@@ -1,0 +1,148 @@
+// Pure mapping from pi's AgentSessionEvent stream to pilot's SessionDriverEvent
+// stream. This is the testable heart of the real driver — given a pi event and a
+// little context, it returns zero or more pilot events to fold + broadcast.
+//
+// Shapes grounded in pi source:
+//   AgentSessionEvent: core/agent-session.ts:124
+//   AssistantMessageEvent (text_delta/thinking_delta/...): packages/ai/src/types.ts
+//   tool_execution_*: docs/rpc.md
+
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type {
+  SessionDriverEvent,
+  SessionRef,
+  SessionSnapshot,
+  SessionStatus,
+} from "@pilot/protocol";
+
+export interface MapCtx {
+  ref: SessionRef;
+  now(): string;
+  /** Human label + description for a tool name, resolved from session.getAllTools(). */
+  toolMeta(name: string): { label?: string; description?: string };
+  /** Build a snapshot reflecting the current title/config at a given status. */
+  snapshot(status: SessionStatus): SessionSnapshot;
+}
+
+function asText(v: unknown): string {
+  if (v == null) return "";
+  return typeof v === "string" ? v : JSON.stringify(v);
+}
+
+/** Map one pi event to zero or more pilot driver events. */
+export function mapPiEvent(
+  ev: AgentSessionEvent,
+  ctx: MapCtx,
+): SessionDriverEvent[] {
+  const meta = { sessionRef: ctx.ref, timestamp: ctx.now() };
+
+  switch (ev.type) {
+    case "agent_start":
+      return [
+        { ...meta, type: "sessionUpdated", snapshot: ctx.snapshot("running") },
+      ];
+
+    case "agent_end":
+      // willRetry = overflow auto-retry; the turn isn't really done yet.
+      return ev.willRetry
+        ? []
+        : [{ ...meta, type: "runCompleted", snapshot: ctx.snapshot("idle") }];
+
+    case "message_update": {
+      const a = ev.assistantMessageEvent;
+      if (a.type === "text_delta")
+        return [
+          { ...meta, type: "assistantDelta", text: a.delta, channel: "text" },
+        ];
+      if (a.type === "thinking_delta")
+        return [
+          {
+            ...meta,
+            type: "assistantDelta",
+            text: a.delta,
+            channel: "thinking",
+          },
+        ];
+      if (a.type === "error")
+        return [
+          { ...meta, type: "runFailed", error: { message: asText(a.error) } },
+        ];
+      return [];
+    }
+
+    case "tool_execution_start": {
+      const m = ctx.toolMeta(ev.toolName);
+      return [
+        {
+          ...meta,
+          type: "toolStarted",
+          callId: ev.toolCallId,
+          toolName: ev.toolName,
+          input: ev.args,
+          label: m.label,
+          description: m.description,
+        },
+      ];
+    }
+
+    case "tool_execution_update":
+      return [
+        {
+          ...meta,
+          type: "toolUpdated",
+          callId: ev.toolCallId,
+          text: asText(ev.partialResult),
+        },
+      ];
+
+    case "tool_execution_end":
+      return [
+        {
+          ...meta,
+          type: "toolFinished",
+          callId: ev.toolCallId,
+          success: !ev.isError,
+          output: ev.result,
+        },
+      ];
+
+    case "session_info_changed":
+      return [
+        { ...meta, type: "sessionUpdated", snapshot: ctx.snapshot("idle") },
+      ];
+
+    case "auto_retry_start":
+      return [
+        {
+          ...meta,
+          type: "hostUiRequest",
+          request: {
+            kind: "notify",
+            requestId: `retry-${meta.timestamp}`,
+            message: `Retrying (attempt ${ev.attempt}/${ev.maxAttempts}): ${ev.errorMessage}`,
+            level: "warning",
+          },
+        },
+      ];
+
+    case "compaction_start":
+      return [
+        {
+          ...meta,
+          type: "hostUiRequest",
+          request: {
+            kind: "notify",
+            requestId: `compact-${meta.timestamp}`,
+            message: "Compacting context…",
+            level: "info",
+          },
+        },
+      ];
+
+    default:
+      // turn_start/turn_end, queue_update, compaction_end, auto_retry_end,
+      // thinking_level_changed, message_start/end, and assistant start/done are
+      // intentionally not surfaced — the reducer derives what it needs from deltas.
+      return [];
+  }
+}

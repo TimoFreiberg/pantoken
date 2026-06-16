@@ -6,6 +6,7 @@
 import { type ServerMessage, parseClientMessage } from "@pilot/protocol";
 import type { ServerWebSocket } from "bun";
 import { config, tokenOk } from "./config.js";
+import type { PilotDriver } from "./driver.js";
 import { SessionHub } from "./hub.js";
 import { MockDriver } from "./mock-driver.js";
 import { serveStatic } from "./static.js";
@@ -15,9 +16,19 @@ interface WsData {
   unsub: (() => void) | null;
 }
 
-const driver = new MockDriver();
+// Driver selection. Default is the deterministic mock; PILOT_DRIVER=pi embeds a
+// live pi AgentSession (dynamic import so the SDK never loads in mock mode).
+let driver: PilotDriver;
+let mock: MockDriver | null = null;
+if (process.env.PILOT_DRIVER === "pi") {
+  const { createPiDriver } = await import("./pi/pi-driver.js");
+  driver = await createPiDriver({ cwd: process.env.PILOT_CWD });
+} else {
+  mock = new MockDriver();
+  driver = mock;
+}
 const hub = new SessionHub(driver);
-driver.bootstrap();
+mock?.bootstrap(); // replay the greeting fixture now that the hub is subscribed
 
 const send = (ws: ServerWebSocket<WsData>, msg: ServerMessage) =>
   ws.send(JSON.stringify(msg));
@@ -97,5 +108,5 @@ const server = Bun.serve<WsData>({
 });
 
 console.log(
-  `[pilot] http://${config.host}:${server.port}  token=${config.token ? "required" : "off"}  debug=${config.debug}`,
+  `[pilot] http://${config.host}:${server.port}  driver=${process.env.PILOT_DRIVER === "pi" ? "pi" : "mock"}  token=${config.token ? "required" : "off"}  debug=${config.debug}`,
 );

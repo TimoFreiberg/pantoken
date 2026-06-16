@@ -8,6 +8,7 @@
     "start": "bun run src/index.ts"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.79.5",
     "@pilot/protocol": "workspace:*"
   }
 }
