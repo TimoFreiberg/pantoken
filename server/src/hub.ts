@@ -62,9 +62,16 @@ export class SessionHub {
       case "abort":
         this.driver.abort();
         return;
-      case "respondUi":
+      case "respondUi": {
+        // First-responder-wins: only the first answer for a still-pending dialog
+        // reaches the driver. A second device answering the same id is dropped, so
+        // the real pi session never gets a double resolution.
+        const id = msg.response.requestId;
+        if (!this.state.pendingApprovals.some((p) => p.requestId === id))
+          return;
         this.driver.respondUi(msg.response);
         return;
+      }
       case "mock":
         this.driver.runScript?.(msg.script);
         return;
