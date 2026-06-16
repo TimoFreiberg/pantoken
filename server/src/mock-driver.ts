@@ -60,6 +60,14 @@ export class MockDriver implements PilotDriver {
     this.play(greeting());
   }
 
+  /** Cancel everything in flight and replay the initial fixture (test determinism). */
+  reset(): void {
+    for (const timer of this.timers) clearTimeout(timer);
+    this.timers.clear();
+    this.pendingDialogs.clear();
+    this.bootstrap();
+  }
+
   prompt(text: string): void {
     this.play(promptReply(text));
   }

@@ -43,6 +43,15 @@ const server = Bun.serve({
       });
     }
 
+    // Dev/test: reset to the initial fixture so e2e specs start clean.
+    if (url.pathname === "/debug/reset") {
+      hub.reset();
+      return Response.json(
+        { ok: true },
+        { headers: { "access-control-allow-origin": "*" } },
+      );
+    }
+
     return new Response("pilot server", { status: 200 });
   },
 
