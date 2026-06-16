@@ -7,6 +7,7 @@ import {
   parseServerMessage,
   type ServerMessage,
 } from "@pilot/protocol";
+import { getToken } from "./auth.js";
 
 export type ConnectionState =
   | "disconnected"
@@ -82,7 +83,7 @@ function doConnect(): void {
   ws.onopen = () => {
     _state = "connected";
     _reconnectAttempt = 0;
-    send({ type: "hello" });
+    send({ type: "hello", auth: getToken() ?? undefined });
   };
 
   ws.onmessage = (event: MessageEvent) => {

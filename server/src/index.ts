@@ -1,34 +1,44 @@
-// Pilot server: Bun.serve with a WebSocket bridge + an agent-legible /debug/state
-// introspection endpoint. M0 wires the deterministic mock driver; M5 swaps in the
-// real pi-sdk driver behind the same PilotDriver seam.
+// Pilot server: Bun.serve with a WebSocket control channel, an agent-legible
+// /debug introspection surface, an optional auth-token gate, and static serving of
+// the built client (so prod is one process behind `tailscale serve`). M0 wires the
+// deterministic mock driver; M5 swaps in the real pi-sdk driver behind PilotDriver.
 
-import {
-  type ClientMessage,
-  parseClientMessage,
-  type ServerMessage,
-} from "@pilot/protocol";
+import { type ServerMessage, parseClientMessage } from "@pilot/protocol";
 import type { ServerWebSocket } from "bun";
+import { config, tokenOk } from "./config.js";
 import { SessionHub } from "./hub.js";
 import { MockDriver } from "./mock-driver.js";
+import { serveStatic } from "./static.js";
 
-const PORT = Number(process.env.PILOT_PORT ?? 8787);
+interface WsData {
+  authed: boolean;
+  unsub: (() => void) | null;
+}
 
 const driver = new MockDriver();
 const hub = new SessionHub(driver);
 driver.bootstrap();
 
-// Track each socket's unsubscribe so close() can detach it from the hub.
-const unsub = new WeakMap<ServerWebSocket<unknown>, () => void>();
+const send = (ws: ServerWebSocket<WsData>, msg: ServerMessage) =>
+  ws.send(JSON.stringify(msg));
 
-const server = Bun.serve({
-  port: PORT,
+function authenticate(ws: ServerWebSocket<WsData>): void {
+  ws.data.authed = true;
+  ws.data.unsub = hub.addClient((m) => send(ws, m));
+  console.log(`[ws] client authed (${hub.clientCount()} total)`);
+}
+
+const server = Bun.serve<WsData>({
+  port: config.port,
+  hostname: config.host,
   idleTimeout: 120,
 
-  fetch(req, server) {
+  async fetch(req, server) {
     const url = new URL(req.url);
 
     if (url.pathname === "/ws") {
-      if (server.upgrade(req)) return undefined;
+      if (server.upgrade(req, { data: { authed: false, unsub: null } }))
+        return undefined;
       return new Response("websocket upgrade failed", { status: 426 });
     }
 
@@ -36,47 +46,56 @@ const server = Bun.serve({
       return Response.json({ ok: true, clients: hub.clientCount() });
     }
 
-    // Agent-legible introspection: the full authoritative state as JSON.
-    if (url.pathname === "/debug/state") {
-      return Response.json(hub.snapshot(), {
-        headers: { "access-control-allow-origin": "*" },
-      });
+    if (url.pathname.startsWith("/debug/")) {
+      if (!config.debug) return new Response("debug disabled", { status: 404 });
+      if (!tokenOk(url.searchParams.get("token")))
+        return new Response("unauthorized", { status: 401 });
+      const headers = { "access-control-allow-origin": "*" };
+      if (url.pathname === "/debug/state")
+        return Response.json(hub.snapshot(), { headers });
+      if (url.pathname === "/debug/reset") {
+        hub.reset();
+        return Response.json({ ok: true }, { headers });
+      }
+      return new Response("not found", { status: 404 });
     }
 
-    // Dev/test: reset to the initial fixture so e2e specs start clean.
-    if (url.pathname === "/debug/reset") {
-      hub.reset();
-      return Response.json(
-        { ok: true },
-        { headers: { "access-control-allow-origin": "*" } },
-      );
-    }
-
-    return new Response("pilot server", { status: 200 });
+    // Serve the built client in prod; in dev Vite serves it and proxies here.
+    const asset = await serveStatic(url.pathname);
+    if (asset) return asset;
+    return new Response("pilot server — no client build (run `bun run dev`)", {
+      status: 200,
+    });
   },
 
   websocket: {
     open(ws) {
-      const send = (msg: ServerMessage) => ws.send(JSON.stringify(msg));
-      unsub.set(ws, hub.addClient(send));
-      console.log(`[ws] client connected (${hub.clientCount()} total)`);
+      // No token configured -> open access (dev). Otherwise wait for an authed hello.
+      if (config.token === null) authenticate(ws);
     },
     message(ws, raw) {
-      const msg: ClientMessage | null = parseClientMessage(
+      const msg = parseClientMessage(
         typeof raw === "string" ? raw : raw.toString(),
       );
       if (!msg) return;
-      const send = (m: ServerMessage) => ws.send(JSON.stringify(m));
-      hub.handleClient(send, msg);
+      if (!ws.data.authed) {
+        if (msg.type === "hello" && tokenOk(msg.auth)) authenticate(ws);
+        else {
+          send(ws, { type: "error", message: "unauthorized" });
+          ws.close();
+        }
+        return;
+      }
+      if (msg.type === "hello") return; // already authed
+      hub.handleClient((m) => send(ws, m), msg);
     },
     close(ws) {
-      unsub.get(ws)?.();
-      unsub.delete(ws);
-      console.log(`[ws] client disconnected (${hub.clientCount()} total)`);
+      ws.data.unsub?.();
+      ws.data.unsub = null;
     },
   },
 });
 
 console.log(
-  `[pilot] server on http://localhost:${server.port}  (ws: /ws, introspect: /debug/state)`,
+  `[pilot] http://${config.host}:${server.port}  token=${config.token ? "required" : "off"}  debug=${config.debug}`,
 );
