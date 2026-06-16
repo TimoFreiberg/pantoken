@@ -6,6 +6,7 @@
   import Transcript from "./components/Transcript.svelte";
   import Composer from "./components/Composer.svelte";
   import ApprovalLayer from "./components/ApprovalLayer.svelte";
+  import TokenGate from "./components/TokenGate.svelte";
 
   // Dev affordance: ?dev shows buttons that drive the mock to any UI state, so the
   // screenshot harness can reach approval/ambient/error states deterministically.
@@ -15,6 +16,9 @@
   onMount(() => store.start());
 </script>
 
+{#if store.unauthorized}
+  <TokenGate />
+{:else}
 <div class="app">
   <StatusHeader />
   <ConnectionBanner />
@@ -29,6 +33,7 @@
   <Composer />
 </div>
 <ApprovalLayer />
+{/if}
 
 <style>
   .app {

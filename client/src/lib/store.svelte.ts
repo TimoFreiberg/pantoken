@@ -9,10 +9,12 @@ import {
   type ServerMessage,
   type SessionState,
 } from "@pilot/protocol";
+import { setToken } from "./auth.js";
 import {
   connect,
   type ConnectionState,
   connectionState,
+  disconnect,
   onMessage,
   send,
 } from "./ws.svelte.js";
@@ -21,6 +23,7 @@ class PilotStore {
   session = $state<SessionState>(initialSessionState());
   serverId = $state<string | null>(null);
   ready = $state(false);
+  unauthorized = $state(false);
 
   // per-client view state — local only
   composerDraft = $state("");
@@ -50,9 +53,21 @@ class PilotStore {
         foldEvent(this.session, msg.event);
         break;
       case "error":
-        console.error("[server error]", msg.message);
+        if (msg.message === "unauthorized") {
+          this.unauthorized = true;
+          disconnect(); // stop the reconnect loop until a new token is entered
+        } else {
+          console.error("[server error]", msg.message);
+        }
         break;
     }
+  }
+
+  /** Save a token and reconnect (from the auth gate). */
+  authenticate(token: string): void {
+    setToken(token);
+    this.unauthorized = false;
+    connect();
   }
 
   prompt(text: string, deliverAs?: "steer" | "followUp"): void {

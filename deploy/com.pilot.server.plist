@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd agent to keep the pilot server running on the Mac Mini.
+  Edit the CHANGE-ME values, then:
+    cp deploy/com.pilot.server.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.pilot.server.plist
+  See deploy/DEPLOY.md.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.pilot.server</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/timo/src/pilot/deploy/run.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/timo/src/pilot</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PILOT_TOKEN</key>
+    <string>CHANGE-ME-run-openssl-rand-hex-16</string>
+    <key>PILOT_HOST</key>
+    <string>127.0.0.1</string>
+    <key>PILOT_PORT</key>
+    <string>8787</string>
+    <!-- bun must be on PATH; adjust if installed elsewhere -->
+    <key>PATH</key>
+    <string>/Users/timo/.bun/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/timo/Library/Logs/pilot.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/timo/Library/Logs/pilot.err.log</string>
+</dict>
+</plist>

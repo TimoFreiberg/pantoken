@@ -1,0 +1,23 @@
+// Server configuration from the environment. Defaults are safe for local dev;
+// the deploy (see deploy/) sets PILOT_TOKEN and runs behind `tailscale serve`.
+
+import { resolve } from "node:path";
+
+export const config = {
+  port: Number(process.env.PILOT_PORT ?? 8787),
+  // Bind to loopback by default — `tailscale serve` proxies in over the tailnet,
+  // so the server never needs to listen on 0.0.0.0. Set PILOT_HOST=0.0.0.0 only
+  // for bare LAN use without Tailscale.
+  host: process.env.PILOT_HOST ?? "127.0.0.1",
+  // null = no auth (dev). When set, WS clients must present it and /debug is gated.
+  token: process.env.PILOT_TOKEN ?? null,
+  // Debug/introspection endpoints. On by default; set PILOT_DEBUG=0 to disable.
+  debug: process.env.PILOT_DEBUG !== "0",
+  // Built client bundle (served in prod; in dev Vite serves it instead).
+  clientDist: resolve(import.meta.dir, "../../client/dist"),
+};
+
+/** Constant-time-ish token check. null token = auth disabled. */
+export function tokenOk(provided: string | null | undefined): boolean {
+  return config.token === null || provided === config.token;
+}
