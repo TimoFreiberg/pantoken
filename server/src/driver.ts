@@ -11,4 +11,6 @@ export interface PilotDriver {
   respondUi(response: HostUiResponse): void;
   /** Dev-only: jump the mock to a named scripted state. No-op for the real driver. */
   runScript?(name: string): void;
+  /** Dev/test-only: clear all state and replay the initial fixture. No-op for real. */
+  reset?(): void;
 }

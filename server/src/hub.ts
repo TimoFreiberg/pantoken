@@ -76,6 +76,13 @@ export class SessionHub {
     }
   }
 
+  /** Dev/test-only: clear state, replay the initial fixture, re-snapshot clients. */
+  reset(): void {
+    this.state = initialSessionState();
+    this.driver.reset?.();
+    this.broadcast({ type: "snapshot", state: this.snapshot() });
+  }
+
   /** A JSON-safe deep copy of current state (foldEvent mutates in place). */
   snapshot(): SessionState {
     return structuredClone(this.state);

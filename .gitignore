@@ -6,3 +6,7 @@ dist/
 .env.*
 client/dev-dist/
 .pilot-data/
+test-results/
+playwright-report/
+blob-report/
+.playwright/

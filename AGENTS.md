@@ -53,6 +53,11 @@ This is set up so you can verify autonomously — use it.
   authoritative `SessionState` as JSON. `curl localhost:8787/debug/state | …`.
 - Fixtures + scripts live in `server/src/fixtures.ts`. Add a script there to get a
   new reproducible UI state.
+- **Committed regression suite:** `bun run test:e2e` (Playwright, in `e2e/`). It
+  reuses a running `bun run dev` (or starts one), resets the mock via `/debug/reset`
+  in `beforeEach`, and asserts DOM across desktop + a mobile (Pixel 7) project. Add a
+  spec when you add UI. This is the repeatable feedback loop; `Claude_Preview` is for
+  live eyeballing.
 
 ## Conventions
 
