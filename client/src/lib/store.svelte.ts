@@ -6,7 +6,9 @@ import {
   foldEvent,
   type HostUiResponse,
   initialSessionState,
+  type ModelDefaults,
   type ModelOption,
+  type ProviderInfo,
   type ServerMessage,
   type SessionListEntry,
   type SessionState,
@@ -51,6 +53,10 @@ class PilotStore {
   // Interactive project-trust card (D12). Out-of-band, not part of the folded session
   // state: trust is decided per-cwd before a session exists. Null when none pending.
   trustRequest = $state<TrustRequest | null>(null);
+  // Settings panel: the providers pilot can manage credentials for, and pi's global
+  // model defaults + favorites. Server-authoritative, delivered like `models`.
+  providers = $state<ProviderInfo[]>([]);
+  modelDefaults = $state<ModelDefaults>({ favorites: [] });
 
   // per-client view state — local only (never sent upstream; see D5)
   composerDraft = $state("");
@@ -114,6 +120,12 @@ class PilotStore {
         break;
       case "modelList":
         this.models = [...msg.models];
+        break;
+      case "providerList":
+        this.providers = [...msg.providers];
+        break;
+      case "modelDefaults":
+        this.modelDefaults = msg.defaults;
         break;
       case "trustRequest":
         this.trustRequest = {
@@ -225,6 +237,52 @@ class PilotStore {
   }
   setThinking(level: string): void {
     send({ type: "setThinking", level });
+  }
+
+  /** Models shown in the header picker: filtered to favorites when any are set, but the
+   *  currently-active model is ALWAYS included — a running non-favorite model stays
+   *  visible/selectable (option a). Empty favorites = show every available model. */
+  get pickerModels(): ModelOption[] {
+    const favs = this.modelDefaults.favorites;
+    if (favs.length === 0) return this.models;
+    const set = new Set(favs);
+    const cfg = this.session.config;
+    return this.models.filter(
+      (m) =>
+        set.has(`${m.provider}:${m.modelId}`) ||
+        (m.provider === cfg.provider && m.modelId === cfg.modelId),
+    );
+  }
+  isFavorite(provider: string, modelId: string): boolean {
+    return this.modelDefaults.favorites.includes(`${provider}:${modelId}`);
+  }
+
+  // --- Settings panel: provider credentials + global model defaults/favorites. ---
+  setProviderApiKey(providerId: string, apiKey: string): void {
+    send({ type: "setProviderApiKey", providerId, apiKey });
+  }
+  removeProviderApiKey(providerId: string): void {
+    send({ type: "removeProviderApiKey", providerId });
+  }
+  /** Set the global default model for new sessions (optimistic; server reconciles). */
+  setDefaultModel(provider: string, modelId: string): void {
+    this.modelDefaults = { ...this.modelDefaults, provider, modelId };
+    send({ type: "setDefaultModel", provider, modelId });
+  }
+  setDefaultThinking(level: string): void {
+    this.modelDefaults = { ...this.modelDefaults, thinkingLevel: level };
+    send({ type: "setDefaultThinking", level });
+  }
+  /** Toggle a model in the favorites subset. Optimistic; the server's `modelDefaults`
+   *  broadcast (resolved against available models) is the source of truth. */
+  toggleFavorite(provider: string, modelId: string): void {
+    const ref = `${provider}:${modelId}`;
+    const cur = this.modelDefaults.favorites;
+    const next = cur.includes(ref)
+      ? cur.filter((r) => r !== ref)
+      : [...cur, ref];
+    this.modelDefaults = { ...this.modelDefaults, favorites: next };
+    send({ type: "setFavoriteModels", refs: next });
   }
   refreshSessions(): void {
     send({ type: "listSessions" });

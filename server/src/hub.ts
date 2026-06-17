@@ -129,6 +129,63 @@ export class SessionHub {
     }
   }
 
+  /** Fetch + broadcast the manageable providers (Settings panel). No-op if the driver
+   *  doesn't support credential management. */
+  private async broadcastProviderList(): Promise<void> {
+    if (!this.driver.listProviders) return;
+    try {
+      const providers = await this.driver.listProviders();
+      this.broadcast({ type: "providerList", providers });
+    } catch (e) {
+      console.error("[hub] listProviders failed", e);
+    }
+  }
+
+  /** Fetch + broadcast pi's global model defaults + favorites (Settings panel). */
+  private async broadcastModelDefaults(): Promise<void> {
+    if (!this.driver.getModelDefaults) return;
+    try {
+      const defaults = await this.driver.getModelDefaults();
+      this.broadcast({ type: "modelDefaults", defaults });
+    } catch (e) {
+      console.error("[hub] getModelDefaults failed", e);
+    }
+  }
+
+  /** Save/remove a provider key, then refresh the provider + model lists (a key change
+   *  shifts model availability and which favorites resolve). Errors go to the requester
+   *  via the `error` channel — surfaced in the panel, not swallowed. */
+  private async applyProviderKey(
+    send: Send,
+    action: () => Promise<void> | undefined,
+  ): Promise<void> {
+    try {
+      await action();
+    } catch (e) {
+      send({
+        type: "error",
+        message: e instanceof Error ? e.message : String(e),
+      });
+      return;
+    }
+    await this.broadcastProviderList();
+    await this.broadcastModelList();
+    await this.broadcastModelDefaults();
+  }
+
+  /** Apply a defaults/favorites mutation, then re-broadcast the defaults so every
+   *  client (and the header picker's favorites filter) updates. */
+  private async applyModelDefaults(
+    action: () => Promise<void> | undefined,
+  ): Promise<void> {
+    try {
+      await action();
+    } catch (e) {
+      console.error("[hub] model-defaults mutation failed", e);
+    }
+    await this.broadcastModelDefaults();
+  }
+
   /** Re-scan available sessions and broadcast the list + the active session id
    *  (derived from the folded state, so the picker's "active" row is authoritative). */
   private async broadcastSessionList(): Promise<void> {
@@ -197,10 +254,13 @@ export class SessionHub {
       serverId: this.serverId,
     });
     send({ type: "snapshot", state: this.snapshot() });
-    // Fire the session + model lists asynchronously (driver disk/registry reads); they
-    // arrive as follow-up messages, keeping hello+snapshot synchronous + first.
+    // Fire the session + model + provider lists asynchronously (driver disk/registry
+    // reads); they arrive as follow-up messages, keeping hello+snapshot synchronous +
+    // first.
     void this.broadcastSessionList();
     void this.broadcastModelList();
+    void this.broadcastProviderList();
+    void this.broadcastModelDefaults();
     return () => this.clients.delete(send);
   }
 
@@ -254,6 +314,35 @@ export class SessionHub {
         return;
       case "listSessions":
         void this.broadcastSessionList();
+        return;
+      case "listProviders":
+        void this.broadcastProviderList();
+        void this.broadcastModelDefaults();
+        return;
+      case "setProviderApiKey":
+        void this.applyProviderKey(send, () =>
+          this.driver.setProviderApiKey?.(msg.providerId, msg.apiKey),
+        );
+        return;
+      case "removeProviderApiKey":
+        void this.applyProviderKey(send, () =>
+          this.driver.removeProviderApiKey?.(msg.providerId),
+        );
+        return;
+      case "setDefaultModel":
+        void this.applyModelDefaults(() =>
+          this.driver.setDefaultModel?.(msg.provider, msg.modelId),
+        );
+        return;
+      case "setDefaultThinking":
+        void this.applyModelDefaults(() =>
+          this.driver.setDefaultThinking?.(msg.level),
+        );
+        return;
+      case "setFavoriteModels":
+        void this.applyModelDefaults(() =>
+          this.driver.setFavoriteModels?.(msg.refs),
+        );
         return;
       case "trustResponse":
         // The driver dedups (first answer settles it); a stale/duplicate id no-ops.

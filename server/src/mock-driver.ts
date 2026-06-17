@@ -4,7 +4,9 @@
 
 import type {
   HostUiResponse,
+  ModelDefaults,
   ModelOption,
+  ProviderInfo,
   SessionConfig,
   SessionDriverEvent,
   SessionListEntry,
@@ -16,7 +18,9 @@ import {
   greeting,
   inputDialog,
   MOCK_DEFAULT_CONFIG,
+  MOCK_MODEL_DEFAULTS,
   MOCK_MODELS,
+  MOCK_PROVIDERS,
   mockSessionSeed,
   mockTrustRequest,
   NEW_SESSION_ENTRY,
@@ -39,6 +43,13 @@ export class MockDriver implements PilotDriver {
   // reflects a switch. (Scripted replies still emit the fixture default — fine for a
   // deterministic mock; the picker is exercised on its own.)
   private config: SessionConfig = { ...MOCK_DEFAULT_CONFIG };
+  // Global config the Settings panel edits (providers + defaults/favorites). In-memory
+  // only; the hub re-reads via list* after each mutation.
+  private providers: ProviderInfo[] = MOCK_PROVIDERS.map((p) => ({ ...p }));
+  private defaults: ModelDefaults = {
+    ...MOCK_MODEL_DEFAULTS,
+    favorites: [...MOCK_MODEL_DEFAULTS.favorites],
+  };
 
   subscribe(listener: (ev: SessionDriverEvent) => void): () => void {
     this.listeners.add(listener);
@@ -122,6 +133,11 @@ export class MockDriver implements PilotDriver {
     this.cancelTimers();
     this.sessions = SESSION_LIST.map((s) => ({ ...s }));
     this.config = { ...MOCK_DEFAULT_CONFIG };
+    this.providers = MOCK_PROVIDERS.map((p) => ({ ...p }));
+    this.defaults = {
+      ...MOCK_MODEL_DEFAULTS,
+      favorites: [...MOCK_MODEL_DEFAULTS.favorites],
+    };
     this.bootstrap();
   }
 
@@ -216,6 +232,45 @@ export class MockDriver implements PilotDriver {
   setThinking(level: string): void {
     this.config = { ...this.config, thinkingLevel: level };
     this.emitConfig();
+  }
+
+  async listProviders(): Promise<ProviderInfo[]> {
+    return this.providers.map((p) => ({ ...p }));
+  }
+
+  async setProviderApiKey(providerId: string, apiKey: string): Promise<void> {
+    if (!apiKey.trim()) throw new Error("API key is required");
+    const p = this.providers.find((x) => x.id === providerId);
+    if (!p) throw new Error(`unknown provider ${providerId}`);
+    if (!p.apiKeySetupSupported)
+      throw new Error(`API key setup isn't supported for ${providerId}`);
+    this.providers = this.providers.map((x) =>
+      x.id === providerId
+        ? { ...x, hasAuth: true, authSource: "auth_file" }
+        : x,
+    );
+  }
+
+  async removeProviderApiKey(providerId: string): Promise<void> {
+    this.providers = this.providers.map((x) =>
+      x.id === providerId ? { ...x, hasAuth: false, authSource: "none" } : x,
+    );
+  }
+
+  async getModelDefaults(): Promise<ModelDefaults> {
+    return { ...this.defaults, favorites: [...this.defaults.favorites] };
+  }
+
+  async setDefaultModel(provider: string, modelId: string): Promise<void> {
+    this.defaults = { ...this.defaults, provider, modelId };
+  }
+
+  async setDefaultThinking(level: string): Promise<void> {
+    this.defaults = { ...this.defaults, thinkingLevel: level };
+  }
+
+  async setFavoriteModels(refs: readonly string[]): Promise<void> {
+    this.defaults = { ...this.defaults, favorites: [...refs] };
   }
 
   /** Broadcast the current model selection as a sessionUpdated (idle) snapshot. */

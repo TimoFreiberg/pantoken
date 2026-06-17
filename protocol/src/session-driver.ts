@@ -46,6 +46,33 @@ export interface ModelOption {
   readonly label: string;
 }
 
+/** A model provider pilot can manage credentials for. No secret ever crosses the
+ *  wire — only whether it's authed and where that auth comes from, so the UI can
+ *  style remove-vs-readonly. Broadcast as `providerList`. */
+export interface ProviderInfo {
+  readonly id: string;
+  readonly name: string;
+  readonly hasAuth: boolean;
+  /** Where the working credential lives: "auth_file" = a key pilot saved and can
+   *  remove; "env"/"external" = configured outside pilot (env var, models.json) and
+   *  read-only here; "oauth" = an OAuth token; "none" = unauthed. */
+  readonly authSource: "none" | "oauth" | "auth_file" | "env" | "external";
+  /** Whether pilot can set a plain API key for this provider (pi's curated set). */
+  readonly apiKeySetupSupported: boolean;
+}
+
+/** Pilot's view of pi's GLOBAL model config (not per-session): the default new
+ *  sessions start from, plus the favorites subset the header picker is filtered to.
+ *  `favorites` are concrete `provider:modelId` refs (resolved server-side from pi's
+ *  glob-capable `enabledModels` patterns); empty = no filter, show every model.
+ *  Broadcast as `modelDefaults`. */
+export interface ModelDefaults {
+  readonly provider?: string;
+  readonly modelId?: string;
+  readonly thinkingLevel?: string;
+  readonly favorites: readonly string[];
+}
+
 export interface SessionSnapshot {
   readonly ref: SessionRef;
   readonly workspace: WorkspaceRef;

@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type {
   HostUiResponse,
+  ModelDefaults,
   ModelOption,
+  ProviderInfo,
   ServerMessage,
   SessionDriverEvent,
   SessionListEntry,
@@ -111,6 +113,48 @@ class FakeDriver implements PilotDriver {
   }
   setThinking(level: string, sessionId?: string) {
     this.thinkingCalls.push({ level, sessionId });
+  }
+
+  // --- Global provider/model config ---
+  readonly providerKeyCalls: { providerId: string; apiKey: string }[] = [];
+  readonly providerRemoveCalls: string[] = [];
+  readonly defaultModelCalls: { provider: string; modelId: string }[] = [];
+  readonly defaultThinkingCalls: string[] = [];
+  readonly favoriteCalls: string[][] = [];
+  async listProviders(): Promise<ProviderInfo[]> {
+    return [
+      {
+        id: "openai",
+        name: "OpenAI",
+        hasAuth: false,
+        authSource: "none",
+        apiKeySetupSupported: true,
+      },
+    ];
+  }
+  async setProviderApiKey(providerId: string, apiKey: string) {
+    if (!apiKey.trim()) throw new Error("API key is required");
+    this.providerKeyCalls.push({ providerId, apiKey });
+  }
+  async removeProviderApiKey(providerId: string) {
+    this.providerRemoveCalls.push(providerId);
+  }
+  async getModelDefaults(): Promise<ModelDefaults> {
+    return {
+      provider: "anthropic",
+      modelId: "claude-opus-4-8",
+      thinkingLevel: "medium",
+      favorites: [],
+    };
+  }
+  async setDefaultModel(provider: string, modelId: string) {
+    this.defaultModelCalls.push({ provider, modelId });
+  }
+  async setDefaultThinking(level: string) {
+    this.defaultThinkingCalls.push(level);
+  }
+  async setFavoriteModels(refs: readonly string[]) {
+    this.favoriteCalls.push([...refs]);
   }
 }
 
@@ -355,6 +399,98 @@ describe("SessionHub", () => {
       { provider: "anthropic", modelId: "claude-opus-4-8", sessionId: "s2" },
     ]);
     expect(d.thinkingCalls).toEqual([{ level: "high", sessionId: "s" }]);
+  });
+
+  test("a connecting client eventually receives the provider list + model defaults", async () => {
+    const hub = new SessionHub(new FakeDriver());
+    const a = client();
+    hub.addClient(a.send);
+    await flush();
+    const providers = a.received.find((m) => m.type === "providerList");
+    expect(providers?.type).toBe("providerList");
+    if (providers?.type === "providerList")
+      expect(providers.providers.some((p) => p.id === "openai")).toBe(true);
+    const defaults = a.received.find((m) => m.type === "modelDefaults");
+    expect(defaults?.type).toBe("modelDefaults");
+    if (defaults?.type === "modelDefaults")
+      expect(defaults.defaults.modelId).toBe("claude-opus-4-8");
+  });
+
+  test("setProviderApiKey routes to the driver and rebroadcasts the provider list", async () => {
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    const a = client();
+    hub.addClient(a.send);
+    await flush();
+    a.received.length = 0;
+
+    hub.handleClient(a.send, {
+      type: "setProviderApiKey",
+      providerId: "openai",
+      apiKey: "sk-test",
+    });
+    await flush();
+
+    expect(d.providerKeyCalls).toEqual([
+      { providerId: "openai", apiKey: "sk-test" },
+    ]);
+    // a refreshed provider + model list follows so newly-available models show up
+    expect(a.received.some((m) => m.type === "providerList")).toBe(true);
+    expect(a.received.some((m) => m.type === "modelList")).toBe(true);
+  });
+
+  test("a failing key set surfaces an error to the requester, no rebroadcast", async () => {
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    const a = client();
+    hub.addClient(a.send);
+    await flush();
+    a.received.length = 0;
+
+    hub.handleClient(a.send, {
+      type: "setProviderApiKey",
+      providerId: "openai",
+      apiKey: "   ",
+    });
+    await flush();
+
+    expect(d.providerKeyCalls).toHaveLength(0);
+    expect(
+      a.received.some(
+        (m) => m.type === "error" && /API key is required/.test(m.message),
+      ),
+    ).toBe(true);
+    expect(a.received.some((m) => m.type === "providerList")).toBe(false);
+  });
+
+  test("default-model / thinking / favorites route to the driver and rebroadcast defaults", async () => {
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    const a = client();
+    hub.addClient(a.send);
+    await flush();
+
+    hub.handleClient(a.send, {
+      type: "setDefaultModel",
+      provider: "deepseek",
+      modelId: "deepseek-v4-flash",
+    });
+    hub.handleClient(a.send, { type: "setDefaultThinking", level: "high" });
+    hub.handleClient(a.send, {
+      type: "setFavoriteModels",
+      refs: ["anthropic:claude-opus-4-8"],
+    });
+    await flush();
+
+    expect(d.defaultModelCalls).toEqual([
+      { provider: "deepseek", modelId: "deepseek-v4-flash" },
+    ]);
+    expect(d.defaultThinkingCalls).toEqual(["high"]);
+    expect(d.favoriteCalls).toEqual([["anthropic:claude-opus-4-8"]]);
+    // each mutation re-broadcasts the defaults
+    expect(
+      a.received.filter((m) => m.type === "modelDefaults").length,
+    ).toBeGreaterThanOrEqual(3);
   });
 
   test("commands target msg.sessionId, else the focused session", () => {

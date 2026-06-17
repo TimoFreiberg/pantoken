@@ -3,7 +3,9 @@
 // pixels, so an agent can screenshot any UI state reproducibly without a live model.
 
 import type {
+  ModelDefaults,
   ModelOption,
+  ProviderInfo,
   SessionConfig,
   SessionDriverEvent,
   SessionListEntry,
@@ -41,6 +43,49 @@ export const MOCK_DEFAULT_CONFIG: SessionConfig = {
   modelId: "claude-opus-4-8",
   thinkingLevel: "medium",
   availableThinkingLevels: MOCK_THINKING_LEVELS,
+};
+
+/** Providers the mock offers in the Settings panel: two connected (an OAuth one and a
+ *  key-file one) and two unconnected key-capable ones, so the panel + e2e can exercise
+ *  set/remove without real credentials. */
+export const MOCK_PROVIDERS: readonly ProviderInfo[] = [
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    hasAuth: true,
+    authSource: "oauth",
+    apiKeySetupSupported: false,
+  },
+  {
+    id: "openai",
+    name: "OpenAI",
+    hasAuth: true,
+    authSource: "auth_file",
+    apiKeySetupSupported: true,
+  },
+  {
+    id: "google",
+    name: "Google",
+    hasAuth: false,
+    authSource: "none",
+    apiKeySetupSupported: true,
+  },
+  {
+    id: "groq",
+    name: "Groq",
+    hasAuth: false,
+    authSource: "none",
+    apiKeySetupSupported: true,
+  },
+];
+
+/** The mock's global model config: defaults for new sessions + favorites subset
+ *  (empty = the header picker shows every model). */
+export const MOCK_MODEL_DEFAULTS: ModelDefaults = {
+  provider: "anthropic",
+  modelId: "claude-opus-4-8",
+  thinkingLevel: "medium",
+  favorites: [],
 };
 
 export const WORKSPACE = {

@@ -4,7 +4,9 @@
 
 import type {
   HostUiResponse,
+  ModelDefaults,
   ModelOption,
+  ProviderInfo,
   SessionDriverEvent,
   SessionId,
   SessionListEntry,
@@ -52,6 +54,28 @@ export interface PilotDriver {
   setModel(provider: string, modelId: string, sessionId?: SessionId): void;
   /** Switch a session's thinking level, emitting a `sessionUpdated`. */
   setThinking(level: string, sessionId?: SessionId): void;
+
+  // --- Global model/provider config (Settings panel). All optional: the mock and
+  // pi driver implement them; a future bare driver may omit, and the hub guards with
+  // `?.`. These touch pi's GLOBAL state (auth.json + global settings), not a session.
+
+  /** Providers pilot can manage (curated key-capable + already-connected). Carries
+   *  no secrets — only auth presence/source. */
+  listProviders?(): Promise<ProviderInfo[]>;
+  /** Save an API key for a provider (writes auth.json) and refresh model availability.
+   *  Rejects on an unsupported provider or empty key — the hub relays it as an error. */
+  setProviderApiKey?(providerId: string, apiKey: string): Promise<void>;
+  /** Remove a pilot-saved API key (auth_file source only) and refresh availability. */
+  removeProviderApiKey?(providerId: string): Promise<void>;
+
+  /** pi's global default model/thinking for new sessions + the favorites subset. */
+  getModelDefaults?(): Promise<ModelDefaults>;
+  /** Set the global default model for NEW sessions (persists to pi's settings). */
+  setDefaultModel?(provider: string, modelId: string): Promise<void>;
+  /** Set the global default thinking level for NEW sessions. */
+  setDefaultThinking?(level: string): Promise<void>;
+  /** Replace the favorites subset (concrete `provider:modelId` refs). */
+  setFavoriteModels?(refs: readonly string[]): Promise<void>;
 
   /** Subscribe to host-level project-trust requests (D12). The driver fires the
    *  listener when opening/creating a session in an untrusted cwd needs an

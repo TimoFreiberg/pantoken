@@ -12,9 +12,7 @@ _(clear — nothing blocking; pull the next item up from Important)_
 
 ## 🟡 Important
 
-- [ ] **Settings panel** — provider config, API keys, auth token, model
-      defaults, theme toggle, notification prefs. Inspired by pi-gui's
-      settings panel.
+_(clear — pull the next item up from Polish)_
 
 ## 🟢 Polish / fast-follow
 
@@ -78,6 +76,10 @@ _(clear — nothing blocking; pull the next item up from Important)_
 - [ ] **Virtualized transcript list** (>80 rows)
 - [ ] **Binary 2-option select → Yes/No card**
 - [ ] **Countdown for timeout-bearing dialogs**
+- [ ] **Provider OAuth login** — sign-in / sign-out for OAuth-capable providers
+      (Anthropic, OpenAI, …) from the Settings panel. Deferred from the settings-panel
+      work (API-key entry shipped); needs a server-side OAuth callback reachable over
+      Tailscale, which is the bulk of the cost.
 - [ ] **Extensions enable/disable view** + compatibility-issue surfacing
 - [ ] **Session rename / archive / unarchive** — from the sidebar (the create/open
       half landed; this is the remaining SHOULD from DESIGN's "Sessions & history")
@@ -100,6 +102,24 @@ _(clear — nothing blocking; pull the next item up from Important)_
 
 ## ✅ Done (for reference)
 
+- [x] **Settings panel** — finished the panel with the server-side pieces (theme,
+      token, notifications already shipped): provider/API-key management, global model
+      defaults, and a favorites subset. The pi driver now shares one `AuthStorage` +
+      `ModelRegistry` across all warm sessions, so a key saved in the panel updates
+      every session's model availability after a `refresh()`; a launch-cwd
+      `SettingsManager` holds the global defaults/favorites. New `PilotDriver`
+      capabilities (`listProviders`, `set/removeProviderApiKey`, `getModelDefaults`,
+      `setDefaultModel`/`setDefaultThinking`, `setFavoriteModels`) with mock + pi
+      implementations, and new wire messages (`providerList`, `modelDefaults` + client
+      commands). Provider list = pi's curated key-capable set + already-connected; no
+      secret ever crosses the wire (only auth presence/source); keys write pi's
+      `auth.json` (shared with terminal pi). Favorites map to pi's `enabledModels`
+      patterns — the GUI writes explicit `provider:modelId` refs; CLI-set globs are
+      preserved unless they resolve to an available model (then flattened). The header
+      `ModelPicker` filters to favorites, always keeping the active model visible
+      ("active · not favorited"). OAuth login deferred (see Polish). Covered:
+      model-config unit tests, hub routing/broadcast tests, e2e (key flip, default
+      persist, favorites filter); verified visually (dark + mobile).
 - [x] **Interactive project-trust card** (D12) — an untrusted cwd now prompts the
       operator to grant/deny instead of silently denying. Trust travels an **out-of-band
       channel** (`trustRequest`/`trustResolved` server msgs + `trustResponse` client msg;
