@@ -1,12 +1,13 @@
 <script lang="ts">
   import { store } from "../lib/store.svelte.js";
-  import SessionPicker from "./SessionPicker.svelte";
+  import ModelPicker from "./ModelPicker.svelte";
 
   const conn = $derived(store.connection);
   const s = $derived(store.session);
-  const model = $derived(s.config.modelId ?? "—");
-  const provider = $derived(s.config.provider ?? "");
   const statuses = $derived(Object.entries(s.ambient.statuses));
+
+  // The active session's title (folded snapshot is authoritative; ambient title wins).
+  const title = $derived(s.ambient.title || s.title || "pilot");
 
   const push = $derived(store.pushState);
   const pushLabel: Record<string, string> = {
@@ -38,8 +39,19 @@
 </script>
 
 <header class="hdr">
+  <button
+    class="menu"
+    data-testid="sidebar-toggle"
+    title="Toggle sessions"
+    aria-label="Toggle sessions"
+    onclick={() => store.toggleSidebar()}
+  >
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+      <path d="M3 6h18M3 12h18M3 18h18" />
+    </svg>
+  </button>
   <div class="left">
-    <SessionPicker />
+    <span class="title">{title}</span>
     <div class="sub">
       <span class="path">{s.ref?.workspaceId ? "pilot" : "no session"}</span>
       {#each statuses as [key, text] (key)}
@@ -67,7 +79,7 @@
     {#if store.streaming}
       <span class="working"><span class="pulse"></span>working</span>
     {/if}
-    <span class="model" title={provider}>{model}</span>
+    <ModelPicker />
     <span class="conn {conn}" title={conn}>
       <span class="led"></span>{connLabel[conn]}
     </span>
@@ -88,8 +100,35 @@
     top: 0;
     z-index: 10;
   }
+  .menu {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    flex-shrink: 0;
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-xs);
+  }
+  .menu:hover {
+    background: var(--surface-sunken);
+    border-color: var(--border);
+    color: var(--text);
+  }
   .left {
     min-width: 0;
+    flex: 1;
+  }
+  .title {
+    display: block;
+    font-weight: 600;
+    font-size: 14.5px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .sub {
     font-size: 12px;
@@ -109,15 +148,6 @@
     align-items: center;
     gap: 10px;
     flex-shrink: 0;
-  }
-  .model {
-    font-size: 12px;
-    color: var(--text-muted);
-    background: var(--surface-sunken);
-    border: 1px solid var(--border);
-    padding: 3px 9px;
-    border-radius: 999px;
-    font-family: var(--font-mono);
   }
   .conn {
     display: inline-flex;

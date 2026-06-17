@@ -1,25 +1,33 @@
 import { expect, test } from "@playwright/test";
-import { gotoFresh } from "./helpers.js";
+import { gotoFresh, openSidebar } from "./helpers.js";
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("the picker lists sessions and switches the active one", async ({
+test("the sidebar groups sessions by project and switches the active one", async ({
   page,
 }) => {
-  const trigger = page.locator(".trigger");
-  // the trigger shows the active (greeting) session's title
-  await expect(trigger).toContainText("Wire up the WebSocket bridge");
+  // the header shows the active (greeting) session's title
+  await expect(page.locator("header .title")).toContainText(
+    "Wire up the WebSocket bridge",
+  );
 
-  await trigger.click();
+  await openSidebar(page);
+  const sidebar = page.getByTestId("sidebar");
+  // scope to the session list so we match project-group headers, not the brand wordmark
+  const list = sidebar.locator(".list");
 
-  // the panel lists the other mock sessions (one named, one preview-only)
-  await expect(page.getByText("Explore the fold reducer")).toBeVisible();
-  await expect(page.getByText("quick scratch session")).toBeVisible();
+  // sessions are grouped under their project dir (basename of cwd)
+  await expect(list.getByText("pilot", { exact: true })).toBeVisible();
+  await expect(list.getByText("scratch", { exact: true })).toBeVisible();
+
+  // the other mock sessions are listed (one named, one preview-only)
+  await expect(sidebar.getByText("Explore the fold reducer")).toBeVisible();
+  await expect(sidebar.getByText("quick scratch session")).toBeVisible();
 
   // switching swaps the transcript to the chosen session's history
-  await page.getByText("Explore the fold reducer").click();
+  await sidebar.getByText("Explore the fold reducer").click();
   await expect(
     page.getByText("How does foldEvent assemble the transcript?"),
   ).toBeVisible();
@@ -27,16 +35,44 @@ test("the picker lists sessions and switches the active one", async ({
   await expect(page.getByText("Add a /health route to the server")).toHaveCount(
     0,
   );
-  // the trigger now reflects the switched-to session
-  await expect(page.locator(".trigger")).toContainText(
+  // the header now reflects the switched-to session
+  await expect(page.locator("header .title")).toContainText(
     "Explore the fold reducer",
   );
 });
 
-test("new session clears the transcript", async ({ page }) => {
-  await page.locator(".trigger").click();
-  await page.getByRole("button", { name: "+ New" }).click();
+test("a project's + button starts a new session in that dir", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await page
+    .getByTestId("sidebar")
+    .getByRole("button", { name: "New session in pilot" })
+    .click();
   await expect(
     page.getByText("No messages yet", { exact: false }),
+  ).toBeVisible();
+});
+
+test("a session can be started in an arbitrary typed directory", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  const sidebar = page.getByTestId("sidebar");
+
+  await sidebar.getByText("New session in a directory…").click();
+  await sidebar
+    .getByPlaceholder("/absolute/path/to/project")
+    .fill("/Users/timo/src/elsewhere");
+  await sidebar.getByRole("button", { name: "Start" }).click();
+
+  // fresh, empty transcript…
+  await expect(
+    page.getByText("No messages yet", { exact: false }),
+  ).toBeVisible();
+  // …and a new project group appears for the typed dir
+  await openSidebar(page); // (closed by afterNavigate on the mobile drawer)
+  await expect(
+    page.getByTestId("sidebar").getByText("elsewhere", { exact: true }),
   ).toBeVisible();
 });

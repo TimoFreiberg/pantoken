@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type {
   HostUiResponse,
+  ModelOption,
   ServerMessage,
   SessionDriverEvent,
   SessionListEntry,
@@ -78,6 +79,24 @@ class FakeDriver implements PilotDriver {
   }
   async newSession(): Promise<SessionDriverEvent[]> {
     return [ev({ type: "sessionOpened", snapshot: snap("new") })];
+  }
+  readonly modelCalls: {
+    provider: string;
+    modelId: string;
+    sessionId?: string;
+  }[] = [];
+  readonly thinkingCalls: { level: string; sessionId?: string }[] = [];
+  async listModels(): Promise<ModelOption[]> {
+    return [
+      { provider: "anthropic", modelId: "claude-opus-4-8", label: "Opus" },
+      { provider: "deepseek", modelId: "deepseek-v4-flash", label: "Flash" },
+    ];
+  }
+  setModel(provider: string, modelId: string, sessionId?: string) {
+    this.modelCalls.push({ provider, modelId, sessionId });
+  }
+  setThinking(level: string, sessionId?: string) {
+    this.thinkingCalls.push({ level, sessionId });
   }
 }
 
@@ -221,6 +240,44 @@ describe("SessionHub", () => {
 
     d.emit(evFor("s2", { type: "runCompleted", snapshot: snap("s2") }));
     expect(notes.some((n) => n.tag === "pilot-run")).toBe(true);
+  });
+
+  test("a connecting client eventually receives the model list", async () => {
+    const hub = new SessionHub(new FakeDriver());
+    const a = client();
+    hub.addClient(a.send);
+    await flush();
+    const list = a.received.find((m) => m.type === "modelList");
+    expect(list?.type).toBe("modelList");
+    if (list?.type === "modelList")
+      expect(list.models.some((m) => m.modelId === "deepseek-v4-flash")).toBe(
+        true,
+      );
+  });
+
+  test("setModel/setThinking route to msg.sessionId, else the focused session", () => {
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    d.emit(ev({ type: "assistantDelta", text: "x", channel: "text" })); // focus "s"
+
+    hub.handleClient(() => {}, {
+      type: "setModel",
+      provider: "deepseek",
+      modelId: "deepseek-v4-flash",
+    });
+    hub.handleClient(() => {}, {
+      type: "setModel",
+      provider: "anthropic",
+      modelId: "claude-opus-4-8",
+      sessionId: "s2",
+    });
+    hub.handleClient(() => {}, { type: "setThinking", level: "high" });
+
+    expect(d.modelCalls).toEqual([
+      { provider: "deepseek", modelId: "deepseek-v4-flash", sessionId: "s" },
+      { provider: "anthropic", modelId: "claude-opus-4-8", sessionId: "s2" },
+    ]);
+    expect(d.thinkingCalls).toEqual([{ level: "high", sessionId: "s" }]);
   });
 
   test("commands target msg.sessionId, else the focused session", () => {

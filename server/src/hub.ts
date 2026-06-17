@@ -107,6 +107,16 @@ export class SessionHub {
     }
   }
 
+  /** Fetch + broadcast the models available to switch to (driver-authoritative). */
+  private async broadcastModelList(): Promise<void> {
+    try {
+      const models = await this.driver.listModels();
+      this.broadcast({ type: "modelList", models });
+    } catch (e) {
+      console.error("[hub] listModels failed", e);
+    }
+  }
+
   /** Re-scan available sessions and broadcast the list + the active session id
    *  (derived from the folded state, so the picker's "active" row is authoritative). */
   private async broadcastSessionList(): Promise<void> {
@@ -159,9 +169,10 @@ export class SessionHub {
       serverId: this.serverId,
     });
     send({ type: "snapshot", state: this.snapshot() });
-    // Fire the session list asynchronously (driver.listSessions reads disk); it
-    // arrives as a follow-up message, keeping hello+snapshot synchronous + first.
+    // Fire the session + model lists asynchronously (driver disk/registry reads); they
+    // arrive as follow-up messages, keeping hello+snapshot synchronous + first.
     void this.broadcastSessionList();
+    void this.broadcastModelList();
     return () => this.clients.delete(send);
   }
 
@@ -194,11 +205,24 @@ export class SessionHub {
         );
         return;
       }
+      case "setModel":
+        this.driver.setModel(
+          msg.provider,
+          msg.modelId,
+          msg.sessionId ?? this.focusedId ?? undefined,
+        );
+        return;
+      case "setThinking":
+        this.driver.setThinking(
+          msg.level,
+          msg.sessionId ?? this.focusedId ?? undefined,
+        );
+        return;
       case "openSession":
         void this.switchTo(() => this.driver.openSession(msg.path));
         return;
       case "newSession":
-        void this.switchTo(() => this.driver.newSession());
+        void this.switchTo(() => this.driver.newSession(msg.cwd));
         return;
       case "listSessions":
         void this.broadcastSessionList();
