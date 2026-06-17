@@ -44,6 +44,7 @@ import type {
 import type { PilotDriver, TrustEvent } from "../driver.js";
 import { mapPiEvent } from "./event-map.js";
 import { type HistoryMessage, historyToEvents } from "./history-map.js";
+import { createWorktree } from "./worktree.js";
 import {
   type AuthCred,
   apiKeySetupSupported,
@@ -415,7 +416,7 @@ export async function createPiDriver(
       return seedFor(ws);
     },
 
-    async newSession(cwd?: string) {
+    async newSession(cwd?: string, worktree?: boolean) {
       // D12: the GUI may open any path. Expand a leading `~`, make it absolute, and
       // fail loudly if it isn't a real directory rather than letting pi create a
       // session against a typo'd cwd. An untrusted new cwd still works — trust only
@@ -435,6 +436,9 @@ export async function createPiDriver(
         }
         if (!stat.isDirectory()) throw new Error(`not a directory: ${dir}`);
       }
+      // Worktree toggle: isolate the session in a fresh jj/git worktree of `dir` so the
+      // agent works on a clean copy. Throws loudly if `dir` isn't a repo (surfaced to UI).
+      if (worktree) dir = await createWorktree(dir);
       const ws = await warmUp(SessionManager.create(dir));
       currentId = ws.ref.sessionId;
       return seedFor(ws);

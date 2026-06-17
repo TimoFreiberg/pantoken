@@ -365,7 +365,7 @@ export class SessionHub {
         void this.switchTo(() => this.driver.openSession(msg.path));
         return;
       case "newSession":
-        void this.switchTo(() => this.driver.newSession(msg.cwd));
+        void this.switchTo(() => this.driver.newSession(msg.cwd, msg.worktree));
         return;
       case "listSessions":
         void this.broadcastSessionList();

@@ -114,8 +114,10 @@ export type ClientMessage =
   /** Switch the active session to this .jsonl path. */
   | { type: "openSession"; path: string }
   /** Create a fresh session and make it active. `cwd` (an absolute dir, D12
-   *  arbitrary GUI paths) picks the workspace; omit it for the server's launch cwd. */
-  | { type: "newSession"; cwd?: string }
+   *  arbitrary GUI paths) picks the workspace; omit it for the server's launch cwd.
+   *  `worktree`: create an isolated jj/git worktree of `cwd` and run the session
+   *  there, leaving the main tree clean (like the Claude app's worktree toggle). */
+  | { type: "newSession"; cwd?: string; worktree?: boolean }
   /** Ask the server to re-scan disk and re-broadcast the session list. */
   | { type: "listSessions" }
   /** Answer a project-trust card (D12). `choice` indexes the request's `options`;

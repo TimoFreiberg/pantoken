@@ -132,3 +132,26 @@ test("opening the new-session form focuses the directory input", async ({
     sidebar.getByPlaceholder("/absolute/path/to/project"),
   ).toBeFocused();
 });
+
+test("the worktree toggle creates the session in an isolated worktree dir", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  const sidebar = page.getByTestId("sidebar");
+  await sidebar.getByText("New session in a directory…").click();
+  await sidebar
+    .getByPlaceholder("/absolute/path/to/project")
+    .fill("/Users/timo/src/demo");
+  await sidebar.getByRole("checkbox").check();
+  await sidebar.getByRole("button", { name: "Start" }).click();
+
+  await expect(
+    page.getByText("No messages yet", { exact: false }),
+  ).toBeVisible();
+  // The mock isolates a worktree request as a sibling "-worktree" dir; the new project
+  // group reflects that isolated path rather than the typed one.
+  await openSidebar(page);
+  await expect(
+    page.getByTestId("sidebar").getByText("demo-worktree", { exact: true }),
+  ).toBeVisible();
+});
