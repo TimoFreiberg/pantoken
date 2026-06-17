@@ -35,6 +35,22 @@ See `docs/` siblings for context: `STATUS.md` (what's built), `DECISIONS.md`
 
 ## 🟢 Polish / fast-follow
 
+- [ ] **Suppress notifications when app focused** — if feasible, silence push/toast
+      notifications while the browser tab/window has focus
+- [ ] **Desktop notifications conflict with terminal pi extension** — on desktop
+      browser, pilot's notification triggers the user's terminal pi notification
+      extension (which links back to the terminal). Needs investigation: either
+      suppress Web Notifications when pilot is the focused browser tab, or find a
+      way to avoid double-firing through the extension.
+- [ ] **Message timestamps** — small relative timestamp at the bottom of each
+      agent and user text box (e.g. "5m ago"), with mouseover revealing the exact
+      timestamp
+- [ ] **Copy-to-clipboard button on agent messages** — a button at the bottom of
+      each agent text area; hidden until hover, copies message content
+- [ ] **Stray caret span in agent text** — a naked `<span class="caret svelte-1rd1h7a"></span>`
+      is appended to the end of agent output, looks like a client rendering bug.
+      Needs investigation and fix
+
 - [ ] **Jump-to-last-prompt hotkey** (OP8)
 - [ ] **Type-to-focus prompt field** — basic typable characters focus the
       text field before typing them (or a dedicated hotkey)
