@@ -225,6 +225,122 @@ _(clear — pull the next item up from Polish)_
 - [ ] **Right-side session minimap** (nebulous, OP8)
 - [ ] **Queued-messages editing** (replace queued)
 
+## 💡 Brainstorm (unfiltered — owner to triage into the lanes above)
+
+_Generated 2026-06-17 on request. Cross-checked against existing items + DESIGN/DECISIONS;
+these are net-new. Each is a candidate, not a commitment — promote the good ones, delete
+the rest._
+
+### Agent interaction & turn control
+- [ ] **Run-failed error card + retry** — `runFailed` currently has no first-class UI.
+      Render a distinct error card (message + stack/cause if present) with a "Retry"
+      button that re-sends the last prompt, and a "Copy error" affordance.
+- [ ] **Per-turn token + cost readout** — small footer on each completed turn showing
+      tokens in/out and an estimated cost (pi emits usage in the snapshot/run events).
+      Distinct from the context-window fill indicator — this is "what did that turn cost."
+- [ ] **Compaction / summary / activity rows** — DESIGN lists these as SHOULD but
+      they're unfiled. When pi auto-compacts the context, render a collapsed
+      "context compacted" row instead of letting history silently shift.
+- [ ] **Edit-and-resubmit a prior prompt** — hover a past user message → "Edit & resend"
+      re-runs from that point (relies on pi fork/branch if available, else just resends).
+      Pairs with the jump-to-last-prompt hotkey.
+- [ ] **Tool-call duration badges** — show elapsed time on each tool card
+      (`toolStarted`→`toolFinished`); makes slow tools (test runs, big greps) legible
+      at a glance.
+- [ ] **Live activity status line** — derive a one-liner from the in-flight tool
+      ("Reading foo.ts", "Running tests", "Editing bar.rs") and surface it in the
+      sidebar row, the tab title, and optionally the push notification. Turns the
+      pulsing dot into "what is it actually doing right now."
+- [ ] **Files-changed-this-turn rollup** — at turn end, a collapsed card summarizing
+      every file the agent wrote/edited this turn with `+N/−M` counts, expandable to
+      the per-file diffs (reuses the `@pierre/diffs` work already landed).
+- [ ] **One-off bash affordance** (DESIGN LATER) — a way to run a single shell command
+      whose result lands in the transcript and enters next-turn context, without a full
+      prompt. Useful for "what's the branch / git status" mid-session.
+- [ ] **"Keep going" / continue button** — one-tap canned follow-up ("continue",
+      "keep going") on an idle session, for the common case of nudging a paused agent
+      from your phone without typing.
+
+### Composer & input
+- [ ] **@-file mention autocomplete** — DESIGN pairs this with the slash-command menu
+      (already filed) but it's missing here. Fuzzy-complete repo paths into the prompt.
+- [ ] **Per-session composer draft persistence** — persist the unsent draft per session
+      in localStorage so a phone reload / tab eviction doesn't lose a half-typed prompt.
+      (Per-client state, so no protocol change.)
+- [ ] **Offline prompt queue** — if you hit send while the WS is reconnecting, queue the
+      prompt locally and flush it on reconnect rather than dropping it or erroring.
+- [ ] **Voice dictation on mobile** — Web Speech API mic button in the composer; talking
+      a prompt into your phone beats thumb-typing a paragraph.
+- [ ] **Optimistic user-message echo** — render the user's message immediately on send
+      with a subtle "sending…" state, reconciling when the server echoes it back, so the
+      composer feels instant over a high-latency Tailscale hop.
+
+### Transcript reading
+- [ ] **In-transcript search (⌘F)** — find-as-you-type across the rendered transcript
+      with match highlighting + next/prev, distinct from the sidebar session search.
+- [ ] **Collapse-all / expand-all tool calls** — one toggle to fold every tool card in a
+      long transcript down to titles, for skimming a finished session.
+- [ ] **Per-code-block copy + language label** — copy button and a language tag on each
+      fenced code block (finer-grained than the whole-message copy already shipped); plus
+      a soft-wrap toggle for wide code.
+- [ ] **"New since you left" divider** — a horizontal marker in the transcript at the
+      first message that arrived while the session was unfocused/backgrounded, so you can
+      jump straight to what's new (complements the unread status work).
+- [ ] **Inline image rendering** — if the agent emits a markdown image or a screenshot
+      path, render it inline rather than as a raw link (handy for the preview-screenshot
+      verification loop pi itself can drive).
+
+### Sessions & navigation
+- [ ] **Command palette (⌘K)** — fuzzy switcher over sessions + actions (new session,
+      switch model, toggle theme, open settings). The single highest-leverage nav primitive
+      for a many-session sidebar.
+- [ ] **Pinned / favorite sessions** — pin the 2–3 you're actively driving to the top of
+      the sidebar, above the project groups.
+- [ ] **Session emoji / color label** — optional per-session glyph or accent color for
+      fast visual ID in the list (stored via `appendCustomEntry`, like the archive flag).
+- [ ] **Session metadata header** — a compact header on the active session showing model,
+      cwd, git branch, message count, started-at — the "where am I" strip.
+- [ ] **Git branch indicator per session** — read the cwd's current branch and show it in
+      the row/header; pairs naturally with the worktree-checkbox item.
+- [ ] **"Open in editor" deep link** — a button that opens the session's cwd in
+      VS Code / Cursor via `vscode://file/…` / `cursor://…` (or copies the path), for the
+      moment you want to drop from phone-driving into the desktop editor.
+- [ ] **Keyboard shortcut cheat-sheet (`?`)** — an overlay listing every hotkey;
+      the natural companion to the hotkey-audit item and a forcing function to keep it
+      current.
+
+### Mobile / PWA
+- [ ] **Swipe gestures** — edge-swipe to open/close the sidebar drawer; optionally
+      swipe-between-sessions. Native-feeling on the phone PWA.
+- [ ] **Pull-to-refresh → force reconnect + snapshot** — the universal mobile gesture for
+      "I think this is stale," wired to drop and re-establish the WS.
+- [ ] **Haptic feedback** — `navigator.vibrate` on approval-needed and turn-complete so a
+      pocketed phone signals without a sound.
+- [ ] **App-icon unread badge** — Badging API (`navigator.setAppBadge`) to show an unread
+      / approval-pending count on the installed PWA icon.
+- [ ] **Connection-status banner** — a quiet indicator for connected / reconnecting /
+      offline, with a manual reconnect button, so a dead WS isn't silent.
+
+### Notifications
+- [ ] **Actionable push notifications** — Approve / Deny buttons directly on the Web Push
+      notification for a pending approval (Notification `actions`), handled in the SW so
+      you can unblock the agent from the lock screen without opening the app.
+- [ ] **Per-session notification mute** — silence a chatty session while keeping others
+      live; a toggle in the session header.
+- [ ] **Distinct alert patterns** — different vibration/sound for approval-needed (urgent,
+      blocking the agent) vs turn-complete (informational).
+- [ ] **Quiet hours / DND schedule** — suppress non-blocking notifications on a time
+      window; still allow approval-needed through (configurable).
+
+### Observability & debug
+- [ ] **In-UI raw event drawer** — a dev-only side drawer streaming the raw
+      `SessionDriverEvent`s for the focused session (the `/?dev` bar's natural sibling),
+      so you can debug fold behavior without curling `/debug/state`.
+- [ ] **Theme: follow system + explicit toggle** — an "auto" option that tracks
+      `prefers-color-scheme` in addition to the manual light/dark choice.
+- [ ] **Font-size / density control** — a reading-comfort setting (compact ↔ comfortable
+      line height + base size), persisted per client.
+
 ---
 
 ## ✅ Done (for reference)
