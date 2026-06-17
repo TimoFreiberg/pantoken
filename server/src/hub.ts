@@ -26,10 +26,12 @@ export class SessionHub {
   private state: SessionState = initialSessionState();
   private clients = new Set<Send>();
   private serverId = `pilot-${Math.floor(Date.now() / 1000)}`;
-  // Whether any client has connected since startup. Gates push so the mock's
-  // bootstrap replay (a greeting ending in runCompleted, fired while clientCount
-  // is 0) doesn't buzz a stored subscription on every restart. The deeper fix —
-  // distinguishing replayed history from live events — lands with persistence (D13).
+  // Whether any client has connected since startup. Gates push so replayed history
+  // — the mock's bootstrap greeting, or the pi driver's on-load session replay
+  // (both can end in runCompleted while clientCount is 0) — doesn't buzz a stored
+  // subscription on every restart. This is also how replay is told apart from live
+  // events (D13): cold-start seeds fold before anyone connects, and switchTo folds
+  // its seed directly rather than through onEvent, so neither reaches maybeNotify.
   private everConnected = false;
   // True only during a session swap: ignore stray driver events while we reset and
   // re-fold the new session's seed, so a half-switched state is never broadcast.

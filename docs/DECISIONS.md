@@ -124,8 +124,11 @@ resume (`open`/`switchSession`), and leave up-to-date session files for new
 sessions (`SessionManager.create(cwd)`). This gives ~≤1s crash loss for free (pi
 appends as the turn runs). pilot still separately persists only what pi can't
 replay (pending approvals, ambient status/widgets); losing those on crash is a
-deny-safe nuisance. Note: the current driver passes no `SessionManager` and
-starts fresh — this is a rework.
+deny-safe nuisance. Status (2026-06-17): implemented and verified live — the
+driver resumes the most recent session via `SessionManager.continueRecent(cwd)`,
+discovers via `list`, switches via `runtime.switchSession`, and rebuilds state
+from the session's messages on load (`historyToEvents`). Resume-across-restart
+and new↔existing switching both replay the full transcript.
 
 ### D14. Styling = same-family, dark-first (OQ8)
 Not pixel-faithful. Polish lane for later: beautiful prose/font rendering,

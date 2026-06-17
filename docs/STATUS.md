@@ -59,8 +59,8 @@ PILOT_DRIVER=pi PILOT_CWD=/path/to/a/repo bun run dev
 # open http://localhost:5173 and send a prompt
 ```
 Expect rough edges on the first real turn (it's untested live) — they'll fail
-loudly and be quick to fix. Known follow-ups in the driver: history replay for
-resumed sessions (currently starts fresh), and richer tool labels.
+loudly and be quick to fix. Known follow-up in the driver: richer tool labels.
+(History replay for resumed sessions is now implemented + verified live — D13.)
 
 ## How to look around
 - `docs/DESIGN.md` — architecture + the full feature roadmap (tiers).
