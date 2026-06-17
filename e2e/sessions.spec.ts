@@ -76,3 +76,16 @@ test("a session can be started in an arbitrary typed directory", async ({
     page.getByTestId("sidebar").getByText("elsewhere", { exact: true }),
   ).toBeVisible();
 });
+
+test("opening the new-session form focuses the directory input", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  const sidebar = page.getByTestId("sidebar");
+  await sidebar.getByText("New session in a directory…").click();
+  // The input is focused via tick()+focus() (the autofocus attr is unreliable here),
+  // so you can type a path immediately without a second click.
+  await expect(
+    sidebar.getByPlaceholder("/absolute/path/to/project"),
+  ).toBeFocused();
+});

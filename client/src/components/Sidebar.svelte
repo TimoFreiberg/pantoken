@@ -1,10 +1,12 @@
 <script lang="ts">
   import type { SessionListEntry } from "@pilot/protocol";
+  import { tick } from "svelte";
   import { store } from "../lib/store.svelte.js";
 
   // A new-session-in-a-directory disclosure (D12: arbitrary GUI-controlled paths).
   let showNewDir = $state(false);
   let newDir = $state("");
+  let dirInput = $state<HTMLInputElement | null>(null);
 
   function basename(p: string): string {
     const parts = p.replace(/\/+$/, "").split("/");
@@ -68,9 +70,14 @@
     store.newSession(cwd);
     afterNavigate();
   }
-  function openNewDir(): void {
+  async function openNewDir(): Promise<void> {
     newDir = activeCwd;
     showNewDir = true;
+    // The `autofocus` attr is unreliable when the input mounts via {#if}; focus it
+    // explicitly once the DOM updates. Select the prefilled cwd so typing replaces it.
+    await tick();
+    dirInput?.focus();
+    dirInput?.select();
   }
   function submitNewDir(): void {
     const dir = newDir.trim();
@@ -111,11 +118,10 @@
           submitNewDir();
         }}
       >
-        <!-- svelte-ignore a11y_autofocus -->
         <input
           class="dir-input"
           type="text"
-          autofocus
+          bind:this={dirInput}
           spellcheck="false"
           autocapitalize="off"
           autocorrect="off"
