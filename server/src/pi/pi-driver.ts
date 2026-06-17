@@ -16,7 +16,9 @@
 // This replaces the old runtime-swap model: AgentSessionRuntime exists precisely to
 // replace+dispose the active session, which is the opposite of keeping N warm.
 
-import { basename } from "node:path";
+import { statSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, resolve } from "node:path";
 import {
   type AgentSession,
   createAgentSessionFromServices,
@@ -103,9 +105,20 @@ export async function createPiDriver(
         provider: m && typeof m.provider === "string" ? m.provider : undefined,
         modelId: m?.id,
         thinkingLevel: ws.session.thinkingLevel,
+        availableThinkingLevels: ws.session.getAvailableThinkingLevels(),
       },
     };
   };
+
+  // Emit a fresh snapshot for a warm session (after a model/thinking change). Status
+  // tracks whether it's mid-stream so a change during a run doesn't read as idle.
+  const emitUpdate = (ws: WarmSession): void =>
+    emit({
+      sessionRef: ws.ref,
+      timestamp: now(),
+      type: "sessionUpdated",
+      snapshot: snapshotFor(ws, ws.session.isStreaming ? "running" : "idle"),
+    });
 
   const toolMetaFor = (ws: WarmSession, name: string) => {
     const t = ws.session.getAllTools().find((x) => x.name === name);
@@ -262,8 +275,9 @@ export async function createPiDriver(
     },
 
     async listSessions() {
-      // Sessions for THIS workspace (listAll() spans every project — too broad here).
-      const infos = await SessionManager.list(launchCwd);
+      // Every session on the machine, so the sidebar can group them by project dir
+      // (the owner's choice — a cross-project navigator, not just launchCwd's sessions).
+      const infos = await SessionManager.listAll();
       return infos.map(toEntry);
     },
 
@@ -281,10 +295,66 @@ export async function createPiDriver(
       return seedFor(ws);
     },
 
-    async newSession() {
-      const ws = await warmUp(SessionManager.create(launchCwd));
+    async newSession(cwd?: string) {
+      // D12: the GUI may open any path. Expand a leading `~`, make it absolute, and
+      // fail loudly if it isn't a real directory rather than letting pi create a
+      // session against a typo'd cwd. An untrusted new cwd still works — trust only
+      // gates that repo's .pi resources (resolved per-cwd in warmUp), not the session.
+      let dir = launchCwd;
+      if (cwd?.trim()) {
+        const raw = cwd.trim();
+        const expanded = raw.startsWith("~")
+          ? resolve(homedir(), `.${raw.slice(1)}`)
+          : raw;
+        dir = resolve(expanded);
+        let stat: ReturnType<typeof statSync> | undefined;
+        try {
+          stat = statSync(dir);
+        } catch {
+          throw new Error(`no such directory: ${dir}`);
+        }
+        if (!stat.isDirectory()) throw new Error(`not a directory: ${dir}`);
+      }
+      const ws = await warmUp(SessionManager.create(dir));
       currentId = ws.ref.sessionId;
       return seedFor(ws);
+    },
+
+    async listModels() {
+      // The registry is global (auth + models.json under agentDir), so any warm
+      // session's view is the same; use the startup one. getAvailable() = models with
+      // working credentials, i.e. the ones actually switchable.
+      const reg = initial.session.modelRegistry;
+      reg.refresh();
+      return reg.getAvailable().map((m) => ({
+        provider: String(m.provider),
+        modelId: m.id,
+        label: m.name,
+      }));
+    },
+
+    setModel(provider, modelId, sessionId) {
+      const ws = target(sessionId);
+      if (!ws) return;
+      const model = ws.session.modelRegistry.find(provider, modelId);
+      if (!model) {
+        console.error(`[pi] setModel: unknown model ${provider}:${modelId}`);
+        return;
+      }
+      ws.session
+        .setModel(model)
+        .then(() => emitUpdate(ws))
+        .catch((e) => console.error("[pi] setModel failed", e));
+    },
+
+    setThinking(level, sessionId) {
+      const ws = target(sessionId);
+      if (!ws) return;
+      // setThinkingLevel wants pi's ThinkingLevel union; the wire carries a string.
+      ws.session.setThinkingLevel(
+        level as Parameters<typeof ws.session.setThinkingLevel>[0],
+      );
+      emitUpdate(ws);
     },
   };
 }

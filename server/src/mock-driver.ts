@@ -4,6 +4,8 @@
 
 import type {
   HostUiResponse,
+  ModelOption,
+  SessionConfig,
   SessionDriverEvent,
   SessionListEntry,
 } from "@pilot/protocol";
@@ -13,6 +15,8 @@ import {
   confirmDialog,
   greeting,
   inputDialog,
+  MOCK_DEFAULT_CONFIG,
+  MOCK_MODELS,
   mockSessionSeed,
   NEW_SESSION_ENTRY,
   newSessionSeed,
@@ -20,6 +24,7 @@ import {
   type ScriptStep,
   SESSION_LIST,
   SESSION_REF,
+  snapshot,
   trustDialog,
 } from "./fixtures.js";
 
@@ -28,6 +33,10 @@ export class MockDriver implements PilotDriver {
   private timers = new Set<ReturnType<typeof setTimeout>>();
   private pendingDialogs = new Set<string>();
   private sessions: SessionListEntry[] = SESSION_LIST.map((s) => ({ ...s }));
+  // The mock's current model selection, mutated by setModel/setThinking so the picker
+  // reflects a switch. (Scripted replies still emit the fixture default — fine for a
+  // deterministic mock; the picker is exercised on its own.)
+  private config: SessionConfig = { ...MOCK_DEFAULT_CONFIG };
 
   subscribe(listener: (ev: SessionDriverEvent) => void): () => void {
     this.listeners.add(listener);
@@ -73,6 +82,7 @@ export class MockDriver implements PilotDriver {
   reset(): void {
     this.cancelTimers();
     this.sessions = SESSION_LIST.map((s) => ({ ...s }));
+    this.config = { ...MOCK_DEFAULT_CONFIG };
     this.bootstrap();
   }
 
@@ -138,11 +148,45 @@ export class MockDriver implements PilotDriver {
     return mockSessionSeed(path);
   }
 
-  async newSession(): Promise<SessionDriverEvent[]> {
+  async newSession(cwd?: string): Promise<SessionDriverEvent[]> {
     this.cancelTimers();
-    if (!this.sessions.some((s) => s.sessionId === NEW_SESSION_ENTRY.sessionId))
-      this.sessions = [{ ...NEW_SESSION_ENTRY }, ...this.sessions];
+    // Honor a typed cwd so the new row groups under that project in the sidebar
+    // (deterministic: one synthetic "new" entry per distinct cwd).
+    const dir = cwd?.trim() || NEW_SESSION_ENTRY.cwd;
+    const sessionId =
+      dir === NEW_SESSION_ENTRY.cwd
+        ? NEW_SESSION_ENTRY.sessionId
+        : `new-${dir}`;
+    if (!this.sessions.some((s) => s.sessionId === sessionId))
+      this.sessions = [
+        { ...NEW_SESSION_ENTRY, sessionId, cwd: dir },
+        ...this.sessions,
+      ];
     return newSessionSeed();
+  }
+
+  async listModels(): Promise<ModelOption[]> {
+    return MOCK_MODELS.map((m) => ({ ...m }));
+  }
+
+  setModel(provider: string, modelId: string): void {
+    this.config = { ...this.config, provider, modelId };
+    this.emitConfig();
+  }
+
+  setThinking(level: string): void {
+    this.config = { ...this.config, thinkingLevel: level };
+    this.emitConfig();
+  }
+
+  /** Broadcast the current model selection as a sessionUpdated (idle) snapshot. */
+  private emitConfig(): void {
+    this.emit({
+      sessionRef: SESSION_REF,
+      timestamp: String(Date.now()),
+      type: "sessionUpdated",
+      snapshot: snapshot({ config: this.config }),
+    });
   }
 
   private cancelTimers(): void {

@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { store } from "./lib/store.svelte.js";
   import StatusHeader from "./components/StatusHeader.svelte";
+  import Sidebar from "./components/Sidebar.svelte";
   import ConnectionBanner from "./components/ConnectionBanner.svelte";
   import Transcript from "./components/Transcript.svelte";
   import Composer from "./components/Composer.svelte";
@@ -38,25 +39,36 @@
 {#if store.unauthorized}
   <TokenGate />
 {:else}
-<div class="app">
-  <StatusHeader />
-  <ConnectionBanner />
-  <Transcript />
-  {#if dev}
-    <div class="devbar">
-      {#each scripts as s (s)}
-        <button onclick={() => store.mock(s)}>{s}</button>
-      {/each}
-      <button onclick={() => store.testPush()}>push</button>
-    </div>
-  {/if}
-  <Composer />
+<div class="shell">
+  <Sidebar />
+  <div class="app">
+    <StatusHeader />
+    <ConnectionBanner />
+    <Transcript />
+    {#if dev}
+      <div class="devbar">
+        {#each scripts as s (s)}
+          <button onclick={() => store.mock(s)}>{s}</button>
+        {/each}
+        <button onclick={() => store.testPush()}>push</button>
+      </div>
+    {/if}
+    <Composer />
+  </div>
 </div>
 <ApprovalLayer />
 {/if}
 
 <style>
+  .shell {
+    display: flex;
+    flex-direction: row;
+    height: 100%;
+    height: 100dvh;
+  }
   .app {
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     height: 100%;

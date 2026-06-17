@@ -34,6 +34,16 @@ export interface SessionConfig {
   readonly provider?: string;
   readonly modelId?: string;
   readonly thinkingLevel?: string;
+  /** Thinking levels the current model supports — drives the picker's options. */
+  readonly availableThinkingLevels?: readonly string[];
+}
+
+/** One selectable model for the per-session model picker (the available set is
+ *  broadcast separately from the per-session snapshot; see `modelList`). */
+export interface ModelOption {
+  readonly provider: string;
+  readonly modelId: string;
+  readonly label: string;
 }
 
 export interface SessionSnapshot {

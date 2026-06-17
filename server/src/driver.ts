@@ -4,6 +4,7 @@
 
 import type {
   HostUiResponse,
+  ModelOption,
   SessionDriverEvent,
   SessionId,
   SessionListEntry,
@@ -30,9 +31,19 @@ export interface PilotDriver {
    * via `subscribe` — the hub orchestrates the reset so the swap is atomic.
    */
   openSession(path: string): Promise<SessionDriverEvent[]>;
-  /** Create a fresh session (in the driver's cwd) and make it active; resolves with
-   *  its seed events (an empty `sessionOpened`). */
-  newSession(): Promise<SessionDriverEvent[]>;
+  /** Create a fresh session and make it active; resolves with its seed events (an
+   *  empty `sessionOpened`). `cwd` (an absolute dir) picks the workspace per D12;
+   *  omit it for the driver's launch cwd. */
+  newSession(cwd?: string): Promise<SessionDriverEvent[]>;
+
+  /** Models available to switch to (driver-wide; the real driver reads pi's model
+   *  registry, the mock returns a fixture set). */
+  listModels(): Promise<ModelOption[]>;
+  /** Switch a session's model. The driver emits a `sessionUpdated` reflecting it.
+   *  sessionId omitted -> the driver's current session. */
+  setModel(provider: string, modelId: string, sessionId?: SessionId): void;
+  /** Switch a session's thinking level, emitting a `sessionUpdated`. */
+  setThinking(level: string, sessionId?: SessionId): void;
 
   /** Dev-only: jump the mock to a named scripted state. No-op for the real driver. */
   runScript?(name: string): void;

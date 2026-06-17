@@ -6,6 +6,7 @@ import {
   foldEvent,
   type HostUiResponse,
   initialSessionState,
+  type ModelOption,
   type ServerMessage,
   type SessionListEntry,
   type SessionState,
@@ -36,9 +37,18 @@ class PilotStore {
   // Session picker — server-authoritative: the sessions on disk + which is active.
   sessions = $state<SessionListEntry[]>([]);
   activeSessionId = $state<string | null>(null);
+  // Model picker — the models available to switch to (current selection lives in
+  // session.config). Server-authoritative, delivered like `sessions`.
+  models = $state<ModelOption[]>([]);
 
-  // per-client view state — local only
+  // per-client view state — local only (never sent upstream; see D5)
   composerDraft = $state("");
+  // Sidebar open/collapsed. Default open on a roomy viewport, closed on a phone
+  // (where it's an overlay drawer). Persisted per-device in localStorage.
+  sidebarOpen = $state(initialSidebarOpen());
+  // Last server-side error worth showing the user (e.g. a session switch to a bad
+  // path failed). Transient — cleared on the next successful switch or by the UI.
+  lastError = $state<string | null>(null);
   // Push subscription status for this device. "working" while a subscribe is in flight.
   pushState = $state<PushState | "working">("idle");
 
@@ -73,6 +83,8 @@ class PilotStore {
       case "snapshot":
         this.session = msg.state;
         this.ready = true;
+        // A snapshot lands after a successful switch — clear any stale switch error.
+        this.lastError = null;
         break;
       case "event":
         foldEvent(this.session, msg.event);
@@ -81,12 +93,16 @@ class PilotStore {
         this.sessions = [...msg.sessions];
         this.activeSessionId = msg.activeSessionId;
         break;
+      case "modelList":
+        this.models = [...msg.models];
+        break;
       case "error":
         if (msg.message === "unauthorized") {
           this.unauthorized = true;
           disconnect(); // stop the reconnect loop until a new token is entered
         } else {
           console.error("[server error]", msg.message);
+          this.lastError = msg.message;
         }
         break;
     }
@@ -124,8 +140,25 @@ class PilotStore {
     if (path === this.activeSessionPath) return;
     send({ type: "openSession", path });
   }
-  newSession(): void {
-    send({ type: "newSession" });
+  newSession(cwd?: string): void {
+    send({ type: "newSession", cwd: cwd?.trim() || undefined });
+  }
+  toggleSidebar(): void {
+    this.sidebarOpen = !this.sidebarOpen;
+    persistSidebarOpen(this.sidebarOpen);
+  }
+  closeSidebar(): void {
+    this.sidebarOpen = false;
+    persistSidebarOpen(false);
+  }
+  clearError(): void {
+    this.lastError = null;
+  }
+  setModel(provider: string, modelId: string): void {
+    send({ type: "setModel", provider, modelId });
+  }
+  setThinking(level: string): void {
+    send({ type: "setThinking", level });
   }
   refreshSessions(): void {
     send({ type: "listSessions" });
@@ -141,6 +174,22 @@ class PilotStore {
     this.pushState = await ensurePushSubscription();
     await sendTestPush();
   }
+}
+
+const SIDEBAR_KEY = "pilot.sidebarOpen";
+
+/** Default the sidebar open on a desktop-width viewport, closed on a phone (where
+ *  it's a drawer); a stored preference wins. Guarded for SSR/test environments. */
+function initialSidebarOpen(): boolean {
+  if (typeof window === "undefined") return true;
+  const stored = localStorage.getItem(SIDEBAR_KEY);
+  if (stored !== null) return stored === "1";
+  return window.matchMedia("(min-width: 860px)").matches;
+}
+
+function persistSidebarOpen(open: boolean): void {
+  if (typeof window !== "undefined")
+    localStorage.setItem(SIDEBAR_KEY, open ? "1" : "0");
 }
 
 export const store = new PilotStore();

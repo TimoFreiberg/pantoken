@@ -7,6 +7,7 @@
 
 import type {
   HostUiResponse,
+  ModelOption,
   SessionDriverEvent,
   SessionId,
   SessionListEntry,
@@ -29,6 +30,9 @@ export type ServerMessage =
       sessions: readonly SessionListEntry[];
       activeSessionId: SessionId | null;
     }
+  /** The models available to switch to (server-authoritative, like `sessionList`).
+   *  The current selection rides each session's snapshot `config`, not this. */
+  | { type: "modelList"; models: readonly ModelOption[] }
   | { type: "error"; message: string };
 
 export type ClientMessage =
@@ -41,10 +45,20 @@ export type ClientMessage =
     }
   | { type: "abort"; sessionId?: SessionId }
   | { type: "respondUi"; response: HostUiResponse; sessionId?: SessionId }
+  /** Switch a session's model. Omit sessionId to target the focused session. */
+  | {
+      type: "setModel";
+      provider: string;
+      modelId: string;
+      sessionId?: SessionId;
+    }
+  /** Switch a session's thinking level. Omit sessionId to target the focused one. */
+  | { type: "setThinking"; level: string; sessionId?: SessionId }
   /** Switch the active session to this .jsonl path. */
   | { type: "openSession"; path: string }
-  /** Create a fresh session (in the server's cwd) and make it active. */
-  | { type: "newSession" }
+  /** Create a fresh session and make it active. `cwd` (an absolute dir, D12
+   *  arbitrary GUI paths) picks the workspace; omit it for the server's launch cwd. */
+  | { type: "newSession"; cwd?: string }
   /** Ask the server to re-scan disk and re-broadcast the session list. */
   | { type: "listSessions" }
   /** Dev-only: drive the mock fixture to a named scripted state. */

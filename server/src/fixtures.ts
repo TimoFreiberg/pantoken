@@ -3,11 +3,44 @@
 // pixels, so an agent can screenshot any UI state reproducibly without a live model.
 
 import type {
+  ModelOption,
+  SessionConfig,
   SessionDriverEvent,
   SessionListEntry,
   SessionRef,
   SessionSnapshot,
 } from "@pilot/protocol";
+
+/** Thinking levels the mock's models "support" — drives the picker's thinking menu. */
+export const MOCK_THINKING_LEVELS = ["off", "low", "medium", "high"] as const;
+
+/** A deterministic spread of models for the picker (mirrors pi's provider:model ids). */
+export const MOCK_MODELS: readonly ModelOption[] = [
+  {
+    provider: "anthropic",
+    modelId: "claude-opus-4-8",
+    label: "Claude Opus 4.8",
+  },
+  {
+    provider: "anthropic",
+    modelId: "claude-sonnet-4-6",
+    label: "Claude Sonnet 4.6",
+  },
+  {
+    provider: "deepseek",
+    modelId: "deepseek-v4-flash",
+    label: "DeepSeek V4 Flash",
+  },
+  { provider: "openai", modelId: "gpt-5", label: "GPT-5" },
+];
+
+/** The mock's starting model selection (matches the greeting snapshot). */
+export const MOCK_DEFAULT_CONFIG: SessionConfig = {
+  provider: "anthropic",
+  modelId: "claude-opus-4-8",
+  thinkingLevel: "medium",
+  availableThinkingLevels: MOCK_THINKING_LEVELS,
+};
 
 export const WORKSPACE = {
   workspaceId: "ws-demo",
@@ -32,11 +65,7 @@ export function snapshot(over: Partial<SessionSnapshot> = {}): SessionSnapshot {
     title: "Wire up the WebSocket bridge",
     status: "idle",
     updatedAt: ts(),
-    config: {
-      provider: "anthropic",
-      modelId: "claude-opus-4-8",
-      thinkingLevel: "medium",
-    },
+    config: MOCK_DEFAULT_CONFIG,
     ...over,
   };
 }
