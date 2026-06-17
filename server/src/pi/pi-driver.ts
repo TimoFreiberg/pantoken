@@ -41,10 +41,12 @@ import type {
   SessionSnapshot,
   SessionStatus,
 } from "@pilot/protocol";
+import { config } from "../config.js";
 import type { PilotDriver, TrustEvent } from "../driver.js";
 import { mapPiEvent } from "./event-map.js";
 import { type HistoryMessage, historyToEvents } from "./history-map.js";
 import { createWorktree } from "./worktree.js";
+import { evictionPlan } from "./warm-cap.js";
 import {
   type AuthCred,
   apiKeySetupSupported,
@@ -58,6 +60,8 @@ import { PiUiBridge } from "./ui-bridge.js";
 
 export interface PiDriverOptions {
   cwd?: string;
+  /** Max kept-warm sessions before LRU eviction. Defaults to config.warmCap. */
+  warmCap?: number;
 }
 
 // One kept-warm session and everything bound to it. Fully independent: its own
@@ -183,6 +187,18 @@ export async function createPiDriver(
   // Fallback target when a command arrives without a sessionId (the hub normally
   // passes the focused id). Tracks the most-recently focused/created session.
   let currentId: SessionId | null = null;
+  const warmCap = opts.warmCap ?? config.warmCap;
+
+  // Mark a session as most-recently focused: set it current AND move it to the end of
+  // the warm map, whose insertion order IS the recency order eviction reads.
+  function focus(id: SessionId): void {
+    currentId = id;
+    const ws = warm.get(id);
+    if (ws) {
+      warm.delete(id);
+      warm.set(id, ws);
+    }
+  }
 
   // Snapshot for one warm session at a given status. Reads the session live so
   // model/title/thinking changes show up whenever a snapshot is taken.
@@ -306,6 +322,20 @@ export async function createPiDriver(
     });
 
     warm.set(session.sessionId, ws);
+    // Enforce the warm cap: evict the least-recently-focused sessions (never the one
+    // just created), disposing each — dispose() also aborts any in-flight run.
+    for (const id of evictionPlan(
+      [...warm.keys()],
+      session.sessionId,
+      warmCap,
+    )) {
+      const victim = warm.get(id);
+      if (!victim) continue;
+      victim.unsubscribe();
+      victim.session.dispose();
+      warm.delete(id);
+      console.log(`[pi] evicted LRU warm session ${id}; ${warm.size} warm`);
+    }
     console.log(
       `[pi] warmed session ${session.sessionId} (${cwd}); ${warm.size} warm`,
     );
@@ -327,7 +357,7 @@ export async function createPiDriver(
   // Startup: resume the most recent session for launchCwd (or a fresh one if none),
   // writing to ~/.pi/agent/sessions/ so an SSH `pi` peer sees the same files (D13).
   const initial = await warmUp(SessionManager.continueRecent(launchCwd));
-  currentId = initial.ref.sessionId;
+  focus(initial.ref.sessionId);
 
   const toEntry = (
     info: Awaited<ReturnType<typeof SessionManager.list>>[number],
@@ -412,7 +442,7 @@ export async function createPiDriver(
       if (existing)
         console.log(`[pi] refocus warm session ${existing.ref.sessionId}`);
       const ws = existing ?? (await warmUp(SessionManager.open(path)));
-      currentId = ws.ref.sessionId;
+      focus(ws.ref.sessionId);
       return seedFor(ws);
     },
 
@@ -440,7 +470,7 @@ export async function createPiDriver(
       // agent works on a clean copy. Throws loudly if `dir` isn't a repo (surfaced to UI).
       if (worktree) dir = await createWorktree(dir);
       const ws = await warmUp(SessionManager.create(dir));
-      currentId = ws.ref.sessionId;
+      focus(ws.ref.sessionId);
       return seedFor(ws);
     },
 
