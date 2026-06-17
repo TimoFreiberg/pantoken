@@ -7,6 +7,7 @@ import {
   type HostUiResponse,
   initialSessionState,
   type ServerMessage,
+  type SessionListEntry,
   type SessionState,
 } from "@pilot/protocol";
 import { setToken } from "./auth.js";
@@ -31,6 +32,10 @@ class PilotStore {
   serverId = $state<string | null>(null);
   ready = $state(false);
   unauthorized = $state(false);
+
+  // Session picker — server-authoritative: the sessions on disk + which is active.
+  sessions = $state<SessionListEntry[]>([]);
+  activeSessionId = $state<string | null>(null);
 
   // per-client view state — local only
   composerDraft = $state("");
@@ -72,6 +77,10 @@ class PilotStore {
       case "event":
         foldEvent(this.session, msg.event);
         break;
+      case "sessionList":
+        this.sessions = [...msg.sessions];
+        this.activeSessionId = msg.activeSessionId;
+        break;
       case "error":
         if (msg.message === "unauthorized") {
           this.unauthorized = true;
@@ -110,6 +119,22 @@ class PilotStore {
   }
   mock(script: string): void {
     send({ type: "mock", script });
+  }
+  openSession(path: string): void {
+    if (path === this.activeSessionPath) return;
+    send({ type: "openSession", path });
+  }
+  newSession(): void {
+    send({ type: "newSession" });
+  }
+  refreshSessions(): void {
+    send({ type: "listSessions" });
+  }
+  get activeSessionPath(): string | null {
+    return (
+      this.sessions.find((s) => s.sessionId === this.activeSessionId)?.path ??
+      null
+    );
   }
   /** Dev/verification: register this device for push, then trigger a server test push. */
   async testPush(): Promise<void> {
