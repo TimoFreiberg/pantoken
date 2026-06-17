@@ -125,6 +125,15 @@ is the project-trust gate, now wired as a non-interactive MVP (see corrections) 
 it gates auto-loading/execution of a repo's `.pi/extensions`, `.pi/settings.json`,
 project packages, etc. No file explorer for MVP.
 
+Status (2026-06-17): the **GUI affordance landed** in the session sidebar. The
+`newSession` wire message carries an optional `cwd`; the sidebar's "New session in
+a directory…" input opens an arbitrary typed absolute path (→ `SessionManager.create`),
+prefilled with the active session's cwd for quick branching to a sibling repo. The pi
+driver expands `~`, resolves the path, and rejects a non-directory loudly rather than
+creating a session against a typo. Still typed-path only (no file explorer), consistent
+with this decision; an opened untrusted cwd works but its `.pi` resources stay unloaded
+until trusted (per the non-interactive resolver above).
+
 ### D13. Persistence = pi session files are authoritative (OQ7)
 **Inverts D5.** Instead of "in-memory transcript authoritative, JSONL backup,"
 pilot treats pi's own `~/.pi/agent/sessions/*.jsonl` as the source of truth and

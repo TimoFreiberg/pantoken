@@ -1,5 +1,31 @@
 # Pilot — overnight status (morning of 2026-06-17)
 
+> ## Update — 2026-06-17, afternoon (supersedes the snapshots below)
+>
+> Landed + committed (`9069d223`; tree clean; `bun test protocol server` = **47**,
+> `bun run test:e2e` = **22** across desktop + mobile, `tsc` + `svelte-check` clean):
+> - **Session/project sidebar** — replaced the header session dropdown
+>   (`SessionPicker` deleted) with a collapsible left rail (desktop) / slide-over
+>   drawer with scrim (mobile), grouping sessions by project directory. Open/collapse
+>   is per-client view state (D5), persisted per-device in localStorage. `listSessions`
+>   now spans every project (`SessionManager.listAll()`) so the sidebar is a
+>   cross-project navigator, not just the launch cwd's sessions.
+> - **New session in an arbitrary directory** (D12 GUI affordance) — the `newSession`
+>   wire message carries an optional `cwd`; the sidebar's "New session in a directory…"
+>   input takes a typed absolute path (prefilled with the active session's cwd), and a
+>   per-project `+` starts a session in that group's dir. The pi driver expands `~`,
+>   resolves, and **fails loudly** on a non-directory; session-switch errors now surface
+>   in the sidebar instead of only the console.
+> - **Per-session model + thinking-level picker** — provider-grouped model menu +
+>   thinking-level menu in the header (`setModel`/`setThinking` over the wire,
+>   `modelList` broadcast). This was pre-existing uncommitted work; committed alongside
+>   the sidebar at the owner's call (the two were entangled across shared files).
+>
+> Verification note: the e2e suite was run against an **isolated mock stack on alt
+> ports** (8799/5199) so the owner's live `PILOT_DRIVER=pi` dev server on 5173/8787
+> stayed untouched. Still open: the interactive trust card (TODO 🔴) and a real model
+> turn (Live pi bring-up).
+
 > ## Update — 2026-06-17, midday (supersedes the morning snapshot below)
 >
 > Since the morning snapshot, landed + committed (tree clean; `bun run test` =
