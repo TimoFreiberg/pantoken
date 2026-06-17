@@ -2,15 +2,23 @@
 // session so the whole UI pipeline can be built and screenshot-verified without a
 // live model or API keys.
 
-import type { HostUiResponse, SessionDriverEvent } from "@pilot/protocol";
+import type {
+  HostUiResponse,
+  SessionDriverEvent,
+  SessionListEntry,
+} from "@pilot/protocol";
 import type { PilotDriver } from "./driver.js";
 import {
   ambient,
   confirmDialog,
   greeting,
   inputDialog,
+  mockSessionSeed,
+  NEW_SESSION_ENTRY,
+  newSessionSeed,
   promptReply,
   type ScriptStep,
+  SESSION_LIST,
   SESSION_REF,
   trustDialog,
 } from "./fixtures.js";
@@ -19,6 +27,7 @@ export class MockDriver implements PilotDriver {
   private listeners = new Set<(ev: SessionDriverEvent) => void>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
   private pendingDialogs = new Set<string>();
+  private sessions: SessionListEntry[] = SESSION_LIST.map((s) => ({ ...s }));
 
   subscribe(listener: (ev: SessionDriverEvent) => void): () => void {
     this.listeners.add(listener);
@@ -62,9 +71,8 @@ export class MockDriver implements PilotDriver {
 
   /** Cancel everything in flight and replay the initial fixture (test determinism). */
   reset(): void {
-    for (const timer of this.timers) clearTimeout(timer);
-    this.timers.clear();
-    this.pendingDialogs.clear();
+    this.cancelTimers();
+    this.sessions = SESSION_LIST.map((s) => ({ ...s }));
     this.bootstrap();
   }
 
@@ -119,6 +127,28 @@ export class MockDriver implements PilotDriver {
         level: "info",
       },
     });
+  }
+
+  async listSessions(): Promise<SessionListEntry[]> {
+    return this.sessions.map((s) => ({ ...s }));
+  }
+
+  async openSession(path: string): Promise<SessionDriverEvent[]> {
+    this.cancelTimers(); // a switch ends any in-flight stream
+    return mockSessionSeed(path);
+  }
+
+  async newSession(): Promise<SessionDriverEvent[]> {
+    this.cancelTimers();
+    if (!this.sessions.some((s) => s.sessionId === NEW_SESSION_ENTRY.sessionId))
+      this.sessions = [{ ...NEW_SESSION_ENTRY }, ...this.sessions];
+    return newSessionSeed();
+  }
+
+  private cancelTimers(): void {
+    for (const timer of this.timers) clearTimeout(timer);
+    this.timers.clear();
+    this.pendingDialogs.clear();
   }
 
   runScript(name: string): void {

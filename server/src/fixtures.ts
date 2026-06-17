@@ -4,6 +4,7 @@
 
 import type {
   SessionDriverEvent,
+  SessionListEntry,
   SessionRef,
   SessionSnapshot,
 } from "@pilot/protocol";
@@ -347,3 +348,129 @@ export const SCRIPTS: Record<string, () => ScriptStep[]> = {
   ambient,
   error: errorRun,
 };
+
+// --- Session listing + switching (Increment 2) ------------------------------
+
+/** The sessions the mock offers in the picker. `demo-session` is the one the
+ *  greeting fixture loads, so it's the active row on a fresh server. */
+export const SESSION_LIST: SessionListEntry[] = [
+  {
+    sessionId: "demo-session",
+    path: "/sessions/demo-session.jsonl",
+    cwd: WORKSPACE.path,
+    displayName: "Wire up the WebSocket bridge",
+    preview: "Add a /health route to the server and a smoke test for it.",
+    messageCount: 6,
+    updatedAt: "0000000100",
+    createdAt: "0000000001",
+  },
+  {
+    sessionId: "older-session",
+    path: "/sessions/older-session.jsonl",
+    cwd: WORKSPACE.path,
+    displayName: "Explore the fold reducer",
+    preview: "How does foldEvent assemble the transcript?",
+    messageCount: 12,
+    updatedAt: "0000000050",
+    createdAt: "0000000002",
+  },
+  {
+    sessionId: "scratch-session",
+    path: "/sessions/scratch-session.jsonl",
+    cwd: "/Users/timo/src/scratch",
+    preview: "quick scratch session",
+    messageCount: 2,
+    updatedAt: "0000000010",
+    createdAt: "0000000003",
+  },
+];
+
+function sessionRefFor(sessionId: string): SessionRef {
+  return { workspaceId: WORKSPACE.workspaceId, sessionId };
+}
+
+/** A flat, instant (no-delay) transcript seed for a session — what `openSession`
+ *  returns and the hub folds into fresh state. */
+function sessionSeed(
+  sessionId: string,
+  title: string,
+  userText: string,
+  assistantText: string,
+): SessionDriverEvent[] {
+  const ref = sessionRefFor(sessionId);
+  const b = () => ({ sessionRef: ref, timestamp: ts() });
+  const snap = (status: SessionSnapshot["status"]): SessionSnapshot => ({
+    ref,
+    workspace: WORKSPACE,
+    title,
+    status,
+    updatedAt: ts(),
+    config: { provider: "anthropic", modelId: "claude-opus-4-8" },
+  });
+  return [
+    { ...b(), type: "sessionOpened", snapshot: snap("idle") },
+    { ...b(), type: "userMessage", id: `u-${sessionId}`, text: userText },
+    { ...b(), type: "assistantDelta", text: assistantText, channel: "text" },
+    { ...b(), type: "runCompleted", snapshot: snap("idle") },
+  ];
+}
+
+/** Seed events for opening a given session path (the active-session swap). */
+export function mockSessionSeed(path: string): SessionDriverEvent[] {
+  switch (path) {
+    case "/sessions/demo-session.jsonl":
+      return greeting().map((s) => s.event);
+    case "/sessions/older-session.jsonl":
+      return sessionSeed(
+        "older-session",
+        "Explore the fold reducer",
+        "How does foldEvent assemble the transcript?",
+        "It folds each driver event into render-ready items — assistant deltas accumulate into one bubble, tool cards key off callId, and ambient UI lives in keyed maps.",
+      );
+    case "/sessions/scratch-session.jsonl":
+      return sessionSeed(
+        "scratch-session",
+        "scratch",
+        "quick scratch session",
+        "Noted — nothing else here.",
+      );
+    default:
+      return sessionSeed(
+        "unknown",
+        "Session",
+        "(opened)",
+        "No fixture for this session.",
+      );
+  }
+}
+
+export const NEW_SESSION_ENTRY: SessionListEntry = {
+  sessionId: "new-session",
+  path: "/sessions/new-session.jsonl",
+  cwd: WORKSPACE.path,
+  displayName: "New session",
+  preview: "",
+  messageCount: 0,
+  updatedAt: "0000000200",
+  createdAt: "0000000200",
+};
+
+/** Seed events for a freshly created (empty) session. */
+export function newSessionSeed(): SessionDriverEvent[] {
+  const ref = sessionRefFor("new-session");
+  return [
+    {
+      sessionRef: ref,
+      timestamp: ts(),
+      type: "sessionOpened",
+      snapshot: {
+        ref,
+        workspace: WORKSPACE,
+        title: "New session",
+        status: "idle",
+        updatedAt: ts(),
+        config: { provider: "anthropic", modelId: "claude-opus-4-8" },
+      },
+    },
+  ];
+}

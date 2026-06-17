@@ -31,6 +31,9 @@ export class SessionHub {
   // is 0) doesn't buzz a stored subscription on every restart. The deeper fix —
   // distinguishing replayed history from live events — lands with persistence (D13).
   private everConnected = false;
+  // True only during a session swap: ignore stray driver events while we reset and
+  // re-fold the new session's seed, so a half-switched state is never broadcast.
+  private switching = false;
 
   constructor(
     private driver: PilotDriver,
@@ -42,6 +45,7 @@ export class SessionHub {
   }
 
   private onEvent(ev: SessionDriverEvent): void {
+    if (this.switching) return; // the swap orchestrates its own reset + re-fold
     foldEvent(this.state, ev);
     this.broadcast({ type: "event", event: ev });
     this.maybeNotify(ev);
@@ -89,6 +93,46 @@ export class SessionHub {
     }
   }
 
+  /** Re-scan available sessions and broadcast the list + the active session id
+   *  (derived from the folded state, so the picker's "active" row is authoritative). */
+  private async broadcastSessionList(): Promise<void> {
+    try {
+      const sessions = await this.driver.listSessions();
+      this.broadcast({
+        type: "sessionList",
+        sessions,
+        activeSessionId: this.state.ref?.sessionId ?? null,
+      });
+    } catch (e) {
+      console.error("[hub] listSessions failed", e);
+    }
+  }
+
+  /**
+   * Atomically switch the active session: run the driver swap (which resolves with
+   * the new session's seed events), reset state, fold the seed, then re-snapshot all
+   * clients and refresh the list. `switching` suppresses any stray events meanwhile.
+   * The swap is server-authoritative — every connected client follows along.
+   */
+  private async switchTo(
+    swap: () => Promise<SessionDriverEvent[]>,
+  ): Promise<void> {
+    this.switching = true;
+    let seed: SessionDriverEvent[];
+    try {
+      seed = await swap();
+    } catch (e) {
+      this.switching = false;
+      this.broadcast({ type: "error", message: `session switch failed: ${e}` });
+      return;
+    }
+    this.state = initialSessionState();
+    for (const ev of seed) foldEvent(this.state, ev);
+    this.switching = false;
+    this.broadcast({ type: "snapshot", state: this.snapshot() });
+    await this.broadcastSessionList();
+  }
+
   /** Register a client. Synchronously sends hello + snapshot, then live events. */
   addClient(send: Send): () => void {
     this.clients.add(send);
@@ -99,6 +143,9 @@ export class SessionHub {
       serverId: this.serverId,
     });
     send({ type: "snapshot", state: this.snapshot() });
+    // Fire the session list asynchronously (driver.listSessions reads disk); it
+    // arrives as a follow-up message, keeping hello+snapshot synchronous + first.
+    void this.broadcastSessionList();
     return () => this.clients.delete(send);
   }
 
@@ -123,6 +170,15 @@ export class SessionHub {
         this.driver.respondUi(msg.response);
         return;
       }
+      case "openSession":
+        void this.switchTo(() => this.driver.openSession(msg.path));
+        return;
+      case "newSession":
+        void this.switchTo(() => this.driver.newSession());
+        return;
+      case "listSessions":
+        void this.broadcastSessionList();
+        return;
       case "mock":
         this.driver.runScript?.(msg.script);
         return;
