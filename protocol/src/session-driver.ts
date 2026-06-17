@@ -49,6 +49,24 @@ export interface SessionSnapshot {
   readonly queuedMessages?: readonly SessionQueuedMessage[];
 }
 
+/**
+ * One row in the session picker — a JSON-safe projection of pi's `SessionInfo`
+ * (Dates rendered as ISO strings, the heavy `allMessagesText` dropped). `path` (the
+ * .jsonl file) is the switch key, since pi's resume/open APIs are path-based and the
+ * `sessionId`/cwd can be empty for older sessions.
+ */
+export interface SessionListEntry {
+  readonly sessionId: SessionId;
+  readonly path: string;
+  readonly cwd: string;
+  readonly displayName?: string;
+  readonly preview: string;
+  readonly messageCount: number;
+  readonly updatedAt: Timestamp;
+  readonly createdAt: Timestamp;
+  readonly parentSessionPath?: string;
+}
+
 // --- Host UI (extension interaction) ---
 
 export type HostUiResponse =

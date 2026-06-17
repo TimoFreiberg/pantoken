@@ -3,7 +3,9 @@ import type {
   HostUiResponse,
   ServerMessage,
   SessionDriverEvent,
+  SessionListEntry,
   SessionRef,
+  SessionSnapshot,
 } from "@pilot/protocol";
 import type { PilotDriver } from "./driver.js";
 import { SessionHub } from "./hub.js";
@@ -11,6 +13,14 @@ import { SessionHub } from "./hub.js";
 const ref: SessionRef = { workspaceId: "w", sessionId: "s" };
 const ev = (e: Partial<SessionDriverEvent>): SessionDriverEvent =>
   ({ sessionRef: ref, timestamp: "t", ...e }) as SessionDriverEvent;
+const snap = (sessionId: string): SessionSnapshot => ({
+  ref: { workspaceId: "w", sessionId },
+  workspace: { workspaceId: "w", path: "/w" },
+  title: "t",
+  status: "idle",
+  updatedAt: "t",
+});
+const flush = () => new Promise((r) => setTimeout(r, 0));
 
 /** A driver we can emit into by hand, for deterministic hub tests. */
 class FakeDriver implements PilotDriver {
@@ -28,6 +38,37 @@ class FakeDriver implements PilotDriver {
   respondUi(r: HostUiResponse) {
     this.responded.push(r);
     this.emit(ev({ type: "hostUiResolved", requestId: r.requestId }));
+  }
+  async listSessions(): Promise<SessionListEntry[]> {
+    return [
+      {
+        sessionId: "s",
+        path: "/s.jsonl",
+        cwd: "/w",
+        preview: "a",
+        messageCount: 1,
+        updatedAt: "t",
+        createdAt: "t",
+      },
+      {
+        sessionId: "s2",
+        path: "/s2.jsonl",
+        cwd: "/w",
+        preview: "b",
+        messageCount: 2,
+        updatedAt: "t",
+        createdAt: "t",
+      },
+    ];
+  }
+  async openSession(_path: string): Promise<SessionDriverEvent[]> {
+    return [
+      ev({ type: "sessionOpened", snapshot: snap("s2") }),
+      ev({ type: "userMessage", id: "u2", text: "new session" }),
+    ];
+  }
+  async newSession(): Promise<SessionDriverEvent[]> {
+    return [ev({ type: "sessionOpened", snapshot: snap("new") })];
   }
 }
 
@@ -99,5 +140,43 @@ describe("SessionHub", () => {
 
     expect(d.responded).toHaveLength(1);
     expect(d.responded[0]).toMatchObject({ confirmed: true });
+  });
+
+  test("a connecting client eventually receives the session list", async () => {
+    const hub = new SessionHub(new FakeDriver());
+    const a = client();
+    hub.addClient(a.send);
+    await flush();
+    const list = a.received.find((m) => m.type === "sessionList");
+    expect(list?.type).toBe("sessionList");
+    if (list?.type === "sessionList")
+      expect(list.sessions.length).toBeGreaterThan(0);
+  });
+
+  test("openSession resets to the new session's seed and re-snapshots clients", async () => {
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    d.emit(ev({ type: "userMessage", id: "u1", text: "old session msg" }));
+    const a = client();
+    hub.addClient(a.send);
+
+    hub.handleClient(a.send, { type: "openSession", path: "/s2.jsonl" });
+    await flush();
+
+    const lastSnap = a.received.filter((m) => m.type === "snapshot").at(-1);
+    expect(lastSnap?.type).toBe("snapshot");
+    if (lastSnap?.type === "snapshot") {
+      // old session's transcript is gone, the new seed is in
+      expect(
+        lastSnap.state.items.some((i) => i.text === "old session msg"),
+      ).toBe(false);
+      expect(lastSnap.state.items.some((i) => i.text === "new session")).toBe(
+        true,
+      );
+    }
+    // the session list now reports the switched-to session as active
+    const lastList = a.received.filter((m) => m.type === "sessionList").at(-1);
+    if (lastList?.type === "sessionList")
+      expect(lastList.activeSessionId).toBe("s2");
   });
 });

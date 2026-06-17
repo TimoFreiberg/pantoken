@@ -1,21 +1,26 @@
-// The real driver: embeds a pi AgentSession and presents it through PilotDriver,
-// the same seam the mock implements. Selected via PILOT_DRIVER=pi. Uses the user's
-// existing pi config (model + credentials from ~/.pi) unless overridden.
+// The real driver: embeds a pi AgentSessionRuntime and presents it through
+// PilotDriver, the same seam the mock implements. Selected via PILOT_DRIVER=pi. Uses
+// the user's existing pi config (model + credentials from ~/.pi) unless overridden.
 //
-// NOTE: this path runs a live coding agent that executes tools in `cwd`. It has not
-// been exercised end-to-end yet (needs provider credentials) — first live bring-up
-// is a known next step. The pure pieces it composes (event-map, ui-bridge) are
-// unit-tested.
+// Uses the RUNTIME (not a bare AgentSession) so the active session can be SWITCHED at
+// runtime (D13 Increment 2). Per the SDK, replacing the active session re-points
+// `runtime.session`, disposes the old one, and requires re-`bindExtensions` +
+// re-`subscribe` — so bind/subscribe live in a re-runnable `bindCurrent()`.
 
 import { basename } from "node:path";
 import {
-  createAgentSession,
+  type CreateAgentSessionRuntimeFactory,
+  createAgentSessionFromServices,
+  createAgentSessionRuntime,
+  createAgentSessionServices,
   type ExtensionUIContext,
+  getAgentDir,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import type {
   HostUiResponse,
   SessionDriverEvent,
+  SessionListEntry,
   SessionRef,
   SessionSnapshot,
   SessionStatus,
@@ -33,16 +38,35 @@ export async function createPiDriver(
   opts: PiDriverOptions = {},
 ): Promise<PilotDriver> {
   const cwd = opts.cwd ?? process.cwd();
-  // Persist like the CLI: continue the most recent session for this cwd (or create a
-  // fresh one), writing to ~/.pi/agent/sessions/ so a SSH `pi` peer sees the same
-  // files. This is what makes pi's .jsonl the authoritative store (D13) — pilot's
-  // in-memory transcript is rebuilt from it on load via historyToEvents below.
-  const { session } = await createAgentSession({
+
+  // The documented runtime factory: recreate cwd-bound services and a session.
+  const createRuntime: CreateAgentSessionRuntimeFactory = async ({
     cwd,
+    sessionManager,
+    sessionStartEvent,
+  }) => {
+    const services = await createAgentSessionServices({ cwd });
+    return {
+      ...(await createAgentSessionFromServices({
+        services,
+        sessionManager,
+        sessionStartEvent,
+      })),
+      services,
+      diagnostics: services.diagnostics,
+    };
+  };
+
+  // Persist + resume like the CLI: continue the most recent session for this cwd,
+  // writing to ~/.pi/agent/sessions/ so an SSH `pi` peer sees the same files (D13).
+  const runtime = await createAgentSessionRuntime(createRuntime, {
+    cwd,
+    agentDir: getAgentDir(),
     sessionManager: SessionManager.continueRecent(cwd),
   });
 
-  const ref: SessionRef = { workspaceId: cwd, sessionId: session.sessionId };
+  let session = runtime.session;
+  let ref: SessionRef = { workspaceId: cwd, sessionId: session.sessionId };
   const listeners = new Set<(ev: SessionDriverEvent) => void>();
   const now = () => String(Date.now());
 
@@ -57,12 +81,9 @@ export async function createPiDriver(
   };
 
   const bridge = new PiUiBridge(ref, emit, now);
-  // Cast: the bridge implements the remote-relevant subset; TUI-only members are
-  // stubbed (see ui-bridge.ts). pi never calls those in a headless session.
-  await session.bindExtensions({
-    uiContext: bridge as unknown as ExtensionUIContext,
-  });
 
+  // Reads the CURRENT session/ref (both reassigned on swap), so it stays correct
+  // across switchSession/newSession.
   const snapshot = (status: SessionStatus): SessionSnapshot => {
     const m = session.model;
     return {
@@ -80,7 +101,9 @@ export async function createPiDriver(
   };
 
   const ctx = {
-    ref,
+    get ref() {
+      return ref;
+    },
     now,
     toolMeta: (name: string) => {
       const t = session.getAllTools().find((x) => x.name === name);
@@ -89,30 +112,58 @@ export async function createPiDriver(
     snapshot,
   };
 
-  session.subscribe((ev) => {
-    for (const out of mapPiEvent(ev, ctx)) emit(out);
+  // (Re)bind extensions + (re)subscribe the current session. Called once at startup
+  // and again after every session swap (subscriptions/bindings are per-AgentSession).
+  let unsubCurrent: (() => void) | null = null;
+  async function bindCurrent(): Promise<void> {
+    unsubCurrent?.(); // detach the previous session's listener
+    session = runtime.session;
+    ref = { workspaceId: cwd, sessionId: session.sessionId };
+    bridge.rebind(ref); // point the bridge at the new session; drop stale dialogs
+    await session.bindExtensions({
+      uiContext: bridge as unknown as ExtensionUIContext,
+    });
+    unsubCurrent = session.subscribe((ev) => {
+      for (const out of mapPiEvent(ev, ctx)) emit(out);
+    });
+  }
+  await bindCurrent();
+
+  // The seed for the current session: a sessionOpened snapshot + its replayed
+  // history. Emitted to the first subscriber; returned (not emitted) on a swap so
+  // the hub can reset state and fold it atomically.
+  const currentSeed = (): SessionDriverEvent[] => [
+    {
+      sessionRef: ref,
+      timestamp: now(),
+      type: "sessionOpened",
+      snapshot: snapshot(session.isStreaming ? "running" : "idle"),
+    },
+    ...historyToEvents(
+      session.messages as unknown as readonly HistoryMessage[],
+      { ref, idleSnapshot: snapshot("idle"), toolMeta: ctx.toolMeta },
+    ),
+  ];
+
+  const toEntry = (
+    info: Awaited<ReturnType<typeof SessionManager.list>>[number],
+  ): SessionListEntry => ({
+    sessionId: info.id,
+    path: info.path,
+    cwd: info.cwd,
+    displayName: info.name,
+    preview: info.firstMessage ?? "",
+    messageCount: info.messageCount,
+    updatedAt: info.modified.toISOString(),
+    createdAt: info.created.toISOString(),
+    parentSessionPath: info.parentSessionPath,
   });
 
   return {
     subscribe(l) {
       listeners.add(l);
-      // Seed the first (only) subscriber — the hub — with an opened snapshot so its
-      // state isn't blank before the first pi event. Synchronous => no lost-event race.
-      if (listeners.size === 1) {
-        emit({
-          sessionRef: ref,
-          timestamp: now(),
-          type: "sessionOpened",
-          snapshot: snapshot(session.isStreaming ? "running" : "idle"),
-        });
-        // Rebuild the transcript from the resumed session's stored messages, so a
-        // reopened/restarted session shows its history instead of starting blank.
-        for (const ev of historyToEvents(
-          session.messages as unknown as readonly HistoryMessage[],
-          { ref, idleSnapshot: snapshot("idle"), toolMeta: ctx.toolMeta },
-        ))
-          emit(ev);
-      }
+      // Seed the first (only) subscriber — the hub — synchronously so no event races.
+      if (listeners.size === 1) for (const ev of currentSeed()) emit(ev);
       return () => listeners.delete(l);
     },
 
@@ -144,6 +195,26 @@ export async function createPiDriver(
 
     respondUi(response: HostUiResponse) {
       bridge.resolve(response);
+    },
+
+    async listSessions() {
+      // Sessions for THIS workspace (listAll() spans every project — too broad here).
+      const infos = await SessionManager.list(cwd);
+      return infos.map(toEntry);
+    },
+
+    async openSession(path: string) {
+      const res = await runtime.switchSession(path);
+      if (res?.cancelled) throw new Error("session switch was cancelled");
+      await bindCurrent();
+      return currentSeed();
+    },
+
+    async newSession() {
+      const res = await runtime.newSession();
+      if (res?.cancelled) throw new Error("new session was cancelled");
+      await bindCurrent();
+      return currentSeed();
     },
   };
 }
