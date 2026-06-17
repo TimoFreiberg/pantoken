@@ -283,8 +283,15 @@ export async function createPiDriver(
 
     // Extension UI calls (approvals + ambient) flow through this session's bridge;
     // binding is per-AgentSession and required for hostUiRequest to reach clients.
+    // mode "rpc": pilot is a headless-but-dialog-capable host (a UI bridge, no
+    // terminal) — pi's own semantics for that combination. Left unset it defaults to
+    // "print" (hasUI=false territory), so pilot ran as the untested "print"+hasUI=true
+    // combo and reported ctx.mode="print" to extensions. "rpc" lets terminal-only
+    // extensions (e.g. a notify ext writing OSC escape codes) detect a non-tui host and
+    // self-suppress, instead of firing a stray escape sequence into the server's stdout.
     await session.bindExtensions({
       uiContext: bridge as unknown as ExtensionUIContext,
+      mode: "rpc",
     });
     ws.unsubscribe = session.subscribe((ev) => {
       for (const out of mapPiEvent(ev, {
