@@ -150,7 +150,24 @@
       {:else if item.kind === "notice"}
         <div class="row notice {item.level}">
           <span class="ico">{item.level === "error" ? "✕" : item.level === "warning" ? "⚠" : "ℹ"}</span>
-          <span>{item.text}</span>
+          <span class="ntext">{item.text}</span>
+          {#if item.level === "error"}
+            <span class="nactions">
+              {#if store.lastPrompt}
+                <button
+                  class="naction"
+                  title="Re-send the last prompt"
+                  onclick={() => store.retryLast()}>Retry</button
+                >
+              {/if}
+              <button
+                class="naction"
+                title="Copy the error message"
+                onclick={() => copyText(item.id, item.text)}
+                >{copiedId === item.id ? "Copied" : "Copy"}</button
+              >
+            </span>
+          {/if}
         </div>
       {/if}
     {/each}
@@ -277,6 +294,23 @@
     color: var(--warning);
     background: var(--warning-soft);
     border-color: color-mix(in srgb, var(--warning) 30%, transparent);
+  }
+  .nactions {
+    display: inline-flex;
+    gap: 6px;
+    margin-left: 2px;
+  }
+  .naction {
+    font-size: 12px;
+    color: inherit;
+    background: color-mix(in srgb, currentColor 12%, transparent);
+    border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+    border-radius: 999px;
+    padding: 2px 9px;
+    cursor: pointer;
+  }
+  .naction:hover {
+    background: color-mix(in srgb, currentColor 20%, transparent);
   }
   .empty {
     color: var(--text-faint);
