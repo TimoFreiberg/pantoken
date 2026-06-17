@@ -5,14 +5,21 @@
 import type {
   HostUiResponse,
   SessionDriverEvent,
+  SessionId,
   SessionListEntry,
 } from "@pilot/protocol";
 
 export interface PilotDriver {
   subscribe(listener: (ev: SessionDriverEvent) => void): () => void;
-  prompt(text: string, deliverAs?: "steer" | "followUp"): void;
-  abort(): void;
-  respondUi(response: HostUiResponse): void;
+  // sessionId targets a specific (warm) session; omit it to act on the session
+  // the driver currently treats as active. Single-session drivers ignore it.
+  prompt(
+    text: string,
+    deliverAs?: "steer" | "followUp",
+    sessionId?: SessionId,
+  ): void;
+  abort(sessionId?: SessionId): void;
+  respondUi(response: HostUiResponse, sessionId?: SessionId): void;
 
   /** Sessions on disk available to open (D13: pi's .jsonl files are authoritative). */
   listSessions(): Promise<SessionListEntry[]>;

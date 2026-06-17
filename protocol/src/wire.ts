@@ -1,9 +1,9 @@
 // The pilot WebSocket envelope. Wraps the vendored session-driver event stream
 // with connection bootstrap (snapshot-on-connect) and client commands.
 //
-// M0 is single-session: the server has one active session and omits a session id
-// from messages. A `sessionId` field will be threaded through at M5 (multi-session)
-// without changing these shapes structurally.
+// Events carry their own `sessionRef`. Client commands optionally carry a
+// `sessionId` to target a specific session (D8 multi-session); omit it and the
+// server applies the command to the currently-focused session.
 
 import type {
   HostUiResponse,
@@ -33,9 +33,14 @@ export type ServerMessage =
 
 export type ClientMessage =
   | { type: "hello"; auth?: string }
-  | { type: "prompt"; text: string; deliverAs?: "steer" | "followUp" }
-  | { type: "abort" }
-  | { type: "respondUi"; response: HostUiResponse }
+  | {
+      type: "prompt";
+      text: string;
+      deliverAs?: "steer" | "followUp";
+      sessionId?: SessionId;
+    }
+  | { type: "abort"; sessionId?: SessionId }
+  | { type: "respondUi"; response: HostUiResponse; sessionId?: SessionId }
   /** Switch the active session to this .jsonl path. */
   | { type: "openSession"; path: string }
   /** Create a fresh session (in the server's cwd) and make it active. */

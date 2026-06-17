@@ -9,6 +9,7 @@ import {
   PROTOCOL_VERSION,
   type ServerMessage,
   type SessionDriverEvent,
+  type SessionId,
   type SessionState,
 } from "@pilot/protocol";
 import type { PilotDriver } from "./driver.js";
@@ -23,7 +24,11 @@ export interface HubNotification {
 }
 
 export class SessionHub {
+  // The FOCUSED session's folded state — what every client sees (D8: global focus).
+  // Background sessions stream live inside the driver (kept warm); they reach the hub
+  // only so a finished background turn can still notify a closed phone.
   private state: SessionState = initialSessionState();
+  private focusedId: SessionId | null = null;
   private clients = new Set<Send>();
   private serverId = `pilot-${Math.floor(Date.now() / 1000)}`;
   // Whether any client has connected since startup. Gates push so replayed history
@@ -48,8 +53,15 @@ export class SessionHub {
 
   private onEvent(ev: SessionDriverEvent): void {
     if (this.switching) return; // the swap orchestrates its own reset + re-fold
-    foldEvent(this.state, ev);
-    this.broadcast({ type: "event", event: ev });
+    const sid = ev.sessionRef.sessionId;
+    // The first session to surface becomes the focus (e.g. the resumed session at
+    // startup). Only the focused session folds into `state` and broadcasts; other
+    // (warm, background) sessions reach maybeNotify but not the focused transcript.
+    if (this.focusedId === null) this.focusedId = sid;
+    if (sid === this.focusedId) {
+      foldEvent(this.state, ev);
+      this.broadcast({ type: "event", event: ev });
+    }
     this.maybeNotify(ev);
   }
 
@@ -103,7 +115,7 @@ export class SessionHub {
       this.broadcast({
         type: "sessionList",
         sessions,
-        activeSessionId: this.state.ref?.sessionId ?? null,
+        activeSessionId: this.focusedId,
       });
     } catch (e) {
       console.error("[hub] listSessions failed", e);
@@ -130,6 +142,8 @@ export class SessionHub {
     }
     this.state = initialSessionState();
     for (const ev of seed) foldEvent(this.state, ev);
+    // Focus follows the swapped-to session; its id rides the seed's sessionOpened.
+    this.focusedId = this.state.ref?.sessionId ?? this.focusedId;
     this.switching = false;
     this.broadcast({ type: "snapshot", state: this.snapshot() });
     await this.broadcastSessionList();
@@ -157,19 +171,27 @@ export class SessionHub {
       case "ping":
         return;
       case "prompt":
-        this.driver.prompt(msg.text, msg.deliverAs);
+        this.driver.prompt(
+          msg.text,
+          msg.deliverAs,
+          msg.sessionId ?? this.focusedId ?? undefined,
+        );
         return;
       case "abort":
-        this.driver.abort();
+        this.driver.abort(msg.sessionId ?? this.focusedId ?? undefined);
         return;
       case "respondUi": {
         // First-responder-wins: only the first answer for a still-pending dialog
         // reaches the driver. A second device answering the same id is dropped, so
-        // the real pi session never gets a double resolution.
+        // the real pi session never gets a double resolution. The dialog lives in
+        // the focused session's state (the only one clients can see + answer).
         const id = msg.response.requestId;
         if (!this.state.pendingApprovals.some((p) => p.requestId === id))
           return;
-        this.driver.respondUi(msg.response);
+        this.driver.respondUi(
+          msg.response,
+          msg.sessionId ?? this.focusedId ?? undefined,
+        );
         return;
       }
       case "openSession":
@@ -195,6 +217,7 @@ export class SessionHub {
   /** Dev/test-only: clear state, replay the initial fixture, re-snapshot clients. */
   reset(): void {
     this.state = initialSessionState();
+    this.focusedId = null;
     this.driver.reset?.();
     this.broadcast({ type: "snapshot", state: this.snapshot() });
   }

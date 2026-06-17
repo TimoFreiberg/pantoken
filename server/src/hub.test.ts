@@ -13,6 +13,15 @@ import { SessionHub } from "./hub.js";
 const ref: SessionRef = { workspaceId: "w", sessionId: "s" };
 const ev = (e: Partial<SessionDriverEvent>): SessionDriverEvent =>
   ({ sessionRef: ref, timestamp: "t", ...e }) as SessionDriverEvent;
+const evFor = (
+  sessionId: string,
+  e: Partial<SessionDriverEvent>,
+): SessionDriverEvent =>
+  ({
+    sessionRef: { workspaceId: "w", sessionId },
+    timestamp: "t",
+    ...e,
+  }) as SessionDriverEvent;
 const snap = (sessionId: string): SessionSnapshot => ({
   ref: { workspaceId: "w", sessionId },
   workspace: { workspaceId: "w", path: "/w" },
@@ -178,5 +187,55 @@ describe("SessionHub", () => {
     const lastList = a.received.filter((m) => m.type === "sessionList").at(-1);
     if (lastList?.type === "sessionList")
       expect(lastList.activeSessionId).toBe("s2");
+  });
+
+  test("only the focused session broadcasts to clients (D8 global focus)", () => {
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    d.emit(ev({ type: "assistantDelta", text: "focused", channel: "text" })); // focus "s"
+    const a = client();
+    hub.addClient(a.send);
+    a.received.length = 0; // drop hello/snapshot
+
+    // A background session's event must NOT reach the client's transcript stream.
+    d.emit(
+      evFor("s2", { type: "assistantDelta", text: "bg", channel: "text" }),
+    );
+    expect(a.received.some((m) => m.type === "event")).toBe(false);
+
+    // A focused-session event still does.
+    d.emit(ev({ type: "assistantDelta", text: "more", channel: "text" }));
+    expect(a.received.some((m) => m.type === "event")).toBe(true);
+  });
+
+  test("a background turn finishing while away still notifies", () => {
+    const notes: { tag?: string }[] = [];
+    const d = new FakeDriver();
+    const hub = new SessionHub(d, (n) => {
+      notes.push(n);
+    });
+    const a = client();
+    const leave = hub.addClient(a.send); // everConnected = true
+    d.emit(ev({ type: "assistantDelta", text: "focus s", channel: "text" })); // focus "s"
+    leave(); // client gone → clients.size 0
+
+    d.emit(evFor("s2", { type: "runCompleted", snapshot: snap("s2") }));
+    expect(notes.some((n) => n.tag === "pilot-run")).toBe(true);
+  });
+
+  test("commands target msg.sessionId, else the focused session", () => {
+    const calls: (string | undefined)[] = [];
+    class RecordingDriver extends FakeDriver {
+      prompt(_t: string, _d?: "steer" | "followUp", sessionId?: string) {
+        calls.push(sessionId);
+      }
+    }
+    const d = new RecordingDriver();
+    const hub = new SessionHub(d);
+    d.emit(ev({ type: "assistantDelta", text: "x", channel: "text" })); // focus "s"
+
+    hub.handleClient(() => {}, { type: "prompt", text: "hi" }); // → focused "s"
+    hub.handleClient(() => {}, { type: "prompt", text: "yo", sessionId: "s2" });
+    expect(calls).toEqual(["s", "s2"]);
   });
 });
