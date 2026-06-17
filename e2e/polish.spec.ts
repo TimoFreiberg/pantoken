@@ -73,6 +73,13 @@ test("no stray caret after a turn ends via sessionUpdated (not runCompleted)", a
     .toBe(0);
 });
 
+test("tab title mirrors the active session title", async ({ page }) => {
+  // The greeting snapshot titles the session "Wire up the WebSocket bridge";
+  // document.title should reflect it (suffixed with the app name) rather than
+  // staying the static "pilot".
+  await expect(page).toHaveTitle("Wire up the WebSocket bridge · pilot");
+});
+
 test("composer: live markdown preview toggle", async ({ page }) => {
   const ta = page.locator(".composer-wrap textarea");
   await ta.fill("some **bold** and `code`");
