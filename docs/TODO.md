@@ -16,8 +16,10 @@ _(clear — pull the next item up from Polish)_
 
 ## 🟢 Polish / fast-follow
 
-- [ ] **Suppress notifications when app focused** — if feasible, silence push/toast
+- [x] **Suppress notifications when app focused** — if feasible, silence push/toast
       notifications while the browser tab/window has focus
+      _(done: client toast now gates on `document.hasFocus()`, not visibility — fires
+      whenever pilot isn't the focused window. Committed in worktree, not yet merged.)_
 - [ ] **Project sidebar hierarchy polish** — larger expand/collapse arrows for
       project groups; indent sessions under their project header to make the
       parent-child relationship visually obvious
