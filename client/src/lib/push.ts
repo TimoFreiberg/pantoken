@@ -39,38 +39,82 @@ function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 
+// Outcome of a subscribe attempt / status check, so the UI can say what happened
+// instead of failing silently (which made the first on-phone test undiagnosable).
+export type PushState =
+  | "idle" // supported, not yet subscribed
+  | "subscribed"
+  | "needs-install" // iOS: Web Push only works from a home-screen PWA
+  | "denied" // notification permission refused
+  | "unsupported"
+  | "error";
+
+function isIOS(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return (
+    /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+    // iPadOS reports as "MacIntel" but is touch-capable
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+}
+
+/** True when running as an installed PWA (home screen / standalone), not a browser tab. */
+export function isStandalone(): boolean {
+  if (typeof window === "undefined") return false;
+  return (
+    window.matchMedia?.("(display-mode: standalone)").matches === true ||
+    (navigator as unknown as { standalone?: boolean }).standalone === true
+  );
+}
+
+/** Read current push status without prompting — for initial UI state. */
+export async function currentPushState(): Promise<PushState> {
+  if (!pushSupported()) return "unsupported";
+  if (isIOS() && !isStandalone()) return "needs-install";
+  if (Notification.permission === "denied") return "denied";
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    return (await reg.pushManager.getSubscription()) ? "subscribed" : "idle";
+  } catch {
+    return "idle";
+  }
+}
+
 /**
- * Idempotent: ensure this device has a push subscription registered server-side.
- * Safe to call repeatedly (re-POSTs an existing subscription, which the server
- * dedupes by endpoint). Must run from a user gesture on iOS — it may prompt for
- * notification permission.
+ * Idempotent: ensure this device has a push subscription registered server-side,
+ * prompting for permission if needed. Returns the outcome so the caller can show it.
+ * Must run from a user gesture on iOS, and only works inside an installed PWA there.
  */
-export async function ensurePushSubscription(): Promise<void> {
-  if (!pushSupported()) return;
+export async function ensurePushSubscription(): Promise<PushState> {
+  if (!pushSupported()) return "unsupported";
+  if (isIOS() && !isStandalone()) return "needs-install";
   try {
     const reg = await navigator.serviceWorker.ready;
     let sub = await reg.pushManager.getSubscription();
     if (!sub) {
-      if (Notification.permission === "denied") return;
       if (Notification.permission === "default") {
-        const perm = await Notification.requestPermission();
-        if (perm !== "granted") return;
+        if ((await Notification.requestPermission()) !== "granted")
+          return "denied";
+      } else if (Notification.permission !== "granted") {
+        return "denied";
       }
       const res = await fetch("/push/vapid", { headers: authHeaders() });
-      if (!res.ok) return;
+      if (!res.ok) return "error";
       const { publicKey } = (await res.json()) as { publicKey: string };
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(publicKey),
       });
     }
-    await fetch("/push/subscribe", {
+    const postRes = await fetch("/push/subscribe", {
       method: "POST",
       headers: authHeaders({ "content-type": "application/json" }),
       body: JSON.stringify(sub),
     });
+    return postRes.ok ? "subscribed" : "error";
   } catch (e) {
     console.warn("[push] subscription failed", e);
+    return "error";
   }
 }
 
