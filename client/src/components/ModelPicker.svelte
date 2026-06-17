@@ -12,10 +12,11 @@
   const thinking = $derived(cfg.thinkingLevel);
   const levels = $derived(cfg.availableThinkingLevels ?? []);
 
-  // Group available models by provider, like pi-gui's selector.
+  // Group the picker's models by provider, like pi-gui's selector. `pickerModels` is
+  // filtered to favorites (when any are set), always keeping the active model visible.
   const groups = $derived.by(() => {
     const m = new Map<string, ModelOption[]>();
-    for (const opt of store.models) {
+    for (const opt of store.pickerModels) {
       const arr = m.get(opt.provider);
       if (arr) arr.push(opt);
       else m.set(opt.provider, [opt]);
@@ -24,6 +25,7 @@
   });
 
   const hasModels = $derived(store.models.length > 0);
+  const filtering = $derived(store.modelDefaults.favorites.length > 0);
 
   function toggle(which: "model" | "thinking"): void {
     open = open === which ? "none" : which;
@@ -56,15 +58,22 @@
           {#each groups as g (g.provider)}
             <div class="group-title">{g.provider}</div>
             {#each g.items as opt (opt.modelId)}
+              {@const active =
+                opt.provider === cfg.provider && opt.modelId === cfg.modelId}
               <button
                 class="item"
-                class:active={opt.provider === cfg.provider &&
-                  opt.modelId === cfg.modelId}
+                class:active
                 onclick={() => pickModel(opt.provider, opt.modelId)}
               >
                 <span class="item-label">{opt.label}</span>
-                {#if opt.provider === cfg.provider && opt.modelId === cfg.modelId}
-                  <span class="item-meta">active</span>
+                {#if active}
+                  <span class="item-meta"
+                    >active{#if filtering && !store.isFavorite(opt.provider, opt.modelId)}<span
+                        class="off"
+                        title="Not in favorites — switch from Settings to manage the list"
+                        > · not favorited</span
+                      >{/if}</span
+                  >
                 {/if}
               </button>
             {/each}
@@ -202,5 +211,8 @@
     font-size: 11px;
     color: var(--accent);
     flex-shrink: 0;
+  }
+  .off {
+    color: var(--text-faint);
   }
 </style>

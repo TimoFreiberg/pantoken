@@ -18,17 +18,22 @@
 
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import {
   type AgentSession,
+  AuthStorage,
   createAgentSessionFromServices,
   createAgentSessionServices,
   type ExtensionUIContext,
   getAgentDir,
+  ModelRegistry,
   SessionManager,
+  SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type {
   HostUiResponse,
+  ModelDefaults,
+  ProviderInfo,
   SessionDriverEvent,
   SessionId,
   SessionListEntry,
@@ -39,6 +44,14 @@ import type {
 import type { PilotDriver, TrustEvent } from "../driver.js";
 import { mapPiEvent } from "./event-map.js";
 import { type HistoryMessage, historyToEvents } from "./history-map.js";
+import {
+  type AuthCred,
+  apiKeySetupSupported,
+  inferAuthSource,
+  mergeFavoritePatterns,
+  type ModelLike,
+  resolveFavorites,
+} from "./model-config.js";
 import { makeTrustResolver, type TrustAsk } from "./trust.js";
 import { PiUiBridge } from "./ui-bridge.js";
 
@@ -65,6 +78,29 @@ export async function createPiDriver(
   const launchCwd = opts.cwd ?? process.cwd();
   const agentDir = getAgentDir();
   const now = () => String(Date.now());
+
+  // ONE shared auth store + model registry across every warm session. Both are global
+  // (auth.json + models.json under agentDir, cwd-independent), and sharing them is what
+  // lets the Settings panel's provider/key changes take effect everywhere: a key saved
+  // here + `modelRegistry.refresh()` immediately updates each warm session's available
+  // models (and `setModel`'s `find`). Per-session settings managers stay cwd-bound (they
+  // layer project settings at session creation); for the GLOBAL defaults/favorites the
+  // panel edits we keep a separate launchCwd-bound manager — those settings are global,
+  // so the bound cwd doesn't matter for what we read/write.
+  const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+  const modelRegistry = ModelRegistry.create(
+    authStorage,
+    join(agentDir, "models.json"),
+  );
+  const globalSettings = SettingsManager.create(launchCwd, agentDir);
+
+  // Available models as the small shape model-config helpers want.
+  const availableModelLikes = (): ModelLike[] => {
+    modelRegistry.refresh();
+    return modelRegistry
+      .getAvailable()
+      .map((m) => ({ provider: String(m.provider), id: m.id }));
+  };
 
   const listeners = new Set<(ev: SessionDriverEvent) => void>();
   const emit = (ev: SessionDriverEvent) => {
@@ -218,6 +254,11 @@ export async function createPiDriver(
     const services = await createAgentSessionServices({
       cwd,
       agentDir,
+      // Share the driver-wide auth store + model registry (see createPiDriver) so a key
+      // saved via the Settings panel is visible to this session after a refresh. The
+      // settings manager is left to default (cwd-bound, for correct project layering).
+      authStorage,
+      modelRegistry,
       // Without this, pi leaves projectTrusted=true and auto-loads every project's .pi
       // resources — the D12 gap. Resolve trust per cwd instead (non-interactive MVP;
       // honors trust.json, trusts launchCwd, denies other untrusted paths).
@@ -393,12 +434,11 @@ export async function createPiDriver(
     },
 
     async listModels() {
-      // The registry is global (auth + models.json under agentDir), so any warm
-      // session's view is the same; use the startup one. getAvailable() = models with
-      // working credentials, i.e. the ones actually switchable.
-      const reg = initial.session.modelRegistry;
-      reg.refresh();
-      return reg.getAvailable().map((m) => ({
+      // The shared registry (createPiDriver) is the same view every warm session sees.
+      // getAvailable() = models with working credentials, i.e. the ones actually
+      // switchable — and it reflects any key just saved via the Settings panel.
+      modelRegistry.refresh();
+      return modelRegistry.getAvailable().map((m) => ({
         provider: String(m.provider),
         modelId: m.id,
         label: m.name,
@@ -427,6 +467,89 @@ export async function createPiDriver(
         level as Parameters<typeof ws.session.setThinkingLevel>[0],
       );
       emitUpdate(ws);
+    },
+
+    // --- Global provider/model config (Settings panel) ---
+
+    async listProviders() {
+      modelRegistry.refresh();
+      // Every provider pi knows a model for, plus every OAuth-capable and every
+      // already-authed one — then narrowed (Q2) to the curated key-capable set + the
+      // already-connected, so the phone panel isn't a wall of irrelevant rows.
+      const ids = new Set<string>([
+        ...modelRegistry.getAll().map((m) => String(m.provider)),
+        ...authStorage.getOAuthProviders().map((p) => p.id),
+        ...authStorage.list(),
+      ]);
+      const out: ProviderInfo[] = [];
+      for (const id of [...ids].sort((a, b) => a.localeCompare(b))) {
+        const keySetup = apiKeySetupSupported(id);
+        const status = modelRegistry.getProviderAuthStatus(id);
+        const hasAuth = status.configured || authStorage.hasAuth(id);
+        if (!keySetup && !hasAuth) continue;
+        out.push({
+          id,
+          name: modelRegistry.getProviderDisplayName(id) || id,
+          hasAuth,
+          authSource: inferAuthSource(
+            authStorage.get(id) as AuthCred | undefined,
+            status,
+            keySetup,
+          ),
+          apiKeySetupSupported: keySetup,
+        });
+      }
+      return out;
+    },
+
+    async setProviderApiKey(providerId, apiKey) {
+      const key = apiKey.trim();
+      if (!key) throw new Error("API key is required");
+      if (!apiKeySetupSupported(providerId))
+        throw new Error(`API key setup isn't supported for ${providerId}`);
+      authStorage.set(providerId, { type: "api_key", key });
+      modelRegistry.refresh(); // newly-authed provider's models become available
+    },
+
+    async removeProviderApiKey(providerId) {
+      authStorage.remove(providerId);
+      modelRegistry.refresh();
+    },
+
+    async getModelDefaults(): Promise<ModelDefaults> {
+      return {
+        provider: globalSettings.getDefaultProvider(),
+        modelId: globalSettings.getDefaultModel(),
+        thinkingLevel: globalSettings.getDefaultThinkingLevel(),
+        favorites: resolveFavorites(
+          globalSettings.getEnabledModels(),
+          availableModelLikes(),
+        ),
+      };
+    },
+
+    async setDefaultModel(provider, modelId) {
+      globalSettings.setDefaultModelAndProvider(provider, modelId);
+      await globalSettings.flush();
+    },
+
+    async setDefaultThinking(level) {
+      globalSettings.setDefaultThinkingLevel(
+        level as Parameters<typeof globalSettings.setDefaultThinkingLevel>[0],
+      );
+      await globalSettings.flush();
+    },
+
+    async setFavoriteModels(refs) {
+      // Preserve patterns the GUI can't represent (CLI globs, offline-provider
+      // favorites); replace the available-resolvable ones with the explicit selection.
+      const patterns = mergeFavoritePatterns(
+        globalSettings.getEnabledModels(),
+        refs,
+        availableModelLikes(),
+      );
+      globalSettings.setEnabledModels(patterns);
+      await globalSettings.flush();
     },
   };
 }

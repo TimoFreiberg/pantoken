@@ -3,9 +3,9 @@
   import { store } from "../lib/store.svelte.js";
   import type { ThemeMode } from "../lib/theme.js";
 
-  // A per-client settings panel (D5 view state): theme, notifications, the read-only
-  // model/provider overview, and this device's access token. Provider credential
-  // editing (writing pi's auth files) is a deferred server-side follow-up — see TODO.
+  // The settings panel. Per-client view state (theme, notifications, this device's
+  // access token) sits next to server-side global pi config (provider credentials,
+  // default model/thinking, favorites) which travels the WS and persists in pi.
 
   const open = $derived(store.settingsOpen);
 
@@ -27,9 +27,12 @@
     unsupported: "Not supported on this device",
   };
 
-  // Read-only model overview. Current selection lives in the folded session config;
-  // the switchable set arrives as store.models. Switching happens in the header picker.
-  const cfg = $derived(store.session.config);
+  // Provider credentials + global model config (server-authoritative).
+  const providers = $derived(store.providers);
+  const defaults = $derived(store.modelDefaults);
+
+  // Available models grouped by provider — drives both the default-model select and
+  // the favorites checklist.
   const groups = $derived.by(() => {
     const m = new Map<string, ModelOption[]>();
     for (const opt of store.models) {
@@ -40,6 +43,29 @@
     return [...m.entries()].map(([provider, items]) => ({ provider, items }));
   });
 
+  // pi's setDefaultThinkingLevel accepts this fixed union (independent of the current
+  // model's supported levels — it's the default for whatever new session is created).
+  const DEFAULT_THINKING_LEVELS = [
+    "off",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+  ] as const;
+
+  const sourceLabel: Record<string, string> = {
+    none: "Not connected",
+    oauth: "Connected · OAuth",
+    auth_file: "Connected · API key",
+    env: "Connected · env var",
+    external: "Connected · external config",
+  };
+
+  // API-key entry: which provider's field is expanded + its draft (write-only; a saved
+  // key is never sent back to the client).
+  let keyProviderId = $state<string | null>(null);
+  let keyDraft = $state("");
   let tokenDraft = $state("");
 
   function close(): void {
@@ -53,6 +79,28 @@
     if (!t) return;
     store.changeToken(t);
     tokenDraft = "";
+  }
+  function openKeyField(id: string): void {
+    keyProviderId = id;
+    keyDraft = "";
+  }
+  function cancelKeyField(): void {
+    keyProviderId = null;
+    keyDraft = "";
+  }
+  function saveKey(): void {
+    const id = keyProviderId;
+    const k = keyDraft.trim();
+    if (!id || !k) return;
+    store.setProviderApiKey(id, k);
+    keyProviderId = null;
+    keyDraft = "";
+  }
+  function onDefaultModel(e: Event): void {
+    const v = (e.target as HTMLSelectElement).value;
+    const i = v.indexOf(":");
+    if (i < 0) return;
+    store.setDefaultModel(v.slice(0, i), v.slice(i + 1));
   }
 </script>
 
@@ -128,36 +176,129 @@
         </p>
       </section>
 
+      <!-- Providers -->
+      <section class="group">
+        <div class="gtitle">Providers</div>
+        {#if providers.length === 0}
+          <p class="note">No providers reported by the server.</p>
+        {:else}
+          <div class="providers">
+            {#each providers as p (p.id)}
+              <div class="prow" data-testid="provider-{p.id}">
+                <div class="rinfo">
+                  <div class="rlabel">{p.name}</div>
+                  <div class="rdesc" class:connected={p.hasAuth}>
+                    {sourceLabel[p.authSource] ??
+                      (p.hasAuth ? "Connected" : "Not connected")}
+                  </div>
+                </div>
+                <div class="actions">
+                  {#if p.apiKeySetupSupported}
+                    <button class="btn ghost" onclick={() => openKeyField(p.id)}>
+                      {p.authSource === "auth_file" ? "Replace key" : "Set key"}
+                    </button>
+                  {/if}
+                  {#if p.authSource === "auth_file"}
+                    <button class="btn danger" onclick={() => store.removeProviderApiKey(p.id)}>
+                      Remove
+                    </button>
+                  {/if}
+                </div>
+              </div>
+              {#if keyProviderId === p.id}
+                <form
+                  class="keyform"
+                  onsubmit={(e) => {
+                    e.preventDefault();
+                    saveKey();
+                  }}
+                >
+                  <input
+                    bind:value={keyDraft}
+                    type="password"
+                    placeholder="Enter API key…"
+                    autocomplete="off"
+                    data-testid="provider-key-input"
+                  />
+                  <button class="btn" type="submit" disabled={!keyDraft.trim()}>Save</button>
+                  <button class="btn ghost" type="button" onclick={cancelKeyField}>Cancel</button>
+                </form>
+              {/if}
+            {/each}
+          </div>
+          <p class="note">
+            Keys save into pi's <code>auth.json</code> on the server — shared with the
+            terminal <code>pi</code> on this machine. Providers configured via environment
+            variables show as connected but aren't editable here.
+          </p>
+        {/if}
+      </section>
+
       <!-- Models -->
       <section class="group">
-        <div class="gtitle">Model</div>
+        <div class="gtitle">Models</div>
         <div class="row">
           <div class="rinfo">
-            <div class="rlabel">Current</div>
-            <div class="rdesc mono">
-              {cfg.provider ? `${cfg.provider} · ` : ""}{cfg.modelId ?? "—"}
+            <div class="rlabel">Default model</div>
+            <div class="rdesc">
+              For new sessions. Switch the current session from the header.
             </div>
           </div>
-          {#if cfg.thinkingLevel}
-            <span class="pill">thinking: {cfg.thinkingLevel}</span>
-          {/if}
+          <select
+            class="select"
+            data-testid="default-model"
+            onchange={onDefaultModel}
+            value={defaults.provider && defaults.modelId
+              ? `${defaults.provider}:${defaults.modelId}`
+              : ""}
+          >
+            <option value="">Choose…</option>
+            {#each groups as g (g.provider)}
+              <optgroup label={g.provider}>
+                {#each g.items as opt (opt.modelId)}
+                  <option value={`${opt.provider}:${opt.modelId}`}>{opt.label}</option>
+                {/each}
+              </optgroup>
+            {/each}
+          </select>
         </div>
-        {#if groups.length > 0}
-          <div class="rdesc available">Available — switch from the header:</div>
+        <div class="row">
+          <div class="rinfo">
+            <div class="rlabel">Default thinking</div>
+            <div class="rdesc">Reasoning level for new sessions.</div>
+          </div>
+          <select
+            class="select"
+            data-testid="default-thinking"
+            value={defaults.thinkingLevel ?? ""}
+            onchange={(e) =>
+              store.setDefaultThinking((e.target as HTMLSelectElement).value)}
+          >
+            <option value="" disabled>Choose…</option>
+            {#each DEFAULT_THINKING_LEVELS as lvl (lvl)}
+              <option value={lvl}>{lvl}</option>
+            {/each}
+          </select>
+        </div>
+
+        <div class="rdesc available">
+          Favorites — the header picker shows only these (none = show all):
+        </div>
+        {#if groups.length === 0}
+          <p class="note">No models available — connect a provider above.</p>
+        {:else}
           <div class="models">
             {#each groups as g (g.provider)}
               <div class="mprovider">{g.provider}</div>
               {#each g.items as opt (opt.modelId)}
-                <div
-                  class="mitem"
-                  class:active={opt.provider === cfg.provider &&
-                    opt.modelId === cfg.modelId}
-                >
+                <label class="mitem fav" data-testid="fav-{opt.provider}-{opt.modelId}">
+                  <input
+                    type="checkbox"
+                    checked={store.isFavorite(opt.provider, opt.modelId)}
+                    onchange={() => store.toggleFavorite(opt.provider, opt.modelId)}
+                  />
                   <span class="mlabel">{opt.label}</span>
-                  {#if opt.provider === cfg.provider && opt.modelId === cfg.modelId}
-                    <span class="mmeta">active</span>
-                  {/if}
-                </div>
+                </label>
               {/each}
             {/each}
           </div>
@@ -298,9 +439,8 @@
     margin-top: 2px;
     line-height: 1.45;
   }
-  .rdesc.mono {
-    font-family: var(--font-mono);
-    color: var(--text);
+  .rdesc.connected {
+    color: var(--ok);
   }
   .note {
     font-size: 12px;
@@ -360,15 +500,20 @@
     border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
     flex-shrink: 0;
   }
-  .pill {
+  .select {
     flex-shrink: 0;
-    font-size: 12px;
-    font-family: var(--font-mono);
-    color: var(--text-muted);
-    background: var(--surface-sunken);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 3px 9px;
+    max-width: 58%;
+    font-size: 13px;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    padding: 6px 9px;
+    cursor: pointer;
+  }
+  .select:focus {
+    outline: none;
+    border-color: var(--accent);
   }
   .available {
     margin: 12px 0 6px;
@@ -389,13 +534,21 @@
   .mitem {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+    gap: 9px;
     padding: 6px 8px;
     border-radius: var(--radius-xs);
   }
-  .mitem.active {
-    background: color-mix(in srgb, var(--accent) 14%, transparent);
+  .mitem.fav {
+    cursor: pointer;
+  }
+  .mitem.fav:hover {
+    background: var(--surface-sunken);
+  }
+  .mitem input[type="checkbox"] {
+    flex-shrink: 0;
+    accent-color: var(--accent);
+    width: 15px;
+    height: 15px;
   }
   .mlabel {
     font-size: 13px;
@@ -403,10 +556,36 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .mmeta {
-    font-size: 11px;
-    color: var(--accent);
-    flex-shrink: 0;
+  .providers {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .prow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 0;
+  }
+  .keyform {
+    display: flex;
+    gap: 8px;
+    margin: 2px 0 8px;
+  }
+  .keyform input {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    padding: 9px 11px;
+    font-size: 16px;
+    background: var(--bg);
+    color: var(--text);
+    outline: none;
+  }
+  .keyform input:focus {
+    border-color: var(--accent);
   }
   .tokenform {
     display: flex;

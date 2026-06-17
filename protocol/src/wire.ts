@@ -7,7 +7,9 @@
 
 import type {
   HostUiResponse,
+  ModelDefaults,
   ModelOption,
+  ProviderInfo,
   SessionDriverEvent,
   SessionId,
   SessionListEntry,
@@ -55,6 +57,14 @@ export type ServerMessage =
   /** The models available to switch to (server-authoritative, like `sessionList`).
    *  The current selection rides each session's snapshot `config`, not this. */
   | { type: "modelList"; models: readonly ModelOption[] }
+  /** The model providers pilot can manage credentials for (curated key-capable +
+   *  already-connected), server-authoritative like `modelList`. No secrets — see
+   *  {@link ProviderInfo}. */
+  | { type: "providerList"; providers: readonly ProviderInfo[] }
+  /** pi's global model config: default model/thinking for new sessions + the
+   *  favorites subset the header picker filters to. Distinct from a session's
+   *  `config` (the CURRENT selection). See {@link ModelDefaults}. */
+  | { type: "modelDefaults"; defaults: ModelDefaults }
   /** Surface an interactive project-trust card (D12). Broadcast to every client; the
    *  first answer wins. Carried as its own message — see {@link TrustRequest}. */
   | ({ type: "trustRequest" } & TrustRequest)
@@ -82,6 +92,21 @@ export type ClientMessage =
     }
   /** Switch a session's thinking level. Omit sessionId to target the focused one. */
   | { type: "setThinking"; level: string; sessionId?: SessionId }
+  /** Save an API key for a provider (writes pi's auth.json — shared with terminal
+   *  pi). The server refreshes the model registry and re-broadcasts provider/model
+   *  lists; a failure (unsupported provider / empty key) comes back as `error`. */
+  | { type: "setProviderApiKey"; providerId: string; apiKey: string }
+  /** Remove a pilot-saved API key for a provider (auth_file source only). */
+  | { type: "removeProviderApiKey"; providerId: string }
+  /** Set pi's global default model for NEW sessions (not the current one). */
+  | { type: "setDefaultModel"; provider: string; modelId: string }
+  /** Set pi's global default thinking level for NEW sessions. */
+  | { type: "setDefaultThinking"; level: string }
+  /** Replace the favorites subset. `refs` are `provider:modelId`; empty clears the
+   *  filter (header picker shows every model again). */
+  | { type: "setFavoriteModels"; refs: readonly string[] }
+  /** Ask the server to re-scan providers + defaults and re-broadcast them. */
+  | { type: "listProviders" }
   /** Switch the active session to this .jsonl path. */
   | { type: "openSession"; path: string }
   /** Create a fresh session and make it active. `cwd` (an absolute dir, D12
