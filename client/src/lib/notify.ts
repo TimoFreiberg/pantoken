@@ -1,6 +1,6 @@
 // Tab-open Web Notifications: buzz the user when the agent finishes or needs an
-// approval while the tab is backgrounded. Web Push (tab fully closed) is deferred —
-// see OPEN-QUESTIONS OQ5. Permission is requested lazily on a user gesture.
+// approval while pilot ISN'T the focused window. Web Push (tab fully closed) is
+// deferred — see OPEN-QUESTIONS OQ5. Permission is requested lazily on a user gesture.
 
 export function notificationsSupported(): boolean {
   return typeof Notification !== "undefined";
@@ -14,11 +14,32 @@ export function ensurePermission(): void {
   }
 }
 
-/** Fire a notification only when the tab is hidden and permission is granted. */
-export function notifyIfHidden(title: string, body: string): void {
-  if (!notificationsSupported()) return;
-  if (Notification.permission !== "granted") return;
-  if (typeof document !== "undefined" && document.visibilityState === "visible")
+/**
+ * Pure decision for whether to surface a tab-open notification. Keyed off *focus*,
+ * not visibility: a desktop window that's on-screen but not the active OS window
+ * (you're in the terminal or another app) should still buzz — only the window you're
+ * actively looking at stays quiet. "Not focused" subsumes hidden/minimized, so this
+ * one signal replaces the old visibilityState check. Kept pure for unit testing.
+ */
+export function shouldNotify(opts: {
+  supported: boolean;
+  permission: NotificationPermission;
+  focused: boolean;
+}): boolean {
+  return opts.supported && opts.permission === "granted" && !opts.focused;
+}
+
+/** Fire a notification when pilot is unfocused and permission is granted. */
+export function notifyIfUnfocused(title: string, body: string): void {
+  const supported = notificationsSupported();
+  const focused = typeof document !== "undefined" && document.hasFocus();
+  if (
+    !shouldNotify({
+      supported,
+      permission: supported ? Notification.permission : "denied",
+      focused,
+    })
+  )
     return;
   try {
     const n = new Notification(title, {

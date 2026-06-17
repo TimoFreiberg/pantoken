@@ -10,7 +10,7 @@
   import TrustCard from "./components/TrustCard.svelte";
   import TokenGate from "./components/TokenGate.svelte";
   import Settings from "./components/Settings.svelte";
-  import { notifyIfHidden } from "./lib/notify.js";
+  import { notifyIfUnfocused } from "./lib/notify.js";
 
   // Dev affordance: ?dev shows buttons that drive the mock to any UI state, so the
   // screenshot harness can reach approval/ambient/error states deterministically.
@@ -19,19 +19,19 @@
 
   onMount(() => store.start());
 
-  // Buzz the user (when backgrounded) on run-complete and new approvals.
+  // Buzz the user (when pilot is unfocused) on run-complete and new approvals.
   let prevStatus = "idle";
   let prevPending = 0;
   $effect(() => {
     const status = store.session.status;
     const pending = store.session.pendingApprovals.length;
     if (prevStatus === "running" && status === "idle") {
-      notifyIfHidden("pilot", "Agent finished its turn");
+      notifyIfUnfocused("pilot", "Agent finished its turn");
     }
     if (pending > prevPending && pending > 0) {
       const top = store.session.pendingApprovals[0];
       const title = top && "title" in top ? top.title : "Waiting on you";
-      notifyIfHidden("Approval needed", title);
+      notifyIfUnfocused("Approval needed", title);
     }
     prevStatus = status;
     prevPending = pending;

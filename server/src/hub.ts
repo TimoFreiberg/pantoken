@@ -78,7 +78,9 @@ export class SessionHub {
   }
 
   // Mirror of the client's tab-open notify rules (App.svelte), but server-side and
-  // only when no client is connected — a foreground tab handles its own buzzing.
+  // only when no client is connected — a connected client buzzes itself when
+  // unfocused, and a focused client needs no buzz at all, so focus is purely a
+  // client-side concern (the server can't observe it anyway).
   private maybeNotify(ev: SessionDriverEvent): void {
     // Push only when someone has been here and then left — never on a cold replay
     // (no one to "return" to a backgrounded app that was never opened).
