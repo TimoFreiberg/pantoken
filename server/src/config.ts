@@ -24,6 +24,9 @@ export const config = {
   debug: process.env.PILOT_DEBUG !== "0",
   // Built client bundle (served in prod; in dev Vite serves it instead).
   clientDist: resolve(import.meta.dir, "../../client/dist"),
+  // Max kept-warm pi sessions before the least-recently-focused one is evicted
+  // (its services disposed). ≤0 disables the cap. Only the real pi driver honors it.
+  warmCap: Number(process.env.PILOT_WARM_CAP ?? 8),
 };
 
 /** Constant-time-ish token check. null token = auth disabled. */
