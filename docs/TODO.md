@@ -58,11 +58,14 @@ _(clear — pull the next item up from Polish)_
       that's N file reads, each scanning the session from disk. Consider caching the
       archive flag in a pilot-side index (e.g. a single JSON file mapping sessionId →
       archived) and invalidating on write, rather than a full entry scan per list.
-- [ ] **Session search bar** — filter-as-you-type search over session display name,
+- [x] **Session search bar** — filter-as-you-type search over session display name,
       preview, and path in the sidebar
-- [ ] **Session list scroll cap** — for projects with many sessions, make the list
+      _(done: sidebar search filters groups by name/preview/cwd, hides empty groups;
+      `sessions.spec.ts` covers name + path matches.)_
+- [x] **Session list scroll cap** — for projects with many sessions, make the list
       internally scrollable with a visible limit of ~10, scroll within the project
       group
+      _(done: per-group `<ul>` `max-height: 21rem` (~10 rows) + `overflow-y: auto`.)_
 - [x] **Tool call results popup: drop description, add hover tooltip** — the tool
       description doesn't need to be listed inline in the popup; move it to a
       mouseover tooltip on the tool name instead
@@ -99,9 +102,13 @@ _(clear — pull the next item up from Polish)_
       each agent text area; hidden until hover, copies message content
       _(done: hover-revealed Copy button, `navigator.clipboard.writeText`, "Copied"
       feedback.)_
-- [ ] **Worktree checkbox in new-session form** — like the Claude app's "worktree"
+- [x] **Worktree checkbox in new-session form** — like the Claude app's "worktree"
       toggle; creates and passes a jj/git worktree path as the session cwd so the
       agent works in an isolated copy, leaving the main tree clean
+      _(done: `newSession` carries `worktree` through protocol→hub→both drivers; pi
+      creates a jj (git-fallback) worktree via `server/src/pi/worktree.ts` — pure
+      planner unit-tested; mock simulates a `-worktree` sibling dir; e2e covers the
+      toggle. The pi creation path is typechecked but not yet run live.)_
 - [ ] **Session context indicator** — a small color-coded circle (or similar badge)
       in the session list / header showing how much context the session has consumed,
       analogous to the Claude app's colored circle (green → yellow → red as the
@@ -114,33 +121,55 @@ _(clear — pull the next item up from Polish)_
       `runCompleted`; a turn that goes idle via `sessionUpdated` left `streaming:true`.
       Fixed at the source (close on any non-running snapshot) + a defensive caret guard
       on `store.streaming`. e2e repro via the `idle` fixture.)_
-- [ ] **Model list search bar** — filter-as-you-type search in the model picker (top bar)
+- [x] **Model list search bar** — filter-as-you-type search in the model picker (top bar)
       and the model list in the Settings panel; model lists grow quickly, and the
       current flat menus become unwieldy with many providers connected
-- [ ] **Autofocus after tapping `+` in the sidebar** — when creating a new session,
+      _(done: search input in the header ModelPicker panel + the Settings favorites
+      list; both filter by label/id/provider with a no-match state. e2e for each.)_
+- [x] **Autofocus after tapping `+` in the sidebar** — when creating a new session,
       focus the cwd input field immediately so you can type a path without an extra
       click. (An `autofocus` attribute exists already but is unreliable with Svelte's
       `{#if}` conditional mount — needs a `tick()` + `input.focus()` approach.)
-- [ ] **PWA update prompt** — when a new service worker is available, show a
+      _(done: `tick()` + `input.focus()`/`select()` on open; e2e asserts focus.)_
+- [x] **PWA update prompt** — when a new service worker is available, show a
       toast/banner asking the user to refresh for the latest version (standard PWA
       lifecycle UX)
-- [ ] **Tab title mirrors session title** — update `document.title` from the ambient
+      _(done: `lib/sw.ts` flags an update when a new SW reaches "installed" while one
+      already controls the page → refresh toast (Refresh/Dismiss); `?dev` "update"
+      button + e2e.)_
+- [x] **Tab title mirrors session title** — update `document.title` from the ambient
       `title` so the browser tab reflects the session name instead of always showing
       "pilot" (DESIGN.md SHOULD)
-- [ ] **Warm-session eviction cap** — `pi-driver.ts` currently keeps every session
+      _(done: `$effect` in App.svelte sets `document.title` to "<title> · pilot",
+      falls back to "pilot"; e2e in polish.spec.)_
+- [x] **Warm-session eviction cap** — `pi-driver.ts` currently keeps every session
       warm forever with no upper bound; add a configurable cap with LRU eviction
-- [ ] **Keyboard shortcut for Settings (⌘+,)** — open the settings panel with the
+      _(done: `PILOT_WARM_CAP` (default 8, ≤0 = unbounded); focus-recency LRU via Map
+      re-insertion; pure `evictionPlan` helper unit-tested; evicts via
+      `session.dispose()` (also aborts an in-flight run). pi path not yet run live.)_
+- [x] **Keyboard shortcut for Settings (⌘+,)** — open the settings panel with the
       standard web app keyboard shortcut
+      _(done: ⌘/Ctrl+, toggles the panel; gear tooltip names the hotkey; e2e.)_
 - [ ] **(discussion needed) Auto session titling via cheapest model** — run a
       lightweight model on session start to generate a title from the first user
       prompt, instead of showing "New Session" indefinitely
-- [ ] **Enter/Alt+Enter hint for steer vs follow-up** — add an inline hint near the
+- [x] **Enter/Alt+Enter hint for steer vs follow-up** — add an inline hint near the
       composer or a tooltip explaining that pressing Enter while the agent is running
       steers, and Alt+Enter queues a follow-up message (and implement both hotkeys)
-- [ ] **Hotkey + tooltip audit for every UI action** — go through every clickable
+      _(done: Enter steers / Alt+Enter queues a follow-up (reflected in the toggle);
+      hint line + hotkey-named tooltips; new `streamhold` fixture holds a running
+      state for the e2e.)_
+- [x] **Hotkey + tooltip audit for every UI action** — go through every clickable
       element (sidebar toggle, header buttons, stop, send, approval actions, trust
       options, settings controls, model picker items, etc.) and add a keyboard
       shortcut or a `title` tooltip naming the action + its hotkey if one exists
+      _(done: every clickable across all components now carries a descriptive `title`
+      (icon-only buttons especially); full suite stays green.)_
+- [ ] **Realistic mock tool-event timestamps** — the mock's `ts()` is a sequential
+      counter, so any duration derived from `toolStarted`→`toolFinished` timestamps
+      renders as a meaningless ~1ms in the dev/preview UI. Stamp tool fixtures with a
+      realistic ms gap (without breaking fold determinism) so the brainstorm
+      "tool-call duration badges" item can ship and be screenshot-verified.
 
 - [ ] **Jump-to-last-prompt hotkey** (OP8)
 - [x] **Type-to-focus prompt field** — basic typable characters focus the
