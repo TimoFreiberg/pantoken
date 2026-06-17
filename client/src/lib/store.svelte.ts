@@ -10,6 +10,7 @@ import {
   type ServerMessage,
   type SessionListEntry,
   type SessionState,
+  type TrustRequest,
 } from "@pilot/protocol";
 import { setToken } from "./auth.js";
 import { ensurePermission } from "./notify.js";
@@ -40,6 +41,9 @@ class PilotStore {
   // Model picker — the models available to switch to (current selection lives in
   // session.config). Server-authoritative, delivered like `sessions`.
   models = $state<ModelOption[]>([]);
+  // Interactive project-trust card (D12). Out-of-band, not part of the folded session
+  // state: trust is decided per-cwd before a session exists. Null when none pending.
+  trustRequest = $state<TrustRequest | null>(null);
 
   // per-client view state — local only (never sent upstream; see D5)
   composerDraft = $state("");
@@ -96,6 +100,18 @@ class PilotStore {
       case "modelList":
         this.models = [...msg.models];
         break;
+      case "trustRequest":
+        this.trustRequest = {
+          requestId: msg.requestId,
+          cwd: msg.cwd,
+          title: msg.title,
+          options: msg.options,
+        };
+        break;
+      case "trustResolved":
+        if (this.trustRequest?.requestId === msg.requestId)
+          this.trustRequest = null;
+        break;
       case "error":
         if (msg.message === "unauthorized") {
           this.unauthorized = true;
@@ -132,6 +148,14 @@ class PilotStore {
   }
   respondUi(response: HostUiResponse): void {
     send({ type: "respondUi", response });
+  }
+  /** Answer the project-trust card. `choice` indexes the options; null denies. Clears
+   *  optimistically; the server's `trustResolved` confirms (and dismisses other tabs). */
+  respondTrust(choice: number | null): void {
+    const req = this.trustRequest;
+    if (!req) return;
+    send({ type: "trustResponse", requestId: req.requestId, choice });
+    this.trustRequest = null;
   }
   mock(script: string): void {
     send({ type: "mock", script });

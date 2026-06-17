@@ -136,8 +136,17 @@ a directory…" input opens an arbitrary typed absolute path (→ `SessionManage
 prefilled with the active session's cwd for quick branching to a sibling repo. The pi
 driver expands `~`, resolves the path, and rejects a non-directory loudly rather than
 creating a session against a typo. Still typed-path only (no file explorer), consistent
-with this decision; an opened untrusted cwd works but its `.pi` resources stay unloaded
-until trusted (per the non-interactive resolver above).
+with this decision.
+
+Status (2026-06-17, later): the **interactive trust card** landed, so an opened
+untrusted cwd no longer silently denies — it prompts. Trust travels an out-of-band
+channel (`trustRequest`/`trustResolved`/`trustResponse`; `subscribeTrust`/`respondTrust`
+on `PilotDriver`) rather than the session event stream, because trust resolves inside
+`warmUp` before the session/UI-bridge exist and while the hub suppresses events mid-swap.
+The resolver keeps its non-interactive fast paths and only escalates an undecided
+non-launch cwd to the card; the chosen option persists via `ProjectTrustStore`
+(CLI-compatible), session-only persists nothing, deny-safe on timeout/dismiss. See the
+correction below — now resolved.
 
 ### D13. Persistence = pi session files are authoritative (OQ7)
 **Inverts D5.** Instead of "in-memory transcript authoritative, JSONL backup,"
@@ -171,9 +180,13 @@ right-side minimap. Diverge from Claude where dogfooding suggests better.
   *event* (that's for extensions to participate in the decision). Status:
   non-interactive MVP wired (`server/src/pi/trust.ts`) — honors trust.json
   (parent-aware via `ProjectTrustStore`), trusts the operator-launched cwd, denies
-  other untrusted paths. An in-app trust *card* is deferred: trust resolves inside
-  `runtime.switchSession`, which the hub runs under `switching=true`, so surfacing
-  an interactive `hostUiRequest` mid-switch needs the swap-guard reworked first.
+  other untrusted paths. **Resolved (2026-06-17, later):** the in-app trust *card*
+  now exists. Rather than rework the swap to push a mid-switch `hostUiRequest`
+  (trust resolves before the session/UI-bridge exist anyway), trust got its own
+  out-of-band channel (`trustRequest`/`trustResolved`/`trustResponse`), so
+  `switching` never touches it. The resolver blocks the swap on the operator's
+  answer (pi awaits `resolveProjectTrust`); the hub added a single-flight switch
+  guard for the now-human-long swap window.
 - **Trust does NOT gate `AGENTS.md`/`CLAUDE.md`** — those load regardless. Trust
   gates `.pi/settings.json`, `.pi/extensions|skills|prompts|themes`,
   `.pi/SYSTEM.md`, and project packages. Because the agent does nothing until the

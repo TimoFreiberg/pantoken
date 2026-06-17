@@ -1,5 +1,26 @@
 # Pilot — overnight status (morning of 2026-06-17)
 
+> ## Update — 2026-06-17, evening (supersedes the snapshots below)
+>
+> **Interactive project-trust card (D12) — landed.** The last 🔴. An untrusted cwd now
+> prompts the operator to grant/deny instead of silently denying. Trust travels an
+> **out-of-band channel** (`trustRequest`/`trustResolved` server msgs + `trustResponse`
+> client msg; `subscribeTrust`/`respondTrust` on `PilotDriver`), *not* the session event
+> stream — because trust resolves inside `warmUp`'s service creation, before the
+> session/UI-bridge exist and while the hub suppresses session events mid-swap
+> (`switching`). The pi resolver (`trust.ts`) keeps its non-interactive fast paths
+> (moot / saved / launch-cwd) and only escalates an undecided non-launch cwd to the
+> card, **blocking the swap** on the answer (pi awaits `resolveProjectTrust`); the chosen
+> option persists via `ProjectTrustStore` (CLI-compatible), session-only persists
+> nothing, deny-safe on timeout / no client / dismiss. New `TrustCard.svelte`; the hub
+> gained a single-flight switch guard (the card can hold a swap on human input for
+> minutes); the mock drives the card via the `trust` dev button (the old select-fixture
+> is gone). Green: `bun test protocol server` = **55**, `bun run test:e2e` = **23**
+> (desktop + mobile, incl. card render-w/-cwd + dismiss-on-click), `tsc` + `svelte-check`
+> clean; visually confirmed (dark). The full WS round-trip is e2e-proven (the
+> `Claude_Preview` browser couldn't establish the WS through its proxy — a harness quirk,
+> not the app; Playwright hits the same server fine).
+
 > ## Update — 2026-06-17, afternoon (supersedes the snapshots below)
 >
 > Landed + committed (`9069d223`; tree clean; `bun test protocol server` = **47**,
