@@ -36,6 +36,14 @@
     prevStatus = status;
     prevPending = pending;
   });
+
+  // Reflect the active session's title in the browser tab so it's legible from the
+  // tab strip / app switcher instead of always reading "pilot" (DESIGN.md SHOULD).
+  // Ambient title wins over the folded snapshot title, mirroring StatusHeader.
+  $effect(() => {
+    const t = store.session.ambient.title || store.session.title;
+    document.title = t ? `${t} · pilot` : "pilot";
+  });
 </script>
 
 {#if store.unauthorized}
