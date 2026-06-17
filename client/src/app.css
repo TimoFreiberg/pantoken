@@ -27,9 +27,10 @@
   /* Unread session-indicator dot (warm gold, matches the owner's mockup). */
   --unread: #cf962b;
 
-  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
-    sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas,
+    "Liberation Mono", monospace;
 
   --radius: 14px;
   --radius-sm: 9px;
@@ -82,7 +83,14 @@ body {
   font-size: 15.5px;
   line-height: 1.62;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  /* kerning + common ligatures for cleaner text on system fonts */
+  font-kerning: normal;
+  font-feature-settings:
+    "kern" 1,
+    "liga" 1,
+    "calt" 1;
 }
 
 #app {

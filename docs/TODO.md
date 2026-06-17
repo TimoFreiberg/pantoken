@@ -63,23 +63,42 @@ _(clear — pull the next item up from Polish)_
 - [ ] **Session list scroll cap** — for projects with many sessions, make the list
       internally scrollable with a visible limit of ~10, scroll within the project
       group
-- [ ] **Tool call results popup: drop description, add hover tooltip** — the tool
+- [x] **Tool call results popup: drop description, add hover tooltip** — the tool
       description doesn't need to be listed inline in the popup; move it to a
       mouseover tooltip on the tool name instead
-- [ ] **Edit tool output: collapsed diff counts + expanded diff view** — instead of
+      _(done: inline `.desc` removed, `item.description` now a `title=` tooltip on
+      the tool name.)_
+- [x] **Edit tool output: collapsed diff counts + expanded diff view** — instead of
       "Successfully replaced N block(s) in /path", show a collapsed view with
       `+N, -M` line counts, expandable to a nice side-by-side or unified diff.
       Use `bun i @pierre/diffs` for the diff rendering
-- [ ] **Desktop notifications conflict with terminal pi extension** — on desktop
+      _(done: `@pierre/diffs/ssr` `preloadDiffHTML` renders a syntax-highlighted diff
+      to an HTML string — no React (peer-only) — mounted in a shadow root (its CSS is
+      `:host`-scoped), lazy `import()`ed so shiki stays out of the initial bundle, and
+      re-rendered on light/dark toggle. Collapsed `+N/−M` from a dependency-free line
+      diff. Detects pi's edit shape `{path, edits:[{oldText,newText}]}` + legacy.)_
+- [x] **Desktop notifications conflict with terminal pi extension** — on desktop
       browser, pilot's notification triggers the user's terminal pi notification
       extension (which links back to the terminal). Needs investigation: either
       suppress Web Notifications when pilot is the focused browser tab, or find a
       way to avoid double-firing through the extension.
-- [ ] **Message timestamps** — small relative timestamp at the bottom of each
+      _(investigated: the terminal notifier is pi's example extension
+      `examples/extensions/notify.ts` — it writes an OSC 777/99 escape on `agent_end`;
+      pi core emits no OS notifications. The double-fire is one logical event driving
+      two independent notifiers (terminal OSC + pilot Web Push). Pilot's actionable
+      fix shipped: `notifyIfUnfocused` (tab-open) + the sw.js push handler now skips
+      the OS notification when a pilot window is focused. Cross-process dedup with the
+      terminal extension is out of pilot's control — run one notifier per machine.)_
+- [x] **Message timestamps** — small relative timestamp at the bottom of each
       agent and user text box (e.g. "5m ago"), with mouseover revealing the exact
       timestamp
-- [ ] **Copy-to-clipboard button on agent messages** — a button at the bottom of
+      _(done: `ts` added to user/assistant items in `foldEvent` from the event
+      timestamp; `<time>` with a relative label + exact-time `title`, refreshed on a
+      30s tick.)_
+- [x] **Copy-to-clipboard button on agent messages** — a button at the bottom of
       each agent text area; hidden until hover, copies message content
+      _(done: hover-revealed Copy button, `navigator.clipboard.writeText`, "Copied"
+      feedback.)_
 - [ ] **Worktree checkbox in new-session form** — like the Claude app's "worktree"
       toggle; creates and passes a jj/git worktree path as the session cwd so the
       agent works in an isolated copy, leaving the main tree clean
@@ -88,9 +107,13 @@ _(clear — pull the next item up from Polish)_
       analogous to the Claude app's colored circle (green → yellow → red as the
       context window fills). Color could map to token-budget thresholds from the
       snapshot's `config`/usage fields; exact threshold values TBD
-- [ ] **Stray caret span in agent text** — a naked `<span class="caret svelte-1rd1h7a"></span>`
+- [x] **Stray caret span in agent text** — a naked `<span class="caret svelte-1rd1h7a"></span>`
       is appended to the end of agent output, looks like a client rendering bug.
       Needs investigation and fix
+      _(done: root cause was `foldEvent` only closing the open assistant on
+      `runCompleted`; a turn that goes idle via `sessionUpdated` left `streaming:true`.
+      Fixed at the source (close on any non-running snapshot) + a defensive caret guard
+      on `store.streaming`. e2e repro via the `idle` fixture.)_
 - [ ] **Model list search bar** — filter-as-you-type search in the model picker (top bar)
       and the model list in the Settings panel; model lists grow quickly, and the
       current flat menus become unwieldy with many providers connected
@@ -120,20 +143,35 @@ _(clear — pull the next item up from Polish)_
       shortcut or a `title` tooltip naming the action + its hotkey if one exists
 
 - [ ] **Jump-to-last-prompt hotkey** (OP8)
-- [ ] **Type-to-focus prompt field** — basic typable characters focus the
+- [x] **Type-to-focus prompt field** — basic typable characters focus the
       text field before typing them (or a dedicated hotkey)
-- [ ] **Beautiful font rendering** — prose readability pass (OP8)
-- [ ] **Tool card inspection polish** — unobtrusive expand/collapse (OP8)
-- [ ] **Stray iOS zoom fix** — composer `font-size: ≥16px` to stop iOS
+      _(done: window keydown focuses the composer on a printable key when no input is
+      focused; doesn't steal from dialog/sidebar inputs.)_
+- [x] **Beautiful font rendering** — prose readability pass (OP8)
+      _(done: refined system font stack + smoothing/feature-settings; `.prose` rhythm,
+      code/pre, link styling tuned. No palette change.)_
+- [x] **Tool card inspection polish** — unobtrusive expand/collapse (OP8)
+      _(done: chevron rotation transition, hover/focus ring, gentle body reveal,
+      `aria-expanded`.)_
+- [x] **Stray iOS zoom fix** — composer `font-size: ≥16px` to stop iOS
       auto-zoom; `overflow-x: hidden` on root
-- [ ] **Live markdown rendering in prompt edit box** — preview formatting
+      _(done: textarea 16px; `overflow-x: hidden` on `.shell`.)_
+- [x] **Live markdown rendering in prompt edit box** — preview formatting
       as you type, if straightforward
+      _(done: Edit/Preview toggle renders the draft via `renderMarkdown`; appears only
+      with a non-empty draft, Enter-to-send preserved.)_
 - [ ] **Slash-command autocompletion** + inline help text describing each
       command
-- [ ] **PNG / maskable icons** — proper app icons for installed PWA
+- [x] **PNG / maskable icons** — proper app icons for installed PWA
+      _(done: 192/512 + maskable-512 (safe-zone padded) + 180 apple-touch, rasterized
+      from `icon.svg`; manifest + `<link apple-touch-icon>` wired.)_
 - [ ] **Virtualized transcript list** (>80 rows)
-- [ ] **Binary 2-option select → Yes/No card**
-- [ ] **Countdown for timeout-bearing dialogs**
+- [x] **Binary 2-option select → Yes/No card**
+      _(done: affirmative option detected + promoted to the primary/right button
+      regardless of array order, mirroring the confirm dialog.)_
+- [x] **Countdown for timeout-bearing dialogs**
+      _(done: shrinking bar + "Auto-dismiss in Ns" for dialogs with `timeoutMs`,
+      deny-safe auto-resolve at zero, timers cleaned per dialog.)_
 - [ ] **Provider OAuth login** — sign-in / sign-out for OAuth-capable providers
       (Anthropic, OpenAI, …) from the Settings panel. Deferred from the settings-panel
       work (API-key entry shipped); needs a server-side OAuth callback reachable over

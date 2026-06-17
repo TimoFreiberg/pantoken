@@ -10,6 +10,7 @@
       const o = input as Record<string, unknown>;
       if (typeof o.command === "string") return o.command;
       if (typeof o.path === "string") return o.path;
+      if (typeof o.file_path === "string") return o.file_path;
       return JSON.stringify(input);
     }
     return String(input);
@@ -40,20 +41,227 @@
   }
 
   const statusIcon: Record<string, string> = { running: "○", ok: "●", error: "✕" };
+
+  // ── Edit-tool diff support ────────────────────────────────────────────────
+  // Detect pi's edit tool by SHAPE, not name: input is an object with a `path`
+  // (string) plus either `edits: [{oldText,newText}]` or legacy top-level
+  // oldText/newText strings. `file_path` is an accepted alias for `path` in pi.
+  // Contract confirmed in pi's edit.ts / edit-diff.ts.
+  type Edit = { oldText: string; newText: string };
+
+  function editFrom(input: unknown): { path: string; edits: Edit[] } | null {
+    if (!input || typeof input !== "object") return null;
+    const o = input as Record<string, unknown>;
+    const path =
+      typeof o.path === "string"
+        ? o.path
+        : typeof o.file_path === "string"
+          ? o.file_path
+          : null;
+    if (!path) return null;
+    if (
+      Array.isArray(o.edits) &&
+      o.edits.length > 0 &&
+      o.edits.every(
+        (e) =>
+          e &&
+          typeof e === "object" &&
+          typeof (e as Edit).oldText === "string" &&
+          typeof (e as Edit).newText === "string",
+      )
+    ) {
+      return { path, edits: o.edits as Edit[] };
+    }
+    if (typeof o.oldText === "string" && typeof o.newText === "string") {
+      return { path, edits: [{ oldText: o.oldText, newText: o.newText }] };
+    }
+    return null;
+  }
+
+  const edit = $derived(editFrom(item.input));
+
+  // Build the two file blobs the diff renders from. Per the task: join each
+  // edit's oldTexts / newTexts with newlines (single legacy edit -> used directly).
+  function joinSides(edits: Edit[]): { oldFile: string; newFile: string } {
+    return {
+      oldFile: edits.map((e) => e.oldText).join("\n"),
+      newFile: edits.map((e) => e.newText).join("\n"),
+    };
+  }
+
+  // A pi edit result may carry a richer standard unified patch in details.patch —
+  // prefer it when present, otherwise the input-derived oldFile/newFile is truth.
+  function patchFrom(out: unknown): string | null {
+    if (!out || typeof out !== "object") return null;
+    const details = (out as { details?: unknown }).details;
+    if (details && typeof details === "object") {
+      const p = (details as { patch?: unknown }).patch;
+      if (typeof p === "string" && p.trim().length > 0) return p;
+    }
+    return null;
+  }
+
+  // Minimal LCS line diff -> added/removed line counts for the collapsed badge.
+  // Pure + dependency-free so the e2e is deterministic; the rich render below
+  // does its own (shiki-backed) diffing.
+  function lineCounts(oldText: string, newText: string): { added: number; removed: number } {
+    const a = oldText.length ? oldText.split("\n") : [];
+    const b = newText.length ? newText.split("\n") : [];
+    const n = a.length;
+    const m = b.length;
+    // LCS length table; lcs[i][j] = LCS length of a[i:] and b[j:].
+    const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+    for (let i = n - 1; i >= 0; i--) {
+      const row = lcs[i] ?? [];
+      const next = lcs[i + 1] ?? [];
+      for (let j = m - 1; j >= 0; j--) {
+        row[j] = a[i] === b[j] ? (next[j + 1] ?? 0) + 1 : Math.max(next[j] ?? 0, row[j + 1] ?? 0);
+      }
+    }
+    let i = 0;
+    let j = 0;
+    let added = 0;
+    let removed = 0;
+    while (i < n && j < m) {
+      const row = lcs[i] ?? [];
+      const next = lcs[i + 1] ?? [];
+      if (a[i] === b[j]) {
+        i++;
+        j++;
+      } else if ((next[j] ?? 0) >= (row[j + 1] ?? 0)) {
+        removed++;
+        i++;
+      } else {
+        added++;
+        j++;
+      }
+    }
+    removed += n - i;
+    added += m - j;
+    return { added, removed };
+  }
+
+  const counts = $derived.by(() => {
+    if (!edit) return null;
+    let added = 0;
+    let removed = 0;
+    for (const e of edit.edits) {
+      const c = lineCounts(e.oldText, e.newText);
+      added += c.added;
+      removed += c.removed;
+    }
+    return { added, removed };
+  });
+
+  // ── Theme: the app resolves to a CONCRETE data-theme ("light"|"dark") on <html>.
+  // The pierre diff HTML uses light-dark(); force it to the app's concrete theme
+  // via themeType so it always matches, and re-render when the user toggles.
+  function currentTheme(): "light" | "dark" {
+    if (typeof document === "undefined") return "light";
+    return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+  }
+  let theme = $state<"light" | "dark">(currentTheme());
+
+  $effect(() => {
+    const html = document.documentElement;
+    const obs = new MutationObserver(() => {
+      const t = currentTheme();
+      if (t !== theme) theme = t;
+    });
+    obs.observe(html, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => obs.disconnect();
+  });
+
+  // Cache the rendered HTML per theme so re-expanding (or re-rendering for any
+  // other reason) doesn't recompute the heavy shiki render. Keyed by theme +
+  // the diff inputs so a different edit/patch invalidates correctly.
+  const diffCache = new Map<string, Promise<string>>();
+
+  function diffHTML(theme: "light" | "dark"): Promise<string> | null {
+    if (!edit) return null;
+    const patch = patchFrom(item.output);
+    const key = `${theme}::${patch ?? JSON.stringify(edit)}`;
+    const cached = diffCache.get(key);
+    if (cached) return cached;
+    const p = renderDiff(theme, patch);
+    // Evict on failure so a transient first-load error (e.g. a theme chunk that
+    // briefly failed to resolve) can retry on the next expand instead of being
+    // pinned to the rejected promise.
+    p.catch(() => diffCache.delete(key));
+    diffCache.set(key, p);
+    return p;
+  }
+
+  async function renderDiff(
+    theme: "light" | "dark",
+    patch: string | null,
+  ): Promise<string> {
+    // Dynamic import keeps shiki + the diff machinery out of the initial PWA
+    // bundle; only loaded the first time a diff is actually shown. Must use the
+    // React-free "/ssr" entry — "." doesn't expose preloadDiffHTML and "/react"
+    // pulls in react/react-dom.
+    const ssr = await import("@pierre/diffs/ssr");
+    const themeOpt = { dark: "github-dark", light: "github-light" } as const;
+    if (patch) {
+      const res = await ssr.preloadPatchDiff({
+        patch,
+        options: { theme: themeOpt, themeType: theme, diffStyle: "unified" },
+      });
+      return res.prerenderedHTML;
+    }
+    const { path, edits } = edit!;
+    const { oldFile, newFile } = joinSides(edits);
+    return ssr.preloadDiffHTML({
+      oldFile: { name: path, contents: oldFile },
+      newFile: { name: path, contents: newFile },
+      options: { theme: themeOpt, themeType: theme, diffStyle: "unified" },
+    });
+  }
+
+  // The pierre HTML is Shadow-DOM-shaped (:host{} + <slot> + light-dark()), so it
+  // only takes effect inside a shadow root. Mount it via a Svelte attachment that
+  // owns a single shadow root and swaps innerHTML. Returned as an Attachment
+  // (`(node) => void`); re-runs when `html` changes (attachShadow is guarded so a
+  // re-run reuses the existing root). All CSS the diff needs is inlined in the
+  // string — nothing else to inject.
+  function mountDiff(html: string) {
+    return (node: HTMLElement) => {
+      const root = node.shadowRoot ?? node.attachShadow({ mode: "open" });
+      root.innerHTML = html;
+    };
+  }
 </script>
 
 <div class="tool {item.status}">
-  <button class="head" onclick={() => (open = !open)}>
+  <button class="head" onclick={() => (open = !open)} aria-expanded={open}>
     <span class="status">{statusIcon[item.status]}</span>
-    <span class="name">{item.label ?? item.name}</span>
+    <span class="name" title={item.description || undefined}>{item.label ?? item.name}</span>
     <span class="arg">{preview(item.input)}</span>
-    <span class="chev">{open ? "▾" : "▸"}</span>
+    {#if counts}
+      <span class="counts" aria-label="{counts.added} added, {counts.removed} removed">
+        <span class="add">+{counts.added}</span>
+        <span class="del">−{counts.removed}</span>
+      </span>
+    {/if}
+    <span class="chev" class:open>▸</span>
   </button>
   {#if open}
     <div class="body">
-      {#if item.description}<div class="desc">{item.description}</div>{/if}
       {#if item.text}<pre class="stream">{item.text}</pre>{/if}
-      {#if item.output !== undefined}<pre class="out">{outputText(item.output)}</pre>{/if}
+      {#if edit}
+        {#await diffHTML(theme)}
+          <div class="diff-pending">rendering diff…</div>
+        {:then html}
+          {#if html}
+            <div class="diff" {@attach mountDiff(html)}></div>
+          {/if}
+        {:catch err}
+          <div class="diff-error">couldn't render diff: {err?.message ?? String(err)}</div>
+          {#if item.output !== undefined}<pre class="out">{outputText(item.output)}</pre>{/if}
+        {/await}
+      {:else if item.output !== undefined}
+        <pre class="out">{outputText(item.output)}</pre>
+      {/if}
       {#if item.status === "running" && !item.text}<div class="running">running…</div>{/if}
     </div>
   {/if}
@@ -76,6 +284,16 @@
     padding: 9px 12px;
     text-align: left;
     color: var(--text);
+    cursor: pointer;
+    transition: background 0.12s ease;
+  }
+  .head:hover {
+    background: var(--surface-sunken);
+  }
+  .head:focus-visible {
+    outline: none;
+    background: var(--surface-sunken);
+    box-shadow: inset 0 0 0 1.5px var(--accent);
   }
   .status {
     font-size: 9px;
@@ -111,10 +329,29 @@
     flex: 1;
     min-width: 0;
   }
+  .counts {
+    display: inline-flex;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 550;
+    flex-shrink: 0;
+    letter-spacing: -0.01em;
+  }
+  .counts .add {
+    color: var(--ok);
+  }
+  .counts .del {
+    color: var(--danger);
+  }
   .chev {
     font-size: 10px;
     color: var(--text-faint);
     flex-shrink: 0;
+    transition: transform 0.15s ease;
+  }
+  .chev.open {
+    transform: rotate(90deg);
   }
   .body {
     border-top: 1px solid var(--border);
@@ -122,10 +359,17 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+    animation: reveal 0.16s ease;
   }
-  .desc {
-    font-size: 12.5px;
-    color: var(--text-muted);
+  @keyframes reveal {
+    from {
+      opacity: 0;
+      transform: translateY(-2px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
   pre {
     margin: 0;
@@ -147,5 +391,19 @@
     font-size: 12px;
     color: var(--text-muted);
     font-style: italic;
+  }
+  .diff {
+    border-radius: var(--radius-xs);
+    overflow: auto;
+    max-height: 420px;
+  }
+  .diff-pending {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-style: italic;
+  }
+  .diff-error {
+    font-size: 12px;
+    color: var(--danger);
   }
 </style>

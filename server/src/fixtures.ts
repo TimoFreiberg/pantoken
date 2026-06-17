@@ -445,6 +445,129 @@ export function bgRun(): ScriptStep[] {
   ];
 }
 
+// --- Polish-batch fixtures (edit-diff card, caret-on-idle, countdown, yes/no) --
+
+/** An edit-tool call + result, so the ToolCard's diff UX (collapsed +N/−M badge +
+ *  expandable @pierre/diffs view) can be exercised deterministically. */
+export function editDiff(): ScriptStep[] {
+  return [
+    {
+      wait: 0,
+      event: {
+        ...base(),
+        type: "toolStarted",
+        callId: "edit-1",
+        toolName: "edit",
+        label: "Edit file",
+        description: "Apply edits to a file in the workspace",
+        input: {
+          path: "server/src/health.ts",
+          edits: [
+            {
+              oldText:
+                'export function health() {\n  return new Response("ok");\n}',
+              newText:
+                'export function health() {\n  return Response.json({ status: "ok", uptime: process.uptime() });\n}',
+            },
+          ],
+        },
+      },
+    },
+    {
+      wait: 200,
+      event: {
+        ...base(),
+        type: "toolFinished",
+        callId: "edit-1",
+        success: true,
+        output: "Successfully replaced 1 block(s) in server/src/health.ts",
+      },
+    },
+  ];
+}
+
+/** A turn that streams an assistant line and then goes idle via `sessionUpdated`
+ *  ONLY (no runCompleted) — the original "stray caret" repro. With the fold fix the
+ *  caret must NOT linger after the idle transition. */
+export function idleNoComplete(): ScriptStep[] {
+  return [
+    {
+      // Begin a proper turn: the userMessage closes any still-open assistant
+      // (foldEvent), so this fixture never merges into a prior streaming bubble.
+      wait: 0,
+      event: {
+        ...base(),
+        type: "userMessage",
+        id: `u-idle-${ts()}`,
+        text: "End this turn without a runCompleted, please.",
+      },
+    },
+    {
+      wait: 0,
+      event: {
+        ...base(),
+        type: "sessionUpdated",
+        snapshot: snapshot({ status: "running" }),
+      },
+    },
+    ...deltas(
+      "Done — this turn ends with a status update, not a runCompleted event.",
+      "text",
+    ),
+    {
+      wait: 80,
+      event: {
+        ...base(),
+        type: "sessionUpdated",
+        snapshot: snapshot({ status: "idle" }),
+      },
+    },
+  ];
+}
+
+/** A confirm dialog with a SHORT timeout, to exercise the countdown + deny-safe
+ *  auto-resolve without an e2e waiting a full minute. */
+export function timeoutConfirm(): ScriptStep[] {
+  return [
+    {
+      wait: 0,
+      event: {
+        ...base(),
+        type: "hostUiRequest",
+        request: {
+          kind: "confirm",
+          requestId: "req-timeout-1",
+          title: "Auto-resolving confirm",
+          message:
+            "This dialog auto-dismisses (deny-safe) if you don't respond.",
+          defaultValue: false,
+          timeoutMs: 3000,
+        },
+      },
+    },
+  ];
+}
+
+/** A binary select whose affirmative option comes SECOND, to verify the Yes/No card
+ *  promotes the affirmative to the primary (right) button regardless of array order. */
+export function yesNoSelect(): ScriptStep[] {
+  return [
+    {
+      wait: 0,
+      event: {
+        ...base(),
+        type: "hostUiRequest",
+        request: {
+          kind: "select",
+          requestId: "req-yesno-1",
+          title: "Apply the suggested fix?",
+          options: ["Don't allow", "Allow"],
+        },
+      },
+    },
+  ];
+}
+
 export const SCRIPTS: Record<string, () => ScriptStep[]> = {
   greeting,
   confirm: confirmDialog,
@@ -452,6 +575,10 @@ export const SCRIPTS: Record<string, () => ScriptStep[]> = {
   ambient,
   error: errorRun,
   bgrun: bgRun,
+  editdiff: editDiff,
+  idle: idleNoComplete,
+  timeout: timeoutConfirm,
+  yesno: yesNoSelect,
 };
 
 // --- Session listing + switching (Increment 2) ------------------------------

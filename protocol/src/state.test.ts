@@ -20,6 +20,31 @@ describe("foldEvent", () => {
     });
   });
 
+  test("assistant item records the timestamp of its first delta only", () => {
+    const s = foldAll([
+      base({
+        type: "assistantDelta",
+        text: "a",
+        channel: "text",
+        timestamp: "t1",
+      }),
+      base({
+        type: "assistantDelta",
+        text: "b",
+        channel: "text",
+        timestamp: "t2",
+      }),
+    ]);
+    expect(s.items[0]).toMatchObject({ kind: "assistant", ts: "t1" });
+  });
+
+  test("user message carries its event timestamp", () => {
+    const s = foldAll([
+      base({ type: "userMessage", id: "u1", text: "hi", timestamp: "t1" }),
+    ]);
+    expect(s.items[0]).toMatchObject({ kind: "user", text: "hi", ts: "t1" });
+  });
+
   test("keeps thinking and text on separate channels", () => {
     const s = foldAll([
       base({ type: "assistantDelta", text: "hmm", channel: "thinking" }),
@@ -185,5 +210,39 @@ describe("foldEvent", () => {
     expect(s.title).toBe("My session");
     expect(s.status).toBe("running");
     expect(s.config.modelId).toBe("claude-opus-4-8");
+  });
+
+  test("an idle sessionUpdated snapshot closes the open assistant", () => {
+    const s = foldAll([
+      base({ type: "assistantDelta", text: "answer", channel: "text" }),
+      base({
+        type: "sessionUpdated",
+        snapshot: {
+          ref,
+          workspace: { workspaceId: "w", path: "/p" },
+          title: "t",
+          status: "idle",
+          updatedAt: "t",
+        },
+      }),
+    ]);
+    expect(s.items[0]).toMatchObject({ kind: "assistant", streaming: false });
+  });
+
+  test("a running sessionUpdated snapshot leaves the assistant open", () => {
+    const s = foldAll([
+      base({ type: "assistantDelta", text: "answer", channel: "text" }),
+      base({
+        type: "sessionUpdated",
+        snapshot: {
+          ref,
+          workspace: { workspaceId: "w", path: "/p" },
+          title: "t",
+          status: "running",
+          updatedAt: "t",
+        },
+      }),
+    ]);
+    expect(s.items[0]).toMatchObject({ kind: "assistant", streaming: true });
   });
 });

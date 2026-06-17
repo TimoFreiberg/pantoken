@@ -1,13 +1,19 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { store } from "../lib/store.svelte.js";
+  import { renderMarkdown } from "../lib/markdown.js";
 
   let deliverAs = $state<"steer" | "followUp">("steer");
   let ta = $state<HTMLTextAreaElement>();
+  let preview = $state(false);
 
   const widgets = $derived(
     Object.values(store.session.ambient.widgets).filter((w) => w.placement === "aboveComposer"),
   );
   const streaming = $derived(store.streaming);
+  // Preview only renders when there's something to show; an empty draft always
+  // falls back to the editable textarea so the box never looks blank/stuck.
+  const showPreview = $derived(preview && store.composerDraft.trim().length > 0);
 
   function autosize() {
     if (!ta) return;
@@ -28,6 +34,38 @@
       submit();
     }
   }
+
+  function toggleEdit() {
+    preview = !preview;
+    // Returning to edit mode: restore focus + sizing on the textarea.
+    if (!preview) queueMicrotask(() => { ta?.focus(); autosize(); });
+  }
+
+  // Type-to-focus: a printable keystroke while nothing is focused lands in the
+  // composer. We don't preventDefault, so the character itself types into the
+  // now-focused textarea. Guarded so it never steals keys from approval/settings/
+  // sidebar inputs or while previewing.
+  onMount(() => {
+    function onWindowKeydown(e: KeyboardEvent) {
+      if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (!ta || showPreview) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && el !== document.body) {
+        const tag = el.tagName;
+        if (
+          tag === "INPUT" ||
+          tag === "TEXTAREA" ||
+          tag === "SELECT" ||
+          el.isContentEditable
+        ) {
+          return;
+        }
+      }
+      ta.focus();
+    }
+    window.addEventListener("keydown", onWindowKeydown);
+    return () => window.removeEventListener("keydown", onWindowKeydown);
+  });
 </script>
 
 <div class="composer-wrap">
@@ -49,17 +87,34 @@
     {/if}
 
     <div class="box" class:streaming>
-      <textarea
-        bind:this={ta}
-        bind:value={store.composerDraft}
-        oninput={autosize}
-        onkeydown={onKeydown}
-        placeholder={streaming ? "Queue a message…" : "Message pilot…"}
-        rows="1"
-      ></textarea>
-      <button class="send" disabled={!store.composerDraft.trim()} onclick={submit} aria-label="Send">
-        ↑
-      </button>
+      {#if showPreview}
+        <div class="prose preview">{@html renderMarkdown(store.composerDraft)}</div>
+      {:else}
+        <textarea
+          bind:this={ta}
+          bind:value={store.composerDraft}
+          oninput={autosize}
+          onkeydown={onKeydown}
+          placeholder={streaming ? "Queue a message…" : "Message pilot…"}
+          rows="1"
+        ></textarea>
+      {/if}
+      <div class="actions">
+        {#if store.composerDraft.trim()}
+          <button
+            class="toggle"
+            class:active={showPreview}
+            onclick={toggleEdit}
+            aria-pressed={showPreview}
+            title={showPreview ? "Back to editing" : "Preview formatting"}
+          >
+            {showPreview ? "Edit" : "Preview"}
+          </button>
+        {/if}
+        <button class="send" disabled={!store.composerDraft.trim()} onclick={submit} aria-label="Send">
+          ↑
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -146,10 +201,76 @@
     background: none;
     color: var(--text);
     font-family: inherit;
-    font-size: 15px;
+    font-size: 16px;
     line-height: 1.5;
     max-height: 220px;
     padding: 4px 0;
+  }
+  .preview {
+    flex: 1;
+    min-width: 0;
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 4px 0;
+    font-size: 16px;
+    line-height: 1.5;
+    color: var(--text);
+    word-break: break-word;
+  }
+  /* Scoped prose styling for the live preview (the .prose :global rules live in
+     Transcript.svelte and don't reach this component). */
+  .prose :global(p) {
+    margin: 0 0 10px;
+  }
+  .prose :global(p:last-child) {
+    margin-bottom: 0;
+  }
+  .prose :global(code) {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border);
+    padding: 1px 5px;
+    border-radius: var(--radius-xs);
+  }
+  .prose :global(pre) {
+    background: var(--surface-sunken);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px 14px;
+    overflow-x: auto;
+    margin: 10px 0;
+  }
+  .prose :global(pre code) {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 0.86em;
+    line-height: 1.55;
+  }
+  .prose :global(a) {
+    color: var(--accent);
+  }
+  .actions {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    align-self: flex-end;
+  }
+  .toggle {
+    border: 1px solid var(--border);
+    background: var(--surface-sunken);
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .toggle.active {
+    color: var(--accent-text);
+    background: var(--accent);
+    border-color: var(--accent);
   }
   .send {
     flex-shrink: 0;

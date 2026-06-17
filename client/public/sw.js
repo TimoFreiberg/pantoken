@@ -12,6 +12,23 @@ self.addEventListener("fetch", () => {
 
 // Web Push: deliver a notification even when every tab is closed. Payload is the
 // JSON the server sends in PushService.sendToAll ({title, body, tag, url}).
+//
+// Foreground suppression: if a pilot window is already focused/visible, the user is
+// looking at the app — an OS notification would be redundant (and on desktop it
+// double-buzzes alongside the in-tab notify.ts path and the terminal pi notify
+// extension). So when foreground, we postMessage the payload to the open clients
+// (so the app can react in-app) and SKIP the OS notification.
+//
+// TRADE-OFF / CAVEAT: this subscription is userVisibleOnly:true, which contractually
+// obliges the SW to show a *user-visible* notification for every push. Some browsers
+// (notably Chrome) enforce this: if you repeatedly receive a push and don't show a
+// notification, Chrome may show its own generic "This site has been updated in the
+// background" notification, or eventually revoke the push subscription as a budget
+// penalty. We accept that risk here because (a) pushes are infrequent and tied to
+// real agent events, and (b) the alternative (always showing) is the double-buzz bug
+// we're fixing. If Chrome's penalty notification proves annoying in practice, switch
+// the `if (foreground)` branch below to show a near-silent minimal notification
+// instead of fully skipping (renotify:false, silent:true). See followups.
 self.addEventListener("push", (event) => {
   let data = { title: "pilot", body: "" };
   try {
@@ -19,13 +36,37 @@ self.addEventListener("push", (event) => {
   } catch {
     /* malformed payload — fall back to defaults */
   }
+
   event.waitUntil(
-    self.registration.showNotification(data.title || "pilot", {
-      body: data.body || "",
-      tag: data.tag || "pilot",
-      icon: "/icon.svg",
-      data: { url: data.url || "/" },
-    }),
+    (async () => {
+      const windows = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+
+      // Foreground = at least one pilot window is focused or visible. focused is the
+      // strongest signal; visibilityState === "visible" covers a foreground tab that
+      // doesn't currently hold OS focus (e.g. focus is in a devtools pane) but is
+      // still on-screen for the user.
+      const foreground = windows.some(
+        (c) => c.focused === true || c.visibilityState === "visible",
+      );
+
+      if (foreground) {
+        // App is in front — let it handle the event in-app, don't buzz the OS.
+        for (const c of windows) {
+          c.postMessage({ type: "push", payload: data });
+        }
+        return;
+      }
+
+      await self.registration.showNotification(data.title || "pilot", {
+        body: data.body || "",
+        tag: data.tag || "pilot",
+        icon: "/icon.svg",
+        data: { url: data.url || "/" },
+      });
+    })(),
   );
 });
 
