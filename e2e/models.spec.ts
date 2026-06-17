@@ -13,10 +13,10 @@ test.beforeEach(async ({ page }) => {
 test("the model picker lists models and switches the active one", async ({
   page,
 }) => {
-  // The badge shows the mock's default model id.
+  // The badge shows the mock's default model as a friendly label (raw id in tooltip).
   const modelBadge = page
     .locator(".mp .badge")
-    .filter({ hasText: "claude-opus-4-8" });
+    .filter({ hasText: "Claude Opus 4.8" });
   await expect(modelBadge).toBeVisible();
 
   await modelBadge.click();
@@ -27,7 +27,7 @@ test("the model picker lists models and switches the active one", async ({
 
   // The badge reflects the switched-to model (server round-trip → folded config).
   await expect(
-    page.locator(".mp .badge").filter({ hasText: "deepseek-v4-flash" }),
+    page.locator(".mp .badge").filter({ hasText: "DeepSeek V4 Flash" }),
   ).toBeVisible();
 });
 

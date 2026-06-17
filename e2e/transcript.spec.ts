@@ -18,7 +18,7 @@ test("renders the greeting conversation: user, assistant, tool card", async ({
 });
 
 test("status header shows model and a live connection", async ({ page }) => {
-  await expect(page.getByText("claude-opus-4-8")).toBeVisible();
+  await expect(page.getByText("Claude Opus 4.8")).toBeVisible();
   await expect(page.getByText("live", { exact: true })).toBeVisible();
 });
 
