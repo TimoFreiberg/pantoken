@@ -13,6 +13,7 @@ export default defineConfig({
       "/ws": { target: SERVER.replace("http", "ws"), ws: true },
       "/debug": { target: SERVER },
       "/health": { target: SERVER },
+      "/push": { target: SERVER },
     },
   },
 });

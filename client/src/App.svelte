@@ -47,6 +47,7 @@
       {#each scripts as s (s)}
         <button onclick={() => store.mock(s)}>{s}</button>
       {/each}
+      <button onclick={() => store.testPush()}>push</button>
     </div>
   {/if}
   <Composer />
