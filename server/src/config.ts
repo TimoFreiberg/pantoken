@@ -9,8 +9,11 @@ export const config = {
   // Gitignored (.pilot-data/). Lives at the repo root by default.
   dataDir:
     process.env.PILOT_DATA_DIR ?? resolve(import.meta.dir, "../../.pilot-data"),
-  // Web Push VAPID `sub` claim — a mailto: or https: URL identifying the sender.
-  vapidSubject: process.env.PILOT_VAPID_SUBJECT ?? "mailto:pilot@localhost",
+  // Web Push VAPID `sub` claim — must be a real https: or mailto: URL. Apple's push
+  // gateway (iOS) rejects placeholder/localhost values with 403 BadJwtToken even
+  // though web-push accepts them locally, so SET THIS in any deploy that wants iOS
+  // push — e.g. PILOT_VAPID_SUBJECT=https://<your-tailnet-host> or your real mailto:.
+  vapidSubject: process.env.PILOT_VAPID_SUBJECT ?? "mailto:pilot@example.com",
   // Bind to loopback by default — `tailscale serve` proxies in over the tailnet,
   // so the server never needs to listen on 0.0.0.0. Set PILOT_HOST=0.0.0.0 only
   // for bare LAN use without Tailscale.

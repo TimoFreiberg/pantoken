@@ -39,6 +39,12 @@ export class PushService {
       this.vapid.publicKey,
       this.vapid.privateKey,
     );
+    // Apple rejects placeholder subjects with 403 BadJwtToken — warn loudly rather
+    // than fail silently on the first real send.
+    if (/localhost|example\.com/.test(config.vapidSubject))
+      console.warn(
+        `[push] VAPID subject is a placeholder (${config.vapidSubject}). iOS push will fail with BadJwtToken — set PILOT_VAPID_SUBJECT to your real https:// host or mailto:.`,
+      );
   }
 
   get publicKey(): string {
