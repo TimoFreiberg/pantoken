@@ -34,7 +34,12 @@ describe("historyToEvents", () => {
   test("a user message becomes a user item", () => {
     const items = transcript([{ role: "user", content: "hello" }]);
     expect(items).toEqual([
-      { kind: "user", id: expect.any(String), text: "hello" },
+      {
+        kind: "user",
+        id: expect.any(String),
+        text: "hello",
+        ts: expect.any(String),
+      },
     ]);
   });
 
@@ -65,6 +70,7 @@ describe("historyToEvents", () => {
         text: "answer",
         thinking: "hmm",
         streaming: false, // closed by the trailing runCompleted
+        ts: expect.any(String),
       },
     ]);
   });
@@ -98,6 +104,7 @@ describe("historyToEvents", () => {
         text: "running it",
         thinking: "",
         streaming: false,
+        ts: expect.any(String),
       },
       {
         kind: "tool",

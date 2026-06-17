@@ -101,6 +101,13 @@ export async function ensurePushSubscription(): Promise<PushState> {
       const res = await fetch("/push/vapid", { headers: authHeaders() });
       if (!res.ok) return "error";
       const { publicKey } = (await res.json()) as { publicKey: string };
+      // userVisibleOnly:true is mandatory (Chrome rejects silent subscriptions) and
+      // contractually obliges the SW to show a notification for every push. sw.js's
+      // push handler deliberately skips the OS notification when a pilot window is
+      // focused/visible to avoid double-buzzing (in-tab notify + terminal pi notify
+      // extension fire for the same event). See the trade-off note in sw.js — Chrome
+      // may show a generic fallback or penalize the subscription for repeated
+      // non-shows; acceptable given pushes are infrequent and event-driven.
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(publicKey),

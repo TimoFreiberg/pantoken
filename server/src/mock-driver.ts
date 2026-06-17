@@ -16,7 +16,9 @@ import {
   ambient,
   bgRun,
   confirmDialog,
+  editDiff,
   greeting,
+  idleNoComplete,
   inputDialog,
   MOCK_DEFAULT_CONFIG,
   MOCK_MODEL_DEFAULTS,
@@ -31,6 +33,8 @@ import {
   SESSION_LIST,
   SESSION_REF,
   snapshot,
+  timeoutConfirm,
+  yesNoSelect,
 } from "./fixtures.js";
 
 export class MockDriver implements PilotDriver {
@@ -305,6 +309,10 @@ export class MockDriver implements PilotDriver {
       ambient,
       bgrun: bgRun,
       reply: () => promptReply("Show me the streamed reply script."),
+      editdiff: editDiff,
+      idle: idleNoComplete,
+      timeout: timeoutConfirm,
+      yesno: yesNoSelect,
     };
     const make = map[name];
     if (make) this.play(make());

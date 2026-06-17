@@ -17,6 +17,8 @@ export interface UserItem {
   readonly kind: "user";
   id: string;
   text: string;
+  /** ISO timestamp of when this user turn was sent. */
+  ts?: string;
 }
 export interface AssistantItem {
   readonly kind: "assistant";
@@ -24,6 +26,8 @@ export interface AssistantItem {
   text: string;
   thinking: string;
   streaming: boolean;
+  /** ISO timestamp of when this assistant turn began. */
+  ts?: string;
 }
 export type ToolStatus = "running" | "ok" | "error";
 export interface ToolItem {
@@ -116,13 +120,23 @@ export function foldEvent(
       state.status = s.status;
       if (s.config) state.config = s.config;
       state.queued = s.queuedMessages ? [...s.queuedMessages] : [];
-      if (ev.type === "runCompleted") closeOpenAssistant(state.items);
+      // Close any open assistant when the turn ends. runCompleted always ends a
+      // turn; a sessionUpdated/runCompleted snapshot whose status is no longer
+      // "running" (idle or failed) also ends it. Without this, an idle
+      // transition that arrives only as a sessionUpdated leaves the assistant
+      // item streaming:true forever (the stray blinking caret bug).
+      if (s.status !== "running") closeOpenAssistant(state.items);
       return state;
     }
 
     case "userMessage": {
       closeOpenAssistant(state.items);
-      state.items.push({ kind: "user", id: ev.id, text: ev.text });
+      state.items.push({
+        kind: "user",
+        id: ev.id,
+        text: ev.text,
+        ts: ev.timestamp,
+      });
       return state;
     }
 
@@ -133,6 +147,7 @@ export function foldEvent(
         kind: "user",
         id: ev.message.id,
         text: ev.message.text,
+        ts: ev.message.createdAt ?? ev.timestamp,
       });
       state.queued = state.queued.filter((q) => q.id !== ev.message.id);
       return state;
@@ -149,6 +164,7 @@ export function foldEvent(
             text: "",
             thinking: "",
             streaming: true,
+            ts: ev.timestamp,
           };
           state.items.push(a);
           return a;

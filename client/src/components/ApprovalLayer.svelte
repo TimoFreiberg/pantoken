@@ -29,12 +29,84 @@
     if (current) store.respondUi({ requestId: current.requestId, value: v });
   }
 
-  // detect a binary yes/no select to render as two big buttons
-  const binarySelect = $derived(
-    current?.kind === "select" && current.options.length === 2
-      ? { primary: current.options[0] as string, secondary: current.options[1] as string }
+  // --- Binary 2-option select → Yes/No card ---
+  // Classify an option label as affirmative / negative / neutral so we can
+  // mirror the confirm dialog's ordering (negative ghost on the left,
+  // affirmative accent on the right) instead of trusting the array order.
+  const AFFIRMATIVE = /\b(yes|ok(ay)?|allow|confirm|continue|trust|enable|accept|approve|proceed)\b/i;
+  const NEGATIVE = /\b(no|cancel|deny|don'?t|stop|disable|reject|decline|abort|never)\b/i;
+  function optionPolarity(label: string): "affirmative" | "negative" | "neutral" {
+    const aff = AFFIRMATIVE.test(label);
+    const neg = NEGATIVE.test(label);
+    // "don't allow" contains both — negative wins (it's a refusal phrasing).
+    if (neg) return "negative";
+    if (aff) return "affirmative";
+    return "neutral";
+  }
+
+  // Resolve the two options into { affirmative (primary, right), negative
+  // (ghost, left) }. If neither reads as affirmative, keep the given order:
+  // options[0] → primary (right), options[1] → ghost (left), matching the
+  // previous behaviour so non-yes/no binaries don't get reshuffled.
+  const binarySelect = $derived.by(() => {
+    if (current?.kind !== "select" || current.options.length !== 2) return null;
+    const [a, b] = current.options as [string, string];
+    const pa = optionPolarity(a);
+    const pb = optionPolarity(b);
+    // Prefer the clearly-affirmative option as primary, the other as ghost.
+    if (pa === "affirmative" && pb !== "affirmative") return { affirmative: a, negative: b };
+    if (pb === "affirmative" && pa !== "affirmative") return { affirmative: b, negative: a };
+    // No clear affirmative (both/neither) → preserve original order.
+    return { affirmative: a, negative: b };
+  });
+
+  // --- Countdown for timeout-bearing dialogs ---
+  // confirm/input/select may carry timeoutMs (editor never does). The request
+  // has no start timestamp, so we start the clock on first render and tick it
+  // down; at zero we fire the deny-safe default for the kind.
+  const timeoutMs = $derived(
+    current && "timeoutMs" in current && typeof current.timeoutMs === "number"
+      ? current.timeoutMs
       : null,
   );
+  let remainingMs = $state(0);
+  const remainingSec = $derived(Math.max(0, Math.ceil(remainingMs / 1000)));
+  const progress = $derived(timeoutMs ? Math.max(0, Math.min(1, remainingMs / timeoutMs)) : 0);
+
+  // Deny-safe auto-resolution: confirm → confirm(false); everything else → cancel().
+  function autoResolve() {
+    const c = current;
+    if (!c) return;
+    if (c.kind === "confirm") confirm(false);
+    else cancel();
+  }
+
+  // Keyed on requestId so the timer restarts for each new dialog and is torn
+  // down on change/unmount. We tick every 250ms (smoother bar than 1s) and
+  // clear the interval at zero before resolving to avoid a double-fire.
+  $effect(() => {
+    // track these so the effect re-runs when the active dialog changes
+    const id = current?.requestId;
+    const total = timeoutMs;
+    if (!id || total === null) {
+      remainingMs = 0;
+      return;
+    }
+    const startedAt = Date.now();
+    remainingMs = total;
+    const tick = () => {
+      const left = total - (Date.now() - startedAt);
+      if (left <= 0) {
+        remainingMs = 0;
+        clearInterval(interval);
+        autoResolve();
+      } else {
+        remainingMs = left;
+      }
+    };
+    const interval = setInterval(tick, 250);
+    return () => clearInterval(interval);
+  });
 </script>
 
 {#if current}
@@ -53,8 +125,10 @@
       <h2>{current.title}</h2>
       {#if binarySelect}
         <div class="actions two">
-          <button class="ghost" onclick={() => submitValue(binarySelect.secondary)}>{binarySelect.secondary}</button>
-          <button class="primary" onclick={() => submitValue(binarySelect.primary)}>{binarySelect.primary}</button>
+          <button class="ghost" onclick={() => submitValue(binarySelect.negative)}>{binarySelect.negative}</button>
+          <button class="primary" onclick={() => submitValue(binarySelect.affirmative)}
+            >{binarySelect.affirmative}</button
+          >
         </div>
       {:else}
         <div class="options">
@@ -85,6 +159,13 @@
       <h2>Agent request: {current.kind}</h2>
       <pre class="raw">{JSON.stringify(current, null, 2)}</pre>
       <div class="actions"><button class="ghost wide" onclick={cancel}>Dismiss</button></div>
+    {/if}
+
+    {#if timeoutMs}
+      <div class="countdown" role="timer" aria-live="off">
+        <div class="track"><div class="bar" style:width={`${progress * 100}%`}></div></div>
+        <span class="countdown-label">Auto-dismiss in {remainingSec}s</span>
+      </div>
     {/if}
 
     {#if store.session.pendingApprovals.length > 1}
@@ -226,6 +307,30 @@
     color: var(--text-faint);
     font-size: 12px;
     margin-top: 12px;
+  }
+  .countdown {
+    margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+  .track {
+    width: 100%;
+    height: 3px;
+    border-radius: 99px;
+    background: var(--surface-sunken);
+    overflow: hidden;
+  }
+  .bar {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 99px;
+    transition: width 0.25s linear;
+  }
+  .countdown-label {
+    color: var(--text-faint);
+    font-size: 12px;
   }
   @keyframes rise {
     from {
