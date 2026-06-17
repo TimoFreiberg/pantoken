@@ -7,6 +7,7 @@
   let showNewDir = $state(false);
   let newDir = $state("");
   let dirInput = $state<HTMLInputElement | null>(null);
+  let useWorktree = $state(false);
 
   function basename(p: string): string {
     const parts = p.replace(/\/+$/, "").split("/");
@@ -101,9 +102,13 @@
   function submitNewDir(): void {
     const dir = newDir.trim();
     if (!dir) return;
-    store.newSession(dir);
-    showNewDir = false;
+    store.newSession(dir, useWorktree);
+    closeNewDir();
     afterNavigate();
+  }
+  function closeNewDir(): void {
+    showNewDir = false;
+    useWorktree = false;
   }
 </script>
 
@@ -147,11 +152,18 @@
           placeholder="/absolute/path/to/project"
           bind:value={newDir}
           onkeydown={(e) => {
-            if (e.key === "Escape") showNewDir = false;
+            if (e.key === "Escape") closeNewDir();
           }}
         />
+        <label
+          class="worktree-toggle"
+          title="Run the session in an isolated jj/git worktree of this directory, leaving the main tree clean"
+        >
+          <input type="checkbox" bind:checked={useWorktree} />
+          <span>Isolate in a worktree</span>
+        </label>
         <div class="dir-actions">
-          <button class="ghost" type="button" onclick={() => (showNewDir = false)}>
+          <button class="ghost" type="button" onclick={closeNewDir}>
             Cancel
           </button>
           <button class="primary" type="submit" disabled={!newDir.trim()}>
@@ -351,6 +363,18 @@
     justify-content: flex-end;
     gap: 6px;
     margin-top: 6px;
+  }
+  .worktree-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 7px;
+    font-size: 12px;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .worktree-toggle input {
+    margin: 0;
   }
   .ghost,
   .primary {

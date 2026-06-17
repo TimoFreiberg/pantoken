@@ -237,8 +237,8 @@ class PilotStore {
   groupRunning(sessionIds: readonly string[]): boolean {
     return sessionIds.some((id) => this.runningIds.has(id));
   }
-  newSession(cwd?: string): void {
-    send({ type: "newSession", cwd: cwd?.trim() || undefined });
+  newSession(cwd?: string, worktree?: boolean): void {
+    send({ type: "newSession", cwd: cwd?.trim() || undefined, worktree });
   }
   openSettings(): void {
     this.settingsOpen = true;

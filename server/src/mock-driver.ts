@@ -208,11 +208,16 @@ export class MockDriver implements PilotDriver {
     return mockSessionSeed(path);
   }
 
-  async newSession(cwd?: string): Promise<SessionDriverEvent[]> {
+  async newSession(
+    cwd?: string,
+    worktree?: boolean,
+  ): Promise<SessionDriverEvent[]> {
     this.cancelTimers();
     // Honor a typed cwd so the new row groups under that project in the sidebar
-    // (deterministic: one synthetic "new" entry per distinct cwd).
-    const dir = cwd?.trim() || NEW_SESSION_ENTRY.cwd;
+    // (deterministic: one synthetic "new" entry per distinct cwd). A worktree request
+    // is simulated as a sibling "-worktree" dir so the isolated path is visible in e2e.
+    const base = cwd?.trim() || NEW_SESSION_ENTRY.cwd;
+    const dir = worktree ? `${base.replace(/\/+$/, "")}-worktree` : base;
     const sessionId =
       dir === NEW_SESSION_ENTRY.cwd
         ? NEW_SESSION_ENTRY.sessionId

@@ -43,8 +43,9 @@ export interface PilotDriver {
   openSession(path: string): Promise<SessionDriverEvent[]>;
   /** Create a fresh session and make it active; resolves with its seed events (an
    *  empty `sessionOpened`). `cwd` (an absolute dir) picks the workspace per D12;
-   *  omit it for the driver's launch cwd. */
-  newSession(cwd?: string): Promise<SessionDriverEvent[]>;
+   *  omit it for the driver's launch cwd. `worktree`: create an isolated jj/git
+   *  worktree of `cwd` first and bind the session to it. */
+  newSession(cwd?: string, worktree?: boolean): Promise<SessionDriverEvent[]>;
 
   /** Models available to switch to (driver-wide; the real driver reads pi's model
    *  registry, the mock returns a fixture set). */
