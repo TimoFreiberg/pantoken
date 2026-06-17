@@ -81,6 +81,8 @@ class PilotStore {
   themeMode = $state<ThemeMode>(getThemeMode());
   // PWA: a newer service worker installed and is ready; we prompt for a refresh.
   swUpdateReady = $state(false);
+  // The last prompt text sent — lets the run-failed error card re-send it on Retry.
+  lastPrompt = $state("");
 
   get connection(): ConnectionState {
     return connectionState();
@@ -189,6 +191,7 @@ class PilotStore {
   prompt(text: string, deliverAs?: "steer" | "followUp"): void {
     const t = text.trim();
     if (!t) return;
+    this.lastPrompt = t;
     // This call is a user gesture — the moment to ask for notification permission
     // (tab-open path) and register a Web Push subscription (closed-phone path).
     ensurePermission();
@@ -200,6 +203,10 @@ class PilotStore {
   }
   abort(): void {
     send({ type: "abort" });
+  }
+  /** Re-send the last prompt after a run-failed (the error card's Retry). */
+  retryLast(): void {
+    if (this.lastPrompt) this.prompt(this.lastPrompt);
   }
   respondUi(response: HostUiResponse): void {
     send({ type: "respondUi", response });
