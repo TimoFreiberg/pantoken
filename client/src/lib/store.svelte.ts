@@ -11,7 +11,12 @@ import {
 } from "@pilot/protocol";
 import { setToken } from "./auth.js";
 import { ensurePermission } from "./notify.js";
-import { ensurePushSubscription, sendTestPush } from "./push.js";
+import {
+  currentPushState,
+  ensurePushSubscription,
+  type PushState,
+  sendTestPush,
+} from "./push.js";
 import {
   connect,
   type ConnectionState,
@@ -29,6 +34,8 @@ class PilotStore {
 
   // per-client view state — local only
   composerDraft = $state("");
+  // Push subscription status for this device. "working" while a subscribe is in flight.
+  pushState = $state<PushState | "working">("idle");
 
   get connection(): ConnectionState {
     return connectionState();
@@ -40,6 +47,17 @@ class PilotStore {
   start(): void {
     onMessage((msg) => this.onServer(msg));
     connect();
+    void this.refreshPushState();
+  }
+
+  async refreshPushState(): Promise<void> {
+    this.pushState = await currentPushState();
+  }
+
+  /** Explicit user-gesture enable (the header bell). Reports the outcome via pushState. */
+  async enablePush(): Promise<void> {
+    this.pushState = "working";
+    this.pushState = await ensurePushSubscription();
   }
 
   private onServer(msg: ServerMessage): void {
@@ -78,7 +96,9 @@ class PilotStore {
     // This call is a user gesture — the moment to ask for notification permission
     // (tab-open path) and register a Web Push subscription (closed-phone path).
     ensurePermission();
-    void ensurePushSubscription();
+    void ensurePushSubscription().then((s) => {
+      this.pushState = s;
+    });
     send({ type: "prompt", text: t, deliverAs });
     this.composerDraft = "";
   }
@@ -93,7 +113,7 @@ class PilotStore {
   }
   /** Dev/verification: register this device for push, then trigger a server test push. */
   async testPush(): Promise<void> {
-    await ensurePushSubscription();
+    this.pushState = await ensurePushSubscription();
     await sendTestPush();
   }
 }
