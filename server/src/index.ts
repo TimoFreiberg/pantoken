@@ -9,6 +9,7 @@ import { config, tokenOk } from "./config.js";
 import type { PilotDriver } from "./driver.js";
 import { SessionHub } from "./hub.js";
 import { MockDriver } from "./mock-driver.js";
+import { PushService } from "./push.js";
 import { serveStatic } from "./static.js";
 
 interface WsData {
@@ -27,7 +28,10 @@ if (process.env.PILOT_DRIVER === "pi") {
   mock = new MockDriver();
   driver = mock;
 }
-const hub = new SessionHub(driver);
+const push = new PushService();
+const hub = new SessionHub(driver, (n) => {
+  void push.sendToAll(n);
+});
 mock?.bootstrap(); // replay the greeting fixture now that the hub is subscribed
 
 const send = (ws: ServerWebSocket<WsData>, msg: ServerMessage) =>
@@ -55,6 +59,39 @@ const server = Bun.serve<WsData>({
 
     if (url.pathname === "/health") {
       return Response.json({ ok: true, clients: hub.clientCount() });
+    }
+
+    // Web Push: VAPID key handout, (un)subscribe, and a manual test trigger. Gated
+    // by the same app token as everything else (the public key isn't secret, but
+    // keeping the surface uniform is simpler). Not behind config.debug — it's a
+    // real feature, not introspection.
+    if (url.pathname.startsWith("/push/")) {
+      if (!tokenOk(url.searchParams.get("token")))
+        return new Response("unauthorized", { status: 401 });
+      try {
+        if (url.pathname === "/push/vapid")
+          return Response.json({ publicKey: push.publicKey });
+        if (url.pathname === "/push/subscribe" && req.method === "POST") {
+          push.add(await req.json());
+          return Response.json({ ok: true });
+        }
+        if (url.pathname === "/push/unsubscribe" && req.method === "POST") {
+          const { endpoint } = (await req.json()) as { endpoint?: string };
+          if (endpoint) push.remove(endpoint);
+          return Response.json({ ok: true });
+        }
+        if (url.pathname === "/push/test" && req.method === "POST") {
+          const sent = await push.sendToAll({
+            title: "pilot",
+            body: "Test push ✅ — if you see this on a closed phone, it works.",
+            tag: "pilot-test",
+          });
+          return Response.json({ ok: true, subscriptions: push.count, sent });
+        }
+      } catch (e) {
+        return new Response(`bad request: ${String(e)}`, { status: 400 });
+      }
+      return new Response("not found", { status: 404 });
     }
 
     if (url.pathname.startsWith("/debug/")) {

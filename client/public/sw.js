@@ -10,6 +10,39 @@ self.addEventListener("fetch", () => {
   // passthrough — let the network handle everything for now
 });
 
-// Placeholder for M8 Web Push:
-// self.addEventListener("push", (e) => { ... show notification ... });
-// self.addEventListener("notificationclick", (e) => { ... focus client ... });
+// Web Push: deliver a notification even when every tab is closed. Payload is the
+// JSON the server sends in PushService.sendToAll ({title, body, tag, url}).
+self.addEventListener("push", (event) => {
+  let data = { title: "pilot", body: "" };
+  try {
+    if (event.data) data = event.data.json();
+  } catch {
+    /* malformed payload — fall back to defaults */
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title || "pilot", {
+      body: data.body || "",
+      tag: data.tag || "pilot",
+      icon: "/icon.svg",
+      data: { url: data.url || "/" },
+    }),
+  );
+});
+
+// Focus an existing window if one is open, otherwise open the app.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || "/";
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((clients) => {
+        for (const c of clients) {
+          if ("focus" in c) return c.focus();
+        }
+        return self.clients.openWindow
+          ? self.clients.openWindow(url)
+          : undefined;
+      }),
+  );
+});

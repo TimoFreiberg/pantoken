@@ -11,6 +11,7 @@ import {
 } from "@pilot/protocol";
 import { setToken } from "./auth.js";
 import { ensurePermission } from "./notify.js";
+import { ensurePushSubscription, sendTestPush } from "./push.js";
 import {
   connect,
   type ConnectionState,
@@ -74,7 +75,10 @@ class PilotStore {
   prompt(text: string, deliverAs?: "steer" | "followUp"): void {
     const t = text.trim();
     if (!t) return;
-    ensurePermission(); // this call is a user gesture — good time to ask
+    // This call is a user gesture — the moment to ask for notification permission
+    // (tab-open path) and register a Web Push subscription (closed-phone path).
+    ensurePermission();
+    void ensurePushSubscription();
     send({ type: "prompt", text: t, deliverAs });
     this.composerDraft = "";
   }
@@ -86,6 +90,11 @@ class PilotStore {
   }
   mock(script: string): void {
     send({ type: "mock", script });
+  }
+  /** Dev/verification: register this device for push, then trigger a server test push. */
+  async testPush(): Promise<void> {
+    await ensurePushSubscription();
+    await sendTestPush();
   }
 }
 
