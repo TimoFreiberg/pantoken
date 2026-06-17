@@ -25,13 +25,9 @@ See `docs/` siblings for context: `STATUS.md` (what's built), `DECISIONS.md`
 - [ ] **Live pi bring-up** — first real turn against provider credentials.
       `PILOT_DRIVER=pi PILOT_CWD=/some/repo bun run dev`. Expect rough edges;
       they'll fail loudly.
-- [ ] **Session list/picker UI** — browse, open, create, archive from the
-      client. Paired with persistence rework + multi-session.
 - [ ] **Settings panel** — provider config, API keys, auth token, model
       defaults, theme toggle, notification prefs. Inspired by pi-gui's
       settings panel.
-- [ ] **Model picker** — per-session model selector in the session header
-      (distinct from global defaults in settings).
 
 ## 🟢 Polish / fast-follow
 
@@ -67,6 +63,8 @@ See `docs/` siblings for context: `STATUS.md` (what's built), `DECISIONS.md`
 - [ ] **Binary 2-option select → Yes/No card**
 - [ ] **Countdown for timeout-bearing dialogs**
 - [ ] **Extensions enable/disable view** + compatibility-issue surfacing
+- [ ] **Session rename / archive / unarchive** — from the sidebar (the create/open
+      half landed; this is the remaining SHOULD from DESIGN's "Sessions & history")
 
 ## 🔵 Later
 
@@ -86,6 +84,20 @@ See `docs/` siblings for context: `STATUS.md` (what's built), `DECISIONS.md`
 
 ## ✅ Done (for reference)
 
+- [x] **Session/project sidebar** — replaced the header session dropdown
+      (`SessionPicker` deleted) with a collapsible left rail (desktop) / slide-over
+      drawer (mobile) that groups sessions by project directory. `listSessions` now
+      spans every project (`SessionManager.listAll`), so it's a cross-project
+      navigator. New sessions can target an arbitrary typed cwd (`newSession` carries
+      `cwd` → `SessionManager.create`; `~`-expanded, resolved, rejects a non-directory
+      loudly — the D12 GUI affordance), plus a per-project `+`. Switch errors surface
+      in the sidebar. Open/collapse is per-client + localStorage-persisted. e2e-covered
+      (`sessions.spec.ts`: grouping/switch, per-project `+`, arbitrary typed dir).
+      (rename/archive/unarchive still open — see Polish.)
+- [x] **Per-session model + thinking-level picker** — provider-grouped model menu +
+      thinking-level menu in the header (`setModel`/`setThinking` over the wire,
+      `modelList` broadcast; selection rides each session's snapshot `config`).
+      e2e-covered (`models.spec.ts`).
 - [x] **Multi-session — keep N warm** (D8 increment 2) — the pi-driver now holds a
       `Map<sessionId, WarmSession>` of fully-independent sessions instead of a
       single `AgentSessionRuntime` that disposed the old session on every switch.

@@ -108,8 +108,8 @@ Tiers: **MUST** (MVP) · **SHOULD** (fast-follow) · **LATER**.
 ### Sessions & history
 - Bootstrap snapshot via `get_state` + `get_messages` — MUST
 - Snapshot-on-reconnect: transcript + live flags + pending approvals — MUST
-- Session list/picker grouped by cwd — MUST
-- Create / open / rename / archive / unarchive — SHOULD
+- Session list/picker grouped by cwd — MUST — DONE ✓ (project-grouped sidebar: collapsible rail / mobile drawer; `listSessions` spans all projects)
+- Create / open / rename / archive / unarchive — SHOULD — create (incl. arbitrary typed cwd, D12) + open DONE ✓; rename/archive/unarchive still open
 - Read idle sessions from `.jsonl` directly — SHOULD
 - Session tree navigation / fork / clone / compaction — LATER
 - Scheduled / recurring runs — LATER
