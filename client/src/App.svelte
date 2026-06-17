@@ -7,6 +7,7 @@
   import Transcript from "./components/Transcript.svelte";
   import Composer from "./components/Composer.svelte";
   import ApprovalLayer from "./components/ApprovalLayer.svelte";
+  import TrustCard from "./components/TrustCard.svelte";
   import TokenGate from "./components/TokenGate.svelte";
   import { notifyIfHidden } from "./lib/notify.js";
 
@@ -57,6 +58,7 @@
   </div>
 </div>
 <ApprovalLayer />
+<TrustCard />
 {/if}
 
 <style>

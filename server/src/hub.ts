@@ -41,6 +41,10 @@ export class SessionHub {
   // True only during a session swap: ignore stray driver events while we reset and
   // re-fold the new session's seed, so a half-switched state is never broadcast.
   private switching = false;
+  // Single-flight guard for switchTo. The trust card (D12) can keep a swap awaiting
+  // human input for minutes; without this, a second open/new arriving meanwhile would
+  // race two swaps over the one `switching` flag and the focused state.
+  private switchInFlight = false;
 
   constructor(
     private driver: PilotDriver,
@@ -49,6 +53,14 @@ export class SessionHub {
     private notify?: (n: HubNotification) => void,
   ) {
     driver.subscribe((ev) => this.onEvent(ev));
+    // Project-trust cards travel their own channel (D12): they're decided before a
+    // session exists and while `switching` suppresses session events, so they can't go
+    // through onEvent. Relay request → broadcast card, resolved → dismiss it.
+    driver.subscribeTrust?.((ev) => {
+      if (ev.kind === "request")
+        this.broadcast({ type: "trustRequest", ...ev.request });
+      else this.broadcast({ type: "trustResolved", requestId: ev.requestId });
+    });
   }
 
   private onEvent(ev: SessionDriverEvent): void {
@@ -141,22 +153,38 @@ export class SessionHub {
   private async switchTo(
     swap: () => Promise<SessionDriverEvent[]>,
   ): Promise<void> {
-    this.switching = true;
-    let seed: SessionDriverEvent[];
-    try {
-      seed = await swap();
-    } catch (e) {
-      this.switching = false;
-      this.broadcast({ type: "error", message: `session switch failed: ${e}` });
+    if (this.switchInFlight) {
+      this.broadcast({
+        type: "error",
+        message:
+          "a session switch is already in progress — answer the trust prompt first",
+      });
       return;
     }
-    this.state = initialSessionState();
-    for (const ev of seed) foldEvent(this.state, ev);
-    // Focus follows the swapped-to session; its id rides the seed's sessionOpened.
-    this.focusedId = this.state.ref?.sessionId ?? this.focusedId;
-    this.switching = false;
-    this.broadcast({ type: "snapshot", state: this.snapshot() });
-    await this.broadcastSessionList();
+    this.switchInFlight = true;
+    this.switching = true;
+    try {
+      let seed: SessionDriverEvent[];
+      try {
+        seed = await swap();
+      } catch (e) {
+        this.switching = false;
+        this.broadcast({
+          type: "error",
+          message: `session switch failed: ${e}`,
+        });
+        return;
+      }
+      this.state = initialSessionState();
+      for (const ev of seed) foldEvent(this.state, ev);
+      // Focus follows the swapped-to session; its id rides the seed's sessionOpened.
+      this.focusedId = this.state.ref?.sessionId ?? this.focusedId;
+      this.switching = false;
+      this.broadcast({ type: "snapshot", state: this.snapshot() });
+      await this.broadcastSessionList();
+    } finally {
+      this.switchInFlight = false;
+    }
   }
 
   /** Register a client. Synchronously sends hello + snapshot, then live events. */
@@ -226,6 +254,10 @@ export class SessionHub {
         return;
       case "listSessions":
         void this.broadcastSessionList();
+        return;
+      case "trustResponse":
+        // The driver dedups (first answer settles it); a stale/duplicate id no-ops.
+        this.driver.respondTrust?.(msg.requestId, msg.choice);
         return;
       case "mock":
         this.driver.runScript?.(msg.script);

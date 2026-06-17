@@ -8,17 +8,7 @@ See `docs/` siblings for context: `STATUS.md` (what's built), `DECISIONS.md`
 
 ## 🔴 Next (urgent / blocking)
 
-- [ ] **Interactive project-trust card** (D12) — surface a `hostUiRequest` trust
-      card to connected clients and let them grant/deny (replaces the mock-only
-      fixture). Open hurdles after the warm-session rework: (1) trust resolves
-      inside `warmUp` during service creation (`createAgentSessionServices`'s
-      `resolveProjectTrust`), which runs *before* that session's `PiUiBridge`
-      exists — so there's no per-session channel to emit the card through yet; and
-      (2) the hub still wraps `openSession`/`newSession` in `switchTo` under
-      `switching = true`, which suppresses stray events mid-swap. NOTE: the
-      auto-trust security hole is already closed by a non-interactive resolver
-      (`server/src/pi/trust.ts` — honors trust.json, trusts the launch cwd, denies
-      other untrusted paths), so this is now UX, not a safety blocker.
+_(clear — nothing blocking; pull the next item up from Important)_
 
 ## 🟡 Important
 
@@ -89,6 +79,22 @@ See `docs/` siblings for context: `STATUS.md` (what's built), `DECISIONS.md`
 
 ## ✅ Done (for reference)
 
+- [x] **Interactive project-trust card** (D12) — an untrusted cwd now prompts the
+      operator to grant/deny instead of silently denying. Trust travels an **out-of-band
+      channel** (`trustRequest`/`trustResolved` server msgs + `trustResponse` client msg;
+      `subscribeTrust`/`respondTrust` on `PilotDriver`), *not* the session event stream —
+      because trust resolves inside `warmUp`'s service creation, before the session/UI
+      bridge exist and while the hub suppresses session events mid-swap (`switching`). The
+      resolver (`trust.ts`) keeps its non-interactive fast paths (moot / saved / launch-cwd)
+      and only escalates an undecided non-launch cwd to the card, blocking the swap on the
+      answer (pi awaits `resolveProjectTrust`, exactly as its TUI blocks on `ui.select`). A
+      chosen option's trust.json updates persist via `ProjectTrustStore` (CLI-compatible);
+      session-only persists nothing; timeout / no client / dismiss denies deny-safe. Five
+      pi-parity options; new `TrustCard.svelte`; the hub gained a single-flight switch
+      guard (the card can hold a swap on human input for minutes). Mock drives it via the
+      `trust` dev button. Covered: trust unit tests, hub relay + single-flight tests, e2e
+      (render w/ cwd + 5 options, dismiss-on-click) desktop + mobile. Verified visually
+      (dark). Closes the last 🔴.
 - [x] **Live pi bring-up** — first real turn against provider credentials.
       `PILOT_DRIVER=pi PILOT_CWD=/some/repo bun run dev`. Working; rough edges
       are filed as separate todos.

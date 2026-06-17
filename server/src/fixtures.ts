@@ -9,6 +9,7 @@ import type {
   SessionListEntry,
   SessionRef,
   SessionSnapshot,
+  TrustRequest,
 } from "@pilot/protocol";
 
 /** Thinking levels the mock's models "support" — drives the picker's thinking menu. */
@@ -253,29 +254,23 @@ export function confirmDialog(): ScriptStep[] {
   ];
 }
 
-export function trustDialog(): ScriptStep[] {
-  return [
-    {
-      wait: 0,
-      event: {
-        ...base(),
-        type: "hostUiRequest",
-        request: {
-          kind: "select",
-          requestId: "req-trust-1",
-          title: "Trust this folder?",
-          options: [
-            "Trust this folder",
-            "Trust parent folder",
-            "Trust for this session only",
-            "Don't trust",
-            "Don't trust (this session)",
-          ],
-          timeoutMs: 120000,
-        },
-      },
-    },
-  ];
+// The interactive project-trust card (D12). NOT a ScriptStep — it rides the driver's
+// out-of-band trust channel, not the session event stream — so the mock emits it
+// directly via emitTrust rather than through play(). Mirrors the five options pi's CLI
+// selector offers for an untrusted cwd with gated .pi resources.
+export function mockTrustRequest(): TrustRequest {
+  return {
+    requestId: "req-trust-1",
+    cwd: "/Users/timo/src/untrusted-repo",
+    title: "Trust this project folder?",
+    options: [
+      { label: "Trust this folder", trusted: true },
+      { label: "Trust parent folder", trusted: true },
+      { label: "Trust for this session only", trusted: true },
+      { label: "Don't trust", trusted: false },
+      { label: "Don't trust (this session)", trusted: false },
+    ],
+  };
 }
 
 export function inputDialog(): ScriptStep[] {
@@ -372,7 +367,6 @@ export function errorRun(): ScriptStep[] {
 export const SCRIPTS: Record<string, () => ScriptStep[]> = {
   greeting,
   confirm: confirmDialog,
-  trust: trustDialog,
   input: inputDialog,
   ambient,
   error: errorRun,

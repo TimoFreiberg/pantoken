@@ -8,7 +8,7 @@ import type {
   SessionRef,
   SessionSnapshot,
 } from "@pilot/protocol";
-import type { PilotDriver } from "./driver.js";
+import type { PilotDriver, TrustEvent } from "./driver.js";
 import { SessionHub } from "./hub.js";
 
 const ref: SessionRef = { workspaceId: "w", sessionId: "s" };
@@ -35,13 +35,27 @@ const flush = () => new Promise((r) => setTimeout(r, 0));
 /** A driver we can emit into by hand, for deterministic hub tests. */
 class FakeDriver implements PilotDriver {
   private listener?: (e: SessionDriverEvent) => void;
+  private trustListener?: (e: TrustEvent) => void;
   readonly responded: HostUiResponse[] = [];
+  readonly trustResponded: { requestId: string; choice: number | null }[] = [];
   subscribe(l: (e: SessionDriverEvent) => void) {
     this.listener = l;
     return () => {};
   }
   emit(e: SessionDriverEvent) {
     this.listener?.(e);
+  }
+  subscribeTrust(l: (e: TrustEvent) => void) {
+    this.trustListener = l;
+    return () => {};
+  }
+  trustEmit(e: TrustEvent) {
+    this.trustListener?.(e);
+  }
+  respondTrust(requestId: string, choice: number | null) {
+    this.trustResponded.push({ requestId, choice });
+    // Mirror the real driver: settling fires a `resolved` event back through the channel.
+    this.trustEmit({ kind: "resolved", requestId });
   }
   prompt() {}
   abort() {}
@@ -206,6 +220,69 @@ describe("SessionHub", () => {
     const lastList = a.received.filter((m) => m.type === "sessionList").at(-1);
     if (lastList?.type === "sessionList")
       expect(lastList.activeSessionId).toBe("s2");
+  });
+
+  test("trust requests relay to clients and responses route back to the driver", () => {
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    const a = client();
+    const b = client();
+    hub.addClient(a.send);
+    hub.addClient(b.send);
+
+    const request = {
+      requestId: "t1",
+      cwd: "/some/repo",
+      title: "Trust this project folder?",
+      options: [
+        { label: "Trust this folder", trusted: true },
+        { label: "Don't trust", trusted: false },
+      ],
+    };
+    d.trustEmit({ kind: "request", request });
+
+    // Both clients see the card (out-of-band — not folded into session state).
+    for (const c of [a, b]) {
+      const card = c.received.find((m) => m.type === "trustRequest");
+      expect(card).toMatchObject({ requestId: "t1", cwd: "/some/repo" });
+    }
+
+    hub.handleClient(a.send, {
+      type: "trustResponse",
+      requestId: "t1",
+      choice: 0,
+    });
+    expect(d.trustResponded).toEqual([{ requestId: "t1", choice: 0 }]);
+    // The driver's `resolved` echo dismisses the card on every client.
+    for (const c of [a, b])
+      expect(c.received.some((m) => m.type === "trustResolved")).toBe(true);
+  });
+
+  test("a session switch is single-flight while one is pending", async () => {
+    // A swap that never resolves models a trust card awaiting human input.
+    let release: (v: SessionDriverEvent[]) => void = () => {};
+    const pending = new Promise<SessionDriverEvent[]>((r) => {
+      release = r;
+    });
+    const d = new FakeDriver();
+    // biome-ignore lint/suspicious/noExplicitAny: test stub override
+    (d as any).openSession = () => pending;
+    const hub = new SessionHub(d);
+    const a = client();
+    hub.addClient(a.send);
+
+    hub.handleClient(a.send, { type: "openSession", path: "/a.jsonl" });
+    hub.handleClient(a.send, { type: "openSession", path: "/b.jsonl" });
+    await flush();
+
+    // The second open is rejected, not run concurrently.
+    expect(
+      a.received.some(
+        (m) => m.type === "error" && /already in progress/.test(m.message),
+      ),
+    ).toBe(true);
+
+    release([ev({ type: "sessionOpened", snapshot: snap("s") })]);
   });
 
   test("only the focused session broadcasts to clients (D8 global focus)", () => {

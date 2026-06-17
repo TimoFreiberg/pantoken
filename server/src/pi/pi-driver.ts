@@ -36,10 +36,10 @@ import type {
   SessionSnapshot,
   SessionStatus,
 } from "@pilot/protocol";
-import type { PilotDriver } from "../driver.js";
+import type { PilotDriver, TrustEvent } from "../driver.js";
 import { mapPiEvent } from "./event-map.js";
 import { type HistoryMessage, historyToEvents } from "./history-map.js";
-import { makeTrustResolver } from "./trust.js";
+import { makeTrustResolver, type TrustAsk } from "./trust.js";
 import { PiUiBridge } from "./ui-bridge.js";
 
 export interface PiDriverOptions {
@@ -76,6 +76,69 @@ export async function createPiDriver(
       }
     }
   };
+
+  // --- Host-level project-trust channel (D12 interactive card) ---
+  // Trust resolves inside warmUp's createAgentSessionServices — before the session (and
+  // its PiUiBridge) exists, and while the hub is mid-swap (switching=true) suppressing
+  // session events. So the card can't ride the per-session stream. It travels here
+  // instead: makeTrustResolver's `ask` blocks (pi awaits resolveProjectTrust, exactly as
+  // its TUI blocks on ui.select) until a client answers via respondTrust, or it denies
+  // deny-safe on timeout / no client. Per-cwd, not per-session, by nature.
+  const trustListeners = new Set<(ev: TrustEvent) => void>();
+  const emitTrust = (ev: TrustEvent) => {
+    for (const l of trustListeners) {
+      try {
+        l(ev);
+      } catch (e) {
+        console.error("[pi] trust listener error", e);
+      }
+    }
+  };
+  const pendingTrust = new Map<
+    string,
+    {
+      resolve: (choice: number | null) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
+  let trustSeq = 0;
+  // Generous: the operator may be answering from a pocket. On expiry, deny-safe.
+  const TRUST_TIMEOUT_MS = 5 * 60_000;
+
+  const settleTrust = (requestId: string, choice: number | null): void => {
+    const p = pendingTrust.get(requestId);
+    if (!p) return; // already settled / unknown
+    pendingTrust.delete(requestId);
+    clearTimeout(p.timer);
+    emitTrust({ kind: "resolved", requestId });
+    p.resolve(choice);
+  };
+
+  const ask: TrustAsk = ({ cwd, title, options }) =>
+    new Promise<number | null>((resolve) => {
+      // No one to answer (e.g. a startup resume of an untrusted cwd before any client
+      // connects) → deny-safe at once rather than hang the swap for 5 minutes.
+      if (trustListeners.size === 0) {
+        resolve(null);
+        return;
+      }
+      const requestId = `trust-${now()}-${trustSeq++}`;
+      const timer = setTimeout(
+        () => settleTrust(requestId, null),
+        TRUST_TIMEOUT_MS,
+      );
+      (timer as { unref?: () => void }).unref?.();
+      pendingTrust.set(requestId, { resolve, timer });
+      emitTrust({
+        kind: "request",
+        request: {
+          requestId,
+          cwd,
+          title,
+          options: options.map((o) => ({ label: o.label, trusted: o.trusted })),
+        },
+      });
+    });
 
   // Every kept-warm session, keyed by sessionId. Created on first touch (startup
   // resume, newSession, or openSession); never disposed on a focus switch.
@@ -159,7 +222,7 @@ export async function createPiDriver(
       // resources — the D12 gap. Resolve trust per cwd instead (non-interactive MVP;
       // honors trust.json, trusts launchCwd, denies other untrusted paths).
       resourceLoaderReloadOptions: {
-        resolveProjectTrust: makeTrustResolver(cwd, cwd === launchCwd),
+        resolveProjectTrust: makeTrustResolver(cwd, cwd === launchCwd, ask),
       },
     });
     const { session } = await createAgentSessionFromServices({
@@ -238,6 +301,15 @@ export async function createPiDriver(
       // session so no live event races ahead of the initial transcript.
       if (listeners.size === 1) for (const ev of seedFor(initial)) emit(ev);
       return () => listeners.delete(l);
+    },
+
+    subscribeTrust(l) {
+      trustListeners.add(l);
+      return () => trustListeners.delete(l);
+    },
+
+    respondTrust(requestId, choice) {
+      settleTrust(requestId, choice);
     },
 
     prompt(text, deliverAs, sessionId) {

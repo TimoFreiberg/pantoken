@@ -9,7 +9,7 @@ import type {
   SessionDriverEvent,
   SessionListEntry,
 } from "@pilot/protocol";
-import type { PilotDriver } from "./driver.js";
+import type { PilotDriver, TrustEvent } from "./driver.js";
 import {
   ambient,
   confirmDialog,
@@ -18,6 +18,7 @@ import {
   MOCK_DEFAULT_CONFIG,
   MOCK_MODELS,
   mockSessionSeed,
+  mockTrustRequest,
   NEW_SESSION_ENTRY,
   newSessionSeed,
   promptReply,
@@ -25,11 +26,12 @@ import {
   SESSION_LIST,
   SESSION_REF,
   snapshot,
-  trustDialog,
 } from "./fixtures.js";
 
 export class MockDriver implements PilotDriver {
   private listeners = new Set<(ev: SessionDriverEvent) => void>();
+  private trustListeners = new Set<(ev: TrustEvent) => void>();
+  private pendingTrust = new Set<string>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
   private pendingDialogs = new Set<string>();
   private sessions: SessionListEntry[] = SESSION_LIST.map((s) => ({ ...s }));
@@ -43,6 +45,11 @@ export class MockDriver implements PilotDriver {
     return () => this.listeners.delete(listener);
   }
 
+  subscribeTrust(listener: (ev: TrustEvent) => void): () => void {
+    this.trustListeners.add(listener);
+    return () => this.trustListeners.delete(listener);
+  }
+
   private emit(ev: SessionDriverEvent): void {
     for (const l of this.listeners) {
       try {
@@ -51,6 +58,38 @@ export class MockDriver implements PilotDriver {
         console.error("[mock] listener error", e);
       }
     }
+  }
+
+  private emitTrust(ev: TrustEvent): void {
+    for (const l of this.trustListeners) {
+      try {
+        l(ev);
+      } catch (e) {
+        console.error("[mock] trust listener error", e);
+      }
+    }
+  }
+
+  respondTrust(requestId: string, choice: number | null): void {
+    if (!this.pendingTrust.has(requestId)) return; // first-responder-wins / unknown
+    this.pendingTrust.delete(requestId);
+    this.emitTrust({ kind: "resolved", requestId });
+    // Echo the outcome as a notice, mirroring respondUi's confirmation UX.
+    const message =
+      choice === null
+        ? "Trust prompt dismissed — folder left untrusted."
+        : `Trust decision recorded (option ${choice + 1}).`;
+    this.emit({
+      sessionRef: SESSION_REF,
+      timestamp: String(Date.now()),
+      type: "hostUiRequest",
+      request: {
+        kind: "notify",
+        requestId: `trust-done-${requestId}`,
+        message,
+        level: "info",
+      },
+    });
   }
 
   /** Schedule a script's steps with their cumulative delays. */
@@ -193,12 +232,19 @@ export class MockDriver implements PilotDriver {
     for (const timer of this.timers) clearTimeout(timer);
     this.timers.clear();
     this.pendingDialogs.clear();
+    this.pendingTrust.clear();
   }
 
   runScript(name: string): void {
+    if (name === "trust") {
+      // The trust card rides the out-of-band trust channel, not the event stream.
+      const req = mockTrustRequest();
+      this.pendingTrust.add(req.requestId);
+      this.emitTrust({ kind: "request", request: req });
+      return;
+    }
     const map: Record<string, () => ScriptStep[]> = {
       confirm: confirmDialog,
-      trust: trustDialog,
       input: inputDialog,
       ambient,
       reply: () => promptReply("Show me the streamed reply script."),

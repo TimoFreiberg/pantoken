@@ -16,6 +16,28 @@ import type { SessionState } from "./state.js";
 
 export const PROTOCOL_VERSION = 1;
 
+/** One choice on the project-trust card (D12). The label is display-only; the index
+ *  into a request's `options` is what the client sends back. `trusted` lets the card
+ *  style allow-vs-deny without parsing the label. */
+export interface TrustRequestOption {
+  readonly label: string;
+  readonly trusted: boolean;
+}
+
+/**
+ * An interactive project-trust decision (D12). Travels OUT OF BAND — not as a
+ * `SessionDriverEvent` — because trust resolves inside the driver's session warm-up,
+ * before that session (and its UI bridge) exists and while the hub is mid-swap
+ * (`switching`), so it can't ride the per-session event/fold path. It's a per-cwd
+ * question by nature: "may pi load this folder's .pi resources?".
+ */
+export interface TrustRequest {
+  readonly requestId: string;
+  readonly cwd: string;
+  readonly title: string;
+  readonly options: readonly TrustRequestOption[];
+}
+
 export type ServerMessage =
   | { type: "hello"; protocolVersion: number; serverId: string }
   /** Full authoritative state — sent on (re)connect so clients catch up. */
@@ -33,6 +55,12 @@ export type ServerMessage =
   /** The models available to switch to (server-authoritative, like `sessionList`).
    *  The current selection rides each session's snapshot `config`, not this. */
   | { type: "modelList"; models: readonly ModelOption[] }
+  /** Surface an interactive project-trust card (D12). Broadcast to every client; the
+   *  first answer wins. Carried as its own message — see {@link TrustRequest}. */
+  | ({ type: "trustRequest" } & TrustRequest)
+  /** A pending trust card was settled (answered, or denied on timeout/disconnect).
+   *  Clients dismiss the card for this requestId. */
+  | { type: "trustResolved"; requestId: string }
   | { type: "error"; message: string };
 
 export type ClientMessage =
@@ -61,6 +89,9 @@ export type ClientMessage =
   | { type: "newSession"; cwd?: string }
   /** Ask the server to re-scan disk and re-broadcast the session list. */
   | { type: "listSessions" }
+  /** Answer a project-trust card (D12). `choice` indexes the request's `options`;
+   *  null denies (cancel / dismiss). */
+  | { type: "trustResponse"; requestId: string; choice: number | null }
   /** Dev-only: drive the mock fixture to a named scripted state. */
   | { type: "mock"; script: string }
   | { type: "ping" };
