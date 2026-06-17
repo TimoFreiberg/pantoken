@@ -1,5 +1,6 @@
 <script lang="ts">
   import { store } from "../lib/store.svelte.js";
+  import SessionPicker from "./SessionPicker.svelte";
 
   const conn = $derived(store.connection);
   const s = $derived(store.session);
@@ -38,7 +39,7 @@
 
 <header class="hdr">
   <div class="left">
-    <div class="title">{s.ambient.title || s.title || "pilot"}</div>
+    <SessionPicker />
     <div class="sub">
       <span class="path">{s.ref?.workspaceId ? "pilot" : "no session"}</span>
       {#each statuses as [key, text] (key)}
@@ -89,13 +90,6 @@
   }
   .left {
     min-width: 0;
-  }
-  .title {
-    font-weight: 600;
-    font-size: 14.5px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
   .sub {
     font-size: 12px;
