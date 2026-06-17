@@ -24,10 +24,19 @@
 > `~/.pi` is set to deepseek), so the "not yet run live" framing below is stale
 > for session ops but accurate for a model turn.
 >
-> **Next:** D8 increment 2 — rework the pi-driver from runtime-swap to N
-> independent warm `AgentSession`s (live 2-session verification). Then the D12
-> interactive trust card (needs the hub swap-guard reworked so a mid-switch
-> `hostUiRequest` reaches clients). See `TODO.md` + `DECISIONS.md` (D8/D12/D13).
+> **D8 increment 2 — done.** The pi-driver now keeps N independent sessions warm in
+> a `Map<sessionId, WarmSession>` (no more runtime swap+dispose); `openSession`/
+> `newSession` warm-and-focus and dedup by session file, `prompt`/`abort`/`respondUi`
+> dispatch by `sessionId`. Verified live against the real agent
+> (`scripts/live-warm-toggle.ts`): two sessions warm at once, instant refocus with
+> full history, no stale-ctx crash. Background *streaming* across a switch still
+> needs a real model turn (the Live pi bring-up task / provider creds).
+>
+> **Next:** the D12 interactive trust card. After the warm rework, trust resolves
+> inside `warmUp` (service creation) before that session's UI bridge exists, and the
+> hub still runs `openSession`/`newSession` under `switching = true` — both need
+> addressing so a trust `hostUiRequest` can reach clients. See `TODO.md` +
+> `DECISIONS.md` (D8/D12/D13).
 
 ## TL;DR
 A working, test-covered remote-control web UI for pi — running against a
