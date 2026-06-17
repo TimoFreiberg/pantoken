@@ -22,9 +22,6 @@ See `docs/` siblings for context: `STATUS.md` (what's built), `DECISIONS.md`
 
 ## 🟡 Important
 
-- [ ] **Live pi bring-up** — first real turn against provider credentials.
-      `PILOT_DRIVER=pi PILOT_CWD=/some/repo bun run dev`. Expect rough edges;
-      they'll fail loudly.
 - [ ] **Settings panel** — provider config, API keys, auth token, model
       defaults, theme toggle, notification prefs. Inspired by pi-gui's
       settings panel.
@@ -43,6 +40,14 @@ See `docs/` siblings for context: `STATUS.md` (what's built), `DECISIONS.md`
       timestamp
 - [ ] **Copy-to-clipboard button on agent messages** — a button at the bottom of
       each agent text area; hidden until hover, copies message content
+- [ ] **Worktree checkbox in new-session form** — like the Claude app's "worktree"
+      toggle; creates and passes a jj/git worktree path as the session cwd so the
+      agent works in an isolated copy, leaving the main tree clean
+- [ ] **Session context indicator** — a small color-coded circle (or similar badge)
+      in the session list / header showing how much context the session has consumed,
+      analogous to the Claude app's colored circle (green → yellow → red as the
+      context window fills). Color could map to token-budget thresholds from the
+      snapshot's `config`/usage fields; exact threshold values TBD
 - [ ] **Stray caret span in agent text** — a naked `<span class="caret svelte-1rd1h7a"></span>`
       is appended to the end of agent output, looks like a client rendering bug.
       Needs investigation and fix
@@ -84,6 +89,9 @@ See `docs/` siblings for context: `STATUS.md` (what's built), `DECISIONS.md`
 
 ## ✅ Done (for reference)
 
+- [x] **Live pi bring-up** — first real turn against provider credentials.
+      `PILOT_DRIVER=pi PILOT_CWD=/some/repo bun run dev`. Working; rough edges
+      are filed as separate todos.
 - [x] **Session/project sidebar** — replaced the header session dropdown
       (`SessionPicker` deleted) with a collapsible left rail (desktop) / slide-over
       drawer (mobile) that groups sessions by project directory. `listSessions` now
