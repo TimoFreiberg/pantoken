@@ -6,6 +6,8 @@
   import { relativeTime } from "../lib/relative-time.js";
   import { buildHash, buildDate, buildLabel } from "../lib/build-info.js";
   import ContextRing from "./ContextRing.svelte";
+  import Button from "./ui/Button.svelte";
+  import IconButton from "./ui/IconButton.svelte";
 
   function basename(p: string): string {
     const parts = p.replace(/\/+$/, "").split("/");
@@ -237,14 +239,11 @@
 <aside class="sidebar" data-testid="sidebar" data-open={store.sidebarOpen}>
   <div class="top">
     <span class="brand">pilot</span>
-    <button
-      class="icon"
+    <IconButton
       title="Collapse sidebar"
       aria-label="Collapse sidebar"
-      onclick={() => store.closeSidebar()}
+      onclick={() => store.closeSidebar()}>‹</IconButton
     >
-      ‹
-    </button>
   </div>
 
   <div class="new">
@@ -258,8 +257,13 @@
     {#if store.lastError}
       <div class="err" role="alert">
         {store.lastError}
-        <button class="err-x" title="Dismiss this error" aria-label="Dismiss" onclick={() => store.clearError()}
-          >×</button
+        <IconButton
+          class="err-x"
+          variant="danger"
+          size="sm"
+          title="Dismiss this error"
+          aria-label="Dismiss"
+          onclick={() => store.clearError()}>×</IconButton
         >
       </div>
     {/if}
@@ -324,11 +328,11 @@
                 <span class="group-running" aria-label="a session is running"></span>
               {/if}
             </button>
-            <button
-              class="icon add"
+            <IconButton
+              size="sm"
               title={`New session in ${g.cwd}`}
               aria-label={`New session in ${basename(g.cwd)}`}
-              onclick={() => startDraft(g.cwd)}>+</button
+              onclick={() => startDraft(g.cwd)}>+</IconButton
             >
           </div>
           {#if !collapsed[g.cwd]}
@@ -361,17 +365,19 @@
                         }}
                       />
                       <div class="rename-actions">
-                        <button
-                          class="ghost"
+                        <Button
+                          variant="secondary"
+                          size="sm"
                           type="button"
                           title="Cancel rename (Esc)"
-                          onclick={cancelRename}>Cancel</button
+                          onclick={cancelRename}>Cancel</Button
                         >
-                        <button
-                          class="primary"
+                        <Button
+                          variant="primary"
+                          size="sm"
                           type="submit"
                           title="Save the new session name (Enter)"
-                          disabled={!renameValue.trim()}>Save</button
+                          disabled={!renameValue.trim()}>Save</Button
                         >
                       </div>
                     </form>
@@ -447,14 +453,14 @@
                         </span>
                       </span>
                     </button>
-                    <button
+                    <IconButton
                       class="row-menu"
                       data-testid="session-menu"
                       title="Session actions"
                       aria-label={`Actions for ${s.displayName || s.preview || "session"}`}
                       aria-haspopup="menu"
                       aria-expanded={menuFor === s.path}
-                      onclick={(e) => toggleMenu(e, s.path)}>⋯</button
+                      onclick={(e) => toggleMenu(e, s.path)}>⋯</IconButton
                     >
                   </div>
                   {#if menuFor === s.path && menuPos}
@@ -565,25 +571,6 @@
     font-size: 15px;
     letter-spacing: -0.01em;
   }
-  .icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    font-size: 17px;
-    line-height: 1;
-    color: var(--text-muted);
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: var(--radius-xs);
-  }
-  .icon:hover {
-    background: var(--surface);
-    border-color: var(--border);
-    color: var(--text);
-  }
-
   .new {
     padding: 0 10px 8px;
   }
@@ -619,13 +606,10 @@
     border-radius: var(--radius-xs);
     padding: 6px 8px;
   }
-  .err-x {
+  /* IconButton owns the look; this only nudges it to the row's end (it's a child
+     component root, so the rule has to pierce the scope boundary). */
+  .err :global(.err-x) {
     margin-left: auto;
-    background: transparent;
-    border: none;
-    color: var(--danger);
-    font-size: 14px;
-    line-height: 1;
   }
 
   .search {
@@ -763,12 +747,6 @@
     color: var(--text-faint);
     font-size: 11px;
   }
-  .add {
-    width: 24px;
-    height: 24px;
-    font-size: 15px;
-    flex-shrink: 0;
-  }
   ul {
     list-style: none;
     /* Indent the whole session list under its project header so the parent-child
@@ -801,31 +779,16 @@
   .row.active {
     background: color-mix(in srgb, var(--accent) 15%, transparent);
   }
-  /* Overflow (⋯) trigger: hover-revealed on desktop, always shown on touch. */
-  .row-menu {
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    font-size: 16px;
-    line-height: 1;
-    color: var(--text-muted);
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: var(--radius-xs);
+  /* Overflow (⋯) trigger is an IconButton; here we only own its reveal — hidden until
+     the row is hovered (or the menu is open), always shown on touch (mobile block below).
+     :global pierces the scope boundary onto the child component's root. */
+  :global(.row-menu) {
     opacity: 0;
     transition: opacity 0.1s ease;
   }
-  .row-wrap:hover .row-menu,
-  .row-menu[aria-expanded="true"] {
+  .row-wrap:hover :global(.row-menu),
+  :global(.row-menu[aria-expanded="true"]) {
     opacity: 1;
-  }
-  .row-menu:hover {
-    background: var(--surface);
-    border-color: var(--border);
-    color: var(--text);
   }
   /* Floating popover: pinned in viewport coords (set inline) so it overlays the list
      rather than displacing rows. position: fixed escapes the list's overflow clip. */
@@ -1048,7 +1011,7 @@
       border: none;
     }
     /* No hover on touch — keep the ⋯ trigger and the collapse caret visible. */
-    .row-menu,
+    :global(.row-menu),
     .caret {
       opacity: 1;
     }
