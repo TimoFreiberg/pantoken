@@ -8,6 +8,7 @@
 import type {
   CommandInfo,
   HostUiResponse,
+  ImageContent,
   ModelDefaults,
   ModelOption,
   ProviderInfo,
@@ -87,6 +88,7 @@ export type ClientMessage =
   | {
       type: "prompt";
       text: string;
+      images?: readonly ImageContent[];
       deliverAs?: "steer" | "followUp";
       sessionId?: SessionId;
     }
@@ -134,6 +136,7 @@ export type ClientMessage =
       model?: { provider: string; modelId: string };
       thinking?: string;
       prompt?: string;
+      images?: readonly ImageContent[];
     }
   /** Ask the server to re-scan disk and re-broadcast the session list. */
   | { type: "listSessions" }

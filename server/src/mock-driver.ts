@@ -162,7 +162,12 @@ export class MockDriver implements PilotDriver {
     this.bootstrap();
   }
 
-  prompt(text: string): void {
+  prompt(
+    text: string,
+    _deliverAs?: "steer" | "followUp",
+    _sessionId?: string,
+    _images?: readonly import("@pilot/protocol").ImageContent[],
+  ): void {
     this.play(promptReply(text));
   }
 

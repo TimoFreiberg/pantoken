@@ -16,6 +16,10 @@ awaiting the owner's input.
   `~/src/pi-gui` (Electron React shell; its `session-driver` types we vendored, its
   extension-visibility UI is worth mining) and `~/src/kellercomm` (the Axum+Svelte+WS
   template whose *patterns* we ported to TS).
+- **Ports 8787 (WS backend) and 5173 (Vite proxy) are the agent harness's own dev
+  server.** Never `kill` or `lsof -ti:8787 | xargs kill` them — that nukes the
+  harness you're talking through, and the session dies. If `EADDRINUSE` on 8787,
+  something else is holding the port; find and stop it, not the harness's process.
 
 ## Stack & layout
 

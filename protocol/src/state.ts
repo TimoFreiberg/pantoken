@@ -5,6 +5,7 @@
 
 import {
   type HostUiRequest,
+  type ImageContent,
   isDialogRequest,
   type SessionConfig,
   type SessionDriverEvent,
@@ -18,6 +19,8 @@ export interface UserItem {
   readonly kind: "user";
   id: string;
   text: string;
+  /** Image attachments, if any. */
+  images?: readonly ImageContent[];
   /** ISO timestamp of when this user turn was sent. */
   ts?: string;
 }
@@ -143,6 +146,7 @@ export function foldEvent(
         kind: "user",
         id: ev.id,
         text: ev.text,
+        images: ev.images,
         ts: ev.timestamp,
       });
       return state;

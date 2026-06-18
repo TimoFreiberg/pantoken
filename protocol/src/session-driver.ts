@@ -22,6 +22,14 @@ export interface SessionRef {
 export type SessionStatus = "idle" | "running" | "failed";
 export type SessionMessageDeliveryMode = "steer" | "followUp";
 
+/** An image attachment for a user message, as pi's SDK carries them. Base64-encoded
+ *  image data with a MIME type — serializable across the WS wire as plain JSON. */
+export interface ImageContent {
+  readonly type: "image";
+  readonly data: string; // base64
+  readonly mimeType: string; // e.g. "image/jpeg", "image/png"
+}
+
 export interface SessionQueuedMessage {
   readonly id: string;
   readonly mode: SessionMessageDeliveryMode;
@@ -272,6 +280,7 @@ export interface UserMessageEvent extends SessionEventBase {
   readonly type: "userMessage";
   readonly id: string;
   readonly text: string;
+  readonly images?: readonly ImageContent[];
 }
 export interface ToolStartedEvent extends SessionEventBase {
   readonly type: "toolStarted";

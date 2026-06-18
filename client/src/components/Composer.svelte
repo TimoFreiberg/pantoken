@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { CommandInfo } from "@pilot/protocol";
+  import type { CommandInfo, ImageContent } from "@pilot/protocol";
   import { store } from "../lib/store.svelte.js";
   import Markdown from "./Markdown.svelte";
   import { filterCommands, slashQuery } from "../lib/slash.js";
@@ -11,12 +11,18 @@
   let deliverAs = $state<"steer" | "followUp">("steer");
   let ta = $state<HTMLTextAreaElement>();
   let box = $state<HTMLDivElement>();
+  let fileInput = $state<HTMLInputElement>();
   let preview = $state(false);
   // Expand toggle: collapsed keeps the composer modest so more of the session
   // shows; expanded trades that for reading a long prompt whole. Auto-resets on send.
   let expanded = $state(false);
   // Tracked so the caps re-derive on window resize (the cap scales with viewport).
   let winH = $state(window.innerHeight);
+
+  // Image attachments: picked from the browser file input, read as base64.
+  let images = $state<ImageContent[]>([]);
+  const MAX_IMAGES = 10;
+  const imageCount = $derived(images.length);
 
   const widgets = $derived(
     Object.values(store.session.ambient.widgets).filter((w) => w.placement === "aboveComposer"),
@@ -89,9 +95,11 @@
 
   function submit() {
     const text = store.composerDraft;
-    if (!text.trim()) return;
-    if (drafting) store.submitDraft(text);
-    else store.prompt(text, streaming ? deliverAs : undefined);
+    if (!text.trim() && images.length === 0) return;
+    const imgs = images.length > 0 ? [...images] : undefined;
+    if (drafting) store.submitDraft(text, imgs);
+    else store.prompt(text, streaming ? deliverAs : undefined, imgs);
+    images = [];
     editingCwd = false;
     expanded = false;
     queueMicrotask(autosize);
@@ -110,6 +118,41 @@
       ta?.focus();
       autosize();
     });
+  }
+
+  function openFilePicker() {
+    fileInput?.click();
+  }
+
+  /** Drop an attachment by index. */
+  function removeImage(i: number) {
+    images = images.filter((_, idx) => idx !== i);
+  }
+
+  async function onFilesSelected(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const files = input.files;
+    if (!files) return;
+    const remaining = MAX_IMAGES - images.length;
+    const toRead = Array.from(files).slice(0, remaining);
+    const newImages: ImageContent[] = [];
+    for (const f of toRead) {
+      if (!f.type.startsWith("image/")) continue;
+      const data = await new Promise<string>((resolve) => {
+        const r = new FileReader();
+        r.onload = () => {
+          const raw = r.result;
+          if (raw == null || typeof raw !== "string") { resolve(""); return; }
+          resolve(raw.split(",")[1] ?? "");
+        };
+        r.readAsDataURL(f);
+      });
+      newImages.push({ type: "image", data, mimeType: f.type });
+    }
+    images = [...images, ...newImages];
+    // Reset so re-selecting the same file re-fires the change event.
+    input.value = "";
+    ta?.focus();
   }
 
   function onInput() {
@@ -200,6 +243,12 @@
   // sidebar inputs or while previewing.
   onMount(() => {
     function onWindowKeydown(e: KeyboardEvent) {
+      // ⌘⇧F / Ctrl+Shift+F: open the file picker for image attachments.
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "F") {
+        e.preventDefault();
+        openFilePicker();
+        return;
+      }
       if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) return;
       if (!ta || showPreview) return;
       const el = document.activeElement as HTMLElement | null;
@@ -381,18 +430,41 @@
         </div>
       {/if}
       <div class="toolbar-right">
-        <!-- TODO: file uploader — wire to an attach/upload driver capability + a
-             hotkey once the protocol carries attachments. Disabled placeholder for now. -->
-        <button
-          class="attach"
-          disabled
-          title="Attach files (coming soon)"
-          aria-label="Attach files (coming soon)"
-        >
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-          </svg>
-        </button>
+        <!-- Hidden file input for image attachments. -->
+        <input
+          bind:this={fileInput}
+          type="file"
+          accept="image/*"
+          multiple
+          class="file-input-hidden"
+          onchange={onFilesSelected}
+          tabindex="-1"
+        />
+        {#if imageCount > 0}
+          <button class="attach-tag" onclick={openFilePicker} title={`${imageCount} image${imageCount > 1 ? "s" : ""} attached — click to add more, right-click to clear`}>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg>
+            {imageCount}
+          </button>
+          {#each images as img, i (i)}
+            <button class="thumb-chip" onclick={() => removeImage(i)} title="Click to remove this image">
+              <img src="data:{img.mimeType};base64,{img.data}" alt={`Attachment ${i + 1}`} />
+              <span class="thumb-x" aria-hidden="true">×</span>
+            </button>
+          {/each}
+        {:else}
+          <button
+            class="attach"
+            onclick={openFilePicker}
+            title="Attach images (⌘⇧F)"
+            aria-label="Attach images"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg>
+          </button>
+        {/if}
         <ModelPicker />
       </div>
     </div>
@@ -740,5 +812,68 @@
   .attach:disabled {
     opacity: 0.45;
     cursor: default;
+  }
+  .file-input-hidden {
+    position: absolute;
+    width: 0;
+    height: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .attach-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+    padding: 2px 8px;
+    font-size: 12px;
+    font-family: var(--font-sans);
+    color: var(--accent-text);
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-xs);
+    cursor: pointer;
+  }
+  .attach-tag:hover {
+    filter: brightness(1.05);
+  }
+  .thumb-chip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    padding: 0;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    cursor: pointer;
+    overflow: hidden;
+  }
+  .thumb-chip:hover {
+    border-color: var(--danger);
+  }
+  .thumb-chip img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .thumb-chip:hover .thumb-x {
+    opacity: 1;
+  }
+  .thumb-x {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    background: color-mix(in srgb, var(--danger) 75%, transparent);
+    color: white;
+    font-size: 14px;
+    font-weight: 700;
+    opacity: 0;
+    transition: opacity 0.1s;
+    pointer-events: none;
   }
 </style>

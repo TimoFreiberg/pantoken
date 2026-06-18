@@ -60,7 +60,12 @@ class FakeDriver implements PilotDriver {
     // Mirror the real driver: settling fires a `resolved` event back through the channel.
     this.trustEmit({ kind: "resolved", requestId });
   }
-  prompt() {}
+  prompt(
+    _text?: string,
+    _deliverAs?: "steer" | "followUp",
+    _sessionId?: string,
+    _images?: readonly import("@pilot/protocol").ImageContent[],
+  ) {}
   abort() {}
   respondUi(r: HostUiResponse) {
     this.responded.push(r);
@@ -751,8 +756,14 @@ describe("SessionHub", () => {
   test("commands target msg.sessionId, else the focused session", () => {
     const calls: (string | undefined)[] = [];
     class RecordingDriver extends FakeDriver {
-      prompt(_t: string, _d?: "steer" | "followUp", sessionId?: string) {
+      override prompt(
+        _t: string,
+        _d?: "steer" | "followUp",
+        sessionId?: string,
+        _images?: readonly import("@pilot/protocol").ImageContent[],
+      ) {
         calls.push(sessionId);
+        super.prompt(_t, _d, sessionId, _images);
       }
     }
     const d = new RecordingDriver();
