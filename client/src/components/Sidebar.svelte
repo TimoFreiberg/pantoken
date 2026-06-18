@@ -3,6 +3,7 @@
   import { tick } from "svelte";
   import { store } from "../lib/store.svelte.js";
   import { filterSessions } from "../lib/session-filter.js";
+  import { relativeTime } from "../lib/relative-time.js";
 
   // A new-session-in-a-directory disclosure (D12: arbitrary GUI-controlled paths).
   let showNewDir = $state(false);
@@ -256,7 +257,9 @@
             >
               <span class="caret" class:collapsed={collapsed[g.cwd]}>▾</span>
               <span class="proj">{basename(g.cwd)}</span>
-              <span class="count">{g.items.length}</span>
+              {#if collapsed[g.cwd]}
+                <span class="count">{g.items.length}</span>
+              {/if}
               {#if collapsed[g.cwd] && store.groupRunning(g.items.map((i) => i.sessionId))}
                 <span class="group-running" aria-label="a session is running"></span>
               {/if}
@@ -272,6 +275,7 @@
             <ul>
               {#each g.items as s (s.path)}
                 {@const st = store.sessionStatus(s.sessionId)}
+                {@const rel = relativeTime(s.updatedAt, Date.now())}
                 <li class="row-wrap">
                   <div class="row-line">
                     <button
@@ -298,9 +302,17 @@
                         <span class="name"
                           >{s.displayName || s.preview || "(untitled)"}</span
                         >
-                        <span class="meta"
-                          >{s.messageCount} msg{#if s.archived} · archived{/if}</span
-                        >
+                        <span class="meta">
+                          <span class="msg-count"
+                            >{s.messageCount} msg{#if s.archived} ·
+                              archived{/if}</span
+                          >
+                          {#if rel}
+                            <span class="time" title={`Last activity ${rel}`}
+                              >{rel}</span
+                            >
+                          {/if}
+                        </span>
                       </span>
                     </button>
                     <button
@@ -563,12 +575,21 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
+  /* Collapse/expand affordance: revealed only on hover (the row width is reserved so
+     nothing shifts). The count badge stands in for state when a group is collapsed. */
   .caret {
     font-size: 13px;
     width: 13px;
     text-align: center;
     color: var(--text-muted);
-    transition: transform 0.12s ease;
+    opacity: 0;
+    transition:
+      transform 0.12s ease,
+      opacity 0.1s ease;
+  }
+  .group-head:hover .caret,
+  .group-toggle:focus-visible .caret {
+    opacity: 1;
   }
   .caret.collapsed {
     transform: rotate(-90deg);
@@ -755,9 +776,22 @@
     font-weight: 600;
   }
   .meta {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
     font-size: 11px;
     color: var(--text-faint);
     font-family: var(--font-mono);
+  }
+  .msg-count {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Last-activity timestamp ("15m ago"), right-aligned under the name. */
+  .time {
+    flex-shrink: 0;
   }
 
   /* Phone: the sidebar becomes a slide-over drawer above the transcript. */
@@ -783,8 +817,9 @@
       background: rgba(0, 0, 0, 0.34);
       border: none;
     }
-    /* No hover on touch — keep the ⋯ trigger visible so it's reachable. */
-    .row-menu {
+    /* No hover on touch — keep the ⋯ trigger and the collapse caret visible. */
+    .row-menu,
+    .caret {
       opacity: 1;
     }
   }
