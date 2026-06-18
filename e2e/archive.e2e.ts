@@ -55,6 +55,32 @@ test("right-clicking a session row opens its overflow menu", async ({
   await expect(sidebar.getByText("Explore the fold reducer")).toHaveCount(0);
 });
 
+test("pressing 'a' while the menu is open archives the targeted session", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  const sidebar = page.getByTestId("sidebar");
+
+  const row = sidebar
+    .locator(".row-wrap")
+    .filter({ hasText: "Explore the fold reducer" });
+  await expect(row).toBeVisible();
+
+  // Open the floating menu, then drive the archive via its keyboard shortcut.
+  await row.hover();
+  await row.getByTestId("session-menu").click();
+  await expect(
+    sidebar.getByRole("menuitem", { name: "Archive", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("a");
+
+  // Archived → gone from the active list, and the menu closed itself.
+  await expect(sidebar.getByText("Explore the fold reducer")).toHaveCount(0);
+  await expect(
+    sidebar.getByRole("menuitem", { name: "Archive", exact: true }),
+  ).toHaveCount(0);
+});
+
 test("the overflow menu archives a session, hiding it from the active list", async ({
   page,
 }) => {

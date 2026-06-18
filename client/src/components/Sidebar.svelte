@@ -37,27 +37,49 @@
   const filteredGroups = $derived(filtered.groups);
   const hiddenCount = $derived(filtered.hiddenCount);
 
-  // Per-row actions menu (the ⋯ overflow). Holds the path of the session whose menu is
-  // open, or null. One open at a time.
+  // Per-row actions menu (the ⋯ overflow) — a floating popover anchored under the ⋯ trigger
+  // (right-aligned to it) or at the cursor on right-click. Positioned in viewport coords so
+  // it overlays the list instead of shoving rows down. `menuFor` holds the open session's
+  // path (one at a time); `menuPos` is where to paint it.
+  type MenuPos = { top: number; left?: number; right?: number };
   let menuFor = $state<string | null>(null);
-  function toggleMenu(path: string): void {
-    menuFor = menuFor === path ? null : path;
+  let menuPos = $state<MenuPos | null>(null);
+  let menuEl = $state<HTMLDivElement | null>(null);
+  // The open session entry, resolved fresh from the store so the menu reflects the current
+  // archived state (drives Archive vs Unarchive, and the `a` hotkey below).
+  const menuSession = $derived(
+    menuFor ? (store.sessions.find((s) => s.path === menuFor) ?? null) : null,
+  );
+
+  function openAt(path: string, pos: MenuPos): void {
+    menuFor = path;
+    menuPos = pos;
+    clampedFor = null;
   }
-  // Right-clicking a row opens its ⋯ menu (and suppresses the native context menu),
-  // mirroring the desktop expectation. Always opens — never toggles closed — so a
+  // ⋯ trigger: toggle; when opening, hang the menu just under the button, right-aligned to it.
+  function toggleMenu(e: MouseEvent, path: string): void {
+    if (menuFor === path) {
+      closeMenu();
+      return;
+    }
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    openAt(path, { top: r.bottom + 4, right: window.innerWidth - r.right });
+  }
+  // Right-clicking a row opens its menu at the cursor (and suppresses the native context
+  // menu), mirroring the desktop expectation. Always opens — never toggles closed — so a
   // second right-click re-targets rather than dismissing.
   function openMenu(e: MouseEvent, path: string): void {
     e.preventDefault();
-    menuFor = path;
+    openAt(path, { top: e.clientY, left: e.clientX });
   }
   function closeMenu(): void {
     menuFor = null;
+    menuPos = null;
   }
   function toggleArchive(s: SessionListEntry): void {
     store.setArchived(s.path, !s.archived);
     closeMenu();
   }
-
   // Inline rename. Holds the path of the session being renamed (one at a time), the
   // working text, and the input ref so we can focus+select on open.
   let renamingFor = $state<string | null>(null);
@@ -81,8 +103,29 @@
   function cancelRename(): void {
     renamingFor = null;
   }
-  // Dismiss the row menu on an outside click or Escape. Deferred so the opening click
-  // doesn't immediately re-close it.
+
+  // Keep the popover on-screen: once mounted, measure it and pull it back inside the viewport
+  // if it would spill off the bottom or right edge. `clampedFor` keys the one-shot self-write
+  // to the open path (reset in openAt) so we adjust each open exactly once, no feedback loop.
+  let clampedFor: string | null = null;
+  $effect(() => {
+    const el = menuEl;
+    if (!menuFor || !menuPos || !el || clampedFor === menuFor) return;
+    const m = 8;
+    const r = el.getBoundingClientRect();
+    const next: MenuPos = { ...menuPos };
+    if (next.top + r.height > window.innerHeight - m)
+      next.top = Math.max(m, window.innerHeight - m - r.height);
+    if (next.left != null && next.left + r.width > window.innerWidth - m)
+      next.left = Math.max(m, window.innerWidth - m - r.width);
+    clampedFor = menuFor;
+    if (next.top !== menuPos.top || next.left !== menuPos.left) menuPos = next;
+  });
+
+  // Dismiss the menu on an outside click, Escape, or scroll/resize (which would detach the
+  // fixed popover from its row). The click listener is deferred so the opening click doesn't
+  // immediately re-close it. While open, `a` archives/unarchives the targeted session —
+  // unless focus is in a text field, where `a` should type.
   $effect(() => {
     if (!menuFor) return;
     const onClick = (e: MouseEvent): void => {
@@ -90,14 +133,31 @@
       if (!t.closest(".menu") && !t.closest(".row-menu")) closeMenu();
     };
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") closeMenu();
+      if (e.key === "Escape") {
+        closeMenu();
+        return;
+      }
+      if (e.key === "a" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const t = e.target as HTMLElement;
+        if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)
+          return;
+        if (menuSession) {
+          e.preventDefault();
+          toggleArchive(menuSession);
+        }
+      }
     };
+    const onDetach = (): void => closeMenu();
     const id = setTimeout(() => document.addEventListener("click", onClick), 0);
     document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onDetach, true);
+    window.addEventListener("resize", onDetach);
     return () => {
       clearTimeout(id);
       document.removeEventListener("click", onClick);
       document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onDetach, true);
+      window.removeEventListener("resize", onDetach);
     };
   });
 
@@ -399,11 +459,16 @@
                       aria-label={`Actions for ${s.displayName || s.preview || "session"}`}
                       aria-haspopup="menu"
                       aria-expanded={menuFor === s.path}
-                      onclick={() => toggleMenu(s.path)}>⋯</button
+                      onclick={(e) => toggleMenu(e, s.path)}>⋯</button
                     >
                   </div>
-                  {#if menuFor === s.path}
-                    <div class="menu" role="menu">
+                  {#if menuFor === s.path && menuPos}
+                    <div
+                      class="menu"
+                      role="menu"
+                      bind:this={menuEl}
+                      style={`top:${menuPos.top}px;${menuPos.left != null ? `left:${menuPos.left}px` : `right:${menuPos.right}px`}`}
+                    >
                       <button
                         class="menu-item"
                         role="menuitem"
@@ -414,11 +479,13 @@
                         class="menu-item"
                         role="menuitem"
                         title={s.archived
-                          ? "Restore this session to the active list"
-                          : "Hide this session from the active list"}
+                          ? "Restore this session to the active list (A)"
+                          : "Hide this session from the active list (A)"}
                         onclick={() => toggleArchive(s)}
-                        >{s.archived ? "Unarchive" : "Archive"}</button
                       >
+                        <span>{s.archived ? "Unarchive" : "Archive"}</span>
+                        <kbd class="hotkey" aria-hidden="true">A</kbd>
+                      </button>
                     </div>
                   {/if}
                   {/if}
@@ -764,23 +831,32 @@
     border-color: var(--border);
     color: var(--text);
   }
+  /* Floating popover: pinned in viewport coords (set inline) so it overlays the list
+     rather than displacing rows. position: fixed escapes the list's overflow clip. */
   .menu {
+    position: fixed;
+    z-index: 70;
+    min-width: 160px;
     display: flex;
     flex-direction: column;
-    margin: 2px 0 4px 18px;
+    padding: 4px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     box-shadow: var(--shadow-pop);
-    overflow: hidden;
   }
   .menu-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
     text-align: left;
-    padding: 8px 12px;
+    padding: 8px 10px;
     font-size: 13px;
     color: var(--text);
     background: transparent;
     border: none;
+    border-radius: var(--radius-xs);
   }
   .menu-item:hover {
     background: var(--surface-sunken);
@@ -806,6 +882,18 @@
     justify-content: flex-end;
     gap: 6px;
     margin-top: 6px;
+  }
+  /* Decorative shortcut hint (aria-hidden — kept out of the button's accessible name). */
+  .hotkey {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1;
+    color: var(--text-faint);
+    background: var(--surface-sunken);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    padding: 2px 5px;
   }
   .row-body {
     display: flex;
