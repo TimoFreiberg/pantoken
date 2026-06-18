@@ -74,7 +74,12 @@ function doConnect(): void {
   )
     return;
   cleanupSocket();
-  if (document.visibilityState === "hidden") return;
+  // A hidden tab skips connecting to save resources (e.g. a backgrounded PWA).
+  // But under the Vite dev server the preview/automation tab runs permanently
+  // backgrounded (visibilityState stays "hidden", no visibilitychange ever
+  // fires), so this guard would wedge it "Offline" forever. Always connect in
+  // dev; the prod bundle keeps the battery guard.
+  if (!import.meta.env.DEV && document.visibilityState === "hidden") return;
 
   const url = buildWsUrl();
   _state = _reconnectAttempt === 0 ? "connecting" : "reconnecting";
