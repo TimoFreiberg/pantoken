@@ -2,6 +2,9 @@
   import type { ModelOption } from "@pilot/protocol";
   import { store } from "../lib/store.svelte.js";
   import type { ThemeMode } from "../lib/theme.js";
+  import Button from "./ui/Button.svelte";
+  import IconButton from "./ui/IconButton.svelte";
+  import SegmentedControl from "./ui/SegmentedControl.svelte";
 
   // The settings panel. Per-client view state (theme, notifications, this device's
   // access token) sits next to server-side global pi config (provider credentials,
@@ -14,6 +17,13 @@
     { mode: "light", label: "Light" },
     { mode: "dark", label: "Dark" },
   ];
+  // Shape THEMES for the SegmentedControl; keep the `theme-<mode>` testids the e2e relies on.
+  const themeOptions = THEMES.map((t) => ({
+    value: t.mode,
+    label: t.label,
+    title: `Use ${t.label} theme`,
+    testid: `theme-${t.mode}`,
+  }));
 
   // Push status copy mirrors the header bell so the two stay in step.
   const push = $derived(store.pushState);
@@ -145,7 +155,7 @@
   >
     <header class="phead">
       <h2>Settings</h2>
-      <button class="x" aria-label="Close settings" onclick={close}>✕</button>
+      <IconButton title="Close settings" aria-label="Close settings" onclick={close}>✕</IconButton>
     </header>
 
     <div class="body">
@@ -157,19 +167,12 @@
             <div class="rlabel">Theme</div>
             <div class="rdesc">"System" follows your OS appearance.</div>
           </div>
-          <div class="seg" role="radiogroup" aria-label="Theme">
-            {#each THEMES as t (t.mode)}
-              <button
-                class="seg-btn"
-                class:active={store.themeMode === t.mode}
-                role="radio"
-                aria-checked={store.themeMode === t.mode}
-                data-testid="theme-{t.mode}"
-                title={`Use ${t.label} theme`}
-                onclick={() => store.setTheme(t.mode)}>{t.label}</button
-              >
-            {/each}
-          </div>
+          <SegmentedControl
+            ariaLabel="Theme"
+            options={themeOptions}
+            value={store.themeMode}
+            onchange={(mode) => store.setTheme(mode)}
+          />
         </div>
       </section>
 
@@ -183,19 +186,18 @@
           </div>
           {#if push !== "unsupported"}
             <div class="actions">
-              <button
-                class="btn"
+              <Button
+                variant="primary"
                 disabled={push === "working" || push === "subscribed"}
                 title="Enable push notifications on this device"
                 onclick={() => store.enablePush()}
               >
                 {push === "subscribed" ? "Enabled" : "Enable"}
-              </button>
-              <button
-                class="btn ghost"
+              </Button>
+              <Button
                 disabled={push === "working"}
                 title="Send a test push notification to this device"
-                onclick={() => store.testPush()}>Test</button
+                onclick={() => store.testPush()}>Test</Button
               >
             </div>
           {/if}
@@ -225,24 +227,23 @@
                 </div>
                 <div class="actions">
                   {#if p.apiKeySetupSupported}
-                    <button
-                      class="btn ghost"
+                    <Button
                       title={p.authSource === "auth_file"
                         ? `Replace the API key for ${p.name}`
                         : `Set an API key for ${p.name}`}
                       onclick={() => openKeyField(p.id)}
                     >
                       {p.authSource === "auth_file" ? "Replace key" : "Set key"}
-                    </button>
+                    </Button>
                   {/if}
                   {#if p.authSource === "auth_file"}
-                    <button
-                      class="btn danger"
+                    <Button
+                      variant="danger"
                       title={`Remove the saved API key for ${p.name}`}
                       onclick={() => store.removeProviderApiKey(p.id)}
                     >
                       Remove
-                    </button>
+                    </Button>
                   {/if}
                 </div>
               </div>
@@ -261,8 +262,8 @@
                     autocomplete="off"
                     data-testid="provider-key-input"
                   />
-                  <button class="btn" type="submit" title="Save this API key" disabled={!keyDraft.trim()}>Save</button>
-                  <button class="btn ghost" type="button" title="Cancel without saving the key" onclick={cancelKeyField}>Cancel</button>
+                  <Button variant="primary" type="submit" title="Save this API key" disabled={!keyDraft.trim()}>Save</Button>
+                  <Button type="button" title="Cancel without saving the key" onclick={cancelKeyField}>Cancel</Button>
                 </form>
               {/if}
             {/each}
@@ -375,7 +376,7 @@
             </div>
           </div>
           {#if store.hasToken}
-            <button class="btn danger" title="Forget the access token saved on this device" onclick={() => store.signOut()}>Forget</button>
+            <Button variant="danger" title="Forget the access token saved on this device" onclick={() => store.signOut()}>Forget</Button>
           {/if}
         </div>
         <form
@@ -391,7 +392,7 @@
             placeholder={store.hasToken ? "Replace token…" : "Enter token…"}
             autocomplete="off"
           />
-          <button class="btn" type="submit" title="Save this access token on this device" disabled={!tokenDraft.trim()}>Save</button>
+          <Button variant="primary" type="submit" title="Save this access token on this device" disabled={!tokenDraft.trim()}>Save</Button>
         </form>
       </section>
     </div>
@@ -445,21 +446,6 @@
     font-size: 16px;
     font-weight: 600;
   }
-  .x {
-    width: 28px;
-    height: 28px;
-    border: 1px solid transparent;
-    border-radius: var(--radius-xs);
-    background: transparent;
-    color: var(--text-muted);
-    font-size: 14px;
-    cursor: pointer;
-  }
-  .x:hover {
-    background: var(--surface-sunken);
-    border-color: var(--border);
-    color: var(--text);
-  }
   .body {
     overflow-y: auto;
     padding: 4px 20px calc(20px + env(safe-area-inset-bottom));
@@ -506,56 +492,9 @@
     line-height: 1.5;
     margin: 10px 0 0;
   }
-  .seg {
-    display: inline-flex;
-    background: var(--surface-sunken);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 2px;
-    flex-shrink: 0;
-  }
-  .seg-btn {
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
-    font-size: 12.5px;
-    padding: 5px 12px;
-    border-radius: 999px;
-    cursor: pointer;
-  }
-  .seg-btn.active {
-    background: var(--surface);
-    color: var(--text);
-    box-shadow: var(--shadow-card);
-  }
   .actions {
     display: flex;
     gap: 8px;
-    flex-shrink: 0;
-  }
-  .btn {
-    border: 1px solid var(--border-strong);
-    background: var(--accent);
-    color: var(--accent-text);
-    border-color: transparent;
-    border-radius: var(--radius-sm);
-    padding: 7px 13px;
-    font-size: 13px;
-    cursor: pointer;
-  }
-  .btn:disabled {
-    opacity: 0.45;
-    cursor: default;
-  }
-  .btn.ghost {
-    background: var(--surface);
-    color: var(--text);
-    border-color: var(--border-strong);
-  }
-  .btn.danger {
-    background: transparent;
-    color: var(--danger);
-    border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
     flex-shrink: 0;
   }
   .select {
