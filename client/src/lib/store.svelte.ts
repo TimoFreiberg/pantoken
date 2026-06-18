@@ -109,6 +109,9 @@ class PilotStore {
   settingsOpen = $state(false);
   // Theme override (system/light/dark), persisted per-device in localStorage.
   themeMode = $state<ThemeMode>(getThemeMode());
+  // Hide thinking blocks toggle — when on, thinking content is replaced with a
+  // subtle non-expandable placeholder. Persisted per-device in localStorage.
+  hideThinking = $state(initialHideThinking());
   // PWA: a newer service worker installed and is ready; we prompt for a refresh.
   swUpdateReady = $state(false);
   // The last prompt text sent — lets the run-failed error card re-send it on Retry.
@@ -388,6 +391,11 @@ class PilotStore {
     this.themeMode = mode;
     setThemeMode(mode);
   }
+  /** Toggle whether thinking blocks are hidden (replaced with a subtle placeholder). */
+  setHideThinking(hide: boolean): void {
+    this.hideThinking = hide;
+    persistHideThinking(hide);
+  }
   /** True if an access token is saved on this device (we never reveal its value). */
   get hasToken(): boolean {
     return !!getToken();
@@ -591,6 +599,18 @@ function initialShowArchived(): boolean {
 function persistShowArchived(show: boolean): void {
   if (typeof window !== "undefined")
     localStorage.setItem(SHOW_ARCHIVED_KEY, show ? "1" : "0");
+}
+
+const HIDE_THINKING_KEY = "pilot.hideThinking";
+
+function initialHideThinking(): boolean {
+  if (typeof window === "undefined") return false;
+  return localStorage.getItem(HIDE_THINKING_KEY) === "1";
+}
+
+function persistHideThinking(hide: boolean): void {
+  if (typeof window !== "undefined")
+    localStorage.setItem(HIDE_THINKING_KEY, hide ? "1" : "0");
 }
 
 export const store = new PilotStore();

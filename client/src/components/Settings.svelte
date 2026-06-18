@@ -174,6 +174,23 @@
             onchange={(mode) => store.setTheme(mode)}
           />
         </div>
+        <div class="row">
+          <div class="rinfo">
+            <div class="rlabel">Hide thinking blocks</div>
+            <div class="rdesc">Replace thinking content with a subtle placeholder.</div>
+          </div>
+          <button
+            class="seg-btn"
+            class:active={store.hideThinking}
+            role="switch"
+            aria-checked={store.hideThinking}
+            data-testid="hide-thinking"
+            title={store.hideThinking ? "Show thinking blocks" : "Hide thinking blocks"}
+            onclick={() => store.setHideThinking(!store.hideThinking)}
+          >
+            {store.hideThinking ? "On" : "Off"}
+          </button>
+        </div>
       </section>
 
       <!-- Notifications -->
@@ -491,6 +508,22 @@
     color: var(--text-faint);
     line-height: 1.5;
     margin: 10px 0 0;
+  }
+  /* Pill toggle for the hide-thinking switch. The theme control moved to
+     <SegmentedControl>, which scopes its own .seg-btn; this row still needs it. */
+  .seg-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 12.5px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .seg-btn.active {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-card);
   }
   .actions {
     display: flex;

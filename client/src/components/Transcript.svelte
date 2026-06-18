@@ -154,7 +154,7 @@
       {:else if item.kind === "assistant"}
         <div class="row assistant">
           {#if item.thinking}
-            <ThinkingBlock text={item.thinking} streaming={item.streaming && !item.text} />
+            <ThinkingBlock text={item.thinking} streaming={item.streaming && !item.text} minimal={store.hideThinking} />
           {/if}
           {#if item.text}
             <Markdown
