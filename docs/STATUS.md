@@ -1,5 +1,33 @@
 # Pilot — overnight status (morning of 2026-06-17)
 
+> ## Update — 2026-06-18 (supersedes the snapshots below)
+>
+> **Overnight Polish/feature batch — landed and rebased linearly onto `main`.** A sweep
+> over the 🟢 Polish backlog plus one brainstorm item, all green on the integrated tree:
+> `bun run test` = **97** unit, `bun run test:e2e` = **55** (desktop + mobile),
+> `tsc -p protocol` + `svelte-check` clean.
+> - **Composer / turns:** Enter steers / **Alt+Enter** queues a follow-up (inline hint);
+>   **run-failed error card** with Retry (re-sends the last prompt) + Copy.
+> - **Sidebar:** **session search** (name / preview / path), per-group **height cap**
+>   (~10 rows, internal scroll), **autofocus** on the new-session input, and a **worktree
+>   toggle** that runs the session in an isolated jj/git worktree of the chosen dir
+>   (`newSession.worktree` → both drivers; `server/src/pi/worktree.ts`).
+> - **Header / Settings:** **⌘/Ctrl+,** toggles Settings; **model search** in the picker
+>   and the favorites list; **tab title** mirrors the active session title.
+> - **Server:** **warm-session LRU eviction** (`PILOT_WARM_CAP`, default 8) — pure
+>   `evictionPlan` unit-tested; eviction disposes the session (aborts any in-flight run)
+>   and clears it from the running set (review-pass fix + regression test).
+> - **PWA:** refresh prompt when a new service worker installs.
+> - **Cross-cutting:** hotkey + **tooltip audit** — every clickable carries a descriptive
+>   `title`. Plus the **slash-command typeahead** (composer `/` menu) and a review pass
+>   (running-set-on-eviction fix, honest SW-push comment, `~/` cwd expansion, fav tooltip).
+>
+> Infra: Playwright ports are env-overridable (`PILOT_E2E_*`) so two checkouts can run e2e
+> concurrently. The **worktree-creation and LRU-eviction pi paths are typechecked +
+> unit-tested but not yet exercised live** (consistent with the rest of the pi driver).
+> Known debt: `tsc -p server` reports **7 pre-existing strict-mode errors in test files**
+> (`hub.test.ts`, `trust.test.ts`); `bun test` is green, so they sit outside the working gate.
+
 > ## Update — 2026-06-17, evening (supersedes the snapshots below)
 >
 > **Interactive project-trust card (D12) — landed.** The last 🔴. An untrusted cwd now

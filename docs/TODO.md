@@ -241,9 +241,13 @@ these are net-new. Each is a candidate, not a commitment — promote the good on
 the rest._
 
 ### Agent interaction & turn control
-- [ ] **Run-failed error card + retry** — `runFailed` currently has no first-class UI.
+- [x] **Run-failed error card + retry** — `runFailed` currently has no first-class UI.
       Render a distinct error card (message + stack/cause if present) with a "Retry"
       button that re-sends the last prompt, and a "Copy error" affordance.
+      _(done: error notices now carry a Retry (re-sends `store.lastPrompt`) + Copy
+      button; `store.lastPrompt` tracks the last sent prompt; the `error` fixture is
+      wired into the `?dev` bar + mock `runScript`; `streaming.spec.ts` covers it.
+      Stack/cause rendering deferred — the driver only surfaces `error.message` today.)_
 - [ ] **Per-turn token + cost readout** — small footer on each completed turn showing
       tokens in/out and an estimated cost (pi emits usage in the snapshot/run events).
       Distinct from the context-window fill indicator — this is "what did that turn cost."
