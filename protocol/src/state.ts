@@ -253,6 +253,12 @@ export function foldEvent(
           state.ambient.title = req.title;
           break;
         case "notify":
+          // A notice is a transcript item, so it ends any open assistant bubble —
+          // same as toolStarted/userMessage. Without this, a mid-turn notify
+          // (compaction/auto-retry) orphans the in-progress bubble: a later delta
+          // can't reuse it (no longer the last item) and starts a fresh bubble,
+          // leaving the orphan streaming:true forever (the stray blinking caret).
+          closeOpenAssistant(state.items);
           state.items.push({
             kind: "notice",
             id: req.requestId,
@@ -278,6 +284,7 @@ export function foldEvent(
     }
 
     case "extensionCompatibilityIssue": {
+      closeOpenAssistant(state.items);
       state.items.push({
         kind: "notice",
         id: `compat-${ev.timestamp}`,

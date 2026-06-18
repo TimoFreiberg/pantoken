@@ -229,6 +229,27 @@ describe("foldEvent", () => {
     expect(s.items[0]).toMatchObject({ kind: "assistant", streaming: false });
   });
 
+  test("a mid-turn notice closes the open assistant (no orphaned caret)", () => {
+    const s = foldAll([
+      base({ type: "assistantDelta", text: "first", channel: "text" }),
+      base({
+        type: "hostUiRequest",
+        request: {
+          kind: "notify",
+          requestId: "n1",
+          message: "Compacting context…",
+          level: "info",
+        },
+      }),
+      base({ type: "assistantDelta", text: "second", channel: "text" }),
+    ]);
+    // Two separate bubbles split by the notice; only the latest one may stream.
+    const assistants = s.items.filter((i) => i.kind === "assistant");
+    expect(assistants).toHaveLength(2);
+    expect(assistants[0]).toMatchObject({ text: "first", streaming: false });
+    expect(assistants[1]).toMatchObject({ text: "second", streaming: true });
+  });
+
   test("a running sessionUpdated snapshot leaves the assistant open", () => {
     const s = foldAll([
       base({ type: "assistantDelta", text: "answer", channel: "text" }),
