@@ -191,6 +191,10 @@
     flex-direction: column;
     gap: 18px;
   }
+  .row, :global(.tool) {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 120px;
+  }
   .row {
     display: flex;
     flex-direction: column;
