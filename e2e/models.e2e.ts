@@ -57,3 +57,64 @@ test("the model menu has a search that filters the list", async ({ page }) => {
   await search.fill("zzzz");
   await expect(panel.getByText("No models match")).toBeVisible();
 });
+
+test("⌘⇧M focuses the model search; keyboard select returns focus to composer", async ({
+  page,
+}) => {
+  const composer = page.getByPlaceholder("Message pilot…");
+  await composer.click();
+  await expect(composer).toBeFocused();
+
+  // Hotkey opens the menu AND lands focus in the search, so arrow/enter work at once.
+  await page.keyboard.press("Control+Shift+M");
+  const panel = page.locator(".mp .panel");
+  await expect(panel).toBeVisible();
+  const search = panel.locator(".model-search");
+  await expect(search).toBeFocused();
+
+  // Filter to a single match — it becomes the keyboard highlight — then Enter picks it.
+  await search.fill("deep");
+  await expect(panel.locator(".item.hl")).toHaveText(/DeepSeek V4 Flash/);
+  await page.keyboard.press("Enter");
+
+  await expect(
+    page.locator(".mp .badge").filter({ hasText: "DeepSeek V4 Flash" }),
+  ).toBeVisible();
+  // Focus is back in the text field, ready to type.
+  await expect(composer).toBeFocused();
+});
+
+test("⌘⇧E focuses the thinking menu; arrow+enter selects and returns focus", async ({
+  page,
+}) => {
+  const composer = page.getByPlaceholder("Message pilot…");
+  await composer.click();
+
+  await page.keyboard.press("Control+Shift+E");
+  const panel = page.getByRole("listbox", { name: "Thinking level" });
+  await expect(panel).toBeVisible();
+  await expect(panel).toBeFocused();
+  // The active level (medium) starts highlighted; arrow down moves to "high".
+  await expect(panel.locator(".item.hl")).toHaveText(/medium/);
+  await page.keyboard.press("ArrowDown");
+  await expect(panel.locator(".item.hl")).toHaveText(/high/);
+  await page.keyboard.press("Enter");
+
+  await expect(
+    page.locator(".mp .badge").filter({ hasText: "high" }),
+  ).toBeVisible();
+  await expect(composer).toBeFocused();
+});
+
+test("Esc closes the picker and returns focus to the composer", async ({
+  page,
+}) => {
+  const composer = page.getByPlaceholder("Message pilot…");
+  await composer.click();
+
+  await page.keyboard.press("Control+Shift+M");
+  await expect(page.locator(".mp .panel")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".mp .panel")).toHaveCount(0);
+  await expect(composer).toBeFocused();
+});

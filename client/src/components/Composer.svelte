@@ -66,6 +66,18 @@
     autosize();
   });
 
+  // The model/effort picker asks for focus back here after a keyboard-driven close
+  // (select or Esc). A counter so each request re-fires; guarded so the initial
+  // run never grabs focus (which would pop the keyboard on mobile / page load).
+  let lastFocusN = 0;
+  $effect(() => {
+    const n = store.focusComposerN;
+    if (n !== lastFocusN) {
+      lastFocusN = n;
+      if (!showPreview) queueMicrotask(() => ta?.focus());
+    }
+  });
+
   function submit() {
     const text = store.composerDraft;
     if (!text.trim()) return;

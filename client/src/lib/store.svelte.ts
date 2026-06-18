@@ -95,6 +95,13 @@ class PilotStore {
   hotkeyAction = $state<{ which: "model" | "thinking"; n: number } | null>(
     null,
   );
+  // Bump to ask the composer textarea to retake focus — e.g. after the model/effort
+  // menu closes from a keyboard-driven flow. A counter so each request re-fires.
+  focusComposerN = $state(0);
+
+  focusComposer(): void {
+    this.focusComposerN++;
+  }
 
   get connection(): ConnectionState {
     return connectionState();
