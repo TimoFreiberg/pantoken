@@ -43,6 +43,26 @@ describe("historyToEvents", () => {
     ]);
   });
 
+  test("a stored per-message timestamp surfaces as the item's ts", () => {
+    // Regression: reloaded transcripts must show pi's real wall-clock times, not the
+    // synthetic `h-N` ordering markers (which render as a blank <time> in the UI).
+    const items = transcript([
+      { role: "user", content: "hi", timestamp: 1_700_000_000_000 },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "yo" }],
+        timestamp: 1_700_000_005_000,
+      },
+    ]);
+    expect(items[0]).toMatchObject({ kind: "user", ts: "1700000000000" });
+    expect(items[1]).toMatchObject({ kind: "assistant", ts: "1700000005000" });
+  });
+
+  test("a message without a timestamp falls back to a synthetic marker", () => {
+    const items = transcript([{ role: "user", content: "hi" }]);
+    expect(items[0]?.ts).toMatch(/^h-\d+$/);
+  });
+
   test("string and block user content both flatten to text", () => {
     const items = transcript([
       {

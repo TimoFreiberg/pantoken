@@ -27,6 +27,10 @@ type ContentBlock =
 export interface HistoryMessage {
   readonly role: string;
   readonly content?: string | ContentBlock[];
+  // Per-message wall-clock time (Unix ms). pi-ai's UserMessage/AssistantMessage/
+  // ToolResultMessage and the custom message types all carry this; we surface it so
+  // a reloaded transcript shows real times instead of synthetic ordering markers.
+  readonly timestamp?: number;
   // toolResult
   readonly toolCallId?: string;
   readonly toolName?: string;
@@ -75,14 +79,20 @@ export function historyToEvents(
   if (messages.length === 0) return [];
 
   let seq = 0;
-  const meta = () => ({ sessionRef: ctx.ref, timestamp: `h-${seq++}` });
+  // Prefer pi's stored per-message timestamp so reloaded transcripts show real times;
+  // fall back to a synthetic `h-N` ordering marker for messages without one. seq still
+  // advances every call so the `u-${seq}`/`bash-${seq}`/`summary-${seq}` ids stay unique.
+  const meta = (ts?: number) => {
+    const marker = `h-${seq++}`;
+    return { sessionRef: ctx.ref, timestamp: ts != null ? String(ts) : marker };
+  };
   const out: SessionDriverEvent[] = [];
 
   for (const m of messages) {
     switch (m.role) {
       case "user":
         out.push({
-          ...meta(),
+          ...meta(m.timestamp),
           type: "userMessage",
           id: `u-${seq}`,
           text: contentToText(m.content),
@@ -94,14 +104,14 @@ export function historyToEvents(
         for (const b of blocks) {
           if (b.type === "text")
             out.push({
-              ...meta(),
+              ...meta(m.timestamp),
               type: "assistantDelta",
               text: (b as { text: string }).text,
               channel: "text",
             });
           else if (b.type === "thinking")
             out.push({
-              ...meta(),
+              ...meta(m.timestamp),
               type: "assistantDelta",
               text: (b as { thinking: string }).thinking,
               channel: "thinking",
@@ -110,7 +120,7 @@ export function historyToEvents(
             const call = b as { id: string; name: string; arguments?: unknown };
             const tm = ctx.toolMeta(call.name);
             out.push({
-              ...meta(),
+              ...meta(m.timestamp),
               type: "toolStarted",
               callId: call.id,
               toolName: call.name,
@@ -125,7 +135,7 @@ export function historyToEvents(
 
       case "toolResult":
         out.push({
-          ...meta(),
+          ...meta(m.timestamp),
           type: "toolFinished",
           callId: m.toolCallId ?? "",
           success: !m.isError,
@@ -136,7 +146,7 @@ export function historyToEvents(
       case "bashExecution":
         // The `!`-bash affordance result — surface as a notice (no tool card pairing).
         out.push({
-          ...meta(),
+          ...meta(m.timestamp),
           type: "hostUiRequest",
           request: {
             kind: "notify",
@@ -150,7 +160,7 @@ export function historyToEvents(
       case "compactionSummary":
       case "branchSummary":
         out.push({
-          ...meta(),
+          ...meta(m.timestamp),
           type: "hostUiRequest",
           request: {
             kind: "notify",
