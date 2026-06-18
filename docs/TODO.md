@@ -182,110 +182,54 @@ the rest._
 
 ## 🎒 Paseo-inspired (patterns to steal from [paseo.sh](https://paseo.sh))
 
-_Added 2026-06-18 after a deep comparison of both codebases. Paseo is a multi-provider
-agent orchestration layer (daemon spawns agent CLIs as subprocesses, Expo mobile app,
-Electron desktop, Docker-style CLI). Pilot's differentiator is deep in-process pi SDK
-integration — things paseo structurally can't do because it talks to pi via
-`--mode rpc` over stdio. These items are patterns paseo does well that pilot can adopt
-without changing its lane. Items marked 🚫-PASEO are things paseo already ships that
-pilot should NOT build — they're paseo's domain, not pilot's differentiator._
+_Added 2026-06-18 after a deep comparison of both codebases; triaged the same day.
+Paseo is a multi-provider agent orchestration layer (daemon spawns agent CLIs as
+subprocesses, Expo mobile app, Electron desktop, Docker-style CLI). Pilot's
+differentiator is deep in-process pi SDK integration — things paseo structurally
+can't do because it talks to pi via `--mode rpc` over stdio. The survivors below are
+patterns pilot can adopt without changing its lane. Cut in triage: items pilot
+already ships a different way (it has a `/health` endpoint, in-band WS-`hello` auth
+instead of a header/subprotocol token, and settings-panel key reload), and items that
+contradict a settled decision (Tailscale transport, pi-only, pi-owned session IDs —
+see DECISIONS D15/D16). Items marked 🚫-PASEO below are things paseo already ships
+that pilot should NOT build — they're paseo's domain, not pilot's differentiator._
 
-### ⚡ High payoff, low effort
+### Worth adopting
 
-- [ ] **Capability flags for feature gating** — Paseo's `AgentClient` carries a
-      `capabilities` flags object (`supportsStreaming`, `supportsSessionPersistence`,
-      `supportsDynamicModes`, etc.). UI gates features on `capabilities.supportsX`,
-      not `provider === "pi"`. Even for a single-provider tool, this makes the UI
-      self-documenting about what depends on what, and keeps the mock/real driver
-      split clean. Add a `Capabilities` flags type to `PilotDriver` + `ServerMessage.hello`,
-      gate UI features on slices of it rather than scattered conditionals.
-- [ ] **Design system: "3+ uses → primitive" rule** — Paseo enforces that any
-      semantic element used in three or more places must be a primitive in
-      `components/ui/`. A `<Pressable>` styled as a button is wrong — the only
-      button is `<Button>`. A bare `<Text>` styled as a section header is wrong.
-      Pilot's Svelte components would benefit from the same rigor: audit common
-      patterns, pull them into shared primitives, stop re-implementing the same
-      row/button/header across components.
-- [ ] **Button variants with single jobs** — Paseo has exactly 5 button variants,
-      each with one job: `default` (one CTA per surface), `secondary` (paired
-      equal-weight), `outline` (row-level action), `ghost` (chrome/structural),
-      `destructive` (confirm dialog only). Adopt the same variant discipline in
-      pilot's button classes — right now buttons don't have a clear variant taxonomy.
-- [ ] **Hierarchy via weight/color, not font-size** — Paseo keeps most text at
-      `fontSize.base`. Distinction between primary and secondary lines is
-      `foreground` vs `foregroundMuted`. Weight tiers: screen titles (light),
-      structural labels (medium), content (normal). Pilot uses varying font sizes
-      for hierarchy; switch to the weight+color approach for a calmer visual rhythm.
-- [ ] **Directory-backed vs workspace-owned state boundary** — Paseo splits
-      right-sidebar state cleanly: git status/diff keyed by `(serverId, cwd)` so
-      same-directory workspaces share it; tabs/agents/drafts keyed by opaque
-      `workspaceId` so they don't leak. Pilot's current flat "sessions grouped by
-      cwd" doesn't have this distinction. Formalize what state is directory-scoped
-      vs session-scoped, and enforce it through the key shape in the protocol +
-      client stores.
-- [ ] **Agent lifecycle as explicit state machine** — Paseo's `ManagedAgent` is a
-      discriminated union: `initializing → idle ⇄ running → error → closed`. The
-      `initializing` state (session being created, not ready) lets the UI show a
-      spinner. Pilot's mock fixture currently has no `initializing` phase. Add it
-      so the UI handles "session created but not yet streaming" gracefully.
-- [ ] **Opaque session/workspace IDs — never parse into paths** — Paseo's
-      `workspaceId` is opaque (`wks_<hex>`). Code reads `cwd` for the filesystem
-      path. Pilot's session IDs are pi's session file paths by convention — adopt
-      a stable opaque ID for pilot sessions, keep the path as a separate field, and
-      never parse the ID.
-
-### ⚡ High payoff, medium effort
-
-- [ ] **E2E encrypted relay with QR pairing** — Paseo's relay is zero-knowledge:
-      daemon holds a persistent Curve25519 keypair, phone generates ephemeral one
-      per connection, ECDH + XSalsa20-Poly1305 (NaCl `box`). The QR code embeds
-      the daemon's public key in a URL fragment (never sent to the relay server).
-      Pilot currently depends on Tailscale for network ACL + an app-level auth
-      token. A relay option would make mobile connectivity zero-config and remove
-      the Tailscale dependency for external access. Paseo's `@getpaseo/relay`
-      package is AGPL-3.0 and could be reused or studied as a reference.
-- [ ] **Timeline sync: live stream + authoritative paged fetch** — Paseo's event
-      delivery has two paths: `agent_stream` (live, for immediacy) and
-      `fetch_agent_timeline` (authoritative, paged to completion). The invariant:
-      every connected client eventually displays every committed timeline row.
-      Pilot's snapshot-on-reconnect works but doesn't handle the case where a
-      client was disconnected during a long run and the full snapshot is huge.
-      Paged catch-up with sequence-based dedup would be more robust over flaky
-      mobile connections. Also worth stealing: the `AgentStreamCoalescer` pattern
-      for reducing WS frame churn during rapid tool-call updates.
-- [ ] **Password auth for direct-TCP exposure** — Paseo supports optional bcrypt
-      password auth: `Authorization: Bearer <token>` on HTTP, and the token rides
-      in the `Sec-WebSocket-Protocol` subprotocol for browser WS (browsers can't
-      set custom headers on upgrade). Health + CORS preflight are exempt. Pilot
-      has no auth besides network ACL — add password auth as a defense-in-depth
-      layer for direct exposure even within the tailnet.
-- [ ] **PID lock file + daemon identity** — Paseo writes `paseo.pid` / `server-id`
-      to prevent two daemons sharing one `$PASEO_HOME`. Pilot currently has no
-      PID lock — two server processes would fight over the same archive store +
-      VAPID keypair. Add a PID lock file + a stable server ID per data dir.
-- [ ] **Config hot-reload** — Paseo watches `config.json` for changes and applies
-      them at runtime. Pilot reads config once at startup. Hot-reload would make
-      "add API key in Settings" feel instant rather than requiring a restart
-      (or the current workaround of driver re-initialization).
-
-### 📐 Medium payoff, medium effort
-
-- [ ] **Workspace model: projects + workspaces + worktrees** — Paseo's abstraction
-      layers: Project (logical group, keyed by git remote) → Workspace (one `cwd`,
-      git state, kind = `directory|local_checkout|worktree`) → Isolation (create-time
-      choice: reuse vs new git worktree). Pilot's "sessions grouped by directory"
-      is a simpler version of this. Consider formalizing the project/workspace
-      concepts so multi-repo workflows and worktree-based isolation are first-class
-      in the UI rather than ad-hoc path conventions.
-- [ ] **Subagent track UI pattern** — Paseo has a collapsible lane above the composer
-      showing running child agents with live status. Closing a tab on a subagent is
-      layout-only (stays in the track); closing a root's tab archives it. If pilot
-      adds multi-agent orchestration (pi sub-agents), the track pattern is better
-      than burying children in a sidebar.
-- [ ] **Daemon as infrastructure: log rotation, startup health** — Paseo's daemon
-      writes `daemon.log` with pino + rotation, and has a `/api/health` endpoint.
-      Pilot has no structured logging or health endpoint. Add both for
-      production-readiness.
+- [ ] **Agent lifecycle `initializing` state** — pilot's `SessionStatus` is
+      `idle | running | failed` (`protocol/src/session-driver.ts`), with no explicit
+      "session created but not yet streaming" phase. Paseo models the full machine as
+      `initializing → idle ⇄ running → error → closed`. Add `initializing` so the UI
+      can show a spinner during the warm-up + trust-card swap window (the
+      "now-human-long" swap from D12) instead of a dead-looking row.
+- [ ] **PID lock file + server identity** — nothing stops two server processes
+      sharing one data dir; they'd fight over the archive store and the VAPID keypair,
+      and regenerating VAPID silently invalidates every phone's push subscription (see
+      the archive-store note in DONE.md). Write a PID lock + a stable server-id per
+      data dir and fail loud on a second start. Cheap; fits the
+      crash-loud-over-silent-corruption posture.
+- [ ] **Design-system consistency pass** — port paseo's *discipline*, not its
+      React-Native specifics: any semantic element used 3+ times becomes a shared
+      primitive, buttons get a small fixed variant taxonomy (one CTA per surface,
+      secondary, outline, ghost, destructive), and hierarchy leans on weight+color
+      over font-size. Audit pilot's Svelte components, pull repeated row/button/header
+      patterns into primitives. Refactor, not a feature; the weight-vs-font-size call
+      is a taste judgment to make by eyeballing against D14.
+- [ ] **Big-snapshot pagination + tool-update frame coalescing** — extends the
+      existing "raise/chunk 64KB WS frame cap for snapshots" SHOULD in DESIGN. For a
+      long session reconnecting over a flaky phone link, a paged/chunked catch-up beats
+      one huge snapshot frame; paseo's `AgentStreamCoalescer` (merge rapid tool-call
+      updates into fewer WS frames) is the other half. Skip paseo's full
+      sequence-dedup'd paged-timeline machinery — overkill for a single user.
+- [ ] **Structured logging + rotation for the daemon** — only the logging half of
+      paseo's "daemon as infrastructure" applies (pilot already has `/health` in
+      `server/src/index.ts`): a rotating `daemon.log` for the launchd-run server so a
+      background crash leaves a trail.
+- [ ] **Render pi's native sub-agents** (conditional, low priority) — *not* paseo's
+      orchestration track; pilot deliberately isn't the orchestration layer (D9, and
+      see 🚫 below). But pi has native sub-agents — if/when they surface in the event
+      stream, render them as a collapsible lane rather than burying them. Display, not
+      orchestrate.
 
 ### 🚫 Out of scope (paseo does these already — not pilot's lane)
 

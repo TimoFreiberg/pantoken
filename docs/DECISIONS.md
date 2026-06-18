@@ -194,3 +194,24 @@ right-side minimap. Diverge from Claude where dogfooding suggests better.
   BOTH AGENTS.md and `.pi` config first — but its actual security function is
   blocking auto-exec of repo `.pi/extensions`, which matters more given no tool
   gating (D9).
+
+## 2026-06-18 — Paseo comparison triage
+
+A deep read of paseo.sh surfaced patterns to steal (filed in TODO's "Paseo-inspired"
+lane) and two calls worth recording as settled, both reinforcing prior decisions.
+
+### D15. Session identity = pi's session IDs, never pilot-minted
+Pilot uses pi's own session IDs (its session-file identity) and nothing else. Paseo
+mints opaque `wks_<hex>` IDs and keeps the path as a separate field; pilot
+deliberately does not. D13 makes pi's session files authoritative and pilot behaves
+as a peer to a CLI `pi`, so a parallel ID space would reintroduce exactly the mapping
+layer D13 removed. Revisit only if a critical use case needs an ID decoupled from the
+path — not on general principle.
+
+### D16. Directory- vs session-scoped state = defer the formal split
+Paseo splits right-sidebar state by `(serverId, cwd)` (shared across same-dir
+workspaces) vs opaque `workspaceId` (per-workspace), and layers Project → Workspace →
+Isolation. Pilot has almost no directory-scoped state today — the git status/diff
+panels that would need it are LATER / out-of-scope — so the formal split is premature.
+When directory-scoped state does land, key it by `(server, cwd)`; the cwd-grouped
+sidebar + worktree checkbox already cover the lightweight version.
