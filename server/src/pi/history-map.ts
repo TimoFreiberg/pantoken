@@ -51,7 +51,9 @@ export interface HistoryMapCtx {
 }
 
 /** Flatten message content to plain text the transcript renders (images -> placeholder). */
-function contentToText(content: string | ContentBlock[] | undefined): string {
+export function contentToText(
+  content: string | ContentBlock[] | undefined,
+): string {
   if (content == null) return "";
   if (typeof content === "string") return content;
   return content
