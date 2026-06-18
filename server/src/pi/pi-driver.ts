@@ -60,7 +60,7 @@ import {
   type ModelLike,
   resolveFavorites,
 } from "./model-config.js";
-import { mergeSessionLists } from "./session-list.js";
+import { firstUserPreview, mergeSessionLists } from "./session-list.js";
 import { makeTrustResolver, type TrustAsk } from "./trust.js";
 import { PiUiBridge } from "./ui-bridge.js";
 
@@ -454,19 +454,22 @@ export async function createPiDriver(
   // missing from the very list we broadcast alongside its activeSessionId. Synthesize
   // a placeholder so the sidebar shows it the instant it's created; once it persists,
   // the richer disk entry supersedes it (deduped by sessionId in listSessions). cwd is
-  // the only stable field — name/preview fill in from disk after the first turn; the
-  // timestamp is "now" so a brand-new session sorts to the top and never reads as stale.
+  // the only stable field; the timestamp is "now" so a brand-new session sorts to the
+  // top and never reads as stale. preview = the first user message (firstUserPreview) so
+  // an unnamed new session reads as its prompt, not "(untitled)", before pi names it.
   const warmEntry = (ws: WarmSession): SessionListEntry | null => {
     const path = ws.session.sessionFile;
     if (!path) return null; // non-persistent session (pilot never makes these)
     const nowIso = new Date().toISOString();
+    const messages = ws.session
+      .messages as unknown as readonly HistoryMessage[];
     return {
       sessionId: ws.ref.sessionId,
       path,
       cwd: ws.cwd,
       displayName: ws.session.sessionName,
-      preview: "",
-      messageCount: ws.session.messages.filter(
+      preview: firstUserPreview(messages),
+      messageCount: messages.filter(
         (m) => m.role === "user" || m.role === "assistant",
       ).length,
       updatedAt: nowIso,
