@@ -12,6 +12,7 @@ import type {
   SessionListEntry,
   SessionRef,
   SessionSnapshot,
+  SessionUsage,
   TrustRequest,
 } from "@pilot/protocol";
 
@@ -75,6 +76,14 @@ export const MOCK_COMMANDS: readonly CommandInfo[] = [
     source: "skill",
   },
 ];
+
+/** The mock's context-window fill, for the composer meter. ~24% of Opus's 200k
+ *  window — a clearly-partial gauge that's deterministic for screenshots/e2e. */
+export const MOCK_USAGE: SessionUsage = {
+  tokens: 47200,
+  contextWindow: 200000,
+  percent: 23.6,
+};
 
 /** The mock's starting model selection (matches the greeting snapshot). */
 export const MOCK_DEFAULT_CONFIG: SessionConfig = {
@@ -151,6 +160,7 @@ export function snapshot(over: Partial<SessionSnapshot> = {}): SessionSnapshot {
     status: "idle",
     updatedAt: ts(),
     config: MOCK_DEFAULT_CONFIG,
+    usage: MOCK_USAGE,
     ...over,
   };
 }

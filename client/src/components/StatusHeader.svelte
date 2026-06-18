@@ -1,6 +1,5 @@
 <script lang="ts">
   import { store } from "../lib/store.svelte.js";
-  import ModelPicker from "./ModelPicker.svelte";
 
   let hotkeyN = $state(0);
 
@@ -94,7 +93,6 @@
     {#if store.streaming}
       <span class="working"><span class="pulse"></span>working</span>
     {/if}
-    <ModelPicker />
     <button
       class="gear"
       data-testid="settings-toggle"

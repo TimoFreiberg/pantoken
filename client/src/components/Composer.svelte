@@ -5,6 +5,8 @@
   import { renderMarkdown } from "../lib/markdown.js";
   import { filterCommands, slashQuery } from "../lib/slash.js";
   import SlashMenu from "./SlashMenu.svelte";
+  import ModelPicker from "./ModelPicker.svelte";
+  import ContextMeter from "./ContextMeter.svelte";
 
   let deliverAs = $state<"steer" | "followUp">("steer");
   let ta = $state<HTMLTextAreaElement>();
@@ -253,6 +255,31 @@
       </div>
       </div>
     </div>
+
+    <!-- Footer toolbar: the session's context fill on the left, the per-session
+         controls (attach · model · effort) on the right. Mirrors the Claude app's
+         composer chrome; permission/voice controls are intentionally omitted. -->
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <ContextMeter />
+      </div>
+      <div class="toolbar-right">
+        <!-- TODO: file uploader — wire to an attach/upload driver capability + a
+             hotkey once the protocol carries attachments. Disabled placeholder for now. -->
+        <button
+          class="attach"
+          disabled
+          title="Attach files (coming soon)"
+          aria-label="Attach files (coming soon)"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+          </svg>
+        </button>
+        <ModelPicker />
+      </div>
+    </div>
+
     {#if streaming}
       <div class="hint">
         <kbd>Enter</kbd> steers · <kbd>Alt</kbd>+<kbd>Enter</kbd> queues a follow-up
@@ -489,5 +516,46 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-xs);
     padding: 0 4px;
+  }
+  .toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 0 2px;
+  }
+  .toolbar-left,
+  .toolbar-right {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  /* The model/effort badges can grow; let them shrink + ellipsize before the
+     fixed-width context meter or attach button give up their space. */
+  .toolbar-right {
+    flex-shrink: 1;
+  }
+  .attach {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    flex-shrink: 0;
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-xs);
+    cursor: pointer;
+  }
+  .attach:hover:not(:disabled) {
+    background: var(--surface-sunken);
+    border-color: var(--border);
+    color: var(--text);
+  }
+  .attach:disabled {
+    opacity: 0.45;
+    cursor: default;
   }
 </style>

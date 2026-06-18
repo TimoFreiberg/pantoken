@@ -213,6 +213,12 @@ export async function createPiDriver(
     status: SessionStatus,
   ): SessionSnapshot => {
     const m = ws.session.model;
+    // Context-window fill for the composer meter. getContextUsage() walks the branch
+    // + estimates tokens over the message list — O(messages), so it's fine here (only
+    // called at turn boundaries / config changes, never on the per-delta path) but
+    // would not be on the hot stream. Returns undefined when no model / no window;
+    // re-shaped to a plain object so nothing pi-internal leaks onto the wire.
+    const cu = ws.session.getContextUsage();
     return {
       ref: ws.ref,
       workspace: {
@@ -229,6 +235,13 @@ export async function createPiDriver(
         thinkingLevel: ws.session.thinkingLevel,
         availableThinkingLevels: ws.session.getAvailableThinkingLevels(),
       },
+      usage: cu
+        ? {
+            tokens: cu.tokens,
+            contextWindow: cu.contextWindow,
+            percent: cu.percent,
+          }
+        : undefined,
     };
   };
 

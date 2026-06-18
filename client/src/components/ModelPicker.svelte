@@ -227,7 +227,9 @@
   }
   .panel {
     position: absolute;
-    top: calc(100% + 6px);
+    /* Opens UPWARD: the picker lives in the composer footer at the bottom of the
+       viewport, so a downward panel would fall off-screen. */
+    bottom: calc(100% + 6px);
     right: 0;
     z-index: 50;
     width: max(180px, 100%);
