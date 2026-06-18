@@ -126,10 +126,8 @@
             <!-- eslint-disable-next-line svelte/no-at-html-tags -->
             <div class="prose">{@html renderMarkdown(item.text)}</div>
           {/if}
-          <!-- Caret only while this item is streaming AND the session is actually
-               running — guards against a stale streaming:true leaving a blinking
-               caret after an idle transition that arrived only as sessionUpdated. -->
-          {#if item.streaming && store.streaming}<span class="caret"></span>{/if}
+          <!-- "Still working" lives in the bottom WorkingIndicator now, not as an
+               inline caret on the streaming paragraph. -->
           {#if item.text && (!item.streaming || !store.streaming)}
             <div class="meta">
               <button
@@ -249,21 +247,6 @@
   }
   .assistant {
     gap: 8px;
-  }
-  .caret {
-    display: inline-block;
-    width: 8px;
-    height: 1.1em;
-    background: var(--accent);
-    border-radius: 1px;
-    animation: blink 1s steps(2) infinite;
-    vertical-align: text-bottom;
-    margin-top: 2px;
-  }
-  @keyframes blink {
-    50% {
-      opacity: 0;
-    }
   }
   /* tiny relative timestamp under each turn */
   .ts {

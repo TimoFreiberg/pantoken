@@ -5,6 +5,7 @@
   import Sidebar from "./components/Sidebar.svelte";
   import ConnectionBanner from "./components/ConnectionBanner.svelte";
   import Transcript from "./components/Transcript.svelte";
+  import WorkingIndicator from "./components/WorkingIndicator.svelte";
   import Composer from "./components/Composer.svelte";
   import ApprovalLayer from "./components/ApprovalLayer.svelte";
   import TrustCard from "./components/TrustCard.svelte";
@@ -56,6 +57,7 @@
     <StatusHeader />
     <ConnectionBanner />
     <Transcript />
+    <WorkingIndicator />
     {#if dev}
       <div class="devbar">
         {#each scripts as s (s)}
