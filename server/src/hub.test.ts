@@ -445,6 +445,49 @@ describe("SessionHub", () => {
     release([ev({ type: "sessionOpened", snapshot: snap("s") })]);
   });
 
+  test("a completed swap reconciles new focus and keeps backgrounded sessions running", async () => {
+    // Companion to the mid-switch test: the round-2 reorder (trackRunning above the
+    // switching guard) must not disturb a *successful* swap. The swapped-from session
+    // keeps running in the warm pool, the untouched background session stays running,
+    // and the swapped-to session's running state is reconciled from its seed snapshot.
+    let release: (v: SessionDriverEvent[]) => void = () => {};
+    const pending = new Promise<SessionDriverEvent[]>((r) => {
+      release = r;
+    });
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    const a = client();
+    hub.addClient(a.send);
+
+    d.emit(ev({ type: "assistantDelta", text: "focus", channel: "text" })); // focus "s"
+    d.emit(
+      evFor("s2", { type: "assistantDelta", text: "bg", channel: "text" }),
+    ); // bg "s2"
+
+    // biome-ignore lint/suspicious/noExplicitAny: test stub override
+    (d as any).openSession = () => pending;
+    hub.handleClient(a.send, { type: "openSession", path: "/s3.jsonl" });
+    await flush();
+    a.received.length = 0;
+
+    // The swap resolves with a mid-run seed → new focus "s3" reconciles to running.
+    release([
+      evFor("s3", {
+        type: "sessionOpened",
+        snapshot: { ...snap("s3"), status: "running" },
+      }),
+    ]);
+    await flush();
+
+    const st = a.received.filter((m) => m.type === "sessionStatus").at(-1);
+    expect(st?.type).toBe("sessionStatus");
+    if (st?.type === "sessionStatus") {
+      expect(st.runningIds).toContain("s3"); // new focus reconciled from seed status
+      expect(st.runningIds).toContain("s"); // swapped-from session still running
+      expect(st.runningIds).toContain("s2"); // untouched background session
+    }
+  });
+
   test("a fresh client is told what's already running on connect", () => {
     const d = new FakeDriver();
     const hub = new SessionHub(d);
