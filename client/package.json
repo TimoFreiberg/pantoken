@@ -11,7 +11,8 @@
   },
   "dependencies": {
     "@pierre/diffs": "^1.2.11",
-    "@pilot/protocol": "workspace:*"
+    "@pilot/protocol": "workspace:*",
+    "markstream-svelte": "^0.0.1"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",

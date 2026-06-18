@@ -279,6 +279,71 @@ export function greeting(): ScriptStep[] {
   ];
 }
 
+// --- A rich-markdown turn for verifying full markdown rendering -------------
+
+const MARKDOWN_SAMPLE = [
+  "## Markdown showcase",
+  "",
+  "Here's **bold**, *italic*, ~~struck~~, and `inline code`, plus a [link](https://example.com).",
+  "",
+  "### A table",
+  "",
+  "| Feature     | Status |",
+  "| ----------- | ------ |",
+  "| Headers     | done   |",
+  "| Tables      | done   |",
+  "| Code blocks | done   |",
+  "",
+  "### A list",
+  "",
+  "1. First item",
+  "2. Second item",
+  "   - nested bullet",
+  "   - another",
+  "",
+  "> A blockquote, for good measure.",
+  "",
+  "```ts",
+  "function greet(name: string) {",
+  "  return `hello, ${name}`;",
+  "}",
+  "```",
+].join("\n");
+
+/** Stream a turn that exercises headers, tables, lists, blockquotes, code, and
+ *  inline emphasis — driven by the `markdown` dev-bar button and the e2e suite to
+ *  verify full markdown rendering (markstream-svelte). */
+export function markdownShowcase(): ScriptStep[] {
+  return [
+    {
+      wait: 0,
+      event: {
+        ...base(),
+        type: "userMessage",
+        id: `u-${ts()}`,
+        text: "Show me a markdown formatting sample.",
+      },
+    },
+    {
+      wait: 0,
+      event: {
+        ...base(),
+        type: "sessionUpdated",
+        snapshot: snapshot({ status: "running" }),
+      },
+    },
+    ...deltas(MARKDOWN_SAMPLE, "text"),
+    {
+      wait: 60,
+      event: {
+        ...base(),
+        type: "runCompleted",
+        snapshot: snapshot({ status: "idle" }),
+      },
+    },
+  ];
+}
+
 // --- The default streamed reply to any prompt -------------------------------
 
 export function promptReply(userText: string): ScriptStep[] {

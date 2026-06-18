@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import type { TranscriptItem } from "@pilot/protocol";
   import { store } from "../lib/store.svelte.js";
-  import { renderMarkdown } from "../lib/markdown.js";
+  import Markdown from "./Markdown.svelte";
   import ToolCard from "./ToolCard.svelte";
   import ThinkingBlock from "./ThinkingBlock.svelte";
 
@@ -123,8 +123,10 @@
             <ThinkingBlock text={item.thinking} streaming={item.streaming && !item.text} />
           {/if}
           {#if item.text}
-            <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-            <div class="prose">{@html renderMarkdown(item.text)}</div>
+            <Markdown
+              content={item.text}
+              final={!(item.streaming && store.streaming)}
+            />
           {/if}
           <!-- "Still working" lives in the bottom WorkingIndicator now, not as an
                inline caret on the streaming paragraph. -->
