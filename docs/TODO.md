@@ -202,6 +202,11 @@ _(clear — pull the next item up from Polish)_
       prompt and pi's `prompt()` runs the command / expands the template. TUI builtins
       (/model, /settings, …) intentionally omitted — pilot has native UI. Unit test for
       the filter + `e2e/slash.spec.ts`.)_
+- [ ] **`/tree` command (native pi command)** — pi's builtin `/tree` command shows
+      the directory tree. Currently TUI builtins are intentionally omitted from the
+      client command list. `/tree` should be passed through so typing `/tree` in the
+      composer sends it as a prompt for pi to execute, even if pilot doesn't render
+      the tree natively.
 - [x] **PNG / maskable icons** — proper app icons for installed PWA
       _(done: 192/512 + maskable-512 (safe-zone padded) + 180 apple-touch, rasterized
       from `icon.svg`; manifest + `<link apple-touch-icon>` wired.)_
