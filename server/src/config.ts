@@ -29,7 +29,9 @@ export const config = {
   warmCap: Number(process.env.PILOT_WARM_CAP ?? 8),
 };
 
-/** Constant-time-ish token check. null token = auth disabled. */
+/** Token check. null token = auth disabled. This is a plain string compare, not a
+ *  constant-time one: pilot is single-user behind `tailscale serve`, so a timing
+ *  side-channel on the token isn't in the threat model. */
 export function tokenOk(provided: string | null | undefined): boolean {
   return config.token === null || provided === config.token;
 }

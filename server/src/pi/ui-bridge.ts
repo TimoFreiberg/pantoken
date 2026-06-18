@@ -62,13 +62,6 @@ export class PiUiBridge {
     this.settle(response.requestId, response);
   }
 
-  /** Re-point at a newly-active session (after a switch): stamp emitted events with
-   *  the new ref and drop dialogs from the previous, now-disposed session. */
-  rebind(ref: SessionRef): void {
-    this.ref = ref;
-    this.pending.clear();
-  }
-
   private settle(id: string, r: HostUiResponse | null): void {
     const fn = this.pending.get(id);
     if (!fn) return;

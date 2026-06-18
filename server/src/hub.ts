@@ -69,11 +69,17 @@ export class SessionHub {
   }
 
   private onEvent(ev: SessionDriverEvent): void {
-    if (this.switching) return; // the swap orchestrates its own reset + re-fold
     const sid = ev.sessionRef.sessionId;
-    // Track the running set across every session (incl. background ones whose events
-    // are never broadcast), before the focus check below.
+    // Track the running set across every session — including mid-swap and for
+    // background sessions whose events are never broadcast. A session's turn/terminal
+    // events are authoritative about whether it's running regardless of focus or an
+    // in-flight switch. In particular, LRU eviction (pi-driver) disposes a warm session
+    // *inside* a swap and emits a synthetic sessionClosed for it; that must clear the
+    // running set here or the evicted session shows a perpetual running indicator. The
+    // `switching` guard below only protects the focused-transcript fold + broadcast,
+    // which the swap re-seeds — it must not gate cross-session running tracking.
     this.trackRunning(sid, ev);
+    if (this.switching) return; // the swap orchestrates its own reset + re-fold
     // The first session to surface becomes the focus (e.g. the resumed session at
     // startup). Only the focused session folds into `state` and broadcasts; other
     // (warm, background) sessions reach maybeNotify but not the focused transcript.
