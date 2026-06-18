@@ -5,6 +5,24 @@ and its resolution note. Latest completions first.
 
 ---
 
+- [x] **Design-system consistency pass — button primitives** _(scoped + reshaped with owner
+  2026-06-18; shipped 2026-06-18)_
+  _(done: three interactive primitives in `client/src/components/ui/` —
+  `IconButton` (icon-only, required `title`, sizes, `danger` variant, `active` toggle, 44px
+  coarse-pointer tap target), `SegmentedControl` (generic radiogroup, data-driven options
+  with optional `testid`), alongside the pre-existing `Button`. Standard chrome migrated to
+  them: Sidebar (collapse/group-add/error-x/row-menu → IconButton, rename → Button), Composer
+  (steer/follow-up → SegmentedControl controlled, attach → IconButton), Settings (theme →
+  SegmentedControl, all btn/ghost/danger → Button, close → IconButton), StatusHeader
+  (hamburger + gear → IconButton), App (update-toast x → IconButton), TokenGate (Connect →
+  Button), NewSession (Cancel → Button). Pure refactor — full e2e + svelte-check + 174 unit
+  tests + prod build green; a 9-agent adversarial review confirmed behavior preserved, all
+  clickables labelled, no dead CSS, 0 real issues. Fixed two latent gaps in passing (Sidebar
+  rename buttons were unstyled; Settings close ✕ had no title). What didn't fit the three
+  primitives is catalogued as future-primitive candidates in `docs/design-system-pass.md`
+  and a follow-on TODO; the layout-primitive fast-follow + type-hierarchy polish stay
+  separate. Per-surface commits on a stack above `main`, left for owner review.)_
+
 - [x] **Server PID lock + stable server identity** _(paseo-inspired)_
   _(done: `server/src/pidlock.ts` — lock at `dataDir/pilot.pid`; a LIVE second server
   aborts startup loud (names pid + data dir; guards the archive/push stores + VAPID
