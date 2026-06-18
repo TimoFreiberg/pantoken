@@ -46,6 +46,15 @@ to use the deterministic mock instead — you want this for UI dev without a run
 pi instance and for the dev-bar (`/?dev`). The e2e suite sets it automatically;
 unit tests don't touch the driver at all.
 
+**Worktree note:** if you're spawned in an isolated worktree, work there — don't
+fall back to `~/src/pilot` (a concurrent session may be committing there; two
+agents on one working copy scramble each other's commits). A fresh worktree
+starts without `node_modules` (gitignored), so run `bun install` in it before
+building/testing. The e2e suite runs fully inside one checkout — it boots its own
+dev server — so a worktree can run it standalone; to run alongside another e2e
+run, override `PILOT_E2E_SERVER_PORT` / `PILOT_E2E_VITE_PORT` (see
+`playwright.config.ts`).
+
 ## Verifying the UI (agent-legible introspection)
 
 This is set up so you can verify autonomously — use it.
