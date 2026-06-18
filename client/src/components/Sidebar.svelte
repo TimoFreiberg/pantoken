@@ -4,6 +4,7 @@
   import { store } from "../lib/store.svelte.js";
   import { filterSessions } from "../lib/session-filter.js";
   import { relativeTime } from "../lib/relative-time.js";
+  import { buildHash, buildDate, buildLabel } from "../lib/build-info.js";
   import ContextRing from "./ContextRing.svelte";
 
   function basename(p: string): string {
@@ -501,6 +502,18 @@
       {/each}
     {/if}
   </nav>
+
+  <!-- Build stamp: last commit hash + date, baked in at build time. Quiet footer so
+       you can tell which version is live without it competing with the session list. -->
+  <div
+    class="version"
+    data-testid="version"
+    title={buildDate
+      ? `pilot build ${buildHash} · committed ${buildDate}`
+      : `pilot build ${buildHash}`}
+  >
+    {buildLabel}
+  </div>
 </aside>
 
 <style>
@@ -648,6 +661,19 @@
     flex: 1;
     overflow-y: auto;
     padding: 4px 6px 14px;
+  }
+  /* Quiet build stamp pinned at the bottom of the sidebar. */
+  .version {
+    flex-shrink: 0;
+    padding: 8px 14px calc(8px + env(safe-area-inset-bottom));
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: default;
+    user-select: none;
   }
   .empty {
     padding: 16px 10px;

@@ -1,12 +1,37 @@
+import { execSync } from "node:child_process";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig } from "vite";
 
 const SERVER = process.env.PILOT_SERVER ?? "http://localhost:8787";
 
+// Stamp the build with the last commit's short hash + date, surfaced in the UI as an
+// unobtrusive version string. Works in dev (the jj worktree resolves git) and in prod
+// (the deploy slots are plain git clones). Falls back to "dev" if git isn't reachable
+// rather than failing the build.
+function gitInfo(): { hash: string; date: string } {
+  try {
+    const git = (args: string): string =>
+      execSync(`git ${args}`, { stdio: ["ignore", "pipe", "ignore"] })
+        .toString()
+        .trim();
+    return {
+      hash: git("rev-parse --short HEAD"),
+      date: git("log -1 --format=%cd --date=short"),
+    };
+  } catch {
+    return { hash: "dev", date: "" };
+  }
+}
+const BUILD = gitInfo();
+
 // During dev the Svelte app runs on Vite (5173) and proxies the WS + introspection
 // endpoints to the Bun server (8787). In prod the Bun server serves the built bundle.
 export default defineConfig({
   plugins: [svelte()],
+  define: {
+    __BUILD_HASH__: JSON.stringify(BUILD.hash),
+    __BUILD_DATE__: JSON.stringify(BUILD.date),
+  },
   server: {
     port: 5173,
     proxy: {
