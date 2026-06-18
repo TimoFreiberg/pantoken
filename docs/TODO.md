@@ -32,6 +32,13 @@ _(clear — nothing blocking; pull the next item up from Important)_
       work (API-key entry shipped); needs a server-side OAuth callback reachable over
       Tailscale, which is the bulk of the cost.
 - [ ] **Extensions enable/disable view** + compatibility-issue surfacing
+- [ ] **Per-session system-prompt override** — let a new session start with a custom
+      system prompt instead of pi's default (in the new-session draft, and/or a global
+      default in Settings). Seam: `resourceLoaderOptions.systemPrompt` on
+      `createAgentSessionServices` in `warmUp` (`server/src/pi/pi-driver.ts`) for a full
+      replace, or `appendSystemPrompt` for additive. NOT needed for the pi-docs-pointer
+      strip — that's handled globally by the `strip-pi-docs` pi extension
+      (`~/.pi/agent/extensions/`); this is the broader "different prompt for this session."
 
 ## 🔵 Later
 
