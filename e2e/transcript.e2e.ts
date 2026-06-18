@@ -17,9 +17,18 @@ test("renders the greeting conversation: user, assistant, tool card", async ({
   await expect(page.getByText("Run shell command")).toBeVisible();
 });
 
-test("status header shows model and a live connection", async ({ page }) => {
-  await expect(page.getByText("Claude Opus 4.8")).toBeVisible();
-  await expect(page.getByText("live", { exact: true })).toBeVisible();
+test("the composer footer shows the model; the header shows a live connection", async ({
+  page,
+}) => {
+  // The model label lives in the composer footer now (moved out of the header).
+  await expect(
+    page
+      .locator(".composer-wrap .mp .badge")
+      .filter({ hasText: "Claude Opus 4.8" }),
+  ).toBeVisible();
+  await expect(
+    page.locator(".hdr").getByText("live", { exact: true }),
+  ).toBeVisible();
 });
 
 test("tool card expands to show output", async ({ page }) => {

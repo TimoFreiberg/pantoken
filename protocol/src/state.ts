@@ -11,6 +11,7 @@ import {
   type SessionQueuedMessage,
   type SessionRef,
   type SessionStatus,
+  type SessionUsage,
 } from "./session-driver.js";
 
 export interface UserItem {
@@ -61,6 +62,9 @@ export interface SessionState {
   title: string;
   status: SessionStatus;
   config: SessionConfig;
+  /** Context-window fill for the active model; undefined until a snapshot carries it
+   *  (or when the model exposes no context window). Drives the composer's meter. */
+  usage?: SessionUsage;
   items: TranscriptItem[];
   /** Blocking dialogs awaiting a response, in arrival order. */
   pendingApprovals: HostUiRequest[];
@@ -119,6 +123,10 @@ export function foldEvent(
       state.title = s.title;
       state.status = s.status;
       if (s.config) state.config = s.config;
+      // Only overwrite when the snapshot carries usage, so a usage-less snapshot
+      // (e.g. the mock's abort) doesn't blank a known meter value. A defined usage
+      // with tokens:null is still meaningful (window known, count pending).
+      if (s.usage) state.usage = s.usage;
       state.queued = s.queuedMessages ? [...s.queuedMessages] : [];
       // Close any open assistant when the turn ends. runCompleted always ends a
       // turn; a sessionUpdated/runCompleted snapshot whose status is no longer

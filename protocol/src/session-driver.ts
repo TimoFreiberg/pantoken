@@ -38,6 +38,18 @@ export interface SessionConfig {
   readonly availableThinkingLevels?: readonly string[];
 }
 
+/** How full the active model's context window is — drives the composer's context
+ *  meter. A JSON-safe projection of pi's `AgentSession.getContextUsage()`. `tokens`
+ *  is the estimated token count currently in context; it's `null` when unknown
+ *  (e.g. right after a compaction, until the next assistant response re-grounds it),
+ *  in which case `percent` is null too but `contextWindow` (the model's max) is still
+ *  known and worth showing. */
+export interface SessionUsage {
+  readonly tokens: number | null;
+  readonly contextWindow: number;
+  readonly percent: number | null;
+}
+
 /** One selectable model for the per-session model picker (the available set is
  *  broadcast separately from the per-session snapshot; see `modelList`). */
 export interface ModelOption {
@@ -98,6 +110,9 @@ export interface SessionSnapshot {
   readonly archivedAt?: Timestamp;
   readonly preview?: string;
   readonly config?: SessionConfig;
+  /** Context-window fill at the moment the snapshot was taken. Recomputed at turn
+   *  boundaries + on model/thinking change, not per streamed delta. */
+  readonly usage?: SessionUsage;
   readonly runningRunId?: RunId;
   readonly queuedMessages?: readonly SessionQueuedMessage[];
 }
