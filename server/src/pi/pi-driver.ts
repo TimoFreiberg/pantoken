@@ -10,8 +10,10 @@
 // closed phone. `openSession`/`newSession` warm-and-focus (create on first touch, reuse
 // after); `prompt`/`abort`/`respondUi` dispatch by sessionId. Nothing is disposed on a
 // switch — a backgrounded session keeps running and is instantly re-focusable with its
-// full transcript. (No eviction yet: N is small for a single user; a warm-cap is a
-// fast-follow if it ever isn't.)
+// full transcript. A warm-cap (PILOT_WARM_CAP, default 8) bounds the pool: when warming
+// a session would exceed it, the least-recently-focused victims are disposed (see the
+// eviction loop in warmUp). Disposing aborts any in-flight run, so eviction emits a
+// synthetic sessionClosed for each victim to clear the hub's cross-session running set.
 //
 // This replaces the old runtime-swap model: AgentSessionRuntime exists precisely to
 // replace+dispose the active session, which is the opposite of keeping N warm.
@@ -144,6 +146,9 @@ export async function createPiDriver(
     }
   >();
   let trustSeq = 0;
+  // Disambiguates live user-message ids within a millisecond: `u-${now()}` alone
+  // collides on a fast double-send, and Transcript.svelte keys its {#each} by id.
+  let userSeq = 0;
   // Generous: the operator may be answering from a pocket. On expiry, deny-safe.
   const TRUST_TIMEOUT_MS = 5 * 60_000;
 
@@ -332,6 +337,18 @@ export async function createPiDriver(
     )) {
       const victim = warm.get(id);
       if (!victim) continue;
+      // dispose() aborts any in-flight run but tears down pi's own event listeners, so
+      // the abort's terminal event never reaches the hub. Emit a synthetic sessionClosed
+      // FIRST (while the subscription is still live) so trackRunning clears this id from
+      // the cross-session running set; otherwise an evicted mid-run session shows a
+      // perpetual running indicator. Eviction happens inside a swap, so the hub only acts
+      // on this for the running set — it's never folded into the focused transcript.
+      emit({
+        sessionRef: victim.ref,
+        timestamp: now(),
+        type: "sessionClosed",
+        reason: "ended",
+      });
       victim.unsubscribe();
       victim.session.dispose();
       warm.delete(id);
@@ -399,7 +416,7 @@ export async function createPiDriver(
         sessionRef: ws.ref,
         timestamp: now(),
         type: "userMessage",
-        id: `u-${now()}`,
+        id: `u-${now()}-${userSeq++}`,
         text,
       });
       const options =

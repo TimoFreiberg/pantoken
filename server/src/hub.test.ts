@@ -404,6 +404,47 @@ describe("SessionHub", () => {
     }
   });
 
+  test("a terminal event clears running for a background session mid-switch", async () => {
+    // LRU eviction (pi-driver) disposes a warm session *inside* a swap, while
+    // `switching` is true, and emits a synthetic sessionClosed for it. That must still
+    // clear the cross-session running set — otherwise the evicted session shows a
+    // perpetual running indicator. Regression: the `switching` guard used to sit above
+    // trackRunning and dropped this update.
+    let release: (v: SessionDriverEvent[]) => void = () => {};
+    const pending = new Promise<SessionDriverEvent[]>((r) => {
+      release = r;
+    });
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    const a = client();
+    hub.addClient(a.send);
+
+    // Focus "s" and run a background "s2" — both running.
+    d.emit(ev({ type: "assistantDelta", text: "focus", channel: "text" }));
+    d.emit(
+      evFor("s2", { type: "assistantDelta", text: "bg", channel: "text" }),
+    );
+
+    // Begin a swap that never resolves → `switching` stays true.
+    // biome-ignore lint/suspicious/noExplicitAny: test stub override
+    (d as any).openSession = () => pending;
+    hub.handleClient(a.send, { type: "openSession", path: "/x.jsonl" });
+    await flush();
+    a.received.length = 0;
+
+    // The backgrounded "s2" is evicted mid-swap.
+    d.emit(evFor("s2", { type: "sessionClosed", reason: "ended" }));
+
+    const st = a.received.filter((m) => m.type === "sessionStatus").at(-1);
+    expect(st?.type).toBe("sessionStatus");
+    if (st?.type === "sessionStatus") {
+      expect(st.runningIds).not.toContain("s2");
+      expect(st.runningIds).toContain("s"); // the focused session is unaffected
+    }
+
+    release([ev({ type: "sessionOpened", snapshot: snap("s") })]);
+  });
+
   test("a fresh client is told what's already running on connect", () => {
     const d = new FakeDriver();
     const hub = new SessionHub(d);
