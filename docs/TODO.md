@@ -205,7 +205,10 @@ _(clear — pull the next item up from Polish)_
 - [x] **PNG / maskable icons** — proper app icons for installed PWA
       _(done: 192/512 + maskable-512 (safe-zone padded) + 180 apple-touch, rasterized
       from `icon.svg`; manifest + `<link apple-touch-icon>` wired.)_
-- [ ] **Virtualized transcript list** (>80 rows)
+- [x] **Virtualized transcript list** (>80 rows)
+      _(done: CSS `content-visibility: auto` + `contain-intrinsic-size` on `.row`
+      and `.tool` — browser skips rendering off-screen rows, remembers actual sizes
+      after first render. Zero JS, progressive enhancement.)_
 - [x] **Binary 2-option select → Yes/No card**
       _(done: affirmative option detected + promoted to the primary/right button
       regardless of array order, mirroring the confirm dialog.)_
