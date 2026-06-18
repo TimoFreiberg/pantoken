@@ -5,6 +5,7 @@
 import type {
   CommandInfo,
   HostUiResponse,
+  ImageContent,
   ModelDefaults,
   ModelOption,
   ProviderInfo,
@@ -40,6 +41,7 @@ export interface PilotDriver {
     text: string,
     deliverAs?: "steer" | "followUp",
     sessionId?: SessionId,
+    images?: readonly ImageContent[],
   ): void;
   abort(sessionId?: SessionId): void;
   respondUi(response: HostUiResponse, sessionId?: SessionId): void;

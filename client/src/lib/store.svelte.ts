@@ -6,6 +6,7 @@ import {
   type CommandInfo,
   foldEvent,
   type HostUiResponse,
+  type ImageContent,
   initialSessionState,
   type ModelDefaults,
   type ModelOption,
@@ -221,7 +222,11 @@ class PilotStore {
     connect();
   }
 
-  prompt(text: string, deliverAs?: "steer" | "followUp"): void {
+  prompt(
+    text: string,
+    deliverAs?: "steer" | "followUp",
+    images?: ImageContent[],
+  ): void {
     const t = text.trim();
     if (!t) return;
     this.lastPrompt = t;
@@ -231,7 +236,7 @@ class PilotStore {
     void ensurePushSubscription().then((s) => {
       this.pushState = s;
     });
-    send({ type: "prompt", text: t, deliverAs });
+    send({ type: "prompt", text: t, images, deliverAs });
     this.composerDraft = "";
   }
   abort(): void {
@@ -307,7 +312,7 @@ class PilotStore {
   }
   /** Commit the draft: create the session and deliver its first prompt in one
    *  message. Mirrors prompt()'s permission/push gesture since this IS the first turn. */
-  submitDraft(text: string): void {
+  submitDraft(text: string, images?: ImageContent[]): void {
     const d = this.draft;
     if (!d) return;
     const t = text.trim();
@@ -324,6 +329,7 @@ class PilotStore {
       model: d.model,
       thinking: d.thinking,
       prompt: t,
+      images,
     });
     this.draft = null;
     this.composerDraft = "";

@@ -28,10 +28,10 @@ test("the model and effort pickers live in the composer footer", async ({
   await expect(page.locator(".hdr .mp")).toHaveCount(0);
 });
 
-test("the attach button is a disabled, tooltipped placeholder (uploader TODO)", async ({
+test("the attach button opens a file picker for image attachments", async ({
   page,
 }) => {
   const attach = page.locator(".composer-wrap .attach");
-  await expect(attach).toBeDisabled();
-  await expect(attach).toHaveAttribute("title", /Attach files/);
+  await expect(attach).toBeEnabled();
+  await expect(attach).toHaveAttribute("title", /Attach images/);
 });

@@ -486,6 +486,7 @@ export class SessionHub {
           msg.text,
           msg.deliverAs,
           msg.sessionId ?? this.focusedId ?? undefined,
+          msg.images,
         );
         return;
       case "abort":
@@ -527,6 +528,7 @@ export class SessionHub {
         // only after the switch lands (focusedId now points at the new session) — doing
         // it inside the driver's newSession would race the hub's atomic state reset.
         const firstPrompt = msg.prompt?.trim();
+        const firstImages = msg.images;
         void this.switchTo(() =>
           this.driver.newSession({
             cwd: msg.cwd,
@@ -540,6 +542,7 @@ export class SessionHub {
               firstPrompt,
               undefined,
               this.focusedId ?? undefined,
+              firstImages,
             );
         });
         return;

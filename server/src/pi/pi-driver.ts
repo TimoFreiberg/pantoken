@@ -522,7 +522,7 @@ export async function createPiDriver(
       settleTrust(requestId, choice);
     },
 
-    prompt(text, deliverAs, sessionId) {
+    prompt(text, deliverAs, sessionId, images) {
       const ws = target(sessionId);
       if (!ws) return;
       emit({
@@ -531,11 +531,12 @@ export async function createPiDriver(
         type: "userMessage",
         id: `u-${now()}-${userSeq++}`,
         text,
+        images,
       });
-      const options =
-        ws.session.isStreaming && deliverAs
-          ? { streamingBehavior: deliverAs }
-          : undefined;
+      const options: Record<string, unknown> = {};
+      if (images && images.length > 0) options.images = images;
+      if (ws.session.isStreaming && deliverAs)
+        options.streamingBehavior = deliverAs;
       ws.session.prompt(text, options).catch((e) => {
         emit({
           sessionRef: ws.ref,
