@@ -199,40 +199,23 @@ that pilot should NOT build — they're paseo's domain, not pilot's differentiat
 
 ### Worth adopting
 
-- [ ] **Design-system consistency pass** _(scoped 2026-06-18; reshaped 2026-06-18 with
-      owner — own focused session, screenshot-driven, not bundled)_.
-      Port paseo's *discipline*, not its React-Native specifics: any semantic element used
-      3+ times becomes a shared primitive with a small fixed taxonomy. Promote
-      `Settings.svelte`'s already-proven convention rather than invent a new vocabulary.
-      **Audit findings (current state):** 71 raw `<button>`s across 14 components; **no
-      `client/src/components/ui/` primitives** exist yet; button classes are ad-hoc (only
-      `Settings.svelte` has a `btn`/`btn ghost`/`btn danger` convention — everywhere else
-      is bespoke per-component classes, lots of icon-only buttons). Heaviest: `Sidebar`
-      (16), `Composer` (11), `ApprovalLayer` (11), `Settings` (10), `ModelPicker` (5).
-      **Plan — three interactive primitives in `components/ui/`:**
-      (1) `<Button>` with **3** emphasis levels — `primary` (filled accent, one CTA/surface),
-      `secondary` (outline/surface, low-emphasis), `danger` (destructive confirm). This *is*
-      Settings' existing `btn`/`ghost`/`danger`, renamed — not the 5-variant shadcn list (an
-      earlier agent draft), whose `secondary`/`outline`/`ghost` trio re-imports the very
-      ambiguity the discipline kills.
-      (2) `<IconButton>` — square, centered glyph, for the icon-only chrome that dominates
-      Sidebar/Composer/ApprovalLayer. Make `title` a **required** prop so the repo's "every
-      clickable carries a title/hotkey" rule is enforced by the type system, not by reviewers.
-      (3) `<SegmentedControl>` — the pill toggle (Settings' `.seg-btn`, the composer's
-      follow-up/steer mode switch). A distinct widget, not a Button variant.
-      **Migration order:** lock each primitive's API against the *hardest* consumers first
-      (Sidebar's icon buttons, ApprovalLayer's dialog actions) — easiest-first gives false
-      confidence, then the API doesn't fit the hard cases. Screenshot each surface
-      (desktop + mobile + light/dark) before/after; expect several commits.
-      **e2e is mostly safe:** specs select by accessible name
-      (`getByRole("button", {name})`), which a no-behavior-change refactor preserves —
-      they never see CSS classes. Only two *structural* selectors can break:
-      `.actions.two button` (`e2e/polish.e2e.ts`) and `.keyform` (`e2e/settings.e2e.ts`).
-      Keep `e2e` green; no behavior changes, styling/structure only.
-      _(Cut from the original agent plan, by owner call 2026-06-18: the "weight+color over
-      font-size" hierarchy doctrine — it's paseo's, but D14's north star is the Claude app,
-      which itself uses some size hierarchy. Fix type-hierarchy spots that look wrong against
-      the Claude app as ongoing polish, not as a refactor pass bolted onto this.)_
+- [ ] **Follow-on UI primitives — Toggle · Chip · Menu/Dropdown · Disclosure**
+      _(surfaced by the 2026-06-18 design-system pass; full catalog +
+      visual-session notes in `docs/design-system-pass.md`)_.
+      The three interactive primitives (`Button`, `IconButton`, `SegmentedControl`) shipped
+      and the standard chrome migrated to them (Sidebar, Composer, Settings, StatusHeader,
+      App, TokenGate, NewSession — see DONE). What's left are four recurring patterns that
+      didn't fit the three, each used 3+ times, so each is a real future primitive — promote
+      only once it recurs cleanly, don't pre-build:
+      (1) **single labeled toggle** — a 2-state pill with a changing label + `aria-pressed`
+      (Sidebar `.filter-toggle`, Composer `.toggle` Preview/Edit). Not IconButton (labeled),
+      not SegmentedControl (single).
+      (2) **chip** — small labeled pill (Composer project / worktree chips).
+      (3) **menu / dropdown family** — highest-leverage: trigger + menu items + backdrop
+      (ModelPicker is entirely this; Sidebar's row menu is the same shape).
+      (4) **disclosure row** — accordion header with chevron (ToolCard / ThinkingBlock heads).
+      Special-identity buttons stay one-off (send circle, Stop pill, status bell, copy,
+      `.naction`, `.new-pill`, drag-handle, update-toast Refresh).
 - [ ] **Shared layout primitives (session row, section header)** — fast-follow to the
       Button/IconButton/SegmentedControl pass above. The other 3+-use *structural* patterns
       (sidebar session row, section headers) pulled into components. Split out deliberately:
