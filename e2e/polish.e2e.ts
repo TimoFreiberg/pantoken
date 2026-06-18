@@ -80,7 +80,7 @@ test("copy button fades back out once the pointer leaves the message", async ({
     .toBe("0");
 });
 
-test("no stray caret after a turn ends via sessionUpdated (not runCompleted)", async ({
+test("no stray working indicator after a turn ends via sessionUpdated (not runCompleted)", async ({
   page,
 }) => {
   // gotoFresh returns as soon as "Routes live in" appears — which is mid-stream.
@@ -95,9 +95,9 @@ test("no stray caret after a turn ends via sessionUpdated (not runCompleted)", a
   await expect(
     page.getByText("ends with a status update", { exact: false }),
   ).toBeVisible();
-  // The session is idle again — the streaming caret must be gone.
+  // The session is idle again — the bottom working indicator must be gone.
   await expect
-    .poll(() => page.locator(".row.assistant .caret").count())
+    .poll(() => page.getByTestId("working-indicator").count())
     .toBe(0);
 });
 

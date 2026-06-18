@@ -90,9 +90,6 @@
         <span class="bell-label">{pushLabel[push]}</span>
       </button>
     {/if}
-    {#if store.streaming}
-      <span class="working"><span class="pulse"></span>working</span>
-    {/if}
     <button
       class="gear"
       data-testid="settings-toggle"
@@ -244,20 +241,6 @@
     border-color: var(--border);
     color: var(--text);
   }
-  .working {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: var(--accent);
-  }
-  .pulse {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--accent);
-    animation: pulse 1.1s ease-in-out infinite;
-  }
   /* On a phone the header gets crowded (sidebar toggle + title + bell + model +
      thinking + gear + connection). Drop the text labels whose icon/LED already
      conveys their state, so the row fits the viewport instead of overflowing
@@ -272,17 +255,6 @@
     .bell-label,
     .conn-label {
       display: none;
-    }
-  }
-  @keyframes pulse {
-    0%,
-    100% {
-      opacity: 0.35;
-      transform: scale(0.8);
-    }
-    50% {
-      opacity: 1;
-      transform: scale(1.15);
     }
   }
 </style>
