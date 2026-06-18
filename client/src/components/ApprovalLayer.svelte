@@ -1,6 +1,7 @@
 <script lang="ts">
   import { isDialogRequest } from "@pilot/protocol";
   import { store } from "../lib/store.svelte.js";
+  import Button from "./ui/Button.svelte";
 
   // Show one dialog at a time — the oldest pending. Resolving it reveals the next.
   const current = $derived(store.session.pendingApprovals[0] ?? null);
@@ -118,16 +119,16 @@
       <h2>{current.title}</h2>
       <p class="msg">{current.message}</p>
       <div class="actions two">
-        <button class="ghost" title="Deny this request" onclick={() => confirm(false)}>Deny</button>
-        <button class="primary" title="Allow this request" onclick={() => confirm(true)}>Allow</button>
+        <Button variant="secondary" size="lg" block title="Deny this request" onclick={() => confirm(false)}>Deny</Button>
+        <Button variant="primary" size="lg" block title="Allow this request" onclick={() => confirm(true)}>Allow</Button>
       </div>
     {:else if current.kind === "select"}
       <h2>{current.title}</h2>
       {#if binarySelect}
         <div class="actions two">
-          <button class="ghost" title={binarySelect.negative} onclick={() => submitValue(binarySelect.negative)}>{binarySelect.negative}</button>
-          <button class="primary" title={binarySelect.affirmative} onclick={() => submitValue(binarySelect.affirmative)}
-            >{binarySelect.affirmative}</button
+          <Button variant="secondary" size="lg" block title={binarySelect.negative} onclick={() => submitValue(binarySelect.negative)}>{binarySelect.negative}</Button>
+          <Button variant="primary" size="lg" block title={binarySelect.affirmative} onclick={() => submitValue(binarySelect.affirmative)}
+            >{binarySelect.affirmative}</Button
           >
         </div>
       {:else}
@@ -136,21 +137,21 @@
             <button class="opt" class:sel={selectedOption === opt} title={`Choose: ${opt}`} onclick={() => submitValue(opt)}>{opt}</button>
           {/each}
         </div>
-        <div class="actions"><button class="ghost wide" title="Cancel this request" onclick={cancel}>Cancel</button></div>
+        <div class="actions"><Button variant="secondary" size="lg" block title="Cancel this request" onclick={cancel}>Cancel</Button></div>
       {/if}
     {:else if current.kind === "input"}
       <h2>{current.title}</h2>
       <input class="field" bind:value={inputValue} placeholder={current.placeholder ?? ""} />
       <div class="actions two">
-        <button class="ghost" title="Cancel this request" onclick={cancel}>Cancel</button>
-        <button class="primary" title="Submit your input" onclick={() => submitValue(inputValue)}>Submit</button>
+        <Button variant="secondary" size="lg" block title="Cancel this request" onclick={cancel}>Cancel</Button>
+        <Button variant="primary" size="lg" block title="Submit your input" onclick={() => submitValue(inputValue)}>Submit</Button>
       </div>
     {:else if current.kind === "editor"}
       <h2>{current.title}</h2>
       <textarea class="editor" bind:value={inputValue} rows="6"></textarea>
       <div class="actions two">
-        <button class="ghost" title="Cancel this request" onclick={cancel}>Cancel</button>
-        <button class="primary" title="Save your edits" onclick={() => submitValue(inputValue)}>Save</button>
+        <Button variant="secondary" size="lg" block title="Cancel this request" onclick={cancel}>Cancel</Button>
+        <Button variant="primary" size="lg" block title="Save your edits" onclick={() => submitValue(inputValue)}>Save</Button>
       </div>
     {:else if isDialogRequest(current)}
       <!-- unreachable: all dialog kinds handled above -->
@@ -158,7 +159,7 @@
       <!-- generic fallback for any unknown/unhandled method -->
       <h2>Agent request: {current.kind}</h2>
       <pre class="raw">{JSON.stringify(current, null, 2)}</pre>
-      <div class="actions"><button class="ghost wide" title="Dismiss this request" onclick={cancel}>Dismiss</button></div>
+      <div class="actions"><Button variant="secondary" size="lg" block title="Dismiss this request" onclick={cancel}>Dismiss</Button></div>
     {/if}
 
     {#if timeoutMs}
@@ -226,29 +227,6 @@
     display: flex;
     gap: 10px;
     margin-top: 14px;
-  }
-  .actions.two button {
-    flex: 1;
-  }
-  button.primary {
-    background: var(--accent);
-    color: var(--accent-text);
-    border: none;
-    border-radius: var(--radius-sm);
-    padding: 12px;
-    font-size: 15px;
-    font-weight: 550;
-  }
-  button.ghost {
-    background: var(--surface);
-    color: var(--text);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm);
-    padding: 12px;
-    font-size: 15px;
-  }
-  button.wide {
-    flex: 1;
   }
   .options {
     display: flex;
