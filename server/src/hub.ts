@@ -292,6 +292,34 @@ export class SessionHub {
     await this.broadcastSessionList();
   }
 
+  /** Remove a pilot-created worktree on request (the sidebar's clean-up action). Surfaces
+   *  a refusal (dirty worktree without force) as an error so the client can offer force;
+   *  re-broadcasts the list either way so the indicator clears when it's gone. */
+  private async applyWorktreeCleanup(
+    send: Send,
+    path: string,
+    force?: boolean,
+  ): Promise<void> {
+    if (!this.driver.cleanupWorktree) {
+      send({ type: "error", message: "this driver can't clean up worktrees" });
+      return;
+    }
+    try {
+      const res = await this.driver.cleanupWorktree(path, { force });
+      if (!res.removed)
+        send({
+          type: "error",
+          message: `worktree not removed: ${res.reason ?? "unknown reason"}`,
+        });
+    } catch (e) {
+      send({
+        type: "error",
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
+    await this.broadcastSessionList();
+  }
+
   /** Re-scan available sessions and broadcast the list + the active session id
    *  (derived from the folded state, so the picker's "active" row is authoritative). */
   private async broadcastSessionList(): Promise<void> {
@@ -461,6 +489,9 @@ export class SessionHub {
       case "renameSession":
         void this.applyRename(send, msg.path, msg.name);
         return;
+      case "cleanupWorktree":
+        void this.applyWorktreeCleanup(send, msg.path, msg.force);
+        return;
       case "listCommands":
         void this.broadcastCommandList();
         return;
@@ -527,3 +558,4 @@ export class SessionHub {
     return this.clients.size;
   }
 }
+

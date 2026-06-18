@@ -496,6 +496,23 @@ class PilotStore {
     );
     send({ type: "renameSession", path, name: next });
   }
+  /** Remove a pilot-created worktree (by its path == the session cwd). `force` discards
+   *  uncommitted changes. The server re-broadcasts the list, clearing the indicator. */
+  cleanupWorktree(path: string, force = false): void {
+    send({ type: "cleanupWorktree", path, force });
+  }
+  /** Copy a worktree's path to the clipboard. Returns whether it succeeded so the
+   *  caller can flash feedback; degrades quietly where the clipboard API is unavailable
+   *  (insecure context / older browser). */
+  async copyWorktreePath(path: string): Promise<boolean> {
+    try {
+      await navigator.clipboard.writeText(path);
+      return true;
+    } catch {
+      this.lastError = "couldn't copy to clipboard (needs a secure context)";
+      return false;
+    }
+  }
   get activeSessionPath(): string | null {
     return (
       this.sessions.find((s) => s.sessionId === this.activeSessionId)?.path ??

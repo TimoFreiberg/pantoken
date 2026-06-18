@@ -49,7 +49,8 @@ import { config } from "../config.js";
 import type { NewSessionOpts, PilotDriver, TrustEvent } from "../driver.js";
 import { mapPiEvent } from "./event-map.js";
 import { type HistoryMessage, historyToEvents } from "./history-map.js";
-import { createWorktree } from "./worktree.js";
+import { createWorktree, removeWorktree } from "./worktree.js";
+import { WorktreeStore } from "../worktree-store.js";
 import { evictionPlan } from "./warm-cap.js";
 import {
   type AuthCred,
@@ -118,6 +119,10 @@ export async function createPiDriver(
   // Pilot-side archive index (source of truth for the archived flag; see ArchiveStore).
   // Read at list time as an in-memory lookup — no per-session file reads.
   const archiveStore = new ArchiveStore();
+
+  // Pilot-side worktree index: the jj/git worktrees pilot created (keyed by cwd), so the
+  // sidebar can flag them and cleanup only ever touches worktrees we own.
+  const worktreeStore = new WorktreeStore();
 
   // ONE shared auth store + model registry across every warm session. Both are global
   // (auth.json + models.json under agentDir, cwd-independent), and sharing them is what
@@ -439,6 +444,7 @@ export async function createPiDriver(
     createdAt: info.created.toISOString(),
     parentSessionPath: info.parentSessionPath,
     archived: archiveStore.has(info.path),
+    worktree: worktreeStore.get(info.cwd) ? { path: info.cwd } : undefined,
   });
 
   // A list entry for a warm session that isn't on disk yet. pi doesn't write a
@@ -467,6 +473,21 @@ export async function createPiDriver(
       createdAt: nowIso,
       archived: archiveStore.has(path),
     };
+  };
+
+  // Remove a pilot-created worktree at `cwd` and forget it. `force=false` leaves a dirty
+  // worktree in place (returns removed:false). The index is the gate — we never touch a
+  // worktree pilot didn't create.
+  const reapWorktree = async (
+    cwd: string,
+    force: boolean,
+  ): Promise<{ removed: boolean; reason?: string }> => {
+    const meta = worktreeStore.get(cwd);
+    if (!meta)
+      return { removed: false, reason: "no pilot worktree at this path" };
+    const res = await removeWorktree(meta, force);
+    if (res.removed) worktreeStore.remove(cwd);
+    return res;
   };
 
   return {
@@ -538,6 +559,21 @@ export async function createPiDriver(
       // NOT append to the session file — pi's list path drops custom entries, so that
       // copy would be write-only and force a per-session scan to read back.
       archiveStore.set(path, archived);
+      // Archiving a worktree-backed session reaps the worktree when it's clean; a dirty
+      // one is left in place (the sidebar keeps flagging it for manual cleanup). Resolve
+      // the cwd from the .jsonl path via the same list the sidebar is built from.
+      if (!archived) return;
+      const info = (await SessionManager.listAll()).find(
+        (s) => s.path === path,
+      );
+      if (info && worktreeStore.get(info.cwd))
+        await reapWorktree(info.cwd, false).catch((e) =>
+          console.error("[worktree] archive cleanup failed", e),
+        );
+    },
+
+    async cleanupWorktree(path: string, opts?: { force?: boolean }) {
+      return reapWorktree(path, opts?.force ?? false);
     },
 
     async renameSession(path: string, name: string) {
@@ -599,7 +635,13 @@ export async function createPiDriver(
       }
       // Worktree toggle: isolate the session in a fresh jj/git worktree of `dir` so the
       // agent works on a clean copy. Throws loudly if `dir` isn't a repo (surfaced to UI).
-      if (worktree) dir = await createWorktree(dir);
+      // Record it (keyed by the worktree dir, which becomes the session cwd) so the
+      // sidebar can flag it and it can be cleaned up later.
+      if (worktree) {
+        const meta = await createWorktree(dir);
+        worktreeStore.add(meta);
+        dir = meta.path;
+      }
       const ws = await warmUp(SessionManager.create(dir));
       // Apply the draft's model/thinking BEFORE seedFor so the returned seed snapshot
       // already reflects them (the hub folds the seed atomically; subscribe-side
@@ -773,3 +815,4 @@ export async function createPiDriver(
     },
   };
 }
+

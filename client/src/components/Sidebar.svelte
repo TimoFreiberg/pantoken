@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import type { SessionListEntry } from "@pilot/protocol";
   import { store } from "../lib/store.svelte.js";
   import { filterSessions } from "../lib/session-filter.js";
@@ -36,6 +37,9 @@
   // path (one at a time); `menuPos` is where to paint it.
   type MenuPos = { top: number; left?: number; right?: number };
   let menuFor = $state<string | null>(null);
+  // Worktree cleanup is destructive, so it's a two-step: the first click arms it (this
+  // holds the session path being confirmed), the second actually removes.
+  let confirmCleanup = $state<string | null>(null);
   let menuPos = $state<MenuPos | null>(null);
   let menuEl = $state<HTMLDivElement | null>(null);
   // The open session entry, resolved fresh from the store so the menu reflects the current
@@ -68,6 +72,7 @@
   function closeMenu(): void {
     menuFor = null;
     menuPos = null;
+    confirmCleanup = null;
   }
   function toggleArchive(s: SessionListEntry): void {
     store.setArchived(s.path, !s.archived);
@@ -119,10 +124,23 @@
   // fixed popover from its row). The click listener is deferred so the opening click doesn't
   // immediately re-close it. While open, `a` archives/unarchives the targeted session —
   // unless focus is in a text field, where `a` should type.
+  async function copyWorktreePath(s: SessionListEntry): Promise<void> {
+    if (s.worktree) await store.copyWorktreePath(s.worktree.path);
+    closeMenu();
+  }
+  function cleanupWorktree(s: SessionListEntry): void {
+    // Second click confirms; force-removes (the menu label warns it discards changes).
+    if (s.worktree) store.cleanupWorktree(s.worktree.path, true);
+    closeMenu();
+  }
   $effect(() => {
     if (!menuFor) return;
     const onClick = (e: MouseEvent): void => {
       const t = e.target as HTMLElement;
+      // An in-menu item that re-renders (e.g. arming the cleanup confirm) detaches the
+      // clicked node before this fires; a detached target has no ancestors, so `closest`
+      // would wrongly read as an outside click and close the menu. Ignore those.
+      if (!t.isConnected) return;
       if (!t.closest(".menu") && !t.closest(".row-menu")) closeMenu();
     };
     const onKey = (e: KeyboardEvent): void => {
@@ -384,7 +402,13 @@
                         <span class="meta">
                           <span class="msg-count"
                             >{s.messageCount} msg{#if s.archived} ·
-                              archived{/if}</span
+                              archived{/if}{#if s.worktree}
+                              ·
+                              <span
+                                class="wt"
+                                title={`Worktree: ${s.worktree.path}`}
+                                >worktree</span
+                              >{/if}</span
                           >
                           {#if rel}
                             <span class="time" title={`Last activity ${rel}`}
@@ -411,6 +435,34 @@
                       bind:this={menuEl}
                       style={`top:${menuPos.top}px;${menuPos.left != null ? `left:${menuPos.left}px` : `right:${menuPos.right}px`}`}
                     >
+                      {#if s.worktree}
+                        <button
+                          class="menu-item"
+                          role="menuitem"
+                          title={`Copy the worktree path to the clipboard: ${s.worktree.path}`}
+                          onclick={() => copyWorktreePath(s)}
+                          >Copy worktree path</button
+                        >
+                        {#if confirmCleanup === s.path}
+                          <button
+                            class="menu-item danger"
+                            role="menuitem"
+                            data-testid="confirm-cleanup-worktree"
+                            title="Permanently remove the worktree from disk — discards any uncommitted changes"
+                            onclick={() => cleanupWorktree(s)}
+                            >Confirm: delete worktree</button
+                          >
+                        {:else}
+                          <button
+                            class="menu-item"
+                            role="menuitem"
+                            data-testid="cleanup-worktree"
+                            title="Remove this worktree from disk, freeing the isolated copy (asks to confirm)"
+                            onclick={() => (confirmCleanup = s.path)}
+                            >Clean up worktree…</button
+                          >
+                        {/if}
+                      {/if}
                       <button
                         class="menu-item"
                         role="menuitem"
@@ -785,6 +837,12 @@
     border-radius: var(--radius-xs);
     padding: 2px 5px;
   }
+  .menu-item.danger {
+    color: var(--danger);
+  }
+  .menu-item.danger:hover {
+    background: var(--danger-soft);
+  }
   .row-body {
     display: flex;
     flex-direction: column;
@@ -877,6 +935,14 @@
   .time {
     flex-shrink: 0;
   }
+  /* Worktree marker in the meta line — tinted + with a dotted underline to read as a
+     hoverable indicator (the title carries the full path). */
+  .wt {
+    color: var(--accent);
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+    cursor: help;
+  }
 
   /* Phone: the sidebar becomes a slide-over drawer above the transcript. */
   @media (max-width: 859px) {
@@ -908,3 +974,4 @@
     }
   }
 </style>
+
