@@ -55,7 +55,29 @@ test("copy button copies an agent message and shows feedback", async ({
   const copy = assistant.getByRole("button", { name: "Copy message" });
   await expect(copy).toBeVisible();
   await copy.click();
-  await expect(assistant.getByText("Copied", { exact: false })).toBeVisible();
+  // Feedback is now an icon swap (copy -> check) + accent tint, flagged by `copied`.
+  await expect(copy).toHaveClass(/\bcopied\b/);
+});
+
+test("copy button fades back out once the pointer leaves the message", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const assistant = page.locator(".row.assistant").first();
+  const copy = assistant.getByRole("button", { name: "Copy message" });
+  // Hover reveals it (opacity animates to 1).
+  await assistant.hover();
+  await expect
+    .poll(() => copy.evaluate((el) => getComputedStyle(el).opacity))
+    .toBe("1");
+  // Clicking copies but must not pin it visible via lingering :focus-visible;
+  // leaving the row in any direction fades it back out.
+  await copy.click();
+  await page.mouse.move(0, 0);
+  await expect
+    .poll(() => copy.evaluate((el) => getComputedStyle(el).opacity))
+    .toBe("0");
 });
 
 test("no stray caret after a turn ends via sessionUpdated (not runCompleted)", async ({
