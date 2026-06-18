@@ -13,6 +13,7 @@
   import TokenGate from "./components/TokenGate.svelte";
   import Settings from "./components/Settings.svelte";
   import Tooltip from "./components/Tooltip.svelte";
+  import IconButton from "./components/ui/IconButton.svelte";
   import { notifyIfUnfocused } from "./lib/notify.js";
 
   // Dev affordance: ?dev shows buttons that drive the mock to any UI state, so the
@@ -86,11 +87,11 @@
       title="Reload to update to the new version"
       onclick={() => store.applyUpdate()}>Refresh</button
     >
-    <button
-      class="update-x"
+    <IconButton
+      size="sm"
       title="Dismiss update notice"
       aria-label="Dismiss update"
-      onclick={() => store.dismissUpdate()}>×</button
+      onclick={() => store.dismissUpdate()}>×</IconButton
     >
   </div>
 {/if}
@@ -160,14 +161,5 @@
     padding: 5px 13px;
     font-size: 12.5px;
     font-weight: 550;
-  }
-  .update-x {
-    flex-shrink: 0;
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    font-size: 16px;
-    line-height: 1;
-    padding: 0 4px;
   }
 </style>
