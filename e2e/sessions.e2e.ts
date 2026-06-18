@@ -91,7 +91,7 @@ test("relative timestamps tick forward as time passes", async ({ page }) => {
   await expect(time).toHaveText(`${before + 5}m ago`);
 });
 
-test("a project's + button starts a new session in that dir", async ({
+test("a project's + button opens a new-session draft for that dir", async ({
   page,
 }) => {
   await openSidebar(page);
@@ -99,8 +99,16 @@ test("a project's + button starts a new session in that dir", async ({
     .getByTestId("sidebar")
     .getByRole("button", { name: "New session in pilot" })
     .click();
+  // Deferred creation: the draft hero shows (nothing is created until you send), and
+  // it's prefilled with that group's dir + the default model.
+  const hero = page.getByTestId("new-session");
+  await expect(hero).toBeVisible();
+  await expect(hero).toContainText("/Users/timo/src/pilot");
   await expect(
-    page.getByText("No messages yet", { exact: false }),
+    page.getByText("Nothing is created until you send"),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Claude Opus 4\.8/ }),
   ).toBeVisible();
 });
 
@@ -110,17 +118,18 @@ test("a session can be started in an arbitrary typed directory", async ({
   await openSidebar(page);
   const sidebar = page.getByTestId("sidebar");
 
-  await sidebar.getByText("New session in a directory…").click();
-  await sidebar
-    .getByPlaceholder("/absolute/path/to/project")
+  await sidebar.getByText("New session…").click();
+  // The project lives as a chip in the composer; click it to edit the path inline.
+  await page.locator(".chips .chip").first().click();
+  await page
+    .getByPlaceholder(/absolute\/path\/to\/project/)
     .fill("/Users/timo/src/elsewhere");
-  await sidebar.getByRole("button", { name: "Start" }).click();
+  // Sending the first prompt is what actually creates the session (atomic).
+  const composer = page.getByPlaceholder("Describe a task or ask a question…");
+  await composer.fill("kick things off");
+  await composer.press("Enter");
 
-  // fresh, empty transcript…
-  await expect(
-    page.getByText("No messages yet", { exact: false }),
-  ).toBeVisible();
-  // …and a new project group appears for the typed dir
+  // A new project group appears for the typed dir.
   await openSidebar(page); // (closed by afterNavigate on the mobile drawer)
   await expect(
     page.getByTestId("sidebar").getByText("elsewhere", { exact: true }),
@@ -169,34 +178,39 @@ test("the session search filters by name, preview, and path", async ({
   await expect(sidebar.getByText("quick scratch session")).toBeVisible();
 });
 
-test("opening the new-session form focuses the directory input", async ({
-  page,
-}) => {
+test("clicking the project chip focuses the path input", async ({ page }) => {
   await openSidebar(page);
-  const sidebar = page.getByTestId("sidebar");
-  await sidebar.getByText("New session in a directory…").click();
-  // The input is focused via tick()+focus() (the autofocus attr is unreliable here),
-  // so you can type a path immediately without a second click.
+  await page.getByTestId("sidebar").getByText("New session…").click();
+  await page.locator(".chips .chip").first().click();
+  // Focused via a mount action (the autofocus attr is unreliable here), so you can
+  // type a path immediately without a second click.
   await expect(
-    sidebar.getByPlaceholder("/absolute/path/to/project"),
+    page.getByPlaceholder(/absolute\/path\/to\/project/),
   ).toBeFocused();
 });
 
-test("the worktree toggle creates the session in an isolated worktree dir", async ({
+test("the worktree chip creates the session in an isolated worktree dir", async ({
   page,
 }) => {
   await openSidebar(page);
   const sidebar = page.getByTestId("sidebar");
-  await sidebar.getByText("New session in a directory…").click();
-  await sidebar
-    .getByPlaceholder("/absolute/path/to/project")
+  await sidebar.getByText("New session…").click();
+  // Toggle the worktree chip on first (before editing the path, so the inline path
+  // editor's blur doesn't reflow the chip row under the pointer), then set the dir.
+  await page.getByRole("button", { name: "worktree" }).click();
+  await expect(page.getByRole("button", { name: "worktree" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.locator(".chips .chip").first().click();
+  await page
+    .getByPlaceholder(/absolute\/path\/to\/project/)
     .fill("/Users/timo/src/demo");
-  await sidebar.getByRole("checkbox").check();
-  await sidebar.getByRole("button", { name: "Start" }).click();
+  // Sending the first prompt creates the session.
+  const composer = page.getByPlaceholder("Describe a task or ask a question…");
+  await composer.fill("get started");
+  await composer.press("Enter");
 
-  await expect(
-    page.getByText("No messages yet", { exact: false }),
-  ).toBeVisible();
   // The mock isolates a worktree request as a sibling "-worktree" dir; the new project
   // group reflects that isolated path rather than the typed one.
   await openSidebar(page);

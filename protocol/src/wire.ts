@@ -121,8 +121,20 @@ export type ClientMessage =
   /** Create a fresh session and make it active. `cwd` (an absolute dir, D12
    *  arbitrary GUI paths) picks the workspace; omit it for the server's launch cwd.
    *  `worktree`: create an isolated jj/git worktree of `cwd` and run the session
-   *  there, leaving the main tree clean (like the Claude app's worktree toggle). */
-  | { type: "newSession"; cwd?: string; worktree?: boolean }
+   *  there, leaving the main tree clean (like the Claude app's worktree toggle).
+   *  `model`/`thinking`: apply this model + thinking level at creation, so the
+   *  new-session draft's config carries through without mutating pi's global
+   *  defaults. `prompt`: deliver this as the first message once the session is
+   *  active — creation + first turn ride one message, so nothing is created on the
+   *  server until the user actually sends (the draft lives client-side until then). */
+  | {
+      type: "newSession";
+      cwd?: string;
+      worktree?: boolean;
+      model?: { provider: string; modelId: string };
+      thinking?: string;
+      prompt?: string;
+    }
   /** Ask the server to re-scan disk and re-broadcast the session list. */
   | { type: "listSessions" }
   /** Archive or unarchive a session (by its .jsonl `path`, the stable switch key).

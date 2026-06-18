@@ -6,9 +6,10 @@
   type Open = "none" | "model" | "thinking";
   let open = $state<Open>("none");
 
-  // Current selection lives in the folded session config (server-authoritative);
-  // the switchable set arrives separately as store.models.
-  const cfg = $derived(store.session.config);
+  // Current selection: the active session's folded config, or — while drafting a new
+  // session — the draft's chosen model/effort (composerConfig unifies the two). The
+  // switchable set arrives separately as store.models.
+  const cfg = $derived(store.composerConfig);
   // Show the friendly label (e.g. "Opus 4.8") in the badge, matching the Claude
   // app; fall back to the raw id before the model list arrives or if the active
   // model isn't in it. The raw provider:id stays available in the tooltip.

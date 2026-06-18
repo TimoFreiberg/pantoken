@@ -21,6 +21,16 @@ export type TrustEvent =
   | { kind: "request"; request: TrustRequest }
   | { kind: "resolved"; requestId: string };
 
+/** Options for {@link PilotDriver.newSession}. All optional: a bare new session in
+ *  the launch cwd is `newSession()`. The first `prompt` is delivered by the hub after
+ *  the switch, not by the driver. */
+export interface NewSessionOpts {
+  cwd?: string;
+  worktree?: boolean;
+  model?: { provider: string; modelId: string };
+  thinking?: string;
+}
+
 export interface PilotDriver {
   subscribe(listener: (ev: SessionDriverEvent) => void): () => void;
   // sessionId targets a specific (warm) session; omit it to act on the session
@@ -56,8 +66,11 @@ export interface PilotDriver {
   /** Create a fresh session and make it active; resolves with its seed events (an
    *  empty `sessionOpened`). `cwd` (an absolute dir) picks the workspace per D12;
    *  omit it for the driver's launch cwd. `worktree`: create an isolated jj/git
-   *  worktree of `cwd` first and bind the session to it. */
-  newSession(cwd?: string, worktree?: boolean): Promise<SessionDriverEvent[]>;
+   *  worktree of `cwd` first and bind the session to it. `model`/`thinking`: apply
+   *  this config to the new session at creation (not pi's global defaults). The
+   *  first prompt is NOT delivered here — the hub sends it after the switch lands,
+   *  so creation + first turn stay correctly ordered. */
+  newSession(opts?: NewSessionOpts): Promise<SessionDriverEvent[]>;
 
   /** Models available to switch to (driver-wide; the real driver reads pi's model
    *  registry, the mock returns a fixture set). */

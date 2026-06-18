@@ -12,7 +12,7 @@ import type {
   SessionDriverEvent,
   SessionListEntry,
 } from "@pilot/protocol";
-import type { PilotDriver, TrustEvent } from "./driver.js";
+import type { NewSessionOpts, PilotDriver, TrustEvent } from "./driver.js";
 import {
   ambient,
   bgRun,
@@ -226,11 +226,9 @@ export class MockDriver implements PilotDriver {
     return mockSessionSeed(path);
   }
 
-  async newSession(
-    cwd?: string,
-    worktree?: boolean,
-  ): Promise<SessionDriverEvent[]> {
+  async newSession(opts: NewSessionOpts = {}): Promise<SessionDriverEvent[]> {
     this.cancelTimers();
+    const { cwd, worktree, model, thinking } = opts;
     // Honor a typed cwd so the new row groups under that project in the sidebar
     // (deterministic: one synthetic "new" entry per distinct cwd). A worktree request
     // is simulated as a sibling "-worktree" dir so the isolated path is visible in e2e.
@@ -245,7 +243,21 @@ export class MockDriver implements PilotDriver {
         { ...NEW_SESSION_ENTRY, sessionId, cwd: dir },
         ...this.sessions,
       ];
-    return newSessionSeed();
+    // Carry the draft's model/thinking into the new session's config so the picker
+    // reflects them immediately (mirrors the real driver applying them at creation).
+    const chosen = model
+      ? MOCK_MODELS.find(
+          (m) => m.provider === model.provider && m.modelId === model.modelId,
+        )
+      : undefined;
+    this.config = {
+      provider: model?.provider ?? MOCK_DEFAULT_CONFIG.provider,
+      modelId: model?.modelId ?? MOCK_DEFAULT_CONFIG.modelId,
+      thinkingLevel: thinking ?? MOCK_DEFAULT_CONFIG.thinkingLevel,
+      availableThinkingLevels:
+        chosen?.thinkingLevels ?? MOCK_DEFAULT_CONFIG.availableThinkingLevels,
+    };
+    return newSessionSeed({ cwd: dir, config: this.config });
   }
 
   async listModels(): Promise<ModelOption[]> {

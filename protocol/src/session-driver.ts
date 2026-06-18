@@ -56,6 +56,10 @@ export interface ModelOption {
   readonly provider: string;
   readonly modelId: string;
   readonly label: string;
+  /** Thinking levels this model supports (pi's `getSupportedThinkingLevels`). Lets the
+   *  new-session draft's effort picker offer accurate options before a session exists —
+   *  per-session `availableThinkingLevels` is only known once a model is warm. */
+  readonly thinkingLevels?: readonly string[];
 }
 
 /** One slash command the composer's typeahead can offer — a JSON-safe projection of

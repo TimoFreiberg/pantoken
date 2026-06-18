@@ -11,6 +11,7 @@ import {
   type ModelOption,
   type ProviderInfo,
   type ServerMessage,
+  type SessionConfig,
   type SessionListEntry,
   type SessionState,
   type TrustRequest,
@@ -71,6 +72,16 @@ class PilotStore {
 
   // per-client view state — local only (never sent upstream; see D5)
   composerDraft = $state("");
+  // New-session draft (Claude-app style): when non-null the main pane shows the
+  // config chips + composer for a session that does NOT exist yet. Creation is
+  // deferred — submitDraft() sends `newSession` (cwd/worktree/model/thinking + the
+  // first prompt) atomically, so nothing hits the server until the user sends.
+  draft = $state<{
+    cwd: string;
+    worktree: boolean;
+    model?: { provider: string; modelId: string };
+    thinking?: string;
+  } | null>(null);
   // Sidebar open/collapsed. Default open on a roomy viewport, closed on a phone
   // (where it's an overlay drawer). Persisted per-device in localStorage.
   sidebarOpen = $state(initialSidebarOpen());
@@ -268,8 +279,54 @@ class PilotStore {
   groupRunning(sessionIds: readonly string[]): boolean {
     return sessionIds.some((id) => this.runningIds.has(id));
   }
-  newSession(cwd?: string, worktree?: boolean): void {
-    send({ type: "newSession", cwd: cwd?.trim() || undefined, worktree });
+  /** Open the new-session draft. `cwd` prefills the project (the sidebar passes the
+   *  group's cwd, or the active session's). Model/thinking seed from pi's global
+   *  defaults so the chips reflect what a plain new session would use. */
+  startDraft(cwd = ""): void {
+    const d = this.modelDefaults;
+    this.draft = {
+      cwd,
+      worktree: false,
+      model:
+        d.provider && d.modelId
+          ? { provider: d.provider, modelId: d.modelId }
+          : undefined,
+      thinking: d.thinkingLevel,
+    };
+    this.composerDraft = "";
+  }
+  cancelDraft(): void {
+    this.draft = null;
+  }
+  setDraftCwd(cwd: string): void {
+    if (this.draft) this.draft = { ...this.draft, cwd };
+  }
+  toggleDraftWorktree(): void {
+    if (this.draft)
+      this.draft = { ...this.draft, worktree: !this.draft.worktree };
+  }
+  /** Commit the draft: create the session and deliver its first prompt in one
+   *  message. Mirrors prompt()'s permission/push gesture since this IS the first turn. */
+  submitDraft(text: string): void {
+    const d = this.draft;
+    if (!d) return;
+    const t = text.trim();
+    if (!t) return;
+    this.lastPrompt = t;
+    ensurePermission();
+    void ensurePushSubscription().then((s) => {
+      this.pushState = s;
+    });
+    send({
+      type: "newSession",
+      cwd: d.cwd.trim() || undefined,
+      worktree: d.worktree || undefined,
+      model: d.model,
+      thinking: d.thinking,
+      prompt: t,
+    });
+    this.draft = null;
+    this.composerDraft = "";
   }
   /** PWA: a newer service worker installed — raise the refresh prompt (set from sw.ts). */
   markUpdateReady(): void {
@@ -325,10 +382,50 @@ class PilotStore {
   clearError(): void {
     this.lastError = null;
   }
+  /** The config the composer's model/effort picker reflects: the draft's choices while
+   *  drafting a new session, else the active session's live config. In draft mode the
+   *  available thinking levels come from the chosen model's `thinkingLevels` (no session
+   *  exists yet to report its own). */
+  get composerConfig(): SessionConfig {
+    const d = this.draft;
+    if (!d) return this.session.config;
+    const levels = d.model
+      ? this.models.find(
+          (m) =>
+            m.provider === d.model?.provider && m.modelId === d.model?.modelId,
+        )?.thinkingLevels
+      : undefined;
+    return {
+      provider: d.model?.provider,
+      modelId: d.model?.modelId,
+      thinkingLevel: d.thinking,
+      availableThinkingLevels: levels,
+    };
+  }
   setModel(provider: string, modelId: string): void {
+    if (this.draft) {
+      // Switching model can change supported thinking levels; clamp the draft's level
+      // to the new model's set so the effort chip never shows an unsupported option.
+      const levels = this.models.find(
+        (m) => m.provider === provider && m.modelId === modelId,
+      )?.thinkingLevels;
+      const cur = this.draft.thinking;
+      const thinking =
+        levels && cur && !levels.includes(cur)
+          ? levels.includes("medium")
+            ? "medium"
+            : levels[levels.length - 1]
+          : cur;
+      this.draft = { ...this.draft, model: { provider, modelId }, thinking };
+      return;
+    }
     send({ type: "setModel", provider, modelId });
   }
   setThinking(level: string): void {
+    if (this.draft) {
+      this.draft = { ...this.draft, thinking: level };
+      return;
+    }
     send({ type: "setThinking", level });
   }
 
@@ -339,7 +436,7 @@ class PilotStore {
     const favs = this.modelDefaults.favorites;
     if (favs.length === 0) return this.models;
     const set = new Set(favs);
-    const cfg = this.session.config;
+    const cfg = this.composerConfig;
     return this.models.filter(
       (m) =>
         set.has(`${m.provider}:${m.modelId}`) ||
