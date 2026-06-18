@@ -42,6 +42,13 @@
   function toggleMenu(path: string): void {
     menuFor = menuFor === path ? null : path;
   }
+  // Right-clicking a row opens its ⋯ menu (and suppresses the native context menu),
+  // mirroring the desktop expectation. Always opens — never toggles closed — so a
+  // second right-click re-targets rather than dismissing.
+  function openMenu(e: MouseEvent, path: string): void {
+    e.preventDefault();
+    menuFor = path;
+  }
   function closeMenu(): void {
     menuFor = null;
   }
@@ -270,8 +277,9 @@
                     <button
                       class="row"
                       class:active={s.sessionId === store.activeSessionId}
-                      title={`Open session: ${s.displayName || s.preview || "(untitled)"}`}
+                      title={`Open session: ${s.displayName || s.preview || "(untitled)"} (right-click for actions)`}
                       onclick={() => pick(s)}
+                      oncontextmenu={(e) => openMenu(e, s.path)}
                     >
                       <span
                         class="status"

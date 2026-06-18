@@ -28,6 +28,33 @@ test("active-only filter hides archived + stale sessions; show-all reveals them"
   await expect(sidebar.getByText(/hidden/)).toHaveCount(0);
 });
 
+test("right-clicking a session row opens its overflow menu", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  const sidebar = page.getByTestId("sidebar");
+
+  const row = sidebar
+    .locator(".row-wrap")
+    .filter({ hasText: "Explore the fold reducer" });
+  await expect(row).toBeVisible();
+
+  // The menu is closed to start with — no hover, no ⋯ click.
+  await expect(
+    row.getByRole("menuitem", { name: "Archive", exact: true }),
+  ).toHaveCount(0);
+
+  // Right-click the row itself opens the same menu the ⋯ trigger would.
+  await row.locator(".row").click({ button: "right" });
+  await expect(
+    row.getByRole("menuitem", { name: "Archive", exact: true }),
+  ).toBeVisible();
+
+  // And it drives the same action.
+  await sidebar.getByRole("menuitem", { name: "Archive", exact: true }).click();
+  await expect(sidebar.getByText("Explore the fold reducer")).toHaveCount(0);
+});
+
 test("the overflow menu archives a session, hiding it from the active list", async ({
   page,
 }) => {
