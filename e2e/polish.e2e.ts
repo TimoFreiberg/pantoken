@@ -126,6 +126,34 @@ test("composer: live markdown preview toggle", async ({ page }) => {
   await expect(ta).toHaveValue("some **bold** and `code`");
 });
 
+test("transcript: full markdown renders (headings, table, code, links)", async ({
+  page,
+}) => {
+  // gotoFresh resolves as soon as the greeting's *start* is visible, but the greeting
+  // streams at idle status (no "running"), so it keeps streaming after that. Wait for
+  // its final words before driving, or the markdown script interleaves with the
+  // greeting's tail in the mock's shared timer queue.
+  await expect(page.locator(".row.assistant").last()).toContainText("Bun test");
+  await drive(page, "markdown");
+  // Wait for the markdown turn to settle (final render) before asserting structure.
+  const row = page.locator(".row.assistant").last();
+  await expect(row.getByRole("button", { name: "Copy message" })).toBeVisible();
+  const md = row.locator(".markstream-svelte.markdown-renderer");
+  await expect(md.locator("h2")).toHaveText("Markdown showcase");
+  await expect(md.locator("h3").first()).toHaveText("A table");
+  await expect(md.locator("strong")).toHaveText("bold");
+  await expect(md.locator("em")).toHaveText("italic");
+  // GFM table — headers + a body cell.
+  await expect(md.locator("table th").first()).toHaveText("Feature");
+  await expect(md.locator("table td").first()).toHaveText("Headers");
+  // Fenced code block renders as <pre> (renderCodeBlocksAsPre, no Monaco peer).
+  await expect(md.locator("pre")).toContainText("function greet");
+  // Links survive sanitization and are hardened with rel="noopener".
+  const link = md.locator("a");
+  await expect(link).toHaveAttribute("href", "https://example.com");
+  await expect(link).toHaveAttribute("rel", /noopener/);
+});
+
 test("type-to-focus: a printable key focuses the composer", async ({
   page,
 }) => {

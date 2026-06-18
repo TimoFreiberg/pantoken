@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import type { CommandInfo } from "@pilot/protocol";
   import { store } from "../lib/store.svelte.js";
-  import { renderMarkdown } from "../lib/markdown.js";
+  import Markdown from "./Markdown.svelte";
   import { filterCommands, slashQuery } from "../lib/slash.js";
   import SlashMenu from "./SlashMenu.svelte";
   import ModelPicker from "./ModelPicker.svelte";
@@ -314,7 +314,9 @@
         tabindex="-1"
       >{expanded ? "⌄" : "⌃"}</button>
       {#if showPreview}
-        <div class="prose preview">{@html renderMarkdown(store.composerDraft)}</div>
+        <div class="prose preview">
+          <Markdown content={store.composerDraft} />
+        </div>
       {:else}
         <textarea
           bind:this={ta}

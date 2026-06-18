@@ -1,6 +1,7 @@
 import { mount } from "svelte";
 import App from "./App.svelte";
 import "./app.css";
+import "./markstream-theme.css";
 import { store } from "./lib/store.svelte.js";
 import { registerServiceWorker } from "./lib/sw.js";
 
