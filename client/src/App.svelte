@@ -10,6 +10,7 @@
   import TrustCard from "./components/TrustCard.svelte";
   import TokenGate from "./components/TokenGate.svelte";
   import Settings from "./components/Settings.svelte";
+  import Tooltip from "./components/Tooltip.svelte";
   import { notifyIfUnfocused } from "./lib/notify.js";
 
   // Dev affordance: ?dev shows buttons that drive the mock to any UI state, so the
@@ -87,6 +88,9 @@
   </div>
 {/if}
 {/if}
+
+<!-- Themed tooltip override for every `title` in the app; works behind the gate too. -->
+<Tooltip />
 
 <style>
   .shell {
