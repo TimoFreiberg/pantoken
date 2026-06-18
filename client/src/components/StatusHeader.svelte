@@ -19,8 +19,18 @@
   const s = $derived(store.session);
   const statuses = $derived(Object.entries(s.ambient.statuses));
 
+  // While drafting a new session there's no folded session yet — the header reflects
+  // the draft so it doesn't read as the (now-backgrounded) previously-active one.
+  const drafting = $derived(store.draft != null);
+  const draftDir = $derived.by(() => {
+    const c = store.draft?.cwd?.replace(/\/+$/, "") ?? "";
+    return c ? (c.split("/").pop() ?? c) : "";
+  });
+
   // The active session's title (folded snapshot is authoritative; ambient title wins).
-  const title = $derived(s.ambient.title || s.title || "pilot");
+  const title = $derived(
+    drafting ? "New session" : s.ambient.title || s.title || "pilot",
+  );
 
   const push = $derived(store.pushState);
   const pushLabel: Record<string, string> = {
@@ -67,7 +77,13 @@
   <div class="left">
     <span class="title">{title}</span>
     <div class="sub">
-      <span class="path">{s.ref?.workspaceId ? "pilot" : "no session"}</span>
+      <span class="path"
+        >{drafting
+          ? draftDir || "new session"
+          : s.ref?.workspaceId
+            ? "pilot"
+            : "no session"}</span
+      >
       {#each statuses as [key, text] (key)}
         <span class="dot-sep">·</span>
         <span class="amb">{text}</span>

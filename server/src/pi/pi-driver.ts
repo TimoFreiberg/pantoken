@@ -46,7 +46,7 @@ import type {
 } from "@pilot/protocol";
 import { ArchiveStore } from "../archive-store.js";
 import { config } from "../config.js";
-import type { PilotDriver, TrustEvent } from "../driver.js";
+import type { NewSessionOpts, PilotDriver, TrustEvent } from "../driver.js";
 import { mapPiEvent } from "./event-map.js";
 import { type HistoryMessage, historyToEvents } from "./history-map.js";
 import { createWorktree } from "./worktree.js";
@@ -67,6 +67,32 @@ export interface PiDriverOptions {
   cwd?: string;
   /** Max kept-warm sessions before LRU eviction. Defaults to config.warmCap. */
   warmCap?: number;
+}
+
+// pi's thinking-level ladder. Mirrors `getSupportedThinkingLevels` from
+// @earendil-works/pi-ai, which isn't a direct/resolvable dep here — we read the same
+// `reasoning` + `thinkingLevelMap` model metadata it does. Used to enrich the model
+// list so the new-session draft's effort picker has accurate options before a session
+// exists (per-session `availableThinkingLevels` is only known once a model is warm).
+const EXTENDED_THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const;
+function supportedThinkingLevels(model: {
+  reasoning?: unknown;
+  thinkingLevelMap?: Record<string, string | null | undefined>;
+}): string[] {
+  if (!model.reasoning) return ["off"];
+  return EXTENDED_THINKING_LEVELS.filter((level) => {
+    const mapped = model.thinkingLevelMap?.[level];
+    if (mapped === null) return false;
+    if (level === "xhigh") return mapped !== undefined;
+    return true;
+  });
 }
 
 // One kept-warm session and everything bound to it. Fully independent: its own
@@ -547,7 +573,8 @@ export async function createPiDriver(
       return seedFor(ws);
     },
 
-    async newSession(cwd?: string, worktree?: boolean) {
+    async newSession(opts: NewSessionOpts = {}) {
+      const { cwd, worktree, model, thinking } = opts;
       // D12: the GUI may open any path. Expand a leading `~/` (or bare `~`), make it
       // absolute, and fail loudly if it isn't a real directory rather than letting pi
       // create a session against a typo'd cwd. An untrusted new cwd still works — trust
@@ -574,6 +601,22 @@ export async function createPiDriver(
       // agent works on a clean copy. Throws loudly if `dir` isn't a repo (surfaced to UI).
       if (worktree) dir = await createWorktree(dir);
       const ws = await warmUp(SessionManager.create(dir));
+      // Apply the draft's model/thinking BEFORE seedFor so the returned seed snapshot
+      // already reflects them (the hub folds the seed atomically; subscribe-side
+      // sessionUpdated emissions are dropped while switching). setThinkingLevel clamps
+      // to what the chosen model supports, so an unsupported draft level is graceful.
+      if (model) {
+        const m = ws.session.modelRegistry.find(model.provider, model.modelId);
+        if (m) await ws.session.setModel(m);
+        else
+          console.error(
+            `[pi] newSession: unknown model ${model.provider}:${model.modelId}`,
+          );
+      }
+      if (thinking)
+        ws.session.setThinkingLevel(
+          thinking as Parameters<typeof ws.session.setThinkingLevel>[0],
+        );
       focus(ws.ref.sessionId);
       return seedFor(ws);
     },
@@ -587,6 +630,7 @@ export async function createPiDriver(
         provider: String(m.provider),
         modelId: m.id,
         label: m.name,
+        thinkingLevels: supportedThinkingLevels(m),
       }));
     },
 

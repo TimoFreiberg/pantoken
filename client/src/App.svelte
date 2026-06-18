@@ -6,6 +6,7 @@
   import ConnectionBanner from "./components/ConnectionBanner.svelte";
   import Transcript from "./components/Transcript.svelte";
   import WorkingIndicator from "./components/WorkingIndicator.svelte";
+  import NewSession from "./components/NewSession.svelte";
   import Composer from "./components/Composer.svelte";
   import ApprovalLayer from "./components/ApprovalLayer.svelte";
   import TrustCard from "./components/TrustCard.svelte";
@@ -56,8 +57,12 @@
   <div class="app">
     <StatusHeader />
     <ConnectionBanner />
-    <Transcript />
-    <WorkingIndicator />
+    {#if store.draft}
+      <NewSession />
+    {:else}
+      <Transcript />
+      <WorkingIndicator />
+    {/if}
     {#if dev}
       <div class="devbar">
         {#each scripts as s (s)}

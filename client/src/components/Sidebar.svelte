@@ -1,15 +1,8 @@
 <script lang="ts">
   import type { SessionListEntry } from "@pilot/protocol";
-  import { tick } from "svelte";
   import { store } from "../lib/store.svelte.js";
   import { filterSessions } from "../lib/session-filter.js";
   import { relativeTime } from "../lib/relative-time.js";
-
-  // A new-session-in-a-directory disclosure (D12: arbitrary GUI-controlled paths).
-  let showNewDir = $state(false);
-  let newDir = $state("");
-  let dirInput = $state<HTMLInputElement | null>(null);
-  let useWorktree = $state(false);
 
   function basename(p: string): string {
     const parts = p.replace(/\/+$/, "").split("/");
@@ -203,29 +196,12 @@
     store.openSession(s.path);
     afterNavigate();
   }
-  function newInDir(cwd: string): void {
-    store.newSession(cwd);
+  // Open the new-session draft (config chips + first prompt live in the main pane's
+  // composer; creation is deferred until send). `cwd` prefills the project: the group's
+  // dir from a project "+" header, or the active session's dir from the top button.
+  function startDraft(cwd: string): void {
+    store.startDraft(cwd);
     afterNavigate();
-  }
-  async function openNewDir(): Promise<void> {
-    newDir = activeCwd;
-    showNewDir = true;
-    // The `autofocus` attr is unreliable when the input mounts via {#if}; focus it
-    // explicitly once the DOM updates. Select the prefilled cwd so typing replaces it.
-    await tick();
-    dirInput?.focus();
-    dirInput?.select();
-  }
-  function submitNewDir(): void {
-    const dir = newDir.trim();
-    if (!dir) return;
-    store.newSession(dir, useWorktree);
-    closeNewDir();
-    afterNavigate();
-  }
-  function closeNewDir(): void {
-    showNewDir = false;
-    useWorktree = false;
   }
 </script>
 
@@ -252,47 +228,13 @@
   </div>
 
   <div class="new">
-    {#if showNewDir}
-      <form
-        onsubmit={(e) => {
-          e.preventDefault();
-          submitNewDir();
-        }}
-      >
-        <input
-          class="dir-input"
-          type="text"
-          bind:this={dirInput}
-          spellcheck="false"
-          autocapitalize="off"
-          autocorrect="off"
-          placeholder="/absolute/path/to/project"
-          bind:value={newDir}
-          onkeydown={(e) => {
-            if (e.key === "Escape") closeNewDir();
-          }}
-        />
-        <label
-          class="worktree-toggle"
-          title="Run the session in an isolated jj/git worktree of this directory, leaving the main tree clean"
-        >
-          <input type="checkbox" bind:checked={useWorktree} />
-          <span>Isolate in a worktree</span>
-        </label>
-        <div class="dir-actions">
-          <button class="ghost" type="button" title="Cancel and close this form (Esc)" onclick={closeNewDir}>
-            Cancel
-          </button>
-          <button class="primary" type="submit" title="Start a new session in this directory" disabled={!newDir.trim()}>
-            Start
-          </button>
-        </div>
-      </form>
-    {:else}
-      <button class="new-btn" title="Start a new session in a directory you choose" onclick={openNewDir}>
-        <span class="plus">+</span> New session in a directory…
-      </button>
-    {/if}
+    <button
+      class="new-btn"
+      title="Start a new session — pick the project, worktree, and model in the composer (creation is deferred until you send)"
+      onclick={() => startDraft(activeCwd)}
+    >
+      <span class="plus">+</span> New session…
+    </button>
     {#if store.lastError}
       <div class="err" role="alert">
         {store.lastError}
@@ -366,7 +308,7 @@
               class="icon add"
               title={`New session in ${g.cwd}`}
               aria-label={`New session in ${basename(g.cwd)}`}
-              onclick={() => newInDir(g.cwd)}>+</button
+              onclick={() => startDraft(g.cwd)}>+</button
             >
           </div>
           {#if !collapsed[g.cwd]}
@@ -572,58 +514,6 @@
   .plus {
     color: var(--accent);
     font-weight: 700;
-  }
-  .dir-input {
-    width: 100%;
-    font-family: var(--font-mono);
-    font-size: 13px; /* ≥16px would dodge iOS zoom, but this input only shows on desktop-ish widths; keep compact */
-    color: var(--text);
-    background: var(--surface);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm);
-    padding: 8px 10px;
-  }
-  .dir-input:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-  .dir-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 6px;
-    margin-top: 6px;
-  }
-  .worktree-toggle {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 7px;
-    font-size: 12px;
-    color: var(--text-muted);
-    cursor: pointer;
-  }
-  .worktree-toggle input {
-    margin: 0;
-  }
-  .ghost,
-  .primary {
-    font-size: 12.5px;
-    border-radius: var(--radius-xs);
-    padding: 5px 11px;
-    border: 1px solid var(--border);
-  }
-  .ghost {
-    color: var(--text-muted);
-    background: transparent;
-  }
-  .primary {
-    color: var(--accent-text);
-    background: var(--accent);
-    border-color: var(--accent);
-  }
-  .primary:disabled {
-    opacity: 0.5;
-    cursor: default;
   }
   .err {
     display: flex;

@@ -19,24 +19,34 @@ import type {
 /** Thinking levels the mock's models "support" — drives the picker's thinking menu. */
 export const MOCK_THINKING_LEVELS = ["off", "low", "medium", "high"] as const;
 
-/** A deterministic spread of models for the picker (mirrors pi's provider:model ids). */
+/** A deterministic spread of models for the picker (mirrors pi's provider:model ids).
+ *  `thinkingLevels` vary by model so the new-session draft's effort picker has a
+ *  realistic (and e2e-distinguishable) per-model set; DeepSeek Flash is non-reasoning. */
 export const MOCK_MODELS: readonly ModelOption[] = [
   {
     provider: "anthropic",
     modelId: "claude-opus-4-8",
     label: "Claude Opus 4.8",
+    thinkingLevels: MOCK_THINKING_LEVELS,
   },
   {
     provider: "anthropic",
     modelId: "claude-sonnet-4-6",
     label: "Claude Sonnet 4.6",
+    thinkingLevels: MOCK_THINKING_LEVELS,
   },
   {
     provider: "deepseek",
     modelId: "deepseek-v4-flash",
     label: "DeepSeek V4 Flash",
+    thinkingLevels: ["off"],
   },
-  { provider: "openai", modelId: "gpt-5", label: "GPT-5" },
+  {
+    provider: "openai",
+    modelId: "gpt-5",
+    label: "GPT-5",
+    thinkingLevels: ["minimal", "low", "medium", "high"],
+  },
 ];
 
 /** A deterministic spread of slash commands for the composer typeahead — one per
@@ -789,9 +799,22 @@ export const NEW_SESSION_ENTRY: SessionListEntry = {
   archived: false,
 };
 
-/** Seed events for a freshly created (empty) session. */
-export function newSessionSeed(): SessionDriverEvent[] {
+/** Seed events for a freshly created (empty) session. `cwd`/`config` reflect the
+ *  new-session draft's choices (workspace dir + model/thinking) so the mock mirrors
+ *  what the real driver returns and e2e can assert the isolated worktree path. */
+export function newSessionSeed(
+  opts: { cwd?: string; config?: SessionConfig } = {},
+): SessionDriverEvent[] {
   const ref = sessionRefFor("new-session");
+  const dir = opts.cwd ?? WORKSPACE.path;
+  const workspace =
+    dir === WORKSPACE.path
+      ? WORKSPACE
+      : {
+          workspaceId: dir,
+          path: dir,
+          displayName: dir.replace(/\/+$/, "").split("/").pop() || dir,
+        };
   return [
     {
       sessionRef: ref,
@@ -799,11 +822,14 @@ export function newSessionSeed(): SessionDriverEvent[] {
       type: "sessionOpened",
       snapshot: {
         ref,
-        workspace: WORKSPACE,
+        workspace,
         title: "New session",
         status: "idle",
         updatedAt: ts(),
-        config: { provider: "anthropic", modelId: "claude-opus-4-8" },
+        config: opts.config ?? {
+          provider: "anthropic",
+          modelId: "claude-opus-4-8",
+        },
       },
     },
   ];

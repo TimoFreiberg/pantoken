@@ -22,6 +22,15 @@
     Object.values(store.session.ambient.widgets).filter((w) => w.placement === "aboveComposer"),
   );
   const streaming = $derived(store.streaming);
+  // Drafting a brand-new session: the composer doubles as the new-session form (config
+  // chips above, first prompt below). Send creates the session + delivers the prompt.
+  const drafting = $derived(store.draft != null);
+  // Inline path editor for the project chip (collapsed → chip, expanded → text input).
+  let editingCwd = $state(false);
+  const cwdBase = $derived.by(() => {
+    const c = store.draft?.cwd?.replace(/\/+$/, "") ?? "";
+    return c ? (c.split("/").pop() ?? c) : "launch dir";
+  });
   // Preview only renders when there's something to show; an empty draft always
   // falls back to the editable textarea so the box never looks blank/stuck.
   const showPreview = $derived(preview && store.composerDraft.trim().length > 0);
@@ -81,9 +90,18 @@
   function submit() {
     const text = store.composerDraft;
     if (!text.trim()) return;
-    store.prompt(text, streaming ? deliverAs : undefined);
+    if (drafting) store.submitDraft(text);
+    else store.prompt(text, streaming ? deliverAs : undefined);
+    editingCwd = false;
     expanded = false;
     queueMicrotask(autosize);
+  }
+
+  // Focus (and select) the cwd input the moment it mounts — `autofocus` is unreliable
+  // for inputs that appear via {#if}, same pattern as the sidebar's old new-dir field.
+  function focusOnMount(node: HTMLElement) {
+    node.focus();
+    if (node instanceof HTMLInputElement) node.select();
   }
 
   function toggleExpand() {
@@ -123,6 +141,20 @@
       expanded = e.key === "ArrowUp";
       queueMicrotask(autosize);
       return;
+    }
+    // New-session draft shortcuts: ⌥W toggles the worktree chip; Escape (with an empty
+    // prompt and no slash menu open) abandons the draft.
+    if (drafting) {
+      if (e.altKey && (e.key === "w" || e.key === "W")) {
+        e.preventDefault();
+        store.toggleDraftWorktree();
+        return;
+      }
+      if (e.key === "Escape" && !slashOpen && !store.composerDraft.trim()) {
+        e.preventDefault();
+        store.cancelDraft();
+        return;
+      }
     }
     if (slashOpen) {
       const n = slashItems.length;
@@ -214,6 +246,54 @@
       </div>
     {/if}
 
+    {#if drafting && store.draft}
+      <!-- New-session config chips (project · worktree). Model + effort live in the
+           footer toolbar below, rebound to the draft via store.composerConfig. -->
+      <div class="chips">
+        {#if editingCwd}
+          <input
+            class="cwd-input"
+            type="text"
+            value={store.draft.cwd}
+            placeholder="/absolute/path/to/project (blank = launch dir)"
+            spellcheck="false"
+            autocapitalize="off"
+            autocorrect="off"
+            title="Project directory for this new session"
+            aria-label="Project directory"
+            oninput={(e) => store.setDraftCwd(e.currentTarget.value)}
+            onkeydown={(e) => {
+              if (e.key === "Enter" || e.key === "Escape") {
+                e.preventDefault();
+                editingCwd = false;
+              }
+            }}
+            onblur={() => (editingCwd = false)}
+            use:focusOnMount
+          />
+        {:else}
+          <button
+            class="chip"
+            title={`Project: ${store.draft.cwd || "launch dir"} — click to change`}
+            onclick={() => (editingCwd = true)}
+          >
+            <span class="chip-ico" aria-hidden="true">▸</span>
+            {cwdBase}
+          </button>
+        {/if}
+        <button
+          class="chip toggle-chip"
+          class:on={store.draft.worktree}
+          aria-pressed={store.draft.worktree}
+          title="Isolate this session in a jj/git worktree of the project, leaving the main tree clean (⌥W)"
+          onclick={() => store.toggleDraftWorktree()}
+        >
+          <span class="chip-check" aria-hidden="true">{store.draft.worktree ? "✓" : ""}</span>
+          worktree
+        </button>
+      </div>
+    {/if}
+
     <div class="box-wrap">
       {#if slashOpen}
         <SlashMenu
@@ -241,7 +321,11 @@
           bind:value={store.composerDraft}
           oninput={onInput}
           onkeydown={onKeydown}
-          placeholder={streaming ? "Queue a message…" : "Message pilot…"}
+          placeholder={drafting
+            ? "Describe a task or ask a question…"
+            : streaming
+              ? "Queue a message…"
+              : "Message pilot…"}
           rows="1"
           role="combobox"
           aria-expanded={slashOpen}
@@ -261,7 +345,13 @@
             {showPreview ? "Edit" : "Preview"}
           </button>
         {/if}
-        <button class="send" disabled={!store.composerDraft.trim()} onclick={submit} aria-label="Send" title="Send (Enter)">
+        <button
+          class="send"
+          disabled={!store.composerDraft.trim()}
+          onclick={submit}
+          aria-label={drafting ? "Create session and send" : "Send"}
+          title={drafting ? "Create session and send first message (Enter)" : "Send (Enter)"}
+        >
           ↑
         </button>
       </div>
@@ -273,7 +363,11 @@
          composer chrome; permission/voice controls are intentionally omitted. -->
     <div class="toolbar">
       <div class="toolbar-left">
-        <ContextMeter />
+        {#if drafting}
+          <span class="draft-hint" title="A new session is created when you send">new session</span>
+        {:else}
+          <ContextMeter />
+        {/if}
       </div>
       <div class="toolbar-right">
         <!-- TODO: file uploader — wire to an attach/upload driver capability + a
@@ -360,6 +454,66 @@
     font-weight: 550;
     padding: 5px 14px;
     border-radius: 999px;
+  }
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12.5px;
+    font-family: var(--font-sans);
+    color: var(--text-muted);
+    background: var(--surface-sunken);
+    border: 1px solid var(--border);
+    padding: 4px 11px;
+    border-radius: 999px;
+    cursor: pointer;
+    max-width: 60vw;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .chip:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+  .chip-ico {
+    color: var(--text-faint);
+    font-size: 10px;
+  }
+  .toggle-chip.on {
+    color: var(--accent-text);
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .chip-check {
+    display: inline-grid;
+    place-items: center;
+    width: 12px;
+    font-size: 11px;
+    line-height: 1;
+  }
+  .cwd-input {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    font-family: var(--font-mono);
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    padding: 4px 12px;
+    outline: none;
+  }
+  .draft-hint {
+    font-size: 11.5px;
+    color: var(--text-faint);
+    font-family: var(--font-sans);
   }
   .box-wrap {
     /* Anchor for the slash menu, which pops upward from just above the box. */

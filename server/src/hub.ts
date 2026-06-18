@@ -315,14 +315,14 @@ export class SessionHub {
    */
   private async switchTo(
     swap: () => Promise<SessionDriverEvent[]>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (this.switchInFlight) {
       this.broadcast({
         type: "error",
         message:
           "a session switch is already in progress — answer the trust prompt first",
       });
-      return;
+      return false;
     }
     this.switchInFlight = true;
     this.switching = true;
@@ -336,7 +336,7 @@ export class SessionHub {
           type: "error",
           message: `session switch failed: ${e}`,
         });
-        return;
+        return false;
       }
       this.state = initialSessionState();
       for (const ev of seed) foldEvent(this.state, ev);
@@ -355,6 +355,7 @@ export class SessionHub {
       await this.broadcastSessionList();
       // Commands are cwd-scoped — the swapped-to session may expose a different set.
       await this.broadcastCommandList();
+      return true;
     } finally {
       this.switchInFlight = false;
     }
@@ -428,9 +429,29 @@ export class SessionHub {
       case "openSession":
         void this.switchTo(() => this.driver.openSession(msg.path));
         return;
-      case "newSession":
-        void this.switchTo(() => this.driver.newSession(msg.cwd, msg.worktree));
+      case "newSession": {
+        // Deferred creation: the draft lives client-side until the user sends, so this
+        // message creates the session AND carries its first prompt. Deliver the prompt
+        // only after the switch lands (focusedId now points at the new session) — doing
+        // it inside the driver's newSession would race the hub's atomic state reset.
+        const firstPrompt = msg.prompt?.trim();
+        void this.switchTo(() =>
+          this.driver.newSession({
+            cwd: msg.cwd,
+            worktree: msg.worktree,
+            model: msg.model,
+            thinking: msg.thinking,
+          }),
+        ).then((ok) => {
+          if (ok && firstPrompt)
+            this.driver.prompt(
+              firstPrompt,
+              undefined,
+              this.focusedId ?? undefined,
+            );
+        });
         return;
+      }
       case "listSessions":
         void this.broadcastSessionList();
         return;
