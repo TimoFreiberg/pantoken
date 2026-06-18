@@ -31,6 +31,10 @@ _(clear — nothing blocking; pull the next item up from Important)_
       (Anthropic, OpenAI, …) from the Settings panel. Deferred from the settings-panel
       work (API-key entry shipped); needs a server-side OAuth callback reachable over
       Tailscale, which is the bulk of the cost.
+- [ ] **Workspace icon instead of text label in sidebar** — replace the "WORKSPACE: …" label on
+      session rows with a compact icon (no text), matching the Claude app's visual density.
+- [ ] **Remove hover tooltip on session titles in the sidebar** — intentional: it's visually
+      noisy and doesn't add information beyond what's already visible in the title itself.
 - [ ] **Extensions enable/disable view** + compatibility-issue surfacing
 - [ ] **Per-session system-prompt override** — let a new session start with a custom
       system prompt instead of pi's default (in the new-session draft, and/or a global
@@ -44,6 +48,11 @@ _(clear — nothing blocking; pull the next item up from Important)_
 
 - [ ] **gondolin egress containment** (D10) — for the autonomous Mac Mini
       user account; preserves TS-embed via pi-gondolin extension
+- [ ] **Group workspace-spawned sessions under their parent** — when a session is spawned
+      inside a jj workspace, nest it visually under the parent session in the sidebar
+      (or show them adjacent with an indent), so the relationship is visible at a glance.
+      Nontrivial: the list is flat today; grouping needs either session metadata or
+      workspace-path heuristics.
 - [ ] **Session tree / fork / clone / compaction**
 - [ ] **Scheduled / recurring runs**
 - [ ] **Image / file attachments** (browser file input)
