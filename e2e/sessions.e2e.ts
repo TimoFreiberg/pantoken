@@ -41,6 +41,32 @@ test("the sidebar groups sessions by project and switches the active one", async
   );
 });
 
+test("rows show a relative last-activity timestamp; the count appears only when collapsed", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  const sidebar = page.getByTestId("sidebar");
+
+  // Each row carries a relative "time since last activity" label below the name.
+  const demoRow = sidebar
+    .locator(".row-wrap")
+    .filter({ hasText: "Wire up the WebSocket" });
+  await expect(demoRow.locator(".time")).toHaveText(
+    /(\d+(m|h|d|w|mo|y) ago|just now)/,
+  );
+
+  // The session count is hidden while a group is expanded…
+  const pilotGroup = sidebar
+    .locator(".group")
+    .filter({ has: page.locator(".proj", { hasText: "pilot" }) });
+  await expect(pilotGroup.locator(".count")).toHaveCount(0);
+
+  // …and revealed once it's collapsed (the rows themselves disappear).
+  await pilotGroup.locator(".group-toggle").click();
+  await expect(pilotGroup.locator(".count")).toBeVisible();
+  await expect(demoRow).toHaveCount(0);
+});
+
 test("a project's + button starts a new session in that dir", async ({
   page,
 }) => {
