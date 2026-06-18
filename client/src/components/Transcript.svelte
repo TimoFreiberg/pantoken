@@ -132,12 +132,45 @@
             <div class="meta">
               <button
                 class="copy"
+                class:copied={copiedId === item.id}
                 type="button"
-                onclick={() => copyText(item.id, item.text)}
-                title="Copy message"
+                onclick={(e) => {
+                  copyText(item.id, item.text);
+                  // Drop focus so a mouse click doesn't leave the button pinned
+                  // visible via :focus-visible after the pointer leaves the row.
+                  e.currentTarget.blur();
+                }}
+                title={copiedId === item.id ? "Copied" : "Copy message"}
                 aria-label="Copy message"
               >
-                {copiedId === item.id ? "Copied" : "Copy"}
+                {#if copiedId === item.id}
+                  <svg
+                    class="ico"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                {:else}
+                  <svg
+                    class="ico"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <rect x="9" y="9" width="13" height="13" rx="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                {/if}
               </button>
               {#if item.ts}
                 <time class="ts" datetime={item.ts} title={exactTime(item.ts)}>{relativeTime(item.ts)}</time>
@@ -252,18 +285,24 @@
   }
   .copy {
     appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text-muted);
-    font-size: 11px;
-    line-height: 1;
-    padding: 3px 8px;
+    padding: 4px;
     border-radius: var(--radius-xs);
     opacity: 0;
     transition:
       opacity 0.12s ease,
       color 0.12s ease,
       border-color 0.12s ease;
+  }
+  .copy .ico {
+    display: block;
+    width: 13px;
+    height: 13px;
   }
   .assistant:hover .copy,
   .copy:focus-visible {
@@ -272,6 +311,11 @@
   .copy:hover {
     color: var(--text);
     border-color: var(--border-strong);
+  }
+  /* brief post-copy confirmation — the check icon picks up the accent tint */
+  .copy.copied {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
   }
   .copy:focus-visible {
     outline: 2px solid var(--accent);
