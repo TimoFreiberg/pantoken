@@ -197,28 +197,44 @@ that pilot should NOT build — they're paseo's domain, not pilot's differentiat
 
 ### Worth adopting
 
-- [ ] **Design-system consistency pass** _(scoped 2026-06-18; own focused session —
-      it's a broad, visually-sensitive refactor, do it screenshot-driven, not bundled)_.
+- [ ] **Design-system consistency pass** _(scoped 2026-06-18; reshaped 2026-06-18 with
+      owner — own focused session, screenshot-driven, not bundled)_.
       Port paseo's *discipline*, not its React-Native specifics: any semantic element used
-      3+ times becomes a shared primitive; buttons get a small fixed variant taxonomy;
-      hierarchy leans on weight+color over font-size.
+      3+ times becomes a shared primitive with a small fixed taxonomy. Promote
+      `Settings.svelte`'s already-proven convention rather than invent a new vocabulary.
       **Audit findings (current state):** 71 raw `<button>`s across 14 components; **no
       `client/src/components/ui/` primitives** exist yet; button classes are ad-hoc (only
       `Settings.svelte` has a `btn`/`btn ghost`/`btn danger` convention — everywhere else
       is bespoke per-component classes, lots of icon-only buttons). Heaviest: `Sidebar`
       (16), `Composer` (11), `ApprovalLayer` (11), `Settings` (10), `ModelPicker` (5).
-      **Plan:** (1) extract a `<Button>` primitive in `components/ui/` with 5 variants —
-      `default` (one CTA/surface), `secondary`, `outline` (row action), `ghost`
-      (chrome/icon), `destructive` (confirm only) — each preserving the repo rule that
-      every clickable carries a `title`/hotkey; (2) migrate the 71 buttons variant-by-
-      variant, simplest components first, screenshotting each surface (desktop + mobile +
-      light/dark) before/after to catch visual regressions; (3) pull other 3+-use patterns
-      (session row, section header) into primitives; (4) the weight-vs-font-size hierarchy
-      pass LAST, as a separate reviewable step — it's a taste call to settle with the owner
-      against D14 (the Claude app does use some size hierarchy). **Guardrails:** keep
-      `e2e` green throughout (several specs select on existing button roles/labels — don't
-      break selectors); no behavior changes, styling/structure only. Big diff — expect to
-      split across several commits by variant/component.
+      **Plan — three interactive primitives in `components/ui/`:**
+      (1) `<Button>` with **3** emphasis levels — `primary` (filled accent, one CTA/surface),
+      `secondary` (outline/surface, low-emphasis), `danger` (destructive confirm). This *is*
+      Settings' existing `btn`/`ghost`/`danger`, renamed — not the 5-variant shadcn list (an
+      earlier agent draft), whose `secondary`/`outline`/`ghost` trio re-imports the very
+      ambiguity the discipline kills.
+      (2) `<IconButton>` — square, centered glyph, for the icon-only chrome that dominates
+      Sidebar/Composer/ApprovalLayer. Make `title` a **required** prop so the repo's "every
+      clickable carries a title/hotkey" rule is enforced by the type system, not by reviewers.
+      (3) `<SegmentedControl>` — the pill toggle (Settings' `.seg-btn`, the composer's
+      follow-up/steer mode switch). A distinct widget, not a Button variant.
+      **Migration order:** lock each primitive's API against the *hardest* consumers first
+      (Sidebar's icon buttons, ApprovalLayer's dialog actions) — easiest-first gives false
+      confidence, then the API doesn't fit the hard cases. Screenshot each surface
+      (desktop + mobile + light/dark) before/after; expect several commits.
+      **e2e is mostly safe:** specs select by accessible name
+      (`getByRole("button", {name})`), which a no-behavior-change refactor preserves —
+      they never see CSS classes. Only two *structural* selectors can break:
+      `.actions.two button` (`e2e/polish.e2e.ts`) and `.keyform` (`e2e/settings.e2e.ts`).
+      Keep `e2e` green; no behavior changes, styling/structure only.
+      _(Cut from the original agent plan, by owner call 2026-06-18: the "weight+color over
+      font-size" hierarchy doctrine — it's paseo's, but D14's north star is the Claude app,
+      which itself uses some size hierarchy. Fix type-hierarchy spots that look wrong against
+      the Claude app as ongoing polish, not as a refactor pass bolted onto this.)_
+- [ ] **Shared layout primitives (session row, section header)** — fast-follow to the
+      Button/IconButton/SegmentedControl pass above. The other 3+-use *structural* patterns
+      (sidebar session row, section headers) pulled into components. Split out deliberately:
+      it's a different kind of extraction (layout, not interactive primitives) — don't bundle.
 - [ ] **Big-snapshot pagination + tool-update frame coalescing** — extends the
       existing "raise/chunk 64KB WS frame cap for snapshots" SHOULD in DESIGN. For a
       long session reconnecting over a flaky phone link, a paged/chunked catch-up beats
