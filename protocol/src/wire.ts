@@ -139,13 +139,18 @@ export type ClientMessage =
   | { type: "listSessions" }
   /** Archive or unarchive a session (by its .jsonl `path`, the stable switch key).
    *  The flag is pilot-side state (D-archive); the server persists it and re-broadcasts
-   *  the session list so every client's active-only filter updates. */
+   *  the session list so every client's active-only filter updates. Archiving a session
+   *  whose cwd is a pilot-created worktree also reaps that worktree when it's clean. */
   | { type: "setArchived"; path: string; archived: boolean }
   /** Rename a session (by its .jsonl `path`). Writes pi's session display name (a
    *  `session_info` entry); the server re-broadcasts the session list so every client's
    *  sidebar updates, and a warm session's header title updates live. Empty `name` is a
    *  no-op server-side (the client shouldn't submit one). */
   | { type: "renameSession"; path: string; name: string }
+  /** Remove a pilot-created worktree (by its `path` == the session's cwd). `force`
+   *  discards uncommitted changes; without it the server refuses a dirty worktree and
+   *  reports back. The server re-broadcasts the session list (clearing the indicator). */
+  | { type: "cleanupWorktree"; path: string; force?: boolean }
   /** Ask the server to re-read the focused session's commands and re-broadcast them. */
   | { type: "listCommands" }
   /** Answer a project-trust card (D12). `choice` indexes the request's `options`;

@@ -141,6 +141,10 @@ export interface SessionListEntry {
    *  resolves it at list time). Archived sessions are hidden by the sidebar's
    *  active-only filter, alongside ones untouched for >7 days. */
   readonly archived: boolean;
+  /** Present when this session runs in a jj/git worktree pilot created (the cwd is the
+   *  worktree). The driver resolves it at list time from its worktree index; the sidebar
+   *  shows an indicator + a clean-up/copy-path action. Absent for normal sessions. */
+  readonly worktree?: { readonly path: string };
 }
 
 // --- Host UI (extension interaction) ---

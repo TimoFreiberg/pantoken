@@ -1,15 +1,26 @@
-// Create an isolated jj/git worktree of a repo directory, so a session can run on a
-// clean copy of the tree (the new-session "worktree" toggle). The command/path planning
-// is a pure function (unit-tested); only `createWorktree` touches disk + spawns the VCS.
+// Create/remove an isolated jj/git worktree of a repo directory, so a session can run
+// on a clean copy of the tree (the new-session "worktree" toggle). Command/path planning
+// is pure (unit-tested); only the create/remove/clean helpers touch disk + spawn the VCS.
 
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
 
 export type Vcs = "jj" | "git";
+
+/** A pilot-created worktree, recorded at creation so it can later be flagged in the
+ *  sidebar and cleaned up. `path` is the worktree dir (== the session's cwd); `base`
+ *  is the repo it was forked from; `name` is the jj workspace name (unused for git). */
+export interface WorktreeMeta {
+  readonly path: string;
+  readonly base: string;
+  readonly vcs: Vcs;
+  readonly name: string;
+}
 
 /** Detect the VCS backing a directory. Prefers jj (the project's VCS) when a repo is
  *  colocated jj+git. Returns null when the dir isn't a recognized repo. */
@@ -25,7 +36,13 @@ export function planWorktree(
   repoDir: string,
   vcs: Vcs,
   id: string,
-): { path: string; command: string; args: string[] } {
+): {
+  path: string;
+  command: string;
+  args: string[];
+  name: string;
+  base: string;
+} {
   const base = resolve(repoDir).replace(/\/+$/, "");
   const name = `pilot-${id}`;
   const path = `${base}-${name}`;
@@ -34,28 +51,98 @@ export function planWorktree(
       path,
       command: "jj",
       args: ["-R", base, "workspace", "add", "--name", name, path],
+      name,
+      base,
     };
   // git: a detached worktree at HEAD avoids inventing (and later colliding on) a branch.
   return {
     path,
     command: "git",
     args: ["-C", base, "worktree", "add", "--detach", path],
+    name,
+    base,
   };
 }
 
-/** Create an isolated worktree of `repoDir` and return its absolute path. Throws loudly
- *  if the dir isn't a jj/git repo or the VCS command fails — the caller surfaces it to
- *  the UI rather than silently falling back to the shared tree. */
+/** Pure: plan how to tear a worktree down. `removeDir` is true when the VCS leaves the
+ *  directory behind (jj `workspace forget` only stops tracking it) so the caller must
+ *  rm it; git's `worktree remove` deletes the dir itself. Side-effect-free for testing. */
+export function planWorktreeRemoval(
+  meta: WorktreeMeta,
+  force: boolean,
+): { command: string; args: string[]; removeDir: boolean } {
+  if (meta.vcs === "jj")
+    return {
+      command: "jj",
+      args: ["-R", meta.base, "workspace", "forget", meta.name],
+      removeDir: true,
+    };
+  return {
+    command: "git",
+    args: [
+      "-C",
+      meta.base,
+      "worktree",
+      "remove",
+      ...(force ? ["--force"] : []),
+      meta.path,
+    ],
+    removeDir: false,
+  };
+}
+
+/** Create an isolated worktree of `repoDir` and return its metadata. Throws loudly if
+ *  the dir isn't a jj/git repo or the VCS command fails — the caller surfaces it to the
+ *  UI rather than silently falling back to the shared tree. */
 export async function createWorktree(
   repoDir: string,
   id: string = Date.now().toString(36),
-): Promise<string> {
+): Promise<WorktreeMeta> {
   const vcs = detectVcs(repoDir);
   if (!vcs)
     throw new Error(
       `cannot create a worktree: ${repoDir} is not a jj or git repository`,
     );
-  const { path, command, args } = planWorktree(repoDir, vcs, id);
+  const { path, command, args, name, base } = planWorktree(repoDir, vcs, id);
   await run(command, args);
-  return path;
+  return { path, base, vcs, name };
+}
+
+/** True if the worktree has no changes that removal would destroy. git: a clean
+ *  `status --porcelain`. jj: no working-copy diff (jj auto-commits, so even "dirty"
+ *  work is recoverable via the op log, but we still treat a non-empty diff as unsafe
+ *  to silently reap). Returns false (unsafe) if the check itself errors — fail closed. */
+export async function worktreeIsClean(meta: WorktreeMeta): Promise<boolean> {
+  try {
+    if (meta.vcs === "git") {
+      const { stdout } = await run("git", [
+        "-C",
+        meta.path,
+        "status",
+        "--porcelain",
+      ]);
+      return stdout.trim() === "";
+    }
+    const { stdout } = await run("jj", ["diff", "--name-only"], {
+      cwd: meta.path,
+    });
+    return stdout.trim() === "";
+  } catch {
+    return false;
+  }
+}
+
+/** Remove a pilot-created worktree. With `force=false` this refuses a dirty worktree
+ *  (returns {removed:false, reason}); with `force=true` it removes regardless, which
+ *  can discard uncommitted git changes. Throws only on an unexpected VCS/fs failure. */
+export async function removeWorktree(
+  meta: WorktreeMeta,
+  force = false,
+): Promise<{ removed: boolean; reason?: string }> {
+  if (!force && !(await worktreeIsClean(meta)))
+    return { removed: false, reason: "worktree has uncommitted changes" };
+  const plan = planWorktreeRemoval(meta, force);
+  await run(plan.command, plan.args);
+  if (plan.removeDir) await rm(meta.path, { recursive: true, force: true });
+  return { removed: true };
 }

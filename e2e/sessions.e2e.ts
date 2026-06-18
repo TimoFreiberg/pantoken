@@ -218,3 +218,62 @@ test("the worktree chip creates the session in an isolated worktree dir", async 
     page.getByTestId("sidebar").getByText("demo-worktree", { exact: true }),
   ).toBeVisible();
 });
+
+// Create a worktree-backed session at /Users/timo/src/demo (→ demo-worktree) and leave
+// the sidebar open. Shared by the indicator/cleanup specs below.
+async function createWorktreeSession(page: import("@playwright/test").Page) {
+  await openSidebar(page);
+  await page.getByTestId("sidebar").getByText("New session…").click();
+  await page.getByRole("button", { name: "worktree" }).click();
+  await page.locator(".chips .chip").first().click();
+  await page
+    .getByPlaceholder(/absolute\/path\/to\/project/)
+    .fill("/Users/timo/src/demo");
+  const composer = page.getByPlaceholder("Describe a task or ask a question…");
+  await composer.fill("get started");
+  await composer.press("Enter");
+  await openSidebar(page);
+}
+
+test("a worktree session shows a path indicator and can be cleaned up", async ({
+  page,
+}) => {
+  await createWorktreeSession(page);
+  const sidebar = page.getByTestId("sidebar");
+
+  // The indicator carries the worktree path in its tooltip.
+  const badge = sidebar.locator(".wt");
+  await expect(badge).toBeVisible();
+  await expect(badge).toHaveAttribute(
+    "title",
+    "Worktree: /Users/timo/src/demo-worktree",
+  );
+
+  // Clean it up from the row's ⋯ menu (two-step confirm), then the indicator is gone.
+  const row = sidebar
+    .locator("li.row-wrap")
+    .filter({ has: page.locator(".wt") });
+  await row.getByTestId("session-menu").click();
+  await page.getByTestId("cleanup-worktree").click();
+  await page.getByTestId("confirm-cleanup-worktree").click();
+  await expect(sidebar.locator(".wt")).toHaveCount(0);
+});
+
+test("archiving a worktree session reaps the worktree", async ({ page }) => {
+  await createWorktreeSession(page);
+  const sidebar = page.getByTestId("sidebar");
+
+  const row = sidebar
+    .locator("li.row-wrap")
+    .filter({ has: page.locator(".wt") });
+  await row.getByTestId("session-menu").click();
+  await sidebar.getByRole("menuitem", { name: "Archive" }).click();
+
+  // Reveal archived sessions; the row is back but the worktree indicator is gone — the
+  // (clean) worktree was reaped on archive.
+  await sidebar.getByTestId("filter-toggle").click();
+  await expect(
+    sidebar.getByText("demo-worktree", { exact: true }),
+  ).toBeVisible();
+  await expect(sidebar.locator(".wt")).toHaveCount(0);
+});

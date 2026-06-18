@@ -48,6 +48,9 @@ export class MockDriver implements PilotDriver {
   private timers = new Set<ReturnType<typeof setTimeout>>();
   private pendingDialogs = new Set<string>();
   private sessions: SessionListEntry[] = SESSION_LIST.map((s) => ({ ...s }));
+  // Cwds of worktrees the mock "created" (the -worktree sibling dirs), so listSessions
+  // flags them and cleanup/archive can reap them. Mock worktrees are always clean.
+  private worktreeCwds = new Set<string>();
   // The mock's current model selection, mutated by setModel/setThinking so the picker
   // reflects a switch. (Scripted replies still emit the fixture default — fine for a
   // deterministic mock; the picker is exercised on its own.)
@@ -141,6 +144,7 @@ export class MockDriver implements PilotDriver {
   reset(): void {
     this.cancelTimers();
     this.sessions = SESSION_LIST.map((s) => ({ ...s }));
+    this.worktreeCwds.clear();
     this.config = { ...MOCK_DEFAULT_CONFIG };
     this.providers = MOCK_PROVIDERS.map((p) => ({ ...p }));
     this.defaults = {
@@ -204,13 +208,32 @@ export class MockDriver implements PilotDriver {
   }
 
   async listSessions(): Promise<SessionListEntry[]> {
-    return this.sessions.map((s) => ({ ...s }));
+    return this.sessions.map((s) => ({
+      ...s,
+      worktree: this.worktreeCwds.has(s.cwd) ? { path: s.cwd } : undefined,
+    }));
   }
 
   async setArchived(path: string, archived: boolean): Promise<void> {
     this.sessions = this.sessions.map((s) =>
       s.path === path ? { ...s, archived } : s,
     );
+    // Archiving a worktree session reaps the (always-clean) mock worktree, mirroring the
+    // real driver's safe cleanup so the indicator clears.
+    if (archived) {
+      const cwd = this.sessions.find((s) => s.path === path)?.cwd;
+      if (cwd) this.worktreeCwds.delete(cwd);
+    }
+  }
+
+  async cleanupWorktree(
+    path: string,
+  ): Promise<{ removed: boolean; reason?: string }> {
+    // Mock worktrees are always clean, so force is moot — just forget it.
+    if (!this.worktreeCwds.has(path))
+      return { removed: false, reason: "no pilot worktree at this path" };
+    this.worktreeCwds.delete(path);
+    return { removed: true };
   }
 
   async renameSession(path: string, name: string): Promise<void> {
@@ -234,6 +257,7 @@ export class MockDriver implements PilotDriver {
     // is simulated as a sibling "-worktree" dir so the isolated path is visible in e2e.
     const base = cwd?.trim() || NEW_SESSION_ENTRY.cwd;
     const dir = worktree ? `${base.replace(/\/+$/, "")}-worktree` : base;
+    if (worktree) this.worktreeCwds.add(dir);
     const sessionId =
       dir === NEW_SESSION_ENTRY.cwd
         ? NEW_SESSION_ENTRY.sessionId

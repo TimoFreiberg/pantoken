@@ -44,8 +44,18 @@ export interface PilotDriver {
   respondUi(response: HostUiResponse, sessionId?: SessionId): void;
 
   /** Sessions on disk available to open (D13: pi's .jsonl files are authoritative).
-   *  Each entry's `archived` flag is resolved here from the driver's archive index. */
+   *  Each entry's `archived` flag is resolved here from the driver's archive index, and
+   *  `worktree` from its worktree index. */
   listSessions(): Promise<SessionListEntry[]>;
+
+  /** Remove a pilot-created worktree at `path` (== a session cwd). `force` discards
+   *  uncommitted changes; without it a dirty worktree is left in place. Resolves with
+   *  whether it was removed (and why not). Optional: a driver with no worktree support
+   *  omits it and the hub guards with `?.`. */
+  cleanupWorktree?(
+    path: string,
+    opts?: { force?: boolean },
+  ): Promise<{ removed: boolean; reason?: string }>;
   /** Archive or unarchive a session by its .jsonl path (pilot-side flag). Optional:
    *  a bare driver may omit it and the hub guards with `?.`. The hub re-broadcasts the
    *  session list afterward so every client's active-only filter updates. */
