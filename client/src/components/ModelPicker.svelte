@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import type { ModelOption } from "@pilot/protocol";
   import { store } from "../lib/store.svelte.js";
 
@@ -58,13 +59,60 @@
     }
     return out;
   });
+  // Flat list of the visible model rows, in render order — arrow-key navigation
+  // walks this, and `sel` indexes into it.
+  const flatModelItems = $derived(filteredGroups.flatMap((g) => g.items));
+
+  // Keyboard-highlight index into the open menu's item list (model rows or levels).
+  let sel = $state(0);
+  // Element handles for focus management + scroll-into-view.
+  let searchEl = $state<HTMLInputElement>();
+  let modelPanelEl = $state<HTMLDivElement>();
+  let thinkingPanelEl = $state<HTMLDivElement>();
+  // Whether the open menu was opened via its hotkey. Gates returning focus to the
+  // composer on close, so a plain mouse/tap interaction never pops up the keyboard.
+  let openedViaKeyboard = false;
+
   // Clear the query whenever the model menu closes, so it's fresh on next open.
   $effect(() => {
     if (open !== "model") modelQuery = "";
   });
+  // Keep the highlight in range as filtering shrinks the list under the cursor.
+  $effect(() => {
+    if (sel >= flatModelItems.length) sel = 0;
+  });
+  // Scroll the keyboard-highlighted model row into view as the user arrows past the fold.
+  $effect(() => {
+    if (open !== "model") return;
+    sel;
+    tick().then(() =>
+      modelPanelEl?.querySelector(".item.hl")?.scrollIntoView({ block: "nearest" }),
+    );
+  });
 
-  function toggle(which: "model" | "thinking"): void {
-    open = open === which ? "none" : which;
+  function focusMenu(which: "model" | "thinking"): void {
+    if (which === "model") searchEl?.focus();
+    else thinkingPanelEl?.focus();
+  }
+
+  function openMenu(which: "model" | "thinking", viaKeyboard: boolean): void {
+    open = which;
+    openedViaKeyboard = viaKeyboard;
+    // Start on the active level for thinking (so Enter is a no-op until you move);
+    // start at the top for models.
+    sel = which === "thinking" ? Math.max(0, thinking ? levels.indexOf(thinking) : 0) : 0;
+    if (viaKeyboard) tick().then(() => focusMenu(which));
+  }
+
+  function closeMenu(refocus: boolean): void {
+    open = "none";
+    openedViaKeyboard = false;
+    if (refocus) store.focusComposer();
+  }
+
+  function toggle(which: "model" | "thinking", viaKeyboard = false): void {
+    if (open === which) closeMenu(viaKeyboard);
+    else openMenu(which, viaKeyboard);
   }
 
   // React to global hotkeys dispatched from StatusHeader via the store.
@@ -73,17 +121,59 @@
     const hk = store.hotkeyAction;
     if (hk && hk.n !== lastHotkeyN) {
       lastHotkeyN = hk.n;
-      toggle(hk.which);
+      toggle(hk.which, true);
     }
   });
-  function pickModel(provider: string, modelId: string): void {
+
+  function pickModel(provider: string, modelId: string, refocus: boolean): void {
     if (!(provider === cfg.provider && modelId === cfg.modelId))
       store.setModel(provider, modelId);
-    open = "none";
+    closeMenu(refocus);
   }
-  function pickThinking(level: string): void {
+  function pickThinking(level: string, refocus: boolean): void {
     if (level !== thinking) store.setThinking(level);
-    open = "none";
+    closeMenu(refocus);
+  }
+
+  function onModelKeydown(e: KeyboardEvent): void {
+    const n = flatModelItems.length;
+    if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
+      e.preventDefault();
+      if (n) sel = (sel + 1) % n;
+    } else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) {
+      e.preventDefault();
+      if (n) sel = (sel - 1 + n) % n;
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const it = flatModelItems[sel];
+      if (it) pickModel(it.provider, it.modelId, true);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      closeMenu(true);
+    }
+  }
+
+  function onThinkingKeydown(e: KeyboardEvent): void {
+    const n = levels.length;
+    if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
+      e.preventDefault();
+      if (n) sel = (sel + 1) % n;
+    } else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) {
+      e.preventDefault();
+      if (n) sel = (sel - 1 + n) % n;
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      const lvl = levels[sel];
+      if (lvl) pickThinking(lvl, true);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      closeMenu(true);
+    } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      // The thinking panel (a focused div, not an input) would otherwise let a bare
+      // printable key bubble to the composer's type-to-focus handler, yanking focus
+      // out of the open menu. Swallow it — the menu has nothing to type into.
+      e.stopPropagation();
+    }
   }
 </script>
 
@@ -95,22 +185,26 @@
         title={modelTitle + " (⌘⇧M)"}
         disabled={!hasModels}
         onclick={() => toggle("model")}
+        data-testid="model-badge"
       >
         <span class="badge-text">{modelLabel}</span>
         {#if hasModels}<span class="chev" class:up={open === "model"}>▾</span>{/if}
       </button>
       {#if open === "model"}
-        <div class="panel">
+        <div class="panel" bind:this={modelPanelEl}>
           <input
             class="model-search"
             type="text"
             placeholder="Search models…"
-            title="Filter models by name, id, or provider"
+            title="Filter models by name, id, or provider (↑↓ to move · ↵ select · esc cancel)"
             aria-label="Search models"
             spellcheck="false"
             autocapitalize="off"
             autocorrect="off"
+            bind:this={searchEl}
             bind:value={modelQuery}
+            oninput={() => (sel = 0)}
+            onkeydown={onModelKeydown}
           />
           {#each filteredGroups as g (g.provider)}
             <div class="group-title">{g.provider}</div>
@@ -120,8 +214,9 @@
               <button
                 class="item"
                 class:active
+                class:hl={flatModelItems[sel] === opt}
                 title={active ? `${opt.label} (current model)` : `Switch to ${opt.label}`}
-                onclick={() => pickModel(opt.provider, opt.modelId)}
+                onclick={() => pickModel(opt.provider, opt.modelId, openedViaKeyboard)}
               >
                 <span class="item-label">{opt.label}</span>
                 {#if active}
@@ -138,6 +233,8 @@
           {/each}
           {#if filteredGroups.length === 0}
             <div class="model-empty">No models match</div>
+          {:else}
+            <div class="kbd-hint">↑↓ move · ↵ select · esc cancel</div>
           {/if}
         </div>
       {/if}
@@ -146,31 +243,44 @@
 
   {#if thinking}
     <div class="anchor">
-      <button class="badge" title="Thinking level (⌘⇧E / ⌘⇧T)" onclick={() => toggle("thinking")}>
+      <button class="badge" title="Thinking level (⌘⇧E / ⌘⇧T)" onclick={() => toggle("thinking")} data-testid="thinking-badge">
         <span class="badge-text">{thinking}</span>
         {#if levels.length > 0}<span class="chev" class:up={open === "thinking"}>▾</span>{/if}
       </button>
       {#if open === "thinking" && levels.length > 0}
-        <div class="panel">
+        <!-- Focusable container (tabindex -1) so the hotkey lands keyboard focus here
+             and arrow/enter/esc drive the list. -->
+        <div
+          class="panel"
+          role="listbox"
+          tabindex="-1"
+          aria-label="Thinking level"
+          bind:this={thinkingPanelEl}
+          onkeydown={onThinkingKeydown}
+        >
           <div class="group-title">Thinking</div>
-          {#each levels as lvl (lvl)}
+          {#each levels as lvl, i (lvl)}
             <button
               class="item"
               class:active={lvl === thinking}
+              class:hl={sel === i}
+              role="option"
+              aria-selected={sel === i}
               title={lvl === thinking ? `Thinking: ${lvl} (current)` : `Set thinking level to ${lvl}`}
-              onclick={() => pickThinking(lvl)}
+              onclick={() => pickThinking(lvl, openedViaKeyboard)}
             >
               <span class="item-label">{lvl}</span>
               {#if lvl === thinking}<span class="item-meta">active</span>{/if}
             </button>
           {/each}
+          <div class="kbd-hint">↑↓ move · ↵ select · esc cancel</div>
         </div>
       {/if}
     </div>
   {/if}
 
   {#if open !== "none"}
-    <button class="backdrop" aria-label="Close model menu" onclick={() => (open = "none")}
+    <button class="backdrop" aria-label="Close model menu" onclick={() => closeMenu(openedViaKeyboard)}
     ></button>
   {/if}
 </div>
@@ -224,6 +334,11 @@
     border: none;
     z-index: 40;
     cursor: default;
+  }
+  .panel:focus {
+    /* The keyboard highlight (.item.hl) shows position; the container's own focus
+       ring would just be noise. */
+    outline: none;
   }
   .panel {
     position: absolute;
@@ -289,6 +404,11 @@
   .item.active {
     background: color-mix(in srgb, var(--accent) 14%, transparent);
   }
+  /* Keyboard highlight — a ring rather than a fill, so it reads clearly even on the
+     active row (which already has the accent-tinted background). */
+  .item.hl {
+    box-shadow: inset 0 0 0 1.5px var(--accent);
+  }
   .item-label {
     font-size: 13px;
     white-space: nowrap;
@@ -302,5 +422,13 @@
   }
   .off {
     color: var(--text-faint);
+  }
+  .kbd-hint {
+    padding: 6px 8px 3px;
+    margin-top: 2px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-faint);
+    text-align: center;
   }
 </style>
