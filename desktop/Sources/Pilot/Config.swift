@@ -58,6 +58,11 @@ struct Config {
         env["PILOT_APP_CLONE"] = clone.path
         env["PILOT_HEALTH_URL"] = "http://127.0.0.1:\(serverPort)/health"
         env["PILOT_DATA_DIR"] = dataDir.path
+        // The app owns notifications now (AppDelegate posts via UNUserNotificationCenter on
+        // the watcher's `update-deferred` stdout event). Disable the watcher's own osascript
+        // fallback — those notifications are attributed to Script Editor, so clicking one
+        // opens Script Editor instead of Pilot.
+        env["PILOT_UPDATE_NATIVE_NOTIFY"] = "0"
         return env
     }
 

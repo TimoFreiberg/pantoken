@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   decideAction,
   hasClientsFromHealth,
+  isBuildStale,
   isBusyFromHealth,
   lockfileChanged,
   parseServerPid,
@@ -25,6 +26,18 @@ describe("decideAction", () => {
   });
   test("behind + background turn, no client (busy) → defer (don't abort it)", () => {
     expect(act(true, false, true)).toBe("defer");
+  });
+});
+
+describe("isBuildStale", () => {
+  test("built bundle matches origin/main → fresh", () => {
+    expect(isBuildStale("abc123", "abc123")).toBe(false);
+  });
+  test("built bundle behind origin/main → stale (the manual-pull / failed-build trap)", () => {
+    expect(isBuildStale("old456", "new789")).toBe(true);
+  });
+  test("no build stamped yet (fresh clone) → stale, so the first tick builds it", () => {
+    expect(isBuildStale(null, "abc123")).toBe(true);
   });
 });
 

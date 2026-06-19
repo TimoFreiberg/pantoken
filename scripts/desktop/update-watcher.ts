@@ -117,6 +117,20 @@ export function decideAction(o: {
   return "defer";
 }
 
+/** The served app is stale when the *built* bundle isn't origin/main. Comparing the built
+ *  sha (vite stamps it into client/dist/.pilot-built-sha) rather than git HEAD is what lets
+ *  the watcher self-heal a state where HEAD advanced but the bundle didn't: a manual `git
+ *  pull`, an apply interrupted before its build, or a build that failed after the pull — all
+ *  leave HEAD ahead of what's served, and a HEAD-vs-remote check would call that "up to
+ *  date" forever. A null built sha (fresh clone, never stamped) counts as stale so the first
+ *  tick builds and stamps it. */
+export function isBuildStale(
+  builtSha: string | null,
+  remoteSha: string,
+): boolean {
+  return builtSha !== remoteSha;
+}
+
 /** Did `bun.lock` change across the pull? Drives whether we reinstall. Treats
  *  appearance/disappearance (null↔string) as a change; both-absent as no change. */
 export function lockfileChanged(
@@ -202,14 +216,28 @@ async function capture(
 }
 
 interface CompareResult {
+  /** git HEAD of the clone. */
   local: string;
+  /** Tracked remote ref (origin/main). */
   remote: string;
+  /** Full sha vite stamped into the served bundle, or null if no build has run yet. */
+  built: string | null;
+  /** Is the *served* bundle behind origin/main? (built !== remote, see isBuildStale.) */
   behind: boolean;
 }
 
-/** Fetch, then compare local HEAD to the tracked remote ref. `behind` is just
- *  "they differ" — a non-fast-forwardable divergence surfaces later when the
- *  --ff-only pull fails loud, which is the right place to notice a rewritten history. */
+/** The full sha vite stamped into the built bundle (client/dist/.pilot-built-sha), or null
+ *  if no build has run yet. This — not git HEAD — is what's actually served, so it's the
+ *  honest answer to "what version is the user looking at". */
+async function readBuiltSha(clone: string): Promise<string | null> {
+  const f = Bun.file(join(clone, "client", "dist", ".pilot-built-sha"));
+  return (await f.exists()) ? (await f.text()).trim() || null : null;
+}
+
+/** Fetch, then compare the *built* bundle to the tracked remote ref (see isBuildStale for
+ *  why built-vs-remote, not HEAD-vs-remote). A non-fast-forwardable divergence surfaces
+ *  later when the --ff-only pull fails loud, which is the right place to notice a rewritten
+ *  history. */
 async function fetchAndCompare(cfg: WatcherConfig): Promise<CompareResult> {
   await capture("git", [
     "-C",
@@ -230,7 +258,8 @@ async function fetchAndCompare(cfg: WatcherConfig): Promise<CompareResult> {
       `${cfg.remote}/${cfg.branch}`,
     ])
   ).stdout.trim();
-  return { local, remote, behind: local !== remote };
+  const built = await readBuiltSha(cfg.clone);
+  return { local, remote, built, behind: isBuildStale(built, remote) };
 }
 
 interface HostState {
@@ -388,17 +417,25 @@ function nativeNotify(title: string, body: string): void {
   ]).catch(() => {});
 }
 
-function notifyDeferred(cfg: WatcherConfig, c: CompareResult): void {
+/** Human-readable summary of what an apply would do. Distinguishes a genuine new commit
+ *  (built/HEAD → remote) from a pure rebuild (HEAD already current, only the served bundle
+ *  lags) so a self-heal doesn't log a confusing "X → X". */
+function describeUpdate(c: CompareResult): string {
   const short = (s: string) => s.slice(0, 7);
+  return c.local === c.remote
+    ? `rebuild ${short(c.remote)} (served bundle stale)`
+    : `${c.built ? short(c.built) : "none"} → ${short(c.remote)}`;
+}
+
+function notifyDeferred(cfg: WatcherConfig, c: CompareResult): void {
   emitEvent({
     event: "update-deferred",
     reason: "session-running",
+    built: c.built,
     local: c.local,
     remote: c.remote,
   });
-  log(
-    `update ${short(c.local)} → ${short(c.remote)} ready; session running — deferring`,
-  );
+  log(`${describeUpdate(c)} ready; session running — deferring`);
   if (cfg.nativeNotify) {
     nativeNotify(
       "Pilot update ready",
@@ -452,9 +489,7 @@ export async function tick(
 
   if (action === "apply") {
     // Unattended & idle → auto-apply (no card; nobody's watching to interrupt).
-    log(
-      `update ${short(cached.local)} → ${short(cached.remote)}; unattended & idle — applying`,
-    );
+    log(`${describeUpdate(cached)}; unattended & idle — applying`);
     if (cfg.dryRun) {
       log("[dry-run] would pull/build/restart");
       return { lastNotifiedSha, lastFetchMs, cached };

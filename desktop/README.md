@@ -66,6 +66,17 @@ work (full policy in `scripts/desktop/update-watcher.ts`):
   button — clicking it asks the watcher to apply on demand. Closing the app lets the
   next poll auto-apply.
 
+"Current" means the *served bundle*, not git HEAD: the watcher compares the sha vite stamps
+into `client/dist/.pilot-built-sha` against `origin/main`, so a state where HEAD advanced but
+the bundle didn't (a manual `git pull`, an apply interrupted before its build, a build that
+failed after the pull) is detected and self-heals on the next tick — a plain HEAD-vs-remote
+check would call that "up to date" forever and leave you on stale code.
+
+Notifications are owned by the app (`UNUserNotificationCenter`), so clicking one focuses
+Pilot. The app sets `PILOT_UPDATE_NATIVE_NOTIFY=0` for the watcher to disable its standalone
+`osascript` fallback — those notifications are attributed to Script Editor, so clicking one
+opens Script Editor instead of Pilot.
+
 ## Config (env)
 
 | Var | Default | Meaning |
@@ -73,7 +84,7 @@ work (full policy in `scripts/desktop/update-watcher.ts`):
 | `PILOT_APP_CLONE` | `~/pilot-app` | The checkout the app runs from |
 | `PILOT_DATA_DIR`  | `~/Library/Application Support/Pilot` | Server state (set in-app) |
 | `PILOT_UPDATE_INTERVAL_MS` | `60000` | Watcher poll cadence |
-| `PILOT_UPDATE_NATIVE_NOTIFY` | on | macOS notification when an update is deferred |
+| `PILOT_UPDATE_NATIVE_NOTIFY` | on (app forces **off**) | watcher's own `osascript` notification on defer; the app disables it and notifies itself |
 
 (GUI apps don't inherit your shell env, so setting these for the launched app means a
 `launchctl setenv` / `LSEnvironment` entry — they're mainly here for running the pieces
