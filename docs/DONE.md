@@ -5,6 +5,22 @@ and its resolution note. Latest completions first.
 
 ---
 
+- [x] **Agent turn cancelled when client disconnects?** — closed 2026-06-19, **not
+  reproduced**; kept here as a watch-item for context if the owner sees it again. Original
+  report: firing off a prompt on the Mac Mini, then fully exiting the phone view (closing
+  the PWA / navigating away), the existing turn appeared to be cancelled before completing.
+  The server-side turn must finish regardless of whether any client is connected.
+  _(investigated 2026-06-19: both code and a live repro clear pilot. `close(ws)`
+  (`server/src/index.ts`) only calls `ws.data.unsub()` → `clients.delete` +
+  `syncLiveRefresh` (`server/src/hub.ts`); it never calls `driver.abort()`. Live test
+  (real pi, deepseek-v4-flash): sent a multi-step turn, navigated the only active client
+  away mid-run, polled `/debug/state` while disconnected — the turn ran to completion
+  server-side (all steps + summary), and reconnect restored the full transcript. The only
+  abort vector is warm-cap eviction (disposing a session), triggered by warming a new
+  session, not by client loss. If it recurs on the Mac Mini with a real phone-PWA close,
+  the cause is almost certainly downstream of pilot — pi turn loop, model API, or Tailscale
+  drop — not the WS handler.)_
+
 - [x] **Stop default-new-session-in-server-cwd (the `launchCwd` blocker)** — the server's
   own cwd no longer feeds any logic; boot to an empty landing + $HOME new-session draft.
   _(done 2026-06-19: the server cwd carries no operator intent — a Finder-launched
