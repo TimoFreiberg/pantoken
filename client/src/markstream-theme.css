@@ -70,6 +70,15 @@
 .markstream-svelte.markdown-renderer :where(table) {
   border-collapse: collapse;
   margin: 0.85em 0;
+  /* A wide table (many columns) would otherwise overflow the viewport on a phone
+     with no way to reach the right-hand columns. Mirror the `pre` treatment above
+     and let it scroll horizontally: `display: block` + `width: max-content` keeps
+     the real table layout (via anonymous table boxes) while making the element
+     itself a horizontal scroll container, capped at the column width. */
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
 }
 .markstream-svelte.markdown-renderer :where(th, td) {
   border: 1px solid var(--border);
