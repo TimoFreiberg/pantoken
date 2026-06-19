@@ -58,12 +58,33 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       the turn completes server-side) to either confirm a pilot bug or rule it out. If
       pilot is the cause, the likeliest path is the WS disconnect handler cancelling the
       in-flight turn.
-- [ ] **Pi `answer` tool doesn't work via pilot** — the pi answer tool (which prompts the
-      user with questions while an agent is running) appears broken when driven through
-      pilot. Investigate why and fix if possible. This is critical for any agent flow that
-      needs to ask the human mid-turn (e.g. approval, clarification, choices). May involve
-      the web-socket bridge not forwarding the `answer`-style interaction, or the
-      `PilotDriver` not translating it to a client-facing event.
+      → **investigated 2026-06-19, not reproduced in pilot.** Both code and a live repro
+      clear pilot: `close(ws)` (`server/src/index.ts`) only calls `ws.data.unsub()` →
+      `clients.delete` + `syncLiveRefresh` (`server/src/hub.ts`); it never calls
+      `driver.abort()`. Live test (real pi, deepseek-v4-flash): sent a multi-step turn,
+      navigated the only active client away mid-run, polled `/debug/state` while
+      disconnected — the turn ran to completion server-side (all steps + summary), and
+      reconnect restored the full transcript. The only abort vector is warm-cap eviction
+      (disposing a session), which is triggered by warming a new session, not by client
+      loss. **Left open** because the owner observed it on the Mac Mini with a real
+      phone-PWA close — if it recurs there, the cause is almost certainly downstream of
+      pilot (pi turn loop, model API, or Tailscale drop), not the WS handler. Recommend
+      closing unless re-observed.
+- [x] **Pi `answer` tool doesn't work via pilot** → verified working 2026-06-19 against a
+      live real-pi instance (deepseek-v4-flash). Root cause was a timing one, not a missing
+      feature: the bug predates the qna host-UI bridge (`Add qna host-UI form…` + `Keep
+      answer dialogs navigable across chats`) AND the pi `answer` extension's `ctx.ui.qna`
+      remote-fallback branch (`~/.pi/agent/extensions/answer.ts:1005-1019`). With both sides
+      now in place the tool works end-to-end. Tested live: single multiple-choice, multiSelect
+      checkboxes, free-text, and a 2-question paginated form — each rendered correctly and the
+      answers round-tripped back to pi (it acknowledged the picks). The contract matches
+      (pilot exposes `qna(questions, opts?)`; the extension feature-detects exactly that name +
+      shape). **Residual hardening (optional fast-follow):** no test exercises the *real* seam
+      (only the mock fixture + `e2e/qna.e2e.ts`); the bridge survives solely because pi hands
+      extensions the raw, un-proxied `uiContext` — a runtime assert that `typeof ctx.ui.qna
+      === "function"` at bind time would catch a silent pi-version regression. Also: the
+      extension calls `qna(questions)` with no opts, so no timeout/abort is armed — a form
+      opened while no client is connected awaits forever (it does replay on refocus).
 - [x] ~~**Desktop app (macOS .app), local-first**~~ → done 2026-06-19, archived to
       `docs/DONE.md`. Swift/AppKit + `WKWebView` shell that runs a local pilot server from a
       dedicated clone and supervises it; auto-updater ships with it (unattended-apply /
@@ -101,6 +122,35 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       replace, or `appendSystemPrompt` for additive. NOT needed for the pi-docs-pointer
       strip — that's handled globally by the `strip-pi-docs` pi extension
       (`~/.pi/agent/extensions/`); this is the broader "different prompt for this session."
+
+### Jank found in the 2026-06-19 live pass (real pi, deepseek-v4-flash)
+
+- [x] **Wide markdown tables overflowed the mobile viewport** → fixed 2026-06-19
+      (`Scroll wide markdown tables horizontally on mobile`). A 7-column table rendered
+      654px wide inside a 375px phone with no way to reach the right columns; tables now
+      scroll horizontally like code blocks (`client/src/markstream-theme.css`). Covered by
+      a Pixel 7 spec in `e2e/responsive.mobile.e2e.ts`.
+- [ ] **Copy button is invisible/unreachable on touch** — the per-turn copy button
+      (`client/src/components/Transcript.svelte`, `.copy`) is `opacity: 0`, revealed only on
+      `:hover`/`:focus-visible`. A phone has neither, so you can't copy a reply. Needs a
+      *reliable* touch reveal: a bare `@media (hover: none)` rule misfires under headless
+      Chromium (it reports `hover: none`), breaking the desktop "copy fades back out" spec —
+      so gate on an explicit touch/coarse-pointer signal or a JS capability check instead.
+- [ ] **Attach-tag tooltip lies** — the composer's attached-images chip
+      (`client/src/components/Composer.svelte:552`) has `title="… right-click to clear"` but
+      there is no `oncontextmenu` handler, so right-click just opens the native menu. Either
+      wire up right-click-to-clear (+`preventDefault`) or drop the claim from the tooltip.
+- [ ] **Stop button has no hotkey** — the composer Stop button
+      (`client/src/components/Composer.svelte`, `title="Stop the agent"`) names no shortcut,
+      unlike every other composer control (`⌘⇧M`, `⌥↑`, `Enter`, …), and no global
+      stop/abort key was found. Violates the "every UI action needs a hotkey + tooltip" rule
+      (e.g. Escape to abort a running turn).
+- [ ] **Session auto-title keeps a literal markdown `#`** — a turn whose reply began with a
+      heading got auto-titled `# Demo` (the `#` shows verbatim in the header + sidebar). The
+      title comes from pi's session-namer, but pilot could defensively strip leading markdown
+      when rendering titles. Low priority.
+- [ ] **QnA form header says "A few questions" for a single question** — minor copy nit; a
+      one-question form should read singular (or just show the question).
 
 ## 🔵 Later
 
