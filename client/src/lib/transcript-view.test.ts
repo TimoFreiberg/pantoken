@@ -39,31 +39,46 @@ const tool = (
 });
 
 describe("mergeTools", () => {
-  test("collapses an uninterrupted run of nav tools into one heterogeneous card", () => {
+  test("collapses an uninterrupted run of tools, including bash, into one summary", () => {
     const out = mergeTools([
       tool("r1", "read"),
       tool("g1", "grep"),
+      tool("b1", "bash"),
       tool("f1", "find"),
     ]);
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({
       kind: "mergedTools",
-      names: ["read", "grep", "find"],
+      names: ["read", "grep", "bash", "find"],
     });
   });
 
-  test("a single nav tool passes through as a plain tool", () => {
-    const out = mergeTools([tool("r1", "read")]);
-    expect(out[0]!.kind).toBe("tool");
+  test("a single non-write/edit tool still becomes a summary", () => {
+    const out = mergeTools([tool("b1", "bash")]);
+    expect(out[0]).toMatchObject({
+      kind: "mergedTools",
+      names: ["bash"],
+      tools: [{ id: "b1" }],
+    });
   });
 
-  test("a non-mergeable tool (bash) breaks the run", () => {
+  test("write and edit stay standalone and break surrounding summary runs", () => {
     const out = mergeTools([
       tool("r1", "read"),
+      tool("w1", "write"),
       tool("b1", "bash"),
-      tool("r2", "read"),
+      tool("e1", "edit"),
+      tool("g1", "grep"),
     ]);
-    expect(out.map((i) => i.kind)).toEqual(["tool", "tool", "tool"]);
+    expect(out.map((i) => i.kind)).toEqual([
+      "mergedTools",
+      "tool",
+      "mergedTools",
+      "tool",
+      "mergedTools",
+    ]);
+    expect(out[1]).toMatchObject({ name: "write" });
+    expect(out[3]).toMatchObject({ name: "edit" });
   });
 });
 

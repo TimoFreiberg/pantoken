@@ -5,7 +5,7 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("a mixed run of mergeable tools collapses into one combined card", async ({
+test("a mixed run including bash collapses into one tool-styled summary", async ({
   page,
 }) => {
   await drive(page, "search");
@@ -14,13 +14,16 @@ test("a mixed run of mergeable tools collapses into one combined card", async ({
   await expect(page.getByText("Reconnect lives in")).toBeVisible();
   await expandWork(page);
 
-  // 2 reads + 2 greps + 1 find, uninterrupted, fold into ONE card. The header
+  // 2 reads + 2 greps + 1 find + 1 bash, uninterrupted, fold into ONE card. The header
   // shows the total count plus each distinct tool name once (first-appearance
-  // order), not a per-name breakdown or one card per name.
-  const head = page.locator(".merged-head");
+  // order), using the same card shell/classes as a standalone ToolCard.
+  const summary = page.locator(".tool.summary");
+  const head = summary.locator(".head");
+  await expect(summary).toHaveClass(/ok/);
   await expect(head).toHaveCount(1);
-  await expect(head.locator(".count")).toHaveText("5 tools");
-  await expect(head.locator(".tool-names")).toHaveText("(read, grep, find)");
+  await expect(head.locator(".name")).toHaveText("6 tools");
+  await expect(head.locator(".arg")).toHaveText("read, grep, find, bash");
+  await expect(head.locator(".status")).toHaveText("●");
 });
 
 test("merged card expands in two steps: the list, then each call", async ({
@@ -29,17 +32,17 @@ test("merged card expands in two steps: the list, then each call", async ({
   await drive(page, "search");
   await expect(page.getByText("Reconnect lives in")).toBeVisible();
   await expandWork(page);
-  const card = page.locator(".merged-tools");
+  const card = page.locator(".tool.summary");
 
   // Step 0 — collapsed: no inner tool cards rendered yet.
-  await expect(card.locator(".merged-body")).toHaveCount(0);
+  await expect(card.locator(".body")).toHaveCount(0);
 
-  // Step 1 — expand the card: the run shows as 5 collapsed ToolCards. Still no
+  // Step 1 — expand the card: the run shows as 6 collapsed ToolCards. Still no
   // output visible (each ToolCard owns its own inner expand state).
-  await card.locator(".merged-head").click();
-  const innerCards = card.locator(".merged-body .tool");
-  await expect(innerCards).toHaveCount(5);
-  await expect(card.locator(".merged-body .tool .out")).toHaveCount(0);
+  await card.locator(":scope > .head").click();
+  const innerCards = card.locator(":scope > .body > .tool");
+  await expect(innerCards).toHaveCount(6);
+  await expect(card.locator(":scope > .body > .tool .out")).toHaveCount(0);
 
   // Step 2 — expand one inner ToolCard: its output appears.
   await innerCards.first().locator(".head").click();

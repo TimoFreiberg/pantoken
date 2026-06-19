@@ -2,8 +2,8 @@
 // component so the grouping rules are unit-testable in isolation (no DOM, no store).
 //
 // Two passes, applied in order:
-//   1. mergeTools  — collapse uninterrupted runs of navigation/inspection tools
-//      (read/grep/find/…) into one card, matching the Claude-app "N tools" affordance.
+//   1. mergeTools  — collapse uninterrupted runs of tools into one summary card,
+//      except for write/edit calls, which stay standalone for immediate visibility.
 //   2. groupTurns  — split the flat item list into turns (user → next user) and, within
 //      each, separate the collapsible "work" (tools + intermediate narration) from the
 //      turn-final assistant response that stays visible. This is the Codex-style
@@ -11,19 +11,11 @@
 
 import type { AssistantItem, ToolItem, TranscriptItem } from "@pilot/protocol";
 
-// ── Pass 1: merge sequential navigation tools ────────────────────────────────
-// Any uninterrupted run of "mergeable" tools collapses into ONE card — regardless of
-// which of those names it mixes. Membership is decided by name; a run of length 1
-// passes through as a plain tool. Writes, edits, bash, etc. break a run.
-export const MERGEABLE_TOOLS = new Set([
-  "read",
-  "grep",
-  "find",
-  "session_search",
-  "preview_start",
-  "preview_eval",
-  "preview_stop",
-]);
+// ── Pass 1: summarize sequential tools ───────────────────────────────────────
+// Every uninterrupted run of tools collapses into ONE summary card, including a
+// one-tool run. Write/edit are the only exceptions: their side effects and diffs
+// should stay visible as standalone cards, and each one breaks the surrounding run.
+export const STANDALONE_TOOLS = new Set(["write", "edit"]);
 
 export interface MergedToolsItem {
   readonly kind: "mergedTools";
@@ -39,8 +31,8 @@ export type DisplayItem = TranscriptItem | MergedToolsItem;
 function isToolItem(i: TranscriptItem): i is ToolItem {
   return i.kind === "tool";
 }
-function isMergeableTool(i: TranscriptItem): i is ToolItem {
-  return isToolItem(i) && MERGEABLE_TOOLS.has(i.name);
+function isSummarizedTool(i: TranscriptItem): i is ToolItem {
+  return isToolItem(i) && !STANDALONE_TOOLS.has(i.name);
 }
 
 /** True for the two "work" item kinds the collapse treats as activity: tool cards and
@@ -55,20 +47,16 @@ export function mergeTools(items: readonly TranscriptItem[]): DisplayItem[] {
   const flush = () => {
     if (pending.length === 0) return;
     const first = pending[0]!;
-    if (pending.length === 1) {
-      result.push(first);
-    } else {
-      result.push({
-        kind: "mergedTools",
-        id: first.id,
-        names: [...new Set(pending.map((t) => t.name))],
-        tools: pending,
-      });
-    }
+    result.push({
+      kind: "mergedTools",
+      id: first.id,
+      names: [...new Set(pending.map((t) => t.name))],
+      tools: pending,
+    });
     pending = [];
   };
   for (const item of items) {
-    if (isMergeableTool(item)) {
+    if (isSummarizedTool(item)) {
       pending.push(item);
     } else {
       flush();
