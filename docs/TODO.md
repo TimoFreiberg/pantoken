@@ -26,17 +26,15 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
 - [ ] **Per-client UI state persistence** — store the active session, sidebar visibility,
       theme, and other UI state per-client (e.g. localStorage) so that a mobile PWA reload
       doesn't reset to the default session. The user should land exactly where they left off.
-- [ ] **Desktop app (macOS .app), local-first** — deferred to a dedicated session.
-      Direction (owner, 2026-06-18): the app should **run pi agents locally by default**
-      and spawn the pilot server locally on launch, with connecting to a remote server as
-      an *option*, not the default. Leaning toward a **mini Swift / WKWebView wrapper**
-      around the local server URL — a clickable, dockable `.app`. macOS only for now.
-      ⚠️ **Blocker to handle there:** pi spawning must **disregard the server's cwd**.
-      `warmUp`'s `launchCwd = opts.cwd ?? process.cwd()` (`server/src/pi/pi-driver.ts`)
-      both defaults a session's cwd *and* feeds the trust resolver (the launch cwd is
-      implicitly trusted, D12). When the app spawns the server from an arbitrary dir, that
-      dir must NOT silently become a trusted default. Audit every reader of `launchCwd`
-      before changing it — it's a state-interpretation change, not a one-liner.
+- [x] ~~**Desktop app (macOS .app), local-first**~~ → done 2026-06-19, archived to
+      `docs/DONE.md`. Swift/AppKit + `WKWebView` shell that runs a local pilot server from a
+      dedicated clone and supervises it; auto-updater ships with it (unattended-apply /
+      deferred + in-app update card). See `desktop/README.md`. The `launchCwd`/trust blocker
+      flagged here is **still open** and remains tracked by the sibling item above ("Stop
+      default-new-session-in-server-cwd for production usage") — the wrapper launches the
+      server as-is, so the launch dir still defaults a new session's cwd and is implicitly
+      trusted (D12). Audit every reader of `launchCwd` before changing it; it's a
+      state-interpretation change, not a one-liner.
 
 ## 🟢 Polish / fast-follow
 
