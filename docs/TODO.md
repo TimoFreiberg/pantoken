@@ -26,6 +26,23 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
 - [ ] **Per-client UI state persistence** — store the active session, sidebar visibility,
       theme, and other UI state per-client (e.g. localStorage) so that a mobile PWA reload
       doesn't reset to the default session. The user should land exactly where they left off.
+- [ ] **Per-session prompt draft persistence (pilot-level, not pi state)** — save the
+      unsent prompt text per session in client-side state (localStorage) so switching
+      between sessions preserves whatever you were typing. Key behaviors: (a) starting a
+      prompt in the new-session view, switching to a running session, and coming back
+      restores the draft text. (b) switching away from a running session and back restores
+      its draft. (c) as durable as possible — prefer storing up to one pending new-session
+      draft per project rather than losing paragraphs on a reload. Pure client state, no
+      protocol change needed (supersedes the brainstorm item).
+- [ ] **Agent turn cancelled when client disconnects?** — observed behavior on the Mac Mini:
+      firing off a prompt, then fully exiting the phone view (closing the PWA / navigating
+      away), the existing turn appeared to be cancelled before completing. This must NOT
+      happen: the server-side agent turn should finish regardless of whether any client is
+      connected. **Hedging:** this could be a different pi bug or model API issue, not pilot.
+      Needs investigation — reproduce deliberately (send prompt → close client → check if
+      the turn completes server-side) to either confirm a pilot bug or rule it out. If
+      pilot is the cause, the likeliest path is the WS disconnect handler cancelling the
+      in-flight turn.
 - [x] ~~**Desktop app (macOS .app), local-first**~~ → done 2026-06-19, archived to
       `docs/DONE.md`. Swift/AppKit + `WKWebView` shell that runs a local pilot server from a
       dedicated clone and supervises it; auto-updater ships with it (unattended-apply /
@@ -44,10 +61,13 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       sessions within each project stay sorted by last-used (most recent on top).
 - [x] **Remove hover tooltip on session titles in the sidebar** — intentional: it's visually
       noisy and doesn't add information beyond what's already visible in the title itself.
-- [x] **Hide thinking blocks behind a toggle** — thinking blocks are visually noisy and
-      rarely useful to a human driver. Add a toggle (default off, tucked in Settings) that
-      hides `<thinking>` content from the transcript; when off, the block is collapsed or
-      replaced with a subtle "thinking…" placeholder.
+- [ ] **Thinking-blocks refinement: default to hidden, full invisibility, thinking spinner** —
+      follow-up to the shipped toggle. Three changes: (1) the hide-thinking toggle in
+      Settings should default to hiding (current default is showing). (2) When hidden,
+      thinking blocks must be completely invisible in the UI — no collapsed placeholder,
+      no "thinking…" stub, nothing. (3) Add a minimal thinking spinner/animated dot in the
+      activity/composer area so the user still gets feedback that the model is doing
+      something when there's no visible thinking block.
 - [ ] **Extension compatibility-issue surfacing** — surface when an extension uses a
       terminal-only capability against pilot's non-tui host. _Half already done (found
       2026-06-19 while building OAuth):_ the protocol has the `extensionCompatibilityIssue`
@@ -133,9 +153,10 @@ the rest._
 ### Composer & input
 - [ ] **@-file mention autocomplete** — DESIGN pairs this with the slash-command menu
       (already filed) but it's missing here. Fuzzy-complete repo paths into the prompt.
-- [ ] **Per-session composer draft persistence** — persist the unsent draft per session
-      in localStorage so a phone reload / tab eviction doesn't lose a half-typed prompt.
-      (Per-client state, so no protocol change.)
+- [ ] **Per-session prompt draft persistence** _(superseded — promoted to 🟡 Important with
+      owner's detailed requirements, see above)_.
+      Persist the unsent draft per session in localStorage so a phone reload / tab eviction
+      doesn't lose a half-typed prompt. (Per-client state, so no protocol change.)
 - [ ] **Offline prompt queue** — if you hit send while the WS is reconnecting, queue the
       prompt locally and flush it on reconnect rather than dropping it or erroring.
 - [ ] **Voice dictation on mobile** — Web Speech API mic button in the composer; talking
