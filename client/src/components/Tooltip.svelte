@@ -25,6 +25,7 @@
   let timer: ReturnType<typeof setTimeout> | undefined;
   let raf: number | undefined; // pending mouseout decision (see onOut)
   let current: HTMLElement | null = null; // element we're showing/scheduling for
+  let single = $state(false); // source has data-tip-single → clamp to 1 line
   let suppressed = false; // did we strip current's native `title`?
 
   // Begin showing for `el`. On the hover path we strip the native `title` so the
@@ -38,6 +39,7 @@
     if (!t) return;
     current = el;
     text = t;
+    single = el.dataset.tipSingle !== undefined;
     if (suppressNative) {
       el.setAttribute("data-tip-title", t);
       el.removeAttribute("title");
@@ -136,6 +138,7 @@
         el.getAttribute("data-testid") === leaving.getAttribute("data-testid")
       ) {
         current = el;
+        single = el.dataset.tipSingle !== undefined;
         el.setAttribute("data-tip-title", text);
         el.removeAttribute("title");
         suppressed = true;
@@ -191,6 +194,7 @@
     bind:this={tipEl}
     class="tip {placement}"
     class:in={placed}
+    class:single
     style="left: {x}px; top: {y}px"
     role="tooltip"
     aria-hidden="true"
@@ -220,6 +224,13 @@
     transition:
       opacity 90ms ease,
       transform 90ms ease;
+  }
+  /* Single-line variant: source element has data-tip-single. Clamps to one
+     visual line — prevents a long first-user-message preview from ballooning. */
+  .tip.single {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .tip.bottom {
     transform: translateY(-2px);

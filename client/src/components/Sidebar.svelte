@@ -405,7 +405,10 @@
                         {/if}
                       </span>
                       <span class="row-body">
-                        <span class="name"
+                        <span
+                          class="name"
+                          data-tip-single
+                          title={s.displayName ?? (s.preview ? s.preview.split('\n')[0] : '(untitled)')}
                           >{s.displayName || s.preview || "(untitled)"}</span
                         >
                         <span class="meta">
