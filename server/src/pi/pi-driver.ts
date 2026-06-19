@@ -466,7 +466,12 @@ export async function createPiDriver(
     createdAt: info.created.toISOString(),
     parentSessionPath: info.parentSessionPath,
     archived: archiveStore.has(info.path),
-    worktree: worktreeStore.get(info.cwd) ? { path: info.cwd } : undefined,
+    worktree: (() => {
+      const meta = worktreeStore.get(info.cwd);
+      return meta
+        ? { path: meta.path, base: meta.base, name: meta.name }
+        : undefined;
+    })(),
   });
 
   // A list entry for a warm session that isn't on disk yet. pi doesn't write a

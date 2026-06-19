@@ -50,6 +50,22 @@ import {
   yesNoSelect,
 } from "./fixtures.js";
 
+/** Build the mock's worktree index from the fixture list: any SESSION_LIST entry
+ *  whose `worktree` is set seeds the map keyed by the session's cwd (== the worktree
+ *  dir), carrying its `base`/`name`. Mirrors the real WorktreeStore loading from disk —
+ *  the listSessions overlay then reads from this map rather than the fixture's
+ *  `worktree` field directly, so cleanup/archive and newSession stay consistent. */
+function seedWorktrees(
+  sessions: readonly SessionListEntry[],
+): Map<string, { base: string; name: string }> {
+  const m = new Map<string, { base: string; name: string }>();
+  for (const s of sessions) {
+    if (s.worktree)
+      m.set(s.cwd, { base: s.worktree.base, name: s.worktree.name });
+  }
+  return m;
+}
+
 export class MockDriver implements PilotDriver {
   private listeners = new Set<(ev: SessionDriverEvent) => void>();
   private trustListeners = new Set<(ev: TrustEvent) => void>();
@@ -63,9 +79,14 @@ export class MockDriver implements PilotDriver {
   }> = [];
   private pendingDialogs = new Set<string>();
   private sessions: SessionListEntry[] = SESSION_LIST.map((s) => ({ ...s }));
-  // Cwds of worktrees the mock "created" (the -worktree sibling dirs), so listSessions
-  // flags them and cleanup/archive can reap them. Mock worktrees are always clean.
-  private worktreeCwds = new Set<string>();
+  // Worktrees the mock "created" (the -worktree sibling dirs), keyed by the worktree
+  // cwd (== the session's cwd) → {base, name}. Mirrors the real WorktreeStore so
+  // listSessions flags worktree-backed rows with their parent project for grouping,
+  // and cleanup/archive only ever touch mock worktrees. Seeded from SESSION_LIST at
+  // construction + reset (mirroring how the real WorktreeStore loads its index from
+  // disk) so any fixture worktree session carries its base/name into the overlay.
+  // Mock worktrees are always clean.
+  private worktrees = seedWorktrees(SESSION_LIST);
   // The mock's current model selection, mutated by setModel/setThinking so the picker
   // reflects a switch. (Scripted replies still emit the fixture default — fine for a
   // deterministic mock; the picker is exercised on its own.)
@@ -203,7 +224,7 @@ export class MockDriver implements PilotDriver {
     this.cancelTimers();
     this.sessions = SESSION_LIST.map((s) => ({ ...s }));
     this.liveCountBumps.clear();
-    this.worktreeCwds.clear();
+    this.worktrees = seedWorktrees(SESSION_LIST);
     this.config = { ...MOCK_DEFAULT_CONFIG };
     this.providers = MOCK_PROVIDERS.map((p) => ({ ...p }));
     this.defaults = {
@@ -277,7 +298,12 @@ export class MockDriver implements PilotDriver {
       ...s,
       userMessageCount:
         s.userMessageCount + (this.liveCountBumps.get(s.sessionId) ?? 0),
-      worktree: this.worktreeCwds.has(s.cwd) ? { path: s.cwd } : undefined,
+      worktree: (() => {
+        const meta = this.worktrees.get(s.cwd);
+        return meta
+          ? { path: s.cwd, base: meta.base, name: meta.name }
+          : undefined;
+      })(),
     }));
   }
 
@@ -313,7 +339,7 @@ export class MockDriver implements PilotDriver {
     // real driver's safe cleanup so the indicator clears.
     if (archived) {
       const cwd = this.sessions.find((s) => s.path === path)?.cwd;
-      if (cwd) this.worktreeCwds.delete(cwd);
+      if (cwd) this.worktrees.delete(cwd);
     }
   }
 
@@ -321,9 +347,9 @@ export class MockDriver implements PilotDriver {
     path: string,
   ): Promise<{ removed: boolean; reason?: string }> {
     // Mock worktrees are always clean, so force is moot — just forget it.
-    if (!this.worktreeCwds.has(path))
+    if (!this.worktrees.has(path))
       return { removed: false, reason: "no pilot worktree at this path" };
-    this.worktreeCwds.delete(path);
+    this.worktrees.delete(path);
     return { removed: true };
   }
 
@@ -348,7 +374,7 @@ export class MockDriver implements PilotDriver {
     // is simulated as a sibling "-worktree" dir so the isolated path is visible in e2e.
     const base = cwd?.trim() || NEW_SESSION_ENTRY.cwd;
     const dir = worktree ? `${base.replace(/\/+$/, "")}-worktree` : base;
-    if (worktree) this.worktreeCwds.add(dir);
+    if (worktree) this.worktrees.set(dir, { base, name: `pilot-mock-${dir}` });
     const sessionId =
       dir === NEW_SESSION_ENTRY.cwd
         ? NEW_SESSION_ENTRY.sessionId

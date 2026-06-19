@@ -95,6 +95,48 @@ describe("filterSessions", () => {
     expect(groups.map((g) => g.cwd)).toEqual(["/active-proj"]);
   });
 
+  test("a pilot-created worktree session groups under its parent project (base), not its own cwd", () => {
+    const sessions = [
+      entry({
+        path: "/wt",
+        cwd: "/proj-pilot-abc",
+        updatedAt: isoAgo(1000),
+        worktree: { path: "/proj-pilot-abc", base: "/proj", name: "pilot-abc" },
+      }),
+      entry({ path: "/main", cwd: "/proj", updatedAt: isoAgo(3000) }),
+    ];
+    const { groups } = filterSessions(sessions, active);
+    // One group keyed by the parent project, not two — and no group labelled
+    // "proj-pilot-abc".
+    expect(groups.map((g) => g.cwd)).toEqual(["/proj"]);
+    // Interleaved newest-first: the worktree session (newer) on top of the main one.
+    expect(groups[0].items.map((i) => i.path)).toEqual(["/wt", "/main"]);
+  });
+
+  test("a worktree session whose parent base has no other sessions still forms a group labelled by the parent", () => {
+    const sessions = [
+      entry({
+        path: "/wt",
+        cwd: "/proj-pilot-abc",
+        worktree: { path: "/proj-pilot-abc", base: "/proj", name: "pilot-abc" },
+      }),
+    ];
+    const { groups } = filterSessions(sessions, active);
+    expect(groups.map((g) => g.cwd)).toEqual(["/proj"]); // parent basename, not worktree's
+  });
+
+  test("a hand-made workspace (no `worktree` field) keeps its own group", () => {
+    const sessions = [
+      entry({ path: "/main", cwd: "/proj" }),
+      entry({ path: "/ws", cwd: "/proj-pilot-abc" }), // no worktree field → own group
+    ];
+    const { groups } = filterSessions(sessions, active);
+    expect(groups.map((g) => g.cwd).sort()).toEqual([
+      "/proj",
+      "/proj-pilot-abc",
+    ]);
+  });
+
   test("search matches name, preview, and path; query is independent of hiddenCount", () => {
     const sessions = [
       entry({ path: "/a", displayName: "Fold reducer" }),
