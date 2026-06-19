@@ -34,6 +34,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type {
   CommandInfo,
+  FileInfo,
   HostUiResponse,
   ModelDefaults,
   ProviderInfo,
@@ -112,6 +113,129 @@ interface WarmSession {
   cwd: string;
   bridge: PiUiBridge;
   unsubscribe: () => void;
+}
+
+/** `fd` matches its pattern as a regex by default, so a raw query is wrong twice over:
+ *  path chars like `.` become wildcards, and unbalanced metacharacters (`(`, `[`) make
+ *  `fd` exit non-zero — a file literally named `foo[1].txt` would be uncompletable. Port
+ *  pi's escaping: regex-escape each path segment, joining on a separator class. Mirrors
+ *  `escapeRegex`/`buildFdPathQuery` in pi's TUI `autocomplete.ts`. */
+function escapeFdRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildFdPathQuery(query: string): string {
+  const normalized = query.replace(/\\/g, "/");
+  if (!normalized.includes("/")) {
+    return escapeFdRegex(normalized);
+  }
+  const hasTrailingSeparator = normalized.endsWith("/");
+  const trimmed = normalized.replace(/^\/+|\/+$/g, "");
+  if (!trimmed) return normalized;
+  const separatorPattern = "[\\\\/]";
+  const segments = trimmed.split("/").filter(Boolean).map(escapeFdRegex);
+  if (segments.length === 0) return normalized;
+  let pattern = segments.join(separatorPattern);
+  if (hasTrailingSeparator) pattern += separatorPattern;
+  return pattern;
+}
+
+/** Search files in `cwd` using fd (fast, .gitignore-aware) for the composer's @-mention
+ *  autocomplete. Follows the same patterns as pi's TUI `autocomplete.ts`: `--follow` for
+ *  symlinks, `--hidden` to include dotfiles, explicit `.git/` exclusion, max-results cap,
+ *  and regex-escaping the query via `buildFdPathQuery` (see above — `fd` matches as regex).
+ *  Returns relative paths with forward slashes. Timeout at 5s — silence is fine in a web
+ *  UI (the menu just stays closed). */
+async function listFilesWithFd(
+  cwd: string,
+  query: string,
+): Promise<FileInfo[]> {
+  const args: string[] = [
+    "--base-directory",
+    cwd,
+    "--max-results",
+    "50",
+    "--type",
+    "f",
+    "--type",
+    "d",
+    "--follow",
+    "--hidden",
+    "--exclude",
+    ".git",
+    "--exclude",
+    ".git/*",
+    "--exclude",
+    ".git/**",
+  ];
+
+  if (query.replace(/\\/g, "/").includes("/")) {
+    args.push("--full-path");
+  }
+  if (query) {
+    args.push(buildFdPathQuery(query));
+  }
+
+  return new Promise((resolve) => {
+    const child = Bun.spawn(["fd", ...args], {
+      cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    let stdout = "";
+    let resolved = false;
+
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        child.kill();
+        resolve([]);
+      }
+    }, 5_000);
+
+    const finish = (results: FileInfo[]) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      resolve(results);
+    };
+
+    void (async () => {
+      try {
+        stdout = await new Response(child.stdout).text();
+      } catch {
+        // fd not found or errored — return empty, no menu.
+        finish([]);
+        return;
+      }
+      const exitCode = await child.exited;
+      if (exitCode !== 0) {
+        // fd exits 1 when no matches; treat like empty.
+        finish([]);
+        return;
+      }
+
+      const lines = stdout.trim().split("\n").filter(Boolean);
+      const results: FileInfo[] = [];
+      for (const line of lines) {
+        // fd appends "/" for directories. Normalize to forward slashes.
+        const normalized = line.replaceAll("\\", "/");
+        const isDirectory = normalized.endsWith("/");
+        const path = isDirectory ? normalized.slice(0, -1) : normalized;
+        // Skip .git entries (belt-and-suspenders — fd's exclude should catch them).
+        if (
+          path === ".git" ||
+          path.startsWith(".git/") ||
+          path.includes("/.git/")
+        ) {
+          continue;
+        }
+        results.push({ path, isDirectory });
+      }
+      finish(results);
+    })();
+  });
 }
 
 export async function createPiDriver(
@@ -761,6 +885,12 @@ export async function createPiDriver(
         label: m.name,
         thinkingLevels: supportedThinkingLevels(m),
       }));
+    },
+
+    async listFiles(query, sessionId) {
+      const ws = target(sessionId);
+      if (!ws) return [];
+      return listFilesWithFd(ws.cwd, query);
     },
 
     async listCommands(sessionId) {

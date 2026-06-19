@@ -4,6 +4,7 @@
 
 import type {
   CommandInfo,
+  FileInfo,
   HostUiResponse,
   ImageContent,
   ModelDefaults,
@@ -114,6 +115,13 @@ export interface PilotDriver {
    *  + skills, pi's `get_commands` set). Per-session because the set is cwd-scoped;
    *  sessionId omitted -> the driver's current session. The mock returns a fixture set. */
   listCommands(sessionId?: SessionId): Promise<CommandInfo[]>;
+  /** File paths matching a composer @-mention query (the text after `@`, empty for
+   *  the initial list). Searched on demand per-keystroke (debounced client-side),
+   *  capped at ~50 results. The real driver uses `fd` for fast, .gitignore-aware
+   *  search; the mock returns a fixture set filtered by substring. sessionId omitted
+   *  -> the driver's current session. Returns up to 50 entries, sorted by match
+   *  quality (directories ranked above files of the same score). */
+  listFiles(query: string, sessionId?: SessionId): Promise<FileInfo[]>;
   /** Switch a session's model. The driver emits a `sessionUpdated` reflecting it.
    *  sessionId omitted -> the driver's current session. */
   setModel(provider: string, modelId: string, sessionId?: SessionId): void;

@@ -7,6 +7,7 @@
 
 import type {
   CommandInfo,
+  FileInfo,
   HostUiResponse,
   ImageContent,
   ModelDefaults,
@@ -80,6 +81,12 @@ export type ServerMessage =
    *  composer's typeahead. Server-authoritative like `modelList`; re-broadcast on
    *  session switch because the set is cwd-scoped. See {@link CommandInfo}. */
   | { type: "commandList"; commands: readonly CommandInfo[] }
+  /** File paths matching a composer @-mention query, returned by the server on
+   *  demand (the client sends {@link queryFiles} on each keystroke after `@`,
+   *  debounced). Re-broadcast per-query, not per-session — the client caches the
+   *  empty-query result. The `query` field echoes the request so the client can
+   *  ignore stale responses. See {@link FileInfo}. */
+  | { type: "fileList"; query: string; files: readonly FileInfo[] }
   /** The model providers pilot can manage credentials for (curated key-capable +
    *  already-connected), server-authoritative like `modelList`. No secrets — see
    *  {@link ProviderInfo}. */
@@ -210,6 +217,11 @@ export type ClientMessage =
   | { type: "cleanupWorktree"; path: string; force?: boolean }
   /** Ask the server to re-read the focused session's commands and re-broadcast them. */
   | { type: "listCommands" }
+  /** Ask the server to search for files matching a composer @-mention query (the text
+   *  after `@`, empty for the initial list). The server responds with {@link fileList}.
+   *  Debounce client-side (~150ms); the server echoes the query back so stale responses
+   *  can be dropped. */
+  | { type: "queryFiles"; query: string }
   /** Answer a project-trust card (D12). `choice` indexes the request's `options`;
    *  null denies (cancel / dismiss). */
   | { type: "trustResponse"; requestId: string; choice: number | null }
