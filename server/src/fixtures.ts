@@ -740,8 +740,15 @@ export function ambient(): ScriptStep[] {
         request: {
           kind: "widget",
           requestId: "w1",
-          key: "todo",
-          lines: ["☑ read routes", "☐ add /health", "☐ write smoke test"],
+          key: "tasklist",
+          // Matches the tasklist extension's real wire format so the client's
+          // collapsed-pill rendering is exercised by the dev bar + e2e.
+          lines: [
+            "Open Tasks (3):",
+            "  ○ #v23gry: wire up /health route",
+            "  ○ #4dhaiz: add a smoke test",
+            "  ○ #dyouxr: document the deploy step",
+          ],
           placement: "aboveComposer",
         },
       },
