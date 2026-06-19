@@ -47,7 +47,12 @@ import type {
 } from "@pilot/protocol";
 import { ArchiveStore } from "../archive-store.js";
 import { config } from "../config.js";
-import type { NewSessionOpts, PilotDriver, TrustEvent } from "../driver.js";
+import type {
+  NewSessionOpts,
+  OAuthLoginIO,
+  PilotDriver,
+  TrustEvent,
+} from "../driver.js";
 import { mapPiEvent } from "./event-map.js";
 import { type HistoryMessage, historyToEvents } from "./history-map.js";
 import { createWorktree, removeWorktree } from "./worktree.js";
@@ -778,23 +783,35 @@ export async function createPiDriver(
 
     async listProviders() {
       modelRegistry.refresh();
+      // Provider id -> display name for the OAuth-capable set (Anthropic, OpenAI Codex,
+      // GitHub Copilot). Carries pi's nicer label ("Anthropic (Claude Pro/Max)") and is
+      // what lets an UNAUTHED OAuth provider still show a row (so its "Sign in" button
+      // has a home) even though it isn't in the curated key-capable set.
+      const oauthProviders = new Map(
+        authStorage.getOAuthProviders().map((p) => [p.id, p.name]),
+      );
       // Every provider pi knows a model for, plus every OAuth-capable and every
-      // already-authed one — then narrowed (Q2) to the curated key-capable set + the
-      // already-connected, so the phone panel isn't a wall of irrelevant rows.
+      // already-authed one — then narrowed (Q2) to the curated key-capable set, the
+      // OAuth-capable set, and the already-connected, so the phone panel isn't a wall of
+      // irrelevant rows.
       const ids = new Set<string>([
         ...modelRegistry.getAll().map((m) => String(m.provider)),
-        ...authStorage.getOAuthProviders().map((p) => p.id),
+        ...oauthProviders.keys(),
         ...authStorage.list(),
       ]);
       const out: ProviderInfo[] = [];
       for (const id of [...ids].sort((a, b) => a.localeCompare(b))) {
         const keySetup = apiKeySetupSupported(id);
+        const oauthSupported = oauthProviders.has(id);
         const status = modelRegistry.getProviderAuthStatus(id);
         const hasAuth = status.configured || authStorage.hasAuth(id);
-        if (!keySetup && !hasAuth) continue;
+        if (!keySetup && !oauthSupported && !hasAuth) continue;
         out.push({
           id,
-          name: modelRegistry.getProviderDisplayName(id) || id,
+          name:
+            modelRegistry.getProviderDisplayName(id) ||
+            oauthProviders.get(id) ||
+            id,
           hasAuth,
           authSource: inferAuthSource(
             authStorage.get(id) as AuthCred | undefined,
@@ -802,6 +819,7 @@ export async function createPiDriver(
             keySetup,
           ),
           apiKeySetupSupported: keySetup,
+          oauthSupported,
         });
       }
       return out;
@@ -818,6 +836,73 @@ export async function createPiDriver(
 
     async removeProviderApiKey(providerId) {
       authStorage.remove(providerId);
+      modelRegistry.refresh();
+    },
+
+    async oauthLogin(providerId: string, io: OAuthLoginIO) {
+      // Map pi's OAuth callbacks onto the hub's IO. The flow is built for the remote
+      // case: pi opens an authorize URL (onAuth), starts a localhost loopback that the
+      // phone can't reach, and — because we provide onManualCodeInput — races that
+      // loopback against the operator pasting the code/redirect-URL back. authStorage
+      // persists the tokens + auto-refreshes them on use; we only bridge the prompts.
+      let authUrl: string | undefined;
+      let authInstructions: string | undefined;
+      // A cancelled prompt (io.prompt -> null) must abort, not silently retry with "".
+      const required = (answer: string | null): string => {
+        if (answer == null) throw new Error("OAuth login cancelled");
+        return answer;
+      };
+      await authStorage.login(providerId, {
+        onAuth: (info) => {
+          authUrl = info.url;
+          authInstructions = info.instructions;
+          // Surface the link immediately too, so it's visible even for a loopback-only
+          // provider that never calls onManualCodeInput/onPrompt to carry it.
+          io.progress(`Open this URL to authorize:\n${info.url}`);
+        },
+        onManualCodeInput: () =>
+          io
+            .prompt({
+              kind: "input",
+              message: "Paste the authorization code or the full redirect URL",
+              placeholder: "code, or http://localhost/callback?code=…",
+              url: authUrl,
+              instructions: authInstructions,
+            })
+            .then(required),
+        onPrompt: (p) =>
+          io
+            .prompt({
+              kind: "input",
+              message: p.message,
+              placeholder: p.placeholder,
+              url: authUrl,
+              instructions: authInstructions,
+            })
+            .then((answer) =>
+              answer == null ? (p.allowEmpty ? "" : required(answer)) : answer,
+            ),
+        onSelect: (p) =>
+          io
+            .prompt({
+              kind: "select",
+              message: p.message,
+              options: p.options.map((o) => ({ id: o.id, label: o.label })),
+            })
+            .then((answer) => answer ?? undefined),
+        onProgress: (m) => io.progress(m),
+        onDeviceCode: (info) =>
+          io.deviceCode({
+            userCode: info.userCode,
+            verificationUri: info.verificationUri,
+            expiresInSeconds: info.expiresInSeconds,
+          }),
+      });
+      modelRegistry.refresh(); // the newly-authed provider's models become available
+    },
+
+    async oauthLogout(providerId: string) {
+      authStorage.logout(providerId);
       modelRegistry.refresh();
     },
 

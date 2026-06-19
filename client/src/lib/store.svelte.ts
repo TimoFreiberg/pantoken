@@ -10,6 +10,8 @@ import {
   initialSessionState,
   type ModelDefaults,
   type ModelOption,
+  type OAuthDeviceInfo,
+  type OAuthLoginPrompt,
   type ProviderInfo,
   type ServerMessage,
   type SessionConfig,
@@ -80,6 +82,19 @@ class PilotStore {
   // model defaults + favorites. Server-authoritative, delivered like `models`.
   providers = $state<ProviderInfo[]>([]);
   modelDefaults = $state<ModelDefaults>({ favorites: [] });
+  // OAuth sign-in flow (Settings panel). Global + interactive like `trustRequest` —
+  // not part of the folded session state. Null when no login is running. `progress`
+  // accumulates status lines; `prompt` is the step awaiting the operator (open the URL,
+  // paste the code), `device` the device-code variant; `done`/`error` end the flow. Only
+  // the client that started the login renders it (a single-user app drives from one tab).
+  oauthFlow = $state<{
+    providerId: string;
+    progress: string[];
+    prompt: (OAuthLoginPrompt & { requestId: string }) | null;
+    device: OAuthDeviceInfo | null;
+    done: boolean;
+    error: string | null;
+  } | null>(null);
 
   // per-client view state — local only (never sent upstream; see D5)
   composerDraft = $state("");
@@ -226,6 +241,47 @@ class PilotStore {
         this.appUpdate = msg.available
           ? { sha: msg.sha ?? "", applying: msg.applying }
           : null;
+        break;
+      case "oauthPrompt":
+        // Ignore prompts for a flow this client didn't start (or already closed).
+        if (this.oauthFlow?.providerId === msg.providerId)
+          this.oauthFlow = {
+            ...this.oauthFlow,
+            prompt: { requestId: msg.requestId, ...msg.prompt },
+            device: null,
+          };
+        break;
+      case "oauthProgress":
+        if (this.oauthFlow?.providerId === msg.providerId)
+          this.oauthFlow = {
+            ...this.oauthFlow,
+            progress: [...this.oauthFlow.progress, msg.message],
+          };
+        break;
+      case "oauthDeviceCode":
+        if (this.oauthFlow?.providerId === msg.providerId)
+          this.oauthFlow = {
+            ...this.oauthFlow,
+            device: {
+              userCode: msg.userCode,
+              verificationUri: msg.verificationUri,
+              expiresInSeconds: msg.expiresInSeconds,
+            },
+          };
+        break;
+      case "oauthResolved":
+        if (this.oauthFlow?.prompt?.requestId === msg.requestId)
+          this.oauthFlow = { ...this.oauthFlow, prompt: null };
+        break;
+      case "oauthResult":
+        if (this.oauthFlow?.providerId === msg.providerId)
+          this.oauthFlow = {
+            ...this.oauthFlow,
+            prompt: null,
+            device: null,
+            done: true,
+            error: msg.ok ? null : (msg.error ?? "OAuth login failed"),
+          };
         break;
       case "error":
         if (msg.message === "unauthorized") {
@@ -514,6 +570,42 @@ class PilotStore {
   }
   removeProviderApiKey(providerId: string): void {
     send({ type: "removeProviderApiKey", providerId });
+  }
+  /** Start an OAuth sign-in. Opens the local flow (so this client renders the prompts
+   *  the server will broadcast back) and asks the server to drive it. */
+  oauthLogin(providerId: string): void {
+    this.oauthFlow = {
+      providerId,
+      progress: [],
+      prompt: null,
+      device: null,
+      done: false,
+      error: null,
+    };
+    send({ type: "oauthLogin", providerId });
+  }
+  /** Answer the current OAuth prompt (pasted code/URL, or a selected option id).
+   *  Optimistically clears the prompt; the server's `oauthResolved` confirms. */
+  oauthRespond(value: string): void {
+    const p = this.oauthFlow?.prompt;
+    if (!p || !this.oauthFlow) return;
+    send({ type: "oauthRespond", requestId: p.requestId, value });
+    this.oauthFlow = { ...this.oauthFlow, prompt: null };
+  }
+  /** Cancel an in-progress login: tell the server to abort the pending prompt (which
+   *  fails the login server-side), then close the local flow. */
+  oauthCancel(): void {
+    const p = this.oauthFlow?.prompt;
+    if (p) send({ type: "oauthRespond", requestId: p.requestId, value: null });
+    this.oauthFlow = null;
+  }
+  /** Dismiss a finished (done/errored) OAuth flow. */
+  closeOauth(): void {
+    this.oauthFlow = null;
+  }
+  /** Sign out of an OAuth provider (clears its stored credentials server-side). */
+  oauthLogout(providerId: string): void {
+    send({ type: "oauthLogout", providerId });
   }
   /** Set the global default model for new sessions (optimistic; server reconciles). */
   setDefaultModel(provider: string, modelId: string): void {

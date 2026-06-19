@@ -8,6 +8,8 @@ import type {
   ImageContent,
   ModelDefaults,
   ModelOption,
+  OAuthDeviceInfo,
+  OAuthLoginPrompt,
   ProviderInfo,
   SessionDriverEvent,
   SessionId,
@@ -22,6 +24,18 @@ import type {
 export type TrustEvent =
   | { kind: "request"; request: TrustRequest }
   | { kind: "resolved"; requestId: string };
+
+/** How the driver drives an interactive OAuth login through the hub. The hub provides
+ *  this to {@link PilotDriver.oauthLogin}; the driver maps pi's OAuth callbacks onto it.
+ *  Each `prompt` renders to clients and resolves with the operator's answer — a pasted
+ *  code/URL or a selected option id — or null if they cancelled / it timed out (the
+ *  driver should treat null as an aborted login). `progress`/`deviceCode` are
+ *  fire-and-forget. */
+export interface OAuthLoginIO {
+  prompt(prompt: OAuthLoginPrompt): Promise<string | null>;
+  progress(message: string): void;
+  deviceCode(info: OAuthDeviceInfo): void;
+}
 
 /** Options for {@link PilotDriver.newSession}. All optional: a bare new session in
  *  the launch cwd is `newSession()`. The first `prompt` is delivered by the hub after
@@ -118,6 +132,14 @@ export interface PilotDriver {
   setProviderApiKey?(providerId: string, apiKey: string): Promise<void>;
   /** Remove a pilot-saved API key (auth_file source only) and refresh availability. */
   removeProviderApiKey?(providerId: string): Promise<void>;
+  /** Run an interactive OAuth sign-in for a provider in pi's OAuth registry (Anthropic
+   *  Claude Pro/Max, OpenAI Codex, GitHub Copilot), driving the flow's prompts through
+   *  `io`. Resolves once credentials are stored; rejects on failure/cancel. The hub
+   *  re-broadcasts the provider + model lists afterward. */
+  oauthLogin?(providerId: string, io: OAuthLoginIO): Promise<void>;
+  /** Sign out of an OAuth provider (clears its stored credentials), refreshing
+   *  availability so the now-unauthed provider's models drop out. */
+  oauthLogout?(providerId: string): Promise<void>;
 
   /** pi's global default model/thinking for new sessions + the favorites subset. */
   getModelDefaults?(): Promise<ModelDefaults>;

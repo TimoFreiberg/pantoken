@@ -111,16 +111,26 @@ export const MOCK_DEFAULT_CONFIG: SessionConfig = {
   availableThinkingLevels: MOCK_THINKING_LEVELS,
 };
 
-/** Providers the mock offers in the Settings panel: two connected (an OAuth one and a
- *  key-file one) and two unconnected key-capable ones, so the panel + e2e can exercise
- *  set/remove without real credentials. */
+/** Providers the mock offers in the Settings panel, covering every auth shape the panel
+ *  renders: an OAuth-connected one (sign-out), an OAuth-capable but unconnected one
+ *  (sign-in flow), a key-file one (replace/remove), and two unconnected key-capable
+ *  ones — so the panel + e2e exercise the full matrix without real credentials. */
 export const MOCK_PROVIDERS: readonly ProviderInfo[] = [
   {
     id: "anthropic",
-    name: "Anthropic",
+    name: "Anthropic (Claude Pro/Max)",
     hasAuth: true,
     authSource: "oauth",
     apiKeySetupSupported: false,
+    oauthSupported: true,
+  },
+  {
+    id: "openai-codex",
+    name: "OpenAI Codex",
+    hasAuth: false,
+    authSource: "none",
+    apiKeySetupSupported: false,
+    oauthSupported: true,
   },
   {
     id: "openai",
@@ -128,6 +138,7 @@ export const MOCK_PROVIDERS: readonly ProviderInfo[] = [
     hasAuth: true,
     authSource: "auth_file",
     apiKeySetupSupported: true,
+    oauthSupported: false,
   },
   {
     id: "google",
@@ -135,6 +146,7 @@ export const MOCK_PROVIDERS: readonly ProviderInfo[] = [
     hasAuth: false,
     authSource: "none",
     apiKeySetupSupported: true,
+    oauthSupported: false,
   },
   {
     id: "groq",
@@ -142,6 +154,7 @@ export const MOCK_PROVIDERS: readonly ProviderInfo[] = [
     hasAuth: false,
     authSource: "none",
     apiKeySetupSupported: true,
+    oauthSupported: false,
   },
 ];
 
