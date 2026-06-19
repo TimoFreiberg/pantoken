@@ -27,11 +27,46 @@ _(clear — nothing blocking; pull the next item up from Important)_
 
 ## 🟢 Polish / fast-follow
 
-- [ ] **Provider OAuth login** — sign-in / sign-out for OAuth-capable providers
-      (Anthropic, OpenAI, …) from the Settings panel. Deferred from the settings-panel
-      work (API-key entry shipped); needs a server-side OAuth callback reachable over
-      Tailscale, which is the bulk of the cost.
-- [ ] **Extensions enable/disable view** + compatibility-issue surfacing
+- [ ] **Provider OAuth login** — sign-in / sign-out for OAuth-capable providers from the
+      Settings panel. **Greenlit + scoped (owner, 2026-06-19): the driver is subscription
+      billing** — OAuth lets pi bill against a flat-rate Claude Max/Pro sub instead of
+      per-token API. Anthropic first. _Cost premise corrected:_ the old "needs a
+      Tailscale-reachable OAuth callback" note was wrong. pi already ships the whole flow
+      (`packages/ai/src/utils/oauth/`, registry + `authStorage.login()` + token refresh)
+      and it's **built for the headless/remote case** — `loginAnthropic` races a localhost
+      loopback against a **manual paste path** (`onManualCodeInput`/`onPrompt`): phone opens
+      the authorize URL, completes login, pastes the redirect URL/code back; pi exchanges +
+      stores + auto-refreshes. **No Tailscale callback needed.** Pilot's actual work:
+      driver `login/logout` methods bridging pi's callbacks over WS (reuse the existing
+      `respondUi` Host-UI channel for the paste round-trip) + a Settings button & paste
+      field. The protocol already models `authSource: "oauth"` and the driver already
+      enumerates OAuth providers from `authStorage`. ⚠️ **ToS gray area:** pi requests
+      Claude Code's scopes (`user:sessions:claude_code`), i.e. presents as Claude Code;
+      whether subscription OAuth from a third-party tool is within Anthropic's ToS is
+      unsettled — weigh before relying on it.
+- [ ] **Workspace icon instead of text label in sidebar** — replace the "WORKSPACE: …" label on
+      session rows with a compact icon (no text), matching the Claude app's visual density.
+- [ ] **Sort projects alphabetically in sidebar** — projects grouped by name A→Z;
+      sessions within each project stay sorted by last-used (most recent on top).
+- [ ] **Remove hover tooltip on session titles in the sidebar** — intentional: it's visually
+      noisy and doesn't add information beyond what's already visible in the title itself.
+- [ ] **Hide thinking blocks behind a toggle** — thinking blocks are visually noisy and
+      rarely useful to a human driver. Add a toggle (default off, tucked in Settings) that
+      hides `<thinking>` content from the transcript; when off, the block is collapsed or
+      replaced with a subtle "thinking…" placeholder.
+- [ ] **Extension compatibility-issue surfacing** — render extension compat issues in the
+      UI (an extension silently breaking against a pi version is exactly the kind of silent
+      failure to surface loudly). Cheap: the protocol already has the
+      `extensionCompatibilityIssue` event + `extensionPath` — emit it server-side, render a
+      banner. _(Scoped down from "enable/disable view", owner 2026-06-19: the enable/disable
+      toggle was split off to Later — see below.)_
+- [ ] **Per-session system-prompt override** — let a new session start with a custom
+      system prompt instead of pi's default (in the new-session draft, and/or a global
+      default in Settings). Seam: `resourceLoaderOptions.systemPrompt` on
+      `createAgentSessionServices` in `warmUp` (`server/src/pi/pi-driver.ts`) for a full
+      replace, or `appendSystemPrompt` for additive. NOT needed for the pi-docs-pointer
+      strip — that's handled globally by the `strip-pi-docs` pi extension
+      (`~/.pi/agent/extensions/`); this is the broader "different prompt for this session."
 
 ## 🔵 Later
 
@@ -48,6 +83,11 @@ _(clear — nothing blocking; pull the next item up from Important)_
 - [ ] **Inline tool-diff rendering**
 - [ ] **Workspace git changed-files/diff/stage panel**
 - [ ] **Skills enable/disable view**
+- [ ] **Extensions enable/disable toggle** — split off from the compat-surfacing item
+      (owner, 2026-06-19). Deferred: low frequency (extensions are set once, rarely toggled
+      from a phone) and higher cost than it looks — pi loads extensions at session start
+      (`packages/coding-agent/src/core/extensions/loader.ts`, no runtime disable), so a live
+      toggle needs per-session load config or a session restart, not a flag.
 
 - [ ] **Right-side session minimap** (nebulous, OP8)
 - [ ] **Queued-messages editing** (replace queued)
