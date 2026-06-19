@@ -82,7 +82,7 @@ by hand.)
 ## Not done yet
 
 - **Code-signing/notarization** for frictionless installs.
-- **App icon** (`Resources/`), and a release/CI step to publish a built `.app`.
+- A release/CI step to publish a built `.app`.
 
 ## Known caveat (resolved)
 

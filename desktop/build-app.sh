@@ -25,6 +25,19 @@ swiftc -O -swift-version 5 -target "$TARGET" \
 
 cp Info.plist "$APP/Contents/Info.plist"
 
+# App icon. Generate the .icns from icon-1024.png (the full-bleed pilot mark, rendered
+# from ../client/public/icon.svg) using only system tools — sips + iconutil ship with
+# macOS, so this keeps the "builds with just the Command Line Tools" promise.
+echo "→ generating app icon (sips + iconutil)"
+ICONSET="$(mktemp -d)/AppIcon.iconset"
+mkdir -p "$ICONSET"
+for size in 16 32 128 256 512; do
+    sips -z "$size" "$size"             icon-1024.png --out "$ICONSET/icon_${size}x${size}.png"    >/dev/null
+    sips -z $((size*2)) $((size*2))     icon-1024.png --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+rm -rf "$(dirname "$ICONSET")"
+
 # Ad-hoc signature ("-" identity). Enough for a local app; swap for a Developer ID +
 # notarization if you ever want frictionless double-click installs across machines.
 if codesign --force --sign - "$APP" 2>/dev/null; then
