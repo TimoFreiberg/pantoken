@@ -22,3 +22,35 @@ test("approval sheet is reachable and tappable on mobile", async ({ page }) => {
   await allow.click();
   await expect(page.getByText("Approved — continuing.")).toBeVisible();
 });
+
+test("a wide markdown table scrolls horizontally instead of overflowing", async ({
+  page,
+}) => {
+  await drive(page, "markdown");
+  const md = page.locator(".markstream-svelte.markdown-renderer").last();
+  // The fixture renders a narrow table, then a 7-column "wide table", then a code
+  // block. Wait for the code block (last in the stream) so the whole turn — and the
+  // wide table — has finished streaming before we measure.
+  await expect(md.locator("pre", { hasText: "function greet" })).toBeVisible();
+  // Select the wide table by a header unique to it (not `.last()`, which would race
+  // the stream — the narrow table renders first).
+  const wide = md.locator("table", { hasText: "CallingCode" });
+  await expect(wide).toBeVisible();
+  // The row carries `content-visibility: auto`; an off-screen row isn't laid out,
+  // so measure only after scrolling it on-screen (a plain assertion won't scroll).
+  await wide.scrollIntoViewIfNeeded();
+  const metrics = await wide.evaluate((t) => ({
+    overflowX: getComputedStyle(t).overflowX,
+    // content is wider than the box → it's an actual horizontal scroll container
+    scrolls: t.scrollWidth > t.clientWidth + 1,
+    // the element itself stays within the viewport (no page-level overflow)
+    rightWithinViewport:
+      t.getBoundingClientRect().right <= window.innerWidth + 1,
+    noPageOverflow:
+      document.documentElement.scrollWidth <= window.innerWidth + 1,
+  }));
+  expect(metrics.overflowX).toBe("auto");
+  expect(metrics.scrolls).toBe(true);
+  expect(metrics.rightWithinViewport).toBe(true);
+  expect(metrics.noPageOverflow).toBe(true);
+});
