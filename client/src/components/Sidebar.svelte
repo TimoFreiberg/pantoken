@@ -302,6 +302,25 @@
   {/if}
 
   <nav class="list">
+    {#if store.draft}
+      <div class="draft-row">
+        <button
+          class="row active"
+          title={`New session in ${store.draft.cwd || "home"} — click to return to the draft`}
+          onclick={() => startDraft(store.draft.cwd)}
+        >
+          <span class="status" data-state="draft" title="New session draft" aria-label="draft">
+            <span class="draft-marker">+</span>
+          </span>
+          <span class="row-body">
+            <span class="name">New session</span>
+            <span class="meta">
+              <span class="msg-count">{store.draft.cwd ? basename(store.draft.cwd) : "home"}</span>
+            </span>
+          </span>
+        </button>
+      </div>
+    {/if}
     {#if filteredGroups.length === 0}
       <div class="empty">
         {query.trim()
@@ -942,6 +961,23 @@
   }
   .status[data-state="running"] .dot:nth-child(3) {
     animation-delay: 0.36s;
+  }
+  /* Draft row — pinned above the session list while composing a new session.
+     Reuses .row + .row.active; only the status marker is custom. */
+  .draft-row {
+    margin-bottom: 6px;
+    padding: 0 6px;
+  }
+  .draft-marker {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1;
   }
   /* initializing — a small rotating ring (a session warming up, pre-stream). Distinct
      from the running pulse so the two phases read apart at a glance. */
