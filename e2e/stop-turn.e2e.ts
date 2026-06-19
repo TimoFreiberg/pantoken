@@ -24,7 +24,10 @@ test("the Stop pill survives a stray mid-turn idle snapshot (turn still in fligh
   await expect(
     page.getByText("kicking off a command", { exact: false }),
   ).toBeVisible();
-  await expect(page.getByText("Run shell command")).toBeVisible();
+  const summary = page.locator(".tool.summary");
+  await expect(summary.locator(":scope > .head .name")).toHaveText("1 tool");
+  await expect(summary.locator(":scope > .head .arg")).toHaveText("bash");
+  await expect(summary).toHaveClass(/running/);
 
   // Wait for the stray idle snapshot to land server-side: the folded status flips to
   // "idle" (and stays — the turn never completes), proving the affordance no longer

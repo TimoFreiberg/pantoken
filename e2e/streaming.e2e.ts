@@ -21,7 +21,9 @@ test("a streamed reply renders user text, a working block, and the final answer"
   await expect(
     page.getByText("Here's the plan", { exact: false }),
   ).toBeVisible();
-  await expect(page.getByText("Read file")).toBeVisible();
+  const summary = page.locator(".tool.summary");
+  await expect(summary.locator(":scope > .head .name")).toHaveText("1 tool");
+  await expect(summary.locator(":scope > .head .arg")).toHaveText("read");
 });
 
 test("thinking stays hidden by default even inside an expanded working block", async ({

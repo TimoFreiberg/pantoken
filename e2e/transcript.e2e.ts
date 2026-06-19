@@ -30,12 +30,14 @@ test("renders the greeting conversation: user, collapsed work, final answer", as
   ).toHaveCount(0);
   await expect(page.getByText("Run shell command")).toHaveCount(0);
 
-  // Expanding reveals the narration and the tool card.
+  // Expanding reveals the narration and the one-tool bash summary.
   await expandWork(page);
   await expect(
     page.getByText("I'll add a lightweight health endpoint"),
   ).toBeVisible();
-  await expect(page.getByText("Run shell command")).toBeVisible();
+  const summary = page.locator(".tool.summary");
+  await expect(summary.locator(":scope > .head .name")).toHaveText("1 tool");
+  await expect(summary.locator(":scope > .head .arg")).toHaveText("bash");
 });
 
 test("the composer footer shows the model; the header shows a live connection", async ({
@@ -54,13 +56,21 @@ test("the composer footer shows the model; the header shows a live connection", 
 
 test("tool card expands to show output", async ({ page }) => {
   await expandWork(page);
-  await page.getByText("Run shell command").click();
+  const summary = page.locator(".tool.summary");
+  await summary.locator(":scope > .head").click();
+  const innerHead = summary.locator(":scope > .body > .tool > .head");
+  await expect(innerHead).toBeVisible();
+  await innerHead.click({ force: true });
   await expect(page.getByText("server/src/index.ts:14")).toBeVisible();
 });
 
 test("tool card expands to show the full arguments", async ({ page }) => {
   await expandWork(page);
-  await page.getByText("Run shell command").click();
+  const summary = page.locator(".tool.summary");
+  await summary.locator(":scope > .head").click();
+  const innerHead = summary.locator(":scope > .body > .tool > .head");
+  await expect(innerHead).toBeVisible();
+  await innerHead.click({ force: true });
   // The args block labels each input key and shows its full value in a <pre> —
   // the collapsed header only renders a truncated single-line preview.
   const args = page.locator(".tool .args");

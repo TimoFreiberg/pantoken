@@ -516,11 +516,10 @@ export function promptReply(userText: string): ScriptStep[] {
   ];
 }
 
-// --- A burst of navigation tools, to exercise the merged-tools card ---------
+// --- A burst of summarized tools, to exercise the tool-summary card ----------
 
-/** One scripted navigation/inspection call (read/grep/find/…) with a
- *  deterministic span. */
-function navSpan(
+/** One scripted summarized call with a deterministic span. */
+function summarySpan(
   callId: string,
   toolName: string,
   input: Record<string, unknown>,
@@ -539,10 +538,10 @@ function navSpan(
   );
 }
 
-/** A mixed, uninterrupted burst of navigation tools (2 reads, 2 greps, 1 find).
- *  They all collapse into ONE merged card whose header reads "5 tools (read,
- *  grep, find)" — exercising the merge-by-membership behavior (heterogeneous run,
- *  distinct names deduped) and the two-step drill-down. */
+/** A mixed, uninterrupted burst of tools (2 reads, 2 greps, 1 find, 1 bash).
+ *  They all collapse into ONE summary card whose header reads "6 tools" with
+ *  "read, grep, find, bash" as its preview — exercising heterogeneous runs,
+ *  distinct-name deduping, bash folding, and the two-step drill-down. */
 export function searchBatch(): ScriptStep[] {
   return [
     {
@@ -563,35 +562,41 @@ export function searchBatch(): ScriptStep[] {
       },
     },
     ...deltas("Let me poke around the codebase a few ways.", "text"),
-    ...navSpan(
+    ...summarySpan(
       "r1",
       "read",
       { path: "client/src/lib/store.svelte.ts" },
       "// store.svelte.ts\n  private reconnect() { /* WS singleton backoff */ }",
     ),
-    ...navSpan(
+    ...summarySpan(
       "r2",
       "read",
       { path: "client/src/App.svelte" },
       "// App.svelte — mounts the store and the transcript",
     ),
-    ...navSpan(
+    ...summarySpan(
       "g1",
       "grep",
       { pattern: "reconnect", path: "client/src" },
       "client/src/lib/store.svelte.ts:88:  private reconnect() {",
     ),
-    ...navSpan(
+    ...summarySpan(
       "g2",
       "grep",
       { pattern: "WebSocket", path: "client/src" },
       "client/src/lib/store.svelte.ts:31:    this.ws = new WebSocket(url);",
     ),
-    ...navSpan(
+    ...summarySpan(
       "f1",
       "find",
       { pattern: "*.svelte", path: "client/src/components" },
       "client/src/components/Transcript.svelte\nclient/src/components/ToolCard.svelte",
+    ),
+    ...summarySpan(
+      "b1",
+      "bash",
+      { command: "rg -n \"reconnect\" client/src/lib" },
+      "client/src/lib/store.svelte.ts:88:  private reconnect() {",
     ),
     ...deltas("Reconnect lives in the store's WS singleton.", "text"),
     {

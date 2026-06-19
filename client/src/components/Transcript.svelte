@@ -4,19 +4,20 @@
   import {
     type DisplayItem,
     groupTurns,
-    mergedSummary,
     mergeTools,
     type TurnGroup,
     workedLabel,
   } from "../lib/transcript-view.js";
   import Markdown from "./Markdown.svelte";
   import ToolCard from "./ToolCard.svelte";
+  import ToolSummary from "./ToolSummary.svelte";
   import ThinkingBlock from "./ThinkingBlock.svelte";
 
   const items = $derived(store.session.items);
 
   // Two view-model passes (pure, unit-tested in transcript-view.test.ts):
-  //   1. mergeTools — uninterrupted runs of nav/inspection tools fold into one card.
+  //   1. mergeTools — uninterrupted runs of every tool except write/edit fold into
+  //      one summary card.
   //   2. groupTurns — each turn (user → next user) splits into a collapsible "work"
   //      portion (tools + intermediate narration) and the turn-final response that
   //      stays visible. That's the "Worked for Ns" block below.
@@ -68,10 +69,9 @@
     return map;
   });
 
-  // Track open/close state for merged cards (the outer toggle that reveals the
-  // collapsed list). Keyed by the first call's id (stable across recomputes — a
-  // new call appended to the run doesn't change the first id). Each listed
-  // ToolCard owns its own inner expand state, giving the two-step drill-down.
+  // Keep summary expansion outside ToolSummary so transcript refreshes cannot
+  // remount a live card and collapse it between the outer and inner clicks.
+  // The first call id is stable as more calls append to the same summarized run.
   let mergedOpen = $state<Record<string, boolean>>({});
   function toggleMerged(id: string) {
     mergedOpen = { ...mergedOpen, [id]: !mergedOpen[id] };
@@ -289,27 +289,11 @@
           {/if}
         </div>
       {:else if item.kind === "mergedTools"}
-        <div class="merged-tools">
-          <button
-            class="merged-head"
-            onclick={() => toggleMerged(item.id)}
-            aria-expanded={mergedOpen[item.id] ?? false}
-            title={`${mergedOpen[item.id] ? "Collapse" : "Expand"} ${mergedSummary(item)}`}
-          >
-            <span class="chevron" class:open={mergedOpen[item.id]}>▸</span>
-            <span class="count">{item.tools.length} {item.tools.length === 1 ? "tool" : "tools"}</span>
-            <span class="tool-names">({item.names.join(", ")})</span>
-          </button>
-          {#if mergedOpen[item.id]}
-            <!-- Two-step drill-down: the outer toggle reveals the run as a list of
-                 collapsed ToolCards; each ToolCard then expands on its own click. -->
-            <div class="merged-body">
-              {#each item.tools as t (t.id)}
-                <ToolCard item={t} />
-              {/each}
-            </div>
-          {/if}
-        </div>
+        <ToolSummary
+          {item}
+          open={mergedOpen[item.id] ?? false}
+          ontoggle={() => toggleMerged(item.id)}
+        />
       {:else if item.kind === "tool"}
         <ToolCard {item} />
       {:else if item.kind === "notice"}
@@ -639,61 +623,6 @@
     overflow-wrap: normal;
     tab-size: 2;
   }
-  /* ── Merged sequential navigation tools (read/grep/find/session_search) ── */
-  .merged-tools {
-    content-visibility: auto;
-    contain-intrinsic-size: auto 60px;
-  }
-  .merged-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    text-align: left;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 8px 10px;
-    color: var(--text);
-    font-size: 13px;
-    cursor: pointer;
-  }
-  .merged-head:hover {
-    background: var(--surface);
-  }
-  .merged-head .chevron {
-    font-size: 10px;
-    width: 14px;
-    text-align: center;
-    color: var(--text-faint);
-    transition: transform 0.12s;
-    flex-shrink: 0;
-  }
-  .merged-head .chevron.open {
-    transform: rotate(90deg);
-  }
-  .merged-head .count {
-    font-weight: 600;
-    color: var(--text);
-    flex-shrink: 0;
-  }
-  .merged-head .tool-names {
-    color: var(--accent);
-    flex: 1;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .merged-body {
-    margin-top: 6px;
-    margin-left: 6px;
-    padding-left: 10px;
-    border-left: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
   /* ── Per-turn "Worked for Ns" block (Codex-style collapsed working section) ── */
   .turn-work {
     content-visibility: auto;
@@ -727,8 +656,7 @@
   .work-head .work-label {
     font-weight: 550;
   }
-  /* When expanded, the work items indent under the header with a thread line, echoing
-     the merged-tools body so nested cards read as "inside" the working section. */
+  /* When expanded, the work items indent under the header with a thread line. */
   .work-body {
     margin-top: 10px;
     margin-left: 5px;
