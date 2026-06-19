@@ -58,26 +58,28 @@
   <Sidebar />
   <div class="app">
     <StatusHeader />
-    <ConnectionBanner />
-    {#if store.draft}
-      <NewSession />
-    {:else}
-      <Transcript />
-      <WorkingIndicator />
-    {/if}
-    {#if dev}
-      <div class="devbar">
-        {#each scripts as s (s)}
-          <button onclick={() => store.mock(s)}>{s}</button>
-        {/each}
-        <button onclick={() => store.testPush()}>push</button>
-        <button onclick={() => store.markUpdateReady()}>update</button>
-      </div>
-    {/if}
-    <Composer />
+    <div class="chat">
+      <ConnectionBanner />
+      {#if store.draft}
+        <NewSession />
+      {:else}
+        <Transcript />
+        <WorkingIndicator />
+      {/if}
+      {#if dev}
+        <div class="devbar">
+          {#each scripts as s (s)}
+            <button onclick={() => store.mock(s)}>{s}</button>
+          {/each}
+          <button onclick={() => store.testPush()}>push</button>
+          <button onclick={() => store.markUpdateReady()}>update</button>
+        </div>
+      {/if}
+      <Composer />
+      <ApprovalLayer />
+    </div>
   </div>
 </div>
-<ApprovalLayer />
 <TrustCard />
 <Settings />
 {#if store.swUpdateReady}
@@ -116,6 +118,13 @@
     flex-direction: column;
     height: 100%;
     height: 100dvh;
+  }
+  .chat {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
   .devbar {
     display: flex;

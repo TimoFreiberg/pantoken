@@ -1,3 +1,16 @@
+<script module lang="ts">
+  export interface QnaDraftAnswer {
+    selectedOptionIndices: number[];
+    customText: string;
+    customSelected: boolean;
+  }
+
+  export interface QnaDraft {
+    answers: QnaDraftAnswer[];
+    current: number;
+  }
+</script>
+
 <script lang="ts">
   import { untrack } from "svelte";
   import type { HostUiRequest, QnaAnswer } from "@pilot/protocol";
@@ -7,14 +20,22 @@
   // radio (single) / checkbox (multi) / free-text, with prev-next + arrow/Esc/⌘↵
   // navigation. Each card produces a structured QnaAnswer (picked indices + a
   // free-text "something else" escape) so the extension's formatQnA renders the
-  // transcript identically to the TUI path. Mounted keyed-by-requestId, so state
-  // starts fresh per request — no cross-request reset needed here.
+  // transcript identically to the TUI path. The parent can seed/observe a local draft
+  // so switching chats does not discard an unfinished form.
   interface Props {
     request: Extract<HostUiRequest, { kind: "qna" }>;
     onsubmit: (answers: QnaAnswer[]) => void;
     oncancel: () => void;
+    initialDraft?: QnaDraft;
+    onchange?: (draft: QnaDraft) => void;
   }
-  let { request, onsubmit, oncancel }: Props = $props();
+  let {
+    request,
+    onsubmit,
+    oncancel,
+    initialDraft,
+    onchange,
+  }: Props = $props();
 
   const questions = $derived(request.questions);
 
@@ -22,14 +43,26 @@
   // reactive proxies, so per-field mutation re-renders the active card. Seeded
   // once from the prop (the parent keys this component by requestId, so request
   // never changes under us) — untrack keeps that intentional read non-reactive.
-  let answers = $state(
-    untrack(() => request.questions).map(() => ({
-      selectedOptionIndices: [] as number[],
-      customText: "",
-    })),
+  let answers = $state<QnaDraftAnswer[]>(
+    untrack(() => {
+      const saved = initialDraft?.answers;
+      return request.questions.map((_, i) => ({
+        selectedOptionIndices: [...(saved?.[i]?.selectedOptionIndices ?? [])],
+        customText: saved?.[i]?.customText ?? "",
+        customSelected: saved?.[i]?.customSelected ?? false,
+      }));
+    }),
   );
-  let current = $state(0);
+  let current = $state(
+    untrack(() =>
+      Math.min(
+        Math.max(initialDraft?.current ?? 0, 0),
+        Math.max(request.questions.length - 1, 0),
+      ),
+    ),
+  );
   let root: HTMLDivElement | undefined = $state();
+  let customInput: HTMLInputElement | undefined = $state();
 
   // current is always kept in [0, total) and answers has one slot per question,
   // so these indexed reads are present — assert past noUncheckedIndexedAccess.
@@ -43,15 +76,39 @@
 
   function isAnswered(i: number): boolean {
     const ans = answers[i]!;
+    const question = questions[i]!;
+    const singleSelect =
+      Array.isArray(question.options) &&
+      question.options.length > 0 &&
+      !question.multiSelect;
     return (
-      ans.selectedOptionIndices.length > 0 || ans.customText.trim().length > 0
+      ans.selectedOptionIndices.length > 0 ||
+      ((!singleSelect || ans.customSelected) &&
+        ans.customText.trim().length > 0)
     );
   }
   const answeredCount = $derived(answers.filter((_, i) => isAnswered(i)).length);
 
+  function draftChanged(): void {
+    onchange?.({
+      current,
+      answers: answers.map((x) => ({
+        selectedOptionIndices: [...x.selectedOptionIndices],
+        customText: x.customText,
+        customSelected: x.customSelected,
+      })),
+    });
+  }
+
   function pickSingle(j: number) {
-    // Single-select: one index, and a radio pick clears any typed escape.
-    answers[current] = { selectedOptionIndices: [j], customText: "" };
+    // Preserve the typed alternative as a draft when a preset wins. Submit sanitizes
+    // the inactive text so the extension still receives exactly one single-select answer.
+    answers[current] = {
+      ...a,
+      selectedOptionIndices: [j],
+      customSelected: false,
+    };
+    draftChanged();
   }
   function toggleMulti(j: number) {
     const set = new Set(a.selectedOptionIndices);
@@ -61,33 +118,67 @@
       ...a,
       selectedOptionIndices: [...set].sort((x, y) => x - y),
     };
+    draftChanged();
+  }
+  function chooseCustom(focus = true) {
+    answers[current] = {
+      ...a,
+      selectedOptionIndices: [],
+      customSelected: true,
+    };
+    draftChanged();
+    if (focus) customInput?.focus();
   }
   function setCustom(text: string) {
-    // On a single-select card, typing the escape clears the radio pick so the
-    // two never disagree. Multi-select and free-text keep both.
+    // Typing activates the custom radio on single-select cards. Multi-select and
+    // free-text cards can carry custom text without an exclusive selection mode.
     if (hasOptions && !isMulti) {
-      answers[current] = { selectedOptionIndices: [], customText: text };
+      answers[current] = {
+        selectedOptionIndices: [],
+        customText: text,
+        customSelected: true,
+      };
     } else {
       answers[current] = { ...a, customText: text };
     }
+    draftChanged();
   }
 
   function next() {
-    if (current < total - 1) current += 1;
+    if (current < total - 1) {
+      current += 1;
+      draftChanged();
+    }
   }
   function prev() {
-    if (current > 0) current -= 1;
+    if (current > 0) {
+      current -= 1;
+      draftChanged();
+    }
   }
   function goto(i: number) {
     current = i;
+    draftChanged();
   }
   function submit() {
     // Hand back plain data (not the $state proxy) for clean WS serialization.
     onsubmit(
-      answers.map((x) => ({
-        selectedOptionIndices: [...x.selectedOptionIndices],
-        customText: x.customText,
-      })),
+      answers.map((x, i) => {
+        const question = questions[i]!;
+        const singleSelect =
+          Array.isArray(question.options) &&
+          question.options.length > 0 &&
+          !question.multiSelect;
+        return {
+          selectedOptionIndices: [...x.selectedOptionIndices],
+          customText:
+            singleSelect &&
+            x.selectedOptionIndices.length > 0 &&
+            !x.customSelected
+              ? ""
+              : x.customText,
+        };
+      }),
     );
   }
 
@@ -173,14 +264,40 @@
             </span>
           </button>
         {/each}
+        {#if !isMulti}
+          <div class="custom">
+            <button
+              type="button"
+              class="custom-radio"
+              class:sel={a.customSelected}
+              role="radio"
+              aria-checked={a.customSelected}
+              aria-label="Something else"
+              title="Choose a free-text answer"
+              onclick={() => chooseCustom()}
+            >
+              {a.customSelected ? "◉" : "○"}
+            </button>
+            <input
+              class="field"
+              bind:this={customInput}
+              placeholder="Something else…"
+              value={a.customText}
+              onfocus={() => chooseCustom(false)}
+              oninput={(e) => setCustom(e.currentTarget.value)}
+              title="Choose “Something else” and type a free-text answer"
+            />
+          </div>
+        {:else}
+          <input
+            class="field"
+            placeholder="Something else…"
+            value={a.customText}
+            oninput={(e) => setCustom(e.currentTarget.value)}
+            title="Add a free-text answer alongside the selected options"
+          />
+        {/if}
       </div>
-      <input
-        class="field"
-        placeholder="Something else…"
-        value={a.customText}
-        oninput={(e) => setCustom(e.currentTarget.value)}
-        title="Type a free-text answer instead of the options"
-      />
     {:else}
       <textarea
         class="field area"
@@ -288,7 +405,6 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    margin-bottom: 10px;
   }
   .opt {
     display: flex;
@@ -312,6 +428,26 @@
     line-height: 1.4;
     color: var(--accent);
     flex: 0 0 auto;
+  }
+  .custom {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .custom-radio {
+    flex: 0 0 auto;
+    width: 42px;
+    align-self: stretch;
+    color: var(--accent);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    font-size: 15px;
+    cursor: pointer;
+  }
+  .custom-radio.sel {
+    border-color: var(--accent);
+    background: var(--accent-soft);
   }
   .lbl {
     display: flex;

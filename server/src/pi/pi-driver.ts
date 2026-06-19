@@ -456,6 +456,17 @@ export async function createPiDriver(
         toolMeta: (name) => toolMetaFor(ws, name),
       },
     ),
+    // Dialogs are live bridge state, not persisted transcript history. Replay any
+    // unresolved request after the history seed so refocusing a chat restores the
+    // answer popup instead of leaving its extension blocked invisibly.
+    ...ws.bridge.pendingRequests().map(
+      (request): SessionDriverEvent => ({
+        sessionRef: ws.ref,
+        timestamp: now(),
+        type: "hostUiRequest",
+        request,
+      }),
+    ),
   ];
 
   // Warm up a brand-new session from a SessionManager: create cwd-bound services (with

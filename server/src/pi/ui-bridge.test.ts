@@ -73,6 +73,16 @@ describe("PiUiBridge", () => {
     expect(await p).toBe(true);
   });
 
+  test("pending blocking requests can be replayed until they settle", async () => {
+    const { bridge, firstRequest } = setup();
+    const p = bridge.input("Name");
+    const req = firstRequest();
+    expect(bridge.pendingRequests()).toEqual([req]);
+    bridge.resolve({ requestId: req.requestId, value: "pilot" });
+    expect(await p).toBe("pilot");
+    expect(bridge.pendingRequests()).toEqual([]);
+  });
+
   test("notify and setStatus emit fire-and-forget requests", () => {
     const { events, bridge } = setup();
     bridge.notify("hello", "warning");

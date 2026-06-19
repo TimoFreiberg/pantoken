@@ -2,17 +2,19 @@
 // session so the whole UI pipeline can be built and screenshot-verified without a
 // live model or API keys.
 
-import type {
-  CommandInfo,
-  FileInfo,
-  HostUiResponse,
-  ModelDefaults,
-  ModelOption,
-  ProviderInfo,
-  SessionConfig,
-  SessionDriverEvent,
-  SessionListEntry,
-  SessionUsage,
+import {
+  isDialogRequest,
+  type CommandInfo,
+  type FileInfo,
+  type HostUiRequest,
+  type HostUiResponse,
+  type ModelDefaults,
+  type ModelOption,
+  type ProviderInfo,
+  type SessionConfig,
+  type SessionDriverEvent,
+  type SessionListEntry,
+  type SessionUsage,
 } from "@pilot/protocol";
 import type {
   NewSessionOpts,
@@ -83,7 +85,10 @@ export class MockDriver implements PilotDriver {
     timer: ReturnType<typeof setTimeout>;
     step: ScriptStep;
   }> = [];
-  private pendingDialogs = new Set<string>();
+  private pendingDialogs = new Map<
+    string,
+    { request: HostUiRequest; sessionRef: SessionDriverEvent["sessionRef"] }
+  >();
   // Tool callIds that have started but not yet finished. Tracked so abort() can settle
   // them (emit a toolFinished), mirroring real pi's tool_execution_end on abort —
   // otherwise an aborted turn leaves a tool card "running" forever.
@@ -211,11 +216,12 @@ export class MockDriver implements PilotDriver {
     this.emit(step.event);
     if (
       step.event.type === "hostUiRequest" &&
-      "timeoutMs" in step.event.request
-    ) {
-      // remember dialogs so respondUi / abort can settle them
-      this.pendingDialogs.add(step.event.request.requestId);
-    }
+      isDialogRequest(step.event.request)
+    )
+      this.pendingDialogs.set(step.event.request.requestId, {
+        request: step.event.request,
+        sessionRef: step.event.sessionRef,
+      });
   }
 
   /** Fire every still-pending step immediately, in order, cancelling its timer.
@@ -294,9 +300,10 @@ export class MockDriver implements PilotDriver {
   }
 
   respondUi(response: HostUiResponse): void {
+    const pending = this.pendingDialogs.get(response.requestId);
     this.pendingDialogs.delete(response.requestId);
     this.emit({
-      sessionRef: SESSION_REF,
+      sessionRef: pending?.sessionRef ?? SESSION_REF,
       timestamp: String(Date.now()),
       type: "hostUiResolved",
       requestId: response.requestId,
@@ -312,7 +319,7 @@ export class MockDriver implements PilotDriver {
             ? `Recorded ${response.answers.length} answer${response.answers.length === 1 ? "" : "s"}.`
             : `Received: ${response.value}`;
     this.emit({
-      sessionRef: SESSION_REF,
+      sessionRef: pending?.sessionRef ?? SESSION_REF,
       timestamp: String(Date.now()),
       type: "hostUiRequest",
       request: {
@@ -393,8 +400,19 @@ export class MockDriver implements PilotDriver {
   }
 
   async openSession(path: string): Promise<SessionDriverEvent[]> {
-    this.cancelTimers(); // a switch ends any in-flight stream
-    return mockSessionSeed(path);
+    const seed = mockSessionSeed(path);
+    const sessionId = seed[0]?.sessionRef.sessionId;
+    const pending = [...this.pendingDialogs.values()]
+      .filter((p) => p.sessionRef.sessionId === sessionId)
+      .map(
+        (p): SessionDriverEvent => ({
+          sessionRef: p.sessionRef,
+          timestamp: String(Date.now()),
+          type: "hostUiRequest",
+          request: p.request,
+        }),
+      );
+    return [...seed, ...pending];
   }
 
   async newSession(opts: NewSessionOpts = {}): Promise<SessionDriverEvent[]> {

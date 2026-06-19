@@ -2,13 +2,31 @@
   import { isDialogRequest } from "@pilot/protocol";
   import { store } from "../lib/store.svelte.js";
   import Button from "./ui/Button.svelte";
-  import QnaForm from "./QnaForm.svelte";
+  import QnaForm, { type QnaDraft } from "./QnaForm.svelte";
 
   // Show one dialog at a time — the oldest pending. Resolving it reveals the next.
   const current = $derived(store.session.pendingApprovals[0] ?? null);
 
   let inputValue = $state("");
   let selectedOption = $state<string | null>(null);
+  // Q&A answers are local drafts until Submit. Keep them keyed by session/request so
+  // focusing another chat can unmount this form without throwing away typed answers.
+  // The real request ids are unique; including the session also keeps deterministic
+  // mock ids from colliding across chats.
+  const qnaDrafts = new Map<string, QnaDraft>();
+
+  function qnaKey(requestId: string): string {
+    return `${store.session.ref?.sessionId ?? "unknown"}:${requestId}`;
+  }
+  function rememberQna(key: string, draft: QnaDraft): void {
+    qnaDrafts.set(key, draft);
+    // Pending forms are few, but bound stale drafts if another client resolves one
+    // while this chat is in the background.
+    if (qnaDrafts.size > 20) {
+      const oldest = qnaDrafts.keys().next().value;
+      if (oldest) qnaDrafts.delete(oldest);
+    }
+  }
 
   // reset local field state whenever the active dialog changes
   $effect(() => {
@@ -22,7 +40,9 @@
   });
 
   function cancel() {
-    if (current) store.respondUi({ requestId: current.requestId, cancelled: true });
+    if (!current) return;
+    if (current.kind === "qna") qnaDrafts.delete(qnaKey(current.requestId));
+    store.respondUi({ requestId: current.requestId, cancelled: true });
   }
   // The qna form holds in-progress answers — a stray backdrop tap shouldn't
   // discard them. Every other dialog is cheap to reopen, so a tap dismisses.
@@ -119,7 +139,7 @@
 
 {#if current}
   <div class="scrim" onclick={scrimClick} role="presentation"></div>
-  <div class="sheet" class:wide={current.kind === "qna"} role="dialog" aria-modal="true">
+  <div class="sheet" class:wide={current.kind === "qna"} role="dialog">
     <div class="grip"></div>
 
     {#if current.kind === "confirm"}
@@ -161,10 +181,16 @@
         <Button variant="primary" size="lg" block title="Save your edits" onclick={() => submitValue(inputValue)}>Save</Button>
       </div>
     {:else if current.kind === "qna"}
+      {@const draftKey = qnaKey(current.requestId)}
       {#key current.requestId}
         <QnaForm
           request={current}
-          onsubmit={(answers) => store.respondUi({ requestId: current.requestId, answers })}
+          initialDraft={qnaDrafts.get(draftKey)}
+          onchange={(draft) => rememberQna(draftKey, draft)}
+          onsubmit={(answers) => {
+            qnaDrafts.delete(draftKey);
+            store.respondUi({ requestId: current.requestId, answers });
+          }}
           oncancel={cancel}
         />
       {/key}
@@ -192,14 +218,14 @@
 
 <style>
   .scrim {
-    position: fixed;
+    position: absolute;
     inset: 0;
     background: rgba(20, 19, 18, 0.32);
     z-index: 40;
     animation: fade 0.15s ease;
   }
   .sheet {
-    position: fixed;
+    position: absolute;
     z-index: 41;
     left: 50%;
     bottom: 0;
