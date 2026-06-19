@@ -64,8 +64,29 @@ test("input dialog submits a value", async ({ page }) => {
   await expect(page.getByText("Received: My commit")).toBeVisible();
 });
 
-test("ambient: status strip and a todo widget appear", async ({ page }) => {
+test("ambient: status strip + a collapsed tasklist pill that expands", async ({
+  page,
+}) => {
   await drive(page, "ambient");
   await expect(page.getByText("on main · 2 files changed")).toBeVisible();
-  await expect(page.getByText("add /health")).toBeVisible();
+
+  // The tasklist starts collapsed to a pill — count shown, tasks hidden.
+  // (Accessible name comes from the visible "3 tasks" text, not the title attr.)
+  const pill = page.getByRole("button", { name: /3 tasks/ });
+  const task = page.getByText("add a smoke test");
+  await expect(pill).toBeVisible();
+  await expect(task).toBeHidden();
+
+  // Hover peeks the list open, revealing the tasks…
+  await pill.hover();
+  await expect(task).toBeVisible();
+  await expect(page.getByText("wire up /health route")).toBeVisible();
+  // …and moving the pointer away collapses it again (peek, not pinned).
+  await page.mouse.move(0, 0);
+  await expect(task).toBeHidden();
+
+  // Clicking pins it open so it survives the pointer leaving (touch/keyboard path).
+  await pill.click();
+  await page.mouse.move(0, 0);
+  await expect(task).toBeVisible();
 });

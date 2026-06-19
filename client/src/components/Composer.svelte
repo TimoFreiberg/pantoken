@@ -10,6 +10,8 @@
   import ContextMeter from "./ContextMeter.svelte";
   import SegmentedControl from "./ui/SegmentedControl.svelte";
   import IconButton from "./ui/IconButton.svelte";
+  import TaskList from "./TaskList.svelte";
+  import { parseTasklist } from "../lib/tasklist.js";
 
   let deliverAs = $state<"steer" | "followUp">("steer");
   // Delivery-mode options for the steer/follow-up switch. Typed so the SegmentedControl
@@ -36,8 +38,17 @@
   const MAX_IMAGES = 10;
   const imageCount = $derived(images.length);
 
+  // Ambient widgets above the composer. The "tasklist" widget gets a collapsed
+  // pill (parsed from its lines) that expands on hover/click; everything else
+  // renders as the raw monospace box. A tasklist whose lines don't parse (format
+  // drift / empty) falls back to the box too — never an empty pill.
   const widgets = $derived(
-    Object.values(store.session.ambient.widgets).filter((w) => w.placement === "aboveComposer"),
+    Object.values(store.session.ambient.widgets)
+      .filter((w) => w.placement === "aboveComposer")
+      .map((w) => ({
+        w,
+        tasks: w.key === "tasklist" ? parseTasklist(w.lines) : null,
+      })),
   );
   // "A turn is in flight" — the robust signal (see store.turnActive), so the stop pill +
   // steer/queue affordances stay correct even if the folded status glitches mid-turn.
@@ -397,10 +408,14 @@
 
 <div class="composer-wrap">
   <div class="col">
-    {#each widgets as w (w.key)}
-      <div class="widget">
-        {#each w.lines as line, i (i)}<div class="wline">{line}</div>{/each}
-      </div>
+    {#each widgets as { w, tasks } (w.key)}
+      {#if tasks}
+        <TaskList {tasks} />
+      {:else}
+        <div class="widget">
+          {#each w.lines as line, i (i)}<div class="wline">{line}</div>{/each}
+        </div>
+      {/if}
     {/each}
 
     {#if streaming}
