@@ -38,6 +38,9 @@ export interface HistoryMessage {
   readonly toolCallId?: string;
   readonly toolName?: string;
   readonly isError?: boolean;
+  // custom (extension-injected sendMessage)
+  readonly customType?: string;
+  readonly display?: boolean;
   // bashExecution
   readonly command?: string;
   readonly output?: string;
@@ -163,6 +166,22 @@ export function historyToEvents(
         });
         break;
 
+      case "custom":
+        // An extension-injected custom message (pi's sendMessage). Surface it as a
+        // turn boundary so a reloaded transcript splits the run it triggered exactly
+        // as the live path does — otherwise the prior turn's final response collapses
+        // into the nudge run's work block. `display:false` still splits but renders
+        // nothing (the robustness net).
+        out.push({
+          ...meta(m.timestamp),
+          type: "customMessage",
+          id: `inject-${seq}`,
+          customType: m.customType ?? "",
+          text: contentToText(m.content),
+          display: m.display !== false,
+        });
+        break;
+
       case "bashExecution":
         // The `!`-bash affordance result — surface as a notice (no tool card pairing).
         out.push({
@@ -191,7 +210,7 @@ export function historyToEvents(
         });
         break;
 
-      // custom / unknown roles carry no transcript-renderable content here — skip.
+      // unknown roles carry no transcript-renderable content here — skip.
       default:
         break;
     }

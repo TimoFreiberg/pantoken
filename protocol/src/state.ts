@@ -63,7 +63,25 @@ export interface NoticeItem {
   level: "info" | "warning" | "error";
   text: string;
 }
-export type TranscriptItem = UserItem | AssistantItem | ToolItem | NoticeItem;
+/** An extension-injected custom message (pi's `sendMessage`). Folded from a
+ *  `customMessage` event. Acts as a turn boundary (see transcript-view.groupTurns):
+ *  the run it triggered gets its own turn instead of gluing onto the prior one.
+ *  `display:false` items render nothing but still split the turn. */
+export interface InjectItem {
+  readonly kind: "inject";
+  id: string;
+  customType: string;
+  text: string;
+  display: boolean;
+  /** ISO timestamp (or epoch-ms string) of when the message was injected. */
+  ts?: string;
+}
+export type TranscriptItem =
+  | UserItem
+  | AssistantItem
+  | ToolItem
+  | NoticeItem
+  | InjectItem;
 
 export interface AmbientWidget {
   key: string;
@@ -189,6 +207,23 @@ export function foldEvent(
         id: ev.id,
         text: ev.text,
         images: ev.images,
+        ts: ev.timestamp,
+      });
+      return state;
+    }
+
+    case "customMessage": {
+      // An injected custom message closes any open assistant bubble (same as a user
+      // message / tool start) and lands as its own item so groupTurns can split the
+      // turn here. No completedAt: the prior runCompleted already stamped the real
+      // turn-final assistant; this is just the boundary marker.
+      closeOpenAssistant(state.items);
+      state.items.push({
+        kind: "inject",
+        id: ev.id,
+        customType: ev.customType,
+        text: ev.text,
+        display: ev.display,
         ts: ev.timestamp,
       });
       return state;

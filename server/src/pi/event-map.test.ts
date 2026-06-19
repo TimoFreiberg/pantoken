@@ -60,6 +60,80 @@ describe("mapPiEvent", () => {
     });
   });
 
+  test("message_start(custom) -> customMessage (turn boundary), content flattened", () => {
+    const out = mapPiEvent(
+      pi({
+        type: "message_start",
+        message: {
+          role: "custom",
+          customType: "journal-nudge",
+          content: [
+            { type: "text", text: "<journal-nudge>go</journal-nudge>" },
+          ],
+          display: true,
+          timestamp: 123,
+        },
+      }),
+      ctx,
+    );
+    expect(out).toEqual([
+      {
+        sessionRef: ref,
+        timestamp: "t",
+        type: "customMessage",
+        id: "inject-t",
+        customType: "journal-nudge",
+        text: "<journal-nudge>go</journal-nudge>",
+        display: true,
+      },
+    ]);
+  });
+
+  test("message_start(custom) defaults display to true when omitted", () => {
+    const out = mapPiEvent(
+      pi({
+        type: "message_start",
+        message: { role: "custom", customType: "x", content: "hi" },
+      }),
+      ctx,
+    );
+    expect(out[0]).toMatchObject({ type: "customMessage", display: true });
+  });
+
+  test("message_start(custom) honors display:false (split-only marker)", () => {
+    const out = mapPiEvent(
+      pi({
+        type: "message_start",
+        message: {
+          role: "custom",
+          customType: "x",
+          content: "hi",
+          display: false,
+        },
+      }),
+      ctx,
+    );
+    expect(out[0]).toMatchObject({ type: "customMessage", display: false });
+  });
+
+  test("message_start for non-custom roles is ignored", () => {
+    expect(
+      mapPiEvent(
+        pi({ type: "message_start", message: { role: "user", content: "hi" } }),
+        ctx,
+      ),
+    ).toEqual([]);
+    expect(
+      mapPiEvent(
+        pi({
+          type: "message_start",
+          message: { role: "assistant", content: [] },
+        }),
+        ctx,
+      ),
+    ).toEqual([]);
+  });
+
   test("tool_execution_start -> toolStarted with resolved description", () => {
     const out = mapPiEvent(
       pi({

@@ -1098,8 +1098,118 @@ export function initializingSession(): ScriptStep[] {
   ];
 }
 
+/** Reproduces the journal-nudge interaction (the auto-collapse bug). A normal turn
+ *  (prompt → work → final response → runCompleted) is followed by an extension-injected
+ *  custom message (`customMessage`, display:true) that triggers a SECOND run: the
+ *  journal call + a short reply. Without the turn-boundary split this would collapse
+ *  the first turn's real final response into the nudge run's "work" block. With the
+ *  fix, turn 1 keeps its response visible and the nudge heads its own collapsible turn
+ *  (a tiny expandable pill). Drives the dev-bar `journalnudge` button + e2e. */
+export function journalNudge(): ScriptStep[] {
+  const steps: ScriptStep[] = [
+    {
+      wait: 0,
+      event: {
+        ...base(),
+        type: "userMessage",
+        id: "u-jn-1",
+        text: "Rename the helper and update its callers.",
+      },
+    },
+  ];
+  advanceTs(12_000);
+  steps.push(
+    ...deltas(
+      "I'll rename it and fix the call sites. Let me find them first.",
+      "text",
+    ),
+    ...toolSpan(
+      {
+        callId: "jn-t1",
+        toolName: "bash",
+        label: "Run shell command",
+        description: "Execute a command in the workspace shell",
+        input: { command: 'rg -n "oldHelper" src' },
+      },
+      {
+        callId: "jn-t1",
+        success: true,
+        output: "src/a.ts:4:  oldHelper()\nsrc/b.ts:9:  oldHelper()",
+      },
+      { startWait: 100, wait: 200, durationMs: 380 },
+    ),
+    // The REAL turn-final response. This is the paragraph that used to get swallowed.
+    ...deltas(
+      "Done — renamed `oldHelper` to `resolveHelper` and updated both call sites in `a.ts` and `b.ts`.",
+      "text",
+    ),
+    {
+      wait: 60,
+      event: {
+        ...base(),
+        type: "runCompleted",
+        snapshot: snapshot({ status: "idle" }),
+      },
+    },
+  );
+  // The extension fires on agent_end and injects a nudge, triggering a fresh run.
+  advanceTs(400);
+  steps.push(
+    {
+      wait: 120,
+      event: {
+        ...base(),
+        type: "sessionUpdated",
+        snapshot: snapshot({ status: "running" }),
+      },
+    },
+    {
+      wait: 0,
+      event: {
+        ...base(),
+        type: "customMessage",
+        id: "inject-jn-1",
+        customType: "journal-nudge",
+        text:
+          "<journal-nudge>this turn did work and didn't journal. if a fork or " +
+          "correction formed that's generally applicable AND isn't already in your " +
+          "skills/AGENTS.md, call the journal skill now.</journal-nudge>",
+        display: true,
+      },
+    },
+  );
+  advanceTs(2_000);
+  steps.push(
+    ...toolSpan(
+      {
+        callId: "jn-t2",
+        toolName: "bash",
+        label: "Run shell command",
+        description: "Execute a command in the workspace shell",
+        input: {
+          command:
+            './skills/journal/scripts/journal observation "prefer X over Y"',
+        },
+      },
+      { callId: "jn-t2", success: true, output: "journal entry staged" },
+      { startWait: 120, wait: 220, durationMs: 520 },
+    ),
+    ...deltas("Journaled a note about the helper-naming convention.", "text"),
+    {
+      wait: 60,
+      event: {
+        ...base(),
+        type: "runCompleted",
+        snapshot: snapshot({ status: "idle" }),
+      },
+    },
+  );
+  return steps;
+}
+
 export const SCRIPTS: Record<string, () => ScriptStep[]> = {
   greeting,
+  journalnudge: journalNudge,
   confirm: confirmDialog,
   input: inputDialog,
   qna: qnaDialog,

@@ -43,6 +43,41 @@ describe("historyToEvents", () => {
     ]);
   });
 
+  test("a custom message becomes an inject item (turn boundary on reload)", () => {
+    const items = transcript([
+      { role: "user", content: "do it" },
+      { role: "assistant", content: [{ type: "text", text: "done" }] },
+      {
+        role: "custom",
+        customType: "journal-nudge",
+        content: "<journal-nudge>journal?</journal-nudge>",
+        display: true,
+        timestamp: 1_700_000_000_000,
+      },
+      { role: "assistant", content: [{ type: "text", text: "journaled" }] },
+    ]);
+    expect(items.map((i) => i.kind)).toEqual([
+      "user",
+      "assistant",
+      "inject",
+      "assistant",
+    ]);
+    expect(items[2]).toMatchObject({
+      kind: "inject",
+      customType: "journal-nudge",
+      text: "<journal-nudge>journal?</journal-nudge>",
+      display: true,
+      ts: "1700000000000",
+    });
+  });
+
+  test("a display:false custom message still maps (split-only, no render)", () => {
+    const items = transcript([
+      { role: "custom", customType: "ctx", content: "hidden", display: false },
+    ]);
+    expect(items[0]).toMatchObject({ kind: "inject", display: false });
+  });
+
   test("a stored per-message timestamp surfaces as the item's ts", () => {
     // Regression: reloaded transcripts must show pi's real wall-clock times, not the
     // synthetic `h-N` ordering markers (which render as a blank <time> in the UI).
@@ -186,16 +221,14 @@ describe("historyToEvents", () => {
       },
     ]);
     expect(
-      items.find(
-        (i) => i.kind === "tool" && i.id === "dangling-answer",
-      ),
+      items.find((i) => i.kind === "tool" && i.id === "dangling-answer"),
     ).toMatchObject({
       status: "interrupted",
       finishedAt: expect.any(String),
     });
-    expect(
-      items.some((i) => i.kind === "tool" && i.status === "running"),
-    ).toBe(false);
+    expect(items.some((i) => i.kind === "tool" && i.status === "running")).toBe(
+      false,
+    );
   });
 
   test("an errored assistant turn yields an inline error notice", () => {
