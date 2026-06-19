@@ -32,6 +32,7 @@ import {
   initializingSession,
   inputDialog,
   markdownShowcase,
+  qnaDialog,
   staleIdle,
   MOCK_COMMANDS,
   MOCK_FILES,
@@ -307,7 +308,9 @@ export class MockDriver implements PilotDriver {
           ? response.confirmed
             ? "Approved — continuing."
             : "Denied — skipping that step."
-          : `Received: ${response.value}`;
+          : "answers" in response
+            ? `Recorded ${response.answers.length} answer${response.answers.length === 1 ? "" : "s"}.`
+            : `Received: ${response.value}`;
     this.emit({
       sessionRef: SESSION_REF,
       timestamp: String(Date.now()),
@@ -554,6 +557,7 @@ export class MockDriver implements PilotDriver {
     const map: Record<string, () => ScriptStep[]> = {
       confirm: confirmDialog,
       input: inputDialog,
+      qna: qnaDialog,
       ambient,
       compat,
       bgrun: bgRun,

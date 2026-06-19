@@ -656,6 +656,50 @@ export function inputDialog(): ScriptStep[] {
   ];
 }
 
+// A purpose-built Q&A form (the answer extension's remote face): a single-select
+// card, a multi-select card, and a free-text card — enough to exercise every
+// render mode plus the prev/next navigation.
+export function qnaDialog(): ScriptStep[] {
+  return [
+    {
+      wait: 0,
+      event: {
+        ...base(),
+        type: "hostUiRequest",
+        request: {
+          kind: "qna",
+          requestId: "req-qna-1",
+          title: "A few questions before I proceed",
+          questions: [
+            {
+              question: "Which package manager should I use?",
+              context: "The repo has both a bun.lock and a package-lock.json.",
+              options: [
+                { label: "bun", description: "Matches bun.lock (recommended)" },
+                { label: "npm", description: "Matches package-lock.json" },
+                { label: "pnpm" },
+              ],
+            },
+            {
+              question: "Which checks should run before each commit?",
+              multiSelect: true,
+              options: [
+                { label: "Typecheck" },
+                { label: "Unit tests" },
+                { label: "Lint" },
+                { label: "e2e" },
+              ],
+            },
+            {
+              question: "Anything else I should know before starting?",
+            },
+          ],
+        },
+      },
+    },
+  ];
+}
+
 // --- Ambient (fire-and-forget) UI -------------------------------------------
 
 export function ambient(): ScriptStep[] {
@@ -1006,6 +1050,7 @@ export const SCRIPTS: Record<string, () => ScriptStep[]> = {
   greeting,
   confirm: confirmDialog,
   input: inputDialog,
+  qna: qnaDialog,
   ambient,
   compat,
   error: errorRun,

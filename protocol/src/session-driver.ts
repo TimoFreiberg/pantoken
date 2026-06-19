@@ -236,9 +236,41 @@ export interface SessionListEntry {
 
 // --- Host UI (extension interaction) ---
 
+/** One selectable choice in a `qna` question. Mirrors the answer extension's
+ *  QuestionOption so the whole form can ride across the bridge structurally. */
+export interface QnaQuestionOption {
+  readonly label: string;
+  readonly description?: string;
+}
+
+/** One question in a `qna` form. `options` is the discriminator: absent → a
+ *  free-text card; present → a choice card (checkboxes when `multiSelect`,
+ *  radios otherwise). Every choice card also offers a free-text "something
+ *  else" escape that lands in {@link QnaAnswer.customText}. */
+export interface QnaQuestion {
+  readonly question: string;
+  readonly context?: string;
+  readonly options?: readonly QnaQuestionOption[];
+  readonly multiSelect?: boolean;
+}
+
+/** The answer captured per question. Kept structured (indices + free text)
+ *  rather than a pre-formatted string so the extension's `formatQnA` can render
+ *  the picked labels and the typed escape exactly as the TUI widget does.
+ *  Shapes match the answer extension's `QnAAnswer` — the contract is duck-typed
+ *  across the `ctx.ui.qna(...)` seam, not a shared import. */
+export interface QnaAnswer {
+  /** Indices into the question's `options` the user selected (choice cards). */
+  readonly selectedOptionIndices: readonly number[];
+  /** Free text the user typed: the whole answer for free-text cards, or the
+   *  "something else" escape for choice cards. Empty when unused. */
+  readonly customText: string;
+}
+
 export type HostUiResponse =
   | { readonly requestId: string; readonly value: string }
   | { readonly requestId: string; readonly confirmed: boolean }
+  | { readonly requestId: string; readonly answers: readonly QnaAnswer[] }
   | { readonly requestId: string; readonly cancelled: true };
 
 export type HostUiRequest =
@@ -273,6 +305,14 @@ export type HostUiRequest =
       readonly title: string;
       readonly initialValue?: string;
     }
+  | {
+      readonly kind: "qna";
+      readonly requestId: string;
+      /** Optional heading for the whole form (e.g. "A few questions"). */
+      readonly title?: string;
+      readonly questions: readonly QnaQuestion[];
+      readonly timeoutMs?: number;
+    }
   // FIRE-AND-FORGET — ambient UI, no response
   | {
       readonly kind: "notify";
@@ -305,7 +345,12 @@ export type HostUiRequest =
     }
   | { readonly kind: "reset"; readonly requestId: string };
 
-export type HostUiDialogKind = "confirm" | "input" | "select" | "editor";
+export type HostUiDialogKind =
+  | "confirm"
+  | "input"
+  | "select"
+  | "editor"
+  | "qna";
 
 export function isDialogRequest(
   r: HostUiRequest,
@@ -314,7 +359,8 @@ export function isDialogRequest(
     r.kind === "confirm" ||
     r.kind === "input" ||
     r.kind === "select" ||
-    r.kind === "editor"
+    r.kind === "editor" ||
+    r.kind === "qna"
   );
 }
 

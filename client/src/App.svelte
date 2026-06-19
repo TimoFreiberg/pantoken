@@ -19,7 +19,7 @@
   // Dev affordance: ?dev shows buttons that drive the mock to any UI state, so the
   // screenshot harness can reach approval/ambient/error states deterministically.
   const dev = new URLSearchParams(location.search).has("dev");
-  const scripts = ["reply", "markdown", "search", "confirm", "trust", "input", "ambient", "compat", "bgrun", "initializing", "editdiff", "error", "idle", "streamhold", "staleidle", "timeout", "yesno"];
+  const scripts = ["reply", "markdown", "search", "confirm", "trust", "input", "qna", "ambient", "compat", "bgrun", "initializing", "editdiff", "error", "idle", "streamhold", "staleidle", "timeout", "yesno"];
 
   onMount(() => store.start());
 
@@ -34,7 +34,8 @@
     }
     if (pending > prevPending && pending > 0) {
       const top = store.session.pendingApprovals[0];
-      const title = top && "title" in top ? top.title : "Waiting on you";
+      // qna carries an optional title; fall back when it (or the kind) has none.
+      const title = (top && "title" in top && top.title) || "Waiting on you";
       notifyIfUnfocused("Approval needed", title);
     }
     prevStatus = status;
