@@ -140,7 +140,14 @@ const server = Bun.serve<WsData>({
     }
 
     if (url.pathname === "/health") {
-      return Response.json({ ok: true, clients: hub.clientCount() });
+      // `...activity()` adds { running, initializing, busy } — the desktop
+      // update-watcher polls `busy` to decide auto-apply vs defer (no token/debug
+      // gate here, so a loopback poller can read it without credentials).
+      return Response.json({
+        ok: true,
+        clients: hub.clientCount(),
+        ...hub.activity(),
+      });
     }
 
     // Web Push: VAPID key handout, (un)subscribe, and a manual test trigger. Gated
