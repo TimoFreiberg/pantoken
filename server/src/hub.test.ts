@@ -851,3 +851,75 @@ describe("SessionHub", () => {
     expect(calls).toEqual(["s", "s2"]);
   });
 });
+
+describe("desktop update relay", () => {
+  const lastUpdate = (c: ReturnType<typeof client>) =>
+    [...c.received].reverse().find((m) => m.type === "updateStatus") as
+      | Extract<ServerMessage, { type: "updateStatus" }>
+      | undefined;
+
+  test("reportUpdate broadcasts availability to clients", () => {
+    const hub = new SessionHub(new FakeDriver());
+    const a = client();
+    hub.addClient(a.send);
+    // Connect sends a baseline updateStatus (nothing staged).
+    expect(lastUpdate(a)).toMatchObject({ available: false, applying: false });
+
+    hub.reportUpdate("abc123");
+    expect(lastUpdate(a)).toMatchObject({
+      available: true,
+      sha: "abc123",
+      applying: false,
+    });
+  });
+
+  test("a client connecting after an update is staged sees the card immediately", () => {
+    const hub = new SessionHub(new FakeDriver());
+    hub.reportUpdate("def456");
+    const late = client();
+    hub.addClient(late.send);
+    expect(lastUpdate(late)).toMatchObject({ available: true, sha: "def456" });
+  });
+
+  test("applyUpdate flips applying + the watcher learns it on its next report", () => {
+    const hub = new SessionHub(new FakeDriver());
+    const a = client();
+    hub.addClient(a.send);
+    hub.reportUpdate("abc123");
+
+    hub.handleClient(a.send, { type: "applyUpdate" });
+    expect(lastUpdate(a)).toMatchObject({ available: true, applying: true });
+    // The watcher's next poll (any sha report) returns applying=true → it applies.
+    expect(hub.reportUpdate("abc123")).toEqual({ applying: true });
+  });
+
+  test("applyUpdate is a no-op when nothing is staged", () => {
+    const hub = new SessionHub(new FakeDriver());
+    const a = client();
+    hub.addClient(a.send);
+    hub.handleClient(a.send, { type: "applyUpdate" });
+    expect(lastUpdate(a)).toMatchObject({ available: false, applying: false });
+  });
+
+  test("reportUpdate(null) clears availability and any applying flag", () => {
+    const hub = new SessionHub(new FakeDriver());
+    const a = client();
+    hub.addClient(a.send);
+    hub.reportUpdate("abc123");
+    hub.handleClient(a.send, { type: "applyUpdate" });
+    expect(hub.reportUpdate(null)).toEqual({ applying: false });
+    expect(lastUpdate(a)).toMatchObject({ available: false, applying: false });
+  });
+
+  test("applyFailed un-sticks a stuck applying card (offer retry)", () => {
+    const hub = new SessionHub(new FakeDriver());
+    const a = client();
+    hub.addClient(a.send);
+    hub.reportUpdate("abc123");
+    hub.handleClient(a.send, { type: "applyUpdate" });
+    expect(lastUpdate(a)).toMatchObject({ applying: true });
+    // A failed apply reports back applyFailed → card returns to "update now".
+    expect(hub.reportUpdate("abc123", true)).toEqual({ applying: false });
+    expect(lastUpdate(a)).toMatchObject({ available: true, applying: false });
+  });
+});

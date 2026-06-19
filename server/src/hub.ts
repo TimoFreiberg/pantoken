@@ -63,6 +63,12 @@ export class SessionHub {
   // nulled when idle. (getContextUsage / listSessions are O(messages|files) — fine once
   // a second, never on the per-delta path.)
   private liveTimer: ReturnType<typeof setInterval> | null = null;
+  // Desktop auto-update (driven by scripts/desktop/update-watcher.ts via /update/state).
+  // `updateSha` is the origin/main commit the watcher staged but deferred because a client
+  // is connected; null = up to date. `applying` flips true when a client clicks the
+  // sidebar card's "update now" — the watcher reads it back on its next poll and applies.
+  private updateSha: string | null = null;
+  private applying = false;
 
   constructor(
     private driver: PilotDriver,
@@ -499,6 +505,14 @@ export class SessionHub {
       runningIds: [...this.running],
       initializingIds: [...this.initializing],
     });
+    // Current desktop-update state, so a connecting client immediately shows (or hides)
+    // the sidebar update card without waiting for the watcher's next poll.
+    send({
+      type: "updateStatus",
+      available: this.updateSha !== null,
+      sha: this.updateSha ?? undefined,
+      applying: this.applying,
+    });
     // Fire the session + model + provider lists asynchronously (driver disk/registry
     // reads); they arrive as follow-up messages, keeping hello+snapshot synchronous +
     // first.
@@ -635,6 +649,15 @@ export class SessionHub {
         // The driver dedups (first answer settles it); a stale/duplicate id no-ops.
         this.driver.respondTrust?.(msg.requestId, msg.choice);
         return;
+      case "applyUpdate":
+        // User clicked "update now". Flag it (the watcher reads it back on its next
+        // /update/state poll and applies) and reflect "applying" in the card. No-op if
+        // nothing is staged or an apply is already in flight.
+        if (this.updateSha !== null && !this.applying) {
+          this.applying = true;
+          this.broadcastUpdateStatus();
+        }
+        return;
       case "mock":
         this.driver.runScript?.(msg.script);
         return;
@@ -652,6 +675,8 @@ export class SessionHub {
     this.focusedId = null;
     this.running.clear();
     this.initializing.clear();
+    this.updateSha = null;
+    this.applying = false;
     this.driver.reset?.();
     this.broadcast({ type: "snapshot", state: this.snapshot() });
     this.broadcastSessionStatus();
@@ -678,5 +703,33 @@ export class SessionHub {
       initializing: this.initializing.size,
       busy: this.running.size + this.initializing.size > 0,
     };
+  }
+
+  /** Watcher → server: report the staged-update commit (or null when up to date), and
+   *  optionally that an attempted apply failed (resets a stuck "applying" so the card
+   *  offers retry). Broadcasts updateStatus on change. Returns `applying` so the watcher
+   *  learns on this same poll whether the user clicked "update now". */
+  reportUpdate(sha: string | null, applyFailed = false): { applying: boolean } {
+    let changed = false;
+    if (sha !== this.updateSha) {
+      this.updateSha = sha;
+      if (sha === null) this.applying = false; // applied/gone — drop any apply flag
+      changed = true;
+    }
+    if (applyFailed && this.applying) {
+      this.applying = false;
+      changed = true;
+    }
+    if (changed) this.broadcastUpdateStatus();
+    return { applying: this.applying };
+  }
+
+  private broadcastUpdateStatus(): void {
+    this.broadcast({
+      type: "updateStatus",
+      available: this.updateSha !== null,
+      sha: this.updateSha ?? undefined,
+      applying: this.applying,
+    });
   }
 }
