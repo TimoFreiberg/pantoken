@@ -4,13 +4,16 @@
 // Polls a *dedicated clone* (the one the desktop app runs from — NOT your dev tree)
 // for new commits on origin/main and keeps it current without stomping live work:
 //
-//   • host idle    → apply immediately (pull → install if the lock moved → build →
-//                     ask the server to restart). This is the "auto-update without
-//                     asking" path.
-//   • turn running → defer + emit an `update-deferred` event (the desktop shell turns
-//                     it into the sidebar update card) and, on macOS standalone, a
-//                     native notification. We re-check every tick, so the moment the
-//                     session goes idle the next tick applies it.
+//   • unattended & idle (no client connected, no turn running) → apply immediately
+//                     (pull → install if the lock moved → build → ask the server to
+//                     restart). Safe because there's no open UI to interrupt (not even
+//                     a half-typed prompt) and no background agent turn to abort.
+//   • anything else → defer. A connected client gets an `update-deferred` event (the
+//                     desktop shell renders it as a sidebar update card with an
+//                     "update now" button) + a native notification; a background turn
+//                     with no viewer waits silently until it finishes. Deferred updates
+//                     do NOT auto-apply on idle — they stay pending until the user
+//                     clicks the card (explicit-apply wiring lands with the card UI).
 //
 // This mirrors the Mac Mini's scripts/auto-deploy.sh fetch+compare core, minus the
 // blue-green/smoke/flip machinery — that exists only because the Mini is headless and
@@ -82,14 +85,22 @@ export function configFromEnv(
 
 export type Action = "apply" | "defer" | "noop";
 
-/** The whole policy in one place: up-to-date → noop; behind + idle → apply; behind +
- *  busy → defer (never interrupt a turn). Deferred updates apply on a later tick once
- *  the host goes idle (tick re-evaluates every interval) — that's the literal reading
- *  of "auto-update when no session is running". Flip the `busy` branch to "noop" if you
- *  ever want defer to require an explicit apply instead of auto-applying on idle. */
-export function decideAction(o: { behind: boolean; busy: boolean }): Action {
+/** The update policy in one place. `apply` only when it's safe to restart unattended:
+ *  no client connected (no open UI to interrupt — not even a half-typed prompt) AND no
+ *  turn in flight (don't abort a background agent run with nobody watching). Everything
+ *  else → `defer`: surface the update card to a connected client, otherwise just wait.
+ *  Deferred updates stay pending — they do NOT auto-apply when a turn goes idle; applying
+ *  while a client is connected is the card button's job. To get the literal "auto-apply
+ *  the moment nothing is running" instead, change the guard to `if (!o.busy) return
+ *  "apply"`. */
+export function decideAction(o: {
+  behind: boolean;
+  clientsConnected: boolean;
+  busy: boolean;
+}): Action {
   if (!o.behind) return "noop";
-  return o.busy ? "defer" : "apply";
+  if (!o.clientsConnected && !o.busy) return "apply";
+  return "defer";
 }
 
 /** Did `bun.lock` change across the pull? Drives whether we reinstall. Treats
@@ -111,6 +122,14 @@ export function isBusyFromHealth(body: unknown): boolean {
   const running = typeof b.running === "number" ? b.running : 0;
   const initializing = typeof b.initializing === "number" ? b.initializing : 0;
   return running + initializing > 0;
+}
+
+/** Is a client (the app / PWA) connected? Pilot's /health reports `clients`. A connected
+ *  viewer means "don't restart under them" — surface the card instead of auto-applying. */
+export function hasClientsFromHealth(body: unknown): boolean {
+  if (!body || typeof body !== "object") return false;
+  const c = (body as Record<string, unknown>).clients;
+  return typeof c === "number" && c > 0;
 }
 
 /** Notify (card + native) at most once per target sha, so a session that runs for an
@@ -200,20 +219,32 @@ async function fetchAndCompare(cfg: WatcherConfig): Promise<CompareResult> {
   return { local, remote, behind: local !== remote };
 }
 
-/** Poll /health for `busy`. Unreachable or non-OK → treat as idle: if the server isn't
- *  answering there's no live turn to protect, so applying (then restarting it) is safe.
- *  Logged so a persistently-down server is visible rather than silently "idle". */
-async function checkBusy(healthUrl: string): Promise<boolean> {
+interface HostState {
+  clientsConnected: boolean;
+  busy: boolean;
+}
+
+/** Read host state from /health. Unreachable or non-OK → {no clients, not busy}: if the
+ *  server isn't answering there's no UI to interrupt and no turn to protect, so the
+ *  unattended-&-idle auto-apply path is safe. Logged so a persistently-down server is
+ *  visible rather than silently treated as a green light. */
+async function readHostState(healthUrl: string): Promise<HostState> {
   try {
     const res = await fetch(healthUrl, { signal: AbortSignal.timeout(3000) });
     if (!res.ok) {
-      log(`/health returned ${res.status}; treating host as idle`);
-      return false;
+      log(`/health returned ${res.status}; treating host as unattended & idle`);
+      return { clientsConnected: false, busy: false };
     }
-    return isBusyFromHealth(await res.json());
+    const body = await res.json();
+    return {
+      clientsConnected: hasClientsFromHealth(body),
+      busy: isBusyFromHealth(body),
+    };
   } catch (e) {
-    log(`/health unreachable (${String(e)}); treating host as idle`);
-    return false;
+    log(
+      `/health unreachable (${String(e)}); treating host as unattended & idle`,
+    );
+    return { clientsConnected: false, busy: false };
   }
 }
 
@@ -345,13 +376,13 @@ export async function tick(
   const cmp = await fetchAndCompare(cfg);
   if (!cmp.behind) return initialState; // up to date — clear any pending defer
 
-  const busy = await checkBusy(cfg.healthUrl);
-  const action = decideAction({ behind: cmp.behind, busy });
+  const host = await readHostState(cfg.healthUrl);
+  const action = decideAction({ behind: cmp.behind, ...host });
   const short = (s: string) => s.slice(0, 7);
 
   if (action === "apply") {
     log(
-      `update ${short(cmp.local)} → ${short(cmp.remote)}; host idle — applying`,
+      `update ${short(cmp.local)} → ${short(cmp.remote)}; unattended & idle — applying`,
     );
     if (cfg.dryRun) {
       log("[dry-run] would pull/build/restart");
@@ -361,10 +392,18 @@ export async function tick(
     return initialState;
   }
 
-  // defer
-  if (shouldNotify(cmp.remote, state.lastNotifiedSha)) {
+  // defer: only surface the card when someone's connected to see it. A background turn
+  // with no viewer (no client + busy) waits silently; a later tick re-evaluates to
+  // "apply" once it finishes. Deferred updates never auto-apply while a client is
+  // connected — that's the card button's job (wiring lands with the card UI).
+  if (
+    host.clientsConnected &&
+    shouldNotify(cmp.remote, state.lastNotifiedSha)
+  ) {
     if (cfg.dryRun) {
-      log(`[dry-run] would defer + notify (${short(cmp.remote)})`);
+      log(
+        `[dry-run] would surface update card + notify (${short(cmp.remote)})`,
+      );
     } else {
       notifyDeferred(cfg, cmp);
     }
