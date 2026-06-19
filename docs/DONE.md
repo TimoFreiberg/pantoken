@@ -23,8 +23,9 @@ and its resolution note. Latest completions first.
 
 - [x] **Hide thinking blocks behind a toggle** _(shipped 2026-06-18)_
   _(done: a "Hide thinking blocks" switch in Settings → Appearance, default off, persisted
-  via `store.hideThinking`/`setHideThinking`. When on, `ThinkingBlock` collapses to a subtle
-  "thinking…" placeholder instead of rendering the content. `mock-driver` replays were
+  via `store.hideThinking`/`setHideThinking`. When on, `ThinkingBlock` collapses to a subtle,
+  non-expandable placeholder ("Thinking…" while streaming, "Thought process" once done)
+  instead of rendering the content. `mock-driver` replays were
   serialized so concurrent scripts don't interleave (fixed the flaky thinking-block e2e).)_
 
 - [x] **Workspace icon instead of text label in sidebar** _(shipped 2026-06-18)_
@@ -121,8 +122,9 @@ and its resolution note. Latest completions first.
   the filter + `e2e/slash.spec.ts`.)_
 
 - [x] **Live markdown rendering in prompt edit box** — preview formatting as you type, if straightforward
-  _(done: Edit/Preview toggle renders the draft via `renderMarkdown`; appears only
-  with a non-empty draft, Enter-to-send preserved.)_
+  _(done: Edit/Preview toggle rendered the draft via `<Markdown>`; appeared only
+  with a non-empty draft, Enter-to-send preserved. **Superseded 2026-06-19 — the toggle was
+  removed; see "Remove composer markdown preview/edit toggle" at the top of this file.**)_
 
 - [x] **Run-failed error card + retry** — `runFailed` currently has no first-class UI.
   Render a distinct error card (message + stack/cause if present) with a "Retry"

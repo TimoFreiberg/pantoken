@@ -9,7 +9,7 @@
   // reviewers — which is exactly where it matters, since an icon can't self-document).
   //
   // `active` drives a pressed/toggled look and sets `aria-pressed`, for the many single
-  // on/off chrome toggles (preview, expand, worktree, …). That's distinct from
+  // on/off chrome toggles (expand, worktree, …). That's distinct from
   // <SegmentedControl>, which is for picking one of several. `danger` is the destructive
   // tint (e.g. the dismiss-error ✕). Sizes mirror Button's sm/md/lg so an icon and a text
   // button sit level in the same row; md is the proven Sidebar `.icon` (26px).

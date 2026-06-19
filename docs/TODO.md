@@ -201,9 +201,9 @@ that pilot should NOT build — they're paseo's domain, not pilot's differentiat
       App, TokenGate, NewSession — see DONE). What's left are four recurring patterns that
       didn't fit the three, each used 3+ times, so each is a real future primitive — promote
       only once it recurs cleanly, don't pre-build:
-      (1) **single labeled toggle** — a 2-state pill with a changing label + `aria-pressed`
-      (Sidebar `.filter-toggle`; the Settings hide-thinking switch is the same shape). Not
-      IconButton (labeled), not SegmentedControl (single).
+      (1) **single labeled toggle** — a 2-state pill (Sidebar `.filter-toggle`, `aria-pressed`;
+      the Settings hide-thinking switch, `role="switch"`/`aria-checked` — a future primitive
+      would reconcile the two ARIA patterns). Not IconButton (labeled), not SegmentedControl (single).
       (2) **chip** — small labeled pill (Composer project / worktree chips).
       (3) **menu / dropdown family** — highest-leverage: trigger + menu items + backdrop
       (ModelPicker is entirely this; Sidebar's row menu is the same shape).

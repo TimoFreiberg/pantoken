@@ -73,4 +73,27 @@ test("tooltip survives a re-render of the element under a resting pointer", asyn
   // Still up, still correct — re-acquired onto the replacement node.
   await expect(tip).toBeVisible();
   await expect(tip).toHaveText("Collapse sidebar");
+
+  // Re-acquire must keep the strip/restore contract: the fresh node's native title
+  // is stripped while ours shows (no double tooltip)...
+  const fresh = page.getByRole("button", { name: "Collapse sidebar" });
+  await expect(fresh).not.toHaveAttribute("title", /.+/);
+  // ...and a genuine leave tears the tip down and restores the title. Use a synthetic
+  // mouseout (the node was inserted via JS, so the browser's real hover state for it is
+  // unreliable — a real page.mouse.move here is racy).
+  await page.evaluate(() => {
+    const el = document.querySelector(
+      '[aria-label="Collapse sidebar"]',
+    ) as HTMLElement;
+    el.dispatchEvent(
+      new MouseEvent("mouseout", {
+        bubbles: true,
+        clientX: 0,
+        clientY: 0,
+        relatedTarget: document.body,
+      }),
+    );
+  });
+  await expect(page.locator(".tip")).toHaveCount(0);
+  await expect(fresh).toHaveAttribute("title", "Collapse sidebar");
 });
