@@ -16,12 +16,23 @@ test("a streamed reply renders user text, a working block, and the final answer"
   await expect(
     page.getByText("That confirms it", { exact: false }),
   ).toBeVisible();
+  // Wait for the turn to actually settle before expanding: "That confirms it" is the
+  // reply's final text, but `runCompleted` lands ~80ms later. Until the turn ends it
+  // isn't collapsible, so `expandWork`'s "last toggle" would target the greeting's
+  // block instead (the greeting never goes running, so the indicator is the reply's).
+  await expect(page.getByTestId("working-indicator")).toHaveCount(0);
   // …and its narration + tool collapse into the "Worked for Ns" block — reveal them.
   await expandWork(page);
   await expect(
     page.getByText("Here's the plan", { exact: false }),
   ).toBeVisible();
-  const summary = page.locator(".tool.summary");
+  // Scope to THIS turn's work block: the greeting turn also renders a (collapsed) tool
+  // summary, so an unscoped `.tool.summary` could match both and trip strict mode.
+  const summary = page
+    .locator(".turn-work")
+    .last()
+    .getByTestId("work-body")
+    .locator(".tool.summary");
   await expect(summary.locator(":scope > .head .name")).toHaveText("1 tool");
   await expect(summary.locator(":scope > .head .arg")).toHaveText("read");
 });
