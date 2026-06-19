@@ -26,6 +26,12 @@ export interface MapCtx {
    *  must reflect reality, not assume idle — an idle snapshot mid-turn closes the
    *  streaming bubble and clears the running indicator. */
   liveStatus(): SessionStatus;
+  /** pi tree entry ids for the turn that just completed (this turn's user prompt + the
+   *  turn-final assistant message), read from the live session at agent_end — the first
+   *  moment they're persisted (the id can't ride the streaming deltas). Stamped onto
+   *  runCompleted so the reducer lights up the "branch from here" buttons on the live
+   *  transcript. Optional: mappers/tests without a live session omit it. */
+  turnEntryIds?(): { userEntryId?: string; assistantEntryId?: string };
 }
 
 function asText(v: unknown): string {
@@ -89,8 +95,18 @@ export function mapPiEvent(
           ];
         break; // last assistant turn was fine → normal completion
       }
+      // The turn's messages have persisted by agent_end, so their tree entry ids are
+      // now readable — carry them so the reducer can backfill the branch handles onto
+      // the live transcript (they couldn't ride the streaming deltas).
+      const ids = ctx.turnEntryIds?.() ?? {};
       return [
-        { ...meta, type: "runCompleted", snapshot: ctx.snapshot("idle") },
+        {
+          ...meta,
+          type: "runCompleted",
+          snapshot: ctx.snapshot("idle"),
+          userEntryId: ids.userEntryId,
+          assistantEntryId: ids.assistantEntryId,
+        },
       ];
     }
 

@@ -142,7 +142,53 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       indent/nesting variant was dropped — the existing per-row worktree badge is the
       sole distinguisher. _(Not done: parent-session linkage — worktrees fork from a
       repo, not a session, and pilot doesn't record a spawning session; parked.)_
-- [ ] **Session tree / fork / clone / compaction**
+- [~] **Session tree / fork / clone / compaction** — _T0+T1 shipped 2026-06-19; T2 below._
+  - [x] **T0 — entry-id plumbing.** pi keeps each tree node's id on the `SessionEntry`
+        wrapper, never on the `AgentMessage`, so transcript items couldn't name a node.
+        Threaded pi's entry id through to `UserItem.entryId` / `AssistantItem.entryId` via
+        two paths: REPLAY stamps it per-message in `history-map` (driver correlates
+        `session.messages` ↔ `sessionManager.getBranch()` tail-anchored + compaction-safe,
+        `server/src/pi/branch-ids.ts`), LIVE backfills it at the turn boundary
+        (`RunCompletedEvent.{userEntryId,assistantEntryId}` from `getBranch()` at
+        `agent_end`, reducer `stampLastEntryId`). The id is the handle navigateTree wants.
+  - [x] **T1 — inline branch buttons (the 90% of /tree).** "Branch from this prompt"
+        (re-edit: navigateTree rewinds the leaf to the prompt's parent and prefills the
+        composer via a per-client `editorPrefill`) on user bubbles; "Branch from here"
+        (continue on a new path) on turn-final assistant footers. Global `⌘/Ctrl+⇧+↑`
+        branches from the last prompt. Driver seam `PilotDriver.branchFrom(entryId, {summarize})`
+        → `session.navigateTree` (pi) / deterministic fixture (mock); the hub re-seeds every
+        client through the same atomic path as `openSession`. Gated on `!turnActive` (a
+        mid-turn navigate would interleave the run into the new branch). `e2e/branch*.e2e.ts`.
+  - [ ] **T2 — full tree-view modal (this item).** A browsable visualization of the whole
+        session DAG so you can jump to / fork from *any* node, not just the always-visible
+        prompts + turn-final answers (e.g. an abandoned branch, a mid-turn assistant step).
+        Concretely:
+        - **Data:** serialize `sessionManager.getTree()` (`SessionTreeNode[]` — `{entry,
+          children, label?}`) + `getLeafId()` over a new server message (e.g. `treeState`),
+          requested on demand when the modal opens. Keep the wire shape JSON-safe; don't
+          ship pi's `SessionEntry` raw — project to `{id, parentId, kind, preview, role?,
+          ts?, label?}` so `protocol/` stays DOM/runtime-free.
+        - **Render:** mirror pi's `/tree` — a FLATTENED INDENTED LIST, *not* a 2D graph
+          (single-child chains stay flat; only true branch points indent with `├─`/`└─` +
+          carried `│` gutters; active root→leaf path marked; current leaf flagged). See
+          `~/src/pi/.../components/tree-selector.ts` for the exact flatten/connector rules
+          and per-entry-type preview labels (`getEntryDisplayText`). A web list is far
+          easier than the terminal's gutter math — an indented `<ul>` with a left rail works.
+        - **Modal:** reuse the `Settings.svelte` scrim+dialog pattern (a `store.treeOpen`
+          flag, `role="dialog" aria-modal`, Escape-to-close, mounted in `App.svelte`); add a
+          header trigger IconButton + a hotkey, both with tooltips (repo rule). Mobile-first
+          layout (the list scrolls; rows are tappable).
+        - **Action:** selecting a node sends the EXISTING `branch` wire message with that
+          node's id — `branchFrom` already accepts any entry id, so no new driver surface.
+        - **Fast-follows already seamed:** (a) **branch + summarize** — the `summarize` flag
+          is plumbed end-to-end (`branch` msg → `branchFrom` → `navigateTree({summarize})`),
+          just no UI yet; add a "summarize abandoned branch" affordance (it's a blocking LLM
+          call — needs a "summarizing…" / abort state via `isCompacting`/`abortBranchSummary`).
+          (b) **leaf durability** — a no-summary `branch()` only moves the in-memory leaf; it
+          isn't persisted until the next prompt appends a child, so a cold reopen (warm-cap
+          eviction / server restart) before prompting re-derives the leaf to the file tail.
+          Benign for the warm jump-then-prompt flow; if it bites, navigate with a label or
+          summary (those persist an entry) or have pilot persist the leaf explicitly.
 - [ ] **Scheduled / recurring runs**
 - [ ] **Image / file attachments** (browser file input)
 - [ ] **Inline tool-diff rendering**

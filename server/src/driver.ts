@@ -100,6 +100,27 @@ export interface PilotDriver {
    *  so creation + first turn stay correctly ordered. */
   newSession(opts?: NewSessionOpts): Promise<SessionDriverEvent[]>;
 
+  /** Jump the session to a prior tree entry (pi's /tree) and branch from it. Mutates the
+   *  live session's leaf, then resolves with the new branch's SEED events — like
+   *  {@link openSession}, so the hub resets + re-broadcasts the transcript through the same
+   *  atomic path. `editorText` is set when the target was a user prompt (its text comes
+   *  back for re-editing); the hub forwards it to the requesting client's composer.
+   *  `cancelled`/`aborted` mirror navigateTree (a no-op jump to the current leaf, or an
+   *  aborted summary) — the seed still reflects the (unchanged) branch so the re-seed is
+   *  safe. `summarize` runs pi's branch-summarization (an LLM call) first. Throws if the
+   *  session/entry can't be resolved (the hub keeps the current transcript on a throw).
+   *  Optional: a bare driver omits it and the hub guards with `?.`. */
+  branchFrom?(
+    entryId: string,
+    opts: { summarize?: boolean },
+    sessionId?: SessionId,
+  ): Promise<{
+    seed: SessionDriverEvent[];
+    editorText?: string;
+    cancelled: boolean;
+    aborted?: boolean;
+  }>;
+
   /** The CURRENT context-window fill for a (warm) session — lets the hub refresh the
    *  composer's context meter mid-turn without waiting for a turn-boundary snapshot.
    *  getContextUsage is O(messages), so the hub only calls this on its debounced live

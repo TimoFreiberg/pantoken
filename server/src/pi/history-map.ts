@@ -83,6 +83,10 @@ export function contentToText(
 export function historyToEvents(
   messages: readonly HistoryMessage[],
   ctx: HistoryMapCtx,
+  // pi tree entry ids aligned to `messages` (driver-correlated; see branch-ids.ts).
+  // Carried onto the userMessage / assistantDelta events so a replayed transcript item
+  // can offer "branch from here". `undefined` per slot → that item gets no branch handle.
+  entryIds?: readonly (string | undefined)[],
 ): SessionDriverEvent[] {
   if (messages.length === 0) return [];
 
@@ -96,7 +100,9 @@ export function historyToEvents(
   };
   const out: SessionDriverEvent[] = [];
 
-  for (const m of messages) {
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    const entryId = entryIds?.[i];
     switch (m.role) {
       case "user":
         out.push({
@@ -104,6 +110,7 @@ export function historyToEvents(
           type: "userMessage",
           id: `u-${seq}`,
           text: contentToText(m.content),
+          entryId,
         });
         break;
 
@@ -116,6 +123,7 @@ export function historyToEvents(
               type: "assistantDelta",
               text: (b as { text: string }).text,
               channel: "text",
+              entryId,
             });
           else if (b.type === "thinking")
             out.push({
@@ -123,6 +131,7 @@ export function historyToEvents(
               type: "assistantDelta",
               text: (b as { thinking: string }).thinking,
               channel: "thinking",
+              entryId,
             });
           else if (b.type === "toolCall") {
             const call = b as { id: string; name: string; arguments?: unknown };

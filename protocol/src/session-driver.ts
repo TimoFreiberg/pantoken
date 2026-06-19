@@ -386,6 +386,13 @@ export interface AssistantDeltaEvent extends SessionEventBase {
   readonly text: string;
   /** pilot extension: distinguish reasoning deltas from answer text */
   readonly channel?: "text" | "thinking";
+  /** pilot extension: pi's tree entry id for the assistant message this delta belongs
+   *  to — the branch handle a "branch from here" button names (see PilotDriver.branchFrom).
+   *  Set only on the REPLAY path (history-map), where the persisted entry is known; absent
+   *  on the live stream (pi doesn't assign the id until the message persists at turn end,
+   *  so the live path backfills it via {@link RunCompletedEvent.assistantEntryId}). All
+   *  deltas of one assistant message carry the same id. */
+  readonly entryId?: string;
 }
 export interface QueuedMessageStartedEvent extends SessionEventBase {
   readonly type: "queuedMessageStarted";
@@ -397,6 +404,11 @@ export interface UserMessageEvent extends SessionEventBase {
   readonly id: string;
   readonly text: string;
   readonly images?: readonly ImageContent[];
+  /** pilot extension: pi's tree entry id for this user prompt — the branch handle a
+   *  "branch from this prompt" button names. Set on the REPLAY path (history-map); absent
+   *  on the live emit (pilot emits userMessage before pi persists the entry), where it's
+   *  backfilled via {@link RunCompletedEvent.userEntryId} at turn end. */
+  readonly entryId?: string;
 }
 export interface CustomMessageEvent extends SessionEventBase {
   // An extension-injected `role:"custom"` message (pi's `sendMessage`). These trigger
@@ -435,6 +447,14 @@ export interface ToolFinishedEvent extends SessionEventBase {
 export interface RunCompletedEvent extends SessionEventBase {
   readonly type: "runCompleted";
   readonly snapshot: SessionSnapshot;
+  /** pilot extension: pi's tree entry ids for the turn that just completed, used to
+   *  backfill the branch handle onto the LIVE-streamed transcript (the ids don't exist
+   *  until the messages persist at turn end — see AssistantDeltaEvent.entryId). The
+   *  reducer stamps `assistantEntryId` onto the turn-final assistant item and
+   *  `userEntryId` onto this turn's user item. Absent on the replay path (which threads
+   *  ids per-message) and on the mock unless a fixture sets them. */
+  readonly userEntryId?: string;
+  readonly assistantEntryId?: string;
 }
 export interface UsageUpdatedEvent extends SessionEventBase {
   // pilot-synthetic: the context-window fill changed mid-turn. Emitted by the hub on a

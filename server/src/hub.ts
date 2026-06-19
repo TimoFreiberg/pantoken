@@ -680,6 +680,40 @@ export class SessionHub {
       case "openSession":
         void this.switchTo(() => this.driver.openSession(msg.path));
         return;
+      case "branch": {
+        if (!this.driver.branchFrom) {
+          send({ type: "error", message: "branching isn't supported here" });
+          return;
+        }
+        // A navigate mid-turn would interleave the in-flight run into the new branch.
+        // Gate on the FOCUSED session's status — the only transcript a client can branch.
+        if (
+          this.state.status === "running" ||
+          this.state.status === "initializing"
+        ) {
+          send({
+            type: "error",
+            message: "Can't branch while a turn is running — stop it first.",
+          });
+          return;
+        }
+        // Re-seed every client through the same atomic path openSession uses; the
+        // editorText (a user-prompt branch's re-editable text) is per-client, so it goes
+        // ONLY to the requester after the swap lands.
+        let prefill: string | undefined;
+        void this.switchTo(async () => {
+          const r = await this.driver.branchFrom!(
+            msg.entryId,
+            { summarize: msg.summarize },
+            msg.sessionId ?? this.focusedId ?? undefined,
+          );
+          prefill = r.editorText;
+          return r.seed;
+        }).then((ok) => {
+          if (ok && prefill) send({ type: "editorPrefill", text: prefill });
+        });
+        return;
+      }
       case "newSession": {
         // Deferred creation: the draft lives client-side until the user sends, so this
         // message creates the session AND carries its first prompt. Deliver the prompt

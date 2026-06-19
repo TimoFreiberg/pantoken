@@ -349,6 +349,14 @@ class PilotStore {
       case "fileList":
         this.files = { query: msg.query, items: [...msg.files] };
         break;
+      case "editorPrefill":
+        // A branch landed on a user prompt — its text comes back to re-edit. Per-client
+        // (only the requester), so it's handled here, not in the shared foldEvent. The
+        // transcript re-seed rides a separate `snapshot`; composerDraft is local state it
+        // doesn't touch, so order between them doesn't matter.
+        this.composerDraft = msg.text;
+        this.focusComposer();
+        break;
       case "providerList":
         this.providers = [...msg.providers];
         break;
@@ -494,6 +502,27 @@ class PilotStore {
    *  from the Composer on each keystroke after `@`. */
   queryFiles(query: string): void {
     send({ type: "queryFiles", query });
+  }
+  /** Jump the session to a prior tree entry and branch from it (pi's /tree). The server
+   *  re-seeds every client's transcript to the new branch; if `entryId` was a user
+   *  prompt, this client also gets an `editorPrefill` with its text. No-op while a turn
+   *  is running (the server rejects it — a mid-turn navigate would corrupt the branch). */
+  branch(entryId: string): void {
+    if (this.turnActive) return;
+    send({ type: "branch", entryId });
+  }
+  /** Branch from the most recent user prompt — the "edit & resend my last message"
+   *  gesture, bound to a global hotkey. Finds the last user item carrying a branch
+   *  handle and branches from it. */
+  branchLastPrompt(): void {
+    const items = this.session.items;
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i];
+      if (it && it.kind === "user" && it.entryId) {
+        this.branch(it.entryId);
+        return;
+      }
+    }
   }
   openSession(path: string): void {
     const switching = path !== this.activeSessionPath;
