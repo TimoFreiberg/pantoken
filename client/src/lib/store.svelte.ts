@@ -206,6 +206,10 @@ class PilotStore {
    *  raw turn/tool events), an open streaming assistant bubble, and any still-running
    *  tool. A failed run is terminal — never active — even if a tool card is orphaned. */
   get turnActive(): boolean {
+    // When drafting a new session, the main pane shows the new-session form —
+    // not any running session. Hide streaming controls so the stop button and
+    // steer/follow-up UI don't leak across from the previously-viewed session.
+    if (this.draft) return false;
     const status = this.session.status;
     if (status === "running") return true;
     if (status === "failed") return false;
