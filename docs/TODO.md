@@ -9,10 +9,23 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
 
 ## 🔴 Next (urgent / blocking)
 
-_(clear — nothing blocking; pull the next item up from Important)_
+- [ ] **Missing stop-turn interface when a session is running** — investigate the bug where
+      a session was running (actively producing output) but the UI didn't show the stop turn
+      affordance. Harden this as much as possible: not being able to stop an agent that's
+      looping is genuinely annoying and can be dangerous. The stop pill must be visible in
+      every state where a turn is in-flight, across reconnect and state transitions.
 
 ## 🟡 Important
 
+- [ ] **Stop default-new-session-in-server-cwd for production usage** — in real deployed
+      usage the server's cwd should never become a session's default working directory.
+      Instead, restore the last active session on launch; if that state doesn't exist or gets
+      lost/corrupted, the safe default is an empty (/new) session at the topmost project.
+      _Cross-refs the desktop-app item below which already flags the `launchCwd` issue in
+      `warmUp` — but this is a separate concern from the app wrapper._
+- [ ] **Per-client UI state persistence** — store the active session, sidebar visibility,
+      theme, and other UI state per-client (e.g. localStorage) so that a mobile PWA reload
+      doesn't reset to the default session. The user should land exactly where they left off.
 - [ ] **Desktop app (macOS .app), local-first** — deferred to a dedicated session.
       Direction (owner, 2026-06-18): the app should **run pi agents locally by default**
       and spawn the pilot server locally on launch, with connecting to a remote server as
