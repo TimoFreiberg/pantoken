@@ -93,6 +93,16 @@ export interface CommandInfo {
   readonly argumentHint?: string;
 }
 
+/** One file in the composer's @-file mention autocomplete — a relative path from the
+ *  session's cwd. The server searches on demand via `fd` (fast, .gitignore-aware) and
+ *  broadcasts results; the client renders them in a menu. See {@link fileList}. */
+export interface FileInfo {
+  /** Relative path from the session cwd (forward slashes). */
+  readonly path: string;
+  /** Whether the entry is a directory (the menu renders a trailing "/"). */
+  readonly isDirectory: boolean;
+}
+
 /** A model provider pilot can manage credentials for. No secret ever crosses the
  *  wire — only whether it's authed and where that auth comes from, so the UI can
  *  style remove-vs-readonly. Broadcast as `providerList`. */

@@ -301,6 +301,22 @@ export class SessionHub {
     }
   }
 
+  /** Fetch + broadcast files matching a composer @-mention query. Triggered on each
+   *  client keystroke after `@` (debounced client-side ~150ms); the server runs `fd`
+   *  (fast, .gitignore-aware) and echoes the query so the client can ignore stale
+   *  responses. Searches the focused session's cwd. */
+  private async broadcastFileList(query: string): Promise<void> {
+    try {
+      const files = await this.driver.listFiles(
+        query,
+        this.focusedId ?? undefined,
+      );
+      this.broadcast({ type: "fileList", query, files });
+    } catch (e) {
+      console.error("[hub] listFiles failed", e);
+    }
+  }
+
   /** Fetch + broadcast the manageable providers (Settings panel). No-op if the driver
    *  doesn't support credential management. */
   private async broadcastProviderList(): Promise<void> {
@@ -701,6 +717,9 @@ export class SessionHub {
         return;
       case "listCommands":
         void this.broadcastCommandList();
+        return;
+      case "queryFiles":
+        void this.broadcastFileList(msg.query);
         return;
       case "listProviders":
         void this.broadcastProviderList();

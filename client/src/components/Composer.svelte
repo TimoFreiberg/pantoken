@@ -1,9 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { CommandInfo, ImageContent } from "@pilot/protocol";
+  import type { CommandInfo, FileInfo, ImageContent } from "@pilot/protocol";
   import { store } from "../lib/store.svelte.js";
+  import { extractAtQuery } from "../lib/file-autocomplete.js";
   import { filterCommands, slashQuery } from "../lib/slash.js";
   import SlashMenu from "./SlashMenu.svelte";
+  import FileMenu from "./FileMenu.svelte";
   import ModelPicker from "./ModelPicker.svelte";
   import ContextMeter from "./ContextMeter.svelte";
   import SegmentedControl from "./ui/SegmentedControl.svelte";
@@ -66,6 +68,50 @@
   // Keep the highlighted index in range as the filtered list shrinks under the cursor.
   $effect(() => {
     if (slashSel >= slashItems.length) slashSel = 0;
+  });
+
+  // --- Cursor tracking (textarea). Needed so @-mentions work inline, not just at
+  // the end of the draft. Updated on every input/click/keyboard event.
+  let cursorPos = $state(0);
+
+  // --- @-file mention autocomplete. Similar shape to slash: an active query (the
+  // text after `@` at/before cursor), a highlighted index, and a dismissed flag so
+  // Esc closes it for this token. The items come from the server (store.files), NOT
+  // client-side filtering — the server runs `fd` per-query (Option B; see
+  // server/src/pi/pi-driver.ts `listFilesWithFd`). The debounce timer fires
+  // `store.queryFiles(fileQ.query)` after 150ms of no keystroke; the menu only opens
+  // once the response lands (`store.files.query === fileQ.query`).
+  //
+  // TODO: per-query RPC means WS round-trip latency on every keystroke. Fine for
+  // local use but may feel sluggish over a remote Tailscale hop. If that becomes
+  // annoying, switch to Option A (full file list broadcast on session switch, capped
+  // at ~1000 files, with client-side fuzzy matching).
+  let fileSel = $state(0);
+  let fileDismissed = $state(false);
+  let fileDebounce: ReturnType<typeof setTimeout> | undefined;
+  const fileMatch = $derived(extractAtQuery(store.composerDraft, cursorPos));
+  const fileQ = $derived(fileMatch?.query ?? null);
+  const fileItems = $derived(
+    fileQ !== null && store.files.query === fileQ
+      ? store.files.items
+      : [],
+  );
+  const fileOpen = $derived(
+    fileQ !== null && !fileDismissed && fileItems.length > 0,
+  );
+  $effect(() => {
+    if (fileSel >= fileItems.length) fileSel = 0;
+  });
+
+  // Debounced server query on @-mention keystrokes. The effect tracks fileQ;
+  // each change resets the timer. Cancel on unmount.
+  $effect(() => {
+    const q = fileQ;
+    clearTimeout(fileDebounce);
+    fileDebounce = setTimeout(() => {
+      if (q !== null) store.queryFiles(q);
+    }, 150);
+    return () => clearTimeout(fileDebounce);
   });
 
   // Max textarea height in px. Collapsed: floor at 3 lines so a scrollbar
@@ -179,10 +225,14 @@
 
   function onInput() {
     autosize();
-    // A fresh keystroke restarts the selection at the top; leaving slash mode clears a
-    // prior Escape so the next `/` reopens the menu.
+    // Track cursor so @-mentions work inline.
+    cursorPos = ta?.selectionStart ?? 0;
+    // A fresh keystroke restarts the selection at the top; leaving slash/file mode
+    // clears a prior Escape so the next trigger reopens the menu.
     slashSel = 0;
     if (slashQuery(store.composerDraft) === null) slashDismissed = false;
+    fileSel = 0;
+    if (extractAtQuery(store.composerDraft, cursorPos) === null) fileDismissed = false;
   }
 
   // Replace the bare slash token with `/name ` and keep focus so the user types args
@@ -195,6 +245,26 @@
     queueMicrotask(() => {
       ta?.focus();
       autosize();
+    });
+  }
+
+  /** Replace the @-mention span (`@<query>`) with the selected file path, keeping
+   *  the cursor after the inserted text. Directories get a trailing "/" so the user
+   *  can continue typing to narrow further (pi convention). */
+  function acceptFile(file: FileInfo) {
+    const m = fileMatch;
+    if (!m) return;
+    const draft = store.composerDraft;
+    const path = file.isDirectory ? `${file.path}/` : file.path;
+    store.composerDraft =
+      draft.slice(0, m.atPos) + "@" + path + draft.slice(cursorPos);
+    fileDismissed = false;
+    fileSel = 0;
+    queueMicrotask(() => {
+      ta?.focus();
+      autosize();
+      // Place cursor after the inserted path.
+      if (ta) ta.selectionStart = ta.selectionEnd = m.atPos + 1 + path.length;
     });
   }
 
@@ -215,7 +285,7 @@
         store.toggleDraftWorktree();
         return;
       }
-      if (e.key === "Escape" && !slashOpen && !store.composerDraft.trim()) {
+      if (e.key === "Escape" && !slashOpen && !fileOpen && !store.composerDraft.trim()) {
         e.preventDefault();
         store.cancelDraft();
         return;
@@ -242,6 +312,32 @@
       if (e.key === "Escape") {
         e.preventDefault();
         slashDismissed = true;
+        return;
+      }
+    }
+    // @-file mention keyboard handling (after slash, so slash takes priority if
+    // both menus somehow overlap — the user typed `/` first).
+    if (fileOpen) {
+      const n = fileItems.length;
+      if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
+        e.preventDefault();
+        fileSel = (fileSel + 1) % n;
+        return;
+      }
+      if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) {
+        e.preventDefault();
+        fileSel = (fileSel - 1 + n) % n;
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        const file = fileItems[fileSel];
+        if (file) acceptFile(file);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        fileDismissed = true;
         return;
       }
     }
@@ -371,6 +467,14 @@
           onhover={(i) => (slashSel = i)}
         />
       {/if}
+      {#if fileOpen}
+        <FileMenu
+          items={fileItems}
+          selected={fileSel}
+          onpick={acceptFile}
+          onhover={(i) => (fileSel = i)}
+        />
+      {/if}
       <div class="box" class:streaming bind:this={box}>
       <button
         class="expand"
@@ -386,6 +490,8 @@
         bind:value={store.composerDraft}
         oninput={onInput}
         onkeydown={onKeydown}
+        onclick={() => (cursorPos = ta?.selectionStart ?? 0)}
+        onkeyup={() => (cursorPos = ta?.selectionStart ?? 0)}
         placeholder={drafting
           ? "Describe a task or ask a question…"
           : streaming
@@ -393,8 +499,8 @@
             : "Message pilot…"}
         rows="1"
         role="combobox"
-        aria-expanded={slashOpen}
-        aria-controls="slash-menu"
+        aria-expanded={slashOpen || fileOpen}
+        aria-controls={fileOpen ? "file-menu" : "slash-menu"}
         aria-autocomplete="list"
       ></textarea>
       <div class="actions">

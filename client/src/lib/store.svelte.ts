@@ -4,6 +4,7 @@
 
 import {
   type CommandInfo,
+  type FileInfo,
   foldEvent,
   type HostUiResponse,
   type ImageContent,
@@ -82,6 +83,13 @@ class PilotStore {
   // Slash commands the focused session offers, for the composer typeahead. Server-
   // authoritative, delivered like `models`; refreshed on session switch (cwd-scoped).
   commands = $state<CommandInfo[]>([]);
+  // File paths matching the current @-mention query, for the composer's file
+  // autocomplete. Fetched on demand per-keystroke (debounced client-side ~150ms);
+  // the server echoes the query so we can drop stale responses. See `queryFiles()`.
+  files = $state<{ query: string; items: readonly FileInfo[] }>({
+    query: "",
+    items: [],
+  });
   // Interactive project-trust card (D12). Out-of-band, not part of the folded session
   // state: trust is decided per-cwd before a session exists. Null when none pending.
   trustRequest = $state<TrustRequest | null>(null);
@@ -291,6 +299,9 @@ class PilotStore {
       case "commandList":
         this.commands = [...msg.commands];
         break;
+      case "fileList":
+        this.files = { query: msg.query, items: [...msg.files] };
+        break;
       case "providerList":
         this.providers = [...msg.providers];
         break;
@@ -419,6 +430,13 @@ class PilotStore {
   mock(script: string): void {
     send({ type: "mock", script });
   }
+  /** Ask the server to search for files matching a composer @-mention query.
+   *  The result arrives as a `fileList` server message (the `query` field is
+   *  echoed back so we can ignore stale responses). Called debounced (~150ms)
+   *  from the Composer on each keystroke after `@`. */
+  queryFiles(query: string): void {
+    send({ type: "queryFiles", query });
+  }
   openSession(path: string): void {
     const switching = path !== this.activeSessionPath;
     // Save the draft we're leaving (the new-session draft, or the prior session's text)
@@ -436,6 +454,11 @@ class PilotStore {
     if (id) this.markRead(id);
     // A switched-to session renders at the bottom — clear any stale below-fold flag.
     this.clearActiveUnread();
+    // Drop the @-mention file cache: it's keyed only by query string, so the new
+    // session's cwd would otherwise show the prior cwd's files until the next
+    // `queryFiles` round-trips. The empty-query entry is the one that bites — it
+    // matches instantly when the user types `@`.
+    this.files = { query: "", items: [] };
     send({ type: "openSession", path });
   }
   /** Dev-only timing for a full transcript render (fires on every snapshot: session

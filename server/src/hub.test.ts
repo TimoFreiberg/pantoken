@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type {
   CommandInfo,
+  FileInfo,
   HostUiResponse,
   ModelDefaults,
   ModelOption,
@@ -137,6 +138,9 @@ class FakeDriver implements PilotDriver {
   }
   async listCommands(): Promise<CommandInfo[]> {
     return [{ name: "review", source: "prompt" }];
+  }
+  async listFiles(): Promise<FileInfo[]> {
+    return [{ path: "README.md", isDirectory: false }];
   }
   setModel(provider: string, modelId: string, sessionId?: string) {
     this.modelCalls.push({ provider, modelId, sessionId });

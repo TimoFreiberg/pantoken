@@ -4,6 +4,7 @@
 
 import type {
   CommandInfo,
+  FileInfo,
   HostUiResponse,
   ModelDefaults,
   ModelOption,
@@ -33,6 +34,7 @@ import {
   markdownShowcase,
   staleIdle,
   MOCK_COMMANDS,
+  MOCK_FILES,
   MOCK_DEFAULT_CONFIG,
   MOCK_MODEL_DEFAULTS,
   MOCK_MODELS,
@@ -432,6 +434,15 @@ export class MockDriver implements PilotDriver {
 
   async listCommands(): Promise<CommandInfo[]> {
     return MOCK_COMMANDS.map((c) => ({ ...c }));
+  }
+
+  async listFiles(query: string): Promise<FileInfo[]> {
+    if (!query.trim()) return MOCK_FILES.map((f) => ({ ...f })).slice(0, 20);
+    const q = query.toLowerCase();
+    return MOCK_FILES.filter((f) => f.path.toLowerCase().includes(q))
+      .sort((a, b) => a.path.length - b.path.length)
+      .map((f) => ({ ...f }))
+      .slice(0, 20);
   }
 
   setModel(provider: string, modelId: string): void {

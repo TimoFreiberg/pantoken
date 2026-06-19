@@ -4,6 +4,7 @@
 
 import type {
   CommandInfo,
+  FileInfo,
   ModelDefaults,
   ModelOption,
   ProviderInfo,
@@ -85,6 +86,47 @@ export const MOCK_COMMANDS: readonly CommandInfo[] = [
     description: "Capture a durable judgment for a future session",
     source: "skill",
   },
+];
+
+/** A representative project tree for the composer's @-file mention autocomplete.
+ *  Includes files and directories; `isDirectory: true` entries get a trailing "/"
+ *  in the menu. The mock driver's `listFiles` does case-insensitive substring
+ *  matching on `path` and returns up to 20 matches sorted by path length. */
+export const MOCK_FILES: readonly FileInfo[] = [
+  { path: "README.md", isDirectory: false },
+  { path: "AGENTS.md", isDirectory: false },
+  { path: "docs", isDirectory: true },
+  { path: "docs/DESIGN.md", isDirectory: false },
+  { path: "docs/DECISIONS.md", isDirectory: false },
+  { path: "docs/TODO.md", isDirectory: false },
+  { path: "docs/DONE.md", isDirectory: false },
+  { path: "docs/OPEN-QUESTIONS.md", isDirectory: false },
+  { path: "docs/design-system-pass.md", isDirectory: false },
+  { path: "server", isDirectory: true },
+  { path: "server/src/index.ts", isDirectory: false },
+  { path: "server/src/hub.ts", isDirectory: false },
+  { path: "server/src/driver.ts", isDirectory: false },
+  { path: "server/src/mock-driver.ts", isDirectory: false },
+  { path: "server/src/hub.test.ts", isDirectory: false },
+  { path: "server/src/fixtures.ts", isDirectory: false },
+  { path: "server/src/pi/pi-driver.ts", isDirectory: false },
+  { path: "client", isDirectory: true },
+  { path: "client/src/app.css", isDirectory: false },
+  { path: "client/src/components/Composer.svelte", isDirectory: false },
+  { path: "client/src/components/SlashMenu.svelte", isDirectory: false },
+  { path: "client/src/lib/store.svelte.ts", isDirectory: false },
+  { path: "client/src/lib/slash.ts", isDirectory: false },
+  { path: "client/src/lib/slash.test.ts", isDirectory: false },
+  { path: "client/src/lib/ws.svelte.ts", isDirectory: false },
+  { path: "e2e", isDirectory: true },
+  { path: "e2e/slash.e2e.ts", isDirectory: false },
+  { path: "e2e/composer-resize.e2e.ts", isDirectory: false },
+  { path: "protocol", isDirectory: true },
+  { path: "protocol/src/wire.ts", isDirectory: false },
+  { path: "protocol/src/session-driver.ts", isDirectory: false },
+  { path: "protocol/src/state.ts", isDirectory: false },
+  { path: "package.json", isDirectory: false },
+  { path: "tsconfig.json", isDirectory: false },
 ];
 
 /** The mock's context-window fill, for the composer meter. ~24% of Opus's 200k

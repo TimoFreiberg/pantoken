@@ -168,8 +168,11 @@ the rest._
       from your phone without typing.
 
 ### Composer & input
-- [ ] **@-file mention autocomplete** — DESIGN pairs this with the slash-command menu
-      (already filed) but it's missing here. Fuzzy-complete repo paths into the prompt.
+- [x] **@-file mention autocomplete** — done 2026-06-19. Type `@` in the composer
+      followed by a filename/path prefix → server searches the session's cwd via `fd`
+      (fast, .gitignore-aware), results appear in a popup menu. Arrow/Enter/Tab to
+      select, Esc to dismiss; directories get a trailing `/`. See the TODO in
+      `Composer.svelte` re: per-query RPC latency tradeoff.
 - [ ] **Per-session prompt draft persistence** _(superseded — promoted to 🟡 Important with
       owner's detailed requirements, see above)_.
       Persist the unsent draft per session in localStorage so a phone reload / tab eviction
