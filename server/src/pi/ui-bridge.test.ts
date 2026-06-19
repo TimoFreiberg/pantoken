@@ -119,4 +119,46 @@ describe("PiUiBridge", () => {
         w.request.placement,
     ).toBe("belowComposer");
   });
+
+  // Replay-on-seed: the bridge owns ambient state because pi can't replay it across
+  // a focus switch (DECISIONS.md D5).
+  const seedReqs = (bridge: PiUiBridge): HostUiRequest[] =>
+    bridge
+      .ambientSeedEvents()
+      .flatMap((e) => (e.type === "hostUiRequest" ? [e.request] : []));
+
+  test("ambientSeedEvents replays retained status, widget, and title", () => {
+    const { bridge } = setup();
+    bridge.setStatus("branch", "on main");
+    bridge.setWidget("tasklist", ["Open Tasks (1):", "  ○ #a1: do it"]);
+    bridge.setTitle("My session");
+
+    const reqs = seedReqs(bridge);
+    const status = reqs.find((r) => r.kind === "status");
+    const widget = reqs.find((r) => r.kind === "widget");
+    const title = reqs.find((r) => r.kind === "title");
+    expect(status && status.kind === "status" && status.text).toBe("on main");
+    expect(widget && widget.kind === "widget" && widget.lines).toEqual([
+      "Open Tasks (1):",
+      "  ○ #a1: do it",
+    ]);
+    expect(title && title.kind === "title" && title.title).toBe("My session");
+  });
+
+  test("ambientSeedEvents drops cleared entries and keeps the latest value", () => {
+    const { bridge } = setup();
+    bridge.setStatus("branch", "on main");
+    bridge.setStatus("branch", undefined); // cleared → not replayed
+    bridge.setWidget("tasklist", ["one"]);
+    bridge.setWidget("tasklist", ["two", "three"]); // overwrites
+    bridge.setWidget("scratch", ["x"]);
+    bridge.setWidget("scratch", undefined); // cleared → not replayed
+
+    const reqs = seedReqs(bridge);
+    expect(reqs.some((r) => r.kind === "status")).toBe(false);
+    const widgets = reqs.filter((r) => r.kind === "widget");
+    expect(widgets).toHaveLength(1);
+    const w = widgets[0];
+    expect(w && w.kind === "widget" && w.lines).toEqual(["two", "three"]);
+  });
 });
