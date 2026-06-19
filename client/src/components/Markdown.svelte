@@ -1,14 +1,13 @@
 <script lang="ts">
   // Single place that owns how agent/tool markdown is rendered (markstream-svelte).
-  // Both the transcript and the composer preview render through here so the safety
-  // and styling config can't drift between them.
+  // The transcript renders agent/tool markdown through here.
   import MarkdownRender from "markstream-svelte";
   import { isDark } from "../lib/dark.svelte.js";
 
   let { content, final = true }: { content: string; final?: boolean } = $props();
 </script>
 
-<!-- Render config (kept here so transcript + composer can't drift):
+<!-- Render config:
      - htmlPolicy "safe": allowlisted HTML only; scripts/event-handlers/style dropped,
        js:/data:/vbscript: links blocked, target=_blank hardened with rel=noopener.
      - customMarkdownIt disables typographer so quotes/dashes render verbatim — don't

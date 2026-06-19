@@ -121,12 +121,20 @@
         end();
         return;
       }
-      // Node was removed by a re-render. If the same tooltip target still sits
-      // under the resting pointer, re-acquire the fresh node and keep the tip up;
-      // otherwise the content genuinely changed, so close.
+      // Node was removed by a re-render. Re-acquire only if the element now under
+      // the resting pointer is plausibly the SAME control re-rendered — not merely
+      // a neighbour sharing the title string (pilot has many: per-row "Worktree: …",
+      // action buttons, …). Match the title plus the identity a re-render preserves
+      // (tag + aria-label + testid); anything else means the content changed → close.
       const under = document.elementFromPoint(px, py);
       const el = under?.closest<HTMLElement>("[title]");
-      if (el && el.getAttribute("title") === text) {
+      if (
+        el &&
+        el.getAttribute("title") === text &&
+        el.tagName === leaving.tagName &&
+        el.getAttribute("aria-label") === leaving.getAttribute("aria-label") &&
+        el.getAttribute("data-testid") === leaving.getAttribute("data-testid")
+      ) {
         current = el;
         el.setAttribute("data-tip-title", text);
         el.removeAttribute("title");
