@@ -564,6 +564,29 @@ export function ambient(): ScriptStep[] {
   ];
 }
 
+/** An extension reaching for a terminal-only capability against pilot's non-tui
+ *  host — folds into a warning notice. Mirrors what the real pi driver emits when
+ *  an extension's `ui.custom()` call goes unhandled. */
+export function compat(): ScriptStep[] {
+  return [
+    {
+      wait: 0,
+      event: {
+        ...base(),
+        type: "extensionCompatibilityIssue",
+        issue: {
+          capability: "custom",
+          classification: "terminal-only",
+          message:
+            "Custom UI is not available in the pilot remote; run pi in a terminal for this workflow.",
+          extensionPath: "~/.pi/agent/extensions/fancy-tui.ts",
+          eventName: "session_start",
+        },
+      },
+    },
+  ];
+}
+
 export function errorRun(): ScriptStep[] {
   return [
     {
@@ -845,6 +868,7 @@ export const SCRIPTS: Record<string, () => ScriptStep[]> = {
   confirm: confirmDialog,
   input: inputDialog,
   ambient,
+  compat,
   error: errorRun,
   bgrun: bgRun,
   editdiff: editDiff,

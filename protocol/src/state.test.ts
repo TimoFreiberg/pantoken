@@ -221,6 +221,24 @@ describe("foldEvent", () => {
     });
   });
 
+  test("extensionCompatibilityIssue becomes a warning notice", () => {
+    const s = foldAll([
+      base({
+        type: "extensionCompatibilityIssue",
+        issue: {
+          capability: "custom",
+          classification: "terminal-only",
+          message: "Custom UI is not available in the pilot remote.",
+        },
+      }),
+    ]);
+    expect(s.items[0]).toMatchObject({
+      kind: "notice",
+      level: "warning",
+      text: 'Extension capability "custom" is terminal-only: Custom UI is not available in the pilot remote.',
+    });
+  });
+
   test("runFailed sets failed status and an error notice", () => {
     const s = foldAll([
       base({ type: "runFailed", error: { message: "529 overloaded" } }),
