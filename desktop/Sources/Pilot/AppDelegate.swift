@@ -1,9 +1,10 @@
 import AppKit
+import UserNotifications
 import WebKit
 
 /// The shell. Boots a local pilot server from the dedicated clone, gates on /health,
 /// then shows the web client in a chromeless window and starts the update-watcher.
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
     private var server: ServerSupervisor!
@@ -11,9 +12,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var watcher: Process?
     private var watcherStopped = false
+    /// Accumulates raw watcher stdout until a newline; see consumeWatcherOutput.
+    private var watcherOutBuffer = Data()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMenu()
+
+        // Own update notifications ourselves so they're attributed to Pilot — clicking one
+        // focuses the app. (The watcher's osascript fallback is disabled via watcherEnv;
+        // its notifications would open Script Editor instead.)
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
 
         guard let port = PortFinder.freePort() else {
             presentFatal("Couldn't find a free local port to run the pilot server on.")
@@ -123,6 +133,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         p.arguments = ["run", "scripts/desktop/update-watcher.ts"]
         p.currentDirectoryURL = config.clone
         p.environment = config.watcherEnv()
+
+        // Read the watcher's machine channel (one JSON event per stdout line) so we can post
+        // a native notification on `update-deferred`. Buffer + dispatch happens on the main
+        // queue in consumeWatcherOutput.
+        let outPipe = Pipe()
+        p.standardOutput = outPipe
+        watcherOutBuffer = Data()
+        outPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let chunk = handle.availableData
+            if chunk.isEmpty {
+                handle.readabilityHandler = nil  // EOF — the watcher exited
+                return
+            }
+            DispatchQueue.main.async { self?.consumeWatcherOutput(chunk) }
+        }
+
         p.terminationHandler = { [weak self] _ in
             // Non-fatal: if the watcher dies, the app keeps working — just respawn it
             // after a beat so auto-update keeps running.
@@ -138,6 +164,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Swallow: a missing watcher only costs auto-update, not the app.
             NSLog("Pilot: failed to start update-watcher: \(error.localizedDescription)")
         }
+    }
+
+    /// Buffer raw watcher stdout and dispatch each complete line. The watcher emits one JSON
+    /// object per line (update-watcher.ts emitEvent); chunks don't arrive line-aligned, so we
+    /// accumulate until a newline. On the main queue, so watcherOutBuffer needs no lock.
+    private func consumeWatcherOutput(_ chunk: Data) {
+        watcherOutBuffer.append(chunk)
+        while let nl = watcherOutBuffer.firstIndex(of: 0x0A) {
+            let line = watcherOutBuffer.subdata(in: watcherOutBuffer.startIndex..<nl)
+            watcherOutBuffer.removeSubrange(watcherOutBuffer.startIndex...nl)
+            handleWatcherEvent(line)
+        }
+    }
+
+    private func handleWatcherEvent(_ line: Data) {
+        guard !line.isEmpty,
+            let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+            let event = obj["event"] as? String
+        else { return }
+        if event == "update-deferred" { postUpdateNotification() }
+    }
+
+    private func postUpdateNotification() {
+        let content = UNMutableNotificationContent()
+        content.title = "Pilot update ready"
+        content.body = "A new version is ready — open Pilot to update."
+        // Stable id: if origin/main moves again, the re-notification replaces this one
+        // rather than stacking duplicates.
+        let req = UNNotificationRequest(
+            identifier: "pilot-update-ready", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req)
+    }
+
+    // MARK: - Notifications (UNUserNotificationCenterDelegate)
+
+    /// Show the banner even when Pilot is frontmost. The watcher only emits update-deferred
+    /// when a client is connected (window open) — without this the banner would be silently
+    /// suppressed in the foreground, which is exactly when the user is here to act on it.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) ->
+            Void
+    ) {
+        completionHandler([.banner, .sound])
+    }
+
+    /// Clicking the notification focuses Pilot — the whole point of owning notifications here
+    /// instead of letting the watcher's osascript fallback open Script Editor.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
+        completionHandler()
     }
 
     // MARK: - Menu (so Cmd+Q and copy/paste/select-all work in the web client)
