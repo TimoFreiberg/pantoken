@@ -1,0 +1,378 @@
+<script lang="ts">
+  import { untrack } from "svelte";
+  import type { HostUiRequest, QnaAnswer } from "@pilot/protocol";
+  import Button from "./ui/Button.svelte";
+
+  // The remote face of the answer extension's Q&A widget: one card per question,
+  // radio (single) / checkbox (multi) / free-text, with prev-next + arrow/Esc/⌘↵
+  // navigation. Each card produces a structured QnaAnswer (picked indices + a
+  // free-text "something else" escape) so the extension's formatQnA renders the
+  // transcript identically to the TUI path. Mounted keyed-by-requestId, so state
+  // starts fresh per request — no cross-request reset needed here.
+  interface Props {
+    request: Extract<HostUiRequest, { kind: "qna" }>;
+    onsubmit: (answers: QnaAnswer[]) => void;
+    oncancel: () => void;
+  }
+  let { request, onsubmit, oncancel }: Props = $props();
+
+  const questions = $derived(request.questions);
+
+  // One mutable answer per question. Plain objects under $state become deeply
+  // reactive proxies, so per-field mutation re-renders the active card. Seeded
+  // once from the prop (the parent keys this component by requestId, so request
+  // never changes under us) — untrack keeps that intentional read non-reactive.
+  let answers = $state(
+    untrack(() => request.questions).map(() => ({
+      selectedOptionIndices: [] as number[],
+      customText: "",
+    })),
+  );
+  let current = $state(0);
+  let root: HTMLDivElement | undefined = $state();
+
+  // current is always kept in [0, total) and answers has one slot per question,
+  // so these indexed reads are present — assert past noUncheckedIndexedAccess.
+  const q = $derived(questions[current]!);
+  const a = $derived(answers[current]!);
+  const total = $derived(questions.length);
+  const hasOptions = $derived(
+    Array.isArray(q.options) && q.options.length > 0,
+  );
+  const isMulti = $derived(hasOptions && !!q.multiSelect);
+
+  function isAnswered(i: number): boolean {
+    const ans = answers[i]!;
+    return (
+      ans.selectedOptionIndices.length > 0 || ans.customText.trim().length > 0
+    );
+  }
+  const answeredCount = $derived(answers.filter((_, i) => isAnswered(i)).length);
+
+  function pickSingle(j: number) {
+    // Single-select: one index, and a radio pick clears any typed escape.
+    answers[current] = { selectedOptionIndices: [j], customText: "" };
+  }
+  function toggleMulti(j: number) {
+    const set = new Set(a.selectedOptionIndices);
+    if (set.has(j)) set.delete(j);
+    else set.add(j);
+    answers[current] = {
+      ...a,
+      selectedOptionIndices: [...set].sort((x, y) => x - y),
+    };
+  }
+  function setCustom(text: string) {
+    // On a single-select card, typing the escape clears the radio pick so the
+    // two never disagree. Multi-select and free-text keep both.
+    if (hasOptions && !isMulti) {
+      answers[current] = { selectedOptionIndices: [], customText: text };
+    } else {
+      answers[current] = { ...a, customText: text };
+    }
+  }
+
+  function next() {
+    if (current < total - 1) current += 1;
+  }
+  function prev() {
+    if (current > 0) current -= 1;
+  }
+  function goto(i: number) {
+    current = i;
+  }
+  function submit() {
+    // Hand back plain data (not the $state proxy) for clean WS serialization.
+    onsubmit(
+      answers.map((x) => ({
+        selectedOptionIndices: [...x.selectedOptionIndices],
+        customText: x.customText,
+      })),
+    );
+  }
+
+  function onkeydown(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      oncancel();
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      submit();
+      return;
+    }
+    // Arrow nav only when not typing — don't hijack cursor movement in a field.
+    const t = e.target as HTMLElement | null;
+    const typing =
+      t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA");
+    if (!typing) {
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        next();
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        prev();
+      }
+    }
+  }
+
+  // Focus the form on mount so Esc / arrows work before the first click.
+  $effect(() => {
+    root?.focus();
+  });
+
+  function mark(j: number): string {
+    const sel = a.selectedOptionIndices.includes(j);
+    if (isMulti) return sel ? "☑" : "☐";
+    return sel ? "◉" : "○";
+  }
+</script>
+
+<!-- Form-level keyboard shortcuts (Esc / ⌘↵ / arrows) live on the container; the
+     focusable controls inside still handle their own keys. -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<div
+  class="qna"
+  bind:this={root}
+  onkeydown={onkeydown}
+  role="group"
+  aria-label="Questions"
+  tabindex="-1"
+>
+  <div class="head">
+    <h2>{request.title ?? "A few questions"}</h2>
+    {#if total > 1}
+      <span class="progress" aria-live="polite"
+        >Question {current + 1} of {total} · {answeredCount} answered</span
+      >
+    {/if}
+  </div>
+
+  <div class="card">
+    <p class="q">{q.question}</p>
+    {#if q.context}<p class="ctx">{q.context}</p>{/if}
+
+    {#if hasOptions}
+      <div class="opts" role={isMulti ? "group" : "radiogroup"}>
+        {#each q.options ?? [] as opt, j (j)}
+          <button
+            type="button"
+            class="opt"
+            class:sel={a.selectedOptionIndices.includes(j)}
+            role={isMulti ? "checkbox" : "radio"}
+            aria-checked={a.selectedOptionIndices.includes(j)}
+            title={`${isMulti ? "Toggle" : "Choose"}: ${opt.label}`}
+            onclick={() => (isMulti ? toggleMulti(j) : pickSingle(j))}
+          >
+            <span class="box">{mark(j)}</span>
+            <span class="lbl">
+              <span class="lbl-main">{opt.label}</span>
+              {#if opt.description}<span class="lbl-desc">{opt.description}</span
+                >{/if}
+            </span>
+          </button>
+        {/each}
+      </div>
+      <input
+        class="field"
+        placeholder="Something else…"
+        value={a.customText}
+        oninput={(e) => setCustom(e.currentTarget.value)}
+        title="Type a free-text answer instead of the options"
+      />
+    {:else}
+      <textarea
+        class="field area"
+        rows="4"
+        placeholder="Type your answer…"
+        value={a.customText}
+        oninput={(e) => setCustom(e.currentTarget.value)}
+        title="Type your answer"
+      ></textarea>
+    {/if}
+  </div>
+
+  {#if total > 1}
+    <div class="dots" role="tablist" aria-label="Jump to question">
+      {#each questions as _, i (i)}
+        <button
+          type="button"
+          class="dot"
+          class:active={i === current}
+          class:done={isAnswered(i)}
+          role="tab"
+          aria-selected={i === current}
+          aria-label={`Question ${i + 1}${isAnswered(i) ? ", answered" : ""}`}
+          title={`Go to question ${i + 1}${isAnswered(i) ? " (answered)" : ""}`}
+          onclick={() => goto(i)}
+        ></button>
+      {/each}
+    </div>
+  {/if}
+
+  <div class="actions">
+    <Button
+      variant="secondary"
+      size="lg"
+      title="Cancel without answering (Esc)"
+      onclick={oncancel}>Cancel</Button
+    >
+    {#if total > 1}
+      <Button
+        variant="secondary"
+        size="lg"
+        title="Previous question (←)"
+        disabled={current === 0}
+        onclick={prev}>Back</Button
+      >
+    {/if}
+    {#if current < total - 1}
+      <Button
+        variant="primary"
+        size="lg"
+        title="Next question (→)"
+        onclick={next}>Next</Button
+      >
+    {:else}
+      <Button
+        variant="primary"
+        size="lg"
+        title="Submit all answers (⌘/Ctrl+Enter)"
+        onclick={submit}>Submit</Button
+      >
+    {/if}
+  </div>
+</div>
+
+<style>
+  .qna {
+    outline: none;
+    display: flex;
+    flex-direction: column;
+  }
+  .head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  h2 {
+    font-size: 16px;
+    margin: 0;
+    font-weight: 600;
+  }
+  .progress {
+    color: var(--text-faint);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .card {
+    max-height: min(48vh, 420px);
+    overflow-y: auto;
+  }
+  .q {
+    font-size: 15px;
+    font-weight: 550;
+    margin: 0 0 6px;
+    line-height: 1.4;
+  }
+  .ctx {
+    color: var(--text-muted);
+    font-size: 13px;
+    margin: 0 0 12px;
+    line-height: 1.5;
+  }
+  .opts {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .opt {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    text-align: left;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    padding: 11px 13px;
+    font-size: 15px;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .opt.sel {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .box {
+    font-size: 15px;
+    line-height: 1.4;
+    color: var(--accent);
+    flex: 0 0 auto;
+  }
+  .lbl {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .lbl-main {
+    line-height: 1.4;
+  }
+  .lbl-desc {
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .field {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    padding: 11px 13px;
+    font-size: 15px;
+    color: var(--text);
+    font-family: inherit;
+    outline: none;
+  }
+  .field:focus {
+    border-color: var(--accent);
+  }
+  .field.area {
+    resize: vertical;
+    line-height: 1.5;
+  }
+  .dots {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin: 14px 0 2px;
+  }
+  .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 99px;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-strong);
+    cursor: pointer;
+    padding: 0;
+  }
+  .dot.done {
+    background: color-mix(in srgb, var(--accent) 45%, var(--surface-sunken));
+  }
+  .dot.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    transform: scale(1.25);
+  }
+  .actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
+  }
+  .actions :global(.btn) {
+    flex: 1 1 0;
+  }
+</style>

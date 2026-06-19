@@ -12,6 +12,8 @@ import type {
 import type {
   HostUiRequest,
   HostUiResponse,
+  QnaAnswer,
+  QnaQuestion,
   SessionDriverEvent,
   SessionRef,
 } from "@pilot/protocol";
@@ -148,6 +150,33 @@ export class PiUiBridge {
         resolve(r && "value" in r ? r.value : undefined),
       );
       this.request({ kind: "editor", requestId, title, initialValue: prefill });
+    });
+  }
+
+  // Purpose-built multi-question form. NOT part of pi's ExtensionUIContext —
+  // it's an extra capability pilot offers so an extension that wants a rich Q&A
+  // can render one remotely (the answer extension feature-detects this method
+  // and falls back to ui.custom only in a real terminal). Reachable because pi
+  // hands extensions the raw bridge as `ctx.ui` (runner returns uiContext as-is,
+  // unwrapped), so methods beyond the typed interface are still callable.
+  // Resolves to the per-question answers, or null on cancel/timeout/abort.
+  qna(
+    questions: readonly QnaQuestion[],
+    opts?: ExtensionUIDialogOptions & { title?: string },
+  ): Promise<QnaAnswer[] | null> {
+    const requestId = this.id();
+    return new Promise<QnaAnswer[] | null>((resolve) => {
+      this.pending.set(requestId, (r) =>
+        resolve(r && "answers" in r ? (r.answers as QnaAnswer[]) : null),
+      );
+      this.request({
+        kind: "qna",
+        requestId,
+        title: opts?.title,
+        questions,
+        timeoutMs: opts?.timeout,
+      });
+      this.arm(requestId, opts);
     });
   }
 

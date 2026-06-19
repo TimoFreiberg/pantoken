@@ -2,6 +2,7 @@
   import { isDialogRequest } from "@pilot/protocol";
   import { store } from "../lib/store.svelte.js";
   import Button from "./ui/Button.svelte";
+  import QnaForm from "./QnaForm.svelte";
 
   // Show one dialog at a time — the oldest pending. Resolving it reveals the next.
   const current = $derived(store.session.pendingApprovals[0] ?? null);
@@ -22,6 +23,12 @@
 
   function cancel() {
     if (current) store.respondUi({ requestId: current.requestId, cancelled: true });
+  }
+  // The qna form holds in-progress answers — a stray backdrop tap shouldn't
+  // discard them. Every other dialog is cheap to reopen, so a tap dismisses.
+  function scrimClick() {
+    if (current?.kind === "qna") return;
+    cancel();
   }
   function confirm(value: boolean) {
     if (current) store.respondUi({ requestId: current.requestId, confirmed: value });
@@ -111,8 +118,8 @@
 </script>
 
 {#if current}
-  <div class="scrim" onclick={cancel} role="presentation"></div>
-  <div class="sheet" role="dialog" aria-modal="true">
+  <div class="scrim" onclick={scrimClick} role="presentation"></div>
+  <div class="sheet" class:wide={current.kind === "qna"} role="dialog" aria-modal="true">
     <div class="grip"></div>
 
     {#if current.kind === "confirm"}
@@ -153,6 +160,14 @@
         <Button variant="secondary" size="lg" block title="Cancel this request" onclick={cancel}>Cancel</Button>
         <Button variant="primary" size="lg" block title="Save your edits" onclick={() => submitValue(inputValue)}>Save</Button>
       </div>
+    {:else if current.kind === "qna"}
+      {#key current.requestId}
+        <QnaForm
+          request={current}
+          onsubmit={(answers) => store.respondUi({ requestId: current.requestId, answers })}
+          oncancel={cancel}
+        />
+      {/key}
     {:else if isDialogRequest(current)}
       <!-- unreachable: all dialog kinds handled above -->
     {:else}
@@ -204,6 +219,10 @@
       border-radius: 18px;
       border-bottom: 1px solid var(--border);
     }
+  }
+  /* The qna form carries more content (cards + nav) than a one-shot dialog. */
+  .sheet.wide {
+    width: min(620px, 100%);
   }
   .grip {
     width: 36px;
