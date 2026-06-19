@@ -89,6 +89,16 @@ test("copy button fades back out once the pointer leaves the message", async ({
   context,
 }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  // gotoFresh returns mid-replay, while the greeting turn is still active. An active turn
+  // keeps its "Worked for Ns" block expanded; runCompleted then collapses it, which yanks
+  // the assistant row upward. hover() is one-shot — it parks the cursor at the row's
+  // current centre — so a hover taken before that collapse is left stranded off the row,
+  // `:hover` drops, and the copy button never animates to opacity 1. Wait for the work
+  // block to collapse (aria-expanded="false" ⇒ turn settled, layout final) before hovering.
+  await expect(page.getByTestId("work-toggle")).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
   const assistant = page.locator(".row.assistant").last();
   const copy = assistant.getByRole("button", { name: "Copy message" });
   // Hover reveals it (opacity animates to 1).
