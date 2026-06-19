@@ -131,6 +131,24 @@ export function isBuildStale(
   return builtSha !== remoteSha;
 }
 
+/** /health and /update/state must hit the SAME server: behind-detection + the notification
+ *  read /health, the update card is driven by POST /update/state. They derive from one base
+ *  unless individually overridden, so a config that pins one URL but not the other (the bug
+ *  that silently hid the card while notifications still fired) makes them disagree. Returns
+ *  "<a> vs <b>" on mismatch for a loud startup warning, else null. */
+export function originMismatch(
+  healthUrl: string,
+  updateUrl: string,
+): string | null {
+  try {
+    const h = new URL(healthUrl).origin;
+    const u = new URL(updateUrl).origin;
+    return h === u ? null : `${h} vs ${u}`;
+  } catch {
+    return null; // unparseable URLs surface elsewhere; don't block startup on this check
+  }
+}
+
 /** Did `bun.lock` change across the pull? Drives whether we reinstall. Treats
  *  appearance/disappearance (null↔string) as a change; both-absent as no change. */
 export function lockfileChanged(
@@ -537,9 +555,19 @@ export async function runWatcher(cfg: WatcherConfig): Promise<never> {
         `${cfg.remote}/${cfg.branch}).`,
     );
   }
+  const mismatch = originMismatch(cfg.healthUrl, cfg.updateUrl);
+  if (mismatch) {
+    log(
+      `WARNING: /health and /update/state point at different servers (${mismatch}). ` +
+        `The update card is driven by POST /update/state — if that's the wrong server the ` +
+        `card never shows even though health-derived notifications still fire. Pin PILOT_PORT ` +
+        `(or set PILOT_HEALTH_URL and PILOT_UPDATE_URL consistently).`,
+    );
+  }
   log(
     `watching ${cfg.clone} @ ${cfg.remote}/${cfg.branch} — fetch every ${cfg.intervalMs}ms, ` +
-      `poll ${cfg.pollMs}ms (health ${cfg.healthUrl}${cfg.dryRun ? ", DRY-RUN" : ""})`,
+      `poll ${cfg.pollMs}ms (health ${cfg.healthUrl}, update ${cfg.updateUrl}` +
+      `${cfg.dryRun ? ", DRY-RUN" : ""})`,
   );
 
   let stopping = false;

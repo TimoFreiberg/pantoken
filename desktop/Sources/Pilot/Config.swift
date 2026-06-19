@@ -50,13 +50,18 @@ struct Config {
         return env
     }
 
-    /// Environment for the update-watcher: point it at this clone, this server's /health,
-    /// and the same data dir (so it finds pilot.pid for the restart signal).
+    /// Environment for the update-watcher: point it at this clone, this server's port, and
+    /// the same data dir (so it finds pilot.pid for the restart signal).
     func watcherEnv() -> [String: String] {
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = augmentedPATH
         env["PILOT_APP_CLONE"] = clone.path
-        env["PILOT_HEALTH_URL"] = "http://127.0.0.1:\(serverPort)/health"
+        // Pin the PORT, not individual URLs. The watcher derives BOTH /health and
+        // /update/state from this. Pinning only PILOT_HEALTH_URL (the old bug) left
+        // /update/state defaulting to :8787, so the watcher's card-state POSTs silently
+        // missed the app's auto-assigned server — the update card never showed even as the
+        // (health-derived) notification fired. One source of truth → no half-pinned config.
+        env["PILOT_PORT"] = String(serverPort)
         env["PILOT_DATA_DIR"] = dataDir.path
         // The app owns notifications now (AppDelegate posts via UNUserNotificationCenter on
         // the watcher's `update-deferred` stdout event). Disable the watcher's own osascript

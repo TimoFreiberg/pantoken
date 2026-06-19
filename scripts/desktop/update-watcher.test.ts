@@ -5,6 +5,7 @@ import {
   isBuildStale,
   isBusyFromHealth,
   lockfileChanged,
+  originMismatch,
   parseServerPid,
   shouldNotify,
 } from "./update-watcher.js";
@@ -38,6 +39,28 @@ describe("isBuildStale", () => {
   });
   test("no build stamped yet (fresh clone) → stale, so the first tick builds it", () => {
     expect(isBuildStale(null, "abc123")).toBe(true);
+  });
+});
+
+describe("originMismatch", () => {
+  test("same origin → no mismatch", () => {
+    expect(
+      originMismatch(
+        "http://127.0.0.1:60517/health",
+        "http://127.0.0.1:60517/update/state",
+      ),
+    ).toBeNull();
+  });
+  test("different port → mismatch (the half-pinned-config bug that hid the card)", () => {
+    expect(
+      originMismatch(
+        "http://127.0.0.1:60517/health",
+        "http://127.0.0.1:8787/update/state",
+      ),
+    ).toBe("http://127.0.0.1:60517 vs http://127.0.0.1:8787");
+  });
+  test("unparseable URL → null (don't block startup on this check)", () => {
+    expect(originMismatch("not a url", "also not")).toBeNull();
   });
 });
 
