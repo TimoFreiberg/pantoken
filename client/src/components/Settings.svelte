@@ -40,6 +40,9 @@
   // Provider credentials + global model config (server-authoritative).
   const providers = $derived(store.providers);
   const defaults = $derived(store.modelDefaults);
+  // The in-progress OAuth sign-in flow (null when none). Rendered as a modal over the
+  // panel; the server drives it via oauthPrompt/oauthProgress/oauthResult.
+  const oauth = $derived(store.oauthFlow);
 
   // Available models grouped by provider — drives both the default-model select and
   // the favorites checklist.
@@ -95,6 +98,16 @@
   let keyProviderId = $state<string | null>(null);
   let keyDraft = $state("");
   let tokenDraft = $state("");
+  // The OAuth paste field (code / redirect URL). Cleared on submit; one prompt is
+  // answered before the next arrives, so no per-prompt reset is needed.
+  let oauthDraft = $state("");
+
+  function submitOauth(): void {
+    const v = oauthDraft.trim();
+    if (!v) return;
+    store.oauthRespond(v);
+    oauthDraft = "";
+  }
 
   function close(): void {
     store.closeSettings();
@@ -243,6 +256,16 @@
                   </div>
                 </div>
                 <div class="actions">
+                  {#if p.oauthSupported && p.authSource !== "oauth"}
+                    <button
+                      class="btn"
+                      data-testid="provider-signin"
+                      title={`Sign in to ${p.name} with OAuth`}
+                      onclick={() => store.oauthLogin(p.id)}
+                    >
+                      Sign in
+                    </button>
+                  {/if}
                   {#if p.apiKeySetupSupported}
                     <Button
                       title={p.authSource === "auth_file"
@@ -261,6 +284,16 @@
                     >
                       Remove
                     </Button>
+                  {/if}
+                  {#if p.authSource === "oauth"}
+                    <button
+                      class="btn danger"
+                      data-testid="provider-signout"
+                      title={`Sign out of ${p.name}`}
+                      onclick={() => store.oauthLogout(p.id)}
+                    >
+                      Sign out
+                    </button>
                   {/if}
                 </div>
               </div>
@@ -412,6 +445,123 @@
           <Button variant="primary" type="submit" title="Save this access token on this device" disabled={!tokenDraft.trim()}>Save</Button>
         </form>
       </section>
+    </div>
+  </div>
+{/if}
+
+{#if oauth}
+  <div class="scrim oauth-scrim" role="presentation"></div>
+  <div
+    class="oauth-dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Provider sign-in"
+    data-testid="oauth-dialog"
+  >
+    <header class="phead">
+      <h2>Signing in</h2>
+      <button
+        class="x"
+        aria-label="Close sign-in"
+        title="Cancel sign-in"
+        onclick={() => store.oauthCancel()}>✕</button
+      >
+    </header>
+    <div class="oauth-body">
+      {#each oauth.progress as line, i (i)}
+        <p class="oauth-progress">{line}</p>
+      {/each}
+
+      {#if oauth.error}
+        <p class="oauth-error" data-testid="oauth-error">{oauth.error}</p>
+      {/if}
+
+      {#if oauth.prompt}
+        {#if oauth.prompt.url}
+          <a
+            class="btn oauth-open"
+            href={oauth.prompt.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open the authorization page in a new tab"
+            data-testid="oauth-open">Open authorization page ↗</a
+          >
+          {#if oauth.prompt.instructions}
+            <p class="note">{oauth.prompt.instructions}</p>
+          {/if}
+        {/if}
+
+        {#if oauth.prompt.kind === "select"}
+          <div class="oauth-options">
+            {#each oauth.prompt.options ?? [] as opt (opt.id)}
+              <button
+                class="btn ghost"
+                title={opt.label}
+                onclick={() => store.oauthRespond(opt.id)}>{opt.label}</button
+              >
+            {/each}
+          </div>
+        {:else}
+          <form
+            class="oauth-form"
+            onsubmit={(e) => {
+              e.preventDefault();
+              submitOauth();
+            }}
+          >
+            <label class="oauth-msg" for="oauth-input">{oauth.prompt.message}</label>
+            <input
+              id="oauth-input"
+              bind:value={oauthDraft}
+              type="text"
+              placeholder={oauth.prompt.placeholder ?? "Paste here…"}
+              autocomplete="off"
+              spellcheck="false"
+              autocapitalize="off"
+              autocorrect="off"
+              data-testid="oauth-input"
+            />
+            <div class="actions">
+              <button
+                class="btn"
+                type="submit"
+                title="Submit and finish sign-in"
+                disabled={!oauthDraft.trim()}>Submit</button
+              >
+              <button
+                class="btn ghost"
+                type="button"
+                title="Cancel sign-in"
+                onclick={() => store.oauthCancel()}>Cancel</button
+              >
+            </div>
+          </form>
+        {/if}
+      {:else if oauth.device}
+        <p class="note">
+          Open
+          <a
+            href={oauth.device.verificationUri}
+            target="_blank"
+            rel="noopener noreferrer">{oauth.device.verificationUri}</a
+          >
+          and enter this code:
+        </p>
+        <p class="oauth-code" data-testid="oauth-device-code">
+          {oauth.device.userCode}
+        </p>
+      {:else if oauth.done}
+        <p class="oauth-progress" data-testid="oauth-done">
+          {oauth.error ? "Sign-in failed." : "Signed in ✓"}
+        </p>
+        <div class="actions">
+          <button class="btn" title="Close" onclick={() => store.closeOauth()}
+            >Close</button
+          >
+        </div>
+      {:else}
+        <p class="oauth-progress">Working…</p>
+      {/if}
     </div>
   </div>
 {/if}
@@ -656,6 +806,95 @@
   }
   .tokenform input:focus {
     border-color: var(--accent);
+  }
+  /* OAuth sign-in modal — sits above the settings panel (z 60/61). */
+  .oauth-scrim {
+    z-index: 70;
+    background: rgba(20, 19, 18, 0.45);
+  }
+  .oauth-dialog {
+    position: fixed;
+    z-index: 71;
+    left: 50%;
+    bottom: 0;
+    transform: translateX(-50%);
+    width: min(460px, 100%);
+    max-height: 88dvh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-bottom: none;
+    border-radius: 20px 20px 0 0;
+    box-shadow: var(--shadow-pop);
+    animation: rise 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  @media (min-width: 600px) {
+    .oauth-dialog {
+      top: 50%;
+      bottom: auto;
+      transform: translate(-50%, -50%);
+      border-radius: 18px;
+      border-bottom: 1px solid var(--border);
+    }
+  }
+  .oauth-body {
+    overflow-y: auto;
+    padding: 14px 20px calc(20px + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .oauth-progress {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .oauth-error {
+    font-size: 13px;
+    color: var(--danger);
+    margin: 0;
+  }
+  .oauth-open {
+    align-self: flex-start;
+    text-decoration: none;
+  }
+  .oauth-msg {
+    font-size: 13px;
+    color: var(--text);
+  }
+  .oauth-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .oauth-form input {
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    padding: 9px 11px;
+    font-size: 16px;
+    background: var(--bg);
+    color: var(--text);
+    outline: none;
+  }
+  .oauth-form input:focus {
+    border-color: var(--accent);
+  }
+  .oauth-options {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .oauth-code {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 22px;
+    letter-spacing: 0.1em;
+    color: var(--text);
+    text-align: center;
+    margin: 4px 0;
+    user-select: all;
   }
   @keyframes rise {
     from {

@@ -11,7 +11,7 @@ import type {
   SessionRef,
   SessionSnapshot,
 } from "@pilot/protocol";
-import type { PilotDriver, TrustEvent } from "./driver.js";
+import type { OAuthLoginIO, PilotDriver, TrustEvent } from "./driver.js";
 import { SessionHub } from "./hub.js";
 
 const ref: SessionRef = { workspaceId: "w", sessionId: "s" };
@@ -159,6 +159,15 @@ class FakeDriver implements PilotDriver {
         hasAuth: false,
         authSource: "none",
         apiKeySetupSupported: true,
+        oauthSupported: false,
+      },
+      {
+        id: "anthropic",
+        name: "Anthropic (Claude Pro/Max)",
+        hasAuth: false,
+        authSource: "none",
+        apiKeySetupSupported: false,
+        oauthSupported: true,
       },
     ];
   }
@@ -168,6 +177,21 @@ class FakeDriver implements PilotDriver {
   }
   async removeProviderApiKey(providerId: string) {
     this.providerRemoveCalls.push(providerId);
+  }
+  // Drive the interactive OAuth flow deterministically: announce, surface one paste
+  // prompt, accept any non-null answer, abort on cancel.
+  readonly oauthLogoutCalls: string[] = [];
+  async oauthLogin(providerId: string, io: OAuthLoginIO) {
+    io.progress(`Opening ${providerId} authorization…`);
+    const answer = await io.prompt({
+      kind: "input",
+      message: "Paste the authorization code",
+      url: `https://example.com/oauth/authorize?p=${providerId}`,
+    });
+    if (answer == null) throw new Error("OAuth login cancelled");
+  }
+  async oauthLogout(providerId: string) {
+    this.oauthLogoutCalls.push(providerId);
   }
   async getModelDefaults(): Promise<ModelDefaults> {
     return {
@@ -723,6 +747,109 @@ describe("SessionHub", () => {
       ),
     ).toBe(true);
     expect(a.received.some((m) => m.type === "providerList")).toBe(false);
+  });
+
+  test("oauthLogin surfaces a prompt; answering it completes the login + rebroadcasts providers", async () => {
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    const a = client();
+    hub.addClient(a.send);
+    await flush();
+    a.received.length = 0;
+
+    hub.handleClient(a.send, { type: "oauthLogin", providerId: "anthropic" });
+    await flush();
+
+    const prompt = a.received.find((m) => m.type === "oauthPrompt");
+    expect(prompt?.type).toBe("oauthPrompt");
+    if (prompt?.type !== "oauthPrompt") throw new Error("no prompt broadcast");
+    expect(prompt.providerId).toBe("anthropic");
+    expect(prompt.prompt.url).toBeTruthy();
+    // progress reached clients too
+    expect(a.received.some((m) => m.type === "oauthProgress")).toBe(true);
+
+    hub.handleClient(a.send, {
+      type: "oauthRespond",
+      requestId: prompt.requestId,
+      value: "the-auth-code",
+    });
+    await flush();
+
+    // the prompt is dismissed, the login reports success, and providers refresh
+    expect(
+      a.received.some(
+        (m) => m.type === "oauthResolved" && m.requestId === prompt.requestId,
+      ),
+    ).toBe(true);
+    expect(a.received.find((m) => m.type === "oauthResult")).toMatchObject({
+      providerId: "anthropic",
+      ok: true,
+    });
+    expect(a.received.some((m) => m.type === "providerList")).toBe(true);
+  });
+
+  test("cancelling an oauth prompt (null) fails the login", async () => {
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    const a = client();
+    hub.addClient(a.send);
+    await flush();
+    a.received.length = 0;
+
+    hub.handleClient(a.send, { type: "oauthLogin", providerId: "anthropic" });
+    await flush();
+    const prompt = a.received.find((m) => m.type === "oauthPrompt");
+    if (prompt?.type !== "oauthPrompt") throw new Error("no prompt broadcast");
+
+    hub.handleClient(a.send, {
+      type: "oauthRespond",
+      requestId: prompt.requestId,
+      value: null,
+    });
+    await flush();
+
+    expect(a.received.find((m) => m.type === "oauthResult")).toMatchObject({
+      providerId: "anthropic",
+      ok: false,
+    });
+  });
+
+  test("oauthLogin is single-flight: a second login while one pends is refused", async () => {
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    const a = client();
+    hub.addClient(a.send);
+    await flush();
+    a.received.length = 0;
+
+    hub.handleClient(a.send, { type: "oauthLogin", providerId: "anthropic" });
+    await flush();
+    hub.handleClient(a.send, {
+      type: "oauthLogin",
+      providerId: "openai-codex",
+    });
+    await flush();
+
+    expect(
+      a.received.some(
+        (m) => m.type === "error" && /already in progress/.test(m.message),
+      ),
+    ).toBe(true);
+  });
+
+  test("oauthLogout routes to the driver and rebroadcasts the provider list", async () => {
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    const a = client();
+    hub.addClient(a.send);
+    await flush();
+    a.received.length = 0;
+
+    hub.handleClient(a.send, { type: "oauthLogout", providerId: "anthropic" });
+    await flush();
+
+    expect(d.oauthLogoutCalls).toEqual(["anthropic"]);
+    expect(a.received.some((m) => m.type === "providerList")).toBe(true);
   });
 
   test("default-model / thinking / favorites route to the driver and rebroadcast defaults", async () => {

@@ -13,7 +13,12 @@ import type {
   SessionListEntry,
   SessionUsage,
 } from "@pilot/protocol";
-import type { NewSessionOpts, PilotDriver, TrustEvent } from "./driver.js";
+import type {
+  NewSessionOpts,
+  OAuthLoginIO,
+  PilotDriver,
+  TrustEvent,
+} from "./driver.js";
 import {
   ambient,
   bgRun,
@@ -406,6 +411,36 @@ export class MockDriver implements PilotDriver {
   }
 
   async removeProviderApiKey(providerId: string): Promise<void> {
+    this.providers = this.providers.map((x) =>
+      x.id === providerId ? { ...x, hasAuth: false, authSource: "none" } : x,
+    );
+  }
+
+  /** Simulate the remote browser OAuth flow deterministically: announce, hand back a
+   *  fake authorize URL + paste field, accept any non-empty answer, mark connected.
+   *  A cancelled prompt (null) aborts like the real flow. */
+  async oauthLogin(providerId: string, io: OAuthLoginIO): Promise<void> {
+    const p = this.providers.find((x) => x.id === providerId);
+    if (!p) throw new Error(`unknown provider ${providerId}`);
+    if (!p.oauthSupported)
+      throw new Error(`OAuth login isn't supported for ${providerId}`);
+    io.progress(`Opening ${p.name} authorization…`);
+    const answer = await io.prompt({
+      kind: "input",
+      message: "Paste the authorization code or the full redirect URL",
+      placeholder: "code, or http://localhost/callback?code=…",
+      url: `https://example.com/oauth/authorize?mock=${providerId}`,
+      instructions:
+        "(mock) Open the link, then paste anything back to complete sign-in.",
+    });
+    if (answer == null) throw new Error("OAuth login cancelled");
+    io.progress("Exchanging authorization code for tokens…");
+    this.providers = this.providers.map((x) =>
+      x.id === providerId ? { ...x, hasAuth: true, authSource: "oauth" } : x,
+    );
+  }
+
+  async oauthLogout(providerId: string): Promise<void> {
     this.providers = this.providers.map((x) =>
       x.id === providerId ? { ...x, hasAuth: false, authSource: "none" } : x,
     );

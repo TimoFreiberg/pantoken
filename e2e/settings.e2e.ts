@@ -38,6 +38,58 @@ test("saving a provider API key flips it to connected", async ({ page }) => {
   await expect(google.getByRole("button", { name: "Remove" })).toBeVisible();
 });
 
+test("OAuth sign-in flow connects a provider", async ({ page }) => {
+  await page.getByTestId("settings-toggle").click();
+
+  // OpenAI Codex ships OAuth-capable but unconnected in the mock.
+  const codex = page.getByTestId("provider-openai-codex");
+  await expect(codex.getByText("Not connected")).toBeVisible();
+  await codex.getByTestId("provider-signin").click();
+
+  // The interactive dialog surfaces the authorize link + a paste field — the remote
+  // flow: open on the phone, paste the code back (no Tailscale callback needed).
+  const dialog = page.getByTestId("oauth-dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByTestId("oauth-open")).toBeVisible();
+  await dialog.getByTestId("oauth-input").fill("mock-auth-code");
+  await dialog.getByRole("button", { name: "Submit" }).click();
+
+  // The login completes; closing the success state reveals the flipped row.
+  await expect(dialog.getByTestId("oauth-done")).toBeVisible();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(codex.getByText("Connected · OAuth")).toBeVisible();
+  await expect(codex.getByTestId("provider-signout")).toBeVisible();
+});
+
+test("cancelling the OAuth dialog leaves the provider unconnected", async ({
+  page,
+}) => {
+  await page.getByTestId("settings-toggle").click();
+  const codex = page.getByTestId("provider-openai-codex");
+  await codex.getByTestId("provider-signin").click();
+
+  const dialog = page.getByTestId("oauth-dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+
+  await expect(dialog).toBeHidden();
+  await expect(codex.getByText("Not connected")).toBeVisible();
+  await expect(codex.getByTestId("provider-signin")).toBeVisible();
+});
+
+test("OAuth sign-out disconnects a provider", async ({ page }) => {
+  await page.getByTestId("settings-toggle").click();
+
+  // Anthropic ships OAuth-connected in the mock.
+  const anthropic = page.getByTestId("provider-anthropic");
+  await expect(anthropic.getByText("Connected · OAuth")).toBeVisible();
+  await anthropic.getByTestId("provider-signout").click();
+
+  // Round-trips back as a refreshed provider list: now disconnected + signable-in.
+  await expect(anthropic.getByText("Not connected")).toBeVisible();
+  await expect(anthropic.getByTestId("provider-signin")).toBeVisible();
+});
+
 test("setting a default model persists in the panel", async ({ page }) => {
   await page.getByTestId("settings-toggle").click();
   const select = page.getByTestId("default-model");

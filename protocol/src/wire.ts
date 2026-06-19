@@ -11,6 +11,8 @@ import type {
   ImageContent,
   ModelDefaults,
   ModelOption,
+  OAuthDeviceInfo,
+  OAuthLoginPrompt,
   ProviderInfo,
   SessionDriverEvent,
   SessionId,
@@ -99,6 +101,26 @@ export type ServerMessage =
       sha?: string;
       applying: boolean;
     }
+  /** A step in an in-progress OAuth login needs the operator's answer (open a URL +
+   *  paste the code, or pick a login method). Broadcast to every client; the first
+   *  `oauthRespond` with a matching requestId wins. See {@link OAuthLoginPrompt}. */
+  | {
+      type: "oauthPrompt";
+      requestId: string;
+      providerId: string;
+      prompt: OAuthLoginPrompt;
+    }
+  /** Progress text for an in-progress OAuth login (e.g. "Exchanging code for tokens…"). */
+  | { type: "oauthProgress"; providerId: string; message: string }
+  /** A device-code OAuth login wants the operator to open a URL and enter a code; the
+   *  flow then completes by background polling. See {@link OAuthDeviceInfo}. */
+  | ({ type: "oauthDeviceCode"; providerId: string } & OAuthDeviceInfo)
+  /** A pending OAuth prompt settled (answered elsewhere, cancelled, or timed out).
+   *  Clients dismiss the prompt for this requestId. */
+  | { type: "oauthResolved"; requestId: string }
+  /** An OAuth login finished — `ok` once credentials are stored, else `error` says why.
+   *  Clients close the flow; the provider + model lists re-broadcast alongside. */
+  | { type: "oauthResult"; providerId: string; ok: boolean; error?: string }
   | { type: "error"; message: string };
 
 export type ClientMessage =
@@ -127,6 +149,15 @@ export type ClientMessage =
   | { type: "setProviderApiKey"; providerId: string; apiKey: string }
   /** Remove a pilot-saved API key for a provider (auth_file source only). */
   | { type: "removeProviderApiKey"; providerId: string }
+  /** Start an interactive OAuth login for a provider (pi's OAuth registry). The server
+   *  drives the flow — surfacing `oauthPrompt`/`oauthProgress`/`oauthDeviceCode` and
+   *  finishing with `oauthResult` — then re-broadcasts the provider + model lists. */
+  | { type: "oauthLogin"; providerId: string }
+  /** Answer the current OAuth prompt. `value` is the pasted code/URL or the selected
+   *  option id; null cancels the login. First matching answer wins (others no-op). */
+  | { type: "oauthRespond"; requestId: string; value: string | null }
+  /** Sign out of an OAuth provider (clears its stored credentials in auth.json). */
+  | { type: "oauthLogout"; providerId: string }
   /** Set pi's global default model for NEW sessions (not the current one). */
   | { type: "setDefaultModel"; provider: string; modelId: string }
   /** Set pi's global default thinking level for NEW sessions. */

@@ -12,9 +12,14 @@ import {
   type SessionId,
   type SessionState,
 } from "@pilot/protocol";
-import type { PilotDriver } from "./driver.js";
+import type { OAuthLoginIO, PilotDriver } from "./driver.js";
 
 export type Send = (msg: ServerMessage) => void;
+
+// How long an OAuth prompt waits for the operator before the login aborts itself. The
+// browser hop + copy/paste is slow but human-paced; a few minutes is generous without
+// leaving a zombie login (and its loopback server) pending forever if a phone is closed.
+const OAUTH_PROMPT_TIMEOUT_MS = 5 * 60 * 1000;
 
 /** What the hub hands to a notifier (e.g. the Web Push sender) for notable events. */
 export interface HubNotification {
@@ -69,6 +74,14 @@ export class SessionHub {
   // sidebar card's "update now" — the watcher reads it back on its next poll and applies.
   private updateSha: string | null = null;
   private applying = false;
+  // OAuth login (Settings panel) is a GLOBAL interactive flow — it writes pi's shared
+  // auth.json, not a session — so it rides its own wire messages, not the session-scoped
+  // Host UI channel. While a login runs, its prompts wait here keyed by requestId; an
+  // `oauthRespond` resolves one (first-responder-wins across devices). Single-flight:
+  // one login at a time keeps the pending map unambiguous (a single user, one browser).
+  private oauthPending = new Map<string, (value: string | null) => void>();
+  private oauthSeq = 0;
+  private oauthInFlight = false;
 
   constructor(
     private driver: PilotDriver,
@@ -325,6 +338,77 @@ export class SessionHub {
         message: e instanceof Error ? e.message : String(e),
       });
       return;
+    }
+    await this.broadcastProviderList();
+    await this.broadcastModelList();
+    await this.broadcastModelDefaults();
+  }
+
+  /** Run an interactive OAuth login end to end: hand the driver an IO that broadcasts
+   *  each prompt + awaits the answer, report the terminal result, then refresh the
+   *  provider/model lists (a fresh sign-in shifts model availability). Single-flight —
+   *  a second login while one is pending is refused, so the pending map stays unambiguous. */
+  private async runOAuthLogin(send: Send, providerId: string): Promise<void> {
+    if (!this.driver.oauthLogin) {
+      send({ type: "error", message: "this driver can't do OAuth login" });
+      return;
+    }
+    if (this.oauthInFlight) {
+      send({
+        type: "error",
+        message:
+          "an OAuth login is already in progress — finish or cancel it first",
+      });
+      return;
+    }
+    this.oauthInFlight = true;
+    const io: OAuthLoginIO = {
+      prompt: (prompt) => {
+        const requestId = `oauth-${this.serverId}-${++this.oauthSeq}`;
+        return new Promise<string | null>((resolve) => {
+          const timer = setTimeout(() => {
+            if (this.oauthPending.delete(requestId)) {
+              this.broadcast({ type: "oauthResolved", requestId });
+              resolve(null); // timed out — the driver treats null as a cancel
+            }
+          }, OAUTH_PROMPT_TIMEOUT_MS);
+          (timer as { unref?: () => void }).unref?.();
+          this.oauthPending.set(requestId, (value) => {
+            clearTimeout(timer);
+            resolve(value);
+          });
+          this.broadcast({
+            type: "oauthPrompt",
+            requestId,
+            providerId,
+            prompt,
+          });
+        });
+      },
+      progress: (message) =>
+        this.broadcast({ type: "oauthProgress", providerId, message }),
+      deviceCode: (info) =>
+        this.broadcast({ type: "oauthDeviceCode", providerId, ...info }),
+    };
+    try {
+      await this.driver.oauthLogin(providerId, io);
+      this.broadcast({ type: "oauthResult", providerId, ok: true });
+    } catch (e) {
+      this.broadcast({
+        type: "oauthResult",
+        providerId,
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      this.oauthInFlight = false;
+      // Resolve (null) + dismiss any prompt still pending — a thrown/aborted login
+      // shouldn't leave a dangling dialog on clients or a leaked resolver here.
+      for (const [requestId, resolve] of this.oauthPending) {
+        this.broadcast({ type: "oauthResolved", requestId });
+        resolve(null);
+      }
+      this.oauthPending.clear();
     }
     await this.broadcastProviderList();
     await this.broadcastModelList();
@@ -628,6 +712,24 @@ export class SessionHub {
       case "removeProviderApiKey":
         void this.applyProviderKey(send, () =>
           this.driver.removeProviderApiKey?.(msg.providerId),
+        );
+        return;
+      case "oauthLogin":
+        void this.runOAuthLogin(send, msg.providerId);
+        return;
+      case "oauthRespond": {
+        // First-responder-wins: only the first answer for a still-pending prompt
+        // reaches the driver; a second device answering the same id no-ops.
+        const resolve = this.oauthPending.get(msg.requestId);
+        if (!resolve) return;
+        this.oauthPending.delete(msg.requestId);
+        this.broadcast({ type: "oauthResolved", requestId: msg.requestId });
+        resolve(msg.value);
+        return;
+      }
+      case "oauthLogout":
+        void this.applyProviderKey(send, () =>
+          this.driver.oauthLogout?.(msg.providerId),
         );
         return;
       case "setDefaultModel":

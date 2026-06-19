@@ -106,6 +106,50 @@ export interface ProviderInfo {
   readonly authSource: "none" | "oauth" | "auth_file" | "env" | "external";
   /** Whether pilot can set a plain API key for this provider (pi's curated set). */
   readonly apiKeySetupSupported: boolean;
+  /** Whether pilot can start an OAuth sign-in for this provider (it's in pi's OAuth
+   *  registry — Anthropic Claude Pro/Max, OpenAI Codex, GitHub Copilot). Drives the
+   *  "Sign in" button; `authSource === "oauth"` means already signed in, so offer
+   *  sign-out instead. */
+  readonly oauthSupported: boolean;
+}
+
+// --- OAuth provider login (global + interactive, like the trust channel) ---
+// Sign-in is a global action (it writes pi's shared auth.json, not a session), so it
+// travels its own wire messages rather than the session-scoped Host UI / event stream.
+// The flow can be remote: pi opens an authorize URL the operator loads on their phone,
+// then they paste the resulting code/redirect-URL back — no callback reachable over
+// Tailscale needed (pi's loginAnthropic races a localhost loopback against this paste).
+
+/** One option in an OAuth `select` step (e.g. browser vs device-code login method). */
+export interface OAuthSelectOption {
+  readonly id: string;
+  readonly label: string;
+}
+
+/** One interactive step in an OAuth login the operator must answer. Surfaced by the
+ *  server during {@link PilotDriver.oauthLogin}; the client renders it and sends the
+ *  answer back via the `oauthRespond` client message. */
+export interface OAuthLoginPrompt {
+  /** "input": free text — paste an authorization code or the full redirect URL.
+   *  "select": choose one of `options` (the answer is the chosen option's id). */
+  readonly kind: "input" | "select";
+  readonly message: string;
+  readonly placeholder?: string;
+  /** The authorize URL to open in a browser. Present on the first step of a browser
+   *  flow — open it, complete login, paste the code back. Absent on follow-up steps. */
+  readonly url?: string;
+  readonly instructions?: string;
+  /** Present for `kind: "select"`. */
+  readonly options?: readonly OAuthSelectOption[];
+}
+
+/** A device-code prompt (OpenAI Codex / GitHub Copilot device flow): show the user code
+ *  + verification URL. The login completes by background polling, so there's no value to
+ *  send back — it's informational. */
+export interface OAuthDeviceInfo {
+  readonly userCode: string;
+  readonly verificationUri: string;
+  readonly expiresInSeconds?: number;
 }
 
 /** Pilot's view of pi's GLOBAL model config (not per-session): the default new
