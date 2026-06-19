@@ -24,6 +24,16 @@
   const isTouch =
     typeof navigator !== "undefined" && navigator.maxTouchPoints > 0;
 
+  // The branch handle of the most recent user prompt — the target of the
+  // Cmd/Ctrl+Shift+↑ "branch from last prompt" hotkey, so its button can advertise the
+  // shortcut. undefined when no prompt carries an entry id yet.
+  const lastUserEntryId = $derived.by(() => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i];
+      if (it && it.kind === "user" && it.entryId) return it.entryId;
+    }
+    return undefined;
+  });
   // Two view-model passes (pure, unit-tested in transcript-view.test.ts):
   //   1. mergeTools — uninterrupted runs of every tool except write/edit fold into
   //      one summary card.
@@ -214,7 +224,9 @@
     function onKey(e: KeyboardEvent): void {
       if ((e.metaKey || e.ctrlKey) && e.key === "ArrowUp") {
         e.preventDefault();
-        jumpToLastPrompt();
+        // Shift = act on the last prompt (branch/re-edit); plain = just scroll to it.
+        if (e.shiftKey) store.branchLastPrompt();
+        else jumpToLastPrompt();
       }
     }
     window.addEventListener("keydown", onKey);
@@ -225,14 +237,55 @@
 <div class="transcript-wrap">
 <div class="scroller" class:touch={isTouch} bind:this={scroller} onscroll={onScroll}>
   <div class="col">
+    <!-- Branch ("jump here") affordance — a git-fork glyph. Reused on user prompts and
+         turn-final assistant paragraphs. -->
+    {#snippet branchIcon()}
+      <svg
+        class="ico"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <circle cx="6" cy="5" r="2.2" />
+        <circle cx="6" cy="19" r="2.2" />
+        <circle cx="18" cy="9" r="2.2" />
+        <path d="M6 7.2v9.6" />
+        <path d="M18 11.2v.6a4 4 0 0 1-4 4H6" />
+      </svg>
+    {/snippet}
+
     <!-- One transcript item, rendered the same whether it sits in a turn's collapsible
          work block or as the visible final response. -->
     {#snippet itemView(item: DisplayItem)}
       {#if item.kind === "user"}
         <div class="row user">
           <div class="bubble">{item.text}</div>
-          {#if item.ts}
-            <time class="ts" datetime={item.ts} title={exactTime(item.ts)}>{relativeTime(item.ts)}</time>
+          {#if item.entryId || item.ts}
+            <div class="umeta">
+              {#if item.entryId}
+                <button
+                  class="branch"
+                  type="button"
+                  onclick={(e) => {
+                    if (item.entryId) store.branch(item.entryId);
+                    e.currentTarget.blur();
+                  }}
+                  title={item.entryId === lastUserEntryId
+                    ? "Branch from this prompt — edit & resend (⌘⇧↑)"
+                    : "Branch from this prompt — edit & resend"}
+                  aria-label="Branch from this prompt"
+                >
+                  {@render branchIcon()}
+                </button>
+              {/if}
+              {#if item.ts}
+                <time class="ts" datetime={item.ts} title={exactTime(item.ts)}>{relativeTime(item.ts)}</time>
+              {/if}
+            </div>
           {/if}
         </div>
       {:else if item.kind === "assistant"}
@@ -299,6 +352,20 @@
                   </svg>
                 {/if}
               </button>
+              {#if item.entryId}
+                <button
+                  class="branch"
+                  type="button"
+                  onclick={(e) => {
+                    if (item.entryId) store.branch(item.entryId);
+                    e.currentTarget.blur();
+                  }}
+                  title="Branch from here — continue on a new path"
+                  aria-label="Branch from here"
+                >
+                  {@render branchIcon()}
+                </button>
+              {/if}
               {#if item.ts}
                 <time class="ts" datetime={item.ts} title={exactTime(item.ts)}>{relativeTime(item.ts)}</time>
               {/if}
@@ -572,6 +639,58 @@
   .copy:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
+  }
+  /* user prompt footer: branch button + timestamp, right-aligned under the bubble */
+  .row.user .umeta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .row.user .umeta .ts {
+    margin-top: 0;
+  }
+  /* branch ("jump here") button — same quiet, hover-revealed treatment as copy */
+  .branch {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    padding: 4px;
+    border-radius: var(--radius-xs);
+    opacity: 0;
+    cursor: pointer;
+    transition:
+      opacity 0.12s ease,
+      color 0.12s ease,
+      border-color 0.12s ease;
+  }
+  .branch .ico {
+    display: block;
+    width: 13px;
+    height: 13px;
+  }
+  .assistant:hover .branch,
+  .row.user:hover .branch,
+  .branch:focus-visible {
+    opacity: 1;
+  }
+  .branch:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+  .branch:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  /* Touch devices have no hover — keep branch reachable (phone is the primary target). */
+  @media (max-width: 859px) {
+    .branch {
+      opacity: 1;
+    }
   }
   .notice {
     flex-direction: row;

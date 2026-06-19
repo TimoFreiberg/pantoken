@@ -133,6 +133,10 @@ export type ServerMessage =
   /** An OAuth login finished — `ok` once credentials are stored, else `error` says why.
    *  Clients close the flow; the provider + model lists re-broadcast alongside. */
   | { type: "oauthResult"; providerId: string; ok: boolean; error?: string }
+  /** Prefill the composer after a branch landed on a user prompt — navigateTree hands
+   *  back that prompt's text for re-editing. Sent ONLY to the client that asked to
+   *  branch (per-client composer state, never broadcast / folded into shared state). */
+  | { type: "editorPrefill"; text: string }
   | { type: "error"; message: string };
 
 export type ClientMessage =
@@ -181,6 +185,19 @@ export type ClientMessage =
   | { type: "listProviders" }
   /** Switch the active session to this .jsonl path. */
   | { type: "openSession"; path: string }
+  /** Jump the session to a prior tree entry and branch from it (pi's /tree). `entryId`
+   *  is a pilot transcript item's `entryId` (a pi tree node). The server calls
+   *  navigateTree, then re-seeds every client's transcript to the new branch; if the
+   *  target was a user prompt, the requester also gets an `editorPrefill` with its text.
+   *  `summarize` asks pi to summarize the abandoned branch first (an LLM call) — the UI
+   *  ships without it, but the flag is carried so the summarize path is additive later.
+   *  Omit sessionId to target the focused session. */
+  | {
+      type: "branch";
+      entryId: string;
+      summarize?: boolean;
+      sessionId?: SessionId;
+    }
   /** Create a fresh session and make it active. `cwd` (an absolute dir, D12
    *  arbitrary GUI paths) picks the workspace; omit it for $HOME.
    *  `worktree`: create an isolated jj/git worktree of `cwd` and run the session

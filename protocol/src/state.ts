@@ -23,6 +23,10 @@ export interface UserItem {
   images?: readonly ImageContent[];
   /** ISO timestamp of when this user turn was sent. */
   ts?: string;
+  /** pi's tree entry id for this prompt — the handle "branch from this prompt" sends to
+   *  the server (→ navigateTree). Distinct from `id` (a synthetic {#each} key); undefined
+   *  until the live backfill / replay supplies it, in which case no branch button shows. */
+  entryId?: string;
 }
 export interface AssistantItem {
   readonly kind: "assistant";
@@ -32,6 +36,9 @@ export interface AssistantItem {
   streaming: boolean;
   /** ISO timestamp of when this assistant turn began. */
   ts?: string;
+  /** pi's tree entry id for this turn — the handle "branch from here" sends to the server.
+   *  Set on the turn-final assistant; absent → no branch button. See UserItem.entryId. */
+  entryId?: string;
   /** ISO timestamp (or epoch-ms string) of when the turn settled — stamped on the
    *  turn-final assistant when a non-running snapshot closes it (runCompleted, or an
    *  idle sessionUpdated/sessionClosed). With `ts` it yields the turn's wall-clock
@@ -146,6 +153,30 @@ function closeOpenAssistant(
   }
 }
 
+/** Backfill a pi tree entry id onto the most recent item of `kind` (the live-path
+ *  branch handle — see RunCompletedEvent). The most recent assistant item is the
+ *  turn-final one; the most recent user item is the turn's prompt. Idempotent: a
+ *  re-fold stamps the same id. */
+function stampLastEntryId(
+  items: TranscriptItem[],
+  kind: "user" | "assistant",
+  entryId: string,
+): void {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (!it) continue;
+    // Literal comparisons so TS narrows `it` to the item type that has `entryId`.
+    if (kind === "user" && it.kind === "user") {
+      it.entryId = entryId;
+      return;
+    }
+    if (kind === "assistant" && it.kind === "assistant") {
+      it.entryId = entryId;
+      return;
+    }
+  }
+}
+
 /** Settle tool cards that never received a matching toolFinished event. This only
  *  runs at authoritative turn boundaries: an idle sessionUpdated can be a transient
  *  mid-tool snapshot (pi's isStreaming briefly reads false), while runCompleted,
@@ -195,8 +226,18 @@ export function foldEvent(
       // Unlike sessionUpdated, runCompleted is an authoritative turn boundary.
       // Settle any tool whose result was never persisted/emitted so replay cannot
       // leave a historical card "running" forever.
-      if (ev.type === "runCompleted")
+      if (ev.type === "runCompleted") {
         interruptRunningTools(state.items, ev.timestamp);
+        // Live-path branch handles: pi only knows the just-completed turn's entry ids
+        // now that its messages have persisted (they can't ride the deltas). Stamp them
+        // onto the turn-final assistant + this turn's user item so the "branch from here"
+        // buttons light up without a reload. No-op on replay (ids ride the per-message
+        // events there) and when the fields are absent.
+        if (ev.assistantEntryId)
+          stampLastEntryId(state.items, "assistant", ev.assistantEntryId);
+        if (ev.userEntryId)
+          stampLastEntryId(state.items, "user", ev.userEntryId);
+      }
       return state;
     }
 
@@ -208,6 +249,9 @@ export function foldEvent(
         text: ev.text,
         images: ev.images,
         ts: ev.timestamp,
+        // entryId rides the event on the replay path; live emits omit it (backfilled at
+        // runCompleted). undefined is fine — the branch button just stays hidden.
+        entryId: ev.entryId,
       });
       return state;
     }
@@ -254,6 +298,10 @@ export function foldEvent(
             thinking: "",
             streaming: true,
             ts: ev.timestamp,
+            // Stamp the branch handle when this delta opens a NEW bubble (replay path).
+            // All deltas of one assistant message carry the same entryId, so a
+            // tool-interleaved message's later bubbles inherit the correct node too.
+            entryId: ev.entryId,
           };
           state.items.push(a);
           return a;

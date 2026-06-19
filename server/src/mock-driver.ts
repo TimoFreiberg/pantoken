@@ -27,10 +27,12 @@ import type {
 import {
   ambient,
   bgRun,
+  branchedSeed,
   compat,
   confirmDialog,
   editDiff,
   errorRun,
+  GREETING_PROMPT,
   greeting,
   idleNoComplete,
   initializingSession,
@@ -483,6 +485,28 @@ export class MockDriver implements PilotDriver {
         }),
       );
     return [...seed, ...pending];
+  }
+
+  /** Deterministic stand-in for pi's navigateTree. A user-prompt target (e-u1) rewinds
+   *  to an empty branch and hands its text back to prefill the composer (the re-edit
+   *  gesture); any other target re-seeds the greeting unchanged (a no-op jump). Real
+   *  tree navigation lives in the pi driver. */
+  async branchFrom(
+    entryId: string,
+    _opts: { summarize?: boolean },
+  ): Promise<{
+    seed: SessionDriverEvent[];
+    editorText?: string;
+    cancelled: boolean;
+  }> {
+    this.cancelTimers();
+    if (entryId === "e-u1")
+      return {
+        seed: branchedSeed(),
+        editorText: GREETING_PROMPT,
+        cancelled: false,
+      };
+    return { seed: greeting().map((s) => s.event), cancelled: false };
   }
 
   async newSession(opts: NewSessionOpts = {}): Promise<SessionDriverEvent[]> {

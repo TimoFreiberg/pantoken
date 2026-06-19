@@ -29,6 +29,7 @@ import {
   type ExtensionUIContext,
   getAgentDir,
   ModelRegistry,
+  type SessionEntry,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -54,8 +55,13 @@ import type {
   PilotDriver,
   TrustEvent,
 } from "../driver.js";
+import { correlateEntryIds } from "./branch-ids.js";
 import { mapPiEvent } from "./event-map.js";
-import { type HistoryMessage, historyToEvents } from "./history-map.js";
+import {
+  contentToText,
+  type HistoryMessage,
+  historyToEvents,
+} from "./history-map.js";
 import { createWorktree, removeWorktree } from "./worktree.js";
 import { WorktreeStore } from "../worktree-store.js";
 import { evictionPlan } from "./warm-cap.js";
@@ -438,39 +444,94 @@ export async function createPiDriver(
     return { label: undefined, description: t?.description };
   };
 
+  // The message-entries on the current branch, root→leaf, as {id, role, text} — the
+  // raw material for correlating replayed messages back to their pi tree node (the id
+  // lives on the entry wrapper, never on the message). Non-message entries (compaction,
+  // branch_summary, model_change, …) are dropped: they don't appear in session.messages.
+  const branchTextEntries = (ws: WarmSession) =>
+    ws.session.sessionManager
+      .getBranch()
+      .filter(
+        (e: SessionEntry): e is Extract<SessionEntry, { type: "message" }> =>
+          e.type === "message",
+      )
+      .map((e) => ({
+        id: e.id,
+        role: (e.message as { role?: string }).role,
+        text: contentToText(
+          (e.message as { content?: unknown }).content as Parameters<
+            typeof contentToText
+          >[0],
+        ),
+      }));
+
+  // Branch handles for the REPLAY seed: align each replayed message to its persisted
+  // entry id (tail-anchored, compaction-safe — see branch-ids.ts). `messages` is the
+  // SAME array seedFor feeds historyToEvents, so the returned ids line up by index.
+  const replayEntryIds = (
+    ws: WarmSession,
+    messages: readonly HistoryMessage[],
+  ): (string | undefined)[] =>
+    correlateEntryIds(
+      messages.map((m) => ({ role: m.role, text: contentToText(m.content) })),
+      branchTextEntries(ws),
+    );
+
+  // Branch handles for a just-completed LIVE turn: the most recent user + assistant
+  // entries on the branch (they've persisted by agent_end). The reducer stamps these
+  // onto the turn-final assistant + this turn's user item via runCompleted.
+  const turnEntryIdsFor = (
+    ws: WarmSession,
+  ): { userEntryId?: string; assistantEntryId?: string } => {
+    let userEntryId: string | undefined;
+    let assistantEntryId: string | undefined;
+    for (const e of ws.session.sessionManager.getBranch()) {
+      if (e.type !== "message") continue;
+      const role = (e.message as { role?: string }).role;
+      if (role === "user") userEntryId = e.id;
+      else if (role === "assistant") assistantEntryId = e.id;
+    }
+    return { userEntryId, assistantEntryId };
+  };
+
   // The seed for a warm session: a sessionOpened snapshot + its replayed history +
   // the bridge's retained ambient UI (status strip / widgets / title — pi can't
   // replay these, so the bridge does; otherwise a switch loses them, DECISIONS.md D5).
   // Emitted to the first subscriber for the startup session; returned (not emitted)
   // from openSession/newSession so the hub resets state and folds it atomically.
-  const seedFor = (ws: WarmSession): SessionDriverEvent[] => [
-    {
-      sessionRef: ws.ref,
-      timestamp: now(),
-      type: "sessionOpened",
-      snapshot: snapshotFor(ws, ws.session.isStreaming ? "running" : "idle"),
-    },
-    ...historyToEvents(
-      ws.session.messages as unknown as readonly HistoryMessage[],
+  const seedFor = (ws: WarmSession): SessionDriverEvent[] => {
+    const messages = ws.session
+      .messages as unknown as readonly HistoryMessage[];
+    return [
       {
-        ref: ws.ref,
-        idleSnapshot: snapshotFor(ws, "idle"),
-        toolMeta: (name) => toolMetaFor(ws, name),
-      },
-    ),
-    ...ws.bridge.ambientSeedEvents(),
-    // Dialogs are live bridge state, not persisted transcript history. Replay any
-    // unresolved request after the history seed so refocusing a chat restores the
-    // answer popup instead of leaving its extension blocked invisibly.
-    ...ws.bridge.pendingRequests().map(
-      (request): SessionDriverEvent => ({
         sessionRef: ws.ref,
         timestamp: now(),
-        type: "hostUiRequest",
-        request,
-      }),
-    ),
-  ];
+        type: "sessionOpened",
+        snapshot: snapshotFor(ws, ws.session.isStreaming ? "running" : "idle"),
+      },
+      ...historyToEvents(
+        messages,
+        {
+          ref: ws.ref,
+          idleSnapshot: snapshotFor(ws, "idle"),
+          toolMeta: (name) => toolMetaFor(ws, name),
+        },
+        replayEntryIds(ws, messages),
+      ),
+      ...ws.bridge.ambientSeedEvents(),
+      // Dialogs are live bridge state, not persisted transcript history. Replay any
+      // unresolved request after the history seed so refocusing a chat restores the
+      // answer popup instead of leaving its extension blocked invisibly.
+      ...ws.bridge.pendingRequests().map(
+        (request): SessionDriverEvent => ({
+          sessionRef: ws.ref,
+          timestamp: now(),
+          type: "hostUiRequest",
+          request,
+        }),
+      ),
+    ];
+  };
 
   // Warm up a brand-new session from a SessionManager: create cwd-bound services (with
   // the per-cwd trust resolver), build the session, bind the UI bridge for approvals,
@@ -558,6 +619,10 @@ export async function createPiDriver(
         // must NOT report idle — that would close the streaming bubble + clear the
         // running indicator. Turn-boundary events still hardcode running/idle.
         liveStatus: () => (ws.session.isStreaming ? "running" : "idle"),
+        // Branch handles for the just-completed turn, read at agent_end (when the
+        // messages have persisted) and stamped onto runCompleted so the live transcript
+        // lights up its "branch from here" buttons without a reload.
+        turnEntryIds: () => turnEntryIdsFor(ws),
       })) {
         emit(out);
       }
@@ -832,6 +897,35 @@ export async function createPiDriver(
       const ws = existing ?? (await warmUp(SessionManager.open(path)));
       focus(ws.ref.sessionId);
       return seedFor(ws);
+    },
+
+    async branchFrom(
+      entryId: string,
+      opts: { summarize?: boolean },
+      sessionId?: SessionId,
+    ) {
+      const ws = target(sessionId);
+      // Throw (not return empty) so the hub's switchTo keeps the current transcript on
+      // failure rather than resetting to a blank state.
+      if (!ws)
+        throw new Error(
+          `no warm session to branch (id=${sessionId ?? "(none)"})`,
+        );
+      const result = await ws.session.navigateTree(entryId, {
+        summarize: opts.summarize ?? false,
+      });
+      // Re-seed from the now-current branch. On a no-op/cancel the branch is unchanged,
+      // so the seed equals the current transcript — the re-seed is harmless either way,
+      // and never blanks state. NOTE: a no-summary jump only moves the in-memory leaf;
+      // it isn't durable until the next prompt appends a child (a cold reopen before
+      // then re-derives the leaf to the file tail). Fine for the warm jump-then-prompt
+      // flow; see docs/TODO.md for the durability follow-up.
+      return {
+        seed: seedFor(ws),
+        editorText: result.editorText,
+        cancelled: result.cancelled,
+        aborted: result.aborted,
+      };
     },
 
     async newSession(opts: NewSessionOpts = {}) {

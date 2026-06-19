@@ -324,6 +324,11 @@ function deltas(
 
 // --- The conversation already present on first load -------------------------
 
+/** The first prompt in the greeting fixture, reused by the mock's branchFrom so a
+ *  branch-from-this-prompt re-edit prefills the composer with the exact text. */
+export const GREETING_PROMPT =
+  "Add a /health route to the server and a smoke test for it.";
+
 export function greeting(): ScriptStep[] {
   const steps: ScriptStep[] = [
     {
@@ -336,7 +341,10 @@ export function greeting(): ScriptStep[] {
         ...base(),
         type: "userMessage",
         id: "u1",
-        text: "Add a /health route to the server and a smoke test for it.",
+        text: GREETING_PROMPT,
+        // Mock branch handle: a stable pi-style entry id so the user prompt offers a
+        // "branch from this prompt" button (the real driver supplies these from pi).
+        entryId: "e-u1",
       },
     },
   ];
@@ -377,10 +385,26 @@ export function greeting(): ScriptStep[] {
         ...base(),
         type: "runCompleted",
         snapshot: snapshot({ status: "idle" }),
+        // Branch handles for this turn so the turn-final assistant offers "branch from
+        // here" (the reducer backfills the live transcript from these).
+        userEntryId: "e-u1",
+        assistantEntryId: "e-a1",
       },
     },
   );
   return steps;
+}
+
+/** Seed for a branch that rewound to before the first prompt: an empty transcript the
+ *  hub re-broadcasts (the mock's branchFrom returns this for the user-prompt target). */
+export function branchedSeed(): SessionDriverEvent[] {
+  return [
+    {
+      ...base(),
+      type: "sessionOpened",
+      snapshot: snapshot({ status: "idle" }),
+    },
+  ];
 }
 
 // --- A rich-markdown turn for verifying full markdown rendering -------------
