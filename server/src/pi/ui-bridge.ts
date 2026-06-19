@@ -31,6 +31,17 @@ export class PiUiBridge {
   private pendingRequestMap = new Map<string, HostUiRequest>();
   private seq = 0;
 
+  // Current ambient UI state, retained so it can be replayed when this session is
+  // (re)seeded on a focus switch. pi can't replay these (DECISIONS.md D5), so the
+  // bridge that owns them does — otherwise switching away and back loses the
+  // status strip / widgets / title until the extension happens to re-emit.
+  private statuses = new Map<string, string>();
+  private widgets = new Map<
+    string,
+    { lines: readonly string[]; placement: "aboveComposer" | "belowComposer" }
+  >();
+  private title: string | undefined;
+
   constructor(
     private ref: SessionRef,
     private emit: (ev: SessionDriverEvent) => void,
@@ -41,17 +52,21 @@ export class PiUiBridge {
     return `ui-${this.now()}-${this.seq++}`;
   }
 
+  private hostUiEvent(request: HostUiRequest): SessionDriverEvent {
+    return {
+      sessionRef: this.ref,
+      timestamp: this.now(),
+      type: "hostUiRequest",
+      request,
+    };
+  }
+
   private request(request: HostUiRequest): void {
     // Blocking requests are replayed when a warm session is refocused. Without this,
     // switching chats while an extension awaits an answer strands the hidden dialog.
     if (this.pending.has(request.requestId))
       this.pendingRequestMap.set(request.requestId, request);
-    this.emit({
-      sessionRef: this.ref,
-      timestamp: this.now(),
-      type: "hostUiRequest",
-      request,
-    });
+    this.emit(this.hostUiEvent(request));
   }
 
   private arm(id: string, opts?: ExtensionUIDialogOptions): void {
@@ -203,6 +218,8 @@ export class PiUiBridge {
   }
 
   setStatus(key: string, text: string | undefined): void {
+    if (text) this.statuses.set(key, text);
+    else this.statuses.delete(key);
     this.request({ kind: "status", requestId: this.id(), key, text });
   }
 
@@ -217,22 +234,61 @@ export class PiUiBridge {
         options?.placement === "belowEditor"
           ? "belowComposer"
           : "aboveComposer";
+      const lines = content as string[] | undefined;
+      // Retain non-empty widgets for replay; an empty/cleared widget drops the entry.
+      if (lines && lines.length > 0)
+        this.widgets.set(key, { lines: [...lines], placement });
+      else this.widgets.delete(key);
       this.request({
         kind: "widget",
         requestId: this.id(),
         key,
-        lines: content as string[] | undefined,
+        lines,
         placement,
       });
     }
   }
 
   setTitle(title: string): void {
+    this.title = title;
     this.request({ kind: "title", requestId: this.id(), title });
   }
 
   setEditorText(text: string): void {
     this.request({ kind: "editorText", requestId: this.id(), text });
+  }
+
+  /**
+   * Reconstruct the current ambient UI (status strip, widgets, title) as
+   * hostUiRequest events, so a session being (re)seeded on focus switch restores
+   * them. `editorText` is intentionally excluded — it's per-client composer prefill,
+   * not shared session state. `notify` is a one-shot toast, not retained.
+   */
+  ambientSeedEvents(): SessionDriverEvent[] {
+    const events: SessionDriverEvent[] = [];
+    for (const [key, text] of this.statuses)
+      events.push(
+        this.hostUiEvent({ kind: "status", requestId: this.id(), key, text }),
+      );
+    for (const [key, { lines, placement }] of this.widgets)
+      events.push(
+        this.hostUiEvent({
+          kind: "widget",
+          requestId: this.id(),
+          key,
+          lines: [...lines],
+          placement,
+        }),
+      );
+    if (this.title !== undefined)
+      events.push(
+        this.hostUiEvent({
+          kind: "title",
+          requestId: this.id(),
+          title: this.title,
+        }),
+      );
+    return events;
   }
 
   // --- TUI-only: no terminal on the other end, so these no-op ---

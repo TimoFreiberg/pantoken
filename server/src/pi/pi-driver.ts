@@ -438,7 +438,9 @@ export async function createPiDriver(
     return { label: undefined, description: t?.description };
   };
 
-  // The seed for a warm session: a sessionOpened snapshot + its replayed history.
+  // The seed for a warm session: a sessionOpened snapshot + its replayed history +
+  // the bridge's retained ambient UI (status strip / widgets / title — pi can't
+  // replay these, so the bridge does; otherwise a switch loses them, DECISIONS.md D5).
   // Emitted to the first subscriber for the startup session; returned (not emitted)
   // from openSession/newSession so the hub resets state and folds it atomically.
   const seedFor = (ws: WarmSession): SessionDriverEvent[] => [
@@ -456,6 +458,7 @@ export async function createPiDriver(
         toolMeta: (name) => toolMetaFor(ws, name),
       },
     ),
+    ...ws.bridge.ambientSeedEvents(),
     // Dialogs are live bridge state, not persisted transcript history. Replay any
     // unresolved request after the history seed so refocusing a chat restores the
     // answer popup instead of leaving its extension blocked invisibly.
