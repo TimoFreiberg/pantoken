@@ -49,27 +49,6 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       you navigate to a session (it now stashes + clears the draft), (b)/(c) by the keyed map
       + pagehide/boot restore. `e2e/drafts.e2e.ts` (switch-away-and-back, reload, new-session
       draft, send-clears).
-- [ ] **Agent turn cancelled when client disconnects?** — observed behavior on the Mac Mini:
-      firing off a prompt, then fully exiting the phone view (closing the PWA / navigating
-      away), the existing turn appeared to be cancelled before completing. This must NOT
-      happen: the server-side agent turn should finish regardless of whether any client is
-      connected. **Hedging:** this could be a different pi bug or model API issue, not pilot.
-      Needs investigation — reproduce deliberately (send prompt → close client → check if
-      the turn completes server-side) to either confirm a pilot bug or rule it out. If
-      pilot is the cause, the likeliest path is the WS disconnect handler cancelling the
-      in-flight turn.
-      → **investigated 2026-06-19, not reproduced in pilot.** Both code and a live repro
-      clear pilot: `close(ws)` (`server/src/index.ts`) only calls `ws.data.unsub()` →
-      `clients.delete` + `syncLiveRefresh` (`server/src/hub.ts`); it never calls
-      `driver.abort()`. Live test (real pi, deepseek-v4-flash): sent a multi-step turn,
-      navigated the only active client away mid-run, polled `/debug/state` while
-      disconnected — the turn ran to completion server-side (all steps + summary), and
-      reconnect restored the full transcript. The only abort vector is warm-cap eviction
-      (disposing a session), which is triggered by warming a new session, not by client
-      loss. **Left open** because the owner observed it on the Mac Mini with a real
-      phone-PWA close — if it recurs there, the cause is almost certainly downstream of
-      pilot (pi turn loop, model API, or Tailscale drop), not the WS handler. Recommend
-      closing unless re-observed.
 - [x] **Pi `answer` tool doesn't work via pilot** → verified working 2026-06-19 against a
       live real-pi instance (deepseek-v4-flash). Root cause was a timing one, not a missing
       feature: the bug predates the qna host-UI bridge (`Add qna host-UI form…` + `Keep
@@ -115,14 +94,6 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       button now renders only on the turn-final paragraph (same `turnText` gate as the
       timestamp), and copies the WHOLE turn's assistant text — every paragraph joined,
       excluding tool + thinking blocks. Covered by `e2e/polish.e2e.ts`.
-- [ ] **Per-session system-prompt override** — let a new session start with a custom
-      system prompt instead of pi's default (in the new-session draft, and/or a global
-      default in Settings). Seam: `resourceLoaderOptions.systemPrompt` on
-      `createAgentSessionServices` in `warmUp` (`server/src/pi/pi-driver.ts`) for a full
-      replace, or `appendSystemPrompt` for additive. NOT needed for the pi-docs-pointer
-      strip — that's handled globally by the `strip-pi-docs` pi extension
-      (`~/.pi/agent/extensions/`); this is the broader "different prompt for this session."
-
 ### Jank found in the 2026-06-19 live pass (real pi, deepseek-v4-flash)
 
 - [x] **Wide markdown tables overflowed the mobile viewport** → fixed 2026-06-19
