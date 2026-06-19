@@ -28,6 +28,7 @@ type Settle = (r: HostUiResponse | null) => void; // null = timeout/abort -> saf
 // internals, which the research flagged as version-fragile.
 export class PiUiBridge {
   private pending = new Map<string, Settle>();
+  private pendingRequestMap = new Map<string, HostUiRequest>();
   private seq = 0;
 
   constructor(
@@ -41,6 +42,10 @@ export class PiUiBridge {
   }
 
   private request(request: HostUiRequest): void {
+    // Blocking requests are replayed when a warm session is refocused. Without this,
+    // switching chats while an extension awaits an answer strands the hidden dialog.
+    if (this.pending.has(request.requestId))
+      this.pendingRequestMap.set(request.requestId, request);
     this.emit({
       sessionRef: this.ref,
       timestamp: this.now(),
@@ -65,10 +70,16 @@ export class PiUiBridge {
     this.settle(response.requestId, response);
   }
 
+  /** Blocking requests still awaiting an operator, in arrival order. */
+  pendingRequests(): readonly HostUiRequest[] {
+    return [...this.pendingRequestMap.values()];
+  }
+
   private settle(id: string, r: HostUiResponse | null): void {
     const fn = this.pending.get(id);
     if (!fn) return;
     this.pending.delete(id);
+    this.pendingRequestMap.delete(id);
     fn(r);
     this.emit({
       sessionRef: this.ref,

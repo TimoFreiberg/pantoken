@@ -51,6 +51,52 @@ test("qna form: Back returns to the previous card", async ({ page }) => {
   ).toBeVisible();
 });
 
+test("qna form: custom radio preserves its text across choices and questions", async ({
+  page,
+}) => {
+  await drive(page, "qna");
+  const dialog = page.getByRole("dialog");
+  const custom = dialog.getByRole("radio", { name: "Something else" });
+  const field = dialog.getByPlaceholder("Something else…");
+
+  await field.fill("Use the repo default.");
+  await expect(custom).toHaveAttribute("aria-checked", "true");
+
+  await dialog.getByRole("radio", { name: /bun/ }).click();
+  await expect(custom).toHaveAttribute("aria-checked", "false");
+  await expect(field).toHaveValue("Use the repo default.");
+
+  await dialog.getByRole("button", { name: "Next" }).click();
+  await dialog
+    .getByRole("tab", { name: "Question 1, answered" })
+    .click();
+  await expect(field).toHaveValue("Use the repo default.");
+
+  await custom.click();
+  await expect(custom).toHaveAttribute("aria-checked", "true");
+  await expect(field).toHaveValue("Use the repo default.");
+});
+
+test("qna form: sidebar can focus another chat and returning restores the draft", async ({
+  page,
+}) => {
+  await drive(page, "qna");
+  const field = page.getByPlaceholder("Something else…");
+  await field.fill("Keep this while I check another chat.");
+
+  await page.getByText("Explore the fold reducer").click();
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(
+    page.getByText("How does foldEvent assemble the transcript?"),
+  ).toBeVisible();
+
+  await page.getByText("Wire up the WebSocket bridge").click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.getByPlaceholder("Something else…")).toHaveValue(
+    "Keep this while I check another chat.",
+  );
+});
+
 test("qna form: Cancel dismisses without answering", async ({ page }) => {
   await drive(page, "qna");
   await page
