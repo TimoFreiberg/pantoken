@@ -61,9 +61,10 @@ work (full policy in `scripts/desktop/update-watcher.ts`):
 
 - **No client connected and nothing running** → apply immediately (pull → install if the
   lock moved → build → restart the server; the app respawns it and reloads).
-- **Otherwise** → defer. With the app open you get a native "update ready" notification
-  now; the in-app **update card** (a button to apply on demand) is the next piece to wire.
-  Closing the app lets the next poll auto-apply.
+- **Otherwise** → defer. With the app open you get a native "update ready"
+  notification **and** an in-app **update card** (sidebar) with an "update now"
+  button — clicking it asks the watcher to apply on demand. Closing the app lets the
+  next poll auto-apply.
 
 ## Config (env)
 
@@ -80,7 +81,15 @@ by hand.)
 
 ## Not done yet
 
-- **In-app update card** with an explicit "update now" button (needs a protocol message +
-  client UI + a watcher apply-request path). Today: notification + auto-apply-on-close.
 - **Code-signing/notarization** for frictionless installs.
 - **App icon** (`Resources/`), and a release/CI step to publish a built `.app`.
+
+## Known caveat (not a desktop bug)
+
+The app spawns the pilot server from an arbitrary directory, which becomes the
+server's `launchCwd`. Today `warmUp`'s `launchCwd = opts.cwd ?? process.cwd()`
+(`server/src/pi/pi-driver.ts`) both defaults a new session's cwd *and* feeds the trust
+resolver (the launch cwd is implicitly trusted, D12) — so the app's launch dir must
+not silently become a trusted default. This is tracked as a server-side concern in
+`docs/TODO.md` ("Stop default-new-session-in-server-cwd for production usage"), not a
+desktop-app issue; the wrapper itself just runs the server as-is.

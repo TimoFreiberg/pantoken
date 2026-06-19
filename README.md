@@ -29,6 +29,10 @@ and for the dev bar (`http://localhost:5173/?dev`).
 `http://localhost:5173/?dev` adds a dev bar to drive the mock to any UI state.
 `http://localhost:8787/debug/state` dumps the authoritative session state as JSON.
 
+**Desktop app:** `desktop/` is a macOS `.app` (Swift/AppKit + `WKWebView` shell) that
+runs a local pilot server from a dedicated clone, supervises it, and auto-updates it
+from `origin/main`. See [`desktop/README.md`](desktop/README.md) to build + run it.
+
 **Tests:** `bun test` (unit) needs no mock; `bun run test:e2e` (Playwright) sets
 `PILOT_DRIVER=mock` automatically.
 

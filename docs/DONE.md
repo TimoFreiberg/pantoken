@@ -5,6 +5,34 @@ and its resolution note. Latest completions first.
 
 ---
 
+- [x] **Desktop app (macOS .app), local-first** — a clickable, dockable Swift/AppKit
+  shell that runs pi agents locally by default.
+  _(done 2026-06-19: `desktop/` — a thin `WKWebView` wrapper (`Sources/Pilot/*.swift`,
+  `build-app.sh`, `Info.plist`) that spawns the pilot server from a **dedicated clone**
+  (`PILOT_APP_CLONE`, default `~/pilot-app`) on a free loopback port, gates on `/health`,
+  supervises it (respawn on exit → reload the webview so new client assets show), and
+  SIGTERMs both server + watcher on quit. Built with `swiftc` directly (no Xcode project);
+  ad-hoc signed, so first launch is right-click → Open. Local-first by design: loopback +
+  single-user means auth off, no token. Connecting to a remote pilot stays a future
+  option.)_
+  **Auto-updater ships with it** — `scripts/desktop/update-watcher.ts` polls
+  `origin/main` in the clone and keeps it current without stomping live work:
+  unattended & idle (no client connected, no turn running) → apply immediately
+  (pull → `bun install` if `bun.lock` moved → `bun run build` → SIGTERM the server's
+  recorded pid, the supervisor respawns it); otherwise → defer, with a native macOS
+  notification **and** an in-app **update card** (sidebar, "update now" button) that
+  triggers an explicit apply. The relay is wired through the server: `/health` reports
+  `clients` + `busy`, `/update/state` carries the staged sha (token-gated, off locally),
+  and an `applyUpdate` WS message lets the card's button request the apply. Pure decision
+  logic (`decideAction`/`lockfileChanged`/`isBusyFromHealth`/`shouldNotify`/`parseServerPid`)
+  is exported and unit-tested (`scripts/desktop/update-watcher.test.ts`, 21 tests).
+  ⚠️ **The `launchCwd`/trust blocker flagged in the original TODO item is NOT resolved**
+  — the app launches the server as-is, so the launch dir still defaults a new session's
+  cwd and is implicitly trusted (D12). That stays tracked under the sibling TODO item
+  "Stop default-new-session-in-server-cwd for production usage"; it's a server-side
+  concern, not a desktop-wrapper one. Still missing: code-signing/notarization, app icon,
+  and a release/CI step to publish a built `.app`._
+
 - [x] **Provider OAuth login** — sign-in / sign-out for OAuth-capable providers (Anthropic
   Claude Pro/Max, OpenAI Codex, GitHub Copilot) from the Settings panel, for subscription
   billing instead of per-token API.
