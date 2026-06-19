@@ -104,11 +104,16 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
 
 - [ ] **gondolin egress containment** (D10) — for the autonomous Mac Mini
       user account; preserves TS-embed via pi-gondolin extension
-- [ ] **Group workspace-spawned sessions under their parent** — when a session is spawned
-      inside a jj workspace, nest it visually under the parent session in the sidebar
-      (or show them adjacent with an indent), so the relationship is visible at a glance.
-      Nontrivial: the list is flat today; grouping needs either session metadata or
-      workspace-path heuristics.
+- [x] **Group workspace-spawned sessions under their parent** → done 2026-06-19,
+      resolved as "group pilot-created worktree sessions under their parent PROJECT"
+      (owner-scoped down from "parent session"). Ship `base` on
+      `SessionListEntry.worktree` and re-key the sidebar grouping by
+      `worktree.base ?? cwd`, so worktree sessions interleave by recency under their
+      parent repo instead of forming their own worktree-basename group. Hand-made
+      workspaces (no `worktree` field) keep their own group, by design. The visual
+      indent/nesting variant was dropped — the existing per-row worktree badge is the
+      sole distinguisher. _(Not done: parent-session linkage — worktrees fork from a
+      repo, not a session, and pilot doesn't record a spawning session; parked.)_
 - [ ] **Session tree / fork / clone / compaction**
 - [ ] **Scheduled / recurring runs**
 - [ ] **Image / file attachments** (browser file input)
