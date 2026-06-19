@@ -69,6 +69,7 @@ import {
 import { firstUserPreview, mergeSessionLists } from "./session-list.js";
 import { makeTrustResolver, type TrustAsk } from "./trust.js";
 import { PiUiBridge } from "./ui-bridge.js";
+import { parseUnsupportedHostUiErrorMessage } from "./unsupported-host-ui.js";
 import { countUserMessages } from "./user-message-count.js";
 
 export interface PiDriverOptions {
@@ -381,6 +382,33 @@ export async function createPiDriver(
     await session.bindExtensions({
       uiContext: bridge as unknown as ExtensionUIContext,
       mode: "rpc",
+      // pi catches throws from extension handlers, tags them with which
+      // extension/event raised them, and routes them here. A terminal-only
+      // capability use (the bridge's typed throw) becomes a compatibility
+      // notice; anything else is a real extension error we surface rather than
+      // swallow — without a listener pi would drop these silently.
+      onError: (err) => {
+        const issue = parseUnsupportedHostUiErrorMessage(err.error);
+        if (issue) {
+          emit({
+            sessionRef: ref,
+            timestamp: now(),
+            type: "extensionCompatibilityIssue",
+            issue: {
+              ...issue,
+              ...(err.extensionPath
+                ? { extensionPath: err.extensionPath }
+                : {}),
+              ...(err.event ? { eventName: err.event } : {}),
+            },
+          });
+          return;
+        }
+        bridge.notify(
+          `[${err.extensionPath}] ${err.event}: ${err.error}`,
+          "error",
+        );
+      },
     });
     ws.unsubscribe = session.subscribe((ev) => {
       for (const out of mapPiEvent(ev, {

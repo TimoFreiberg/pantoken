@@ -91,17 +91,6 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       button now renders only on the turn-final paragraph (same `turnText` gate as the
       timestamp), and copies the WHOLE turn's assistant text — every paragraph joined,
       excluding tool + thinking blocks. Covered by `e2e/polish.e2e.ts`.
-- [ ] **Extension compatibility-issue surfacing** — surface when an extension uses a
-      terminal-only capability against pilot's non-tui host. _Half already done (found
-      2026-06-19 while building OAuth):_ the protocol has the `extensionCompatibilityIssue`
-      event AND `state.ts` already folds it into a transcript `notice` (warning) that
-      renders today — so **the rendering is wired; the only missing half is the pi-driver
-      emitting the event.** That's the real cost: a pi-integration task — find how pi signals
-      terminal-only capability use to a non-tui host (the type was vendored from pi-gui's
-      `session-driver`, so pi-gui's emit path is the reference) and wire `PiUiBridge`
-      (`server/src/pi/ui-bridge.ts`) to emit it. NOT the cheap render-a-banner job the
-      earlier note assumed. _(Scoped down from "enable/disable view", owner 2026-06-19: the
-      enable/disable toggle was split off to Later — see below.)_
 - [ ] **Per-session system-prompt override** — let a new session start with a custom
       system prompt instead of pi's default (in the new-session draft, and/or a global
       default in Settings). Seam: `resourceLoaderOptions.systemPrompt` on

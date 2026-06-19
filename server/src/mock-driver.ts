@@ -22,6 +22,7 @@ import type {
 import {
   ambient,
   bgRun,
+  compat,
   confirmDialog,
   editDiff,
   errorRun,
@@ -541,6 +542,7 @@ export class MockDriver implements PilotDriver {
       confirm: confirmDialog,
       input: inputDialog,
       ambient,
+      compat,
       bgrun: bgRun,
       reply: () => promptReply("Show me the streamed reply script."),
       editdiff: editDiff,

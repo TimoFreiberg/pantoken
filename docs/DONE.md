@@ -54,6 +54,25 @@ and its resolution note. Latest completions first.
   2026-06-19** (same-day follow-up) — see the dedicated DONE entry below. Still missing:
   code-signing/notarization, app icon, and a release/CI step to publish a built `.app`._
 
+- [x] **Extension compatibility-issue surfacing** — surface when an extension uses a
+  terminal-only capability against pilot's non-tui host.
+  _(done 2026-06-19: wired the missing emit half — the rendering was already there
+  (`state.ts` folds `extensionCompatibilityIssue` → a warning notice). Followed pi-gui's
+  reference emit path: `PiUiBridge.custom()` now throws a typed error
+  (`server/src/pi/unsupported-host-ui.ts`, vendored from pi-gui) whose message carries a
+  serialized `ExtensionCompatibilityIssue`; pi's `ExtensionRunner` catches the throw, tags
+  it with extensionPath/event, and routes it to the `bindExtensions({ onError })` listener
+  pilot now passes in `pi-driver.ts`. onError parses the typed error → emits the compat
+  event (enriched with extensionPath/eventName), and surfaces any OTHER extension error as
+  an error notice instead of swallowing it — pilot previously passed no onError, so pi
+  dropped all extension errors silently. **Scope (matches the reference):** only `custom()`
+  throws; the fire-and-forget TUI setters (`setFooter`/`setHeader`/`setWorking*`) stay
+  silent no-ops — throwing from those would crash extensions that fire them without a catch,
+  and emitting per-call would spam (some fire per-token). `custom()` is the one capability
+  where the extension awaited a result it can't get. Added a `compat` mock fixture +
+  dev-bar button for reproducible UI; unit tests (helper round-trip, bridge throw, state
+  fold) + an e2e spec in `transcript.e2e.ts`.)_
+
 - [x] **Provider OAuth login** — sign-in / sign-out for OAuth-capable providers (Anthropic
   Claude Pro/Max, OpenAI Codex, GitHub Copilot) from the Settings panel, for subscription
   billing instead of per-token API.

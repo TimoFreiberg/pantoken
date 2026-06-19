@@ -15,6 +15,7 @@ import type {
   SessionDriverEvent,
   SessionRef,
 } from "@pilot/protocol";
+import { createUnsupportedHostUiError } from "./unsupported-host-ui.js";
 
 type Settle = (r: HostUiResponse | null) => void; // null = timeout/abort -> safe default
 
@@ -209,10 +210,12 @@ export class PiUiBridge {
   getEditorText(): string {
     return "";
   }
+  // Throws a typed unsupported-host error (not a plain Error) so pi's runner
+  // tags it with extensionPath/event and the driver's onError can surface it as
+  // an extensionCompatibilityIssue. An extension that awaits this can still
+  // catch and degrade; an unhandled one becomes a transcript notice.
   custom<T>(): Promise<T> {
-    return Promise.reject(
-      new Error("custom() UI is not supported by the pilot remote"),
-    );
+    return Promise.reject(createUnsupportedHostUiError("custom"));
   }
   addAutocompleteProvider(): void {}
   setEditorComponent(): void {}

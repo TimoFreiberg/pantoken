@@ -1,8 +1,18 @@
 import { expect, test } from "@playwright/test";
-import { gotoFresh } from "./helpers.js";
+import { drive, gotoFresh } from "./helpers.js";
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
+});
+
+test("an extension compatibility issue folds into a warning notice", async ({
+  page,
+}) => {
+  await drive(page, "compat");
+  const notice = page.locator(".notice.warning");
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText('Extension capability "custom"');
+  await expect(notice).toContainText("terminal-only");
 });
 
 test("renders the greeting conversation: user, assistant, tool card", async ({

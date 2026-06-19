@@ -5,6 +5,7 @@ import type {
   SessionRef,
 } from "@pilot/protocol";
 import { PiUiBridge } from "./ui-bridge.js";
+import { parseUnsupportedHostUiErrorMessage } from "./unsupported-host-ui.js";
 
 const ref: SessionRef = { workspaceId: "w", sessionId: "s" };
 
@@ -81,6 +82,18 @@ describe("PiUiBridge", () => {
       .map((e) => (e.type === "hostUiRequest" ? e.request.kind : ""));
     expect(kinds).toContain("notify");
     expect(kinds).toContain("status");
+  });
+
+  test("custom() rejects with a parseable terminal-only compat error", async () => {
+    const { bridge } = setup();
+    const err = await bridge.custom<unknown>().then(
+      () => undefined,
+      (e: unknown) => e as Error,
+    );
+    expect(err).toBeInstanceOf(Error);
+    const issue = parseUnsupportedHostUiErrorMessage((err as Error).message);
+    expect(issue?.capability).toBe("custom");
+    expect(issue?.classification).toBe("terminal-only");
   });
 
   test("setWidget maps pi placement to composer placement", () => {
