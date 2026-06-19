@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   decideAction,
+  hasClientsFromHealth,
   isBusyFromHealth,
   lockfileChanged,
   parseServerPid,
@@ -8,15 +9,22 @@ import {
 } from "./update-watcher.js";
 
 describe("decideAction", () => {
-  test("up to date → noop regardless of busy", () => {
-    expect(decideAction({ behind: false, busy: false })).toBe("noop");
-    expect(decideAction({ behind: false, busy: true })).toBe("noop");
+  const act = (behind: boolean, clientsConnected: boolean, busy: boolean) =>
+    decideAction({ behind, clientsConnected, busy });
+
+  test("up to date → noop regardless of host state", () => {
+    expect(act(false, false, false)).toBe("noop");
+    expect(act(false, true, true)).toBe("noop");
   });
-  test("behind + idle → apply", () => {
-    expect(decideAction({ behind: true, busy: false })).toBe("apply");
+  test("behind, unattended & idle (no client, not busy) → apply", () => {
+    expect(act(true, false, false)).toBe("apply");
   });
-  test("behind + busy → defer (never interrupt a turn)", () => {
-    expect(decideAction({ behind: true, busy: true })).toBe("defer");
+  test("behind + client connected → defer (don't restart under a viewer)", () => {
+    expect(act(true, true, false)).toBe("defer");
+    expect(act(true, true, true)).toBe("defer");
+  });
+  test("behind + background turn, no client (busy) → defer (don't abort it)", () => {
+    expect(act(true, false, true)).toBe("defer");
   });
 });
 
@@ -53,6 +61,19 @@ describe("isBusyFromHealth", () => {
     expect(isBusyFromHealth(null)).toBe(false);
     expect(isBusyFromHealth("nope")).toBe(false);
     expect(isBusyFromHealth(undefined)).toBe(false);
+  });
+});
+
+describe("hasClientsFromHealth", () => {
+  test("positive client count → connected", () => {
+    expect(hasClientsFromHealth({ clients: 1 })).toBe(true);
+    expect(hasClientsFromHealth({ clients: 3, busy: false })).toBe(true);
+  });
+  test("zero / missing / malformed → not connected", () => {
+    expect(hasClientsFromHealth({ clients: 0 })).toBe(false);
+    expect(hasClientsFromHealth({ ok: true })).toBe(false);
+    expect(hasClientsFromHealth(null)).toBe(false);
+    expect(hasClientsFromHealth("nope")).toBe(false);
   });
 });
 
