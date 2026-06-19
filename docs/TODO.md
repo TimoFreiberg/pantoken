@@ -45,6 +45,12 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       the turn completes server-side) to either confirm a pilot bug or rule it out. If
       pilot is the cause, the likeliest path is the WS disconnect handler cancelling the
       in-flight turn.
+- [ ] **Pi `answer` tool doesn't work via pilot** — the pi answer tool (which prompts the
+      user with questions while an agent is running) appears broken when driven through
+      pilot. Investigate why and fix if possible. This is critical for any agent flow that
+      needs to ask the human mid-turn (e.g. approval, clarification, choices). May involve
+      the web-socket bridge not forwarding the `answer`-style interaction, or the
+      `PilotDriver` not translating it to a client-facing event.
 - [x] ~~**Desktop app (macOS .app), local-first**~~ → done 2026-06-19, archived to
       `docs/DONE.md`. Swift/AppKit + `WKWebView` shell that runs a local pilot server from a
       dedicated clone and supervises it; auto-updater ships with it (unattended-apply /
