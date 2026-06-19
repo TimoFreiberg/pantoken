@@ -87,6 +87,18 @@ export type ServerMessage =
   /** A pending trust card was settled (answered, or denied on timeout/disconnect).
    *  Clients dismiss the card for this requestId. */
   | { type: "trustResolved"; requestId: string }
+  /** Desktop auto-update status (driven by scripts/desktop/update-watcher.ts via the
+   *  /update/state endpoint). `available` true means a new origin/main was staged but
+   *  deferred because a client is connected — clients show the sidebar update card.
+   *  `applying` flips true after a client clicks "update now" (the watcher then pulls,
+   *  rebuilds, and restarts the server). NOT the PWA service-worker update — that's the
+   *  separate `swUpdateReady` "reload" toast. */
+  | {
+      type: "updateStatus";
+      available: boolean;
+      sha?: string;
+      applying: boolean;
+    }
   | { type: "error"; message: string };
 
 export type ClientMessage =
@@ -165,6 +177,10 @@ export type ClientMessage =
   /** Answer a project-trust card (D12). `choice` indexes the request's `options`;
    *  null denies (cancel / dismiss). */
   | { type: "trustResponse"; requestId: string; choice: number | null }
+  /** Apply the staged desktop update now (the sidebar card's button). The server marks
+   *  it applying and the update-watcher picks it up on its next poll — pull, rebuild,
+   *  restart. No-op if nothing is staged. */
+  | { type: "applyUpdate" }
   /** Dev-only: drive the mock fixture to a named scripted state. */
   | { type: "mock"; script: string }
   | { type: "ping" };

@@ -114,6 +114,11 @@ class PilotStore {
   hideThinking = $state(initialHideThinking());
   // PWA: a newer service worker installed and is ready; we prompt for a refresh.
   swUpdateReady = $state(false);
+  // Desktop app: a new origin/main is staged on the server's clone but deferred because
+  // we're connected (server-pushed via `updateStatus`). Drives the sidebar update card;
+  // `applying` is true between clicking "update now" and the server restarting. Distinct
+  // from `swUpdateReady` (that's the PWA asset-cache refresh).
+  appUpdate = $state<{ sha: string; applying: boolean } | null>(null);
   // The last prompt text sent — lets the run-failed error card re-send it on Retry.
   lastPrompt = $state("");
   // Global hotkey dispatch — incremented so $effect catches every keystroke.
@@ -217,6 +222,11 @@ class PilotStore {
         if (this.trustRequest?.requestId === msg.requestId)
           this.trustRequest = null;
         break;
+      case "updateStatus":
+        this.appUpdate = msg.available
+          ? { sha: msg.sha ?? "", applying: msg.applying }
+          : null;
+        break;
       case "error":
         if (msg.message === "unauthorized") {
           this.unauthorized = true;
@@ -255,6 +265,11 @@ class PilotStore {
   }
   abort(): void {
     send({ type: "abort" });
+  }
+  /** Apply the staged desktop update now (the sidebar card's button). The server marks
+   *  it applying; the watcher pulls/rebuilds/restarts and the card clears on reconnect. */
+  requestAppUpdate(): void {
+    send({ type: "applyUpdate" });
   }
   /** Re-send the last prompt after a run-failed (the error card's Retry). */
   retryLast(): void {

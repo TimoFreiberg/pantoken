@@ -527,6 +527,24 @@
     {/if}
   </nav>
 
+  <!-- Desktop auto-update card: shown when a new origin/main is staged but deferred
+       because we're connected (server pushes `updateStatus`). One action, no dismiss —
+       leave it sitting until you choose to apply. Distinct from the PWA refresh toast. -->
+  {#if store.appUpdate}
+    <div class="app-update" data-testid="update-card">
+      <span class="app-update-label">Update available</span>
+      <Button
+        variant="primary"
+        size="sm"
+        title="Pull the latest main, rebuild, and restart Pilot"
+        disabled={store.appUpdate.applying}
+        onclick={() => store.requestAppUpdate()}
+      >
+        {store.appUpdate.applying ? "Updating…" : "Update now"}
+      </Button>
+    </div>
+  {/if}
+
   <!-- Build stamp: last commit hash + date, baked in at build time. Quiet footer so
        you can tell which version is live without it competing with the session list. -->
   <div
@@ -665,6 +683,23 @@
     padding: 4px 6px 14px;
   }
   /* Quiet build stamp pinned at the bottom of the sidebar. */
+  .app-update {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 0 10px 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+  }
+  .app-update-label {
+    font-size: 12px;
+    color: var(--text);
+    white-space: nowrap;
+  }
   .version {
     flex-shrink: 0;
     padding: 8px 14px calc(8px + env(safe-area-inset-bottom));

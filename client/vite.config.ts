@@ -39,6 +39,7 @@ export default defineConfig({
       "/debug": { target: SERVER },
       "/health": { target: SERVER },
       "/push": { target: SERVER },
+      "/update": { target: SERVER },
     },
   },
 });

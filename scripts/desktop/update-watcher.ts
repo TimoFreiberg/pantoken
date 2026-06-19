@@ -42,12 +42,23 @@ export interface WatcherConfig {
   clone: string;
   remote: string;
   branch: string;
-  /** Unauthenticated /health URL of the running server (carries `busy`). */
+  /** /health URL of the running server (carries `clients` + `busy`). */
   healthUrl: string;
+  /** /update/state URL — we POST the staged-update state and learn back whether the
+   *  user clicked "update now" (so the card's button is responsive). */
+  updateUrl: string;
+  /** App token, sent as Bearer to the gated /update/state endpoint. Empty/undefined on
+   *  the local desktop app (auth off); set behind tailscale. */
+  token?: string;
   /** Data dir holding `pilot.pid` (the server's recorded pid; our restart signal). */
   dataDir: string;
+  /** How often to `git fetch` (the network-heavy check). */
   intervalMs: number;
-  /** Detect + decide + log, but mutate nothing (no pull/build/restart/notify). */
+  /** Loop cadence while an update is pending + a client is connected — keeps the card's
+   *  "update now" responsive (we re-poll /update/state this often). Idle loops sleep the
+   *  full fetch interval instead. */
+  pollMs: number;
+  /** Detect + decide + log, but mutate nothing (no pull/build/restart/notify/report). */
   dryRun: boolean;
   /** Fire an `osascript` notification on defer (macOS). The Swift shell sets this off
    *  (PILOT_UPDATE_NATIVE_NOTIFY=0) once it owns notifications; on by default so the
@@ -67,14 +78,17 @@ export function configFromEnv(
   argv: readonly string[] = process.argv,
 ): WatcherConfig {
   const port = process.env.PILOT_PORT ?? "8787";
+  const base = process.env.PILOT_SERVER_URL ?? `http://127.0.0.1:${port}`;
   return {
     clone: process.env.PILOT_APP_CLONE ?? join(homedir(), "pilot-app"),
     remote: process.env.PILOT_UPDATE_REMOTE ?? "origin",
     branch: process.env.PILOT_UPDATE_BRANCH ?? "main",
-    healthUrl:
-      process.env.PILOT_HEALTH_URL ?? `http://127.0.0.1:${port}/health`,
+    healthUrl: process.env.PILOT_HEALTH_URL ?? `${base}/health`,
+    updateUrl: process.env.PILOT_UPDATE_URL ?? `${base}/update/state`,
+    token: process.env.PILOT_TOKEN || undefined,
     dataDir: process.env.PILOT_DATA_DIR ?? defaultDataDir(),
     intervalMs: Number(process.env.PILOT_UPDATE_INTERVAL_MS ?? 60_000),
+    pollMs: Number(process.env.PILOT_UPDATE_POLL_MS ?? 5_000),
     dryRun:
       process.env.PILOT_UPDATE_DRY_RUN === "1" || argv.includes("--dry-run"),
     nativeNotify: process.env.PILOT_UPDATE_NATIVE_NOTIFY !== "0",
@@ -248,6 +262,41 @@ async function readHostState(healthUrl: string): Promise<HostState> {
   }
 }
 
+/** Tell the server the staged-update state (sha, or null when up to date) so it can show
+ *  or clear the sidebar card, and learn back whether the user clicked "update now".
+ *  `applyFailed` resets a stuck "applying" card. Any error → { applying: false }: a flaky
+ *  report must never trigger an apply. */
+async function reportUpdate(
+  cfg: WatcherConfig,
+  sha: string | null,
+  applyFailed = false,
+): Promise<{ applying: boolean }> {
+  try {
+    const res = await fetch(cfg.updateUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(cfg.token ? { authorization: `Bearer ${cfg.token}` } : {}),
+      },
+      body: JSON.stringify({
+        available: sha !== null,
+        sha: sha ?? undefined,
+        applyFailed,
+      }),
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) {
+      log(`/update/state returned ${res.status}`);
+      return { applying: false };
+    }
+    const body = (await res.json()) as { applying?: boolean };
+    return { applying: body.applying === true };
+  } catch (e) {
+    log(`/update/state unreachable (${String(e)})`);
+    return { applying: false };
+  }
+}
+
 async function readLock(clone: string): Promise<string | null> {
   const f = Bun.file(join(clone, "bun.lock"));
   return (await f.exists()) ? f.text() : null;
@@ -361,55 +410,83 @@ function notifyDeferred(cfg: WatcherConfig, c: CompareResult): void {
 // ──────────────────────────────── loop ────────────────────────────────
 
 export interface WatcherState {
-  /** Last remote sha we surfaced a defer for, to suppress repeat notifications. */
+  /** Last remote sha we surfaced a native notification for, to suppress repeats. */
   lastNotifiedSha: string | null;
+  /** Date.now() of the last git fetch — throttles the network check to intervalMs while
+   *  the loop itself can tick faster (pollMs) to keep the card's "update now" responsive. */
+  lastFetchMs: number;
+  /** Last fetch result, reused on fast polls so we don't re-fetch every pollMs. */
+  cached: CompareResult | null;
 }
 
-export const initialState: WatcherState = { lastNotifiedSha: null };
+export const initialState: WatcherState = {
+  lastNotifiedSha: null,
+  lastFetchMs: 0,
+  cached: null,
+};
 
-/** One poll cycle. Returns the next state. Pure-ish orchestration over the IO helpers;
- *  throws propagate to runWatcher's per-tick guard. */
+/** One loop cycle. Fetches at most every intervalMs (fast polls reuse the cache); when an
+ *  update is staged it reports availability to the server (→ card) and applies it on the
+ *  user's click or when unattended & idle. Returns the next state; throws propagate to
+ *  runWatcher's per-tick guard. */
 export async function tick(
   cfg: WatcherConfig,
   state: WatcherState,
+  now: number,
 ): Promise<WatcherState> {
-  const cmp = await fetchAndCompare(cfg);
-  if (!cmp.behind) return initialState; // up to date — clear any pending defer
-
-  const host = await readHostState(cfg.healthUrl);
-  const action = decideAction({ behind: cmp.behind, ...host });
+  let { lastNotifiedSha, lastFetchMs, cached } = state;
+  if (cached === null || now - lastFetchMs >= cfg.intervalMs) {
+    cached = await fetchAndCompare(cfg);
+    lastFetchMs = now;
+  }
   const short = (s: string) => s.slice(0, 7);
 
+  if (!cached.behind) {
+    // Up to date — clear any card we'd surfaced, then idle.
+    if (lastNotifiedSha !== null && !cfg.dryRun) await reportUpdate(cfg, null);
+    return { lastNotifiedSha: null, lastFetchMs, cached };
+  }
+
+  const host = await readHostState(cfg.healthUrl);
+  const action = decideAction({ behind: cached.behind, ...host });
+
   if (action === "apply") {
+    // Unattended & idle → auto-apply (no card; nobody's watching to interrupt).
     log(
-      `update ${short(cmp.local)} → ${short(cmp.remote)}; unattended & idle — applying`,
+      `update ${short(cached.local)} → ${short(cached.remote)}; unattended & idle — applying`,
     );
     if (cfg.dryRun) {
       log("[dry-run] would pull/build/restart");
-      return state;
+      return { lastNotifiedSha, lastFetchMs, cached };
     }
     await applyUpdate(cfg);
-    return initialState;
+    return initialState; // re-fetch next tick to confirm up to date
   }
 
-  // defer: only surface the card when someone's connected to see it. A background turn
-  // with no viewer (no client + busy) waits silently; a later tick re-evaluates to
-  // "apply" once it finishes. Deferred updates never auto-apply while a client is
-  // connected — that's the card button's job (wiring lands with the card UI).
-  if (
-    host.clientsConnected &&
-    shouldNotify(cmp.remote, state.lastNotifiedSha)
-  ) {
-    if (cfg.dryRun) {
-      log(
-        `[dry-run] would surface update card + notify (${short(cmp.remote)})`,
-      );
-    } else {
-      notifyDeferred(cfg, cmp);
-    }
-    return { lastNotifiedSha: cmp.remote };
+  // defer: a client is connected (or a turn is running). Report availability so the card
+  // shows, and learn whether the user clicked "update now".
+  if (cfg.dryRun) {
+    log(`[dry-run] would surface update card (${short(cached.remote)})`);
+    return { lastNotifiedSha: cached.remote, lastFetchMs, cached };
   }
-  return state;
+  const { applying } = await reportUpdate(cfg, cached.remote);
+  if (applying) {
+    log(`update now requested — applying ${short(cached.remote)}`);
+    try {
+      await applyUpdate(cfg);
+      return initialState;
+    } catch (e) {
+      log(`apply failed: ${e instanceof Error ? e.message : String(e)}`);
+      await reportUpdate(cfg, cached.remote, true); // un-stick the card → offer retry
+      return { lastNotifiedSha, lastFetchMs, cached };
+    }
+  }
+  // Just deferring — native notification once per sha, only when a client can see it.
+  if (host.clientsConnected && shouldNotify(cached.remote, lastNotifiedSha)) {
+    notifyDeferred(cfg, cached);
+    return { lastNotifiedSha: cached.remote, lastFetchMs, cached };
+  }
+  return { lastNotifiedSha, lastFetchMs, cached };
 }
 
 export async function runWatcher(cfg: WatcherConfig): Promise<never> {
@@ -426,8 +503,8 @@ export async function runWatcher(cfg: WatcherConfig): Promise<never> {
     );
   }
   log(
-    `watching ${cfg.clone} @ ${cfg.remote}/${cfg.branch} every ${cfg.intervalMs}ms ` +
-      `(health ${cfg.healthUrl}${cfg.dryRun ? ", DRY-RUN" : ""})`,
+    `watching ${cfg.clone} @ ${cfg.remote}/${cfg.branch} — fetch every ${cfg.intervalMs}ms, ` +
+      `poll ${cfg.pollMs}ms (health ${cfg.healthUrl}${cfg.dryRun ? ", DRY-RUN" : ""})`,
   );
 
   let stopping = false;
@@ -442,13 +519,15 @@ export async function runWatcher(cfg: WatcherConfig): Promise<never> {
   let state = initialState;
   while (!stopping) {
     try {
-      state = await tick(cfg, state);
+      state = await tick(cfg, state, Date.now());
     } catch (e) {
       // Transient failures (network blip, server mid-restart) must not kill the
       // long-lived watcher — log loud and retry next interval.
       log(`tick failed: ${e instanceof Error ? e.message : String(e)}`);
     }
-    await Bun.sleep(cfg.intervalMs);
+    // Poll fast while an update is pending (snappy "update now"); otherwise sleep until
+    // the next fetch is due.
+    await Bun.sleep(state.cached?.behind ? cfg.pollMs : cfg.intervalMs);
   }
   process.exit(0);
 }

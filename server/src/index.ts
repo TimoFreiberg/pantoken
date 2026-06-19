@@ -183,6 +183,27 @@ const server = Bun.serve<WsData>({
       return new Response("not found", { status: 404 });
     }
 
+    // Desktop auto-update relay. The update-watcher POSTs whether a new origin/main is
+    // staged-and-waiting (body { available, sha?, applyFailed? }); the hub broadcasts the
+    // card to clients and returns { applying } so the watcher learns on this same poll
+    // whether the user clicked "update now". Token-gated like /push (off on the local
+    // desktop app; required behind tailscale).
+    if (url.pathname === "/update/state" && req.method === "POST") {
+      if (!tokenOk(tokenFromRequest(req, url)))
+        return new Response("unauthorized", { status: 401 });
+      try {
+        const body = (await req.json()) as {
+          available?: boolean;
+          sha?: string;
+          applyFailed?: boolean;
+        };
+        const sha = body.available ? (body.sha ?? null) : null;
+        return Response.json(hub.reportUpdate(sha, body.applyFailed === true));
+      } catch (e) {
+        return new Response(`bad request: ${String(e)}`, { status: 400 });
+      }
+    }
+
     if (url.pathname.startsWith("/debug/")) {
       if (!config.debug) return new Response("debug disabled", { status: 404 });
       if (!tokenOk(tokenFromRequest(req, url)))
