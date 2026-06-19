@@ -665,4 +665,18 @@ export class SessionHub {
   clientCount(): number {
     return this.clients.size;
   }
+
+  /** Host activity, surfaced on /health so an external poller (the desktop
+   *  update-watcher, scripts/desktop/update-watcher.ts) can tell whether it may
+   *  auto-apply an update or must defer to avoid interrupting a turn. `busy` is the
+   *  only thing the watcher reads; the breakdown is there for eyeballing /health.
+   *  `/debug/state` can't answer this — it only carries the *focused* session, so a
+   *  background session running a turn would be invisible to it. */
+  activity(): { running: number; initializing: number; busy: boolean } {
+    return {
+      running: this.running.size,
+      initializing: this.initializing.size,
+      busy: this.running.size + this.initializing.size > 0,
+    };
+  }
 }
