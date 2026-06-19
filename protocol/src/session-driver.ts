@@ -211,8 +211,17 @@ export interface SessionListEntry {
   readonly archived: boolean;
   /** Present when this session runs in a jj/git worktree pilot created (the cwd is the
    *  worktree). The driver resolves it at list time from its worktree index; the sidebar
-   *  shows an indicator + a clean-up/copy-path action. Absent for normal sessions. */
-  readonly worktree?: { readonly path: string };
+   *  shows an indicator + a clean-up/copy-path action, and groups the row under the
+   *  parent project (`base`) instead of its own worktree-basename group. Absent for
+   *  normal sessions and for workspaces pilot didn't create (hand-made jj/git
+   *  workspaces keep their own group). */
+  readonly worktree?: {
+    readonly path: string;
+    /** The repo the worktree was forked from — the parent project to group under. */
+    readonly base: string;
+    /** The jj workspace name (unused for git worktrees). Surfaced for tooltips. */
+    readonly name: string;
+  };
 }
 
 // --- Host UI (extension interaction) ---

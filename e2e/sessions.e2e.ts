@@ -41,6 +41,43 @@ test("the sidebar groups sessions by project and switches the active one", async
   );
 });
 
+test("a pilot-created worktree session groups under its parent project, interleaved by recency", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  const sidebar = page.getByTestId("sidebar");
+  // Start a new session in a worktree of the pilot project (the active session's cwd is
+  // the pilot repo). The mock isolates it as a sibling "-worktree" dir.
+  await sidebar.getByText("New session…").click();
+  await page.getByRole("button", { name: "worktree" }).click();
+  const composer = page.getByPlaceholder("Describe a task or ask a question…");
+  await composer.fill("isolate me");
+  await composer.press("Enter");
+
+  await openSidebar(page);
+  const list = sidebar.locator(".list");
+
+  // The worktree session (cwd /Users/timo/src/pilot-worktree) groups under its PARENT
+  // project (the pilot repo, its `base`) — NOT a separate "pilot-worktree" group.
+  await expect(list.getByText("pilot-worktree", { exact: true })).toHaveCount(
+    0,
+  );
+
+  const pilotGroup = list
+    .locator(".group")
+    .filter({ has: page.locator(".proj", { hasText: "pilot" }) });
+  // The new worktree session is the newest (just created), so it sits atop the pilot
+  // group — interleaved by recency with the main-tree sessions, not segregated into
+  // its own group. The row carries the worktree badge.
+  const firstRow = pilotGroup.locator("li.row-wrap").first();
+  await expect(firstRow.locator(".wt")).toBeVisible();
+  // The main-tree sessions remain in the same group beneath it.
+  await expect(
+    pilotGroup.getByText("Wire up the WebSocket bridge"),
+  ).toBeVisible();
+  await expect(pilotGroup.getByText("Explore the fold reducer")).toBeVisible();
+});
+
 test("rows show a relative last-activity timestamp; the count appears only when collapsed", async ({
   page,
 }) => {
@@ -189,7 +226,7 @@ test("clicking the project chip focuses the path input", async ({ page }) => {
   ).toBeFocused();
 });
 
-test("the worktree chip creates the session in an isolated worktree dir", async ({
+test("the worktree chip creates the session in an isolated worktree dir, grouped under its parent project", async ({
   page,
 }) => {
   await openSidebar(page);
@@ -211,12 +248,19 @@ test("the worktree chip creates the session in an isolated worktree dir", async 
   await composer.fill("get started");
   await composer.press("Enter");
 
-  // The mock isolates a worktree request as a sibling "-worktree" dir; the new project
-  // group reflects that isolated path rather than the typed one.
+  // The mock isolates a worktree request as a sibling "-worktree" dir, but the session
+  // groups under its PARENT project ("demo") — not its own worktree-basename group —
+  // and the isolated path shows in the worktree badge's tooltip.
   await openSidebar(page);
-  await expect(
-    page.getByTestId("sidebar").getByText("demo-worktree", { exact: true }),
-  ).toBeVisible();
+  const list = sidebar.locator(".list");
+  await expect(list.getByText("demo", { exact: true })).toBeVisible();
+  await expect(list.getByText("demo-worktree", { exact: true })).toHaveCount(0);
+  const badge = list.locator(".wt");
+  await expect(badge).toBeVisible();
+  await expect(badge).toHaveAttribute(
+    "title",
+    "Worktree: /Users/timo/src/demo-worktree",
+  );
 });
 
 // Create a worktree-backed session at /Users/timo/src/demo (→ demo-worktree) and leave

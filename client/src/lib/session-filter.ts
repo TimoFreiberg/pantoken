@@ -76,9 +76,14 @@ export function filterSessions(
   for (const s of sessions) {
     if (isHidden(s, now, showArchived)) continue;
     if (!matchesQuery(s, q)) continue;
-    const arr = byCwd.get(s.cwd);
+    // A pilot-created worktree session groups under the repo it was forked from
+    // (`worktree.base`), not its own worktree-basename cwd — so it interleaves with the
+    // parent project's main-tree sessions instead of forming its own group. Hand-made
+    // workspaces (no `worktree` field) keep their own group, by design.
+    const groupKey = s.worktree?.base ?? s.cwd;
+    const arr = byCwd.get(groupKey);
     if (arr) arr.push(s);
-    else byCwd.set(s.cwd, [s]);
+    else byCwd.set(groupKey, [s]);
   }
 
   const groups = [...byCwd.entries()].map(([cwd, items]) => ({
