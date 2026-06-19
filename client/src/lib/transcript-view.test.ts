@@ -1,9 +1,15 @@
-import type { AssistantItem, ToolItem, TranscriptItem } from "@pilot/protocol";
+import type {
+  AssistantItem,
+  InjectItem,
+  ToolItem,
+  TranscriptItem,
+} from "@pilot/protocol";
 import { describe, expect, test } from "bun:test";
 import {
   type DisplayItem,
   formatWorkedDuration,
   groupTurns,
+  injectText,
   mergeTools,
   parseQnaResult,
   workedLabel,
@@ -36,6 +42,17 @@ const tool = (
   id,
   name,
   status: "ok",
+  ...over,
+});
+const inject = (
+  id: string,
+  over: Partial<InjectItem> = {},
+): TranscriptItem => ({
+  kind: "inject",
+  id,
+  customType: "journal-nudge",
+  text: id,
+  display: true,
   ...over,
 });
 
@@ -189,6 +206,77 @@ describe("groupTurns: answer (visible) tools", () => {
   test("answer stays standalone, not folded into a tool summary", () => {
     const out = mergeTools([tool("a1", "answer"), tool("r1", "read")]);
     expect(out.map((i) => i.kind)).toEqual(["tool", "mergedTools"]);
+  });
+});
+
+describe("groupTurns: injected custom messages (nudge boundary)", () => {
+  test("an injected message opens a NEW turn, freeing the prior turn's response", () => {
+    // The journal-nudge bug: turn 1 (work + final response), then an injected nudge
+    // that triggers a second run (journal tool + reply). Without the split, the nudge
+    // run glues onto turn 1 and its real `final` response collapses into work.
+    const turns = groupTurns([
+      user("u1"),
+      asst("narration"),
+      tool("b1", "bash"),
+      asst("final"),
+      inject("n1"),
+      tool("journal", "bash"),
+      asst("post"),
+    ]);
+    expect(turns).toHaveLength(2);
+    // Turn 1 keeps its real final response visible; only narration + tool collapse.
+    const t1 = turns[0]!;
+    expect(t1.id).toBe("u1");
+    expect(t1.response.map((i) => i.id)).toEqual(["final"]);
+    expect(t1.work.map((i) => i.id)).toEqual(["narration", "b1"]);
+    // Turn 2 is headed by the nudge; the journal call collapses, the reply stays.
+    const t2 = turns[1]!;
+    expect(t2.id).toBe("n1");
+    expect(t2.user?.kind).toBe("inject");
+    expect(t2.work.map((i) => i.id)).toEqual(["journal"]);
+    expect(t2.response.map((i) => i.id)).toEqual(["post"]);
+    expect(t2.collapsible).toBe(true);
+  });
+
+  test("a display:false inject still splits the turn (robustness net)", () => {
+    const turns = groupTurns([
+      user("u1"),
+      asst("final"),
+      inject("n1", { display: false }),
+      tool("t", "bash"),
+      asst("post"),
+    ]);
+    expect(turns.map((t) => t.id)).toEqual(["u1", "n1"]);
+    expect(turns[0]!.response.map((i) => i.id)).toEqual(["final"]);
+  });
+
+  test("inject carries its ts into the turn's startTs", () => {
+    const turns = groupTurns([
+      user("u1"),
+      asst("final"),
+      inject("n1", { ts: "5000" }),
+      tool("t", "bash"),
+      asst("post", { completedAt: "9000" }),
+    ]);
+    expect(turns[1]!.startTs).toBe("5000");
+  });
+
+  test("injectText strips a single matching outer wrapper tag", () => {
+    expect(
+      injectText(
+        inject("x", {
+          text: "<journal-nudge>do the thing</journal-nudge>",
+        }) as InjectItem,
+      ),
+    ).toBe("do the thing");
+    // No wrapper → raw text, trimmed.
+    expect(
+      injectText(inject("x", { text: "  bare text  " }) as InjectItem),
+    ).toBe("bare text");
+    // Mismatched tags → left as-is.
+    expect(injectText(inject("x", { text: "<a>keep</b>" }) as InjectItem)).toBe(
+      "<a>keep</b>",
+    );
   });
 });
 

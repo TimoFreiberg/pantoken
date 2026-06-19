@@ -45,6 +45,32 @@ describe("foldEvent", () => {
     expect(s.items[0]).toMatchObject({ kind: "user", text: "hi", ts: "t1" });
   });
 
+  test("customMessage folds to an inject item and closes the open assistant", () => {
+    const s = foldAll([
+      base({ type: "assistantDelta", text: "final", channel: "text" }),
+      base({
+        type: "customMessage",
+        id: "inject-1",
+        customType: "journal-nudge",
+        text: "<journal-nudge>do it</journal-nudge>",
+        display: true,
+        timestamp: "t9",
+      }),
+    ]);
+    // The streaming assistant is closed (no completedAt — the boundary marker doesn't
+    // claim the turn ended), and the inject lands as its own item.
+    expect(s.items[0]).toMatchObject({ kind: "assistant", streaming: false });
+    expect(s.items[0]).not.toHaveProperty("completedAt");
+    expect(s.items[1]).toMatchObject({
+      kind: "inject",
+      id: "inject-1",
+      customType: "journal-nudge",
+      text: "<journal-nudge>do it</journal-nudge>",
+      display: true,
+      ts: "t9",
+    });
+  });
+
   test("keeps thinking and text on separate channels", () => {
     const s = foldAll([
       base({ type: "assistantDelta", text: "hmm", channel: "thinking" }),

@@ -398,6 +398,19 @@ export interface UserMessageEvent extends SessionEventBase {
   readonly text: string;
   readonly images?: readonly ImageContent[];
 }
+export interface CustomMessageEvent extends SessionEventBase {
+  // An extension-injected `role:"custom"` message (pi's `sendMessage`). These trigger
+  // a fresh pi run with no user prompt, so they double as a TURN BOUNDARY: without
+  // one, the new run's tools + reply glue onto the prior turn and collapse its final
+  // response into the "Worked for Ns" work block. `display` mirrors pi's own "show
+  // this in the transcript" flag — true ones render as a tiny expandable note, false
+  // ones render nothing but still split the turn (the robustness net).
+  readonly type: "customMessage";
+  readonly id: string;
+  readonly customType: string;
+  readonly text: string;
+  readonly display: boolean;
+}
 export interface ToolStartedEvent extends SessionEventBase {
   readonly type: "toolStarted";
   readonly toolName: string;
@@ -473,6 +486,7 @@ export type SessionDriverEvent =
   | AssistantDeltaEvent
   | QueuedMessageStartedEvent
   | UserMessageEvent
+  | CustomMessageEvent
   | ToolStartedEvent
   | ToolUpdatedEvent
   | ToolFinishedEvent

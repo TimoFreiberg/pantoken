@@ -4,6 +4,7 @@
   import {
     type DisplayItem,
     groupTurns,
+    injectText,
     mergeTools,
     type TurnGroup,
     workedLabel,
@@ -67,7 +68,7 @@
       lastId = null;
     };
     for (const it of displayItems) {
-      if (it.kind === "user") {
+      if (it.kind === "user" || it.kind === "inject") {
         flush();
       } else if (it.kind === "assistant" && it.text) {
         buf.push(it.text);
@@ -84,6 +85,13 @@
   let mergedOpen = $state<Record<string, boolean>>({});
   function toggleMerged(id: string) {
     mergedOpen = { ...mergedOpen, [id]: !mergedOpen[id] };
+  }
+
+  // Per-inject expand state — a nudge note renders as a tiny collapsed pill by
+  // default; clicking reveals its text. Keyed by item id, default collapsed.
+  let injectOpen = $state<Record<string, boolean>>({});
+  function toggleInject(id: string) {
+    injectOpen = { ...injectOpen, [id]: !injectOpen[id] };
   }
 
   let scroller = $state<HTMLDivElement>();
@@ -308,6 +316,30 @@
         <QnaResult {item} />
       {:else if item.kind === "tool"}
         <ToolCard {item} />
+      {:else if item.kind === "inject"}
+        <!-- An extension-injected custom message (e.g. a journal nudge). `display:false`
+             ones are turn-boundary markers only — render nothing. The rest show a tiny
+             collapsed pill that expands to the (de-wrapped) note text. -->
+        {#if item.display}
+          <div class="row inject">
+            <button
+              class="inject-pill"
+              class:open={injectOpen[item.id] ?? false}
+              type="button"
+              onclick={() => toggleInject(item.id)}
+              aria-expanded={injectOpen[item.id] ?? false}
+              title={(injectOpen[item.id] ?? false)
+                ? `Collapse the injected ${item.customType} note`
+                : `Expand the injected ${item.customType} note`}
+            >
+              <span class="chevron" class:open={injectOpen[item.id] ?? false}>▸</span>
+              <span class="inject-label">{item.customType}</span>
+            </button>
+            {#if injectOpen[item.id] ?? false}
+              <div class="inject-body">{injectText(item)}</div>
+            {/if}
+          </div>
+        {/if}
       {:else if item.kind === "notice"}
         <div class="row notice {item.level}">
           <span class="ico">{item.level === "error" ? "✕" : item.level === "warning" ? "⚠" : "ℹ"}</span>
@@ -585,6 +617,55 @@
     text-align: center;
     padding: 60px 0;
     font-size: 14px;
+  }
+
+  /* ── Injected custom-message (nudge) pill ── */
+  .row.inject {
+    align-items: flex-start;
+    gap: 5px;
+  }
+  .inject-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    align-self: flex-start;
+    background: transparent;
+    border: none;
+    padding: 1px 0;
+    color: var(--text-faint);
+    font-size: 11.5px;
+    font-weight: 550;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+  }
+  .inject-pill:hover {
+    color: var(--text-muted);
+  }
+  .inject-pill .chevron {
+    font-size: 9px;
+    width: 9px;
+    text-align: center;
+    transition: transform 0.12s;
+    flex-shrink: 0;
+  }
+  .inject-pill .chevron.open {
+    transform: rotate(90deg);
+  }
+  .inject-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+  .inject-body {
+    margin-top: 5px;
+    margin-left: 14px;
+    padding-left: 11px;
+    border-left: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 12.5px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-width: 86%;
   }
 
   /* prose — readability pass (OP8). Only typography/spacing; palette untouched.

@@ -33,6 +33,25 @@ function asText(v: unknown): string {
   return typeof v === "string" ? v : JSON.stringify(v);
 }
 
+/** Flatten a custom message's content (string, or pi's content-block array) to the
+ *  plain text we surface. Images become a placeholder; mirrors history-map.contentToText
+ *  so live and reloaded transcripts read identically. */
+function customContentToText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((b) =>
+      b && typeof b === "object" && (b as { type?: string }).type === "text"
+        ? ((b as { text?: string }).text ?? "")
+        : b &&
+            typeof b === "object" &&
+            (b as { type?: string }).type === "image"
+          ? "[image]"
+          : "",
+    )
+    .join("");
+}
+
 /** Map one pi event to zero or more pilot driver events. */
 export function mapPiEvent(
   ev: AgentSessionEvent,
@@ -72,6 +91,34 @@ export function mapPiEvent(
       }
       return [
         { ...meta, type: "runCompleted", snapshot: ctx.snapshot("idle") },
+      ];
+    }
+
+    case "message_start": {
+      // An extension-injected custom message (pi's sendMessage). Surfaced as a turn
+      // boundary so the run it triggers (e.g. a journal nudge) gets its own turn
+      // instead of collapsing the prior turn's final response into "work". We map on
+      // message_start (not message_end) so the non-triggerTurn start+end pair can't
+      // double-emit. Non-custom message_start (user/assistant/toolResult) is ignored:
+      // assistant text arrives via message_update deltas, and user turns are
+      // synthesized on pilot's own prompt() send path.
+      const msg = ev.message as {
+        role?: string;
+        customType?: string;
+        content?: unknown;
+        display?: boolean;
+        timestamp?: number;
+      };
+      if (msg.role !== "custom") return [];
+      return [
+        {
+          ...meta,
+          type: "customMessage",
+          id: `inject-${meta.timestamp}`,
+          customType: msg.customType ?? "",
+          text: customContentToText(msg.content),
+          display: msg.display !== false,
+        },
       ];
     }
 
@@ -174,8 +221,9 @@ export function mapPiEvent(
 
     default:
       // turn_start/turn_end, queue_update, compaction_end, auto_retry_end,
-      // thinking_level_changed, message_start/end, and assistant start/done are
+      // thinking_level_changed, message_end, and assistant start/done are
       // intentionally not surfaced — the reducer derives what it needs from deltas.
+      // (message_start IS surfaced, but only for role:"custom" — see above.)
       return [];
   }
 }

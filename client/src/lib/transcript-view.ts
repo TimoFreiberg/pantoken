@@ -9,7 +9,12 @@
 //      turn-final assistant response that stays visible. This is the Codex-style
 //      "Worked for Ns" block: collapsed once the turn settles, the answer left showing.
 
-import type { AssistantItem, ToolItem, TranscriptItem } from "@pilot/protocol";
+import type {
+  AssistantItem,
+  InjectItem,
+  ToolItem,
+  TranscriptItem,
+} from "@pilot/protocol";
 
 // ── Pass 1: summarize sequential tools ───────────────────────────────────────
 // Every uninterrupted run of tools collapses into ONE summary card, including a
@@ -91,8 +96,9 @@ export function mergedSummary(item: MergedToolsItem): string {
 export interface TurnGroup {
   /** Stable key for the turn (the user item's id, else the first item's, else index). */
   id: string;
-  /** The user prompt that opened the turn, if this turn has one (a leading run before
-   *  the first user message — e.g. a snapshot mid-turn — yields a turn with no user). */
+  /** The item that opened the turn, if any: a user prompt, or an injected custom
+   *  message (a nudge) that triggered a fresh run. A leading run before the first such
+   *  item — e.g. a snapshot mid-turn — yields a turn with no head. */
   user?: TranscriptItem;
   /** The collapsible portion: tools, merged runs, thinking, and intermediate narration. */
   work: DisplayItem[];
@@ -116,7 +122,8 @@ export interface TurnGroup {
 function itemStart(i: DisplayItem): string | undefined {
   if (i.kind === "tool") return i.startedAt ?? i.finishedAt;
   if (i.kind === "mergedTools") return i.tools[0]?.startedAt;
-  if (i.kind === "user" || i.kind === "assistant") return i.ts;
+  if (i.kind === "user" || i.kind === "assistant" || i.kind === "inject")
+    return i.ts;
   return undefined;
 }
 function itemEnd(i: DisplayItem): string | undefined {
@@ -126,7 +133,7 @@ function itemEnd(i: DisplayItem): string | undefined {
     const last = i.tools[i.tools.length - 1];
     return last?.finishedAt ?? last?.startedAt;
   }
-  if (i.kind === "user") return i.ts;
+  if (i.kind === "user" || i.kind === "inject") return i.ts;
   return undefined;
 }
 
@@ -188,7 +195,11 @@ export function groupTurns(
     body = [];
   };
   for (const item of items) {
-    if (item.kind === "user") {
+    // A user prompt OR an injected custom message opens a new turn. The inject case is
+    // the fix for extension nudges (e.g. journal-nudge): pi's sendMessage triggers a
+    // fresh run with no user prompt, so without splitting here the new run's tools +
+    // reply glue onto the prior turn and collapse its final response into "work".
+    if (item.kind === "user" || item.kind === "inject") {
       flush();
       user = item;
       body = [];
@@ -208,6 +219,20 @@ export function groupTurns(
     if (last) last.collapsible = false;
   }
   return turns;
+}
+
+// ── Injected custom-message (nudge) rendering ────────────────────────────────
+export function isInjectItem(i: DisplayItem): i is InjectItem {
+  return i.kind === "inject";
+}
+
+/** The text to show when an injected note is expanded. Extensions wrap their nudge in
+ *  a single XML-ish tag (e.g. `<journal-nudge>…</journal-nudge>`) as an attribution
+ *  signal; strip one matching outer tag so the body reads clean. Falls back to the raw
+ *  text when there's no wrapper. */
+export function injectText(item: InjectItem): string {
+  const m = item.text.match(/^\s*<([\w-]+)>([\s\S]*)<\/\1>\s*$/);
+  return (m?.[2] ?? item.text).trim();
 }
 
 // ── Duration formatting for the "Worked for Ns" header ───────────────────────
