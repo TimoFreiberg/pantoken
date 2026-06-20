@@ -9,6 +9,35 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
 
 ## 🔴 Next (urgent / blocking)
 
+- [ ] **Reliable prompt delivery across disconnects** — sending while the WS is not
+      open currently clears the composer even though `ws.send()` silently drops the
+      message. Make prompt submission lossless end-to-end:
+      - assign every submitted prompt a client-generated id and persist an outbox per
+        Pilot server;
+      - render the user turn optimistically with a `sending`/`queued offline` state;
+      - flush on reconnect and keep entries until the server explicitly acknowledges
+        acceptance;
+      - make the server deduplicate prompt ids so reconnect/retry cannot run a prompt
+        twice;
+      - retain failed/preflight-rejected prompts with a visible Retry/Edit affordance
+        instead of discarding them.
+      Cover online acceptance, offline → reconnect delivery, reload persistence, duplicate
+      resend, and rejection without draft loss.
+- [ ] **Cross-session attention state** — background sessions currently expose only a
+      running/done dot. A background approval, failure, or useful live activity can be
+      invisible while any client remains connected (server push is suppressed whenever
+      `clients.size > 0`). Broadcast compact per-session attention metadata alongside
+      `sessionStatus`: `running`/`waiting`/`failed`/`done`, pending-request count + title,
+      and a derived current-activity label. Render it in sidebar rows/project groups and
+      include the target session in notification copy/deep-links. A blocking background
+      request must remain obvious and one tap must focus the right session.
+- [ ] **Queued-message tray + restore/edit flow** — pi emits the complete
+      `queue_update {steering, followUp}` state and exposes `clearQueue()`, but Pilot drops
+      the event even though `SessionState.queued` already exists. Map queue updates into
+      the shared state, show queued steering/follow-up messages above the composer, and
+      add Pi-parity “restore queued messages to editor” (`Alt+Up`) that atomically clears
+      the queues and returns their text. Preserve delivery mode visually; cover queue,
+      delivery/removal, restore, empty restore, reconnect/refocus, and multi-client sync.
 - [x] **Missing stop-turn interface when a session is running** → done 2026-06-19. Root
       cause: the stop pill + working indicator derived solely from the folded
       `session.status === "running"`, which only changes on snapshot events. An out-of-band
@@ -25,6 +54,20 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
 
 ## 🟡 Important
 
+- [ ] **Per-client session focus** — sessions already run independently, but every browser
+      shares one server-global focused transcript, so switching on the phone can switch the
+      desktop underneath the user. Move focused session selection and focused snapshots to
+      client/subscription scope while keeping durable session state and actions shared.
+      Approval resolution remains first-responder-wins. Treat as a bounded protocol/hub
+      refactor; do after reliable delivery + attention + queue visibility unless it stops
+      being straightforward.
+- [ ] **Paste/drop image attachments + hardening** — the file-picker path is shipped, but
+      the high-frequency screenshot flows are missing. Accept image files pasted into or
+      dropped onto the composer, show the same removable previews, enforce count and byte
+      limits before base64 expansion, compress oversized camera images where practical, and
+      surface rejected/unsupported files visibly. Preserve image-only submission and cover
+      clipboard, drag/drop, limits, and mobile picker behavior. Arbitrary non-image files
+      remain out of scope because pi's prompt attachment contract is image-only.
 - [x] ~~**Stop default-new-session-in-server-cwd for production usage**~~ → done
       2026-06-19. The server's cwd no longer feeds any logic: it's not a trust anchor
       (no dir is implicitly trusted — every cwd goes through pi's built-in trust:
@@ -102,12 +145,10 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       654px wide inside a 375px phone with no way to reach the right columns; tables now
       scroll horizontally like code blocks (`client/src/markstream-theme.css`). Covered by
       a Pixel 7 spec in `e2e/responsive.mobile.e2e.ts`.
-- [ ] **Copy button is invisible/unreachable on touch** — the per-turn copy button
-      (`client/src/components/Transcript.svelte`, `.copy`) is `opacity: 0`, revealed only on
-      `:hover`/`:focus-visible`. A phone has neither, so you can't copy a reply. Needs a
-      *reliable* touch reveal: a bare `@media (hover: none)` rule misfires under headless
-      Chromium (it reports `hover: none`), breaking the desktop "copy fades back out" spec —
-      so gate on an explicit touch/coarse-pointer signal or a JS capability check instead.
+- [x] **Copy button is invisible/unreachable on touch** → done 2026-06-19.
+      `Transcript.svelte` gates the persistent footer on `navigator.maxTouchPoints > 0`,
+      avoiding the headless-Chromium `hover: none` false positive while keeping copy
+      reachable on touch-primary devices.
 - [x] **Attach-tag tooltip lies** → fixed 2026-06-19. Dropped the unimplemented
       "right-click to clear" claim from the attached-images count badge's tooltip
       (`Composer.svelte`); per-image removal already works via the thumb-chips next to it
@@ -190,8 +231,13 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
           Benign for the warm jump-then-prompt flow; if it bites, navigate with a label or
           summary (those persist an entry) or have pilot persist the leaf explicitly.
 - [ ] **Scheduled / recurring runs**
-- [ ] **Image / file attachments** (browser file input)
-- [ ] **Inline tool-diff rendering**
+- [x] **Image attachments via browser file input** → done 2026-06-19. Up to ten selected
+      images render as removable thumbnail chips and travel through the protocol into pi's
+      prompt options. Paste/drop, byte limits, and compression are tracked in the Important
+      hardening item above. Arbitrary file attachments are not supported by pi's prompt
+      attachment contract.
+- [x] **Inline tool-diff rendering** → done 2026-06-18. Edit tool cards show collapsed
+      `+N/−M` counts and lazily render the full unified diff with `@pierre/diffs`.
 - [ ] **Workspace git changed-files/diff/stage panel**
 - [ ] **Skills enable/disable view**
 - [ ] **Extensions enable/disable toggle** — split off from the compat-surfacing item
@@ -201,7 +247,9 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       toggle needs per-session load config or a session restart, not a flag.
 
 - [ ] **Right-side session minimap** (nebulous, OP8)
-- [ ] **Queued-messages editing** (replace queued)
+- [~] **Queued-messages editing** — promoted to the urgent queued-message tray +
+      restore/edit item above. Start with Pi-parity whole-queue restore; individual
+      replacement can follow only if dogfooding still wants it.
 
 - [ ] **Per-session system-prompt override** _(deprioritized 2026-06-18 — owner doesn't
       expect to need this soon; parked at the back of the backlog)_. Let a new session
@@ -225,9 +273,9 @@ the rest._
 - [ ] **Compaction / summary / activity rows** — DESIGN lists these as SHOULD but
       they're unfiled. When pi auto-compacts the context, render a collapsed
       "context compacted" row instead of letting history silently shift.
-- [ ] **Edit-and-resubmit a prior prompt** — hover a past user message → "Edit & resend"
-      re-runs from that point (relies on pi fork/branch if available, else just resends).
-      Pairs with the jump-to-last-prompt hotkey.
+- [x] **Edit-and-resubmit a prior prompt** → done 2026-06-19 as session-tree T1.
+      “Branch from this prompt” rewinds to the prompt's parent and prefills the composer;
+      `⌘/Ctrl+⇧+↑` applies it to the most recent prompt.
 - [ ] **Live activity status line** — derive a one-liner from the in-flight tool
       ("Reading foo.ts", "Running tests", "Editing bar.rs") and surface it in the
       sidebar row, the tab title, and optionally the push notification. Turns the
@@ -248,17 +296,13 @@ the rest._
       (fast, .gitignore-aware), results appear in a popup menu. Arrow/Enter/Tab to
       select, Esc to dismiss; directories get a trailing `/`. See the TODO in
       `Composer.svelte` re: per-query RPC latency tradeoff.
-- [ ] **Per-session prompt draft persistence** _(superseded — promoted to 🟡 Important with
-      owner's detailed requirements, see above)_.
-      Persist the unsent draft per session in localStorage so a phone reload / tab eviction
-      doesn't lose a half-typed prompt. (Per-client state, so no protocol change.)
-- [ ] **Offline prompt queue** — if you hit send while the WS is reconnecting, queue the
-      prompt locally and flush it on reconnect rather than dropping it or erroring.
+- [x] **Per-session prompt draft persistence** _(superseded — completed in 🟡 Important;
+      retained here only as historical brainstorm context)_.
+- [~] **Offline prompt queue** — promoted into the urgent reliable prompt-delivery item.
 - [ ] **Voice dictation on mobile** — Web Speech API mic button in the composer; talking
       a prompt into your phone beats thumb-typing a paragraph.
-- [ ] **Optimistic user-message echo** — render the user's message immediately on send
-      with a subtle "sending…" state, reconciling when the server echoes it back, so the
-      composer feels instant over a high-latency Tailscale hop.
+- [~] **Optimistic user-message echo** — promoted into the urgent reliable
+      prompt-delivery item; it must reconcile against an explicit server acceptance ACK.
 
 ### Transcript reading
 - [ ] **In-transcript search (⌘F)** — find-as-you-type across the rendered transcript
@@ -307,8 +351,9 @@ the rest._
       pocketed phone signals without a sound.
 - [ ] **App-icon unread badge** — Badging API (`navigator.setAppBadge`) to show an unread
       / approval-pending count on the installed PWA icon.
-- [ ] **Connection-status banner** — a quiet indicator for connected / reconnecting /
-      offline, with a manual reconnect button, so a dead WS isn't silent.
+- [x] **Connection-status banner** → done 2026-06-18. `ConnectionBanner.svelte` shows
+      connecting/reconnecting/offline state, explains that the agent keeps running, and
+      offers manual reconnect (`Alt+R`).
 
 ### Notifications
 - [ ] **Actionable push notifications** — Approve / Deny buttons directly on the Web Push
@@ -325,8 +370,9 @@ the rest._
 - [ ] **In-UI raw event drawer** — a dev-only side drawer streaming the raw
       `SessionDriverEvent`s for the focused session (the `/?dev` bar's natural sibling),
       so you can debug fold behavior without curling `/debug/state`.
-- [ ] **Theme: follow system + explicit toggle** — an "auto" option that tracks
-      `prefers-color-scheme` in addition to the manual light/dark choice.
+- [x] **Theme: follow system + explicit toggle** → done 2026-06-18. Settings offers
+      System/Light/Dark, persists the override, and follows live
+      `prefers-color-scheme` changes in System mode.
 - [ ] **Font-size / density control** — a reading-comfort setting (compact ↔ comfortable
       line height + base size), persisted per client.
 
