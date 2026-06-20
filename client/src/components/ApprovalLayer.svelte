@@ -367,6 +367,8 @@
     gap: 8px;
   }
   .opt {
+    display: flex;
+    align-items: center;
     text-align: left;
     background: var(--surface);
     border: 1px solid var(--border-strong);
@@ -374,6 +376,12 @@
     padding: 12px 14px;
     font-size: 15px;
     color: var(--text);
+  }
+  /* Touch: a comfortable tap target for each blocking choice. */
+  @media (pointer: coarse) {
+    .opt {
+      min-height: 44px;
+    }
   }
   .opt:active,
   .opt.sel {

@@ -30,10 +30,26 @@ export function resolveTheme(mode: ThemeMode): "light" | "dark" {
 }
 
 /** Reflect a mode onto <html> as a concrete `data-theme`. The CSS has no media
- *  query, so "system" must resolve to an explicit value here. */
+ *  query, so "system" must resolve to an explicit value here. Also syncs the
+ *  `theme-color` meta so the PWA/browser chrome (Android status bar, address bar)
+ *  tracks the active palette instead of the static light value baked into index.html. */
 export function applyThemeMode(mode: ThemeMode): void {
   if (typeof document === "undefined") return;
   document.documentElement.setAttribute("data-theme", resolveTheme(mode));
+  syncThemeColor();
+}
+
+/** Point the `theme-color` meta at the resolved palette's `--bg`. Reads the computed
+ *  token so it can't drift from the CSS (iOS standalone uses the static apple status-bar
+ *  meta instead, which can't be set live). */
+function syncThemeColor(): void {
+  if (typeof document === "undefined") return;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) return;
+  const bg = getComputedStyle(document.documentElement)
+    .getPropertyValue("--bg")
+    .trim();
+  if (bg) meta.setAttribute("content", bg);
 }
 
 /** Re-apply the theme when the OS preference flips, but only while in "system" mode. */

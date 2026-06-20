@@ -98,4 +98,12 @@
     width: 100%;
     flex: 1 1 0;
   }
+
+  /* Touch: guarantee a ≥44px tap target on coarse pointers (the md/lg paddings land just
+     under). Harmless on desktop, where the rule doesn't apply. */
+  @media (pointer: coarse) {
+    .btn {
+      min-height: 44px;
+    }
+  }
 </style>

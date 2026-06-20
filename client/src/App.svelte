@@ -17,6 +17,7 @@
   import Tooltip from "./components/Tooltip.svelte";
   import IconButton from "./components/ui/IconButton.svelte";
   import { notifyIfUnfocused } from "./lib/notify.js";
+  import { wakeLock } from "./lib/wake-lock.js";
 
   // Dev affordance: ?dev shows buttons that drive the mock to any UI state, so the
   // screenshot harness can reach approval/ambient/error states deterministically.
@@ -24,6 +25,10 @@
   const scripts = ["reply", "markdown", "search", "skill", "confirm", "trust", "input", "qna", "ambient", "compat", "bgrun", "bgwait", "queue", "deliverqueue", "initializing", "editdiff", "images", "error", "idle", "streamhold", "staleidle", "pendinghold", "timeout", "yesno", "journalnudge", "contextfull", "longoutput", "selectmany"];
 
   onMount(() => store.start());
+
+  // Keep the screen awake while the focused session's turn streams, so a phone you're
+  // watching doesn't sleep mid-run. Released the moment the turn settles.
+  $effect(() => wakeLock.set(store.turnActive));
 
   // Buzz the user (when pilot is unfocused) for every session, not just the focused
   // transcript. The first sessionStatus message is a reconnect baseline, not a live event.
