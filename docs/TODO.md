@@ -266,6 +266,31 @@ hit a session limit mid-verify; confirm each against the code before acting):_
 - [ ] **PWA status-bar / theme-color chrome** — verify the installed PWA's status bar /
       `theme-color` tracks the active light/dark theme.
 
+### New polish (triaged 2026-06-20)
+
+- [ ] **Attach button does nothing** — clicking the paperclip in the composer is a no-op
+      on desktop. Wire it to the file-input / paste/drop path that image attachments
+      already use.
+- [ ] **Sidebar visuals → match Codex** — redesign the sidebar look to follow Codex's
+      style. Needs a Codex screenshot for reference.
+- [ ] **"New session" draft stays visible in sidebar while draft exists** — when a
+      new-session draft has typed text stored, the "New session" sidebar entry should
+      persist (not disappear when another session is selected) so the draft is visible
+      at a glance.
+- [ ] **"New session" draft groups under its project in the sidebar** — the sidebar
+      entry for an active new-session draft should sit under the project it targets,
+      not float independently. The project-switcher button above the composer is
+      reportedly finicky — if a cleaner way to change the target project falls out,
+      take it; otherwise just the grouping change.
+- [ ] **Model list: collapsible provider headers, collapsed by default** — the model
+      dropdown in Settings is too long. Group models under provider headers that are
+      collapsed by default. Typing a search query should auto-uncollapse matching
+      results.
+- [ ] **Autoscroll to transcript bottom on prompt submit** — when the user sends a
+      prompt, scroll the transcript to the bottom so the new user bubble + the
+      incoming assistant stream are in view. (TODO: check whether Codex / Claude do
+      this.)
+
 ## 🔵 Later
 
 - [ ] **gondolin egress containment** (D10) — for the autonomous Mac Mini
