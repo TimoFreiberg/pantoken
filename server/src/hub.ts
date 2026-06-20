@@ -619,10 +619,25 @@ export class SessionHub {
     }
   }
 
-  /** Fetch + send ONE client files matching its composer @-mention query. Triggered on
-   *  each keystroke after `@` (debounced client-side ~150ms); the server runs `fd`
-   *  (fast, .gitignore-aware) and echoes the query so the client can ignore stale
-   *  responses. Searches the requesting client's focused session's cwd. */
+  /** Fetch + send ONE client the full @-mention file index for its focused session's cwd.
+   *  Pushed on that client's connect + session switch (like {@link sendCommandList}); the
+   *  client fuzzy-matches it locally so the menu is instant. `truncated` tells the client
+   *  whether to fall back to a per-query `fd` search ({@link sendFileList}). */
+  private async sendFileIndex(conn: ClientConn): Promise<void> {
+    try {
+      const { files, truncated } = await this.driver.listFileIndex(
+        conn.focusedId ?? undefined,
+      );
+      conn.send({ type: "fileIndex", files, truncated });
+    } catch (e) {
+      console.error("[hub] listFileIndex failed", e);
+    }
+  }
+
+  /** Fetch + send ONE client files matching its composer @-mention query — the fallback
+   *  path, used only when the index was truncated and local matches are thin. The server
+   *  runs `fd` and echoes the query so the client can ignore stale responses. Searches the
+   *  requesting client's focused session's cwd. */
   private async sendFileList(conn: ClientConn, query: string): Promise<void> {
     try {
       const files = await this.driver.listFiles(
@@ -979,6 +994,7 @@ export class SessionHub {
       else conn.send({ type: "snapshot", state: this.snapshotOf(sid) });
       await this.broadcastSessionList();
       await this.sendCommandList(conn);
+      void this.sendFileIndex(conn);
       return sid;
     } finally {
       conn.switchInFlight = false;
@@ -1036,6 +1052,7 @@ export class SessionHub {
     void this.broadcastSessionList();
     void this.broadcastModelList();
     void this.sendCommandList(conn);
+    void this.sendFileIndex(conn);
     void this.broadcastProviderList();
     void this.broadcastModelDefaults();
     // A client arriving while a turn is already running starts the ticker (and one
@@ -1332,7 +1349,10 @@ export class SessionHub {
     }
     this.broadcastSessionStatus();
     void this.broadcastSessionList();
-    for (const conn of this.clients.values()) void this.sendCommandList(conn);
+    for (const conn of this.clients.values()) {
+      void this.sendCommandList(conn);
+      void this.sendFileIndex(conn);
+    }
   }
 
   /** A JSON-safe deep copy of the landing session's folded state (foldEvent mutates in

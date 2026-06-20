@@ -94,8 +94,10 @@ export interface CommandInfo {
 }
 
 /** One file in the composer's @-file mention autocomplete — a relative path from the
- *  session's cwd. The server searches on demand via `fd` (fast, .gitignore-aware) and
- *  broadcasts results; the client renders them in a menu. See {@link fileList}. */
+ *  session's cwd. The server builds a capped, .gitignore-aware index via `fd` and pushes
+ *  it on session switch ({@link fileIndex}); the client fuzzy-matches it locally and
+ *  renders the menu, falling back to a server `fd` search ({@link fileList}) only when the
+ *  index was truncated. See {@link fileIndex}. */
 export interface FileInfo {
   /** Relative path from the session cwd (forward slashes). */
   readonly path: string;
