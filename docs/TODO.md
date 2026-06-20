@@ -282,10 +282,15 @@ the remainder, roughly ordered by day-to-day leverage._
       a clear step up from plain unread's neutral dot (which it used to share). The "Done" activity
       line gets matching `data-state="done"` accent styling. `e2e/status-indicators.e2e.ts` asserts
       the check badge appears on the done row.
-- [ ] **Overflowing tables/code give no at-rest scroll hint on touch** — wide tables + `pre`
-      scroll horizontally, but mobile overlay scrollbars hide at rest, so cut-off columns are
-      invisible until you swipe. Add a right-edge fade/shadow mask when `scrollWidth >
-      clientWidth`. (Desktop has a persistent styled scrollbar; this is touch-only.)
+- [x] **Overflowing tables/code give no at-rest scroll hint on touch** → done 2026-06-21.
+      `markstream-theme.css` now applies Lea Verou's pure-CSS "scrolling shadows" to `pre` and
+      `table` under `@media (pointer: coarse)`: edge covers (`background-attachment: local`) hide
+      the shadows at each end, and the shadows (`scroll`) reveal whenever there's more content
+      that way — so cut-off columns/code show a fade at rest instead of nothing. Cover colors
+      match each container's background (`--surface-sunken` for `pre`, `--bg` for tables). Desktop
+      keeps its persistent styled scrollbar (the rule is coarse-only). `e2e/responsive.mobile.e2e.ts`
+      asserts the 4 gradient layers + `local` attachment land on the Pixel 7 (coarse) project.
+      _(Both-edge shadows, slightly beyond the right-edge-only ask — same technique, better cue.)_
 - [x] **`content-visibility` code/doc mismatch** → done 2026-06-21. **Re-documented as intentional**
       (vs finishing the revert). I first removed the rules to honor the documented no-drift
       invariant — but the e2e caught that they're **load-bearing for the autoscroll pin**: without

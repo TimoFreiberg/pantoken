@@ -90,6 +90,43 @@
   font-weight: 600;
 }
 
+/* Touch: overlay scrollbars hide at rest, so a horizontally-scrollable code block or table
+   gives no hint that columns are cut off until you swipe. Lea Verou's "scrolling shadows"
+   (pure CSS): edge covers (background-attachment: local) hide the shadows at each end, the
+   shadows (attachment: scroll) reveal when there's more content that way. Desktop keeps its
+   persistent styled scrollbar, so this is coarse-pointer only. */
+@media (pointer: coarse) {
+  .markstream-svelte.markdown-renderer :where(pre),
+  .markstream-svelte.markdown-renderer :where(table) {
+    background-repeat: no-repeat;
+    background-attachment: local, local, scroll, scroll;
+    background-position:
+      left center,
+      right center,
+      left center,
+      right center;
+    background-size:
+      26px 100%,
+      26px 100%,
+      16px 100%,
+      16px 100%;
+  }
+  .markstream-svelte.markdown-renderer :where(pre) {
+    background-image:
+      linear-gradient(to right, var(--surface-sunken), transparent),
+      linear-gradient(to left, var(--surface-sunken), transparent),
+      radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, 0.16), transparent),
+      radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, 0.16), transparent);
+  }
+  .markstream-svelte.markdown-renderer :where(table) {
+    background-image:
+      linear-gradient(to right, var(--bg), transparent),
+      linear-gradient(to left, var(--bg), transparent),
+      radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, 0.16), transparent),
+      radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, 0.16), transparent);
+  }
+}
+
 .markstream-svelte.markdown-renderer :where(blockquote) {
   margin: 0.85em 0;
   padding-left: 0.9em;
