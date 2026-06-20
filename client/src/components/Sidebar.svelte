@@ -130,7 +130,11 @@
   // immediately re-close it. While open, `a` archives/unarchives the targeted session —
   // unless focus is in a text field, where `a` should type.
   async function copyWorktreePath(s: SessionListEntry): Promise<void> {
-    if (s.worktree) await store.copyWorktreePath(s.worktree.path);
+    if (s.worktree) await store.copyToClipboard(s.worktree.path);
+    closeMenu();
+  }
+  async function copySessionId(s: SessionListEntry): Promise<void> {
+    await store.copyToClipboard(s.sessionId);
     closeMenu();
   }
   function cleanupWorktree(s: SessionListEntry): void {
@@ -541,6 +545,14 @@
                           >
                         {/if}
                       {/if}
+                      <button
+                        class="menu-item"
+                        role="menuitem"
+                        data-testid="copy-session-id"
+                        title={`Copy the pi session id to the clipboard: ${s.sessionId}`}
+                        onclick={() => copySessionId(s)}
+                        >Copy session ID</button
+                      >
                       <button
                         class="menu-item"
                         role="menuitem"
