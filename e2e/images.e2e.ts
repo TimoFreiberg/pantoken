@@ -149,6 +149,19 @@ test("an oversized camera-style image is compressed before attachment", async ({
     "Compressed 1 oversized image",
   );
 });
+/** Drill the settled image turn open (work block → "1 tool" summary → inner card) and
+ *  return the inner ToolCard locator, so a test can assert on its rendered output. */
+async function openToolCard(page: Page) {
+  await expandWork(page);
+  // One tool in the turn → a "1 tool" summary card; expand it, then the inner card.
+  const card = page.locator(".tool.summary");
+  await expect(card.locator(".head .name")).toHaveText("1 tool");
+  await card.locator(":scope > .head").click();
+  const inner = card.locator(":scope > .body > .tool");
+  await expect(inner).toHaveCount(1);
+  await inner.locator(".head").click();
+  return inner;
+}
 
 test("a user's image attachment is echoed back into the transcript", async ({
   page,
@@ -178,13 +191,7 @@ test("a tool that returns an image block renders it as an <img>", async ({
   await waitForSettledWorkBlocks(page, 2);
   await expandWork(page);
 
-  // One tool in the turn → a "1 tool" summary card; expand it, then the inner card.
-  const card = page.locator(".tool.summary");
-  await expect(card.locator(".head .name")).toHaveText("1 tool");
-  await card.locator(":scope > .head").click();
-  const inner = card.locator(":scope > .body > .tool");
-  await expect(inner).toHaveCount(1);
-  await inner.locator(".head").click();
+  const inner = await openToolCard(page);
 
   // pi's {type:"image"} content block renders as an <img>, and the accompanying
   // text note still shows — NOT a JSON dump of the base64.
@@ -195,4 +202,30 @@ test("a tool that returns an image block renders it as an <img>", async ({
     .poll(() => out.evaluate((i: HTMLImageElement) => i.naturalWidth))
     .toBeGreaterThan(0);
   await expect(inner.getByText("Rendered mockup (160×100 PNG).")).toBeVisible();
+});
+
+test("both images survive a reload (typed images in the state snapshot)", async ({
+  page,
+}) => {
+  await drive(page, "images");
+  await waitForSettledWorkBlocks(page, 2);
+  // The image data lives in ToolItem.images / UserItem.images, which the server holds in
+  // its authoritative SessionState and re-ships on reconnect. Reload WITHOUT resetting:
+  // a fresh client must rebuild the same images.
+  await page.goto("/?dev");
+  await waitForSettledWorkBlocks(page, 2);
+
+  // User attachment — always visible in the user row.
+  const att = page.locator("img.att-img");
+  await expect(att).toBeVisible();
+  await expect
+    .poll(() => att.evaluate((i: HTMLImageElement) => i.naturalWidth))
+    .toBeGreaterThan(0);
+
+  // Tool output image — drill into the (re-collapsed) turn and confirm it decoded.
+  const out = (await openToolCard(page)).locator("img.out-img");
+  await expect(out).toBeVisible();
+  await expect
+    .poll(() => out.evaluate((i: HTMLImageElement) => i.naturalWidth))
+    .toBeGreaterThan(0);
 });

@@ -1079,12 +1079,14 @@ export function imageReply(): ScriptStep[] {
       {
         callId,
         success: true,
+        // Mirror the real driver: image blocks are lifted into the typed `images` field
+        // and stripped from `output` (no double-shipping the base64).
         output: {
-          content: [
-            { type: "text", text: "Rendered mockup (160×100 PNG)." },
-            { type: "image", data: MOCKUP_PNG_B64, mimeType: "image/png" },
-          ],
+          content: [{ type: "text", text: "Rendered mockup (160×100 PNG)." }],
         },
+        images: [
+          { type: "image", data: MOCKUP_PNG_B64, mimeType: "image/png" },
+        ],
       },
       // ~900ms span: a render that produces an image.
       { startWait: 140, wait: 320, durationMs: 900 },

@@ -199,6 +199,35 @@ describe("mapPiEvent", () => {
     expect(bad[0]).toMatchObject({ success: false });
   });
 
+  test("tool_execution_end lifts image blocks into images + strips them from output", () => {
+    const out = mapPiEvent(
+      pi({
+        type: "tool_execution_end",
+        toolCallId: "c",
+        toolName: "render_mockup",
+        result: {
+          content: [
+            { type: "text", text: "Rendered." },
+            { type: "image", data: "QUJD", mimeType: "image/png" },
+          ],
+          details: { ok: true },
+        },
+        isError: false,
+      }),
+      ctx,
+    );
+    expect(out[0]).toMatchObject({
+      type: "toolFinished",
+      callId: "c",
+      // base64 lives ONLY in the typed field; output keeps text + details, no image block.
+      output: {
+        content: [{ type: "text", text: "Rendered." }],
+        details: { ok: true },
+      },
+      images: [{ type: "image", data: "QUJD", mimeType: "image/png" }],
+    });
+  });
+
   test("agent_start -> running; agent_end -> runCompleted unless willRetry", () => {
     expect(mapPiEvent(pi({ type: "agent_start" }), ctx)[0]).toMatchObject({
       type: "sessionUpdated",

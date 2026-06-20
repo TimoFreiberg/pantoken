@@ -51,31 +51,6 @@
     return "";
   }
 
-  // Image content blocks pi tools can return (e.g. `read` on a PNG, a mockup-render
-  // tool). The base64 already rides `output` across the wire (event-map passes the raw
-  // result); we render it as an <img> instead of letting it fall into a JSON dump.
-  function outputImages(out: unknown): { data: string; mimeType: string }[] {
-    if (!out || typeof out !== "object") return [];
-    const content = (out as { content?: unknown }).content;
-    if (!Array.isArray(content)) return [];
-    const imgs: { data: string; mimeType: string }[] = [];
-    for (const b of content) {
-      if (
-        b &&
-        typeof b === "object" &&
-        (b as { type?: unknown }).type === "image" &&
-        typeof (b as { data?: unknown }).data === "string" &&
-        typeof (b as { mimeType?: unknown }).mimeType === "string"
-      ) {
-        imgs.push({
-          data: (b as { data: string }).data,
-          mimeType: (b as { mimeType: string }).mimeType,
-        });
-      }
-    }
-    return imgs;
-  }
-
   function outputText(out: unknown): string {
     if (out == null) return "";
     if (typeof out === "string") return out;
@@ -84,14 +59,18 @@
     return JSON.stringify(out, null, 2);
   }
 
-  const outImages = $derived(
-    item.output === undefined ? [] : outputImages(item.output),
-  );
-  // Body text for the result. With image blocks present, show ONLY the accompanying
-  // text note — never outputText's JSON fallback, which would dump the raw base64.
+  // Images the tool returned, lifted into a typed field by the driver (event-map on the
+  // live path, history-map on reload) — so the SAME data renders before and after a
+  // reconnect, with no sniffing of the raw result shape.
+  const outImages = $derived(item.images ?? []);
+  // Body text for the result. With images present, show ONLY the accompanying text note
+  // (a live object → its text blocks, a replayed string → itself) — never a JSON dump.
   const outBodyText = $derived.by(() => {
     if (item.output === undefined) return "";
-    if (outImages.length) return contentText(item.output);
+    if (outImages.length)
+      return typeof item.output === "string"
+        ? item.output
+        : contentText(item.output);
     return outputText(item.output);
   });
 

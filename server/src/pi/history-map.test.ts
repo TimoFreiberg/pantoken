@@ -98,14 +98,63 @@ describe("historyToEvents", () => {
     expect(items[0]?.ts).toMatch(/^h-\d+$/);
   });
 
-  test("string and block user content both flatten to text", () => {
+  test("a user image attachment survives reload as typed image data (no [image] text)", () => {
+    const items = transcript([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "look at this" },
+          { type: "image", data: "QUJD", mimeType: "image/png" },
+        ],
+      },
+    ]);
+    // The image renders from the typed `images` field, so the text is clean — the old
+    // "[image]" placeholder no longer leaks into the bubble.
+    expect(items[0]).toMatchObject({
+      kind: "user",
+      text: "look at this",
+      images: [{ type: "image", data: "QUJD", mimeType: "image/png" }],
+    });
+  });
+
+  test("a tool result image survives reload as typed image data", () => {
+    const items = transcript([
+      { role: "user", content: "render it" },
+      {
+        role: "assistant",
+        content: [
+          { type: "toolCall", id: "c1", name: "render_mockup", arguments: {} },
+        ],
+      },
+      {
+        role: "toolResult",
+        toolCallId: "c1",
+        toolName: "render_mockup",
+        isError: false,
+        content: [
+          { type: "text", text: "Rendered mockup." },
+          { type: "image", data: "QUJD", mimeType: "image/png" },
+        ],
+      },
+    ]);
+    const tool = items.find((i) => i.kind === "tool");
+    // Output text is clean (no "[image]"); the bytes ride the typed `images` field.
+    expect(tool).toMatchObject({
+      kind: "tool",
+      output: "Rendered mockup.",
+      images: [{ type: "image", data: "QUJD", mimeType: "image/png" }],
+    });
+  });
+
+  test("a trimmed image block (no data) carries no image and no placeholder text", () => {
     const items = transcript([
       {
         role: "user",
         content: [{ type: "text", text: "a" }, { type: "image" }],
       },
     ]);
-    expect(items[0]).toMatchObject({ kind: "user", text: "a[image]" });
+    expect(items[0]).toMatchObject({ kind: "user", text: "a" });
+    expect((items[0] as { images?: unknown }).images).toBeUndefined();
   });
 
   test("assistant text + thinking land on one closed assistant item", () => {
