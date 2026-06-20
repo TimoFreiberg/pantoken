@@ -214,10 +214,15 @@ the remainder, roughly ordered by day-to-day leverage._
       outcome). Push a transient "Resolved on another device" when a pending dialog the local
       client didn't answer disappears. (Pairs with the toast system above; the event would need
       to carry the outcome to say which way it resolved.)
-- [ ] **Tool output trapped in a 320px scrollbox** — `ToolCard.svelte` caps the output `<pre>`
-      at 320px / diff at 420px with no copy-output, expand/drop-the-cap, or "show all" control;
-      a long log is a nested scroll-trap on touch. Add copy + an inline expand. (Distinct from
-      the per-code-block copy brainstorm item, which is markdown fences, not tool cards.)
+- [x] **Tool output trapped in a 320px scrollbox** → done 2026-06-21. The result block in
+      `ToolCard.svelte` now carries a compact action bar: **Copy** (clipboard, with a "Copied"
+      flash) and an **Expand/Collapse** toggle that drops the 320px cap so a long log reads
+      top-to-bottom instead of trapping a nested scroll. The expand affordance only appears when
+      the collapsed output actually overflows (measured `scrollHeight > clientHeight`), so short
+      results stay clean. New `longoutput` mock script/fixture (40-line bash log) + dev-bar button
+      drive it; `e2e/tool-output.e2e.ts` proves the cap-drop and the clipboard round-trip. (The
+      diff's 420px cap and the args `<pre>` were left as-is — the scroll-trap complaint was the
+      text output; revisit if a diff proves as trapping.)
 - [x] **No "running low on context" cue** → done 2026-06-20. Once the focused session's
       context window is ≥85% full, the composer surfaces a one-line `role="status"` cue above
       the input ("Context N% full — consider /compact or a fresh session"), reusing the
