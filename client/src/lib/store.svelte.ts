@@ -15,6 +15,7 @@ import {
   type OAuthLoginPrompt,
   type ProviderInfo,
   type ServerMessage,
+  type SessionAttention,
   type SessionConfig,
   type SessionListEntry,
   type SessionState,
@@ -77,6 +78,10 @@ class PilotStore {
   // Session ids warming up (created/opened, not yet streaming) — server-pushed in the
   // same `sessionStatus` message. Drives the sidebar/header "spinning up" indicator.
   initializingIds = $state<Set<string>>(new Set());
+  // Compact cross-session attention summaries. Background transcripts stay server-side;
+  // this is enough to route the operator to activity, approvals, failures, and completions.
+  attention = $state<Map<string, SessionAttention>>(new Map());
+  attentionVersion = $state(0);
   // Sessions with new content since last viewed. GUI-only, in-memory: a session is
   // marked unread when a *background* turn of it finishes (running→done while it's
   // not the active session); cleared when it becomes active. Everything starts read
@@ -381,6 +386,10 @@ class PilotStore {
         );
         this.runningIds = next;
         this.initializingIds = new Set(msg.initializingIds ?? []);
+        this.attention = new Map(
+          (msg.attention ?? []).map((item) => [item.sessionId, item]),
+        );
+        this.attentionVersion++;
         if (newlyUnread.length > 0)
           this.unread = new Set([...this.unread, ...newlyUnread]);
         break;
@@ -780,6 +789,11 @@ class PilotStore {
     this.files = { query: "", items: [] };
     send({ type: "openSession", path });
   }
+  /** Focus a session named by cross-session attention/notification metadata. */
+  openSessionById(sessionId: string): void {
+    const session = this.sessions.find((item) => item.sessionId === sessionId);
+    if (session) this.openSession(session.path);
+  }
   /** Dev-only timing for a full transcript render (fires on every snapshot: session
    *  open, switch, reconnect, mid-turn re-snapshot). Gated behind `?dev` — the same
    *  runtime URL flag that reveals the dev bar — so production stays silent until you
@@ -825,9 +839,20 @@ class PilotStore {
    *  here); both outrank unread/read. */
   sessionStatus(
     sessionId: string,
-  ): "running" | "initializing" | "unread" | "read" {
+  ):
+    | "waiting"
+    | "failed"
+    | "running"
+    | "initializing"
+    | "done"
+    | "unread"
+    | "read" {
+    const attention = this.attention.get(sessionId);
+    if (attention?.phase === "waiting") return "waiting";
+    if (attention?.phase === "failed") return "failed";
     if (this.runningIds.has(sessionId)) return "running";
     if (this.initializingIds.has(sessionId)) return "initializing";
+    if (attention?.phase === "done" && this.unread.has(sessionId)) return "done";
     if (this.unread.has(sessionId)) return "unread";
     // The active session is normally "read", but flags unread when new content landed
     // below the viewport while you were scrolled up (cleared on scroll-to-bottom).
@@ -835,9 +860,33 @@ class PilotStore {
       return "unread";
     return "read";
   }
-  /** True if any session in a project group is running (collapsed-group indicator). */
-  groupRunning(sessionIds: readonly string[]): boolean {
-    return sessionIds.some((id) => this.runningIds.has(id));
+  /** Human-readable second line for a row that currently deserves attention. */
+  sessionActivity(sessionId: string): string | null {
+    const attention = this.attention.get(sessionId);
+    if (!attention) return null;
+    if (attention.phase === "waiting") {
+      const count = attention.pendingCount ?? 1;
+      const title = attention.pendingTitle ?? "Waiting on you";
+      return count > 1 ? `${title} · ${count} requests` : title;
+    }
+    if (attention.phase === "failed")
+      return attention.activity ? `Failed · ${attention.activity}` : "Run failed";
+    if (attention.phase === "running")
+      return attention.activity ?? "Working";
+    if (attention.phase === "done" && this.unread.has(sessionId)) return "Done";
+    return null;
+  }
+  /** Highest-priority state in a collapsed project group. */
+  groupAttention(
+    sessionIds: readonly string[],
+  ): "waiting" | "failed" | "running" | "done" | null {
+    const states = sessionIds.map((id) => this.sessionStatus(id));
+    if (states.includes("waiting")) return "waiting";
+    if (states.includes("failed")) return "failed";
+    if (states.includes("running") || states.includes("initializing"))
+      return "running";
+    if (states.includes("done") || states.includes("unread")) return "done";
+    return null;
   }
   /** On boot, if no session is active (empty landing), restore this client's last
    *  focused session for the current Pilot server. If none survives, open a new-session
@@ -849,6 +898,26 @@ class PilotStore {
   private maybeOpenBootDraft(): void {
     if (this.bootDraftHandled) return;
     if (!this.serverId || !this.ready || !this.defaultNewSessionCwd) return;
+    const requestedId = requestedSessionId();
+    if (requestedId) {
+      const requested = this.sessions.find(
+        (session) => session.sessionId === requestedId,
+      );
+      clearRequestedSession();
+      if (requested) {
+        this.bootDraftHandled = true;
+        if (
+          requested.sessionId !== this.activeSessionId ||
+          requested.sessionId !== this.session.ref?.sessionId
+        ) {
+          this.bootRestoreInFlight = true;
+          this.openSession(requested.path);
+        } else {
+          this.loadDraft(`s:${requested.sessionId}`);
+        }
+        return;
+      }
+    }
     this.bootDraftHandled = true;
     if (
       this.activeSessionId === null &&
@@ -1255,6 +1324,19 @@ function createPromptId(): string {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function requestedSessionId(): string | null {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get("session");
+}
+
+function clearRequestedSession(): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("session")) return;
+  url.searchParams.delete("session");
+  history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 function lastSessionKey(serverId: string): string {

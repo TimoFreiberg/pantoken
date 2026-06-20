@@ -523,7 +523,7 @@ describe("SessionHub", () => {
   });
 
   test("a background turn finishing while away still notifies", () => {
-    const notes: { tag?: string }[] = [];
+    const notes: { tag?: string; url?: string; body: string }[] = [];
     const d = new FakeDriver();
     const hub = new SessionHub(d, (n) => {
       notes.push(n);
@@ -534,7 +534,13 @@ describe("SessionHub", () => {
     leave(); // client gone → clients.size 0
 
     d.emit(evFor("s2", { type: "runCompleted", snapshot: snap("s2") }));
-    expect(notes.some((n) => n.tag === "pilot-run")).toBe(true);
+    expect(notes).toContainEqual(
+      expect.objectContaining({
+        tag: "pilot-run-s2",
+        url: "/?session=s2",
+        body: expect.stringContaining("t finished"),
+      }),
+    );
   });
 
   test("running state is tracked + broadcast for background sessions too", () => {
@@ -560,7 +566,12 @@ describe("SessionHub", () => {
     // A further delta for an already-running session changes nothing → no re-broadcast.
     a.received.length = 0;
     d.emit(
-      evFor("s2", { type: "assistantDelta", text: "more", channel: "text" }),
+      evFor("s2", {
+        type: "assistantDelta",
+        timestamp: "t2",
+        text: "more",
+        channel: "text",
+      }),
     );
     expect(a.received.some((m) => m.type === "sessionStatus")).toBe(false);
 
@@ -572,6 +583,108 @@ describe("SessionHub", () => {
       expect(after.runningIds).not.toContain("s2");
       expect(after.runningIds).toContain("s");
     }
+  });
+
+  test("background activity, approvals, and failures broadcast compact attention", () => {
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    const a = client();
+    hub.addClient(a.send);
+    d.emit(ev({ type: "assistantDelta", text: "focus", channel: "text" }));
+    a.received.length = 0;
+
+    d.emit(
+      evFor("s2", {
+        type: "toolStarted",
+        callId: "read-1",
+        toolName: "read",
+        input: { path: "docs/TODO.md" },
+      }),
+    );
+    let status = a.received.filter((m) => m.type === "sessionStatus").at(-1);
+    expect(status?.type).toBe("sessionStatus");
+    if (status?.type === "sessionStatus")
+      expect(
+        status.attention?.find((item) => item.sessionId === "s2"),
+      ).toMatchObject({
+        phase: "running",
+        activity: "Reading docs/TODO.md",
+      });
+    expect(a.received.some((m) => m.type === "event")).toBe(false);
+
+    d.emit(
+      evFor("s2", {
+        type: "hostUiRequest",
+        request: {
+          kind: "confirm",
+          requestId: "bg-confirm",
+          title: "Approve deploy",
+          message: "Ship it?",
+        },
+      }),
+    );
+    status = a.received.filter((m) => m.type === "sessionStatus").at(-1);
+    if (status?.type === "sessionStatus")
+      expect(
+        status.attention?.find((item) => item.sessionId === "s2"),
+      ).toMatchObject({
+        phase: "waiting",
+        pendingCount: 1,
+        pendingTitle: "Approve deploy",
+      });
+
+    d.emit(evFor("s2", { type: "hostUiResolved", requestId: "bg-confirm" }));
+    status = a.received.filter((m) => m.type === "sessionStatus").at(-1);
+    if (status?.type === "sessionStatus")
+      expect(
+        status.attention?.find((item) => item.sessionId === "s2"),
+      ).toMatchObject({
+        phase: "running",
+        activity: "Reading docs/TODO.md",
+      });
+
+    d.emit(
+      evFor("s2", {
+        type: "runFailed",
+        error: { message: "Provider overloaded" },
+      }),
+    );
+    status = a.received.filter((m) => m.type === "sessionStatus").at(-1);
+    if (status?.type === "sessionStatus")
+      expect(
+        status.attention?.find((item) => item.sessionId === "s2"),
+      ).toMatchObject({
+        phase: "failed",
+        activity: "Provider overloaded",
+      });
+  });
+
+  test("a fresh client receives retained cross-session attention", () => {
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    d.emit(
+      evFor("s2", {
+        type: "hostUiRequest",
+        request: {
+          kind: "input",
+          requestId: "bg-input",
+          title: "Need a value",
+          message: "Value?",
+        },
+      }),
+    );
+
+    const late = client();
+    hub.addClient(late.send);
+    const status = late.received.find((m) => m.type === "sessionStatus");
+    expect(status?.type).toBe("sessionStatus");
+    if (status?.type === "sessionStatus")
+      expect(
+        status.attention?.find((item) => item.sessionId === "s2"),
+      ).toMatchObject({
+        phase: "waiting",
+        pendingTitle: "Need a value",
+      });
   });
 
   test("a terminal event clears running for a background session mid-switch", async () => {

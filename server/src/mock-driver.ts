@@ -27,6 +27,7 @@ import type {
 import {
   ambient,
   bgRun,
+  bgWait,
   branchedSeed,
   compat,
   confirmDialog,
@@ -677,6 +678,7 @@ export class MockDriver implements PilotDriver {
       ambient,
       compat,
       bgrun: bgRun,
+      bgwait: bgWait,
       reply: () => promptReply("Show me the streamed reply script."),
       editdiff: editDiff,
       error: errorRun,

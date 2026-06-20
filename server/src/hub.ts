@@ -7,8 +7,10 @@ import {
   type ClientMessage,
   foldEvent,
   initialSessionState,
+  isDialogRequest,
   PROTOCOL_VERSION,
   type ServerMessage,
+  type SessionAttention,
   type SessionDriverEvent,
   type SessionId,
   type SessionState,
@@ -27,6 +29,57 @@ export interface HubNotification {
   title: string;
   body: string;
   tag?: string;
+  url?: string;
+}
+
+interface AttentionRecord {
+  phase: "running" | "failed" | "done";
+  activity?: string;
+  updatedAt: string;
+  pending: Map<string, string>;
+}
+
+function clipped(value: string, max = 72): string {
+  const oneLine = value.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
+}
+
+function inputString(input: unknown, keys: readonly string[]): string | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const values = input as Record<string, unknown>;
+  for (const key of keys) {
+    const value = values[key];
+    if (typeof value === "string" && value.trim()) return clipped(value);
+  }
+  return undefined;
+}
+
+function toolActivity(
+  ev: Extract<SessionDriverEvent, { type: "toolStarted" }>,
+): string {
+  const name = ev.toolName.toLowerCase();
+  const path = inputString(ev.input, ["path", "filePath", "file_path"]);
+  if (name.includes("read")) return path ? `Reading ${path}` : "Reading files";
+  if (name.includes("edit") || name.includes("write"))
+    return path ? `Editing ${path}` : "Editing files";
+  if (name.includes("search") || name.includes("grep") || name === "rg")
+    return "Searching the workspace";
+  if (name === "bash" || name === "shell" || name === "exec") {
+    const command = inputString(ev.input, ["command", "cmd"]);
+    return command ? `Running ${command}` : "Running a command";
+  }
+  return clipped(ev.label ?? ev.description ?? ev.toolName);
+}
+
+function requestTitle(
+  request: Extract<
+    SessionDriverEvent,
+    { type: "hostUiRequest" }
+  >["request"],
+): string {
+  if ("title" in request && request.title) return clipped(request.title);
+  if ("message" in request && request.message) return clipped(request.message);
+  return request.kind === "qna" ? "Questions need answers" : "Waiting on you";
 }
 
 export class SessionHub {
@@ -45,6 +98,10 @@ export class SessionHub {
   // background/just-created row shows a distinct "spinning up" indicator. A session is
   // never both running and initializing; entering either clears the other here.
   private initializing = new Set<SessionId>();
+  // Compact metadata for every warm session. Background transcripts stay private to the
+  // driver; this map carries only enough state to route the operator's attention.
+  private attention = new Map<SessionId, AttentionRecord>();
+  private sessionTitles = new Map<SessionId, string>();
   private clients = new Set<Send>();
   // Whether any client has connected since startup. Gates push so replayed history
   // — the mock's bootstrap greeting, or the pi driver's on-load session replay
@@ -125,7 +182,9 @@ export class SessionHub {
     // running set here or the evicted session shows a perpetual running indicator. The
     // `switching` guard below only protects the focused-transcript fold + broadcast,
     // which the swap re-seeds — it must not gate cross-session running tracking.
-    this.trackRunning(sid, ev);
+    const statusChanged = this.trackRunning(sid, ev);
+    const attentionChanged = this.trackAttention(sid, ev);
+    if (statusChanged || attentionChanged) this.broadcastSessionStatus();
     if (this.switching) return; // the swap orchestrates its own reset + re-fold
     // The first session to surface becomes the focus (e.g. the resumed session at
     // startup). Only the focused session folds into `state` and broadcasts; other
@@ -138,10 +197,10 @@ export class SessionHub {
     this.maybeNotify(ev);
   }
 
-  /** Update the running set from one event and push `sessionStatus` if it changed.
+  /** Update the running set from one event and report whether it changed.
    *  Snapshot-bearing events carry an authoritative status; mid-turn events
    *  (deltas, tool/user/queued) imply a live turn; failure/close end it. */
-  private trackRunning(sid: SessionId, ev: SessionDriverEvent): void {
+  private trackRunning(sid: SessionId, ev: SessionDriverEvent): boolean {
     const before = this.running.has(sid);
     const beforeInit = this.initializing.has(sid);
     switch (ev.type) {
@@ -167,11 +226,126 @@ export class SessionHub {
         this.setInitializing(sid, false);
         break;
     }
-    if (
+    return (
       this.running.has(sid) !== before ||
       this.initializing.has(sid) !== beforeInit
-    )
-      this.broadcastSessionStatus();
+    );
+  }
+
+  private attentionFor(sid: SessionId): SessionAttention | undefined {
+    const record = this.attention.get(sid);
+    if (!record) return undefined;
+    const pending = [...record.pending.values()];
+    if (pending.length > 0)
+      return {
+        sessionId: sid,
+        phase: "waiting",
+        activity: "Waiting on you",
+        pendingCount: pending.length,
+        pendingTitle: pending[0],
+        updatedAt: record.updatedAt,
+      };
+    return {
+      sessionId: sid,
+      phase: record.phase,
+      activity: record.activity,
+      updatedAt: record.updatedAt,
+    };
+  }
+
+  /** Update one session's compact attention summary. Returns true only when the wire
+   * projection changed, so repeated deltas don't turn sessionStatus into a hot stream. */
+  private trackAttention(sid: SessionId, ev: SessionDriverEvent): boolean {
+    const before = JSON.stringify(this.attentionFor(sid));
+    let record = this.attention.get(sid);
+    const ensure = (): AttentionRecord => {
+      if (!record) {
+        record = {
+          phase: "running",
+          activity: "Working",
+          updatedAt: ev.timestamp,
+          pending: new Map(),
+        };
+        this.attention.set(sid, record);
+      }
+      return record;
+    };
+    const setBase = (
+      phase: AttentionRecord["phase"],
+      activity?: string,
+    ): void => {
+      const current = ensure();
+      const changed = current.phase !== phase || current.activity !== activity;
+      current.phase = phase;
+      current.activity = activity;
+      if (changed) current.updatedAt = ev.timestamp;
+    };
+
+    switch (ev.type) {
+      case "sessionOpened":
+      case "sessionUpdated":
+        this.sessionTitles.set(sid, ev.snapshot.title);
+        if (ev.snapshot.status === "running") setBase("running", "Working");
+        else if (ev.snapshot.status === "initializing")
+          setBase("running", "Starting session");
+        else if (ev.snapshot.status === "failed")
+          setBase("failed", "Run failed");
+        // An idle sessionUpdated may be a transient isStreaming glitch. Only an
+        // authoritative runCompleted changes attention to done.
+        break;
+      case "userMessage":
+        setBase("running", "Starting");
+        break;
+      case "queuedMessageStarted":
+        setBase("running", "Queued a follow-up");
+        break;
+      case "assistantDelta":
+        setBase(
+          "running",
+          ev.channel === "thinking" ? "Thinking" : "Responding",
+        );
+        break;
+      case "toolStarted":
+        setBase("running", toolActivity(ev));
+        break;
+      case "toolFinished":
+        if (record?.phase === "running") setBase("running", "Working");
+        break;
+      case "runCompleted":
+        this.sessionTitles.set(sid, ev.snapshot.title);
+        setBase("done", "Done");
+        break;
+      case "runFailed": {
+        const failed = ensure();
+        failed.pending.clear();
+        setBase("failed", clipped(ev.error.message));
+        break;
+      }
+      case "hostUiRequest":
+        if (isDialogRequest(ev.request)) {
+          const waiting = ensure();
+          waiting.pending.set(ev.request.requestId, requestTitle(ev.request));
+          waiting.updatedAt = ev.timestamp;
+        } else if (
+          ev.request.kind === "status" &&
+          ev.request.text &&
+          record?.phase === "running"
+        ) {
+          setBase("running", clipped(ev.request.text));
+        } else if (ev.request.kind === "title") {
+          this.sessionTitles.set(sid, ev.request.title);
+        }
+        break;
+      case "hostUiResolved":
+        if (record?.pending.delete(ev.requestId)) record.updatedAt = ev.timestamp;
+        break;
+      case "sessionClosed":
+        this.attention.delete(sid);
+        this.sessionTitles.delete(sid);
+        break;
+    }
+
+    return before !== JSON.stringify(this.attentionFor(sid));
   }
 
   // Running and initializing are mutually exclusive phases; turning one on clears the
@@ -195,9 +369,13 @@ export class SessionHub {
       type: "sessionStatus",
       runningIds: [...this.running],
       initializingIds: [...this.initializing],
+      attention: [...this.attention.keys()].flatMap((sid) => {
+        const item = this.attentionFor(sid);
+        return item ? [item] : [];
+      }),
     });
-    // The running set just changed (this is the only place it's broadcast) — match the
-    // live-refresh ticker to it: start it when a turn begins, stop it when all finish.
+    // Attention-only changes also travel through this method. Reconcile the live-refresh
+    // ticker every time; syncLiveRefresh is idempotent and keys only off running/client sets.
     this.syncLiveRefresh();
   }
 
@@ -253,27 +431,38 @@ export class SessionHub {
     // Push only when someone has been here and then left — never on a cold replay
     // (no one to "return" to a backgrounded app that was never opened).
     if (!this.notify || this.clients.size > 0 || !this.everConnected) return;
+    const sid = ev.sessionRef.sessionId;
+    const session = this.sessionTitles.get(sid) ?? sid;
+    const url = `/?session=${encodeURIComponent(sid)}`;
     if (ev.type === "runCompleted")
       this.notify({
         title: "pilot",
-        body: "Agent finished its turn",
-        tag: "pilot-run",
+        body: `${session} finished its turn`,
+        tag: `pilot-run-${sid}`,
+        url,
       });
     else if (ev.type === "runFailed")
-      this.notify({ title: "pilot", body: "Run failed", tag: "pilot-run" });
+      this.notify({
+        title: "pilot",
+        body: `${session} failed: ${clipped(ev.error.message)}`,
+        tag: `pilot-run-${sid}`,
+        url,
+      });
     else if (ev.type === "hostUiRequest") {
       const kind = ev.request.kind;
       if (
         kind === "confirm" ||
         kind === "select" ||
         kind === "input" ||
-        kind === "editor"
+        kind === "editor" ||
+        kind === "qna"
       ) {
         const r = ev.request as { title?: string };
         this.notify({
           title: "Approval needed",
-          body: r.title ?? "Waiting on you",
-          tag: "pilot-approval",
+          body: `${session}: ${r.title ?? "Waiting on you"}`,
+          tag: `pilot-approval-${sid}`,
+          url,
         });
       }
     }
@@ -623,24 +812,17 @@ export class SessionHub {
         return false;
       }
       this.state = initialSessionState();
-      for (const ev of seed) foldEvent(this.state, ev);
+      let metaChanged = false;
+      for (const ev of seed) {
+        foldEvent(this.state, ev);
+        metaChanged = this.trackRunning(ev.sessionRef.sessionId, ev) || metaChanged;
+        metaChanged =
+          this.trackAttention(ev.sessionRef.sessionId, ev) || metaChanged;
+      }
       // Focus follows the swapped-to session; its id rides the seed's sessionOpened.
       this.focusedId = this.state.ref?.sessionId ?? this.focusedId;
       this.switching = false;
-      // The seed folded directly (not via onEvent), so reconcile the running +
-      // initializing sets from the swapped-to session's resolved status.
-      const focusId = this.state.ref?.sessionId;
-      if (focusId) {
-        const before = this.running.has(focusId);
-        const beforeInit = this.initializing.has(focusId);
-        this.setRunning(focusId, this.state.status === "running");
-        this.setInitializing(focusId, this.state.status === "initializing");
-        if (
-          this.running.has(focusId) !== before ||
-          this.initializing.has(focusId) !== beforeInit
-        )
-          this.broadcastSessionStatus();
-      }
+      if (metaChanged) this.broadcastSessionStatus();
       this.broadcast({ type: "snapshot", state: this.snapshot() });
       await this.broadcastSessionList();
       // Commands are cwd-scoped — the swapped-to session may expose a different set.
@@ -666,6 +848,10 @@ export class SessionHub {
       type: "sessionStatus",
       runningIds: [...this.running],
       initializingIds: [...this.initializing],
+      attention: [...this.attention.keys()].flatMap((sid) => {
+        const item = this.attentionFor(sid);
+        return item ? [item] : [];
+      }),
     });
     // Current desktop-update state, so a connecting client immediately shows (or hides)
     // the sidebar update card without waiting for the watcher's next poll.
@@ -922,6 +1108,8 @@ export class SessionHub {
     this.focusedId = null;
     this.running.clear();
     this.initializing.clear();
+    this.attention.clear();
+    this.sessionTitles.clear();
     this.updateSha = null;
     this.applying = false;
     this.driver.reset?.(opts);
