@@ -84,11 +84,137 @@ export function mergeTools(items: readonly TranscriptItem[]): DisplayItem[] {
   return result;
 }
 
-/** Header summary for a merged card: total count + the distinct names once each,
- *  e.g. "5 tools (read, grep)". */
+// ── Skill-load detection ─────────────────────────────────────────────────────
+// pi has no model-facing "skill" tool: its system prompt lists the available skills
+// with their `<location>` and instructs the model to *read the SKILL.md* when a task
+// matches. So a skill load surfaces as an ordinary `read` of a `SKILL.md`. We detect
+// that shape so the summary can say "loaded skill X" instead of "read a file".
+
+/** The file path a `read` tool targeted, or null if it isn't a path-bearing read. */
+function readPath(t: ToolItem): string | null {
+  if (t.name !== "read") return null;
+  const inp = t.input;
+  if (!inp || typeof inp !== "object") return null;
+  const o = inp as Record<string, unknown>;
+  if (typeof o.path === "string") return o.path;
+  if (typeof o.file_path === "string") return o.file_path;
+  return null;
+}
+
+/**
+ * If a tool is a `read` of a `SKILL.md`, return the skill's name (its parent directory,
+ * matching pi's own `name = parentDirName` convention); otherwise null. Heuristic by
+ * design: reading a SKILL.md you're *editing* also matches, an acceptable false positive
+ * — the dominant meaning of "read a SKILL.md" is "load that skill". Only SKILL.md files
+ * are detectable; root `.md` skills are indistinguishable from any other markdown read.
+ */
+export function skillFromTool(t: ToolItem): string | null {
+  const p = readPath(t);
+  if (!p) return null;
+  const parts = p.split("/").filter(Boolean);
+  const base = parts[parts.length - 1];
+  if (!base || base.toLowerCase() !== "skill.md") return null;
+  return parts[parts.length - 2] ?? "skill";
+}
+
+// ── Programmatic prose summary for a merged tool run ──────────────────────────
+// Maps each tool to a friendly "category" with a count-aware phrase, groups the run by
+// category (first-appearance order), and joins into one sentence — e.g.
+// "Edited a file, read 2 files, ran 3 commands". This is the deterministic, no-LLM
+// stand-in for the intent prose Codex/Claude generate. Skill loads get their own
+// category so the prose can name the skill.
+
+interface ToolCategory {
+  key: string;
+  /** Builds the phrase from the bucket's count and (for skills) collected names. */
+  phrase: (count: number, names: string[]) => string;
+  /** Set only for skill loads; collected so a single-skill run can name it. */
+  skillName?: string;
+}
+
+function toolCategory(t: ToolItem): ToolCategory {
+  const skill = skillFromTool(t);
+  if (skill) {
+    return {
+      key: "skill",
+      skillName: skill,
+      phrase: (n, names) =>
+        n === 1 ? `loaded skill ${names[0]}` : `loaded ${n} skills`,
+    };
+  }
+  switch (t.name) {
+    case "read":
+      return {
+        key: "read",
+        phrase: (n) => (n === 1 ? "read a file" : `read ${n} files`),
+      };
+    case "edit":
+      return {
+        key: "edit",
+        phrase: (n) => (n === 1 ? "edited a file" : `edited ${n} files`),
+      };
+    case "write":
+      return {
+        key: "write",
+        phrase: (n) => (n === 1 ? "wrote a file" : `wrote ${n} files`),
+      };
+    case "bash":
+      return {
+        key: "bash",
+        phrase: (n) => (n === 1 ? "ran a command" : `ran ${n} commands`),
+      };
+    case "grep":
+    case "ripgrep":
+    case "find":
+      // grep (content) and find (filenames) both read as "searches" in a summary.
+      return {
+        key: "search",
+        phrase: (n) => (n === 1 ? "ran a search" : `ran ${n} searches`),
+      };
+    case "ls":
+      return {
+        key: "ls",
+        phrase: (n) =>
+          n === 1 ? "listed a directory" : `listed ${n} directories`,
+      };
+    default: {
+      // Unknown tool: fall back to its name as the verb-noun so nothing is silently dropped.
+      const label = t.name;
+      return {
+        key: `other:${label}`,
+        phrase: (n) => (n === 1 ? `used ${label}` : `used ${label} ${n}×`),
+      };
+    }
+  }
+}
+
+/** Prose summary of a run of tools: "Edited a file, read 2 files, ran 3 commands".
+ *  Skill-aware (reads of SKILL.md become "loaded skill X"), grouped by category in
+ *  first-appearance order, with only the first letter of the whole sentence capitalized. */
+export function summarizeToolRun(tools: readonly ToolItem[]): string {
+  const buckets = new Map<
+    string,
+    { count: number; names: string[]; phrase: ToolCategory["phrase"] }
+  >();
+  for (const t of tools) {
+    const cat = toolCategory(t);
+    let b = buckets.get(cat.key);
+    if (!b) {
+      b = { count: 0, names: [], phrase: cat.phrase };
+      buckets.set(cat.key, b);
+    }
+    b.count++;
+    if (cat.skillName) b.names.push(cat.skillName);
+  }
+  const joined = [...buckets.values()]
+    .map((b) => b.phrase(b.count, b.names))
+    .join(", ");
+  return joined ? joined.charAt(0).toUpperCase() + joined.slice(1) : "";
+}
+
+/** Human label for a merged card — the programmatic prose summary of its tools. */
 export function mergedSummary(item: MergedToolsItem): string {
-  const noun = item.tools.length === 1 ? "tool" : "tools";
-  return `${item.tools.length} ${noun} (${item.names.join(", ")})`;
+  return summarizeToolRun(item.tools);
 }
 
 // ── Pass 2: group into turns and split work vs. response ─────────────────────

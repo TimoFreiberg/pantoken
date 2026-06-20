@@ -709,6 +709,69 @@ export function searchBatch(): ScriptStep[] {
   ];
 }
 
+// --- A run that loads a skill (read of a SKILL.md) ---------------------------
+
+/** A turn where the agent loads a skill before working: it reads a `SKILL.md` (which
+ *  the transcript detects and labels "loaded skill X"), then a normal file, then runs a
+ *  command. The three fold into one subdued summary reading
+ *  "Loaded skill debug, read a file, ran a command" — exercising skill detection and the
+ *  skill-aware prose summarizer. */
+export function skillLoad(): ScriptStep[] {
+  return [
+    {
+      wait: 0,
+      event: {
+        ...base(),
+        type: "userMessage",
+        id: `u-${ts()}`,
+        text: "Something's off with the fold reducer — can you dig in?",
+      },
+    },
+    {
+      wait: 0,
+      event: {
+        ...base(),
+        type: "sessionUpdated",
+        snapshot: snapshot({ status: "running" }),
+      },
+    },
+    ...deltas(
+      "This calls for the debug skill — let me load it, then trace the reducer.",
+      "text",
+    ),
+    ...summarySpan(
+      "sk1",
+      "read",
+      { path: ".pi/skills/debug/SKILL.md" },
+      "# debug\nTrace the code path end-to-end before forming a hypothesis…",
+    ),
+    ...summarySpan(
+      "sk2",
+      "read",
+      { path: "protocol/src/state.ts" },
+      "// foldEvent — mutates state, returns it",
+    ),
+    ...summarySpan(
+      "sk3",
+      "bash",
+      { command: "bun test protocol/src/state.test.ts" },
+      "✓ 12 pass\n0 fail",
+    ),
+    ...deltas(
+      "The reducer is fine; the stray caret came from a missed assistant close. Fixing that.",
+      "text",
+    ),
+    {
+      wait: 60,
+      event: {
+        ...base(),
+        type: "runCompleted",
+        snapshot: snapshot({ status: "idle" }),
+      },
+    },
+  ];
+}
+
 // --- Approval dialogs -------------------------------------------------------
 
 export function confirmDialog(): ScriptStep[] {
@@ -1428,6 +1491,7 @@ export function journalNudge(): ScriptStep[] {
 export const SCRIPTS: Record<string, () => ScriptStep[]> = {
   greeting,
   journalnudge: journalNudge,
+  skill: skillLoad,
   confirm: confirmDialog,
   input: inputDialog,
   qna: qnaDialog,

@@ -18,24 +18,29 @@
     if (item.tools.some((tool) => tool.status === "running")) return "running";
     return "ok";
   });
-  const statusIcon: Record<string, string> = {
-    running: "○",
-    ok: "●",
-    error: "✕",
-  };
+  const summary = $derived(mergedSummary(item));
+  // A quiet status dot only when it carries signal — running (live) or error. The
+  // common settled-ok run shows nothing, keeping the row as subdued as the reference
+  // Codex/Claude transcripts (just grey prose + a chevron).
+  const dot = $derived(
+    status === "running" ? "○" : status === "error" ? "✕" : null,
+  );
 </script>
 
+<!-- Deliberately the OPPOSITE of ToolCard's shell: a merged run is ambient noise, so it
+     renders as a borderless grey disclosure row (matching the "Worked for Ns" header and
+     the nudge pill), not a highlighted card. The high-signal tools (write/edit) stay as
+     standalone bordered cards; everything else recedes into this line. -->
 <div class="tool summary {status}">
   <button
     class="head"
-    title={`${open ? "Collapse" : "Expand"} ${mergedSummary(item)} (Enter)`}
+    title={`${open ? "Collapse" : "Expand"} — ${summary} (Enter)`}
     onclick={ontoggle}
     aria-expanded={open}
   >
-    <span class="status">{statusIcon[status]}</span>
-    <span class="name">{item.tools.length} {item.tools.length === 1 ? "tool" : "tools"}</span>
-    <span class="arg">{item.names.join(", ")}</span>
     <span class="chev" class:open>▸</span>
+    {#if dot}<span class="status" aria-hidden="true">{dot}</span>{/if}
+    <span class="label">{summary}</span>
   </button>
   {#if open}
     <div class="body">
@@ -47,49 +52,54 @@
 </div>
 
 <style>
-  /* Deliberately matches ToolCard's shell exactly: a summary should feel like the
-     same component at a higher level, not a second visual language. */
-  .tool {
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--surface);
-    overflow: hidden;
+  .summary {
+    /* Cheap content-visibility win on long transcripts; no box of its own. */
     content-visibility: auto;
-    contain-intrinsic-size: auto 42px;
+    contain-intrinsic-size: auto 24px;
   }
   .head {
-    width: 100%;
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 9px;
-    background: none;
+    gap: 7px;
+    background: transparent;
     border: none;
-    padding: 9px 12px;
+    padding: 2px 0;
     text-align: left;
-    color: var(--text);
+    color: var(--text-muted);
+    font-size: 12.5px;
     cursor: pointer;
-    transition: background 0.12s ease;
+    transition: color 0.12s ease;
   }
   .head:hover {
-    background: var(--surface-sunken);
+    color: var(--text);
   }
   .head:focus-visible {
-    outline: none;
-    background: var(--surface-sunken);
-    box-shadow: inset 0 0 0 1.5px var(--accent);
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
   }
+  .chev {
+    font-size: 10px;
+    width: 12px;
+    text-align: center;
+    color: var(--text-faint);
+    flex-shrink: 0;
+    transition: transform 0.12s ease;
+  }
+  .chev.open {
+    transform: rotate(90deg);
+  }
+  /* Status dot only renders for running/error (see `dot`). */
   .status {
     font-size: 9px;
     line-height: 1;
+    flex-shrink: 0;
   }
-  .tool.running .status {
+  .summary.running .status {
     color: var(--accent);
     animation: blink 1s ease-in-out infinite;
   }
-  .tool.ok .status {
-    color: var(--ok);
-  }
-  .tool.error .status {
+  .summary.error .status {
     color: var(--danger);
   }
   @keyframes blink {
@@ -97,33 +107,17 @@
       opacity: 0.3;
     }
   }
-  .name {
+  .label {
     font-weight: 550;
-    font-size: 13.5px;
-    flex-shrink: 0;
+    overflow-wrap: anywhere;
   }
-  .arg {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--text-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    flex: 1;
-    min-width: 0;
-  }
-  .chev {
-    font-size: 10px;
-    color: var(--text-faint);
-    flex-shrink: 0;
-    transition: transform 0.15s ease;
-  }
-  .chev.open {
-    transform: rotate(90deg);
-  }
+  /* Expanded detail: the full tool cards, indented under the row with a thread line so
+     they read as "the calls behind this summary" regardless of nesting context. */
   .body {
-    border-top: 1px solid var(--border);
-    padding: 10px 12px;
+    margin-top: 9px;
+    margin-left: 5px;
+    padding-left: 13px;
+    border-left: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -137,6 +131,11 @@
     to {
       opacity: 1;
       transform: translateY(0);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .body {
+      animation: none;
     }
   }
 </style>
