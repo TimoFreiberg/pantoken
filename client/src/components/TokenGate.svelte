@@ -2,13 +2,21 @@
   import { store } from "../lib/store.svelte.js";
   import Button from "./ui/Button.svelte";
   let value = $state("");
+
+  // Explain *why* the gate appeared. An expiry mid-session is disorienting if it
+  // reads like a cold first-run prompt, so name it (and reassure nothing's lost).
+  const expired = $derived(store.unauthorizedReason === "expired");
 </script>
 
 <div class="gate">
   <div class="card">
     <div class="mark">π</div>
     <h1>pilot</h1>
-    <p>This server requires an access token.</p>
+    {#if expired}
+      <p>Your access token was rejected or expired — re-enter it to reconnect.</p>
+    {:else}
+      <p>This server requires an access token.</p>
+    {/if}
     <form
       onsubmit={(e) => {
         e.preventDefault();

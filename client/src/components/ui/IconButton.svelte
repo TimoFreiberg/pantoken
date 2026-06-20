@@ -70,6 +70,10 @@
     opacity: 0.45;
     cursor: default;
   }
+  .icon-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
   .icon-btn:disabled:hover {
     background: transparent;
     border-color: transparent;

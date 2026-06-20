@@ -19,7 +19,7 @@
     </div>
     <div class="items">
       {#each queued as message (message.id)}
-        <div class="item" data-mode={message.mode}>
+        <div class="item" data-mode={message.mode} title={message.text}>
           <span class="mode"
             >{message.mode === "steer" ? "Steer" : "Follow-up"}</span
           >
@@ -103,7 +103,12 @@
     color: var(--text);
     font-size: 12px;
     line-height: 1.35;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    /* Show up to two lines so a queued prompt is readable at a glance; the full
+       text is in the row's title for hover. (Phone is a primary client and has
+       no hover, so two lines + Edit-all is the readable path there.) */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
   }
 </style>
