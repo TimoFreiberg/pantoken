@@ -36,8 +36,9 @@ test("renders the greeting conversation: user, collapsed work, final answer", as
     page.getByText("I'll add a lightweight health endpoint"),
   ).toBeVisible();
   const summary = page.locator(".tool.summary");
-  await expect(summary.locator(":scope > .head .name")).toHaveText("1 tool");
-  await expect(summary.locator(":scope > .head .arg")).toHaveText("bash");
+  await expect(summary.locator(":scope > .head .label")).toHaveText(
+    "Ran a command",
+  );
 });
 
 test("the composer footer shows the model; the header shows a live connection", async ({

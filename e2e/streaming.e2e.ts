@@ -33,8 +33,9 @@ test("a streamed reply renders user text, a working block, and the final answer"
     .last()
     .getByTestId("work-body")
     .locator(".tool.summary");
-  await expect(summary.locator(":scope > .head .name")).toHaveText("1 tool");
-  await expect(summary.locator(":scope > .head .arg")).toHaveText("read");
+  await expect(summary.locator(":scope > .head .label")).toHaveText(
+    "Read a file",
+  );
 });
 
 test("thinking stays hidden by default even inside an expanded working block", async ({

@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { drive, expandWork, gotoFresh } from "./helpers.js";
+import {
+  drive,
+  expandWork,
+  gotoFresh,
+  waitForSettledWorkBlocks,
+} from "./helpers.js";
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
@@ -14,16 +19,43 @@ test("a mixed run including bash collapses into one tool-styled summary", async 
   await expect(page.getByText("Reconnect lives in")).toBeVisible();
   await expandWork(page);
 
-  // 2 reads + 2 greps + 1 find + 1 bash, uninterrupted, fold into ONE card. The header
-  // shows the total count plus each distinct tool name once (first-appearance
-  // order), using the same card shell/classes as a standalone ToolCard.
+  // 2 reads + 2 greps + 1 find + 1 bash, uninterrupted, fold into ONE subdued row. The
+  // label is a programmatic prose summary: tools grouped by category (grep+find both read
+  // as "searches") in first-appearance order, counted, with the sentence capitalized. A
+  // settled-ok run shows no status dot — it's meant to recede into ambient noise.
   const summary = page.locator(".tool.summary");
   const head = summary.locator(".head");
   await expect(summary).toHaveClass(/ok/);
   await expect(head).toHaveCount(1);
-  await expect(head.locator(".name")).toHaveText("6 tools");
-  await expect(head.locator(".arg")).toHaveText("read, grep, find, bash");
-  await expect(head.locator(".status")).toHaveText("●");
+  await expect(head.locator(".label")).toHaveText(
+    "Read 2 files, ran 3 searches, ran a command",
+  );
+  await expect(head.locator(".status")).toHaveCount(0);
+});
+
+test("a skill load (read of a SKILL.md) is labelled as such in the summary", async ({
+  page,
+}) => {
+  await drive(page, "skill");
+  await expect(page.getByText("The reducer is fine")).toBeVisible();
+  // Wait for BOTH the greeting and the skill turn to settle before expanding: the final
+  // text appears mid-stream, so without this `expandWork` races and expands the only
+  // already-collapsed block (the greeting) instead of the skill turn.
+  await waitForSettledWorkBlocks(page, 2);
+  await expandWork(page);
+
+  // The skill-loading read + a normal read + a bash fold into one row whose prose names
+  // the loaded skill instead of counting it as a plain file read. Scope to THIS turn's
+  // work block: the greeting turn also renders a tool summary, so an unscoped
+  // `.tool.summary` could match both and trip strict mode.
+  const summary = page
+    .locator(".turn-work")
+    .last()
+    .getByTestId("work-body")
+    .locator(".tool.summary");
+  await expect(summary.locator(".head .label")).toHaveText(
+    "Loaded skill debug, read a file, ran a command",
+  );
 });
 
 test("merged card expands in two steps: the list, then each call", async ({

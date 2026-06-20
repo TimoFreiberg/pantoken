@@ -25,9 +25,12 @@ test("the Stop pill survives a stray mid-turn idle snapshot (turn still in fligh
     page.getByText("kicking off a command", { exact: false }),
   ).toBeVisible();
   const summary = page.locator(".tool.summary");
-  await expect(summary.locator(":scope > .head .name")).toHaveText("1 tool");
-  await expect(summary.locator(":scope > .head .arg")).toHaveText("bash");
+  await expect(summary.locator(":scope > .head .label")).toHaveText(
+    "Ran a command",
+  );
   await expect(summary).toHaveClass(/running/);
+  // A running run keeps a status dot (the one signal a subdued row still shows).
+  await expect(summary.locator(":scope > .head .status")).toHaveText("○");
 
   // Wait for the stray idle snapshot to land server-side: the folded status flips to
   // "idle" (and stays — the turn never completes), proving the affordance no longer
