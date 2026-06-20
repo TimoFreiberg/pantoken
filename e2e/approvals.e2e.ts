@@ -64,6 +64,34 @@ test("input dialog submits a value", async ({ page }) => {
   await expect(page.getByText("Received: My commit")).toBeVisible();
 });
 
+test("the approval sheet is a labelled modal (aria-modal + accessible name)", async ({
+  page,
+}) => {
+  await drive(page, "confirm");
+  const dialog = page.getByRole("dialog", { name: "Run destructive command?" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
+});
+
+test("Escape cancels the dialog (deny-safe) and surfaces the cancelled notice", async ({
+  page,
+}) => {
+  await drive(page, "confirm");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  // Focus moves into the sheet on open; Escape routes through its deny-safe cancel.
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(page.getByText("Dialog cancelled.")).toBeVisible();
+});
+
+test("input dialog submits from the keyboard (Enter)", async ({ page }) => {
+  await drive(page, "input");
+  const input = page.getByRole("dialog").getByRole("textbox");
+  await input.fill("Keyboard commit");
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("Received: Keyboard commit")).toBeVisible();
+});
+
 test("ambient: status strip + a collapsed tasklist pill that expands", async ({
   page,
 }) => {
