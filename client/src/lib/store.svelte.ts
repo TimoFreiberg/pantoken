@@ -59,6 +59,9 @@ class PilotStore {
   serverId = $state<string | null>(loadLastServerId());
   ready = $state(false);
   unauthorized = $state(false);
+  /** Why the auth gate is showing, so it can explain itself. "expired" = a token was
+   *  rejected mid-session (vs. first-run no-token); "signed-out" = explicit sign-out. */
+  unauthorizedReason = $state<"expired" | "signed-out" | null>(null);
 
   // Session picker — server-authoritative: the sessions on disk + which is active.
   sessions = $state<SessionListEntry[]>([]);
@@ -509,6 +512,9 @@ class PilotStore {
       case "error":
         if (msg.message === "unauthorized") {
           this.unauthorized = true;
+          // Rejected after we'd connected → a token expired/was revoked mid-session,
+          // not a cold first-run gate. Lets TokenGate say so.
+          this.unauthorizedReason = "expired";
           disconnect(); // stop the reconnect loop until a new token is entered
         } else {
           console.error("[server error]", msg.message);
@@ -530,6 +536,7 @@ class PilotStore {
   authenticate(token: string): void {
     setToken(token);
     this.unauthorized = false;
+    this.unauthorizedReason = null;
     connect();
   }
   reconnect(): void {
@@ -568,7 +575,9 @@ class PilotStore {
   }
 
   private sendPendingPrompt(promptId: string): void {
-    const prompt = this.pendingPrompts.find((item) => item.promptId === promptId);
+    const prompt = this.pendingPrompts.find(
+      (item) => item.promptId === promptId,
+    );
     if (!prompt || prompt.state === "rejected") return;
     const sent =
       prompt.kind === "prompt"
@@ -602,11 +611,15 @@ class PilotStore {
   }
 
   private async enqueuePrompt(
-    prompt: Omit<PendingPrompt, "promptId" | "serverId" | "createdAt" | "state">,
+    prompt: Omit<
+      PendingPrompt,
+      "promptId" | "serverId" | "createdAt" | "state"
+    >,
   ): Promise<boolean> {
     const serverId = this.serverId ?? loadLastServerId();
     if (!serverId) {
-      this.lastError = "Still connecting — your prompt is still in the composer.";
+      this.lastError =
+        "Still connecting — your prompt is still in the composer.";
       return false;
     }
     // This is the IndexedDB structured-clone boundary. Svelte `$state` values may be
@@ -914,7 +927,8 @@ class PilotStore {
     if (attention?.phase === "failed") return "failed";
     if (this.runningIds.has(sessionId)) return "running";
     if (this.initializingIds.has(sessionId)) return "initializing";
-    if (attention?.phase === "done" && this.unread.has(sessionId)) return "done";
+    if (attention?.phase === "done" && this.unread.has(sessionId))
+      return "done";
     if (this.unread.has(sessionId)) return "unread";
     // The active session is normally "read", but flags unread when new content landed
     // below the viewport while you were scrolled up (cleared on scroll-to-bottom).
@@ -932,9 +946,10 @@ class PilotStore {
       return count > 1 ? `${title} · ${count} requests` : title;
     }
     if (attention.phase === "failed")
-      return attention.activity ? `Failed · ${attention.activity}` : "Run failed";
-    if (attention.phase === "running")
-      return attention.activity ?? "Working";
+      return attention.activity
+        ? `Failed · ${attention.activity}`
+        : "Run failed";
+    if (attention.phase === "running") return attention.activity ?? "Working";
     if (attention.phase === "done" && this.unread.has(sessionId)) return "Done";
     return null;
   }
@@ -1038,10 +1053,7 @@ class PilotStore {
   }
   /** Commit the draft: create the session and deliver its first prompt in one
    *  message. Mirrors prompt()'s permission/push gesture since this IS the first turn. */
-  async submitDraft(
-    text: string,
-    images?: ImageContent[],
-  ): Promise<boolean> {
+  async submitDraft(text: string, images?: ImageContent[]): Promise<boolean> {
     const d = this.draft;
     if (!d) return false;
     const t = text.trim();
@@ -1126,6 +1138,7 @@ class PilotStore {
     clearToken();
     this.settingsOpen = false;
     this.unauthorized = true;
+    this.unauthorizedReason = "signed-out";
     disconnect();
   }
   toggleSidebar(): void {

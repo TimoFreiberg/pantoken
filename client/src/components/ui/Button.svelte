@@ -54,6 +54,10 @@
     opacity: 0.45;
     cursor: default;
   }
+  .btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
 
   /* Emphasis — promoted verbatim from Settings' btn / ghost / danger. */
   .primary {
