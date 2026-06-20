@@ -168,8 +168,17 @@ if (typeof document !== "undefined") {
         reconnectTimer = null;
       }
     } else if (!intentionalClose && _state !== "connected") {
-      scheduleReconnect();
+      // A freshly-foregrounded tab is exactly when an eager reconnect is wanted
+      // (a phone just woke). Don't wait out the accumulated backoff delay — reset
+      // the attempt counter and connect now, like the manual Reconnect button.
+      forceReconnect();
     }
+  });
+  // A network flap (cell↔wifi over Tailscale) fires 'online' the moment the OS has
+  // connectivity again — usually well before the next backoff tick. Reconnect
+  // eagerly instead of riding out the timer.
+  window.addEventListener("online", () => {
+    if (!intentionalClose && _state !== "connected") forceReconnect();
   });
   // Deterministic e2e hook: simulate a transport loss without taking HTTP/Vite
   // offline, so the test can close and reopen the page around a durable queued prompt.
