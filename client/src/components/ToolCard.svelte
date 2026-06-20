@@ -29,16 +29,15 @@
     }));
   }
 
-  function outputText(out: unknown): string {
-    if (out == null) return "";
-    if (typeof out === "string") return out;
-    // Live tool results arrive as pi's raw object { content: [{type:"text",text}], details? },
-    // while replayed-from-history results are already plain text. Extract the content
-    // text from the object so a tool card renders the SAME before and after a reload.
-    if (typeof out === "object") {
+  // Live tool results arrive as pi's raw object { content: [{type:"text",text}|{type:"image",data,mimeType}], details? },
+  // while replayed-from-history results are already plain text. Pull the text blocks
+  // out so a tool card renders the SAME before and after a reload. '' when there are
+  // none (or the shape isn't pi's content array).
+  function contentText(out: unknown): string {
+    if (out && typeof out === "object") {
       const content = (out as { content?: unknown }).content;
       if (Array.isArray(content)) {
-        const text = content
+        return content
           .map((b) =>
             b &&
             typeof b === "object" &&
@@ -47,11 +46,54 @@
               : "",
           )
           .join("");
-        if (text) return text;
       }
     }
+    return "";
+  }
+
+  // Image content blocks pi tools can return (e.g. `read` on a PNG, a mockup-render
+  // tool). The base64 already rides `output` across the wire (event-map passes the raw
+  // result); we render it as an <img> instead of letting it fall into a JSON dump.
+  function outputImages(out: unknown): { data: string; mimeType: string }[] {
+    if (!out || typeof out !== "object") return [];
+    const content = (out as { content?: unknown }).content;
+    if (!Array.isArray(content)) return [];
+    const imgs: { data: string; mimeType: string }[] = [];
+    for (const b of content) {
+      if (
+        b &&
+        typeof b === "object" &&
+        (b as { type?: unknown }).type === "image" &&
+        typeof (b as { data?: unknown }).data === "string" &&
+        typeof (b as { mimeType?: unknown }).mimeType === "string"
+      ) {
+        imgs.push({
+          data: (b as { data: string }).data,
+          mimeType: (b as { mimeType: string }).mimeType,
+        });
+      }
+    }
+    return imgs;
+  }
+
+  function outputText(out: unknown): string {
+    if (out == null) return "";
+    if (typeof out === "string") return out;
+    const text = contentText(out);
+    if (text) return text;
     return JSON.stringify(out, null, 2);
   }
+
+  const outImages = $derived(
+    item.output === undefined ? [] : outputImages(item.output),
+  );
+  // Body text for the result. With image blocks present, show ONLY the accompanying
+  // text note — never outputText's JSON fallback, which would dump the raw base64.
+  const outBodyText = $derived.by(() => {
+    if (item.output === undefined) return "";
+    if (outImages.length) return contentText(item.output);
+    return outputText(item.output);
+  });
 
   const statusIcon: Record<ToolItem["status"], string> = {
     running: "○",
@@ -321,7 +363,19 @@
           {#if item.output !== undefined}<pre class="out">{outputText(item.output)}</pre>{/if}
         {/await}
       {:else if item.output !== undefined}
-        <pre class="out">{outputText(item.output)}</pre>
+        {#if outImages.length}
+          <div class="out-images">
+            {#each outImages as img, i (i)}
+              <img
+                class="out-img"
+                src={`data:${img.mimeType};base64,${img.data}`}
+                alt={`Tool image output ${i + 1}`}
+                title="Image returned by this tool"
+              />
+            {/each}
+          </div>
+        {/if}
+        {#if outBodyText}<pre class="out">{outBodyText}</pre>{/if}
       {/if}
       {#if item.status === "running" && !item.text}<div class="running">running…</div>{/if}
       {#if item.status === "interrupted" && item.output === undefined}
@@ -462,6 +516,18 @@
   }
   .out {
     color: var(--text);
+  }
+  .out-images {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .out-img {
+    max-width: 100%;
+    max-height: 360px;
+    border-radius: var(--radius-xs);
+    border: 1px solid var(--border);
+    display: block;
   }
   .args {
     display: flex;

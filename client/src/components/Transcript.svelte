@@ -267,8 +267,10 @@
             <div class="user-images">
               {#each item.images as image, index (index)}
                 <img
+                  class="att-img"
                   src="data:{image.mimeType};base64,{image.data}"
                   alt={`Attached image ${index + 1}`}
+                  title="Image you attached to this message"
                   data-testid="sent-image"
                 />
               {/each}
@@ -611,6 +613,9 @@
     white-space: pre-wrap;
     word-break: break-word;
   }
+  /* Echo of the image attachments the user sent with this prompt. Right-aligned
+     thumbnails under the bubble (the row is flex-end); the same data-URL the
+     composer sent, so no extra fetch. */
   .user-images {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 180px));
@@ -618,7 +623,8 @@
     max-width: min(86%, 366px);
     margin-bottom: 5px;
   }
-  .user-images img {
+  .user-images img,
+  .att-img {
     display: block;
     width: 100%;
     max-height: 240px;
