@@ -268,12 +268,16 @@ hit a session limit mid-verify; confirm each against the code before acting):_
 
 ### New polish (triaged 2026-06-20)
 
-- [ ] **Attach button does nothing** — _likely stale (flag, 2026-06-20): the paperclip in
-      the composer footer is already wired._ `Composer.svelte` renders it as an `IconButton`
-      with `onclick={openFilePicker}` → `fileInput.click()`, the same hidden file input the
-      file picker / paste / drop share (`title="Attach images (⌘⇧F)"`). Confirmed present +
-      wired in the live DOM. Couldn't reproduce a no-op — the original report may predate the
-      `IconButton` migration. Owner: confirm on the actual desktop device, then close.
+- [x] **Attach button does nothing** → fixed 2026-06-20. Real bug, NOT stale — but the web
+      code was never the problem: the paperclip is correctly wired (`Composer.svelte`
+      `IconButton` → `openFilePicker` → hidden `<input type="file">`), which is why it works
+      in a browser and in the e2e/DOM checks. Root cause was the **desktop shell**: the
+      `WKWebView` in `desktop/Sources/Pilot/AppDelegate.swift` had no `WKUIDelegate`, and
+      WKWebView silently swallows every `<input type="file">` click unless the host presents
+      the picker itself. Fix: conform to `WKUIDelegate`, set `wv.uiDelegate = self`, and
+      implement `runOpenPanelWith` to drive a native `NSOpenPanel` (sheet on the window,
+      restricted to image content types to mirror the input's `accept="image/*"`). Verified
+      with `swiftc -typecheck`; behavioral confirmation is a desktop rebuild + click (owner).
 - [ ] **Sidebar visuals → match Codex** — redesign the sidebar look to follow Codex's
       style. Needs a Codex screenshot for reference.
 - [ ] **"New session" draft stays visible in sidebar while draft exists** — when a
