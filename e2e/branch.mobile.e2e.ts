@@ -5,10 +5,11 @@ const PROMPT = "Add a /health route to the server and a smoke test for it.";
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
-  // Wait past the running window — the assistant branch button appears only once the
-  // turn settles (see branch.e2e.ts). Branching is a no-op mid-turn.
+  // Wait past the running window — the prompt's branch handle backfills only once the
+  // turn settles (see branch.e2e.ts). Branching is a no-op mid-turn. (The greeting's lone
+  // answer is the active-path tip, so its "Branch from here" is intentionally suppressed.)
   await expect(
-    page.getByRole("button", { name: "Branch from here" }),
+    page.getByRole("button", { name: "Branch from this prompt" }),
   ).toBeVisible();
 });
 
