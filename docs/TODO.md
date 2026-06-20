@@ -290,6 +290,9 @@ hit a session limit mid-verify; confirm each against the code before acting):_
       prompt, scroll the transcript to the bottom so the new user bubble + the
       incoming assistant stream are in view. (TODO: check whether Codex / Claude do
       this.)
+- [ ] **Smooth collapse animation for turn-ending autocollapse** — when an agent turn
+      finishes its closing paragraph, the early part of the turn autocollapses with a
+      jarring jump. Find a short, light animation to smooth the transition.
 
 ## 🔵 Later
 
