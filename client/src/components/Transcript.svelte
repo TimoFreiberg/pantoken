@@ -160,10 +160,15 @@
   // streaming length of the last item. Reactive — the grow-detector effect reads it.
   const contentSize = $derived.by(() => {
     const last = items[items.length - 1];
-    const tick =
-      last && last.kind === "assistant"
-        ? last.text.length + last.thinking.length
-        : 0;
+    let tick = 0;
+    if (last?.kind === "assistant") {
+      tick = last.text.length + last.thinking.length;
+    } else if (last?.kind === "tool") {
+      // A running tool streams its output into `text` (and ticks `progress`) via
+      // toolUpdated. Count it too, so the pinned-scroll effect re-runs and keeps
+      // following a long command's output — not just assistant deltas.
+      tick = (last.text?.length ?? 0) + (last.progress ?? 0);
+    }
     return items.length * 1_000_000 + tick;
   });
   // The previous content size, to tell "the transcript grew" from "it re-rendered".
@@ -227,6 +232,10 @@
         // Shift = act on the last prompt (branch/re-edit); plain = just scroll to it.
         if (e.shiftKey) store.branchLastPrompt();
         else jumpToLastPrompt();
+      } else if ((e.metaKey || e.ctrlKey) && e.key === "ArrowDown") {
+        // The inverse of ⌘↑: return to the live bottom from anywhere in scrollback.
+        e.preventDefault();
+        scrollToBottom();
       }
     }
     window.addEventListener("keydown", onKey);
@@ -522,7 +531,7 @@
   <button
     class="new-pill"
     data-testid="new-messages-pill"
-    title="Jump to the newest messages"
+    title="Jump to the newest messages (⌘↓) · ⌘↑ jumps to your last prompt"
     aria-label="New messages below — jump to newest"
     onclick={scrollToBottom}
   >
