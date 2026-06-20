@@ -18,7 +18,7 @@ function statusOf(page: Page, title: string) {
     .getByTestId("session-status");
 }
 
-test("a background session shows running, then unread, then clears on open", async ({
+test("a background session shows running, then done, then clears on open", async ({
   page,
 }) => {
   await openSidebar(page);
@@ -33,8 +33,8 @@ test("a background session shows running, then unread, then clears on open", asy
   await expect(statusOf(page, BG)).toHaveAttribute("data-state", "running");
   await expect(statusOf(page, ACTIVE)).toHaveAttribute("data-state", "read");
 
-  // When the background turn finishes it becomes unread (new since last viewed).
-  await expect(statusOf(page, BG)).toHaveAttribute("data-state", "unread");
+  // When the background turn finishes it becomes done (new since last viewed).
+  await expect(statusOf(page, BG)).toHaveAttribute("data-state", "done");
 
   // Opening it marks it read again.
   await page.getByTestId("sidebar").locator(".row", { hasText: BG }).click();

@@ -19,14 +19,16 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       sharing the prompt id with the authoritative `userMessage`. E2E covers offline tab
       eviction → reopen → exactly-once delivery and rejection → edit recovery; hub tests
       cover duplicate normal/create requests and rejection.
-- [ ] **Cross-session attention state** — background sessions currently expose only a
-      running/done dot. A background approval, failure, or useful live activity can be
-      invisible while any client remains connected (server push is suppressed whenever
-      `clients.size > 0`). Broadcast compact per-session attention metadata alongside
-      `sessionStatus`: `running`/`waiting`/`failed`/`done`, pending-request count + title,
-      and a derived current-activity label. Render it in sidebar rows/project groups and
-      include the target session in notification copy/deep-links. A blocking background
-      request must remain obvious and one tap must focus the right session.
+- [x] **Cross-session attention state** → done 2026-06-20. The hub now retains and
+      broadcasts compact `running`/`waiting`/`failed`/`done` metadata for every warm
+      session, including derived tool/response activity plus pending-request count/title.
+      Sidebar rows show the live activity or blocking request; collapsed project groups
+      surface their highest-priority state. Background completions become a distinct done
+      marker until read. Tab and Web Push notifications name the target session and carry
+      a `?session=` deep-link; notification clicks focus/open that session, whose retained
+      approval is immediately actionable. Unit tests cover activity/wait/failure/reconnect
+      state; E2E covers background approval → project indicator → one-tap focus, deep-link
+      boot routing, and running → done → read.
 - [ ] **Queued-message tray + restore/edit flow** — pi emits the complete
       `queue_update {steering, followUp}` state and exposes `clearQueue()`, but Pilot drops
       the event even though `SessionState.queued` already exists. Map queue updates into

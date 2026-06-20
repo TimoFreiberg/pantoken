@@ -20,27 +20,61 @@
   // Dev affordance: ?dev shows buttons that drive the mock to any UI state, so the
   // screenshot harness can reach approval/ambient/error states deterministically.
   const dev = new URLSearchParams(location.search).has("dev");
-  const scripts = ["reply", "markdown", "search", "confirm", "trust", "input", "qna", "ambient", "compat", "bgrun", "initializing", "editdiff", "error", "idle", "streamhold", "staleidle", "pendinghold", "timeout", "yesno", "journalnudge"];
+  const scripts = ["reply", "markdown", "search", "confirm", "trust", "input", "qna", "ambient", "compat", "bgrun", "bgwait", "initializing", "editdiff", "error", "idle", "streamhold", "staleidle", "pendinghold", "timeout", "yesno", "journalnudge"];
 
   onMount(() => store.start());
 
-  // Buzz the user (when pilot is unfocused) on run-complete and new approvals.
-  let prevStatus = "idle";
-  let prevPending = 0;
+  // Buzz the user (when pilot is unfocused) for every session, not just the focused
+  // transcript. The first sessionStatus message is a reconnect baseline, not a live event.
+  let prevAttention = new Map<string, string>();
+  let prevAttentionVersion = 0;
   $effect(() => {
-    const status = store.session.status;
-    const pending = store.session.pendingApprovals.length;
-    if (prevStatus === "running" && status === "idle") {
-      notifyIfUnfocused("pilot", "Agent finished its turn");
+    const version = store.attentionVersion;
+    const attention = [...store.attention.values()];
+    const next = new Map(
+      attention.map((item) => [
+        item.sessionId,
+        `${item.phase}:${item.pendingCount ?? 0}:${item.pendingTitle ?? ""}`,
+      ]),
+    );
+    if (version === 0) return;
+    if (prevAttentionVersion === 0) {
+      prevAttention = next;
+      prevAttentionVersion = version;
+      return;
     }
-    if (pending > prevPending && pending > 0) {
-      const top = store.session.pendingApprovals[0];
-      // qna carries an optional title; fall back when it (or the kind) has none.
-      const title = (top && "title" in top && top.title) || "Waiting on you";
-      notifyIfUnfocused("Approval needed", title);
+    for (const item of attention) {
+      const key = next.get(item.sessionId)!;
+      if (prevAttention.get(item.sessionId) === key) continue;
+      if (
+        item.phase !== "waiting" &&
+        item.phase !== "failed" &&
+        item.phase !== "done"
+      )
+        continue;
+      const listed = store.sessions.find(
+        (session) => session.sessionId === item.sessionId,
+      );
+      const session = listed?.displayName ?? listed?.preview ?? item.sessionId;
+      const title =
+        item.phase === "waiting"
+          ? "Approval needed"
+          : item.phase === "failed"
+            ? "Run failed"
+            : "pilot";
+      const detail =
+        item.phase === "waiting"
+          ? (item.pendingTitle ?? "Waiting on you")
+          : item.phase === "failed"
+            ? (item.activity ?? "The run failed")
+            : "Agent finished its turn";
+      notifyIfUnfocused(title, `${session}: ${detail}`, {
+        tag: `pilot-${item.phase}-${item.sessionId}`,
+        onClick: () => store.openSessionById(item.sessionId),
+      });
     }
-    prevStatus = status;
-    prevPending = pending;
+    prevAttention = next;
+    prevAttentionVersion = version;
   });
 
   // Reflect the active session's title in the browser tab so it's legible from the

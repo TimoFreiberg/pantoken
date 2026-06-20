@@ -877,6 +877,50 @@ export function bgRun(): ScriptStep[] {
   ];
 }
 
+/** Leave a background session blocked on an approval after reporting useful activity.
+ * Opening that session replays the mock driver's retained pending dialog. */
+export function bgWait(): ScriptStep[] {
+  const ref = sessionRefFor("older-session");
+  const b = () => ({ sessionRef: ref, timestamp: ts() });
+  const snap: SessionSnapshot = {
+    ref,
+    workspace: WORKSPACE,
+    title: "Explore the fold reducer",
+    status: "running",
+    updatedAt: ts(),
+  };
+  return [
+    {
+      wait: 0,
+      event: { ...b(), type: "sessionUpdated", snapshot: snap },
+    },
+    {
+      wait: 80,
+      event: {
+        ...b(),
+        type: "toolStarted",
+        callId: "bg-read",
+        toolName: "read",
+        label: "Read file",
+        input: { path: "docs/TODO.md" },
+      },
+    },
+    {
+      wait: 120,
+      event: {
+        ...b(),
+        type: "hostUiRequest",
+        request: {
+          kind: "confirm",
+          requestId: "bg-approval",
+          title: "Review background change",
+          message: "Apply the queued background edit?",
+        },
+      },
+    },
+  ];
+}
+
 // --- Polish-batch fixtures (edit-diff card, caret-on-idle, countdown, yes/no) --
 
 /** An edit-tool call + result, so the ToolCard's diff UX (collapsed +N/−M badge +
@@ -1241,6 +1285,7 @@ export const SCRIPTS: Record<string, () => ScriptStep[]> = {
   compat,
   error: errorRun,
   bgrun: bgRun,
+  bgwait: bgWait,
   editdiff: editDiff,
   idle: idleNoComplete,
   initializing: initializingSession,

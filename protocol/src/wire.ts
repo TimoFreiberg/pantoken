@@ -45,6 +45,18 @@ export interface TrustRequest {
   readonly options: readonly TrustRequestOption[];
 }
 
+/** Compact cross-session state for attention routing without broadcasting background
+ * transcripts. `waiting` overrides the underlying run phase while dialogs are pending;
+ * `done` remains useful until each client marks that session read locally. */
+export interface SessionAttention {
+  readonly sessionId: SessionId;
+  readonly phase: "running" | "waiting" | "failed" | "done";
+  readonly activity?: string;
+  readonly pendingCount?: number;
+  readonly pendingTitle?: string;
+  readonly updatedAt: string;
+}
+
 export type ServerMessage =
   | { type: "hello"; protocolVersion: number; serverId: string }
   /** Full authoritative state — sent on (re)connect so clients catch up. */
@@ -73,6 +85,8 @@ export type ServerMessage =
       type: "sessionStatus";
       runningIds: readonly SessionId[];
       initializingIds?: readonly SessionId[];
+      /** Current cross-session attention summaries. Optional for older servers/clients. */
+      attention?: readonly SessionAttention[];
     }
   /** The models available to switch to (server-authoritative, like `sessionList`).
    *  The current selection rides each session's snapshot `config`, not this. */

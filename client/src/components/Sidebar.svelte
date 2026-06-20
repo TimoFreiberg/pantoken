@@ -333,6 +333,7 @@
       </div>
     {:else}
       {#each filteredGroups as g (g.cwd)}
+        {@const groupState = store.groupAttention(g.items.map((i) => i.sessionId))}
         <section class="group">
           <div class="group-head">
             <button
@@ -345,8 +346,13 @@
               {#if collapsed[g.cwd]}
                 <span class="count">{g.items.length}</span>
               {/if}
-              {#if collapsed[g.cwd] && store.groupRunning(g.items.map((i) => i.sessionId))}
-                <span class="group-running" aria-label="a session is running"></span>
+              {#if collapsed[g.cwd] && groupState}
+                <span
+                  class="group-attention"
+                  data-state={groupState}
+                  title={`${groupState} session in this project`}
+                  aria-label={`${groupState} session in this project`}
+                ></span>
               {/if}
             </button>
             <IconButton
@@ -360,6 +366,7 @@
             <ul>
               {#each g.items as s (s.path)}
                 {@const st = store.sessionStatus(s.sessionId)}
+                {@const activity = store.sessionActivity(s.sessionId)}
                 {@const rel = relativeTime(s.updatedAt, now)}
                 <li class="row-wrap">
                   {#if renamingFor === s.path}
@@ -407,6 +414,9 @@
                     <button
                       class="row"
                       class:active={s.sessionId === store.activeSessionId}
+                      title={activity
+                        ? `${s.displayName || s.preview || "Session"} — ${activity}`
+                        : `Open ${s.displayName || s.preview || "session"}`}
                       onclick={() => pick(s)}
                       oncontextmenu={(e) => openMenu(e, s.path)}
                     >
@@ -414,13 +424,19 @@
                         class="status"
                         data-state={st}
                         data-testid="session-status"
-                        title={st === "initializing" ? "initializing — warming up" : st}
+                        title={st === "initializing"
+                          ? "initializing — warming up"
+                          : activity ?? st}
                         aria-label={`status: ${st}`}
                       >
                         {#if st === "running"}
                           <i class="dot"></i><i class="dot"></i><i class="dot"></i>
                         {:else if st === "initializing"}
                           <i class="spinner"></i>
+                        {:else if st === "waiting"}
+                          <i class="attention-symbol">!</i>
+                        {:else if st === "failed"}
+                          <i class="attention-symbol">×</i>
                         {:else}
                           <i class="dot"></i>
                         {/if}
@@ -432,6 +448,9 @@
                           title={s.displayName ?? (s.preview ? s.preview.split('\n')[0] : '(untitled)')}
                           >{s.displayName || s.preview || "(untitled)"}</span
                         >
+                        {#if activity}
+                          <span class="activity" data-state={st}>{activity}</span>
+                        {/if}
                         <span class="meta">
                           <span class="msg-count"
                             >{s.userMessageCount} msg{#if s.archived} ·
@@ -781,13 +800,27 @@
   .caret.collapsed {
     transform: rotate(-90deg);
   }
-  /* A single pulsing dot beside a collapsed project that has a running session. */
-  .group-running {
+  /* Highest-priority state beside a collapsed project. */
+  .group-attention {
     width: 6px;
     height: 6px;
     border-radius: 50%;
     background: var(--text-muted);
+  }
+  .group-attention[data-state="running"] {
     animation: dotPulse 1.1s ease-in-out infinite;
+  }
+  .group-attention[data-state="waiting"] {
+    width: 8px;
+    height: 8px;
+    background: var(--warning);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 18%, transparent);
+  }
+  .group-attention[data-state="failed"] {
+    background: var(--danger);
+  }
+  .group-attention[data-state="done"] {
+    background: var(--unread);
   }
   .proj {
     font-weight: 600;
@@ -948,6 +981,34 @@
     height: 8px;
     background: var(--unread);
   }
+  .status[data-state="done"] .dot {
+    width: 8px;
+    height: 8px;
+    background: var(--unread);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--unread) 16%, transparent);
+  }
+  .status .attention-symbol {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    font-size: 10px;
+    font-style: normal;
+    font-weight: 750;
+    line-height: 1;
+  }
+  .status[data-state="waiting"] .attention-symbol {
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  }
+  .status[data-state="failed"] .attention-symbol {
+    color: var(--danger);
+    background: var(--danger-soft);
+    border: 1px solid color-mix(in srgb, var(--danger) 38%, transparent);
+  }
   /* running — three dots in a left-to-right pulse, echoing the mockup's "···". */
   .status[data-state="running"] .dot {
     width: 4px;
@@ -1005,7 +1066,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .status[data-state="running"] .dot,
-    .group-running {
+    .group-attention[data-state="running"] {
       animation: none;
       opacity: 0.7;
     }
@@ -1020,6 +1081,21 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .activity {
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 11.5px;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .activity[data-state="waiting"] {
+    color: var(--warning);
+    font-weight: 550;
+  }
+  .activity[data-state="failed"] {
+    color: var(--danger);
   }
   .row.active .name {
     color: var(--accent);

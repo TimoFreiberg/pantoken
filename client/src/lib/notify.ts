@@ -30,7 +30,11 @@ export function shouldNotify(opts: {
 }
 
 /** Fire a notification when pilot is unfocused and permission is granted. */
-export function notifyIfUnfocused(title: string, body: string): void {
+export function notifyIfUnfocused(
+  title: string,
+  body: string,
+  opts: { tag?: string; onClick?: () => void } = {},
+): void {
   const supported = notificationsSupported();
   const focused = typeof document !== "undefined" && document.hasFocus();
   if (
@@ -45,10 +49,11 @@ export function notifyIfUnfocused(title: string, body: string): void {
     const n = new Notification(title, {
       body,
       icon: "/icon.svg",
-      tag: "pilot",
+      tag: opts.tag ?? "pilot",
     });
     n.onclick = () => {
       window.focus();
+      opts.onClick?.();
       n.close();
     };
   } catch {
