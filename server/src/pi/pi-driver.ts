@@ -58,6 +58,7 @@ import type {
 import { correlateEntryIds } from "./branch-ids.js";
 import { mapPiEvent } from "./event-map.js";
 import { queueMessages } from "./queue-map.js";
+import { projectTree } from "./tree-map.js";
 import {
   contentToText,
   type HistoryMessage,
@@ -963,6 +964,16 @@ export async function createPiDriver(
         cancelled: result.cancelled,
         aborted: result.aborted,
       };
+    },
+
+    async getTree(sessionId?: SessionId) {
+      const ws = target(sessionId);
+      if (!ws) return undefined;
+      // The full branch tree lives in the SessionManager already (every entry +
+      // parentId), so this is a pure read — no new pi capability, just a projection
+      // alongside branchTextEntries. Unlike those, it reads getTree() (the whole DAG),
+      // not getBranch() (only the active path), so abandoned branches are visible.
+      return projectTree(ws.session.sessionManager);
     },
 
     async newSession(opts: NewSessionOpts = {}) {

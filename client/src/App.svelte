@@ -13,6 +13,7 @@
   import TrustCard from "./components/TrustCard.svelte";
   import TokenGate from "./components/TokenGate.svelte";
   import Settings from "./components/Settings.svelte";
+  import TreeView from "./components/TreeView.svelte";
   import Tooltip from "./components/Tooltip.svelte";
   import IconButton from "./components/ui/IconButton.svelte";
   import { notifyIfUnfocused } from "./lib/notify.js";
@@ -118,6 +119,7 @@
 </div>
 <TrustCard />
 <Settings />
+<TreeView />
 {#if store.swUpdateReady}
   <div class="update-toast" role="status">
     <span class="update-msg">A new version of pilot is available.</span>
