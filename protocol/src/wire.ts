@@ -18,6 +18,7 @@ import type {
   SessionDriverEvent,
   SessionId,
   SessionListEntry,
+  TreeNodeInfo,
 } from "./session-driver.js";
 import type { SessionState } from "./state.js";
 
@@ -95,6 +96,16 @@ export type ServerMessage =
    *  composer's typeahead. Server-authoritative like `modelList`; re-broadcast on
    *  session switch because the set is cwd-scoped. See {@link CommandInfo}. */
   | { type: "commandList"; commands: readonly CommandInfo[] }
+  /** The focused session's full branch tree (pi's /tree). Sent on demand when a client
+   *  opens the tree view (it sends {@link queryTree}) and re-broadcast after a `branch` so
+   *  an open tree view refreshes. `sessionId` is the session the tree belongs to, so a
+   *  client that has since switched away can drop a late tree. See {@link TreeNodeInfo}. */
+  | {
+      type: "treeState";
+      sessionId: SessionId | null;
+      nodes: readonly TreeNodeInfo[];
+      leafId: string | null;
+    }
   /** File paths matching a composer @-mention query, returned by the server on
    *  demand (the client sends {@link queryFiles} on each keystroke after `@`,
    *  debounced). Re-broadcast per-query, not per-session — the client caches the
@@ -271,6 +282,9 @@ export type ClientMessage =
   | { type: "cleanupWorktree"; path: string; force?: boolean }
   /** Ask the server to re-read the focused session's commands and re-broadcast them. */
   | { type: "listCommands" }
+  /** Ask the server for the focused session's branch tree (the tree view just opened).
+   *  The server responds with {@link treeState}. Omit sessionId to target the focused one. */
+  | { type: "queryTree"; sessionId?: SessionId }
   /** Ask the server to search for files matching a composer @-mention query (the text
    *  after `@`, empty for the initial list). The server responds with {@link fileList}.
    *  Debounce client-side (~150ms); the server echoes the query back so stale responses

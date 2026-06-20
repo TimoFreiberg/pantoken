@@ -550,6 +550,26 @@ export class SessionHub {
     }
   }
 
+  /** Fetch + broadcast the focused session's branch tree (pi's /tree) for the tree view.
+   *  Sent on demand when a client opens the view, and re-broadcast after a branch so an
+   *  open view refreshes. No-op if the driver can't read a tree. The `sessionId` lets a
+   *  client that switched away ignore a late tree. */
+  private async broadcastTree(): Promise<void> {
+    if (!this.driver.getTree) return;
+    try {
+      const tree = await this.driver.getTree(this.focusedId ?? undefined);
+      if (!tree) return;
+      this.broadcast({
+        type: "treeState",
+        sessionId: this.focusedId,
+        nodes: tree.nodes,
+        leafId: tree.leafId,
+      });
+    } catch (e) {
+      console.error("[hub] getTree failed", e);
+    }
+  }
+
   /** Fetch + broadcast files matching a composer @-mention query. Triggered on each
    *  client keystroke after `@` (debounced client-side ~150ms); the server runs `fd`
    *  (fast, .gitignore-aware) and echoes the query so the client can ignore stale
@@ -971,6 +991,9 @@ export class SessionHub {
           return r.seed;
         }).then((ok) => {
           if (ok && prefill) send({ type: "editorPrefill", text: prefill });
+          // The leaf moved (and an abandoned-branch summary may have appeared), so refresh
+          // any open tree view — on this client and any other watching the same session.
+          if (ok) void this.broadcastTree();
         });
         return;
       }
@@ -1037,6 +1060,9 @@ export class SessionHub {
         return;
       case "listCommands":
         void this.broadcastCommandList();
+        return;
+      case "queryTree":
+        void this.broadcastTree();
         return;
       case "queryFiles":
         void this.broadcastFileList(msg.query);

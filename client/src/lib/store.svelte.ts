@@ -20,6 +20,7 @@ import {
   type SessionListEntry,
   type SessionState,
   type TranscriptItem,
+  type TreeNodeInfo,
   type TrustRequest,
 } from "@pilot/protocol";
 import { clearToken, getToken, setToken } from "./auth.js";
@@ -166,6 +167,16 @@ class PilotStore {
   pushState = $state<PushState | "working">("idle");
   // Settings panel open/closed — per-client view state, never sent upstream.
   settingsOpen = $state(false);
+  // Session-tree (/tree) view open/closed — per-client view state. The tree data itself
+  // is server-authoritative (fetched via queryTree on open, re-pushed after a branch).
+  treeOpen = $state(false);
+  // The focused session's branch tree, or null until the first treeState arrives. Carries
+  // the session it belongs to so a tree that lands after a switch can be ignored.
+  tree = $state<{
+    sessionId: string | null;
+    nodes: TreeNodeInfo[];
+    leafId: string | null;
+  } | null>(null);
   // Theme override (system/light/dark), persisted per-device in localStorage.
   themeMode = $state<ThemeMode>(getThemeMode());
   // Hide thinking blocks toggle — when on, thinking content is replaced with a
@@ -399,6 +410,13 @@ class PilotStore {
         break;
       case "commandList":
         this.commands = [...msg.commands];
+        break;
+      case "treeState":
+        this.tree = {
+          sessionId: msg.sessionId,
+          nodes: [...msg.nodes],
+          leafId: msg.leafId,
+        };
         break;
       case "fileList":
         this.files = { query: msg.query, items: [...msg.files] };
@@ -827,6 +845,10 @@ class PilotStore {
     // `queryFiles` round-trips. The empty-query entry is the one that bites — it
     // matches instantly when the user types `@`.
     this.files = { query: "", items: [] };
+    // Drop the previous session's branch tree so a stale one never flashes; if the tree
+    // view is open across the switch, re-query for the session we're moving to.
+    this.tree = null;
+    if (this.treeOpen) send({ type: "queryTree" });
     send({ type: "openSession", path });
   }
   /** Focus a session named by cross-session attention/notification metadata. */
@@ -1065,6 +1087,20 @@ class PilotStore {
   }
   closeSettings(): void {
     this.settingsOpen = false;
+  }
+  /** Open the session-tree view and ask the server for the focused session's tree. We
+   *  re-query on every open so the view reflects any branching since it was last seen
+   *  (the server also re-pushes after a branch). */
+  openTree(): void {
+    this.treeOpen = true;
+    send({ type: "queryTree" });
+  }
+  closeTree(): void {
+    this.treeOpen = false;
+  }
+  toggleTree(): void {
+    if (this.treeOpen) this.closeTree();
+    else this.openTree();
   }
   /** Change the theme override (system/light/dark); persisted + applied immediately. */
   setTheme(mode: ThemeMode): void {

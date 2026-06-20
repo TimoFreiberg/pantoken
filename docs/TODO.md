@@ -194,7 +194,7 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       indent/nesting variant was dropped — the existing per-row worktree badge is the
       sole distinguisher. _(Not done: parent-session linkage — worktrees fork from a
       repo, not a session, and pilot doesn't record a spawning session; parked.)_
-- [~] **Session tree / fork / clone / compaction** — _T0+T1 shipped 2026-06-19; T2 below._
+- [~] **Session tree / fork / clone / compaction** — _T0+T1 shipped 2026-06-19; T2 shipped 2026-06-20._
   - [x] **T0 — entry-id plumbing.** pi keeps each tree node's id on the `SessionEntry`
         wrapper, never on the `AgentMessage`, so transcript items couldn't name a node.
         Threaded pi's entry id through to `UserItem.entryId` / `AssistantItem.entryId` via
@@ -211,10 +211,18 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
         → `session.navigateTree` (pi) / deterministic fixture (mock); the hub re-seeds every
         client through the same atomic path as `openSession`. Gated on `!turnActive` (a
         mid-turn navigate would interleave the run into the new branch). `e2e/branch*.e2e.ts`.
-  - [ ] **T2 — full tree-view modal (this item).** A browsable visualization of the whole
-        session DAG so you can jump to / fork from *any* node, not just the always-visible
+  - [x] **T2 — full tree-view modal.** _Shipped 2026-06-20._ A browsable visualization of the
+        whole session DAG so you can jump to / fork from *any* node, not just the always-visible
         prompts + turn-final answers (e.g. an abandoned branch, a mid-turn assistant step).
-        Concretely:
+        As built: a new on-demand `treeState` server msg projects `getTree()`+`getLeafId()` into
+        a JSON-safe `TreeNodeInfo[]` (`server/src/pi/tree-map.ts`); `client/src/lib/tree-view.ts`
+        flattens it (single-child chains flat, branch points indent with continuous CSS rails,
+        nearest-visible-ancestor reparenting under filters); `TreeView.svelte` is a Settings-style
+        modal with filters (default skeleton / all / prompts / labeled) + text search + ↑↓/↵ nav;
+        triggered by a header IconButton, `⌘⇧T`, or typing `/tree`. Node selection reuses the
+        existing `branch` wire message (no new driver nav surface). `e2e/tree.e2e.ts` +
+        `client/src/lib/tree-view.test.ts`. NOT done: branch+summarize UI (flag still plumbed,
+        no affordance) and the leaf-durability follow-up below. Original spec:
         - **Data:** serialize `sessionManager.getTree()` (`SessionTreeNode[]` — `{entry,
           children, label?}`) + `getLeafId()` over a new server message (e.g. `treeState`),
           requested on demand when the modal opens. Keep the wire shape JSON-safe; don't

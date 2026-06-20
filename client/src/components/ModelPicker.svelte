@@ -244,7 +244,7 @@
 
   {#if thinking}
     <div class="anchor">
-      <button class="badge" title="Thinking level (⌘⇧E / ⌘⇧T)" onclick={() => toggle("thinking")} data-testid="thinking-badge">
+      <button class="badge" title="Thinking level (⌘⇧E)" onclick={() => toggle("thinking")} data-testid="thinking-badge">
         <span class="badge-text">{thinking}</span>
         {#if levels.length > 0}<span class="chev" class:up={open === "thinking"}>▾</span>{/if}
       </button>

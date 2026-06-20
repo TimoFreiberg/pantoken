@@ -18,6 +18,7 @@ import {
   type SessionListEntry,
   type SessionQueuedMessage,
   type SessionUsage,
+  type TreeSnapshot,
 } from "@pilot/protocol";
 import type {
   NewSessionOpts,
@@ -41,6 +42,7 @@ import {
   inputDialog,
   journalNudge,
   markdownShowcase,
+  mockTree,
   qnaDialog,
   staleIdle,
   MOCK_COMMANDS,
@@ -538,10 +540,12 @@ export class MockDriver implements PilotDriver {
     return [...withQueue, ...pending];
   }
 
-  /** Deterministic stand-in for pi's navigateTree. A user-prompt target (e-u1) rewinds
-   *  to an empty branch and hands its text back to prefill the composer (the re-edit
-   *  gesture); any other target re-seeds the greeting unchanged (a no-op jump). Real
-   *  tree navigation lives in the pi driver. */
+  /** Deterministic stand-in for pi's navigateTree. Branching from a USER node rewinds to
+   *  an empty branch and hands that prompt's text back to prefill the composer (the re-edit
+   *  gesture, mirroring navigateTree on a user message); any other node re-seeds the
+   *  greeting unchanged (a no-op continue-from-here jump). The user prompts come from the
+   *  tree fixture so any tree-view selection of a user node behaves consistently. Real tree
+   *  navigation lives in the pi driver. */
   async branchFrom(
     entryId: string,
     _opts: { summarize?: boolean },
@@ -551,13 +555,20 @@ export class MockDriver implements PilotDriver {
     cancelled: boolean;
   }> {
     this.cancelTimers();
-    if (entryId === "e-u1")
+    const node = mockTree().nodes.find((n) => n.id === entryId);
+    if (node?.kind === "user")
       return {
         seed: branchedSeed(),
-        editorText: GREETING_PROMPT,
+        editorText: entryId === "e-u1" ? GREETING_PROMPT : node.preview,
         cancelled: false,
       };
     return { seed: greeting().map((s) => s.event), cancelled: false };
+  }
+
+  /** The mock's branch tree — a fixed multi-branch fixture so the /tree view can be built
+   *  and screenshot-verified without a real pi session that's been navigated. */
+  async getTree(): Promise<TreeSnapshot> {
+    return mockTree();
   }
 
   async newSession(opts: NewSessionOpts = {}): Promise<SessionDriverEvent[]> {

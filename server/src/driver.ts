@@ -16,6 +16,7 @@ import type {
   SessionId,
   SessionListEntry,
   SessionUsage,
+  TreeSnapshot,
   TrustRequest,
 } from "@pilot/protocol";
 
@@ -126,6 +127,13 @@ export interface PilotDriver {
     cancelled: boolean;
     aborted?: boolean;
   }>;
+
+  /** The focused (warm) session's full branch tree + active leaf — pi's /tree, projected
+   *  JSON-safe. Read on demand when a client opens the tree view; the hub broadcasts it as
+   *  `treeState`, and re-broadcasts after a `branchFrom`. Optional (the hub guards with
+   *  `?.`); sessionId omitted -> the driver's current session. Resolves undefined when
+   *  there's no session to read. */
+  getTree?(sessionId?: SessionId): Promise<TreeSnapshot | undefined>;
 
   /** The CURRENT context-window fill for a (warm) session — lets the hub refresh the
    *  composer's context meter mid-turn without waiting for a turn-boundary snapshot.

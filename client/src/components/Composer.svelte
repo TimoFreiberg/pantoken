@@ -192,6 +192,14 @@
   async function submit() {
     if (submitting) return;
     const text = store.composerDraft;
+    // `/tree` is a client-native view, not a pi command (pi's /tree is a TUI builtin that
+    // can't run headless). Intercept it before send: open the tree view and clear the box.
+    if (text.trim() === "/tree") {
+      store.composerDraft = "";
+      store.openTree();
+      queueMicrotask(autosize);
+      return;
+    }
     if (!text.trim() && images.length === 0) return;
     // `$state` wraps nested objects in proxies; IndexedDB's structured clone rejects
     // proxies. Copy each attachment back to a plain JSON object before outbox persistence.
