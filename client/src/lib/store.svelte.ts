@@ -206,6 +206,12 @@ class PilotStore {
     this.focusComposerN++;
   }
 
+  // Bump to ask the transcript to jump to its bottom. Set whenever the user sends a
+  // prompt (the single `enqueuePrompt` chokepoint), so the just-sent message and the
+  // incoming reply land in view even if they'd scrolled up reading scrollback — without
+  // it, the optimistic bubble appears below the fold behind the "New messages ↓" pill.
+  promptSentN = $state(0);
+
   /** The localStorage key the current composer text belongs to: the new-session draft's
    *  project while drafting, else the focused/active session. */
   private get composerDraftKey(): string {
@@ -662,6 +668,9 @@ class PilotStore {
       return false;
     }
     this.pendingPrompts = [...this.pendingPrompts, pending];
+    // The optimistic bubble just landed at the tail — ask the transcript to follow it
+    // to the bottom (re-pinning if the reader had scrolled up).
+    this.promptSentN++;
     this.sendPendingPrompt(pending.promptId);
     return true;
   }

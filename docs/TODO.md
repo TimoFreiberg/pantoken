@@ -268,9 +268,12 @@ hit a session limit mid-verify; confirm each against the code before acting):_
 
 ### New polish (triaged 2026-06-20)
 
-- [ ] **Attach button does nothing** — clicking the paperclip in the composer is a no-op
-      on desktop. Wire it to the file-input / paste/drop path that image attachments
-      already use.
+- [ ] **Attach button does nothing** — _likely stale (flag, 2026-06-20): the paperclip in
+      the composer footer is already wired._ `Composer.svelte` renders it as an `IconButton`
+      with `onclick={openFilePicker}` → `fileInput.click()`, the same hidden file input the
+      file picker / paste / drop share (`title="Attach images (⌘⇧F)"`). Confirmed present +
+      wired in the live DOM. Couldn't reproduce a no-op — the original report may predate the
+      `IconButton` migration. Owner: confirm on the actual desktop device, then close.
 - [ ] **Sidebar visuals → match Codex** — redesign the sidebar look to follow Codex's
       style. Needs a Codex screenshot for reference.
 - [ ] **"New session" draft stays visible in sidebar while draft exists** — when a
@@ -286,10 +289,6 @@ hit a session limit mid-verify; confirm each against the code before acting):_
       dropdown in Settings is too long. Group models under provider headers that are
       collapsed by default. Typing a search query should auto-uncollapse matching
       results.
-- [ ] **Autoscroll to transcript bottom on prompt submit** — when the user sends a
-      prompt, scroll the transcript to the bottom so the new user bubble + the
-      incoming assistant stream are in view. (TODO: check whether Codex / Claude do
-      this.)
 - [ ] **Smooth collapse animation for turn-ending autocollapse** — when an agent turn
       finishes its closing paragraph, the early part of the turn autocollapses with a
       jarring jump. Find a short, light animation to smooth the transition.
@@ -297,6 +296,15 @@ hit a session limit mid-verify; confirm each against the code before acting):_
       paragraph (the current leaf) shows a "Branch from here" button, but branching
       from the tip of the tree is a no-op. Suppress the button on the final visible
       paragraph.
+- [x] **Autoscroll to transcript bottom on prompt submit** → done 2026-06-20. Sending a
+      prompt while scrolled up reading scrollback used to leave the just-sent bubble below
+      the fold behind the "New messages ↓" pill — the pinned-scroll effect only follows new
+      content when you're already near the bottom. Now the single `enqueuePrompt` chokepoint
+      (covers normal sends, the new-session draft, and Retry) bumps a `store.promptSentN`
+      counter; `Transcript` watches it, re-pins, and jumps to the bottom so your message +
+      the incoming reply land in view. Standard chat behavior (Claude/Codex/ChatGPT all do
+      it). Covered by `e2e/polish.e2e.ts` (build a tall transcript → scroll to top → send →
+      assert pinned-to-bottom + no catch-up pill); verified it fails without the bump.
 
 ## 🔵 Later
 
