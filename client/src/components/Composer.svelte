@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import type { CommandInfo, FileInfo } from "@pilot/protocol";
   import { store } from "../lib/store.svelte.js";
-  import { extractAtQuery } from "../lib/file-autocomplete.js";
+  import { extractAtQuery, filterFiles } from "../lib/file-autocomplete.js";
   import {
     IMAGE_LIMITS,
     prepareImageFiles,
@@ -102,28 +102,48 @@
   // the end of the draft. Updated on every input/click/keyboard event.
   let cursorPos = $state(0);
 
-  // --- @-file mention autocomplete. Similar shape to slash: an active query (the
-  // text after `@` at/before cursor), a highlighted index, and a dismissed flag so
-  // Esc closes it for this token. The items come from the server (store.files), NOT
-  // client-side filtering — the server runs `fd` per-query (Option B; see
-  // server/src/pi/pi-driver.ts `listFilesWithFd`). The debounce timer fires
-  // `store.queryFiles(fileQ.query)` after 150ms of no keystroke; the menu only opens
-  // once the response lands (`store.files.query === fileQ.query`).
-  //
-  // TODO: per-query RPC means WS round-trip latency on every keystroke. Fine for
-  // local use but may feel sluggish over a remote Tailscale hop. If that becomes
-  // annoying, switch to Option A (full file list broadcast on session switch, capped
-  // at ~1000 files, with client-side fuzzy matching).
+  // --- @-file mention autocomplete (hybrid: instant local matching + server fallback).
+  // Same shape as slash: an active query (the text after `@` at/before cursor), a
+  // highlighted index, and a dismissed flag so Esc closes it for this token. The server
+  // pushes the focused session's full file index on switch (store.fileIndex); `filterFiles`
+  // ranks it locally on every keystroke, so the menu updates synchronously — no round-trip,
+  // and no hide/show flicker (the old per-query RPC blanked the menu for the in-flight
+  // window). Only when the index was truncated (a cwd larger than the server cap) AND local
+  // matches are thin do we fall back to a debounced server `fd` search (store.queryFiles),
+  // merging its results into the local ones.
+  const FILE_MENU_LIMIT = 50;
+  // Fire the server fallback only when local matches are thinner than this — a comfortably
+  // full menu means the wanted file is almost certainly already shown, so don't round-trip.
+  const FALLBACK_MIN = 25;
   let fileSel = $state(0);
   let fileDismissed = $state(false);
   let fileDebounce: ReturnType<typeof setTimeout> | undefined;
   const fileMatch = $derived(extractAtQuery(store.composerDraft, cursorPos));
   const fileQ = $derived(fileMatch?.query ?? null);
-  const fileItems = $derived(
-    fileQ !== null && store.files.query === fileQ
-      ? store.files.items
-      : [],
+  // Instant local matches over the prefetched index — the dominant path.
+  const localFileItems = $derived(
+    fileQ === null
+      ? []
+      : filterFiles(store.fileIndex.files, fileQ, FILE_MENU_LIMIT),
   );
+  // Server fallback results, but only while they match the *current* query (the echoed
+  // query guards a stale in-flight response from landing under a newer keystroke).
+  const serverFileItems = $derived(
+    fileQ !== null && store.files.query === fileQ ? store.files.items : [],
+  );
+  // Local first (instant), then any server extras not already shown, deduped by path. Local
+  // results carry the menu so it never blanks; server results only ever *add*.
+  const fileItems = $derived.by(() => {
+    if (fileQ === null) return [];
+    const seen = new Set(localFileItems.map((f) => f.path));
+    const merged = [...localFileItems];
+    for (const f of serverFileItems) {
+      if (seen.has(f.path)) continue;
+      seen.add(f.path);
+      merged.push(f);
+    }
+    return merged.slice(0, FILE_MENU_LIMIT);
+  });
   const fileOpen = $derived(
     fileQ !== null && !fileDismissed && fileItems.length > 0,
   );
@@ -131,11 +151,16 @@
     if (fileSel >= fileItems.length) fileSel = 0;
   });
 
-  // Debounced server query on @-mention keystrokes. The effect tracks fileQ;
-  // each change resets the timer. Cancel on unmount.
+  // Debounced server fallback: only when the index was truncated and local matches are thin
+  // (the wanted file may live past the cap). The common case never reaches the server.
   $effect(() => {
     const q = fileQ;
+    const needFallback =
+      q !== null &&
+      store.fileIndex.truncated &&
+      localFileItems.length < FALLBACK_MIN;
     clearTimeout(fileDebounce);
+    if (!needFallback) return;
     fileDebounce = setTimeout(() => {
       if (q !== null) store.queryFiles(q);
     }, 150);

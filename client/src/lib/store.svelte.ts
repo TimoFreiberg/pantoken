@@ -104,9 +104,17 @@ class PilotStore {
   // Slash commands the focused session offers, for the composer typeahead. Server-
   // authoritative, delivered like `models`; refreshed on session switch (cwd-scoped).
   commands = $state<CommandInfo[]>([]);
-  // File paths matching the current @-mention query, for the composer's file
-  // autocomplete. Fetched on demand per-keystroke (debounced client-side ~150ms);
-  // the server echoes the query so we can drop stale responses. See `queryFiles()`.
+  // The focused session's full file index (cwd-scoped), pushed by the server on connect +
+  // session switch. The composer fuzzy-matches this locally so the @-mention menu is
+  // instant — no per-keystroke round-trip. `truncated` is true when the cwd overflowed the
+  // server cap, the only case the composer falls back to a `queryFiles` search.
+  fileIndex = $state<{ files: readonly FileInfo[]; truncated: boolean }>({
+    files: [],
+    truncated: false,
+  });
+  // Fallback file-search results for the current @-mention query (the server `fd` path,
+  // only requested when `fileIndex.truncated`). The server echoes the query so we can drop
+  // stale responses; the composer merges these into the local matches. See `queryFiles()`.
   files = $state<{ query: string; items: readonly FileInfo[] }>({
     query: "",
     items: [],
@@ -426,6 +434,9 @@ class PilotStore {
           nodes: [...msg.nodes],
           leafId: msg.leafId,
         };
+        break;
+      case "fileIndex":
+        this.fileIndex = { files: [...msg.files], truncated: msg.truncated };
         break;
       case "fileList":
         this.files = { query: msg.query, items: [...msg.files] };
@@ -862,10 +873,11 @@ class PilotStore {
     if (id) this.markRead(id);
     // A switched-to session renders at the bottom — clear any stale below-fold flag.
     this.clearActiveUnread();
-    // Drop the @-mention file cache: it's keyed only by query string, so the new
-    // session's cwd would otherwise show the prior cwd's files until the next
-    // `queryFiles` round-trips. The empty-query entry is the one that bites — it
-    // matches instantly when the user types `@`.
+    // Drop the @-mention file caches: both are cwd-scoped, so the new session would
+    // otherwise show the prior cwd's files until the server pushes a fresh `fileIndex`
+    // (on switch). The stale index is the one that bites — it'd match instantly when the
+    // user types `@`. The fallback-query cache is cleared for the same reason.
+    this.fileIndex = { files: [], truncated: false };
     this.files = { query: "", items: [] };
     // Drop the previous session's branch tree so a stale one never flashes; if the tree
     // view is open across the switch, re-query for the session we're moving to.

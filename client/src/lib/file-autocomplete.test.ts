@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { extractAtQuery } from "./file-autocomplete.js";
+import type { FileInfo } from "@pilot/protocol";
+import { extractAtQuery, filterFiles } from "./file-autocomplete.js";
 
 describe("extractAtQuery", () => {
   test("returns the text after @ at cursor position", () => {
@@ -97,5 +98,66 @@ describe("extractAtQuery", () => {
     const r = extractAtQuery("@file", 999);
     expect(r).not.toBeNull();
     expect(r!.query).toBe("file");
+  });
+});
+
+describe("filterFiles", () => {
+  const f = (path: string, isDirectory = false): FileInfo => ({
+    path,
+    isDirectory,
+  });
+  const FILES: readonly FileInfo[] = [
+    f("README.md"),
+    f("store", true),
+    f("store.ts"),
+    f("lib/mystore.ts"),
+    f("server", true),
+    f("server/src/hub.ts"),
+    f("docs/DESIGN.md"),
+  ];
+  const paths = (items: FileInfo[]) => items.map((i) => i.path);
+
+  test("empty query returns the head of the index (bare @)", () => {
+    expect(paths(filterFiles(FILES, "", 3))).toEqual([
+      "README.md",
+      "store",
+      "store.ts",
+    ]);
+  });
+
+  test("substring match drops non-matches", () => {
+    expect(paths(filterFiles(FILES, "hub"))).toEqual(["server/src/hub.ts"]);
+  });
+
+  test("match is case-insensitive", () => {
+    expect(paths(filterFiles(FILES, "HUB"))).toEqual(["server/src/hub.ts"]);
+  });
+
+  test("ranks basename-prefix > path-prefix > interior, dir before file on ties", () => {
+    // "store": dir + file both basename-prefix (dir first), then the interior match.
+    expect(paths(filterFiles(FILES, "store"))).toEqual([
+      "store", // basename-prefix, directory → first
+      "store.ts", // basename-prefix, file
+      "lib/mystore.ts", // interior match → last
+    ]);
+  });
+
+  test("path-prefix outranks an interior match", () => {
+    const files = [f("lib/observer.ts"), f("server/src/hub.ts")];
+    // "server": path-prefix on the second; interior (inside "observer") on the first.
+    expect(paths(filterFiles(files, "server"))).toEqual([
+      "server/src/hub.ts",
+      "lib/observer.ts",
+    ]);
+  });
+
+  test("respects the limit", () => {
+    expect(filterFiles(FILES, "", 2)).toHaveLength(2);
+    const manyTs = [f("a.ts"), f("b.ts"), f("c.ts"), f("d.ts")];
+    expect(filterFiles(manyTs, ".ts", 2)).toHaveLength(2);
+  });
+
+  test("no match returns empty", () => {
+    expect(filterFiles(FILES, "zzz")).toEqual([]);
   });
 });

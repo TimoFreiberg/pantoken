@@ -159,6 +159,12 @@ class FakeDriver implements PilotDriver {
   async listCommands(): Promise<CommandInfo[]> {
     return [{ name: "review", source: "prompt" }];
   }
+  async listFileIndex(): Promise<{ files: FileInfo[]; truncated: boolean }> {
+    return {
+      files: [{ path: "README.md", isDirectory: false }],
+      truncated: false,
+    };
+  }
   async listFiles(): Promise<FileInfo[]> {
     return [{ path: "README.md", isDirectory: false }];
   }

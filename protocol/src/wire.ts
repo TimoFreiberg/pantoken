@@ -106,11 +106,17 @@ export type ServerMessage =
       nodes: readonly TreeNodeInfo[];
       leafId: string | null;
     }
-  /** File paths matching a composer @-mention query, returned by the server on
-   *  demand (the client sends {@link queryFiles} on each keystroke after `@`,
-   *  debounced). Re-broadcast per-query, not per-session — the client caches the
-   *  empty-query result. The `query` field echoes the request so the client can
-   *  ignore stale responses. See {@link FileInfo}. */
+  /** The full file index for the focused session's cwd, pushed on connect + session
+   *  switch (like {@link commandList}). The client fuzzy-matches it locally so the
+   *  @-mention menu is instant (no per-keystroke round-trip). Capped server-side;
+   *  `truncated` is true when the cwd has more files than the cap, which is the only
+   *  case the client falls back to a {@link queryFiles} search. See {@link FileInfo}. */
+  | { type: "fileIndex"; files: readonly FileInfo[]; truncated: boolean }
+  /** File paths matching a composer @-mention query — the server-side `fd` *fallback*,
+   *  used only when the {@link fileIndex} was truncated and local matches are thin (so a
+   *  wanted file may live past the index cap). The client sends {@link queryFiles}
+   *  (debounced); the `query` field echoes the request so stale responses are dropped.
+   *  Merged into the local matches, deduped by path. See {@link FileInfo}. */
   | { type: "fileList"; query: string; files: readonly FileInfo[] }
   /** The model providers pilot can manage credentials for (curated key-capable +
    *  already-connected), server-authoritative like `modelList`. No secrets — see
@@ -285,8 +291,9 @@ export type ClientMessage =
   /** Ask the server for the focused session's branch tree (the tree view just opened).
    *  The server responds with {@link treeState}. Omit sessionId to target the focused one. */
   | { type: "queryTree"; sessionId?: SessionId }
-  /** Ask the server to search for files matching a composer @-mention query (the text
-   *  after `@`, empty for the initial list). The server responds with {@link fileList}.
+  /** Fallback file search for a composer @-mention query (the text after `@`). Only sent
+   *  when the {@link fileIndex} was truncated and local matches are thin — the common case
+   *  is served entirely client-side from the index. The server responds with {@link fileList}.
    *  Debounce client-side (~150ms); the server echoes the query back so stale responses
    *  can be dropped. */
   | { type: "queryFiles"; query: string }

@@ -148,21 +148,23 @@ function buildFdPathQuery(query: string): string {
   return pattern;
 }
 
-/** Search files in `cwd` using fd (fast, .gitignore-aware) for the composer's @-mention
- *  autocomplete. Follows the same patterns as pi's TUI `autocomplete.ts`: `--follow` for
- *  symlinks, `--hidden` to include dotfiles, explicit `.git/` exclusion, max-results cap,
- *  and regex-escaping the query via `buildFdPathQuery` (see above — `fd` matches as regex).
- *  Returns relative paths with forward slashes. Timeout at 5s — silence is fine in a web
- *  UI (the menu just stays closed). */
-async function listFilesWithFd(
-  cwd: string,
-  query: string,
-): Promise<FileInfo[]> {
-  const args: string[] = [
+/** How many entries the prefetched @-mention index carries. The client fuzzy-matches
+ *  this locally (no per-keystroke round-trip); only when a cwd overflows the cap does it
+ *  fall back to a server `fd` search. Generous — `fd` is .gitignore-aware so the count is
+ *  source files, not vendored trees — but bounded so the per-switch payload stays small. */
+const FILE_INDEX_CAP = 2000;
+/** Result cap for the per-query fallback search (only fires on a truncated index). */
+const FILE_QUERY_CAP = 50;
+
+/** Shared fd flags for both the index and the fallback query: cap results, list files +
+ *  dirs, follow symlinks, include dotfiles, exclude the `.git` tree. `.gitignore`-aware
+ *  by default. Mirrors pi's TUI `autocomplete.ts`. */
+function baseFdArgs(cwd: string, maxResults: number): string[] {
+  return [
     "--base-directory",
     cwd,
     "--max-results",
-    "50",
+    String(maxResults),
     "--type",
     "f",
     "--type",
@@ -176,14 +178,12 @@ async function listFilesWithFd(
     "--exclude",
     ".git/**",
   ];
+}
 
-  if (query.replace(/\\/g, "/").includes("/")) {
-    args.push("--full-path");
-  }
-  if (query) {
-    args.push(buildFdPathQuery(query));
-  }
-
+/** Spawn fd and collect its stdout lines. Resolves `[]` on spawn failure, non-zero exit
+ *  (fd exits 1 when nothing matches), or a 5s timeout — silence is fine in a web UI (the
+ *  menu just stays closed / the index stays empty). */
+function runFd(cwd: string, args: string[]): Promise<string[]> {
   return new Promise((resolve) => {
     const child = Bun.spawn(["fd", ...args], {
       cwd,
@@ -191,9 +191,7 @@ async function listFilesWithFd(
       stderr: "pipe",
     });
 
-    let stdout = "";
     let resolved = false;
-
     const timer = setTimeout(() => {
       if (!resolved) {
         resolved = true;
@@ -202,18 +200,19 @@ async function listFilesWithFd(
       }
     }, 5_000);
 
-    const finish = (results: FileInfo[]) => {
+    const finish = (lines: string[]) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
-      resolve(results);
+      resolve(lines);
     };
 
     void (async () => {
+      let stdout = "";
       try {
         stdout = await new Response(child.stdout).text();
       } catch {
-        // fd not found or errored — return empty, no menu.
+        // fd not found or errored — return empty.
         finish([]);
         return;
       }
@@ -223,27 +222,63 @@ async function listFilesWithFd(
         finish([]);
         return;
       }
-
-      const lines = stdout.trim().split("\n").filter(Boolean);
-      const results: FileInfo[] = [];
-      for (const line of lines) {
-        // fd appends "/" for directories. Normalize to forward slashes.
-        const normalized = line.replaceAll("\\", "/");
-        const isDirectory = normalized.endsWith("/");
-        const path = isDirectory ? normalized.slice(0, -1) : normalized;
-        // Skip .git entries (belt-and-suspenders — fd's exclude should catch them).
-        if (
-          path === ".git" ||
-          path.startsWith(".git/") ||
-          path.includes("/.git/")
-        ) {
-          continue;
-        }
-        results.push({ path, isDirectory });
-      }
-      finish(results);
+      finish(stdout.trim().split("\n").filter(Boolean));
     })();
   });
+}
+
+/** Parse fd's path lines into `FileInfo[]`: normalize separators to forward slashes,
+ *  strip fd's trailing "/" on directories, and drop any stray `.git` entries (fd's
+ *  exclude should catch them — belt-and-suspenders). */
+function parseFdLines(lines: string[]): FileInfo[] {
+  const results: FileInfo[] = [];
+  for (const line of lines) {
+    const normalized = line.replaceAll("\\", "/");
+    const isDirectory = normalized.endsWith("/");
+    const path = isDirectory ? normalized.slice(0, -1) : normalized;
+    if (
+      path === ".git" ||
+      path.startsWith(".git/") ||
+      path.includes("/.git/")
+    ) {
+      continue;
+    }
+    results.push({ path, isDirectory });
+  }
+  return results;
+}
+
+/** Build the full @-mention index for `cwd`: one unfiltered fd over the tree, capped at
+ *  {@link FILE_INDEX_CAP}. Requests one extra entry so we can report `truncated` when the
+ *  cwd overflows the cap (the client then falls back to {@link listFilesWithFd}). */
+async function listFileIndexWithFd(
+  cwd: string,
+): Promise<{ files: FileInfo[]; truncated: boolean }> {
+  const files = parseFdLines(
+    await runFd(cwd, baseFdArgs(cwd, FILE_INDEX_CAP + 1)),
+  );
+  const truncated = files.length > FILE_INDEX_CAP;
+  return {
+    files: truncated ? files.slice(0, FILE_INDEX_CAP) : files,
+    truncated,
+  };
+}
+
+/** Fallback @-mention search in `cwd` via fd, used only when the index was truncated.
+ *  `fd` matches as a regex, so the query is escaped via `buildFdPathQuery` (see above);
+ *  `--full-path` is added for path-bearing queries. Capped at {@link FILE_QUERY_CAP}. */
+async function listFilesWithFd(
+  cwd: string,
+  query: string,
+): Promise<FileInfo[]> {
+  const args = baseFdArgs(cwd, FILE_QUERY_CAP);
+  if (query.replace(/\\/g, "/").includes("/")) {
+    args.push("--full-path");
+  }
+  if (query) {
+    args.push(buildFdPathQuery(query));
+  }
+  return parseFdLines(await runFd(cwd, args));
 }
 
 export async function createPiDriver(
@@ -1050,6 +1085,12 @@ export async function createPiDriver(
         label: m.name,
         thinkingLevels: supportedThinkingLevels(m),
       }));
+    },
+
+    async listFileIndex(sessionId) {
+      const ws = target(sessionId);
+      if (!ws) return { files: [], truncated: false };
+      return listFileIndexWithFd(ws.cwd);
     },
 
     async listFiles(query, sessionId) {

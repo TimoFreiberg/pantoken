@@ -1,6 +1,10 @@
 // Pure helpers for the composer's @-file mention typeahead. Kept DOM-free so they
 // can be unit-tested directly: `extractAtQuery` decides whether the cursor is inside
-// a `@`-prefix token and returns the query text + the `@` position for replacement.
+// a `@`-prefix token and returns the query text + the `@` position for replacement;
+// `filterFiles` ranks the prefetched file index against a query for instant local
+// matching (no server round-trip).
+
+import type { FileInfo } from "@pilot/protocol";
 
 /** Characters that delimit a token boundary — a `@` is only a mention prefix when
  *  it starts a new token (i.e. preceded by whitespace / start of line, NOT in the
@@ -73,4 +77,48 @@ export function extractAtQuery(
   }
 
   return null;
+}
+
+/**
+ * Rank the prefetched file index against an @-mention query, for instant client-side
+ * matching. Case-insensitive substring match on the path (consistent with the slash-command
+ * filter and pi's TUI autocomplete); a query is dropped if it isn't a substring of the path.
+ *
+ * Ranking, best first:
+ *   1. query matches the start of the basename (the file/dir name itself) — `hub` → `…/hub.ts`
+ *   2. query matches the start of the full path — `server` → `server/src/…`
+ *   3. query matches anywhere else in the path
+ * Ties break by directory-before-file (so a dir the user can keep narrowing surfaces first,
+ * per the driver's documented ordering), then shorter path, then alphabetical.
+ *
+ * An empty query returns the head of the index (it's already in fd's order) — the bare-`@`
+ * list. Results are capped at `limit`.
+ */
+export function filterFiles(
+  files: readonly FileInfo[],
+  query: string,
+  limit = 50,
+): FileInfo[] {
+  if (!query) return files.slice(0, limit);
+  const q = query.toLowerCase();
+
+  const scored: { f: FileInfo; rank: number; len: number }[] = [];
+  for (const f of files) {
+    const path = f.path.toLowerCase();
+    const at = path.indexOf(q);
+    if (at === -1) continue;
+    const slash = path.lastIndexOf("/");
+    const basenameStart = slash + 1; // 0 when no slash
+    const rank = at === basenameStart ? 0 : at === 0 ? 1 : 2;
+    scored.push({ f, rank, len: path.length });
+  }
+
+  scored.sort((a, b) => {
+    if (a.rank !== b.rank) return a.rank - b.rank;
+    if (a.f.isDirectory !== b.f.isDirectory) return a.f.isDirectory ? -1 : 1;
+    if (a.len !== b.len) return a.len - b.len;
+    return a.f.path.localeCompare(b.f.path);
+  });
+
+  return scored.slice(0, limit).map((s) => s.f);
 }

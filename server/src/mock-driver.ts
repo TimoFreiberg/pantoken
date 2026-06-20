@@ -634,6 +634,12 @@ export class MockDriver implements PilotDriver {
     return MOCK_COMMANDS.map((c) => ({ ...c }));
   }
 
+  async listFileIndex(): Promise<{ files: FileInfo[]; truncated: boolean }> {
+    // The fixture set is small, so the client always has the full index — the per-query
+    // fallback path never fires in mock mode (truncated stays false).
+    return { files: MOCK_FILES.map((f) => ({ ...f })), truncated: false };
+  }
+
   async listFiles(query: string): Promise<FileInfo[]> {
     if (!query.trim()) return MOCK_FILES.map((f) => ({ ...f })).slice(0, 20);
     const q = query.toLowerCase();
