@@ -496,6 +496,12 @@ export interface ToolFinishedEvent extends SessionEventBase {
   readonly callId: string;
   readonly success: boolean;
   readonly output?: unknown;
+  /** Image content blocks the tool returned (pi's `{type:"image"}`), lifted out of
+   *  `output` into a typed field so the client renders them without sniffing the raw
+   *  result shape — and so the SAME data survives a reload (history-map populates this
+   *  too). The base64 lives ONLY here; the live path strips it from `output` to avoid
+   *  shipping the bytes twice. */
+  readonly images?: readonly ImageContent[];
 }
 export interface RunCompletedEvent extends SessionEventBase {
   readonly type: "runCompleted";

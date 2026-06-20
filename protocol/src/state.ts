@@ -59,6 +59,10 @@ export interface ToolItem {
   description?: string;
   input?: unknown;
   output?: unknown;
+  /** Image content blocks the tool returned (pi's `{type:"image"}`). Folded from
+   *  `toolFinished.images`; rendered as <img> by the tool card. Same data on the live
+   *  and reloaded paths (event-map / history-map both populate it). */
+  images?: readonly ImageContent[];
   text?: string;
   progress?: number;
   status: ToolStatus;
@@ -355,6 +359,7 @@ export function foldEvent(
       if (t) {
         t.status = ev.success ? "ok" : "error";
         t.output = ev.output;
+        if (ev.images) t.images = ev.images;
         t.finishedAt = ev.timestamp;
       }
       return state;

@@ -15,12 +15,15 @@ import type {
   SessionRef,
   SessionSnapshot,
 } from "@pilot/protocol";
+import { imagesFromContent, textFromContent } from "./content.js";
 
 type ContentBlock =
   | { type: "text"; text: string }
   | { type: "thinking"; thinking: string }
   | { type: "toolCall"; id: string; name: string; arguments?: unknown }
-  | { type: "image" }
+  // pi persists image blocks with their base64 data + mimeType (pi-ai ImageContent);
+  // the runtime session.messages carry them even though older callers only read `type`.
+  | { type: "image"; data?: string; mimeType?: string }
   | { type: string };
 
 /** Narrow structural view of a stored pi message (see pi docs/session-format.md). */
@@ -109,7 +112,10 @@ export function historyToEvents(
           ...meta(m.timestamp),
           type: "userMessage",
           id: `u-${seq}`,
-          text: contentToText(m.content),
+          // textFromContent (not contentToText): the image renders as a thumbnail from
+          // the typed `images` field, so don't also leak a "[image]" placeholder into text.
+          text: textFromContent(m.content),
+          images: imagesFromContent(m.content),
           entryId,
         });
         break;
@@ -171,7 +177,10 @@ export function historyToEvents(
           type: "toolFinished",
           callId: m.toolCallId ?? "",
           success: !m.isError,
-          output: contentToText(m.content),
+          // textFromContent: image blocks are surfaced via the typed `images` field and
+          // rendered as <img>, so the output text shouldn't carry a "[image]" placeholder.
+          output: textFromContent(m.content),
+          images: imagesFromContent(m.content),
         });
         break;
 

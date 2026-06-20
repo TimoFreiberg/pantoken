@@ -15,6 +15,7 @@ import type {
   SessionStatus,
 } from "@pilot/protocol";
 import { queueMessages } from "./queue-map.js";
+import { splitToolResult } from "./content.js";
 
 export interface MapCtx {
   ref: SessionRef;
@@ -186,16 +187,22 @@ export function mapPiEvent(
         },
       ];
 
-    case "tool_execution_end":
+    case "tool_execution_end": {
+      // Lift image blocks out of the raw result into a typed `images` field (stripping
+      // them from `output` so the base64 isn't shipped twice). history-map populates the
+      // same field on reload, so the image survives a reconnect.
+      const { output, images } = splitToolResult(ev.result);
       return [
         {
           ...meta,
           type: "toolFinished",
           callId: ev.toolCallId,
           success: !ev.isError,
-          output: ev.result,
+          output,
+          images,
         },
       ];
+    }
 
     case "session_info_changed":
       // A rename (or other info change) can land mid-turn; reflect the live status so
