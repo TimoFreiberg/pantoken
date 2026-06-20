@@ -328,9 +328,11 @@
               <span>
                 {item.delivery === "sending"
                   ? "Sending…"
-                  : item.delivery === "offline"
-                    ? "Queued offline"
-                    : `Not sent${item.deliveryError ? ` — ${item.deliveryError}` : ""}`}
+                  : item.delivery === "connecting"
+                    ? "Sending when reconnected…"
+                    : item.delivery === "offline"
+                      ? "Queued offline"
+                      : `Not sent${item.deliveryError ? ` — ${item.deliveryError}` : ""}`}
               </span>
               {#if item.delivery === "rejected"}
                 <button

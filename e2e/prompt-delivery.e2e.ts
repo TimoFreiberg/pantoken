@@ -9,7 +9,9 @@ test("an offline prompt survives page loss and sends once after reconnect", asyn
   await page.evaluate(() =>
     window.dispatchEvent(new Event("pilot:test-disconnect")),
   );
-  await expect(page.getByText("Offline — the agent keeps running")).toBeVisible();
+  await expect(
+    page.getByText("Offline — the agent keeps running"),
+  ).toBeVisible();
 
   const prompt = "deliver this exactly once after reconnect";
   const composer = page.getByPlaceholder("Message pilot…");
@@ -33,6 +35,30 @@ test("an offline prompt survives page loss and sends once after reconnect", asyn
   ).toHaveCount(0);
 });
 
+test("a prompt sent mid-reconnect reads 'Sending when reconnected…', not 'Queued offline'", async ({
+  page,
+}) => {
+  await gotoFresh(page);
+  // Freeze the socket in "reconnecting" (dropped but actively retrying) so the queued
+  // prompt is about-to-send, not truly stranded.
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("pilot:test-reconnecting")),
+  );
+
+  const prompt = "this goes out the instant the socket is back";
+  const composer = page.getByPlaceholder("Message pilot…");
+  await composer.fill(prompt);
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(page.getByText(prompt, { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Sending when reconnected…", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Queued offline", { exact: true })).toHaveCount(
+    0,
+  );
+});
+
 test("a rejected prompt stays visible and can be returned to the composer", async ({
   page,
 }) => {
@@ -44,10 +70,9 @@ test("a rejected prompt stays visible and can be returned to the composer", asyn
 
   await expect(page.getByText(prompt, { exact: true })).toBeVisible();
   await expect(
-    page.getByText(
-      "Not sent — Mock prompt rejected before acceptance",
-      { exact: true },
-    ),
+    page.getByText("Not sent — Mock prompt rejected before acceptance", {
+      exact: true,
+    }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(composer).toHaveValue(prompt);
