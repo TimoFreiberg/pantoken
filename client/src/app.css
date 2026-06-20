@@ -115,6 +115,21 @@ button {
   cursor: pointer;
 }
 
+/* iOS Safari auto-zooms the page whenever you focus a form control whose computed
+   font-size is < 16px — and gives no API to read or restore the prior zoom, so the
+   page stays scaled in until you pinch back out by hand. Prevent it at the source:
+   force every focusable control to 16px on touch devices. `!important` is needed to
+   beat Svelte's scoped per-input rules; this keeps desktop density (pointer: fine
+   is untouched) and keeps pinch-zoom (we never set maximum-scale). */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select,
+  [contenteditable] {
+    font-size: 16px !important;
+  }
+}
+
 a {
   color: var(--accent);
 }

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { drive, gotoFresh } from "./helpers.js";
+import { drive, gotoFresh, openSidebar } from "./helpers.js";
 
 // Runs under the "mobile" project (iPhone 13 viewport).
 test.beforeEach(async ({ page }) => {
@@ -53,6 +53,22 @@ test("a wide markdown table scrolls horizontally instead of overflowing", async 
   expect(metrics.scrolls).toBe(true);
   expect(metrics.rightWithinViewport).toBe(true);
   expect(metrics.noPageOverflow).toBe(true);
+});
+
+test("text inputs render at >=16px on touch (guards against iOS focus-zoom)", async ({
+  page,
+}) => {
+  // iOS Safari auto-zooms the page when you focus a form control whose font-size is
+  // < 16px, and won't zoom back out. The global `@media (pointer: coarse)` rule forces
+  // every input to 16px. Assert it actually reaches a real input — the sidebar search,
+  // which is 13px on desktop — under this hasTouch (pointer: coarse) project.
+  await openSidebar(page);
+  const search = page.getByRole("textbox", { name: "Search sessions" });
+  await expect(search).toBeVisible();
+  const fontSize = await search.evaluate((el) =>
+    parseFloat(getComputedStyle(el).fontSize),
+  );
+  expect(fontSize).toBeGreaterThanOrEqual(16);
 });
 
 test("the per-turn copy button stays visible on touch (no hover to reveal it)", async ({
