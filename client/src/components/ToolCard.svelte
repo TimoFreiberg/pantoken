@@ -4,6 +4,35 @@
   let { item }: { item: ToolItem } = $props();
   let open = $state(false);
 
+  // Output controls: the result <pre> is capped at 320px (see .out below), which turns a
+  // long log into a nested scroll-trap on touch. Offer a copy + an inline expand that drops
+  // the cap. The expand affordance only shows when the collapsed output actually overflows.
+  let outExpanded = $state(false);
+  let outOverflows = $state(false);
+  let outPre = $state<HTMLElement>();
+  let copied = $state(false);
+  let copyTimer: ReturnType<typeof setTimeout> | undefined;
+
+  async function copyOut(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+      clearTimeout(copyTimer);
+      copyTimer = setTimeout(() => (copied = false), 1500);
+    } catch {
+      // Clipboard can reject (permissions / insecure context); leave the UI as-is.
+    }
+  }
+
+  // Measure overflow while collapsed (scrollHeight exceeds the capped clientHeight). Keep
+  // the toggle once expanded so it can always be collapsed back; re-measures when the
+  // output text changes (e.g. a streamed result settling).
+  $effect(() => {
+    void outBodyText;
+    const el = outPre;
+    if (el && !outExpanded) outOverflows = el.scrollHeight > el.clientHeight + 1;
+  });
+
   function preview(input: unknown): string {
     if (input == null) return "";
     if (typeof input === "object") {
@@ -354,7 +383,30 @@
             {/each}
           </div>
         {/if}
-        {#if outBodyText}<pre class="out">{outBodyText}</pre>{/if}
+        {#if outBodyText}
+          <div class="out-block">
+            <div class="out-bar">
+              {#if outExpanded || outOverflows}
+                <button
+                  type="button"
+                  class="out-action"
+                  title={outExpanded
+                    ? "Collapse the output back to a scrollbox"
+                    : "Expand the output to full height"}
+                  onclick={() => (outExpanded = !outExpanded)}
+                  >{outExpanded ? "Collapse" : "Expand"}</button
+                >
+              {/if}
+              <button
+                type="button"
+                class="out-action"
+                title="Copy this tool's output to the clipboard"
+                onclick={() => copyOut(outBodyText)}>{copied ? "Copied" : "Copy"}</button
+              >
+            </div>
+            <pre class="out" class:expanded={outExpanded} bind:this={outPre}>{outBodyText}</pre>
+          </div>
+        {/if}
       {/if}
       {#if item.status === "running" && !item.text}<div class="running">running…</div>{/if}
       {#if item.status === "interrupted" && item.output === undefined}
@@ -495,6 +547,39 @@
   }
   .out {
     color: var(--text);
+  }
+  /* Expanded: drop the scrollbox cap so a long log reads top-to-bottom instead of
+     trapping a nested scroll (especially on touch, where the overlay scrollbar hides). */
+  .out.expanded {
+    max-height: none;
+  }
+  .out-block {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .out-bar {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+  .out-action {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 9px;
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: 11px;
+    cursor: pointer;
+    transition: background 0.12s ease;
+  }
+  .out-action:hover {
+    background: var(--surface-sunken);
+    color: var(--text);
+  }
+  .out-action:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1.5px var(--accent);
   }
   .out-images {
     display: flex;
