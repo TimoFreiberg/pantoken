@@ -1333,12 +1333,12 @@ class PilotStore {
   cleanupWorktree(path: string, force = false): void {
     send({ type: "cleanupWorktree", path, force });
   }
-  /** Copy a worktree's path to the clipboard. Returns whether it succeeded so the
-   *  caller can flash feedback; degrades quietly where the clipboard API is unavailable
-   *  (insecure context / older browser). */
-  async copyWorktreePath(path: string): Promise<boolean> {
+  /** Copy text to the clipboard (worktree path, session id, …). Returns whether it
+   *  succeeded so the caller can flash feedback; degrades quietly where the clipboard
+   *  API is unavailable (insecure context / older browser). */
+  async copyToClipboard(text: string): Promise<boolean> {
     try {
-      await navigator.clipboard.writeText(path);
+      await navigator.clipboard.writeText(text);
       return true;
     } catch {
       this.lastError = "couldn't copy to clipboard (needs a secure context)";
