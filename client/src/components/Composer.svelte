@@ -934,6 +934,12 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* Touch: keep the small config pills reliably tappable (≥44px) on coarse pointers. */
+  @media (pointer: coarse) {
+    .chip {
+      min-height: 44px;
+    }
+  }
   .chip:hover {
     color: var(--text);
     border-color: var(--border-strong);

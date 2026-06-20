@@ -20,6 +20,11 @@
         if (m !== "light" && m !== "dark")
           m = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
         document.documentElement.setAttribute("data-theme", m);
+        // Pre-paint the status-bar/theme-color too (CSS tokens aren't loaded yet, so the
+        // two --bg values are inlined; lib/theme.ts re-syncs from the computed token after
+        // load and on every theme change).
+        var tc = document.querySelector('meta[name="theme-color"]');
+        if (tc) tc.setAttribute("content", m === "dark" ? "#242522" : "#f7f6f2");
       } catch (e) {}
     </script>
   </head>

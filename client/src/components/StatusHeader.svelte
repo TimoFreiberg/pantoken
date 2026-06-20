@@ -161,7 +161,9 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 10px 16px;
+    /* Clear the notch/status bar in PWA standalone (viewport-fit=cover). The top inset is
+       0 in a normal browser tab, so this is a no-op there. */
+    padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
     border-bottom: 1px solid var(--border);
     background: color-mix(in srgb, var(--bg) 86%, transparent);
     backdrop-filter: blur(8px);

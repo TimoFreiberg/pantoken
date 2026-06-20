@@ -295,14 +295,26 @@ the remainder, roughly ordered by day-to-day leverage._
 
 **Mobile findings — surfaced but NOT yet verified** _(the survey's mobile + status dimensions
 hit a session limit mid-verify; confirm each against the code before acting):_
-- [ ] **Safe-area insets** — confirm the header clears the notch and the composer sits above the
-      home indicator (`env(safe-area-inset-*)`); the approval sheet already uses it.
-- [ ] **Wake lock during a run** — keep the screen awake while a turn streams so the phone
-      doesn't sleep mid-watch (`navigator.wakeLock`).
-- [ ] **Tap-target audit (≥44px)** — `IconButton` already enforces 44px on coarse pointers;
-      audit the rest (sidebar rows, chips, dialog options) for sub-44px touch targets.
-- [ ] **PWA status-bar / theme-color chrome** — verify the installed PWA's status bar /
-      `theme-color` tracks the active light/dark theme.
+- [x] **Safe-area insets** → done 2026-06-21. Verified `viewport-fit=cover` is set and the
+      composer/sidebar/sheets already pad `env(safe-area-inset-bottom)`. The one gap was the
+      header top — added `padding-top: env(safe-area-inset-top)` to `.hdr` so it clears the
+      notch/status bar in PWA standalone (0 in a normal tab, so a no-op there).
+- [x] **Wake lock during a run** → done 2026-06-21. New `lib/wake-lock.ts` (testable core +
+      browser-wired default) holds a `navigator.wakeLock` while `store.turnActive`, releases on
+      settle, and re-acquires on visibility regain (the OS drops the lock when the tab hides).
+      A progressive enhancement — silent no-op where unsupported/denied. `wake-lock.test.ts`
+      covers acquire/release, the toggle-off-mid-request race, reacquire-only-while-wanted, and
+      the unsupported no-op.
+- [x] **Tap-target audit (≥44px)** → done 2026-06-21. On coarse pointers, the `Button` component
+      (dialog/action buttons, ~42px before), the non-binary select `.opt` rows, and the Composer
+      config `.chip`s now get `min-height: 44px` (sidebar rows + IconButton were already fine).
+      `e2e/tap-targets.mobile.e2e.ts` asserts dialog actions + select options clear 44px on Pixel 7.
+- [x] **PWA status-bar / theme-color chrome** → done 2026-06-21. The `theme-color` meta was a
+      static light value; now `lib/theme.ts` syncs it to the resolved palette's computed `--bg`
+      on every theme change (+ the inline pre-paint script sets it from the two inlined `--bg`
+      hexes before the bundle loads, no flash). Android/browser chrome tracks light↔dark; iOS
+      standalone still uses the static apple status-bar meta (can't be set live). `settings.e2e.ts`
+      asserts the meta flips to `#242522`/`#f7f6f2` on toggle and survives a reload.
 
 ### New polish (triaged 2026-06-20)
 

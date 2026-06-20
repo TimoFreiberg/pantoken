@@ -152,17 +152,23 @@ test("theme toggle drives the data-theme override and persists it", async ({
     "true",
   );
 
+  // The theme-color meta (PWA / browser chrome) tracks the active palette's --bg.
+  const themeColor = page.locator('meta[name="theme-color"]');
   await page.getByTestId("theme-dark").click();
   await expect(html).toHaveAttribute("data-theme", "dark");
+  await expect(themeColor).toHaveAttribute("content", "#242522");
 
   await page.getByTestId("theme-light").click();
   await expect(html).toHaveAttribute("data-theme", "light");
+  await expect(themeColor).toHaveAttribute("content", "#f7f6f2");
 
-  // Back to dark, then reload: the inline pre-paint script must restore it.
+  // Back to dark, then reload: the inline pre-paint script must restore both the
+  // data-theme AND the theme-color, before the bundle loads.
   await page.getByTestId("theme-dark").click();
   await expect(html).toHaveAttribute("data-theme", "dark");
   await page.reload();
   await expect(html).toHaveAttribute("data-theme", "dark");
+  await expect(themeColor).toHaveAttribute("content", "#242522");
 
   // "System" clears the override and re-resolves to the emulated light scheme.
   await page.getByTestId("settings-toggle").click();
