@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 import UserNotifications
 import WebKit
 
@@ -103,6 +104,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         let wv = WKWebView(frame: w.contentView!.bounds, configuration: conf)
         wv.autoresizingMask = [.width, .height]
+        // Without a uiDelegate, WKWebView silently swallows every `<input type="file">`
+        // click — the composer's image-attach button does nothing. We present the file
+        // picker ourselves in runOpenPanelWith (below).
+        wv.uiDelegate = self
         w.contentView!.addSubview(wv)
 
         webView = wv
@@ -262,5 +267,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         alert.addButton(withTitle: "Quit")
         alert.runModal()
         NSApp.terminate(nil)
+    }
+}
+
+// MARK: - File picker (WKUIDelegate)
+
+extension AppDelegate: WKUIDelegate {
+    /// Bridge `<input type="file">` to a native NSOpenPanel. WKWebView does NOT show a
+    /// picker on its own — without this, the composer's image-attach button is a silent
+    /// no-op in the packaged app (it works in a browser because the OS picker is native
+    /// there). WebKit requires `completionHandler` be called exactly once: the panel's
+    /// completion block covers both the picked-files and cancelled (nil) cases.
+    ///
+    /// WKOpenPanelParameters surfaces the multi-select / directory flags but NOT the
+    /// input's `accept` filter, so we mirror the app's sole file input (`accept="image/*"`)
+    /// by restricting to image types. Relax this if a non-image file input ever appears.
+    func webView(
+        _ webView: WKWebView,
+        runOpenPanelWith parameters: WKOpenPanelParameters,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping ([URL]?) -> Void
+    ) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = parameters.allowsDirectories
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.allowedContentTypes = [.image]
+        let finish: (NSApplication.ModalResponse) -> Void = { response in
+            completionHandler(response == .OK ? panel.urls : nil)
+        }
+        if let window {
+            panel.beginSheetModal(for: window, completionHandler: finish)
+        } else {
+            panel.begin(completionHandler: finish)
+        }
     }
 }
