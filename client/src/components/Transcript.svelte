@@ -201,6 +201,24 @@
     }
   });
 
+  // Jump to the bottom whenever the user sends a prompt. Sending is a strong "show me
+  // what I just said and the reply" signal, so we re-pin and scroll even if they'd
+  // scrolled up reading scrollback — otherwise the just-sent bubble lands below the fold
+  // behind the "New messages ↓" pill. Tracked via a store counter so each send re-fires;
+  // initialized to the current value so a remount never scroll-jumps on its own.
+  let lastSendN = store.promptSentN;
+  $effect(() => {
+    const n = store.promptSentN;
+    if (n === lastSendN) return;
+    lastSendN = n;
+    pinned = true;
+    store.clearActiveUnread();
+    // Defer so the optimistic user bubble is in the DOM before we measure scrollHeight.
+    queueMicrotask(
+      () => scroller && scroller.scrollTo({ top: scroller.scrollHeight }),
+    );
+  });
+
   /** Jump to the newest content and clear the unread flag (the "new messages ↓" pill). */
   function scrollToBottom(): void {
     if (!scroller) return;

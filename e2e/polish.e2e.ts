@@ -222,6 +222,46 @@ test("Ctrl/Cmd+Up jumps to the most recent user prompt", async ({ page }) => {
   await expect(lastPrompt).toBeInViewport();
 });
 
+test("sending a prompt while scrolled up jumps the transcript to the bottom", async ({
+  page,
+}) => {
+  // Build a transcript tall enough that its top and bottom differ.
+  for (let i = 0; i < 3; i++) {
+    await drive(page, "reply");
+    await expect(
+      page.getByText("That confirms it", { exact: false }).last(),
+    ).toBeVisible();
+  }
+  await waitForSettledWorkBlocks(page, 4);
+
+  // Scroll to the top so we're no longer pinned to the bottom.
+  const scroller = page.locator(".scroller");
+  await scroller.evaluate((el) => ((el as HTMLElement).scrollTop = 0));
+  await expect
+    .poll(() => scroller.evaluate((el) => (el as HTMLElement).scrollTop))
+    .toBe(0);
+
+  // Send a prompt from the composer.
+  const box = page.getByPlaceholder("Message pilot…");
+  await box.fill("jump to the bottom please");
+  await box.press("Enter");
+
+  // The new turn streams a reply; once it settles we should be pinned at the bottom —
+  // the just-sent message + its reply pulled into view, not left below the fold.
+  await waitForSettledWorkBlocks(page, 5);
+  await expect
+    .poll(() =>
+      scroller.evaluate((el) => {
+        const s = el as HTMLElement;
+        return s.scrollHeight - s.scrollTop - s.clientHeight;
+      }),
+    )
+    .toBeLessThan(80);
+  // …and the "New messages ↓" catch-up pill never appeared (we followed the stream
+  // down instead of falling behind it).
+  await expect(page.getByTestId("new-messages-pill")).toHaveCount(0);
+});
+
 test("PWA update prompt appears and can be dismissed", async ({ page }) => {
   // The ?dev bar's "update" button stands in for a real service-worker update.
   await page.getByRole("button", { name: "update", exact: true }).click();
