@@ -321,10 +321,18 @@ hit a session limit mid-verify; confirm each against the code before acting):_
 - [ ] **Smooth collapse animation for turn-ending autocollapse** — when an agent turn
       finishes its closing paragraph, the early part of the turn autocollapses with a
       jarring jump. Find a short, light animation to smooth the transition.
-- [ ] **Hide "Branch from here" on the current leaf** — the most recent agent
-      paragraph (the current leaf) shows a "Branch from here" button, but branching
-      from the tip of the tree is a no-op. Suppress the button on the final visible
-      paragraph.
+- [x] **Hide "Branch from here" on the current leaf** → done 2026-06-20. `Transcript`
+      derives `leafEntryId` (the entry id of the active path's tip — the last user/assistant
+      item carrying one) and suppresses the turn-final assistant's "Branch from here" when it
+      matches, since branching from the tip is a no-op (it's already where the next message
+      appends). "Last item with an entry id, any kind" — not "last assistant" — so a committed
+      prompt with no answer yet shifts the tip off the prior answer, keeping that earlier turn
+      branchable. Brings the inline button to parity with the tree modal, which already gates
+      no-op jumps on `isLeaf`. The mock's `promptReply` now backfills `userEntryId`/
+      `assistantEntryId` on every settled turn (mirroring real pi, which always does) so the
+      tip detection holds across both drivers — previously sent-prompt turns had no branch
+      handles at all. `branch.e2e.ts` covers leaf-hides + an earlier non-leaf turn showing the
+      button (with a position assertion that defeats an inverted gate).
 - [x] **Autoscroll to transcript bottom on prompt submit** → done 2026-06-20. Sending a
       prompt while scrolled up reading scrollback used to leave the just-sent bubble below
       the fold behind the "New messages ↓" pill — the pinned-scroll effect only follows new

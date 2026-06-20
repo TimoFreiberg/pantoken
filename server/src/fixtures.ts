@@ -569,15 +569,22 @@ export function promptReply(
   images?: readonly ImageContent[],
 ): ScriptStep[] {
   const callId = `t-${ts()}`;
+  // Stable branch handles for this turn, derived from the user message id so the turn-final
+  // assistant offers "branch from here" and the prompt offers "branch from this prompt" —
+  // mirroring real pi, which backfills an entry id on every settled turn. (The greeting
+  // fixture already does this; promptReply lagged, which left sent-prompt turns without
+  // handles and the active-path tip detection unable to tell a real leaf from a stale one.)
+  const uId = userId ?? `u-${ts()}`;
   return [
     {
       wait: 0,
       event: {
         ...base(),
         type: "userMessage",
-        id: userId ?? `u-${ts()}`,
+        id: uId,
         text: userText,
         images,
+        entryId: `e-${uId}`,
       },
     },
     {
@@ -619,6 +626,8 @@ export function promptReply(
         ...base(),
         type: "runCompleted",
         snapshot: snapshot({ status: "idle" }),
+        userEntryId: `e-${uId}`,
+        assistantEntryId: `e-a-${uId}`,
       },
     },
   ];

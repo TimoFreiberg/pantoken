@@ -34,6 +34,23 @@
     }
     return undefined;
   });
+  // The entry id of the active path's TIP — the last transcript item that carries one.
+  // Branching "from here" on the tip is a no-op (it's already where the next message
+  // appends), so the turn-final assistant footer suppresses its branch button there.
+  // "Last item with an entry id" (any kind) — not "last assistant" — so a committed user
+  // prompt with no answer yet correctly shifts the tip off the prior assistant, keeping
+  // that earlier turn genuinely branchable. (Real pi backfills an entry id on every
+  // settled turn; the mock now matches so this holds across both drivers.)
+  const leafEntryId = $derived.by(() => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i];
+      // Only user/assistant items carry an entry id (tool items never do), so the tip is
+      // the last of those — a trailing tool item is part of its turn, not a fork point.
+      if (it && (it.kind === "user" || it.kind === "assistant") && it.entryId)
+        return it.entryId;
+    }
+    return undefined;
+  });
   // Two view-model passes (pure, unit-tested in transcript-view.test.ts):
   //   1. mergeTools — uninterrupted runs of every tool except write/edit fold into
   //      one summary card.
@@ -417,7 +434,7 @@
                   </svg>
                 {/if}
               </button>
-              {#if item.entryId}
+              {#if item.entryId && item.entryId !== leafEntryId}
                 <button
                   class="branch"
                   type="button"
