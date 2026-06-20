@@ -239,7 +239,6 @@
 
 <aside class="sidebar" data-testid="sidebar" data-open={store.sidebarOpen}>
   <div class="top">
-    <span class="brand">pilot</span>
     <IconButton
       title="Collapse sidebar"
       aria-label="Collapse sidebar"
@@ -606,13 +605,10 @@
   .top {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    /* No brand wordmark — leave the top-left clear for the macOS traffic
+       lights and keep the collapse control on the right. */
+    justify-content: flex-end;
     padding: 12px 14px 10px;
-  }
-  .brand {
-    font-weight: 600;
-    font-size: 15px;
-    letter-spacing: -0.01em;
   }
   .new {
     padding: 0 10px 8px;
