@@ -15,7 +15,8 @@ test("the sidebar groups sessions by project and switches the active one", async
 
   await openSidebar(page);
   const sidebar = page.getByTestId("sidebar");
-  // scope to the session list so we match project-group headers, not the brand wordmark
+  // scope to the session list so we match project-group headers, not the
+  // "pilot" that also shows up as the header subtitle / composer placeholder
   const list = sidebar.locator(".list");
 
   // sessions are grouped under their project dir (basename of cwd)
@@ -54,8 +55,7 @@ test("an empty launch restores this client's last-focused session", async ({
       page.evaluate(() =>
         Object.entries(localStorage).some(
           ([key, value]) =>
-            key.startsWith("pilot.lastSession.") &&
-            value === "older-session",
+            key.startsWith("pilot.lastSession.") && value === "older-session",
         ),
       ),
     )
