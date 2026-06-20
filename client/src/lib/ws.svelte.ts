@@ -184,6 +184,23 @@ if (typeof document !== "undefined") {
   // offline, so the test can close and reopen the page around a durable queued prompt.
   if (import.meta.env.DEV)
     window.addEventListener("pilot:test-disconnect", () => disconnect());
+  // Deterministic e2e hook: freeze the socket in "reconnecting" (dropped but actively
+  // retrying) so a queued prompt renders "Sending when reconnected…". Suppress the real
+  // retry/online/visibility auto-reconnect so the state holds for the assertion.
+  if (import.meta.env.DEV)
+    window.addEventListener("pilot:test-reconnecting", () => {
+      intentionalClose = true;
+      if (reconnectTimer !== null) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      if (ws) {
+        const closing = ws;
+        cleanupSocket();
+        closing.close();
+      }
+      _state = "reconnecting";
+    });
 }
 
 export function onMessage(listener: MessageListener): () => void {

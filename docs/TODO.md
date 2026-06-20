@@ -242,10 +242,14 @@ the remainder, roughly ordered by day-to-day leverage._
       rides the last snapshot); `abort()` is a bare send that's dropped when the socket's down,
       with no feedback (unlike `restoreQueue`, which sets `lastError`). Mirror that, or disable
       Stop while `connection !== "connected"`. (The offline banner softens this today.)
-- [ ] **Optimistic prompt reads "Queued offline" while merely connecting** — the delivery label
-      is "sending" only when fully connected, else "offline", so a prompt about to go out during
-      the connecting/reconnecting window reads as more stuck than it is. Add a "connecting" state
-      → "Sending when reconnected…", reserving "Queued offline" for a truly disconnected socket.
+- [x] **Optimistic prompt reads "Queued offline" while merely connecting** → done 2026-06-21.
+      The delivery label now keys off the live socket, not the outbox sub-state (which sits at
+      "queued" for both a dead socket AND one mid-reconnect — the actual root cause). New pure
+      `deliveryState(promptState, connection)` helper (`client/src/lib/delivery.ts`): connected →
+      "Sending…", connecting/reconnecting → "Sending when reconnected…", disconnected → "Queued
+      offline", rejected overrides. Unit test covers the full matrix; a new `pilot:test-reconnecting`
+      DEV hook freezes the socket in "reconnecting" so `e2e/prompt-delivery.e2e.ts` proves the
+      mid-reconnect label appears and "Queued offline" does not.
 - [ ] **Backdrop tap discards a dirty input/editor dialog** — `scrimClick` unconditionally
       cancels; deny-safe, but a stray tap on a phone loses typed text in the input/editor kinds
       (the editor has no timeout, so the scrim is its only non-button dismissal). Guard dismissal

@@ -24,6 +24,7 @@ import {
   type TrustRequest,
 } from "@pilot/protocol";
 import { clearToken, getToken, setToken } from "./auth.js";
+import { deliveryState } from "./delivery.js";
 import { ensurePermission } from "./notify.js";
 import {
   applyThemeMode,
@@ -271,12 +272,7 @@ class PilotStore {
           text: prompt.text,
           images: prompt.images,
           ts: prompt.createdAt,
-          delivery:
-            prompt.state === "rejected"
-              ? "rejected"
-              : this.connection === "connected" && prompt.state === "sending"
-                ? "sending"
-                : "offline",
+          delivery: deliveryState(prompt.state, this.connection),
           deliveryError: prompt.error,
         }),
       );

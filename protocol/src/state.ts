@@ -28,8 +28,10 @@ export interface UserItem {
    *  until the live backfill / replay supplies it, in which case no branch button shows. */
   entryId?: string;
   /** Client-only delivery state for an optimistic prompt row. Authoritative server
-   *  transcript items omit it; the client overlays pending outbox entries at render time. */
-  delivery?: "sending" | "offline" | "rejected";
+   *  transcript items omit it; the client overlays pending outbox entries at render time.
+   *  "connecting" = socket is mid-(re)connect, so the prompt goes out the moment it's back —
+   *  distinct from "offline" (truly disconnected, no attempt in flight). */
+  delivery?: "sending" | "connecting" | "offline" | "rejected";
   deliveryError?: string;
 }
 export interface AssistantItem {
