@@ -53,6 +53,19 @@ test("a wide markdown table scrolls horizontally instead of overflowing", async 
   expect(metrics.scrolls).toBe(true);
   expect(metrics.rightWithinViewport).toBe(true);
   expect(metrics.noPageOverflow).toBe(true);
+
+  // On a coarse pointer the overlay scrollbar hides at rest, so the container carries the
+  // "scrolling shadows" fade (4 gradient layers: 2 edge covers + 2 shadows) to hint the
+  // cut-off columns. Desktop, with a persistent scrollbar, doesn't get this.
+  const fade = await wide.evaluate((t) => {
+    const cs = getComputedStyle(t);
+    return {
+      gradients: (cs.backgroundImage.match(/gradient/g) || []).length,
+      hasLocal: cs.backgroundAttachment.includes("local"),
+    };
+  });
+  expect(fade.gradients).toBe(4);
+  expect(fade.hasLocal).toBe(true);
 });
 
 test("text inputs render at >=16px on touch (guards against iOS focus-zoom)", async ({
