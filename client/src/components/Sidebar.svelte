@@ -390,8 +390,25 @@
               title={g.cwd}
               onclick={() => toggleGroup(g.cwd)}
             >
-              <span class="caret" class:collapsed={collapsed[g.cwd]}>▾</span>
               <span class="proj">{basename(g.cwd)}</span>
+              <span
+                class="caret"
+                class:collapsed={collapsed[g.cwd]}
+                aria-hidden="true"
+              >
+                <svg
+                  viewBox="0 0 16 16"
+                  width="11"
+                  height="11"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.7"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M4 6l4 4 4-4" />
+                </svg>
+              </span>
               {#if collapsed[g.cwd]}
                 <span class="count">{g.items.length}</span>
               {/if}
@@ -470,6 +487,17 @@
                       onclick={() => pick(s)}
                       oncontextmenu={(e) => openMenu(e, s.path)}
                     >
+                      <!-- Leading gutter: the session indent. Empty by default; a session
+                           over the context-fill threshold shows its gauge ring here. -->
+                      <span class="lead">
+                        {#if s.usage && s.usage.percent !== null && s.usage.percent >= RING_THRESHOLD}
+                          <ContextRing
+                            usage={s.usage}
+                            size={12}
+                            showLabel={false}
+                          />
+                        {/if}
+                      </span>
                       <span
                         class="name"
                         data-tip-single
@@ -503,13 +531,6 @@
                               <path d="M18 9a9 9 0 0 1-9 9" />
                             </svg>
                           </span>
-                        {/if}
-                        {#if s.usage && s.usage.percent !== null && s.usage.percent >= RING_THRESHOLD}
-                          <ContextRing
-                            usage={s.usage}
-                            size={12}
-                            showLabel={false}
-                          />
                         {/if}
                         <!-- Unified right-edge slot: attention badge, in-progress spinner,
                              unread dot, or — when idle/read — the last-activity timestamp.
@@ -836,37 +857,38 @@
     display: flex;
     align-items: center;
     gap: 2px;
-    padding: 0 4px;
+    /* Flush left: the project title anchors the very edge; the small right pad just
+       keeps the + button off the scrollbar. */
+    padding: 0 4px 0 0;
   }
   .group-toggle {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
     flex: 1;
     min-width: 0;
     background: transparent;
     border: none;
-    padding: 7px 6px;
+    padding: 7px 4px;
     color: var(--text-muted);
     font-size: 11.5px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
-  /* Collapse/expand affordance: revealed only on hover (the row width is reserved so
-     nothing shifts). The count badge stands in for state when a group is collapsed. */
+  /* Collapse/expand chevron — sits just to the right of the project name (codex-style),
+     faint at rest, rotating to point right when the group is collapsed. */
   .caret {
-    font-size: 13px;
-    width: 13px;
-    text-align: center;
-    color: var(--text-muted);
-    opacity: 0;
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    color: var(--text-faint);
     transition:
-      transform 0.12s ease,
-      opacity 0.1s ease;
+      transform 0.16s ease,
+      color 0.1s ease;
   }
   .group-head:hover .caret,
   .group-toggle:focus-visible .caret {
-    opacity: 1;
+    color: var(--text-muted);
   }
   .caret.collapsed {
     transform: rotate(-90deg);
@@ -904,19 +926,23 @@
     text-overflow: ellipsis;
   }
   .count {
+    /* Collapsed-only badge: pushed to the right end of the toggle, away from the
+       left-anchored project name + chevron. */
+    margin-left: auto;
     color: var(--text-faint);
     font-size: 11px;
   }
   ul {
     list-style: none;
-    /* Indent the whole session list under its project header so the parent-child
-       relationship reads at a glance (no tree rail — indentation only). Kept tight so
-       the single-line titles get as much width as possible. */
+    /* No list indent — each row's leading gutter (.lead) supplies the nesting offset, so
+       the project title stays flush left while session titles sit slightly inset. */
     margin: 0 0 2px;
-    padding: 0 0 0 6px;
+    padding: 0;
   }
-  /* A row + its overflow (⋯) button on one line; the inline actions menu drops below. */
+  /* A row plus its overflow (⋯) trigger. The ⋯ overlays the row's right edge on hover
+     rather than reserving a column, so the title keeps the full width. */
   .row-line {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 2px;
@@ -925,14 +951,14 @@
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 8px;
+    gap: 7px;
     flex: 1;
     min-width: 0;
     text-align: left;
     background: transparent;
     border: none;
     border-radius: var(--radius-sm);
-    padding: 6px 8px;
+    padding: 6px 8px 6px 4px;
   }
   .row:hover {
     background: var(--surface);
@@ -940,16 +966,43 @@
   .row.active {
     background: color-mix(in srgb, var(--accent) 15%, transparent);
   }
-  /* Overflow (⋯) trigger is an IconButton; here we only own its reveal — hidden until
-     the row is hovered (or the menu is open), always shown on touch (mobile block below).
-     :global pierces the scope boundary onto the child component's root. */
+  /* Leading gutter: the session indent, and the home of the high-context ring when a
+     session crosses the fill threshold. Empty (but reserved) otherwise, so titles align. */
+  .lead {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    flex-shrink: 0;
+  }
+  /* Overflow (⋯) trigger (IconButton): absolutely pinned to the row's right edge, hidden
+     until the row is hovered (or the menu is open). It floats ON TOP of the status/time
+     slot — which fades out on hover — so nothing shifts and the title keeps its width.
+     Always shown on touch (mobile block below). :global pierces onto the component root. */
   :global(.row-menu) {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
     opacity: 0;
     transition: opacity 0.1s ease;
   }
   .row-wrap:hover :global(.row-menu),
   :global(.row-menu[aria-expanded="true"]) {
     opacity: 1;
+  }
+  /* When the menu is open without a hover, give the ⋯ a backdrop so it masks the
+     timestamp it sits over (on hover the slot is already faded out below). */
+  :global(.row-menu[aria-expanded="true"]) {
+    background: var(--surface);
+  }
+  /* The right cluster (timestamp / status) yields to the ⋯ overlay on hover. */
+  .row-wrap:hover .meta {
+    opacity: 0;
+  }
+  .meta {
+    transition: opacity 0.1s ease;
   }
   /* Floating popover: pinned in viewport coords (set inline) so it overlays the list
      rather than displacing rows. position: fixed escapes the list's overflow clip. */
@@ -1194,9 +1247,11 @@
       background: rgba(0, 0, 0, 0.34);
       border: none;
     }
-    /* No hover on touch — keep the ⋯ trigger and the collapse caret visible. */
-    :global(.row-menu),
-    .caret {
+    /* No hover on touch — keep the ⋯ trigger in the flow (a reserved column rather than
+       a hover overlay) and always visible, so the timestamp stays readable beside it. */
+    :global(.row-menu) {
+      position: static;
+      transform: none;
       opacity: 1;
     }
   }
