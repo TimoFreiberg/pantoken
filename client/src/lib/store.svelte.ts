@@ -177,7 +177,7 @@ class PilotStore {
   // (up to one per project). The live edit lives in `composerDraft`; this map is the
   // durable backing store, stashed on switch / debounced keystroke / pagehide. Pure client
   // state — no protocol change.
-  private draftMap: Record<string, string> = loadDraftMap();
+  private draftMap = $state<Record<string, string>>(loadDraftMap());
   // New-session draft (Claude-app style): when non-null the main pane shows the
   // config chips + composer for a session that does NOT exist yet. Creation is
   // deferred — submitDraft() sends `newSession` (cwd/worktree/model/thinking + the
@@ -257,6 +257,36 @@ class PilotStore {
     if (this.draft) return `n:${this.draft.cwd.trim() || "~"}`;
     const id = this.session.ref?.sessionId ?? this.activeSessionId;
     return id ? `s:${id}` : "none";
+  }
+  /** Every pending new-session draft worth a sidebar row: the one being actively
+   *  composed (its live text is `composerDraft`, not yet stashed) plus any other
+   *  project's stashed draft that still has text. Keyed `n:<cwd>` — cwd `~` means
+   *  home / no project yet, surfaced as cwd "". Reads `draftMap` + the active draft,
+   *  so it reacts to stash / discard / retarget. */
+  get pendingDrafts(): {
+    key: string;
+    cwd: string;
+    text: string;
+    active: boolean;
+  }[] {
+    const rows: { key: string; cwd: string; text: string; active: boolean }[] =
+      [];
+    const activeKey = this.draft ? this.composerDraftKey : null;
+    if (this.draft) {
+      rows.push({
+        key: activeKey!,
+        cwd: this.draft.cwd,
+        text: this.composerDraft,
+        active: true,
+      });
+    }
+    for (const [key, text] of Object.entries(this.draftMap)) {
+      // The active draft's live text wins over its (possibly stale) stashed copy.
+      if (!key.startsWith("n:") || key === activeKey || !text.trim()) continue;
+      const raw = key.slice(2);
+      rows.push({ key, cwd: raw === "~" ? "" : raw, text, active: false });
+    }
+    return rows;
   }
   /** Persist the current composer text under its key so a switch / reload restores it.
    *  Empty (whitespace-only) drafts are removed rather than stored. Called on every
@@ -1157,8 +1187,32 @@ class PilotStore {
     this.draft = null;
     this.loadDraft(this.composerDraftKey);
   }
+  /** Discard a pending new-session draft (the sidebar ×). Drops its stashed text
+   *  outright (no stash). If it's the draft being actively composed, also exits the
+   *  draft, falling back to the active session's own draft (or the empty landing). */
+  discardDraft(key: string): void {
+    if (key in this.draftMap) {
+      delete this.draftMap[key];
+      persistDraftMap(this.draftMap);
+    }
+    if (this.draft && this.composerDraftKey === key) {
+      this.draft = null;
+      this.composerDraft = "";
+      this.loadDraft(this.composerDraftKey);
+    }
+  }
   setDraftCwd(cwd: string): void {
-    if (this.draft) this.draft = { ...this.draft, cwd };
+    if (!this.draft) return;
+    const oldKey = this.composerDraftKey; // n:<old cwd>
+    this.draft = { ...this.draft, cwd };
+    const newKey = this.composerDraftKey; // n:<new cwd>
+    // Retarget moves the draft's row to the new project — drop the old key's stashed
+    // copy so the same draft doesn't ghost under the project we just left. The live
+    // text rides `composerDraft` and re-stashes under newKey on the next switch.
+    if (oldKey !== newKey && oldKey in this.draftMap) {
+      delete this.draftMap[oldKey];
+      persistDraftMap(this.draftMap);
+    }
   }
   toggleDraftWorktree(): void {
     if (this.draft)
