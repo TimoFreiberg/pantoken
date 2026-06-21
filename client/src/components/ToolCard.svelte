@@ -362,6 +362,22 @@
     {/if}
     <span class="chev" class:open>▸</span>
   </button>
+  {#if outImages.length}
+    <!-- A tool's image output (a screenshot, a rendered mockup, an image read) is a
+         visual artifact the user is meant to SEE, so it renders here — always visible,
+         OUTSIDE the collapsible body — instead of hiding behind the expand toggle. The
+         card chrome (args, text note, duration) stays tucked away under the header. -->
+    <div class="out-images">
+      {#each outImages as img, i (i)}
+        <img
+          class="out-img"
+          src={`data:${img.mimeType};base64,${img.data}`}
+          alt={`Tool image output ${i + 1}`}
+          title="Image returned by this tool"
+        />
+      {/each}
+    </div>
+  {/if}
   {#if open}
     <div class="body">
       {#if argRows.length}
@@ -385,18 +401,6 @@
           {#if item.output !== undefined}<pre class="out">{outputText(item.output)}</pre>{/if}
         {/await}
       {:else if item.output !== undefined}
-        {#if outImages.length}
-          <div class="out-images">
-            {#each outImages as img, i (i)}
-              <img
-                class="out-img"
-                src={`data:${img.mimeType};base64,${img.data}`}
-                alt={`Tool image output ${i + 1}`}
-                title="Image returned by this tool"
-              />
-            {/each}
-          </div>
-        {/if}
         {#if outBodyText}
           <div class="out-block">
             <div class="out-bar">
@@ -596,10 +600,15 @@
     outline: none;
     box-shadow: 0 0 0 1.5px var(--accent);
   }
+  /* Sits directly under the header now (not inside .body), so it carries its own
+     separator + padding. When the card is also expanded, .body follows with its own
+     top border — header | image | details, each delineated. */
   .out-images {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+    padding: 10px 12px;
+    border-top: 1px solid var(--border);
   }
   .out-img {
     max-width: 100%;
