@@ -55,11 +55,13 @@
   });
   // Two view-model passes (pure, unit-tested in transcript-view.test.ts):
   //   1. mergeTools — uninterrupted runs of every tool except write/edit fold into
-  //      one summary card.
+  //      one summary card. With thinking hidden, thinking-only assistant items render
+  //      nothing, so they're skipped too — tool runs separated only by hidden thinking
+  //      merge into one card instead of fragmenting around invisible gaps.
   //   2. groupTurns — each turn (user → next user) splits into a collapsible "work"
   //      portion (tools + intermediate narration) and the turn-final response that
   //      stays visible. That's the "Worked for Ns" block below.
-  const displayItems = $derived(mergeTools(items));
+  const displayItems = $derived(mergeTools(items, store.hideThinking));
   // While the last turn is active, its trailing text is only a candidate final
   // response — another tool can still follow. Keep the whole turn inline until the
   // lifecycle says it settled, then expose the collapse affordance.

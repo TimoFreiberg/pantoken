@@ -20,6 +20,9 @@ import type {
 // Every uninterrupted run of tools collapses into ONE summary card, including a
 // one-tool run. Write/edit are the only exceptions: their side effects and diffs
 // should stay visible as standalone cards, and each one breaks the surrounding run.
+// A thinking-only assistant item normally breaks the run too — but when the "hide
+// thinking" toggle is on it renders nothing, so `mergeTools(items, true)` skips it and
+// the tool runs on either side fold together (no fragmenting around an invisible gap).
 export const STANDALONE_TOOLS = new Set(["write", "edit"]);
 
 // Tools whose result the USER is meant to read, not the agent's scratch work. They
@@ -46,6 +49,13 @@ export type DisplayItem = TranscriptItem | MergedToolsItem;
 function isToolItem(i: TranscriptItem): i is ToolItem {
   return i.kind === "tool";
 }
+/** An assistant item with no user-facing text — its only content is reasoning. When the
+ *  "hide thinking" toggle is on, such an item renders nothing at all, so it's an invisible
+ *  gap between tool cards. `mergeTools` treats it as transparent so the runs on either side
+ *  fold into ONE card instead of fragmenting around a gap the user can't even see. */
+function isHiddenOnlyThinking(i: TranscriptItem): boolean {
+  return i.kind === "assistant" && i.text.trim() === "";
+}
 function isSummarizedTool(i: TranscriptItem): i is ToolItem {
   return (
     isToolItem(i) && !STANDALONE_TOOLS.has(i.name) && !VISIBLE_TOOLS.has(i.name)
@@ -58,7 +68,10 @@ export function isWorkTool(i: DisplayItem): boolean {
   return i.kind === "tool" || i.kind === "mergedTools";
 }
 
-export function mergeTools(items: readonly TranscriptItem[]): DisplayItem[] {
+export function mergeTools(
+  items: readonly TranscriptItem[],
+  hideThinking = false,
+): DisplayItem[] {
   const result: DisplayItem[] = [];
   let pending: ToolItem[] = [];
   const flush = () => {
@@ -75,6 +88,11 @@ export function mergeTools(items: readonly TranscriptItem[]): DisplayItem[] {
   for (const item of items) {
     if (isSummarizedTool(item)) {
       pending.push(item);
+    } else if (hideThinking && isHiddenOnlyThinking(item)) {
+      // Thinking is fully hidden, so this item is an invisible gap: drop it (don't flush)
+      // so the tool runs on either side merge into one card. With thinking VISIBLE it
+      // falls through to the else and breaks the run, as a visible block should.
+      continue;
     } else {
       flush();
       result.push(item);
