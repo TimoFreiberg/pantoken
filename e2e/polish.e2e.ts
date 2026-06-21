@@ -71,6 +71,32 @@ test("copy + timestamp show only on the turn-final paragraph", async ({
   await expect(last.locator("time.ts")).toHaveCount(1);
 });
 
+test("an active turn's paragraph followed by a running tool stays bare", async ({
+  page,
+}) => {
+  // Regression: while a turn is still in flight, a paragraph that LOOKS final (it
+  // stopped streaming because a tool started after it) must NOT get the copy + timestamp
+  // footer — more tools and text can still follow. staleidle leaves exactly that shape:
+  // "On it …" paragraph, then a running tool, turn never completes.
+  await drive(page, "staleidle");
+  const active = page
+    .locator(".row.assistant")
+    .filter({ hasText: "kicking off a command" });
+  await expect(active).toBeVisible();
+  await expect(
+    active.getByRole("button", { name: "Copy message" }),
+  ).toHaveCount(0);
+  await expect(active.locator("time.ts")).toHaveCount(0);
+  // The PRIOR settled turn keeps its footer — the suppression is scoped to the live turn,
+  // not a blanket "hide all footers while anything runs".
+  const settled = page
+    .locator(".row.assistant")
+    .filter({ hasText: "Routes live in" });
+  await expect(
+    settled.getByRole("button", { name: "Copy message" }),
+  ).toBeVisible();
+});
+
 test("copy button copies the whole turn's text and shows feedback", async ({
   page,
   context,
