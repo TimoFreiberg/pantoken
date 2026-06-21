@@ -727,6 +727,84 @@ export function searchBatch(): ScriptStep[] {
   ];
 }
 
+// --- Tools interleaved with thinking, to exercise hidden-thinking merging ----
+
+/** A turn where the agent thinks between every tool call: bash → think → bash → think
+ *  → read → think → bash. Each tool starts a fresh assistant bubble (toolStarted closes
+ *  the open one), so the thinking lands as standalone thinking-only items BETWEEN the
+ *  tool cards. With thinking VISIBLE the run fragments into separate cards (one per
+ *  tool, thinking blocks between); with thinking HIDDEN those gaps render nothing, so
+ *  mergeTools drops them and the four tools fold into ONE summary card. */
+export function thinkingBetweenTools(): ScriptStep[] {
+  return [
+    {
+      wait: 0,
+      event: {
+        ...base(),
+        type: "userMessage",
+        id: `u-${ts()}`,
+        text: "Trace the reconnect path and check it end-to-end.",
+      },
+    },
+    {
+      wait: 0,
+      event: {
+        ...base(),
+        type: "sessionUpdated",
+        snapshot: snapshot({ status: "running" }),
+      },
+    },
+    ...summarySpan(
+      `tbt-1-${ts()}`,
+      "bash",
+      { command: "ls client/src/lib" },
+      "store.svelte.ts\nws.ts",
+    ),
+    ...deltas(
+      "That lists the lib dir. The WS singleton is the likely home.",
+      "thinking",
+    ),
+    ...summarySpan(
+      `tbt-2-${ts()}`,
+      "bash",
+      { command: "rg -n reconnect client/src" },
+      "ws.ts:88: scheduleReconnect()",
+    ),
+    ...deltas(
+      "Found the scheduler. Let me read the file to confirm the backoff.",
+      "thinking",
+    ),
+    ...summarySpan(
+      `tbt-3-${ts()}`,
+      "read",
+      { path: "client/src/lib/ws.ts" },
+      "// reconnecting WS singleton",
+    ),
+    ...deltas(
+      "Backoff looks right. One more check on the call site.",
+      "thinking",
+    ),
+    ...summarySpan(
+      `tbt-4-${ts()}`,
+      "bash",
+      { command: "rg -n scheduleReconnect client/src" },
+      "ws.ts:88\nws.ts:142",
+    ),
+    ...deltas(
+      "Reconnect is wired correctly — exponential backoff, capped, re-armed on close.",
+      "text",
+    ),
+    {
+      wait: 60,
+      event: {
+        ...base(),
+        type: "runCompleted",
+        snapshot: snapshot({ status: "idle" }),
+      },
+    },
+  ];
+}
+
 // --- A run that loads a skill (read of a SKILL.md) ---------------------------
 
 /** A turn where the agent loads a skill before working: it reads a `SKILL.md` (which

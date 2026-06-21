@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { drive, expandWork, gotoFresh } from "./helpers.js";
+import {
+  drive,
+  expandWork,
+  gotoFresh,
+  waitForSettledWorkBlocks,
+} from "./helpers.js";
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
@@ -85,4 +90,40 @@ test("tool card expands to show the full arguments", async ({ page }) => {
 
 test("composer is present and idle", async ({ page }) => {
   await expect(page.getByPlaceholder("Message pilot…")).toBeVisible();
+});
+
+test("with thinking hidden, tools separated only by thinking merge into one card", async ({
+  page,
+}) => {
+  // Default is thinking-hidden. The thinkingtools fixture interleaves a thinking-only
+  // bubble between every tool call (bash → think → bash → think → read → think → bash).
+  // Those gaps render nothing, so the four tools fold into ONE summary card.
+  await drive(page, "thinkingtools");
+  await waitForSettledWorkBlocks(page, 2);
+  await expandWork(page);
+  const work = page.getByTestId("work-body").last();
+  await expect(work.locator(".tool.summary")).toHaveCount(1);
+  await expect(work.locator(".tool.summary > .head .label")).toHaveText(
+    "Ran 3 commands, read a file",
+  );
+  // Nothing thinking-shaped survives — the bubbles between tools were dropped.
+  await expect(work.getByText("Thought process")).toHaveCount(0);
+});
+
+test("with thinking visible, the same run fragments around the thinking blocks", async ({
+  page,
+}) => {
+  // Reveal thinking, then run the same fixture. Now the thinking bubbles are visible
+  // content, so they legitimately break the run: four standalone tool cards with a
+  // "Thought process" block between each pair.
+  await page.locator('button[title^="Settings"]').click();
+  await page.getByTestId("hide-thinking").click();
+  await page.getByRole("button", { name: "Close settings" }).click();
+
+  await drive(page, "thinkingtools");
+  await waitForSettledWorkBlocks(page, 2);
+  await expandWork(page);
+  const work = page.getByTestId("work-body").last();
+  await expect(work.locator(".tool.summary")).toHaveCount(4);
+  await expect(work.getByText("Thought process")).toHaveCount(3);
 });

@@ -101,6 +101,56 @@ describe("mergeTools", () => {
     expect(out[1]).toMatchObject({ name: "write" });
     expect(out[3]).toMatchObject({ name: "edit" });
   });
+
+  test("thinking-only items break runs by default (thinking visible)", () => {
+    const out = mergeTools([
+      tool("b1", "bash"),
+      asst("t1", { text: "", thinking: "pondering" }),
+      tool("b2", "bash"),
+    ]);
+    // Visible thinking block sits between two cards: three items, no merge.
+    expect(out.map((i) => i.kind)).toEqual([
+      "mergedTools",
+      "assistant",
+      "mergedTools",
+    ]);
+  });
+
+  test("with thinking hidden, thinking-only items are dropped and runs merge across them", () => {
+    const out = mergeTools(
+      [
+        tool("b1", "bash"),
+        asst("t1", { text: "", thinking: "pondering" }),
+        tool("b2", "bash"),
+        asst("t2", { text: "   ", thinking: "more" }),
+        tool("b3", "bash"),
+      ],
+      true,
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      kind: "mergedTools",
+      names: ["bash"],
+      tools: [{ id: "b1" }, { id: "b2" }, { id: "b3" }],
+    });
+  });
+
+  test("hidden thinking does not absorb an assistant item that has user-facing text", () => {
+    const out = mergeTools(
+      [
+        tool("b1", "bash"),
+        asst("a1", { text: "here is the answer", thinking: "reasoned" }),
+        tool("b2", "bash"),
+      ],
+      true,
+    );
+    // Visible text still breaks the run even with thinking hidden.
+    expect(out.map((i) => i.kind)).toEqual([
+      "mergedTools",
+      "assistant",
+      "mergedTools",
+    ]);
+  });
 });
 
 describe("groupTurns", () => {
