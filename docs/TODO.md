@@ -402,6 +402,11 @@ hit a session limit mid-verify; confirm each against the code before acting):_
 
 ## 🔵 Later
 
+- [ ] **@-completion in new-session draft uses wrong cwd** — when composing a
+      new-session draft, `@` file autocompletion shows files from the previously
+      focused session's working directory, not the target project dir displayed
+      in the new-session UI. Should query against the soon-to-be cwd so the
+      autocomplete is useful before the session spawns.
 - [ ] **gondolin egress containment** (D10) — for the autonomous Mac Mini
       user account; preserves TS-embed via pi-gondolin extension
 - [x] **Group workspace-spawned sessions under their parent** → done 2026-06-19,
@@ -555,6 +560,11 @@ the rest._
 - [ ] **Per-code-block copy + language label** — copy button and a language tag on each
       fenced code block (finer-grained than the whole-message copy already shipped); plus
       a soft-wrap toggle for wide code.
+- [ ] **Copy-on-hover for code blocks** — each fenced code block gets a copy-to-clipboard
+      button at its top-right edge, hidden by default and visible on mouseover (desktop)
+      or always visible on touch. The existing per-turn footer copy covers the whole
+      assistant message; this is a finer-grained affordance for grabbing just one snippet
+      without selecting text.
 - [ ] **"New since you left" divider** — a horizontal marker in the transcript at the
       first message that arrived while the session was unfocused/backgrounded, so you can
       jump straight to what's new (complements the unread status work).
