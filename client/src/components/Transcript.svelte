@@ -92,29 +92,30 @@
   }
 
   // Per-turn aggregation for the assistant footer (copy + timestamp). Only the LAST
-  // assistant paragraph of a turn carries the footer: paragraphs interleaved between
-  // tool calls omit it (less visual noise), and its copy grabs ALL of the turn's
-  // assistant text (every paragraph joined), excluding tool + thinking blocks. A turn
-  // runs from one user message to the next; the map is keyed by the turn-final
-  // text-bearing assistant item's id, with the joined turn text as its value.
+  // assistant paragraph of a turn carries the footer, and ONLY once the turn is done
+  // (turnDone). While a turn is still in flight, NO paragraph gets the footer: a
+  // paragraph that currently looks final can still be followed by more tools and more
+  // text, so attaching the footer mid-turn renders it on a non-final paragraph (the bug
+  // — a finished-streaming paragraph followed by running tool cards). Copy grabs ALL of
+  // the turn's assistant text (every paragraph joined), excluding tool + thinking
+  // blocks. Keyed by the turn-final text-bearing assistant item's id, value = joined text.
   const turnText = $derived.by(() => {
     const map = new Map<string, string>();
-    let buf: string[] = [];
-    let lastId: string | null = null;
-    const flush = () => {
-      if (lastId !== null) map.set(lastId, buf.join("\n\n"));
-      buf = [];
-      lastId = null;
-    };
-    for (const it of displayItems) {
-      if (it.kind === "user" || it.kind === "inject") {
-        flush();
-      } else if (it.kind === "assistant" && it.text) {
-        buf.push(it.text);
-        lastId = it.id;
+    for (const turn of turns) {
+      // A live turn's trailing paragraph is only a candidate final response — suppress
+      // the footer until it settles, then surface it on the genuine final paragraph.
+      if (!turnDone(turn)) continue;
+      const buf: string[] = [];
+      let lastId: string | null = null;
+      // work → visible → response is chronological order; only assistant items bear text.
+      for (const it of [...turn.work, ...turn.visible, ...turn.response]) {
+        if (it.kind === "assistant" && it.text) {
+          buf.push(it.text);
+          lastId = it.id;
+        }
       }
+      if (lastId !== null) map.set(lastId, buf.join("\n\n"));
     }
-    flush();
     return map;
   });
 
@@ -411,9 +412,10 @@
           {/if}
           <!-- "Still working" lives in the bottom WorkingIndicator now, not as an
                inline caret on the streaming paragraph. The copy + timestamp footer
-               shows ONLY on the turn-final paragraph (turnText holds its id), once the
-               turn settles — interleaved mid-turn paragraphs stay bare. -->
-          {#if turnText.has(item.id) && (!item.streaming || !store.turnActive)}
+               shows ONLY on the turn-final paragraph (turnText holds its id), and only
+               once the turn settles — turnText already excludes live turns, so a
+               mid-turn paragraph followed by tool calls stays bare. -->
+          {#if turnText.has(item.id)}
             <div class="meta">
               <button
                 class="copy"
