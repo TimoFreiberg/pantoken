@@ -51,7 +51,18 @@
   );
   const filteredGroups = $derived(filtered.groups);
   const hiddenCount = $derived(filtered.hiddenCount);
-  const draft = $derived(store.draft);
+
+  // New-session drafts as sidebar rows. Each pending draft nests under its target
+  // project's group; a draft whose cwd isn't a known project yet floats at the very
+  // top. A draft under a collapsed group hides with the group (the `<ul>` is gated on
+  // expansion). The set reacts to typing / discard / retarget via `store.pendingDrafts`.
+  const pendingDrafts = $derived(store.pendingDrafts);
+  const groupCwds = $derived(new Set(filteredGroups.map((g) => g.cwd)));
+  const topDrafts = $derived(
+    pendingDrafts.filter((d) => !groupCwds.has(d.cwd)),
+  );
+  const groupDraftsFor = (cwd: string) =>
+    pendingDrafts.filter((d) => d.cwd === cwd);
 
   // Search-box keyboard: Enter opens the top match (first session of the first group —
   // the visual top of the list), Esc clears a non-empty query (else blurs). The ref also
@@ -376,21 +387,40 @@
       onChange: pull.onChange,
     }}
   >
-    {#if draft}
-      <div class="draft-row">
+    {#snippet draftRow(d: (typeof pendingDrafts)[number], showTag: boolean)}
+      <div class="row-line">
         <button
-          class="row active"
-          title={`New session in ${draft.cwd || "home"} — click to return to the draft`}
-          onclick={() => {
-            if (draft) startDraft(draft.cwd);
-          }}
+          class="row"
+          class:active={d.active}
+          data-testid="draft-row"
+          title={d.active
+            ? `New session in ${d.cwd || "home"} — current draft`
+            : `Resume new-session draft in ${d.cwd || "home"}`}
+          onclick={() => startDraft(d.cwd)}
         >
-          <span class="draft-marker" title="New session draft" aria-label="draft">+</span>
+          <span class="lead">
+            <span class="draft-marker" aria-label="draft">+</span>
+          </span>
           <span class="name">New session</span>
           <span class="meta">
-            <span class="tag">{draft.cwd ? basename(draft.cwd) : "home"}</span>
+            {#if showTag}
+              <span class="tag">{d.cwd ? basename(d.cwd) : "home"}</span>
+            {/if}
           </span>
         </button>
+        <IconButton
+          class="row-menu"
+          title="Discard this draft"
+          aria-label="Discard this new-session draft"
+          onclick={() => store.discardDraft(d.key)}>×</IconButton
+        >
+      </div>
+    {/snippet}
+    {#if topDrafts.length}
+      <div class="draft-top">
+        {#each topDrafts as d (d.key)}
+          <div class="row-wrap">{@render draftRow(d, true)}</div>
+        {/each}
       </div>
     {/if}
     {#if filteredGroups.length === 0}
@@ -451,6 +481,9 @@
           </div>
           {#if !collapsed[g.cwd]}
             <ul transition:slide={{ duration: 160 }}>
+              {#each groupDraftsFor(g.cwd) as d (d.key)}
+                <li class="row-wrap">{@render draftRow(d, false)}</li>
+              {/each}
               {#each g.items as s (s.path)}
                 {@const st = store.sessionStatus(s.sessionId)}
                 {@const activity = store.sessionActivity(s.sessionId)}
@@ -1158,9 +1191,11 @@
     background: color-mix(in srgb, var(--accent) 14%, transparent);
     border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
   }
-  /* Draft row — pinned above the session list while composing a new session.
-     Reuses .row + .row.active; only the status marker is custom. */
-  .draft-row {
+  /* Top-level draft rows — pending new sessions whose cwd isn't a known project yet,
+     pinned above the project groups. Project-targeted drafts nest inside their group's
+     <ul> instead and need no wrapper. Each draft row reuses .row + .row.active; only the
+     leading marker is custom. */
+  .draft-top {
     margin-bottom: 6px;
     padding: 0 6px;
   }
