@@ -1093,7 +1093,11 @@ export async function createPiDriver(
       return listFileIndexWithFd(ws.cwd);
     },
 
-    async listFiles(query, sessionId) {
+    async listFiles(query, sessionId, cwd) {
+      // A new-session draft passes its target project dir directly (no session exists yet);
+      // otherwise resolve the cwd from the focused session. `fd` is read-only + .gitignore-
+      // aware, and the cwd is one the single user picked, so searching it is safe.
+      if (cwd) return listFilesWithFd(cwd, query);
       const ws = target(sessionId);
       if (!ws) return [];
       return listFilesWithFd(ws.cwd, query);

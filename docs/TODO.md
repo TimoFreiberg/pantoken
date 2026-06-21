@@ -467,11 +467,15 @@ hit a session limit mid-verify; confirm each against the code before acting):_
 
 ## 🔵 Later
 
-- [ ] **@-completion in new-session draft uses wrong cwd** — when composing a
-      new-session draft, `@` file autocompletion shows files from the previously
-      focused session's working directory, not the target project dir displayed
-      in the new-session UI. Should query against the soon-to-be cwd so the
-      autocomplete is useful before the session spawns.
+- [x] **@-completion in new-session draft uses wrong cwd** → done 2026-06-21. The `@`
+      typeahead used the pushed file index, which is the previously-focused session's cwd — so
+      a draft showed the wrong project's files. Now while drafting the composer suppresses that
+      stale local index and routes every `@` query through the server `fd` fallback, scoped to
+      the draft's target cwd (typed path, or $HOME when blank). Threaded a `cwd?` through the
+      `queryFiles` wire message → `PilotDriver.listFiles(query, sessionId?, cwd?)` → both drivers
+      (pi uses it as the `fd` root; the mock surfaces a cwd-derived marker for testing). Hub unit
+      tests cover the cwd forwarding (explicit + omitted); `e2e/file-mention.e2e.ts` proves a
+      draft's menu fills from the cwd-scoped fallback while a real session doesn't.
 - [ ] **gondolin egress containment** (D10) — for the autonomous Mac Mini
       user account; preserves TS-embed via pi-gondolin extension
 - [x] **Group workspace-spawned sessions under their parent** → done 2026-06-19,

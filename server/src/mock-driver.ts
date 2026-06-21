@@ -639,15 +639,33 @@ export class MockDriver implements PilotDriver {
   }
 
   async listFileIndex(): Promise<{ files: FileInfo[]; truncated: boolean }> {
-    // The fixture set is small, so the client always has the full index — the per-query
-    // fallback path never fires in mock mode (truncated stays false).
+    // The fixture set is small, so the client always has the full index — for a real session
+    // the per-query fallback never fires (truncated stays false). A new-session DRAFT still
+    // uses the fallback (listFiles below), since the pushed index is the wrong session's cwd.
     return { files: MOCK_FILES.map((f) => ({ ...f })), truncated: false };
   }
 
-  async listFiles(query: string): Promise<FileInfo[]> {
-    if (!query.trim()) return MOCK_FILES.map((f) => ({ ...f })).slice(0, 20);
+  async listFiles(
+    query: string,
+    _sessionId?: string,
+    cwd?: string,
+  ): Promise<FileInfo[]> {
+    // A new-session draft passes its target cwd. Surface it as a synthetic match so the
+    // draft @-mention path (Composer → store → hub → driver) is verifiable end-to-end; the
+    // real driver actually searches that dir. A real session passes no cwd, so it's absent.
+    const pool = cwd
+      ? [
+          {
+            path: `${cwd.replace(/\/+$/, "")}/DRAFT-CWD.md`,
+            isDirectory: false,
+          },
+          ...MOCK_FILES,
+        ]
+      : MOCK_FILES;
+    if (!query.trim()) return pool.map((f) => ({ ...f })).slice(0, 20);
     const q = query.toLowerCase();
-    return MOCK_FILES.filter((f) => f.path.toLowerCase().includes(q))
+    return pool
+      .filter((f) => f.path.toLowerCase().includes(q))
       .sort((a, b) => a.path.length - b.path.length)
       .map((f) => ({ ...f }))
       .slice(0, 20);

@@ -638,11 +638,16 @@ export class SessionHub {
    *  path, used only when the index was truncated and local matches are thin. The server
    *  runs `fd` and echoes the query so the client can ignore stale responses. Searches the
    *  requesting client's focused session's cwd. */
-  private async sendFileList(conn: ClientConn, query: string): Promise<void> {
+  private async sendFileList(
+    conn: ClientConn,
+    query: string,
+    cwd?: string,
+  ): Promise<void> {
     try {
       const files = await this.driver.listFiles(
         query,
         conn.focusedId ?? undefined,
+        cwd,
       );
       conn.send({ type: "fileList", query, files });
     } catch (e) {
@@ -1253,7 +1258,7 @@ export class SessionHub {
         void this.sendTree(conn);
         return;
       case "queryFiles":
-        void this.sendFileList(conn, msg.query);
+        void this.sendFileList(conn, msg.query, msg.cwd);
         return;
       case "listProviders":
         void this.broadcastProviderList();

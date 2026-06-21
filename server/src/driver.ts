@@ -168,11 +168,18 @@ export interface PilotDriver {
   listFileIndex(
     sessionId?: SessionId,
   ): Promise<{ files: FileInfo[]; truncated: boolean }>;
-  /** Fallback file search for a composer @-mention query — used only when the index was
-   *  truncated and local matches are thin. The real driver runs `fd` against the query,
-   *  capped at ~50; the mock filters its fixture by substring. sessionId omitted -> the
-   *  driver's current session. Returns up to 50 entries, directories ranked above files. */
-  listFiles(query: string, sessionId?: SessionId): Promise<FileInfo[]>;
+  /** Fallback file search for a composer @-mention query — used when the index was
+   *  truncated and local matches are thin, OR for a new-session draft (which has no session,
+   *  so it always searches via this path). The real driver runs `fd` against the query,
+   *  capped at ~50; the mock filters its fixture by substring. `cwd`, when given, overrides
+   *  the search root (the draft's target project dir); otherwise the cwd is resolved from
+   *  sessionId (omitted -> the driver's current session). Returns up to 50 entries,
+   *  directories ranked above files. */
+  listFiles(
+    query: string,
+    sessionId?: SessionId,
+    cwd?: string,
+  ): Promise<FileInfo[]>;
   /** Switch a session's model. The driver emits a `sessionUpdated` reflecting it.
    *  sessionId omitted -> the driver's current session. */
   setModel(provider: string, modelId: string, sessionId?: SessionId): void;

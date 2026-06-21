@@ -157,9 +157,12 @@
   let fileDebounce: ReturnType<typeof setTimeout> | undefined;
   const fileMatch = $derived(extractAtQuery(store.composerDraft, cursorPos));
   const fileQ = $derived(fileMatch?.query ?? null);
-  // Instant local matches over the prefetched index — the dominant path.
+  // Instant local matches over the prefetched index — the dominant path. Suppressed while
+  // drafting a new session: the pushed index is the previously-focused session's cwd, so its
+  // files are wrong for the draft's target project. A draft searches via the server fallback
+  // (scoped to the draft cwd) instead.
   const localFileItems = $derived(
-    fileQ === null
+    fileQ === null || drafting
       ? []
       : filterFiles(store.fileIndex.files, fileQ, FILE_MENU_LIMIT),
   );
@@ -188,18 +191,25 @@
     if (fileSel >= fileItems.length) fileSel = 0;
   });
 
-  // Debounced server fallback: only when the index was truncated and local matches are thin
-  // (the wanted file may live past the cap). The common case never reaches the server.
+  // Debounced server fallback: when the index was truncated and local matches are thin (the
+  // wanted file may live past the cap), OR always while drafting (no session index exists for
+  // the draft's target cwd, so the server `fd` search scoped to that cwd is the only source).
+  // The common non-draft case never reaches the server.
   $effect(() => {
     const q = fileQ;
     const needFallback =
       q !== null &&
-      store.fileIndex.truncated &&
-      localFileItems.length < FALLBACK_MIN;
+      (drafting ||
+        (store.fileIndex.truncated && localFileItems.length < FALLBACK_MIN));
     clearTimeout(fileDebounce);
     if (!needFallback) return;
+    // A draft searches its target project dir (typed cwd, or $HOME when blank); a real
+    // session lets the server use its focused cwd (undefined).
+    const cwd = drafting
+      ? store.draft?.cwd.trim() || store.defaultNewSessionCwd
+      : undefined;
     fileDebounce = setTimeout(() => {
-      if (q !== null) store.queryFiles(q);
+      if (q !== null) store.queryFiles(q, cwd);
     }, 150);
     return () => clearTimeout(fileDebounce);
   });
