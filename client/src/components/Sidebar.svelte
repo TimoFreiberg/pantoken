@@ -435,6 +435,7 @@
                 {@const activity = store.sessionActivity(s.sessionId)}
                 {@const rel = compactTime(s.updatedAt, now)}
                 {@const relLong = relativeTime(s.updatedAt, now)}
+                {@const idle = st === "read" || st === "unread"}
                 <li class="row-wrap">
                   {#if renamingFor === s.path}
                     <form
@@ -487,10 +488,18 @@
                       onclick={() => pick(s)}
                       oncontextmenu={(e) => openMenu(e, s.path)}
                     >
-                      <!-- Leading gutter: the session indent. Empty by default; a session
-                           over the context-fill threshold shows its gauge ring here. -->
+                      <!-- Leading gutter: the session indent, and the home of the row's
+                           standing markers. Unread (a new-activity dot) takes priority;
+                           otherwise a session over the context-fill threshold shows its
+                           gauge ring. Empty (but reserved) when neither, so titles align. -->
                       <span class="lead">
-                        {#if s.usage && s.usage.percent !== null && s.usage.percent >= RING_THRESHOLD}
+                        {#if st === "unread"}
+                          <i
+                            class="unread-dot"
+                            title="Unread — new activity since you last looked"
+                            aria-label="unread"
+                          ></i>
+                        {:else if s.usage && s.usage.percent !== null && s.usage.percent >= RING_THRESHOLD}
                           <ContextRing
                             usage={s.usage}
                             size={12}
@@ -533,8 +542,9 @@
                           </span>
                         {/if}
                         <!-- Unified right-edge slot: attention badge, in-progress spinner,
-                             unread dot, or — when idle/read — the last-activity timestamp.
-                             One slot, so the title gets the full row width. -->
+                             or — when idle/read/unread — the last-activity timestamp. The
+                             unread cue itself lives in the left gutter, so an unread row
+                             keeps its timestamp here. One slot, so the title gets the width. -->
                         <span
                           class="status"
                           data-state={st}
@@ -542,10 +552,8 @@
                           title={st === "initializing"
                             ? "initializing — warming up"
                             : (activity ??
-                              (st === "read" && relLong
-                                ? `Last activity ${relLong}`
-                                : st))}
-                          aria-label={st === "read"
+                              (idle && relLong ? `Last activity ${relLong}` : st))}
+                          aria-label={idle
                             ? `last activity ${relLong || "unknown"}`
                             : `status: ${st}`}
                         >
@@ -557,8 +565,6 @@
                             <i class="spinner"></i>
                           {:else if st === "done"}
                             <i class="attention-symbol">✓</i>
-                          {:else if st === "unread"}
-                            <i class="dot"></i>
                           {:else if rel}
                             <span class="time">{rel}</span>
                           {/if}
@@ -966,14 +972,23 @@
   .row.active {
     background: color-mix(in srgb, var(--accent) 15%, transparent);
   }
-  /* Leading gutter: the session indent, and the home of the high-context ring when a
-     session crosses the fill threshold. Empty (but reserved) otherwise, so titles align. */
+  /* Leading gutter: the session indent, and the home of the row's standing markers —
+     the unread dot (priority) or the high-context ring. Empty (but reserved) otherwise,
+     so titles align. */
   .lead {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 15px;
     flex-shrink: 0;
+  }
+  /* Unread — a filled amber dot at the row's head, flagging new activity since you last
+     looked (the timestamp stays in the right slot). */
+  .lead .unread-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--unread);
   }
   /* Overflow (⋯) trigger (IconButton): absolutely pinned to the row's right edge, hidden
      until the row is hovered (or the menu is open). It floats ON TOP of the status/time
@@ -1083,15 +1098,6 @@
     justify-content: flex-end;
     min-width: 14px;
     flex-shrink: 0;
-  }
-  .status .dot {
-    border-radius: 50%;
-  }
-  /* unread — a filled dot, standing in for the timestamp to flag new content. */
-  .status[data-state="unread"] .dot {
-    width: 8px;
-    height: 8px;
-    background: var(--unread);
   }
   .status .attention-symbol {
     display: inline-flex;
