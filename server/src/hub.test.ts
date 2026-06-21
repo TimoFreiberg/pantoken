@@ -165,7 +165,17 @@ class FakeDriver implements PilotDriver {
       truncated: false,
     };
   }
-  async listFiles(): Promise<FileInfo[]> {
+  readonly fileListCalls: {
+    query: string;
+    sessionId?: string;
+    cwd?: string;
+  }[] = [];
+  async listFiles(
+    query: string,
+    sessionId?: string,
+    cwd?: string,
+  ): Promise<FileInfo[]> {
+    this.fileListCalls.push({ query, sessionId, cwd });
     return [{ path: "README.md", isDirectory: false }];
   }
   setModel(provider: string, modelId: string, sessionId?: string) {
@@ -420,6 +430,42 @@ describe("SessionHub", () => {
     ]);
     // a fresh session list follows so every client's sidebar reflects the rename
     expect(a.received.some((m) => m.type === "sessionList")).toBe(true);
+  });
+
+  test("queryFiles forwards an explicit cwd (a draft's target dir) to the driver", async () => {
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    const a = client();
+    hub.addClient(a.send);
+    await flush();
+    a.received.length = 0;
+
+    hub.handleClient(a.send, {
+      type: "queryFiles",
+      query: "comp",
+      cwd: "/home/me/other-project",
+    });
+    await flush();
+
+    expect(d.fileListCalls).toEqual([
+      { query: "comp", sessionId: "s", cwd: "/home/me/other-project" },
+    ]);
+    expect(a.received.some((m) => m.type === "fileList")).toBe(true);
+  });
+
+  test("queryFiles without a cwd searches the focused session (cwd undefined)", async () => {
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    const a = client();
+    hub.addClient(a.send);
+    await flush();
+
+    hub.handleClient(a.send, { type: "queryFiles", query: "rdme" });
+    await flush();
+
+    expect(d.fileListCalls).toEqual([
+      { query: "rdme", sessionId: "s", cwd: undefined },
+    ]);
   });
 
   test("renameSession with a blank name is a no-op (no driver call)", async () => {

@@ -295,8 +295,10 @@ export type ClientMessage =
    *  when the {@link fileIndex} was truncated and local matches are thin — the common case
    *  is served entirely client-side from the index. The server responds with {@link fileList}.
    *  Debounce client-side (~150ms); the server echoes the query back so stale responses
-   *  can be dropped. */
-  | { type: "queryFiles"; query: string }
+   *  can be dropped. `cwd` overrides the search root: a new-session draft has no session yet,
+   *  so its @-mentions must search the soon-to-be project dir, not the previously focused
+   *  session's cwd (which the pushed index reflects). Omitted -> the focused session's cwd. */
+  | { type: "queryFiles"; query: string; cwd?: string }
   /** Answer a project-trust card (D12). `choice` indexes the request's `options`;
    *  null denies (cancel / dismiss). */
   | { type: "trustResponse"; requestId: string; choice: number | null }

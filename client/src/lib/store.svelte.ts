@@ -879,9 +879,10 @@ class PilotStore {
   /** Ask the server to search for files matching a composer @-mention query.
    *  The result arrives as a `fileList` server message (the `query` field is
    *  echoed back so we can ignore stale responses). Called debounced (~150ms)
-   *  from the Composer on each keystroke after `@`. */
-  queryFiles(query: string): void {
-    send({ type: "queryFiles", query });
+   *  from the Composer on each keystroke after `@`. `cwd` targets a new-session
+   *  draft's project dir (no session exists yet); omitted -> the focused session's cwd. */
+  queryFiles(query: string, cwd?: string): void {
+    send({ type: "queryFiles", query, cwd });
   }
   /** Jump the session to a prior tree entry and branch from it (pi's /tree). The server
    *  re-seeds every client's transcript to the new branch; if `entryId` was a user
