@@ -351,15 +351,21 @@ hit a session limit mid-verify; confirm each against the code before acting):_
       confirmation is a desktop rebuild (owner).
 - [ ] **Sidebar visuals → match Codex** — redesign the sidebar look to follow Codex's
       style. Needs a Codex screenshot for reference.
-- [ ] **"New session" draft stays visible in sidebar while draft exists** — when a
-      new-session draft has typed text stored, the "New session" sidebar entry should
-      persist (not disappear when another session is selected) so the draft is visible
-      at a glance.
-- [ ] **"New session" draft groups under its project in the sidebar** — the sidebar
-      entry for an active new-session draft should sit under the project it targets,
-      not float independently. The project-switcher button above the composer is
-      reportedly finicky — if a cleaner way to change the target project falls out,
-      take it; otherwise just the grouping change.
+- [x] **"New session" draft stays visible in sidebar while draft exists** + **groups
+      under its project** → done 2026-06-21 (both, settled per-project after discussion).
+      Sidebar draft rows are now derived from the persisted `draftMap` (`store.pendingDrafts`,
+      `n:<cwd>`-keyed, made `$state` so the rows react): the active draft plus any project's
+      stashed draft with text. Each nests under its target project's group (rendered in the
+      group `<ul>` like a session row, so it hides when the group collapses); a draft whose
+      cwd isn't a known project yet floats at the very top (the `$HOME` default case). Each
+      row carries an × to discard. Retargeting via `setDraftCwd` migrates the stash key
+      (drops the old `n:<old>`), so the row moves to the new project without ghosting under
+      the old one. `e2e/sidebar-drafts.e2e.ts` covers nest+persist, discard, retarget-no-ghost,
+      and collapse-hides. _(Scoped to display + grouping per the discussion; the finicky
+      composer project-switcher redesign was left out of scope. Known limitation: only
+      text + cwd persist across navigation — model/worktree picks re-seed to defaults on
+      return, unchanged from before. During an active sidebar search a draft whose group is
+      filtered out falls to the top row.)_
 - [x] **Model list: collapsible provider headers, collapsed by default** → done 2026-06-21.
       The header model dropdown (`ModelPicker`) now has collapsible provider headers (chevron +
       model count, `aria-expanded`): groups start collapsed except the active model's provider
