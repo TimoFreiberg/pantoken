@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { gotoFresh, openSidebar } from "./helpers.js";
+import { drive, gotoFresh, openSidebar } from "./helpers.js";
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
@@ -59,4 +59,29 @@ test("the context ring only appears once a session crosses the fill threshold", 
     .locator(".meter");
   await expect(olderRing).toBeVisible();
   await expect(olderRing).toHaveClass(/\baccent\b/);
+});
+
+test("an unread session marks the left gutter and keeps its timestamp on the right", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  const row = page
+    .getByTestId("sidebar")
+    .locator(".row-wrap")
+    .filter({ hasText: "Explore the fold reducer" });
+  const status = row.getByTestId("session-status");
+
+  // Drive a background turn to completion, then reset the mock: the server clears the
+  // "done" attention phase while the client keeps the session flagged unread — landing in
+  // the plain unread state.
+  await drive(page, "bgrun");
+  await expect(status).toHaveAttribute("data-state", "done");
+  await page.request.get("/debug/reset");
+  await expect(status).toHaveAttribute("data-state", "unread");
+
+  // Unread shows as a dot in the LEFT gutter (not the right slot)…
+  await expect(row.locator(".lead .unread-dot")).toBeVisible();
+  // …and — unlike the other status states — the right slot keeps the compact timestamp,
+  // since the unread cue has moved to the gutter.
+  await expect(status.locator(".time")).toHaveText(/^(\d+(m|h|d|w|mo|y)|now)$/);
 });
