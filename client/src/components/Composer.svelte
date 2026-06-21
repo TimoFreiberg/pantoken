@@ -77,6 +77,13 @@
   // Drafting a brand-new session: the composer doubles as the new-session form (config
   // chips above, first prompt below). Send creates the session + delivers the prompt.
   const drafting = $derived(store.draft != null);
+  // Touch-primary device (phone/tablet): a bare Enter inserts a newline rather than
+  // sending, so multi-line prompts are possible from a soft keyboard (send is the button
+  // or ⌘/Ctrl+Enter). Uses maxTouchPoints — NOT `(hover: none)`, which headless Chromium
+  // misreports — matching Transcript/Sidebar; the Pixel 7 e2e project sets hasTouch so the
+  // path is covered.
+  const isTouch =
+    typeof navigator !== "undefined" && navigator.maxTouchPoints > 0;
   // Context-window pressure cue: the meter ring escalates by color but never says
   // "you're running out" in words. Once the active session's window is ≥85% full, surface
   // a one-line nudge above the composer toward /compact or a fresh session. Drafts carry no
@@ -553,6 +560,10 @@
       return;
     }
     if (e.key !== "Enter" || e.shiftKey) return;
+    // On a touch device a bare Enter inserts a newline (let the textarea handle it) so a
+    // multi-line prompt is typeable from a soft keyboard; send is the button or ⌘/Ctrl+Enter.
+    // Desktop keeps Enter-to-send. The slash/file menus already consumed their Enter above.
+    if (isTouch && !(e.metaKey || e.ctrlKey)) return;
     e.preventDefault();
     // While the agent runs, Enter steers (deliver after the current step) and
     // Alt+Enter queues a follow-up (deliver when it stops); the toggle reflects it.
@@ -778,7 +789,9 @@
           disabled={submitting || addingImages || (!store.composerDraft.trim() && imageCount === 0)}
           onclick={submit}
           aria-label={drafting ? "Create session and send" : "Send"}
-          title={drafting ? "Create session and send first message (Enter)" : "Send (Enter)"}
+          title={drafting
+            ? `Create session and send first message (${isTouch ? "⌘/Ctrl+Enter" : "Enter"})`
+            : `Send (${isTouch ? "⌘/Ctrl+Enter" : "Enter"})`}
         >
           ↑
         </button>
