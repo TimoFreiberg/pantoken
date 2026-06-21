@@ -431,11 +431,14 @@ hit a session limit mid-verify; confirm each against the code before acting):_
 - [ ] **(discussion needed) Auto session titling via cheapest model** — run a
       lightweight model on session start to generate a title from the first user
       prompt, instead of showing "New Session" indefinitely
-- [ ] **Realistic mock tool-event timestamps** — the mock's `ts()` is a sequential
-      counter, so any duration derived from `toolStarted`→`toolFinished` timestamps
-      renders as a meaningless ~1ms in the dev/preview UI. Stamp tool fixtures with a
-      realistic ms gap (without breaking fold determinism) so the brainstorm
-      "tool-call duration badges" item can ship and be screenshot-verified.
+- [x] **Realistic mock tool-event timestamps** → already satisfied (verified 2026-06-21).
+      `server/src/fixtures.ts` already routes every *finished* tool fixture through `toolSpan`,
+      which calls `advanceTs(durationMs)` between stamping the start/finish events so the gap is
+      a deterministic 180ms–1.2s (not the raw ~1ms `ts()` step). The two remaining direct
+      `toolStarted` events are intentionally-unfinished running tools (one blocked on approval,
+      the `staleidle` regression), so they have no duration to render. `ToolCard.svelte` derives
+      the badge from those `startedAt`/`finishedAt` timestamps. Checkbox was stale — no code
+      change needed.
 - [ ] **`/tree` command (native pi command)** — pi's builtin `/tree` command shows
       the directory tree. Currently TUI builtins are intentionally omitted from the
       client command list. `/tree` should be passed through so typing `/tree` in the
