@@ -3,6 +3,7 @@ import {
   drive,
   expandWork,
   gotoFresh,
+  openSidebar,
   waitForSettledWorkBlocks,
 } from "./helpers.js";
 
@@ -285,6 +286,46 @@ test("sending a prompt while scrolled up jumps the transcript to the bottom", as
     .toBeLessThan(80);
   // …and the "New messages ↓" catch-up pill never appeared (we followed the stream
   // down instead of falling behind it).
+  await expect(page.getByTestId("new-messages-pill")).toHaveCount(0);
+});
+
+test("switching sessions lands at the bottom, even when the previous one was scrolled up", async ({
+  page,
+}) => {
+  // Shrink the viewport so the short mock fixtures exceed the fold — only then is
+  // "opened at the top" distinguishable from "opened at the bottom". Both the greeting
+  // source and the target session scroll at this height.
+  await page.setViewportSize({ width: 1100, height: 380 });
+
+  const scroller = page.locator(".scroller");
+  const top = () => scroller.evaluate((el) => (el as HTMLElement).scrollTop);
+  const gap = () =>
+    scroller.evaluate((el) => {
+      const s = el as HTMLElement;
+      return s.scrollHeight - s.scrollTop - s.clientHeight;
+    });
+
+  // Leave the greeting scrolled to the very top, so we exit it un-pinned — the case that
+  // used to drop you at the TOP of whatever you opened next (the Transcript kept the prior
+  // session's pinned/scroll state across the switch).
+  await scroller.evaluate((el) => ((el as HTMLElement).scrollTop = 0));
+  await expect.poll(top).toBe(0);
+  await expect.poll(gap).toBeGreaterThan(80); // genuinely taller than the fold
+
+  // Open a different session that is itself taller than the fold.
+  await openSidebar(page);
+  await page
+    .getByTestId("sidebar")
+    .getByText("Explore the fold reducer")
+    .click();
+  await expect(page.locator("header .title")).toContainText(
+    "Explore the fold reducer",
+  );
+
+  // It opens at the live bottom — not dropped at the carried-over top (scrollTop 0).
+  await expect.poll(top).toBeGreaterThan(80);
+  await expect.poll(gap).toBeLessThan(80);
+  // …and no "New messages ↓" pill: we're at the tail, nothing below the fold.
   await expect(page.getByTestId("new-messages-pill")).toHaveCount(0);
 });
 
