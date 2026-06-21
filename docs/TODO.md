@@ -402,10 +402,12 @@ hit a session limit mid-verify; confirm each against the code before acting):_
 
 ### Mobile composer
 
-- [ ] **Mobile: Enter should insert newline, not send** — on mobile the composer's
-      Enter key should insert a line break, not submit the prompt. Send should only
-      happen via the explicit send button or a dedicated shortcut (e.g. Cmd+Enter).
-      Today Enter fires send, making multi-line prompts impossible on mobile.
+- [x] **Mobile: Enter should insert newline, not send** → done 2026-06-21. On a touch
+      device (`navigator.maxTouchPoints > 0`, matching Transcript/Sidebar) a bare Enter now
+      falls through to the textarea as a newline; send is the button or a hardware ⌘/Ctrl+Enter
+      (`Composer.svelte` keydown). The slash/file typeaheads still consume their own Enter
+      first, and desktop Enter-to-send is unchanged. The send tooltip names the touch shortcut.
+      `e2e/composer.mobile.e2e.ts` (Pixel 7) covers newline-not-send + button-still-sends.
 - [ ] **Mobile: sending a prompt resets view to default new-draft session** — when
       you send a prompt on mobile, the session view snaps back to the new-draft
       state (blank session) instead of staying on the active session. The sent
