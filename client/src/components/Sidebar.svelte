@@ -1043,12 +1043,10 @@
   :global(.row-menu[aria-expanded="true"]) {
     background: var(--surface);
   }
-  /* The right cluster (timestamp / status) yields to the ⋯ overlay on hover. */
-  .row-wrap:hover .meta {
+  /* Only the status/time slot yields to the ⋯ overlay on hover — the worktree glyph (and
+     any tag) stay put so they remain visible and hoverable while the menu trigger shows. */
+  .row-wrap:hover .status {
     opacity: 0;
-  }
-  .meta {
-    transition: opacity 0.1s ease;
   }
   /* Floating popover: pinned in viewport coords (set inline) so it overlays the list
      rather than displacing rows. position: fixed escapes the list's overflow clip. */
@@ -1129,6 +1127,7 @@
     justify-content: flex-end;
     min-width: 14px;
     flex-shrink: 0;
+    transition: opacity 0.1s ease;
   }
   .status .attention-symbol {
     display: inline-flex;
