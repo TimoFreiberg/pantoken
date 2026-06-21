@@ -1,10 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import {
-  drive,
-  expandWork,
-  gotoFresh,
-  waitForSettledWorkBlocks,
-} from "./helpers.js";
+import { drive, gotoFresh, waitForSettledWorkBlocks } from "./helpers.js";
 
 const PNG =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nWQAAAAASUVORK5CYII=";
@@ -149,18 +144,11 @@ test("an oversized camera-style image is compressed before attachment", async ({
     "Compressed 1 oversized image",
   );
 });
-/** Drill the settled image turn open (work block → "1 tool" summary → inner card) and
- *  return the inner ToolCard locator, so a test can assert on its rendered output. */
-async function openToolCard(page: Page) {
-  await expandWork(page);
-  // One tool in the turn → a "1 tool" summary card; expand it, then the inner card.
-  const card = page.locator(".tool.summary");
-  await expect(card.locator(".head .label")).toHaveText("Used render_mockup");
-  await card.locator(":scope > .head").click();
-  const inner = card.locator(":scope > .body > .tool");
-  await expect(inner).toHaveCount(1);
-  await inner.locator(".head").click();
-  return inner;
+/** The image-output ToolCard for the settled image turn. The screenshot/mockup is now
+ *  surfaced in the turn's always-visible slot (no work-block drill, no summary card), so
+ *  we find the card by the <img> it renders unconditionally outside its collapsible body. */
+function imageToolCard(page: Page) {
+  return page.locator(".tool").filter({ has: page.locator("img.out-img") });
 }
 
 test("a user's image attachment is echoed back into the transcript", async ({
@@ -183,37 +171,37 @@ test("a user's image attachment is echoed back into the transcript", async ({
     .toBeGreaterThan(0);
 });
 
-test("a tool that returns an image block renders it as an <img>", async ({
+test("a tool's image output is visible without drilling into the collapsed work", async ({
   page,
 }) => {
   await drive(page, "images");
-  // Wait for both turns (greeting + this one) to settle before drilling in.
-  await waitForSettledWorkBlocks(page, 2);
-  await expandWork(page);
-
-  const inner = await openToolCard(page);
-
-  // pi's {type:"image"} content block renders as an <img>, and the accompanying
-  // text note still shows — NOT a JSON dump of the base64.
-  const out = inner.locator("img.out-img");
+  // The screenshot/mockup tool is pulled out of the collapsible work into the turn's
+  // always-visible slot, and its <img> renders outside the card's expand toggle — so it
+  // shows with NO work-block expand and NO tool-card click. Wait on the <img> itself as
+  // the settle signal (this turn no longer renders a "Worked for Ns" block).
+  const out = page.locator("img.out-img");
   await expect(out).toBeVisible();
   await expect(out).toHaveAttribute("src", /^data:image\/png;base64,/);
   await expect
     .poll(() => out.evaluate((i: HTMLImageElement) => i.naturalWidth))
     .toBeGreaterThan(0);
-  await expect(inner.getByText("Rendered mockup (160×100 PNG).")).toBeVisible();
+
+  // The accompanying text note still lives in the collapsible card body — reveal it.
+  const card = imageToolCard(page);
+  await card.locator(".head").click();
+  await expect(card.getByText("Rendered mockup (160×100 PNG).")).toBeVisible();
 });
 
 test("both images survive a reload (typed images in the state snapshot)", async ({
   page,
 }) => {
   await drive(page, "images");
-  await waitForSettledWorkBlocks(page, 2);
+  await expect(page.locator("img.out-img")).toBeVisible();
   // The image data lives in ToolItem.images / UserItem.images, which the server holds in
   // its authoritative SessionState and re-ships on reconnect. Reload WITHOUT resetting:
   // a fresh client must rebuild the same images.
   await page.goto("/?dev");
-  await waitForSettledWorkBlocks(page, 2);
+  await waitForSettledWorkBlocks(page, 1);
 
   // User attachment — always visible in the user row.
   const att = page.locator("img.att-img");
@@ -222,8 +210,8 @@ test("both images survive a reload (typed images in the state snapshot)", async 
     .poll(() => att.evaluate((i: HTMLImageElement) => i.naturalWidth))
     .toBeGreaterThan(0);
 
-  // Tool output image — drill into the (re-collapsed) turn and confirm it decoded.
-  const out = (await openToolCard(page)).locator("img.out-img");
+  // Tool output image — visible without any drill, even after a reload.
+  const out = page.locator("img.out-img");
   await expect(out).toBeVisible();
   await expect
     .poll(() => out.evaluate((i: HTMLImageElement) => i.naturalWidth))

@@ -31,8 +31,18 @@ export const STANDALONE_TOOLS = new Set(["write", "edit"]);
 // in — burying it would hide their own responses.
 export const VISIBLE_TOOLS = new Set(["answer"]);
 
+/** A tool that returned image content — a screenshot, a rendered mockup, an image read.
+ *  These are visual artifacts the user is meant to SEE, so they get the same treatment as
+ *  VISIBLE_TOOLS: never merged into a summary run, and pulled out of the collapsible work
+ *  into the always-visible slot so the picture doesn't vanish behind "Worked for Ns".
+ *  Detected by the `images` field (populated at toolFinished), not by tool name, so ANY
+ *  image-returning tool qualifies — `preview_screenshot`, a render tool, a read of a PNG. */
+function toolHasImages(t: ToolItem): boolean {
+  return (t.images?.length ?? 0) > 0;
+}
+
 function isVisibleTool(i: DisplayItem): i is ToolItem {
-  return i.kind === "tool" && VISIBLE_TOOLS.has(i.name);
+  return i.kind === "tool" && (VISIBLE_TOOLS.has(i.name) || toolHasImages(i));
 }
 
 export interface MergedToolsItem {
@@ -58,7 +68,10 @@ function isHiddenOnlyThinking(i: TranscriptItem): boolean {
 }
 function isSummarizedTool(i: TranscriptItem): i is ToolItem {
   return (
-    isToolItem(i) && !STANDALONE_TOOLS.has(i.name) && !VISIBLE_TOOLS.has(i.name)
+    isToolItem(i) &&
+    !STANDALONE_TOOLS.has(i.name) &&
+    !VISIBLE_TOOLS.has(i.name) &&
+    !toolHasImages(i)
   );
 }
 
@@ -246,9 +259,10 @@ export interface TurnGroup {
   user?: TranscriptItem;
   /** The collapsible portion: tools, merged runs, thinking, and intermediate narration. */
   work: DisplayItem[];
-  /** Always-visible items pulled out of `work` — currently the `answer` tool's Q&A
-   *  result (see VISIBLE_TOOLS). Rendered between the collapsed work block and the
-   *  final response so the user's own answers don't hide. */
+  /** Always-visible items pulled out of `work` — the `answer` tool's Q&A result (see
+   *  VISIBLE_TOOLS) and any image-bearing tool (see toolHasImages: a screenshot, a
+   *  rendered mockup). Rendered between the collapsed work block and the final response
+   *  so the user's own answers — and the pictures the agent surfaced — don't hide. */
   visible: DisplayItem[];
   /** The turn-final assistant message(s) — the trailing run of assistant items after the
    *  last tool. Rendered visibly; the work collapses behind the "Worked for Ns" header. */
@@ -291,9 +305,10 @@ function buildTurn(
   // non-assistant item) breaks the run, so anything before it stays in `work`.
   let k = body.length;
   while (k > 0 && body[k - 1]!.kind === "assistant") k--;
-  // Pull always-visible tools (the answer Q&A) out of the work portion so they
-  // never collapse. They're rendered after the work block, before the response —
-  // chronologically right for the common "ask → final response" tail.
+  // Pull always-visible tools (the answer Q&A, plus any image-bearing tool — a
+  // screenshot or rendered mockup) out of the work portion so they never collapse.
+  // They're rendered after the work block, before the response — chronologically
+  // right for the common "ask/show → final response" tail.
   const workItems = body.slice(0, k);
   const visible = workItems.filter(isVisibleTool);
   const work = workItems.filter((i) => !isVisibleTool(i));

@@ -262,6 +262,54 @@ describe("groupTurns: answer (visible) tools", () => {
   });
 });
 
+describe("groupTurns: image-bearing tools (visible)", () => {
+  const png = [{ type: "image", data: "x", mimeType: "image/png" }] as const;
+  const shot = (id: string, name = "preview_screenshot") =>
+    tool(id, name, { images: [...png] });
+
+  test("a screenshot tool is pulled out of work into visible, not collapsed", () => {
+    const turns = groupTurns([
+      user("u1"),
+      asst("narration"),
+      shot("s1"),
+      asst("final"),
+    ]);
+    const t = turns[0]!;
+    expect(t.visible.map((i) => i.id)).toEqual(["s1"]);
+    expect(t.work.map((i) => i.id)).toEqual(["narration"]);
+    expect(t.response.map((i) => i.id)).toEqual(["final"]);
+  });
+
+  test("detection is by the images field, not the tool name (a read of a PNG counts)", () => {
+    const turns = groupTurns([user("u1"), shot("r1", "read"), asst("final")]);
+    expect(turns[0]!.visible.map((i) => i.id)).toEqual(["r1"]);
+  });
+
+  test("an image tool stays standalone, not folded into a tool summary", () => {
+    const out = mergeTools([
+      tool("r1", "read"),
+      shot("s1"),
+      tool("r2", "read"),
+    ]);
+    // The screenshot breaks the run: read | screenshot | read, not one merged card.
+    expect(out.map((i) => i.kind)).toEqual([
+      "mergedTools",
+      "tool",
+      "mergedTools",
+    ]);
+  });
+
+  test("an image-less tool of the same name still merges normally", () => {
+    // A still-running screenshot has no images yet — it summarizes like any other tool
+    // until toolFinished lands the image and the next fold reclassifies it.
+    const out = mergeTools([
+      tool("r1", "read"),
+      tool("s1", "preview_screenshot"),
+    ]);
+    expect(out.map((i) => i.kind)).toEqual(["mergedTools"]);
+  });
+});
+
 describe("groupTurns: injected custom messages (nudge boundary)", () => {
   test("an injected message opens a NEW turn, freeing the prior turn's response", () => {
     // The journal-nudge bug: turn 1 (work + final response), then an injected nudge
