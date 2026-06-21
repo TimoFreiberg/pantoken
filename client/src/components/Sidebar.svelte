@@ -6,7 +6,12 @@
   import { filterSessions } from "../lib/session-filter.js";
   import { compactTime, relativeTime } from "../lib/relative-time.js";
   import { buildHash, buildDate, buildLabel } from "../lib/build-info.js";
+  import ContextRing from "./ContextRing.svelte";
   import Button from "./ui/Button.svelte";
+
+  // Above this context-fill %, a session's row shows the gauge ring — a quiet "this one's
+  // getting full" cue. Below it the ring is noise on a single line, so it stays hidden.
+  const RING_THRESHOLD = 66;
   import IconButton from "./ui/IconButton.svelte";
 
   function basename(p: string): string {
@@ -498,6 +503,13 @@
                               <path d="M18 9a9 9 0 0 1-9 9" />
                             </svg>
                           </span>
+                        {/if}
+                        {#if s.usage && s.usage.percent !== null && s.usage.percent >= RING_THRESHOLD}
+                          <ContextRing
+                            usage={s.usage}
+                            size={12}
+                            showLabel={false}
+                          />
                         {/if}
                         <!-- Unified right-edge slot: attention badge, in-progress spinner,
                              unread dot, or — when idle/read — the last-activity timestamp.

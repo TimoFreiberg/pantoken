@@ -22,18 +22,41 @@ test("rows are a single line: title plus a compact last-activity timestamp", asy
   ).toHaveText(/^\d+(m|h|d|w|mo|y)$/);
 });
 
-test("the old second meta line is gone — no msg-count, activity, or context ring", async ({
+test("the old second meta line is gone — no msg-count or activity sub-line", async ({
   page,
 }) => {
   await openSidebar(page);
   const sidebar = page.getByTestId("sidebar");
 
-  // demo-session used to render "3 msg", a context ring, and a progress sub-line. The
-  // single-line redesign drops all three to give the title the full row width.
+  // demo-session used to render "3 msg" and a progress sub-line. The single-line redesign
+  // drops both to give the title the full row width.
   const demoRow = sidebar
     .locator(".row-wrap")
     .filter({ hasText: "Wire up the WebSocket" });
   await expect(demoRow.locator(".msg-count")).toHaveCount(0);
   await expect(demoRow.locator(".activity")).toHaveCount(0);
-  await expect(demoRow.locator(".meter")).toHaveCount(0);
+});
+
+test("the context ring only appears once a session crosses the fill threshold", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  const sidebar = page.getByTestId("sidebar");
+
+  // demo-session sits at 24% (MOCK_USAGE) — below the threshold, so its row stays clean.
+  await expect(
+    sidebar
+      .locator(".row-wrap")
+      .filter({ hasText: "Wire up the WebSocket" })
+      .locator(".meter"),
+  ).toHaveCount(0);
+
+  // older-session is at 82% (MOCK_USAGE_HIGH) — over the threshold, so it lights up the
+  // gauge in its accent (hot) band as a quiet "getting full" cue.
+  const olderRing = sidebar
+    .locator(".row-wrap")
+    .filter({ hasText: "Explore the fold reducer" })
+    .locator(".meter");
+  await expect(olderRing).toBeVisible();
+  await expect(olderRing).toHaveClass(/\baccent\b/);
 });
