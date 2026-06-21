@@ -400,6 +400,55 @@ hit a session limit mid-verify; confirm each against the code before acting):_
       it). Covered by `e2e/polish.e2e.ts` (build a tall transcript → scroll to top → send →
       assert pinned-to-bottom + no catch-up pill); verified it fails without the bump.
 
+### Mobile composer
+
+- [ ] **Mobile: Enter should insert newline, not send** — on mobile the composer's
+      Enter key should insert a line break, not submit the prompt. Send should only
+      happen via the explicit send button or a dedicated shortcut (e.g. Cmd+Enter).
+      Today Enter fires send, making multi-line prompts impossible on mobile.
+- [ ] **Mobile: sending a prompt resets view to default new-draft session** — when
+      you send a prompt on mobile, the session view snaps back to the new-draft
+      state (blank session) instead of staying on the active session. The sent
+      message lands but you're looking at the wrong session.
+- [ ] **Mobile: composer should be pinned above the keyboard** — when the virtual
+      keyboard is visible on mobile, the text edit box can scroll upward off-screen
+      instead of staying pinned just above the keyboard. Likely a viewport / visual
+      viewport handling issue (iOS Safari's `visualViewport` API or `env(safe-area-inset-bottom)`).
+
+- [ ] **Active session unread when new text lands below the viewport** — builds on
+      the status indicators. Today the active (focused) session is always
+      "read". Refine: if the agent appends content while you're scrolled up (content
+      exists below the visible transcript), mark the active session unread too;
+      clear it when you scroll to the bottom. Needs the transcript scroll container
+      to report "not at bottom + grew" back to the store (the classic "new messages ↓"
+      pill signal), and an exception to the active-session-is-read rule in
+      `store.svelte.ts`'s `sessionStatus`/`markRead` paths. Low priority.
+- [ ] **Session context indicator** — a small color-coded circle (or similar badge)
+      in the session list / header showing how much context the session has consumed,
+      analogous to the Claude app's colored circle (green → yellow → red as the
+      context window fills). Color could map to token-budget thresholds from the
+      snapshot's `config`/usage fields; exact threshold values TBD
+- [ ] **(discussion needed) Auto session titling via cheapest model** — run a
+      lightweight model on session start to generate a title from the first user
+      prompt, instead of showing "New Session" indefinitely
+- [ ] **Realistic mock tool-event timestamps** — the mock's `ts()` is a sequential
+      counter, so any duration derived from `toolStarted`→`toolFinished` timestamps
+      renders as a meaningless ~1ms in the dev/preview UI. Stamp tool fixtures with a
+      realistic ms gap (without breaking fold determinism) so the brainstorm
+      "tool-call duration badges" item can ship and be screenshot-verified.
+- [ ] **`/tree` command (native pi command)** — pi's builtin `/tree` command shows
+      the directory tree. Currently TUI builtins are intentionally omitted from the
+      client command list. `/tree` should be passed through so typing `/tree` in the
+      composer sends it as a prompt for pi to execute, even if pilot doesn't render
+      the tree natively.
+- [ ] **Provider OAuth login** — sign-in / sign-out for OAuth-capable providers
+      (Anthropic, OpenAI, …) from the Settings panel. Deferred from the settings-panel
+      work (API-key entry shipped); needs a server-side OAuth callback reachable over
+      Tailscale, which is the bulk of the cost.
+- [ ] **Extensions enable/disable view** + compatibility-issue surfacing
+- [ ] **Session rename / archive / unarchive** — from the sidebar (the create/open
+      half landed; this is the remaining SHOULD from DESIGN's "Sessions & history")
+
 ## 🔵 Later
 
 - [ ] **@-completion in new-session draft uses wrong cwd** — when composing a
