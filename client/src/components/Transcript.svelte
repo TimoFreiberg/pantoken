@@ -213,6 +213,42 @@
     if (pinned) store.clearActiveUnread();
   }
 
+  /** Force the viewport to the true bottom, re-asserting across a few frames. A single
+   *  scrollTo can land short because off-screen `content-visibility` rows report their
+   *  estimated `contain-intrinsic-size` until they paint; re-running per frame lets the
+   *  estimate firm up to real heights and the bottom hold. The streaming pin gets this
+   *  convergence for free by re-firing on every delta — a one-shot switch into an idle
+   *  session does not, so it has to settle itself. */
+  function snapToBottom(): void {
+    let frames = 0;
+    const settle = () => {
+      if (!scroller) return;
+      scroller.scrollTo({ top: scroller.scrollHeight });
+      if (++frames < 4) requestAnimationFrame(settle);
+    };
+    settle();
+  }
+
+  // Switching sessions always lands at the bottom (the live tail), regardless of where the
+  // session you LEFT was scrolled. The streaming pin below only scrolls when `pinned` is
+  // already true, and a switch inherits the prior session's `pinned`/scrollTop — so a
+  // session you'd scrolled up in would otherwise open mid-transcript. Key off the focused
+  // session id, not every snapshot: a same-session re-snapshot mid-turn (rename, model
+  // change) must NOT yank the scroll position out from under you. Declared before the
+  // streaming-pin effect so it wins the flush — it re-pins and rebaselines `prevSize`
+  // first, then the pin scrolls with `pinned` already true and reads the swap as a
+  // baseline (not growth), so the new session is never spuriously flagged unread.
+  let lastFocusId: string | undefined;
+  $effect(() => {
+    const id = store.session.ref?.sessionId;
+    if (id === lastFocusId) return;
+    lastFocusId = id;
+    pinned = true;
+    prevSize = -1;
+    store.clearActiveUnread();
+    snapToBottom();
+  });
+
   // keep pinned to the bottom while streaming, unless the user scrolled up
   $effect(() => {
     const size = contentSize;
