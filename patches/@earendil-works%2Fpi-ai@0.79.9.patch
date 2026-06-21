@@ -1,0 +1,81 @@
+diff --git a/dist/providers/anthropic.js b/dist/providers/anthropic.js
+index fdffa1159609dc76f58a07b3bde8d08c7f0dccd5..fbf628f20b3de19089e0e974eacfc508d00c5fd3 100644
+--- a/dist/providers/anthropic.js
++++ b/dist/providers/anthropic.js
+@@ -255,28 +255,58 @@ async function* iterateAnthropicEvents(response, signal) {
+     }
+     let sawMessageStart = false;
+     let sawMessageEnd = false;
+-    for await (const sse of iterateSseMessages(response.body, signal)) {
+-        if (sse.event === "error") {
+-            throw new Error(sse.data);
+-        }
+-        if (!ANTHROPIC_MESSAGE_EVENTS.has(sse.event ?? "")) {
+-            continue;
+-        }
+-        try {
+-            const event = parseJsonWithRepair(sse.data);
+-            if (event.type === "message_start") {
+-                sawMessageStart = true;
++    // Drive the SSE iterator by hand so a transport-level failure (the socket
++    // dropping mid-stream — `iterator.next()` rejecting) can be told apart from
++    // an in-band error we throw on purpose (a provider `error` event, a parse
++    // failure). A mid-stream transport death is the same condition as a stream
++    // that ends cleanly but truncated: an incomplete response. Normalizing it to
++    // the existing "ended before message_stop" message keeps retry classification
++    // from depending on the fetch implementation's error wording — undici, Bun,
++    // and proxies each phrase a dropped socket differently. In-band errors are
++    // rethrown untouched so a non-retryable provider error stays non-retryable.
++    const iterator = iterateSseMessages(response.body, signal)[Symbol.asyncIterator]();
++    try {
++        while (true) {
++            let result;
++            try {
++                result = await iterator.next();
+             }
+-            else if (event.type === "message_stop") {
+-                sawMessageEnd = true;
++            catch (error) {
++                if (sawMessageStart && !sawMessageEnd) {
++                    const message = error instanceof Error ? error.message : String(error);
++                    throw new Error(`Anthropic stream ended before message_stop: ${message}`, { cause: error });
++                }
++                throw error;
++            }
++            if (result.done) {
++                break;
++            }
++            const sse = result.value;
++            if (sse.event === "error") {
++                throw new Error(sse.data);
++            }
++            if (!ANTHROPIC_MESSAGE_EVENTS.has(sse.event ?? "")) {
++                continue;
++            }
++            try {
++                const event = parseJsonWithRepair(sse.data);
++                if (event.type === "message_start") {
++                    sawMessageStart = true;
++                }
++                else if (event.type === "message_stop") {
++                    sawMessageEnd = true;
++                }
++                yield event;
++            }
++            catch (error) {
++                const message = error instanceof Error ? error.message : String(error);
++                throw new Error(`Could not parse Anthropic SSE event ${sse.event}: ${message}; data=${sse.data}; raw=${sse.raw.join("\\n")}`);
+             }
+-            yield event;
+-        }
+-        catch (error) {
+-            const message = error instanceof Error ? error.message : String(error);
+-            throw new Error(`Could not parse Anthropic SSE event ${sse.event}: ${message}; data=${sse.data}; raw=${sse.raw.join("\\n")}`);
+         }
+     }
++    finally {
++        await iterator.return?.();
++    }
+     if (sawMessageStart && !sawMessageEnd) {
+         throw new Error("Anthropic stream ended before message_stop");
+     }
