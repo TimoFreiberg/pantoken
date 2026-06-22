@@ -96,7 +96,40 @@
     const t = store.session.ambient.title || store.session.title;
     document.title = t ? `${t} · pilot` : "pilot";
   });
+
+  // App-global navigation hotkeys. The ⌘/Ctrl modifier keeps them clear of typing;
+  // component-local handlers own the ⇧-modified combos (⌘⇧M/E/T) and arrow nav, so we
+  // take only the unshifted, alt-free set here. (⌘N is browser-reserved in a plain tab
+  // but free in the installed PWA / desktop app, pilot's primary surface; ⌘[ / ⌘] cancel
+  // the browser's history nav, which is unused since the app routes views client-side.)
+  function onGlobalKeydown(e: KeyboardEvent) {
+    if (store.unauthorized) return;
+    const mod = e.metaKey || e.ctrlKey;
+    if (!mod || e.altKey || e.shiftKey) return;
+    switch (e.key) {
+      case "n":
+      case "N":
+        e.preventDefault();
+        store.newSessionHotkey();
+        break;
+      case "[":
+        e.preventDefault();
+        store.navBack();
+        break;
+      case "]":
+        e.preventDefault();
+        store.navForward();
+        break;
+      case "b":
+      case "B":
+        e.preventDefault();
+        store.toggleSidebar();
+        break;
+    }
+  }
 </script>
+
+<svelte:window onkeydown={onGlobalKeydown} />
 
 {#if store.unauthorized}
   <TokenGate />

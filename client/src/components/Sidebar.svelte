@@ -307,7 +307,7 @@
 <aside class="sidebar" data-testid="sidebar" data-open={store.sidebarOpen}>
   <div class="top">
     <IconButton
-      title="Collapse sidebar"
+      title="Collapse sidebar (⌘B)"
       aria-label="Collapse sidebar"
       onclick={() => store.closeSidebar()}>‹</IconButton
     >
@@ -316,7 +316,7 @@
   <div class="new">
     <button
       class="new-btn"
-      title="Start a new session — pick the project, worktree, and model in the composer (creation is deferred until you send)"
+      title="Start a new session (⌘N) — pick the project, worktree, and model in the composer (creation is deferred until you send)"
       onclick={() => startDraft(activeCwd)}
     >
       <span class="plus">+</span> New session…

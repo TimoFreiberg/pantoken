@@ -95,7 +95,7 @@
 <header class="hdr">
   <IconButton
     data-testid="sidebar-toggle"
-    title="Toggle sessions"
+    title="Toggle sessions (⌘B)"
     aria-label="Toggle sessions"
     onclick={() => store.toggleSidebar()}
   >
