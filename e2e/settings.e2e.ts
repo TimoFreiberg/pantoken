@@ -23,6 +23,8 @@ test("settings panel opens from the header gear and lists its sections", async (
 
 test("saving a provider API key flips it to connected", async ({ page }) => {
   await page.getByTestId("settings-toggle").click();
+  // The Providers list starts collapsed — expand it to reach the rows.
+  await page.getByTestId("providers-toggle").click();
 
   // Google ships unconnected + key-capable in the mock.
   const google = page.getByTestId("provider-google");
@@ -40,6 +42,7 @@ test("saving a provider API key flips it to connected", async ({ page }) => {
 
 test("OAuth sign-in flow connects a provider", async ({ page }) => {
   await page.getByTestId("settings-toggle").click();
+  await page.getByTestId("providers-toggle").click();
 
   // OpenAI Codex ships OAuth-capable but unconnected in the mock.
   const codex = page.getByTestId("provider-openai-codex");
@@ -65,6 +68,7 @@ test("cancelling the OAuth dialog leaves the provider unconnected", async ({
   page,
 }) => {
   await page.getByTestId("settings-toggle").click();
+  await page.getByTestId("providers-toggle").click();
   const codex = page.getByTestId("provider-openai-codex");
   await codex.getByTestId("provider-signin").click();
 
@@ -79,6 +83,7 @@ test("cancelling the OAuth dialog leaves the provider unconnected", async ({
 
 test("OAuth sign-out disconnects a provider", async ({ page }) => {
   await page.getByTestId("settings-toggle").click();
+  await page.getByTestId("providers-toggle").click();
 
   // Anthropic ships OAuth-connected in the mock.
   const anthropic = page.getByTestId("provider-anthropic");
@@ -103,6 +108,8 @@ test("favorites filter the header model picker, keeping the active model visible
 }) => {
   // Favorite only DeepSeek; the active model stays anthropic/claude-opus-4-8.
   await page.getByTestId("settings-toggle").click();
+  // Favorites groups start collapsed (no favorites yet) — expand deepseek to reach its box.
+  await page.getByTestId("fav-group-deepseek").click();
   await page
     .getByTestId("fav-deepseek-deepseek-v4-flash")
     .getByRole("checkbox")
@@ -137,6 +144,71 @@ test("the favorites list has a search that filters models", async ({
 
   await search.fill("zzzz");
   await expect(settings.getByText("No models match")).toBeVisible();
+});
+
+test("the Providers list is collapsed by default and expands on click", async ({
+  page,
+}) => {
+  await page.getByTestId("settings-toggle").click();
+  const toggle = page.getByTestId("providers-toggle");
+  // The header is present but the rows are hidden until expanded.
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByTestId("provider-google")).toHaveCount(0);
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByTestId("provider-google")).toBeVisible();
+});
+
+test("favorites groups collapse by default, expand on click, and a search auto-expands", async ({
+  page,
+}) => {
+  const settings = page.getByTestId("settings-panel");
+  await page.getByTestId("settings-toggle").click();
+
+  // No favorites in the mock, so every provider group starts collapsed.
+  const openai = page.getByTestId("fav-group-openai");
+  await expect(openai).toHaveAttribute("aria-expanded", "false");
+  await expect(settings.getByTestId("fav-openai-gpt-5")).toHaveCount(0);
+
+  // Clicking the group header reveals its models.
+  await openai.click();
+  await expect(openai).toHaveAttribute("aria-expanded", "true");
+  await expect(settings.getByTestId("fav-openai-gpt-5")).toBeVisible();
+  await openai.click(); // collapse again
+  await expect(settings.getByTestId("fav-openai-gpt-5")).toHaveCount(0);
+
+  // A search auto-expands matching groups without a manual click.
+  await settings.getByPlaceholder("Search models…").fill("gpt");
+  await expect(settings.getByTestId("fav-openai-gpt-5")).toBeVisible();
+});
+
+test("a provider with a favorite is seeded open when the panel reopens", async ({
+  page,
+}) => {
+  await page.getByTestId("settings-toggle").click();
+  // Favorite a deepseek model (its group starts collapsed).
+  await page.getByTestId("fav-group-deepseek").click();
+  await page
+    .getByTestId("fav-deepseek-deepseek-v4-flash")
+    .getByRole("checkbox")
+    .check();
+
+  // Close and reopen the panel; the seeding effect expands providers holding a favorite.
+  await page.keyboard.press("Escape");
+  await page.getByTestId("settings-toggle").click();
+  await expect(page.getByTestId("fav-group-deepseek")).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
+  await expect(
+    page.getByTestId("fav-deepseek-deepseek-v4-flash"),
+  ).toBeVisible();
+  // A provider without a favorite stays collapsed.
+  await expect(page.getByTestId("fav-group-openai")).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
 });
 
 test("theme toggle drives the data-theme override and persists it", async ({
