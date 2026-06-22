@@ -17,7 +17,7 @@
   $effect(() => {
     const c = current;
     if (c && (c.kind === "input" || c.kind === "editor")) {
-      inputValue = (c.kind === "input" ? c.initialValue : c.initialValue) ?? "";
+      inputValue = c.initialValue ?? "";
     } else {
       inputValue = "";
     }
