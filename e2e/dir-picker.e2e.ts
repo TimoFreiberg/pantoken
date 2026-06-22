@@ -6,6 +6,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 const picker = (page: Page) => page.getByTestId("dir-picker");
+const filterInput = (page: Page) => picker(page).locator(".filter-input");
 const projectChip = (page: Page) => page.locator(".chips .chip").first();
 const draftBox = (page: Page) =>
   page.getByPlaceholder("Describe a task or ask a question…");
@@ -49,6 +50,8 @@ test("Escape closes the directory browser without abandoning the draft", async (
 
   await projectChip(page).click();
   await expect(picker(page)).toBeVisible();
+  // The picker auto-focuses its always-visible filter input.
+  await expect(filterInput(page)).toBeFocused();
 
   await page.keyboard.press("Escape");
   await expect(picker(page)).toBeHidden();
@@ -75,13 +78,15 @@ test("the go-to-path input jumps to a typed directory", async ({ page }) => {
   await projectChip(page).click();
   await expect(picker(page)).toBeVisible();
 
-  // The ✎ button swaps the breadcrumb for a path box — the escape hatch for dirs that
-  // are tedious to click to. Type an absolute path and Enter navigates there.
-  await picker(page).locator(".edit-path").click();
-  const input = picker(page).getByLabel("Go to path");
-  await expect(input).toBeFocused();
-  await input.fill("/Users/timo/src/pi");
-  await input.press("Enter");
+  // The filter input is always visible. Start typing a path with / to enter path
+  // mode, then Enter navigates there directly (no separate edit button).
+  // Use the stable .filter-input class — the aria-label changes between
+  // "Filter subdirectories" and "Go to path" as the user types, which would
+  // invalidate a `getByLabel` locator mid-test.
+  await filterInput(page).fill("/Users/timo/src/pi");
+  // In path mode the input's label changes.
+  await expect(picker(page).getByLabel("Go to path")).toBeVisible();
+  await filterInput(page).press("Enter");
 
   await expect(picker(page).locator(".bc")).toContainText("pi");
   await expect(
@@ -94,20 +99,50 @@ test("the go-to-path input jumps to a typed directory", async ({ page }) => {
   await expect(projectChip(page)).toContainText("pi");
 });
 
-test("Escape in the path box cancels the edit without closing the browser", async ({
+test("typing filters subdirectories by fuzzy match", async ({ page }) => {
+  await openDraft(page);
+  await projectChip(page).click();
+  await expect(picker(page)).toBeVisible();
+
+  // Navigate to home so the entry list is stable.
+  await picker(page).locator(".home-btn").click();
+  // Wait for the listing to settle (the "src" row is visible).
+  await expect(
+    picker(page).locator(".row[data-i] .name").filter({ hasText: "src" }),
+  ).toBeVisible();
+
+  // Type a partial match — "sr" should match "src" by subsequence (s…r).
+  await filterInput(page).fill("sr");
+
+  const rows = picker(page).locator(".row[data-i] .name");
+  // "src" should still be visible (fuzzy subsequence match).
+  await expect(rows.filter({ hasText: "src" })).toBeVisible();
+  // Only "src" + the ".." parent row remain; the other 4 entries are hidden.
+  await expect(rows).toHaveCount(2);
+  // Documents (which doesn't match "sr") should be gone.
+  await expect(rows.filter({ hasText: "Documents" })).toBeHidden();
+
+  // Clear the filter (Escape) — all entries reappear.
+  await filterInput(page).press("Escape");
+  await expect(filterInput(page)).toHaveValue("");
+  await expect(rows).not.toHaveCount(2); // more entries now
+});
+
+test("Escape clears the filter without closing the browser", async ({
   page,
 }) => {
   await openDraft(page);
   await projectChip(page).click();
   await expect(picker(page)).toBeVisible();
 
-  await picker(page).locator(".edit-path").click();
-  const input = picker(page).getByLabel("Go to path");
-  await expect(input).toBeVisible();
-  await input.press("Escape");
+  await filterInput(page).fill("some filter text");
+  await filterInput(page).press("Escape");
 
-  // The path box closes, the breadcrumb returns, and the picker stays open.
-  await expect(input).toBeHidden();
-  await expect(picker(page).locator(".bc .crumb").first()).toBeVisible();
+  // The filter clears, and the picker stays open.
+  await expect(filterInput(page)).toHaveValue("");
   await expect(picker(page)).toBeVisible();
+
+  // Second Escape closes the picker.
+  await filterInput(page).press("Escape");
+  await expect(picker(page)).toBeHidden();
 });
