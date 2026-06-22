@@ -482,6 +482,35 @@ class PilotStore {
     return items.some((i) => i.kind === "tool" && i.status === "running");
   }
 
+  /** Estimated tokens the model has streamed into the focused session's CURRENT turn —
+   *  a liveness counter shown beside the working spinner so you can tell the API is
+   *  actually feeding you (the number climbs) from a stall (it freezes). Sums assistant
+   *  text + thinking since the last user/inject turn boundary; tools and earlier turns are
+   *  excluded, so it resets per turn for free. It's an ESTIMATE (~4 chars/token): pi only
+   *  surfaces context-window usage to pilot, not exact per-turn output token counts, so we
+   *  approximate from the streamed characters we already fold. Counting the thinking channel
+   *  too is the point — it proves liveness during "Thinking…" when no answer text shows.
+   *
+   *  Turn boundary: we walk the tail and stop at a user/inject item (the start of this turn)
+   *  OR a SETTLED assistant (one with `completedAt`, which only the turn-FINAL assistant gets
+   *  — so a prior turn's reply never bleeds in). Intermediate bubbles a tool closed mid-turn
+   *  carry no `completedAt`, so a multi-bubble turn still sums whole; tools/notices are skipped
+   *  without breaking. */
+  get turnStreamTokens(): number {
+    const items = this.session.items;
+    let chars = 0;
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i];
+      if (!it) continue;
+      if (it.kind === "user" || it.kind === "inject") break;
+      if (it.kind === "assistant") {
+        if (it.completedAt) break;
+        chars += it.text.length + it.thinking.length;
+      }
+    }
+    return Math.round(chars / 4);
+  }
+
   /** The just-sent prompt to restore to the composer when the user aborts a turn that
    *  hasn't produced output yet (Escape-to-abort UX). Returns the last user message's
    *  text iff nothing after it has emitted output — no assistant answer text and no

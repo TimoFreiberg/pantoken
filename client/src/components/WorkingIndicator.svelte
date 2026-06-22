@@ -16,6 +16,10 @@
       last.text.length === 0
     );
   });
+
+  // Estimated tokens streamed in this turn — a liveness readout so you can see the API
+  // is feeding you (number climbs) vs. stalled (it freezes), even during hidden thinking.
+  const tokens = $derived(store.turnStreamTokens);
 </script>
 
 <!-- The "pi is still working" affordance. Lives at the bottom of the chat window,
@@ -34,6 +38,16 @@
       </span>
       <span class="label">{thinking ? "Thinking…" : "Working…"}</span>
     </span>
+    <!-- aria-hidden: this lives inside the role=status live region, and a per-delta
+         ticking number would spam a screen reader. It's a visual liveness affordance;
+         the "Working…"/"Thinking…" label carries the announced state. -->
+    <span
+      class="tokens"
+      data-testid="working-tokens"
+      aria-hidden="true"
+      title="Estimated tokens received from the model this turn (~4 chars/token). Climbing = the API is streaming; frozen = it has stalled."
+      >~{tokens.toLocaleString("en-US")} tok</span
+    >
   </div>
 {/if}
 
@@ -44,6 +58,8 @@
     margin: 0 auto;
     padding: 4px 18px 10px;
     animation: fade 0.2s ease;
+    display: flex;
+    align-items: center;
   }
   .inner {
     display: inline-flex;
@@ -85,6 +101,19 @@
   .label {
     font-size: 13px;
     color: var(--text-muted);
+  }
+  .tokens {
+    font-size: 12px;
+    color: var(--text-muted);
+    opacity: 0.75;
+    font-variant-numeric: tabular-nums;
+    cursor: default;
+    user-select: none;
+  }
+  .tokens::before {
+    content: "·";
+    margin: 0 7px 0 3px;
+    opacity: 0.6;
   }
   @keyframes orbit {
     to {
