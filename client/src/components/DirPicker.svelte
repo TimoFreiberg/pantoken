@@ -1,5 +1,6 @@
 <script lang="ts">
   import { store } from "../lib/store.svelte.js";
+  import { scrollIndexIntoView } from "../lib/scroll-into-view.js";
 
   // A server-side directory browser for the new-session project picker. The server
   // resolves + reads paths on ITS filesystem (pi runs server-side), so this browses the
@@ -40,7 +41,6 @@
   // Keyboard selection index over the visible rows (.. row + filtered entries).
   let sel = $state(0);
   let lastPath = $state("");
-  let root = $state<HTMLDivElement>();
 
   // Path mode: input starts with / or ~ → Enter navigates to the raw path (server-resolved).
   const isPathMode = $derived(
@@ -252,11 +252,8 @@
     }
   }
 
-  // Keep the keyboard-selected row in view.
-  $effect(() => {
-    const el = root?.querySelector<HTMLElement>(`[data-i="${sel}"]`);
-    el?.scrollIntoView({ block: "nearest" });
-  });
+  // (Keeping the keyboard-selected row in view is handled by use:scrollIndexIntoView on
+  // the picker container below.)
 
   // Open at the draft's current dir (or home), and grab the keyboard.
   $effect(() => {
@@ -289,7 +286,7 @@
   aria-label="Choose project directory"
   data-testid="dir-picker"
   tabindex="-1"
-  bind:this={root}
+  use:scrollIndexIntoView={sel}
   {onkeydown}
 >
   <!-- Path breadcrumb — clickable segments to jump to ancestors. -->

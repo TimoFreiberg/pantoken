@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { CommandInfo } from "@pilot/protocol";
+  import { scrollIndexIntoView } from "../lib/scroll-into-view.js";
 
   // Presentational only: the Composer owns the open/filter/selection state machine and
   // all key handling. We render the list and report intent (pick / hover) back up.
@@ -14,17 +15,10 @@
     onpick: (cmd: CommandInfo) => void;
     onhover: (index: number) => void;
   } = $props();
-
-  let listEl = $state<HTMLDivElement>();
-
-  // Keep the keyboard-selected row in view as the user arrows past the fold.
-  $effect(() => {
-    const el = listEl?.querySelector<HTMLElement>(`[data-i="${selected}"]`);
-    el?.scrollIntoView({ block: "nearest" });
-  });
 </script>
 
-<div id="slash-menu" class="slash-menu" role="listbox" aria-label="Slash commands" data-testid="slash-menu" bind:this={listEl}>
+<!-- use:scrollIndexIntoView keeps the keyboard-selected row in view as you arrow past the fold. -->
+<div id="slash-menu" class="slash-menu" role="listbox" aria-label="Slash commands" data-testid="slash-menu" use:scrollIndexIntoView={selected}>
   {#each items as cmd, i (cmd.name)}
     <button
       type="button"

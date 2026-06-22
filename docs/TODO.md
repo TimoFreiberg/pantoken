@@ -638,6 +638,94 @@ hit a session limit mid-verify; confirm each against the code before acting):_
       strip — that's handled globally by the `strip-pi-docs` pi extension
       (`~/.pi/agent/extensions/`); this is the broader "different prompt for this session."
 
+## 🧹 Code health & drift (2026-06-22 audit)
+
+_Audit lens: Svelte's ["When not to use `$effect`"](https://svelte.dev/docs/svelte/$effect#When-not-to-use-$effect)
+and Scott Spence's ["How I Stop LLMs Drifting In Production Codebases"](https://scottspence.com/posts/how-i-stop-llms-drifting-in-production-codebases).
+The theme is **drift**: a plausible shortcut gets copied until the next session treats it as
+how the app works. Findings below; the cheap/safe ones were fixed in the audit commit, the
+rest are recorded here with rationale for why they weren't done inline._
+
+**Headline: the `$effect` hygiene is already good.** 143 `$derived` vs 46 `$effect` across
+the client, and ~90% of those effects are legitimate escape hatches (direct DOM: focus /
+scrollIntoView / autosize; observers: Resize/Mutation; timers/clocks; browser APIs:
+wakeLock / `document.title` / notifications; outside-click listeners). Crucially nearly
+every effect carries an explaining comment — which is exactly the "require-effect-explanation"
+discipline the drift article recommends. There is **no** `$effect` doing textbook state
+sync (`doubled = count * 2`); those are all `$derived`. So this is maintenance of a healthy
+path, not a cleanup of a bad one.
+
+### Done in this audit (✅ fixed inline)
+
+- [x] **Deduped the copy-pasted "scroll selected row into view" effect** → `lib/scroll-into-view.ts`
+      exports a `scrollIndexIntoView` Svelte **action** (Svelte docs: prefer an action over
+      `$effect` for DOM side effects). It replaced three byte-identical
+      `$effect` + `querySelector('[data-i=...]').scrollIntoView()` copies in `SlashMenu`,
+      `FileMenu`, and `DirPicker` (the latter no longer needs its `bind:this={root}`).
+      Three identical copies is the "copied shortcut becomes the pattern" smell — one shared
+      action stops a fourth slightly-different variant appearing. Verified: svelte-check clean,
+      387 unit + the slash/file-mention/dir-picker e2e (12) green.
+- [x] **Removed a dead ternary in `ApprovalLayer.svelte`** — `c.kind === "input" ? c.initialValue : c.initialValue`
+      (both branches identical) → `c.initialValue ?? ""`. A copy-paste fossil; both `input` and
+      `editor` requests carry `initialValue`.
+
+### `store.svelte.ts` is a 1870-line god-object (🟡 worth doing, ⚠️ not a yolo rewrite)
+
+The drift article's "state modules getting too large and mixed concern" applies squarely. The
+`PilotStore` class owns ~40 `$state` fields spanning unrelated domains (session/transcript,
+sessions list, attention/unread, models/providers, file index, dir/path picker, trust, OAuth,
+composer draft + pending-prompt delivery, sidebar, search, tree, theme, font-scale, SW/app
+update, push, toasts) **and** the transport orchestration: a ~210-line `onServer(msg)` switch
+over ~30 server-message types (lines ~537–768), plus `start` / `authenticate` / `reconnect`.
+
+Good news — the *socket* layer is already cleanly separated in `ws.svelte.ts` (backoff,
+visibility/online reconnect, e2e hooks). The seam to cut next is the **message dispatch**: lift
+`onServer` into an `applyServerMessage(store, msg)` reducer module (or a few per-domain handlers),
+so the store stops being both the wire decoder and the view-state bag. After that, the
+view-state itself could split into cohesive sub-stores (e.g. `composer`, `picker`, `models`,
+`attention`) that the root store composes.
+
+**Why not done inline:** this touches the app's central nervous system, and the delivery /
+reconnect / per-client-focus logic was hard-won (see the 🔴/🟡 done items above — exactly-once
+prompt delivery, stale-idle stop-turn, per-client focus). A mechanical move is *plausible* but
+not *obviously safe*; it wants its own change with the full e2e suite as the net, not a
+side-effect of an `$effect` audit. Recommend the `dev-review-loop` skill for it.
+
+### Oversized components (🟢 opportunistic extractions)
+
+`Sidebar` (1329), `Composer` (1293), `Settings` (1221), `Transcript` (1164) are all >1100 lines
+with mixed concerns — the article's "route component complexity" advisory. None is urgent;
+extract when next editing them rather than in a big-bang pass. Concrete candidates:
+- **Composer**: the `@`-mention + slash autocomplete state machines (query parsing, ranking,
+  debounced server fallback) could move to a `lib/` module unit-testable without the DOM.
+- **Sidebar**: the row-actions overflow popover (open/position/clamp/outside-click, ~120 lines)
+  is a self-contained component.
+- **Settings**: the model-favorites editor is a distinct surface from app preferences.
+
+### Gray-area state-writing effects (👀 watch-list, not a mandate)
+
+These write `$state` inside an `$effect` to **reset/clamp/seed** local UI state on an identity or
+list change. Not the forbidden `doubled = count*2` sync, but the Svelte docs nudge toward
+deriving an effective value at read time or remounting via `{#key}`. All are individually
+benign and well-commented; listed so the pattern stays visible instead of multiplying:
+- **Index clamps** (closest to the antipattern; most mechanically convertible to a clamped
+  `$derived` if ever desired): `Composer` slashSel (~140) & fileSel (~196), `DirPicker` sel (~79),
+  `ModelPicker` sel (~115).
+- **Reset-on-change**: `Composer` pickingCwd (~102), `DirPicker` filter/sel on path change (~63),
+  `ModelPicker` modelQuery on close (~94), `ApprovalLayer` field reset (~17), `QnaInline`
+  collapsed (~33).
+- **Seed-on-open / auto-select**: `DirPicker` top-match (~72), `ModelPicker` expandedProviders
+  (~100), `Settings` expandedFavProviders (~118), `TreeView` valid-row (~45).
+
+### Optional: make the effect discipline a guardrail, not a habit (💡 article's actual thesis)
+
+The drift article's point is that good patterns should be *enforced*, not *hoped for*. The repo
+currently has no lint layer at all (the auto-formatter is harness-level; there's no biome/eslint
+config). If effect-creep ever starts, the lightest guardrail matching the article would be a
+`require-effect-explanation`-style check (an `$effect` in a `.svelte` write must have a nearby
+explaining comment) — the project already follows the convention, so a rule would just hold the
+line. Bigger lift, only worth it if drift actually appears; noted so the option is on record.
+
 ## 💡 Brainstorm (unfiltered — owner to triage into the lanes above)
 
 _Generated 2026-06-17 on request. Cross-checked against existing items + DESIGN/DECISIONS;
