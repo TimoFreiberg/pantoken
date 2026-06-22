@@ -737,33 +737,17 @@ class PilotStore {
         "Still connecting — your prompt is still in the composer.";
       return false;
     }
-    // This is the IndexedDB structured-clone boundary. Svelte `$state` values may be
-    // proxies (draft model/options and composer images both originate in reactive state),
-    // which IDB refuses to clone. Rebuild every nested field as plain data here so all
-    // callers—including future ones—get the same durable behavior.
+    // `$state` values reach here as reactive proxies (composer images, draft
+    // model/options), which IndexedDB refuses to clone. `savePendingPrompt` is the
+    // single boundary that rebuilds plain data, so we can pass nested fields straight
+    // through here and at every other save site.
     const pending: PendingPrompt = {
       kind: prompt.kind,
       text: prompt.text,
-      images: prompt.images?.map(({ type, data, mimeType }) => ({
-        type,
-        data,
-        mimeType,
-      })),
+      images: prompt.images,
       deliverAs: prompt.deliverAs,
       sessionId: prompt.sessionId,
-      newSession: prompt.newSession
-        ? {
-            cwd: prompt.newSession.cwd,
-            worktree: prompt.newSession.worktree,
-            model: prompt.newSession.model
-              ? {
-                  provider: prompt.newSession.model.provider,
-                  modelId: prompt.newSession.model.modelId,
-                }
-              : undefined,
-            thinking: prompt.newSession.thinking,
-          }
-        : undefined,
+      newSession: prompt.newSession,
       promptId: createPromptId(),
       serverId,
       createdAt: new Date().toISOString(),

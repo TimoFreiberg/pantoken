@@ -63,8 +63,47 @@ function transaction<T>(
   );
 }
 
+/** The structured-clone boundary for the outbox. Callers routinely hand us a
+ *  `PendingPrompt` read back out of Svelte `$state` (`store.pendingPrompts`), whose
+ *  entries are deep reactive Proxies — and IndexedDB refuses to clone a proxy
+ *  (`DataCloneError: The object can not be cloned`). A shallow `{...prompt}` at the
+ *  call site does NOT help: the nested `images` / `newSession` survive as proxies.
+ *  Rebuild every nested field as plain data here so all callers — including future
+ *  ones — are safe regardless of how their argument was constructed. */
+function toPlainPrompt(prompt: PendingPrompt): PendingPrompt {
+  return {
+    promptId: prompt.promptId,
+    serverId: prompt.serverId,
+    kind: prompt.kind,
+    text: prompt.text,
+    images: prompt.images?.map(({ type, data, mimeType }) => ({
+      type,
+      data,
+      mimeType,
+    })),
+    deliverAs: prompt.deliverAs,
+    sessionId: prompt.sessionId,
+    newSession: prompt.newSession
+      ? {
+          cwd: prompt.newSession.cwd,
+          worktree: prompt.newSession.worktree,
+          model: prompt.newSession.model
+            ? {
+                provider: prompt.newSession.model.provider,
+                modelId: prompt.newSession.model.modelId,
+              }
+            : undefined,
+          thinking: prompt.newSession.thinking,
+        }
+      : undefined,
+    createdAt: prompt.createdAt,
+    state: prompt.state,
+    error: prompt.error,
+  };
+}
+
 export async function savePendingPrompt(prompt: PendingPrompt): Promise<void> {
-  await transaction("readwrite", (store) => store.put(prompt));
+  await transaction("readwrite", (store) => store.put(toPlainPrompt(prompt)));
 }
 
 export async function deletePendingPrompt(promptId: string): Promise<void> {
