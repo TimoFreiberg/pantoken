@@ -27,3 +27,15 @@ test("non-binary select options meet the 44px touch target", async ({
   await expect(options).toHaveCount(3);
   for (let i = 0; i < 3; i++) await expectTall(options.nth(i));
 });
+
+test("settings collapse headers meet the 44px touch target", async ({
+  page,
+}) => {
+  await page.getByTestId("settings-toggle").click();
+  await expect(page.getByTestId("settings-panel")).toBeVisible();
+  // The Providers / Favorites / Extensions disclosure headers are the primary
+  // collapse affordance — on the phone bottom-sheet they must be comfortably tappable.
+  await expectTall(page.getByTestId("providers-toggle"));
+  await expectTall(page.getByTestId("favorites-toggle"));
+  await expectTall(page.getByTestId("extensions-toggle"));
+});
