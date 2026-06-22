@@ -1341,4 +1341,14 @@
       opacity: 0;
     }
   }
+  /* Reduced motion: the panel/scrim appear instantly rather than sliding up — the
+     same courtesy <Chevron> and `reveal` extend to the collapse animations. */
+  @media (prefers-reduced-motion: reduce) {
+    .scrim,
+    .panel,
+    .oauth-scrim,
+    .oauth-dialog {
+      animation: none;
+    }
+  }
 </style>
