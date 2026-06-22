@@ -310,14 +310,15 @@ async function readHostState(healthUrl: string): Promise<HostState> {
 }
 
 /** Tell the server the staged-update state (sha, or null when up to date) so it can show
- *  or clear the sidebar card, and learn back whether the user clicked "update now".
- *  `applyFailed` resets a stuck "applying" card. Any error → { applying: false }: a flaky
- *  report must never trigger an apply. */
+ *  or clear the sidebar card, and learn back whether the user clicked "update now"
+ *  (`applying`) or "force-update" (`force` — the build-stamp menu). `applyFailed` resets a
+ *  stuck "applying" card. Any error → { applying: false, force: false }: a flaky report
+ *  must never trigger an apply. */
 async function reportUpdate(
   cfg: WatcherConfig,
   sha: string | null,
   applyFailed = false,
-): Promise<{ applying: boolean }> {
+): Promise<{ applying: boolean; force: boolean }> {
   try {
     const res = await fetch(cfg.updateUrl, {
       method: "POST",
@@ -334,13 +335,13 @@ async function reportUpdate(
     });
     if (!res.ok) {
       log(`/update/state returned ${res.status}`);
-      return { applying: false };
+      return { applying: false, force: false };
     }
-    const body = (await res.json()) as { applying?: boolean };
-    return { applying: body.applying === true };
+    const body = (await res.json()) as { applying?: boolean; force?: boolean };
+    return { applying: body.applying === true, force: body.force === true };
   } catch (e) {
     log(`/update/state unreachable (${String(e)})`);
-    return { applying: false };
+    return { applying: false, force: false };
   }
 }
 
@@ -480,10 +481,12 @@ export const initialState: WatcherState = {
   cached: null,
 };
 
-/** One loop cycle. Fetches at most every intervalMs (fast polls reuse the cache); when an
- *  update is staged it reports availability to the server (→ card) and applies it on the
- *  user's click or when unattended & idle. Returns the next state; throws propagate to
- *  runWatcher's per-tick guard. */
+/** One loop cycle. Fetches at most every intervalMs (fast polls reuse the cache). It reports
+ *  state to the server EVERY tick (even when up-to-date) so a force-update request (the
+ *  build-stamp menu) is picked up within one poll instead of waiting for the next ~60s
+ *  fetch; the hub broadcasts only on change, so steady identical reports are silent. Applies
+ *  on the user's click, on a force, or when unattended & idle. Returns the next state; throws
+ *  propagate to runWatcher's per-tick guard. */
 export async function tick(
   cfg: WatcherConfig,
   state: WatcherState,
@@ -496,9 +499,43 @@ export async function tick(
   }
   const short = (s: string) => s.slice(0, 7);
 
+  // Report what we believe is staged (or null when current) and learn back whether the user
+  // asked to apply the staged commit (`applying`, the card) or to force one (`force`, the
+  // build-stamp menu). dry-run mutates nothing, so it can't observe either — that path only
+  // logs what it would do.
+  let applying = false;
+  let force = false;
+  if (!cfg.dryRun) {
+    const r = await reportUpdate(cfg, cached.behind ? cached.remote : null);
+    applying = r.applying;
+    force = r.force;
+  }
+
+  // Force overrides the defer policy: the user just pushed and wants it NOW, viewer or not.
+  // Re-fetch first — the throttle above almost certainly skipped this tick's fetch, so
+  // `cached` predates the push and still reads up-to-date. If origin/main genuinely moved,
+  // apply; if not, it was a no-op (clear any 'Updating…' card the click flipped on).
+  if (force) {
+    cached = await fetchAndCompare(cfg);
+    lastFetchMs = now;
+    if (!cached.behind) {
+      log("force-update requested but already up to date — nothing to apply");
+      await reportUpdate(cfg, null); // clears a staged 'Updating…' card if one was up
+      return { lastNotifiedSha: null, lastFetchMs, cached };
+    }
+    log(`force-update requested — applying ${describeUpdate(cached)}`);
+    try {
+      await applyUpdate(cfg);
+      return initialState;
+    } catch (e) {
+      log(`force apply failed: ${e instanceof Error ? e.message : String(e)}`);
+      await reportUpdate(cfg, cached.remote, true); // un-stick → offer retry via the card
+      return { lastNotifiedSha, lastFetchMs, cached };
+    }
+  }
+
   if (!cached.behind) {
-    // Up to date — clear any card we'd surfaced, then idle.
-    if (lastNotifiedSha !== null && !cfg.dryRun) await reportUpdate(cfg, null);
+    // Up to date — the report above already sent available:false, clearing any card.
     return { lastNotifiedSha: null, lastFetchMs, cached };
   }
 
@@ -516,13 +553,12 @@ export async function tick(
     return initialState; // re-fetch next tick to confirm up to date
   }
 
-  // defer: a client is connected (or a turn is running). Report availability so the card
-  // shows, and learn whether the user clicked "update now".
+  // defer: a client is connected (or a turn is running). The report above surfaced the card
+  // and told us whether the user clicked "update now".
   if (cfg.dryRun) {
     log(`[dry-run] would surface update card (${short(cached.remote)})`);
     return { lastNotifiedSha: cached.remote, lastFetchMs, cached };
   }
-  const { applying } = await reportUpdate(cfg, cached.remote);
   if (applying) {
     log(`update now requested — applying ${short(cached.remote)}`);
     try {
@@ -588,9 +624,13 @@ export async function runWatcher(cfg: WatcherConfig): Promise<never> {
       // long-lived watcher — log loud and retry next interval.
       log(`tick failed: ${e instanceof Error ? e.message : String(e)}`);
     }
-    // Poll fast while an update is pending (snappy "update now"); otherwise sleep until
-    // the next fetch is due.
-    await Bun.sleep(state.cached?.behind ? cfg.pollMs : cfg.intervalMs);
+    // Always poll at the fast cadence so a force-update (build-stamp menu) is picked up
+    // within ~pollMs even when we're otherwise up-to-date — the git *fetch* stays throttled
+    // to intervalMs inside tick(), so this only means a cheap localhost /update/state POST
+    // each loop, not a network fetch. (Dropping the old idle→intervalMs sleep is the price
+    // of a snappy force; the alternative — 60s idle sleeps — leaves a window where a click
+    // right after a push waits up to a minute to be noticed.)
+    await Bun.sleep(cfg.pollMs);
   }
   process.exit(0);
 }

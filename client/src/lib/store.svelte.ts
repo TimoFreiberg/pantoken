@@ -994,6 +994,14 @@ class PilotStore {
   requestAppUpdate(): void {
     send({ type: "applyUpdate" });
   }
+  /** Force an update now (the build-stamp right-click menu) — for clicking right after a
+   *  push to main, before the watcher's next fetch has noticed the commit. Unlike
+   *  requestAppUpdate this isn't a no-op when nothing is staged: the watcher fetches and
+   *  applies on its next poll if origin/main moved. Feedback is the restart/reconnect (and
+   *  a new build hash); a no-op force (already current) shows nothing. */
+  requestForceUpdate(): void {
+    send({ type: "forceUpdate" });
+  }
   /** Re-send the last prompt after a run-failed (the error card's Retry). */
   retryLast(): void {
     if (this.lastPrompt) void this.prompt(this.lastPrompt);

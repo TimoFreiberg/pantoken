@@ -244,6 +244,94 @@
     };
   });
 
+  // Build-stamp context menu (the bottom-left version text). Right-click to copy the build
+  // hash or force an app update — reuses the .menu/.menu-item popover styling. A desktop
+  // affordance: right-click only, so it's keyboard-reachable via the menu's own C/U hotkeys
+  // once open, but there's no touch long-press (the stamp is a desktop sidebar footer).
+  let buildMenuPos = $state<MenuPos | null>(null);
+  let buildMenuEl = $state<HTMLDivElement | null>(null);
+  let buildClamped = false;
+  function openBuildMenu(e: MouseEvent): void {
+    e.preventDefault();
+    buildClamped = false;
+    buildMenuPos = { top: e.clientY, left: e.clientX };
+  }
+  function closeBuildMenu(): void {
+    buildMenuPos = null;
+  }
+  async function copyBuildHash(): Promise<void> {
+    await store.copyToClipboard(buildHash);
+    closeBuildMenu();
+  }
+  function forceUpdate(): void {
+    store.requestForceUpdate();
+    closeBuildMenu();
+  }
+
+  // Pull the build menu back inside the viewport once mounted: it opens at the cursor near
+  // the bottom-left edge, so it almost always needs lifting up. One-shot per open (buildClamped
+  // resets in openBuildMenu) so this self-write doesn't loop.
+  $effect(() => {
+    const el = buildMenuEl;
+    if (!buildMenuPos || !el || buildClamped) return;
+    const m = 8;
+    const r = el.getBoundingClientRect();
+    const next: MenuPos = { ...buildMenuPos };
+    if (next.top + r.height > window.innerHeight - m)
+      next.top = Math.max(m, window.innerHeight - m - r.height);
+    if (next.left != null && next.left + r.width > window.innerWidth - m)
+      next.left = Math.max(m, window.innerWidth - m - r.width);
+    buildClamped = true;
+    if (next.top !== buildMenuPos.top || next.left !== buildMenuPos.left)
+      buildMenuPos = next;
+  });
+
+  // Dismiss the build menu on an outside click, Escape, or scroll/resize (which would
+  // detach the fixed popover). The click listener is deferred so the opening interaction
+  // doesn't immediately re-close it. While open, C copies the hash and U forces an update
+  // (mirroring the kbd hints) — unless focus is in a text field, where they should type.
+  $effect(() => {
+    if (!buildMenuPos) return;
+    const onClick = (e: MouseEvent): void => {
+      const t = e.target as HTMLElement;
+      if (!t.isConnected) return;
+      if (!t.closest(".menu") && !t.closest(".version")) closeBuildMenu();
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") {
+        closeBuildMenu();
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement;
+      if (
+        t.tagName === "INPUT" ||
+        t.tagName === "TEXTAREA" ||
+        t.isContentEditable
+      )
+        return;
+      if (e.key === "c") {
+        e.preventDefault();
+        void copyBuildHash();
+      } else if (e.key === "u") {
+        e.preventDefault();
+        forceUpdate();
+      }
+    };
+    const onDetach = (): void => closeBuildMenu();
+    const id = setTimeout(() => document.addEventListener("click", onClick), 0);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onDetach, true);
+    window.addEventListener("resize", onDetach);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener("click", onClick);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onDetach, true);
+      window.removeEventListener("resize", onDetach);
+    };
+  });
+
   // Per-project collapse state, keyed by cwd. Empty = everything expanded.
   let collapsed = $state<Record<string, boolean>>({});
   function toggleGroup(cwd: string): void {
@@ -727,16 +815,49 @@
   {/if}
 
   <!-- Build stamp: last commit hash + date, baked in at build time. Quiet footer so
-       you can tell which version is live without it competing with the session list. -->
+       you can tell which version is live without it competing with the session list.
+       Right-click for build actions (copy hash / force-update). -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="version"
     data-testid="version"
-    title={buildDate
+    title={(buildDate
       ? `pilot build ${buildHash} · committed ${buildDate}`
-      : `pilot build ${buildHash}`}
+      : `pilot build ${buildHash}`) + " — right-click for build actions"}
+    oncontextmenu={openBuildMenu}
   >
     {buildLabel}
   </div>
+  {#if buildMenuPos}
+    <div
+      class="menu"
+      role="menu"
+      data-testid="build-menu"
+      bind:this={buildMenuEl}
+      style={`top:${buildMenuPos.top}px;${buildMenuPos.left != null ? `left:${buildMenuPos.left}px` : `right:${buildMenuPos.right}px`}`}
+    >
+      <button
+        class="menu-item"
+        role="menuitem"
+        data-testid="copy-build-hash"
+        title={`Copy the build commit hash to the clipboard: ${buildHash}`}
+        onclick={copyBuildHash}
+      >
+        <span>Copy build hash</span>
+        <kbd class="hotkey" aria-hidden="true">C</kbd>
+      </button>
+      <button
+        class="menu-item"
+        role="menuitem"
+        data-testid="force-update"
+        title="Force the app to pull the latest main, rebuild, and restart now — for clicking right after a push"
+        onclick={forceUpdate}
+      >
+        <span>Force-update</span>
+        <kbd class="hotkey" aria-hidden="true">U</kbd>
+      </button>
+    </div>
+  {/if}
 </aside>
 
 <style>
