@@ -202,6 +202,16 @@
   function close(): void {
     store.closeSettings();
   }
+  // Escape in a section search clears the filter first (and stops the event before the
+  // window handler closes the whole panel) — mirrors the sidebar search. An empty box
+  // lets Escape bubble through to close the panel as usual.
+  function searchEsc(e: KeyboardEvent, clear: () => void, hasValue: boolean): void {
+    if (e.key === "Escape" && hasValue) {
+      e.preventDefault();
+      e.stopPropagation();
+      clear();
+    }
+  }
   function onKey(e: KeyboardEvent): void {
     if (e.key === "Escape" && open) {
       close();
@@ -392,6 +402,7 @@
               autocapitalize="off"
               autocorrect="off"
               bind:value={providerQuery}
+              onkeydown={(e) => searchEsc(e, () => (providerQuery = ""), pq !== "")}
             />
           {/if}
           <div class="providers">
@@ -562,6 +573,7 @@
               autocapitalize="off"
               autocorrect="off"
               bind:value={favQuery}
+              onkeydown={(e) => searchEsc(e, () => (favQuery = ""), fq !== "")}
             />
             <div class="models">
               {#each favGroups as g (g.provider)}
@@ -645,6 +657,7 @@
               autocapitalize="off"
               autocorrect="off"
               bind:value={extQuery}
+              onkeydown={(e) => searchEsc(e, () => (extQuery = ""), xq !== "")}
             />
           {/if}
           <div class="exts">
