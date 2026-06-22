@@ -536,17 +536,8 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    animation: reveal 0.16s ease;
-  }
-  @keyframes reveal {
-    from {
-      opacity: 0;
-      transform: translateY(-2px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
+    /* The open animation is the shared `transition:reveal` (slide) on this element —
+       no separate CSS keyframe (it would double-animate and fight the height glide). */
   }
   pre {
     margin: 0;
