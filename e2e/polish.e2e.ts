@@ -191,6 +191,27 @@ test("transcript: full markdown renders (headings, table, code, links)", async (
   await expect(link).toHaveAttribute("rel", /noopener/);
 });
 
+test("transcript: code blocks get a copy button that copies the code", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await drive(page, "markdown");
+  const row = page.locator(".row.assistant").last();
+  // The fenced code block is wrapped with a pinned copy button (top-right).
+  const wrap = row.locator(".code-block", { has: page.locator("pre") });
+  await expect(wrap).toBeVisible();
+  const copy = wrap.getByRole("button", { name: "Copy code" });
+  await expect(copy).toHaveCount(1);
+  await copy.click();
+  // Post-copy: the button flips to the "Copied" confirmation state.
+  await expect(wrap.getByRole("button", { name: "Copied" })).toBeVisible();
+  // The clipboard holds the code block's source (not the surrounding prose).
+  const clip = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clip).toContain("function greet(name: string)");
+  expect(clip).not.toContain("Markdown showcase");
+});
+
 test("type-to-focus: a printable key focuses the composer", async ({
   page,
 }) => {
