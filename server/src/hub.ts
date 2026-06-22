@@ -157,6 +157,12 @@ export class SessionHub {
   // sidebar card's "update now" — the watcher reads it back on its next poll and applies.
   private updateSha: string | null = null;
   private applying = false;
+  // Set by a `forceUpdate` message (the build-stamp menu, for clicking right after a push).
+  // The watcher consumes it on its next /update/state poll and does an immediate fetch +
+  // apply, bypassing the ~60s fetch cadence and the defer-while-connected policy. Read-once:
+  // reportUpdate hands it to that one caller and clears it (the apply's restart wipes hub
+  // state anyway; a failed apply un-flags via applyFailed).
+  private forceRequested = false;
   // OAuth login (Settings panel) is a GLOBAL interactive flow — it writes pi's shared
   // auth.json, not a session — so it rides its own wire messages, not the session-scoped
   // Host UI channel. While a login runs, its prompts wait here keyed by requestId; an
@@ -1403,6 +1409,18 @@ export class SessionHub {
           this.broadcastUpdateStatus();
         }
         return;
+      case "forceUpdate":
+        // User picked "force-update" off the build-stamp menu (typically right after
+        // pushing to main). Flag the force for the watcher; unlike applyUpdate this is NOT
+        // gated on a staged commit — the watcher will fetch-and-apply on its next poll even
+        // if it hasn't noticed the new commit yet. If a commit *is* already staged, also
+        // flip the card to "Updating…" for immediate feedback (same as applyUpdate).
+        this.forceRequested = true;
+        if (this.updateSha !== null && !this.applying) {
+          this.applying = true;
+          this.broadcastUpdateStatus();
+        }
+        return;
       case "mock":
         this.driver.runScript?.(msg.script);
         return;
@@ -1426,6 +1444,7 @@ export class SessionHub {
     this.sessionTitles.clear();
     this.updateSha = null;
     this.applying = false;
+    this.forceRequested = false;
     this.driver.reset?.(opts);
     this.seedDefault();
     for (const conn of this.clients.values()) {
@@ -1470,9 +1489,14 @@ export class SessionHub {
 
   /** Watcher → server: report the staged-update commit (or null when up to date), and
    *  optionally that an attempted apply failed (resets a stuck "applying" so the card
-   *  offers retry). Broadcasts updateStatus on change. Returns `applying` so the watcher
-   *  learns on this same poll whether the user clicked "update now". */
-  reportUpdate(sha: string | null, applyFailed = false): { applying: boolean } {
+   *  offers retry). Broadcasts updateStatus on change. Returns `applying` (did the user
+   *  click "update now"?) and `force` (did they pick "force-update"?) so the watcher learns
+   *  both on this same poll. `force` is read-once — handed to this caller and cleared — so a
+   *  force triggers exactly one fetch-and-apply. */
+  reportUpdate(
+    sha: string | null,
+    applyFailed = false,
+  ): { applying: boolean; force: boolean } {
     let changed = false;
     if (sha !== this.updateSha) {
       this.updateSha = sha;
@@ -1483,8 +1507,11 @@ export class SessionHub {
       this.applying = false;
       changed = true;
     }
+    if (applyFailed) this.forceRequested = false; // a failed force shouldn't re-fire
     if (changed) this.broadcastUpdateStatus();
-    return { applying: this.applying };
+    const force = this.forceRequested;
+    this.forceRequested = false; // read-once: this poll owns the force
+    return { applying: this.applying, force };
   }
 
   private broadcastUpdateStatus(): void {

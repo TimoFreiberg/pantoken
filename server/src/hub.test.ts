@@ -1553,7 +1553,10 @@ describe("desktop update relay", () => {
     hub.handleClient(a.send, { type: "applyUpdate" });
     expect(lastUpdate(a)).toMatchObject({ available: true, applying: true });
     // The watcher's next poll (any sha report) returns applying=true → it applies.
-    expect(hub.reportUpdate("abc123")).toEqual({ applying: true });
+    expect(hub.reportUpdate("abc123")).toEqual({
+      applying: true,
+      force: false,
+    });
   });
 
   test("applyUpdate is a no-op when nothing is staged", () => {
@@ -1570,7 +1573,7 @@ describe("desktop update relay", () => {
     hub.addClient(a.send);
     hub.reportUpdate("abc123");
     hub.handleClient(a.send, { type: "applyUpdate" });
-    expect(hub.reportUpdate(null)).toEqual({ applying: false });
+    expect(hub.reportUpdate(null)).toEqual({ applying: false, force: false });
     expect(lastUpdate(a)).toMatchObject({ available: false, applying: false });
   });
 
@@ -1582,7 +1585,45 @@ describe("desktop update relay", () => {
     hub.handleClient(a.send, { type: "applyUpdate" });
     expect(lastUpdate(a)).toMatchObject({ applying: true });
     // A failed apply reports back applyFailed → card returns to "update now".
-    expect(hub.reportUpdate("abc123", true)).toEqual({ applying: false });
+    expect(hub.reportUpdate("abc123", true)).toEqual({
+      applying: false,
+      force: false,
+    });
     expect(lastUpdate(a)).toMatchObject({ available: true, applying: false });
+  });
+
+  test("forceUpdate flags a force the watcher reads once, even with nothing staged", () => {
+    const hub = new SessionHub(new FakeDriver());
+    const a = client();
+    hub.addClient(a.send);
+    // Nothing staged (just pushed; the watcher hasn't fetched yet).
+    hub.handleClient(a.send, { type: "forceUpdate" });
+    // No card to show (nothing staged), but the next watcher poll learns force=true…
+    expect(hub.reportUpdate(null)).toEqual({ applying: false, force: true });
+    // …exactly once — it's read-once, so a second poll no longer reports it.
+    expect(hub.reportUpdate(null)).toEqual({ applying: false, force: false });
+  });
+
+  test("forceUpdate also flips a staged card to applying (immediate feedback)", () => {
+    const hub = new SessionHub(new FakeDriver());
+    const a = client();
+    hub.addClient(a.send);
+    hub.reportUpdate("abc123");
+    hub.handleClient(a.send, { type: "forceUpdate" });
+    expect(lastUpdate(a)).toMatchObject({ available: true, applying: true });
+    // The watcher's next poll learns both the apply and the force.
+    expect(hub.reportUpdate("abc123")).toEqual({ applying: true, force: true });
+  });
+
+  test("a failed force clears the force flag so it doesn't re-fire", () => {
+    const hub = new SessionHub(new FakeDriver());
+    const a = client();
+    hub.addClient(a.send);
+    hub.handleClient(a.send, { type: "forceUpdate" });
+    // The watcher fetched, found the commit, tried to apply, and it failed.
+    expect(hub.reportUpdate("abc123", true)).toEqual({
+      applying: false,
+      force: false,
+    });
   });
 });

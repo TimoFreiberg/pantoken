@@ -380,6 +380,12 @@ export type ClientMessage =
    *  it applying and the update-watcher picks it up on its next poll — pull, rebuild,
    *  restart. No-op if nothing is staged. */
   | { type: "applyUpdate" }
+  /** Force an update *now* (the build-stamp right-click menu), for clicking right after a
+   *  push to main — before the watcher's next ~60s fetch has even noticed the new commit.
+   *  Unlike `applyUpdate` it's NOT a no-op when nothing is staged: it flags a force the
+   *  watcher reads on its next poll, then immediately fetches and applies if origin/main
+   *  moved (pull → rebuild → restart). No-op only if the clone is already current. */
+  | { type: "forceUpdate" }
   /** Dev-only: drive the mock fixture to a named scripted state. */
   | { type: "mock"; script: string }
   | { type: "ping" };
