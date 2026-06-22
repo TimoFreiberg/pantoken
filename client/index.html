@@ -28,6 +28,11 @@
         // load and on every theme change).
         var tc = document.querySelector('meta[name="theme-color"]');
         if (tc) tc.setAttribute("content", m === "dark" ? "#242522" : "#f7f6f2");
+        // Pre-paint the transcript text-size knob (lib/font-scale.ts owns the key) so a
+        // zoomed-in reader doesn't see a reflow on load.
+        var fs = parseFloat(localStorage.getItem("pilot.fontScale"));
+        if (fs >= 0.85 && fs <= 1.7)
+          document.documentElement.style.setProperty("--font-scale", String(fs));
       } catch (e) {}
     </script>
   </head>

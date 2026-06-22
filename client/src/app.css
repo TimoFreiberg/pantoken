@@ -48,7 +48,14 @@
   --shadow-card: 0 1px 2px rgba(31, 30, 29, 0.04), 0 4px 14px rgba(31, 30, 29, 0.05);
   --shadow-pop: 0 8px 30px rgba(31, 30, 29, 0.14);
 
+  /* Reading measure for prose + chrome. --maxw-wide is the breakout ceiling: only
+     fenced code and tables in assistant turns may grow into it, using the desktop
+     gutter that prose deliberately leaves empty. */
   --maxw: 1000px;
+  --maxw-wide: 1400px;
+  /* Transcript text-size knob (lib/font-scale.ts; ⌘=/⌘-/⌘0). Default 1; the JS sets a
+     concrete value on <html>. Declared here so the var always resolves. */
+  --font-scale: 1;
 }
 
 :root[data-theme="dark"] {
@@ -98,7 +105,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
-  font-size: 15.5px;
+  font-size: 16px;
   line-height: 1.62;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

@@ -20,6 +20,7 @@
   import { notifyIfUnfocused } from "./lib/notify.js";
   import { wakeLock } from "./lib/wake-lock.js";
   import { trackKeyboardInset } from "./lib/keyboard-inset.js";
+  import { STEP as FONT_STEP } from "./lib/font-scale.js";
 
   // Dev affordance: ?dev shows buttons that drive the mock to any UI state, so the
   // screenshot harness can reach approval/ambient/error states deterministically.
@@ -27,6 +28,23 @@
   const scripts = ["reply", "markdown", "search", "thinkingtools", "skill", "confirm", "trust", "input", "qna", "ambient", "compat", "bgrun", "bgwait", "queue", "deliverqueue", "initializing", "editdiff", "images", "error", "idle", "streamhold", "staleidle", "pendinghold", "timeout", "yesno", "journalnudge", "contextfull", "longoutput", "selectmany"];
 
   onMount(() => store.start());
+
+  // Transcript zoom: intercept the browser-zoom keys (⌘=/⌘+ grow, ⌘- shrink, ⌘0 reset)
+  // and drive our own persisted, PWA-safe text-scale instead. Modifier-gated, so plain
+  // typing of = / - / 0 is untouched.
+  function onZoomKey(e: KeyboardEvent): void {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+    if (e.key === "=" || e.key === "+" || e.code === "NumpadAdd") {
+      e.preventDefault();
+      store.bumpFontScale(FONT_STEP);
+    } else if (e.key === "-" || e.key === "_" || e.code === "NumpadSubtract") {
+      e.preventDefault();
+      store.bumpFontScale(-FONT_STEP);
+    } else if (e.key === "0" || e.code === "Numpad0") {
+      e.preventDefault();
+      store.resetFontScale();
+    }
+  }
 
   // Publish the on-screen keyboard's overlap as --keyboard-inset so the composer stays pinned
   // above it on a phone (the CSS below applies it on touch). No-op without visualViewport.
@@ -137,8 +155,7 @@
   }
 </script>
 
-<svelte:window onkeydown={onGlobalKeydown} />
-
+<svelte:window onkeydown={(e) => { onZoomKey(e); onGlobalKeydown(e); }} />
 {#if store.unauthorized}
   <TokenGate />
 {:else}
