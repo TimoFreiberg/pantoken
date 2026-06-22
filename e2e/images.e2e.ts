@@ -56,6 +56,11 @@ test("pasting a screenshot attaches it and image-only send stays visible", async
   await expect(send).toBeEnabled();
   await send.click();
   await expect(page.getByTestId("sent-image")).toBeVisible();
+  // Regression: the outbox persists each prompt to IndexedDB, which refuses to clone
+  // Svelte `$state` proxies. Image-bearing prompts must reach the outbox as plain data;
+  // a proxy leak surfaces a "couldn't update the prompt outbox" banner here (delivery
+  // still happens, so the image above shows up either way — assert the banner is absent).
+  await expect(page.getByText("prompt outbox")).toHaveCount(0);
 });
 
 test("a thumbnail opens a full-screen preview that walks the batch and dismisses", async ({

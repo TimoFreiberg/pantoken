@@ -279,12 +279,9 @@
       return;
     }
     if (!text.trim() && images.length === 0) return;
-    // `$state` wraps nested objects in proxies; IndexedDB's structured clone rejects
-    // proxies. Copy each attachment back to a plain JSON object before outbox persistence.
-    const imgs =
-      images.length > 0
-        ? images.map(({ type, data, mimeType }) => ({ type, data, mimeType }))
-        : undefined;
+    // These are `$state` proxies; that's fine to pass on. `savePendingPrompt` is the
+    // single boundary that rebuilds plain data before IndexedDB's structured clone.
+    const imgs = images.length > 0 ? images : undefined;
     submitting = true;
     let queued = false;
     try {
