@@ -16,6 +16,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// Accumulates raw watcher stdout until a newline; see consumeWatcherOutput.
     private var watcherOutBuffer = Data()
 
+    // "Updating Pilot…" overlay, raised over the webview for the whole apply (build +
+    // restart). Native, not web: the web client is exactly what's restarting, so it can't
+    // paint its own progress — and the restart leaves it showing a stale, offline page.
+    // Driven by the watcher's `apply` events; torn down once the rebuilt server is healthy
+    // and the webview has reloaded the fresh build (see webView(_:didFinish:)).
+    private var overlay: NSVisualEffectView?
+    private var overlaySpinner: NSProgressIndicator?
+    private var overlayLabel: NSTextField?
+    private var overlayFailsafe: Timer?
+    /// True between the first `apply` event and the post-update reload's didFinish — gates
+    /// the teardown so an unrelated page load doesn't dismiss an overlay that isn't ours.
+    private var updateReloadPending = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMenu()
 
@@ -191,7 +204,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
             let event = obj["event"] as? String
         else { return }
-        if event == "update-deferred" { postUpdateNotification() }
+        switch event {
+        case "update-deferred":
+            postUpdateNotification()
+        case "apply":
+            // One per apply phase (starting → installing? → building → restarting, or failed).
+            // A failure drops the overlay (the sidebar card offers retry); any other phase
+            // raises it / refreshes its label.
+            if obj["phase"] as? String == "failed" {
+                hideUpdateOverlay()
+            } else {
+                presentUpdateOverlay(obj["label"] as? String ?? "Updating Pilot…")
+            }
+        default:
+            break
+        }
     }
 
     private func postUpdateNotification() {
@@ -203,6 +230,102 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let req = UNNotificationRequest(
             identifier: "pilot-update-ready", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req)
+    }
+
+    // MARK: - Update overlay
+
+    /// Raise (or refresh the label of) the "Updating Pilot…" overlay over the webview. Built
+    /// from a frosted NSVisualEffectView scrim + a centered indeterminate spinner + a phase
+    /// label — an honest "working, no ETA" busy state (the build emits no real progress, so a
+    /// progress bar would be fake). Added ABOVE the webview explicitly; if WKWebView ever
+    /// composites over it, the fallback is a separate child overlay window.
+    private func presentUpdateOverlay(_ label: String) {
+        updateReloadPending = true
+        armOverlayFailsafe()
+
+        if let scrim = overlay {
+            overlayLabel?.stringValue = label
+            scrim.animator().alphaValue = 1  // in case a fade-out was mid-flight
+            return
+        }
+        guard let host = window?.contentView, let webView else { return }
+
+        let scrim = NSVisualEffectView(frame: host.bounds)
+        scrim.autoresizingMask = [.width, .height]
+        scrim.material = .hudWindow
+        scrim.blendingMode = .withinWindow
+        scrim.state = .active
+        scrim.wantsLayer = true
+        // Pin a dark vibrancy so the spinner + label read as light on the frost regardless
+        // of the system theme.
+        scrim.appearance = NSAppearance(named: .vibrantDark)
+
+        let spinner = NSProgressIndicator()
+        spinner.style = .spinning
+        spinner.isIndeterminate = true
+        spinner.controlSize = .large
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.startAnimation(nil)
+
+        let text = NSTextField(labelWithString: label)
+        text.font = .systemFont(ofSize: 13, weight: .medium)
+        text.textColor = .secondaryLabelColor
+        text.alignment = .center
+        text.translatesAutoresizingMaskIntoConstraints = false
+
+        scrim.addSubview(spinner)
+        scrim.addSubview(text)
+        NSLayoutConstraint.activate([
+            spinner.centerXAnchor.constraint(equalTo: scrim.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: scrim.centerYAnchor, constant: -14),
+            text.topAnchor.constraint(equalTo: spinner.bottomAnchor, constant: 18),
+            text.centerXAnchor.constraint(equalTo: scrim.centerXAnchor),
+        ])
+
+        scrim.alphaValue = 0
+        host.addSubview(scrim, positioned: .above, relativeTo: webView)
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.18
+            scrim.animator().alphaValue = 1
+        }
+
+        overlay = scrim
+        overlaySpinner = spinner
+        overlayLabel = text
+    }
+
+    /// Fade out + remove the overlay. Called on the post-update reload finishing, on an
+    /// apply failure, on an unrecoverable server, or by the failsafe timer.
+    private func hideUpdateOverlay() {
+        updateReloadPending = false
+        overlayFailsafe?.invalidate()
+        overlayFailsafe = nil
+        guard let scrim = overlay else { return }
+        overlaySpinner?.stopAnimation(nil)
+        overlay = nil
+        overlaySpinner = nil
+        overlayLabel = nil
+        NSAnimationContext.runAnimationGroup(
+            { ctx in
+                ctx.duration = 0.2
+                scrim.animator().alphaValue = 0
+            },
+            completionHandler: { scrim.removeFromSuperview() })
+    }
+
+    /// Drop the overlay if the teardown signal never arrives (e.g. a restart that can't be
+    /// SIGTERM'd, or a missed event) so a modal scrim can't strand the window forever.
+    private func armOverlayFailsafe() {
+        overlayFailsafe?.invalidate()
+        // Re-armed at every phase, so this only has to outlast the longest single phase
+        // (the build / a cold `bun install`). 5 min is comfortably above that; if a phase
+        // somehow overruns it the next `apply` event re-raises the overlay anyway.
+        overlayFailsafe = Timer.scheduledTimer(
+            withTimeInterval: 300, repeats: false
+        ) { [weak self] _ in
+            NSLog("Pilot: update overlay failsafe fired — tearing it down")
+            self?.hideUpdateOverlay()
+        }
     }
 
     // MARK: - Notifications (UNUserNotificationCenterDelegate)
@@ -263,6 +386,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func presentFatal(_ message: String) {
+        hideUpdateOverlay()
         let alert = NSAlert()
         alert.messageText = "Pilot can't start"
         alert.informativeText = message
@@ -334,6 +458,14 @@ extension AppDelegate: WKUIDelegate {
 // MARK: - Navigation routing + downloads (WKNavigationDelegate)
 
 extension AppDelegate: WKNavigationDelegate {
+    /// Tear down the update overlay once the rebuilt server is healthy AND the webview has
+    /// reloaded the fresh build (onHealthy(firstTime:false) → reload → here). Gated on
+    /// updateReloadPending so an ordinary page load doesn't dismiss it; the SPA routes
+    /// client-side, so the only real navigations during an update are our reload.
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if updateReloadPending { hideUpdateOverlay() }
+    }
+
     /// Keep the chromeless window on the app's own origin. A user-clicked external link
     /// opens in the system browser; an `<a download>` (shouldPerformDownload) becomes a
     /// native download. Everything else — the initial load, reloads, same-origin nav,
