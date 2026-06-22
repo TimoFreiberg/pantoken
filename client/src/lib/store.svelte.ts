@@ -64,6 +64,19 @@ export interface Toast {
   action?: { label: string; run: () => void };
 }
 
+/** A view in the back/forward navigation history (⌘[ / ⌘]): a focused session, or a
+ *  pending new-session draft identified by its project cwd. Client-only view state. */
+type NavEntry =
+  | { kind: "session"; sessionId: string }
+  | { kind: "draft"; cwd: string };
+
+function navEntryEquals(a: NavEntry, b: NavEntry): boolean {
+  if (a.kind !== b.kind) return false;
+  return a.kind === "session"
+    ? a.sessionId === (b as { sessionId: string }).sessionId
+    : a.cwd === (b as { cwd: string }).cwd;
+}
+
 class PilotStore {
   session = $state<SessionState>(initialSessionState());
   serverId = $state<string | null>(loadLastServerId());
@@ -244,9 +257,92 @@ class PilotStore {
   // Bump to ask the composer textarea to retake focus — e.g. after the model/effort
   // menu closes from a keyboard-driven flow. A counter so each request re-fires.
   focusComposerN = $state(0);
+  // The most recently selected project's cwd (a session's cwd, or a new-session draft's
+  // target). Persisted per-device so ⌘N defaults a fresh draft there even on a cold
+  // landing with no session restored. Maintained by setLastProjectCwd.
+  lastProjectCwd = $state(loadLastProjectCwd());
 
   focusComposer(): void {
     this.focusComposerN++;
+  }
+
+  // Back/forward navigation history (⌘[ / ⌘]). A stack of views — focused sessions and
+  // new-session drafts — in visit order; `navIndex` is the current position. Opening a
+  // session or starting a draft truncates any forward entries and appends. Replaying an
+  // entry sets `navigating` so the open/startDraft it triggers doesn't re-record the step.
+  // Plain fields (no UI reads them yet), never sent upstream.
+  private navStack: NavEntry[] = [];
+  private navIndex = -1;
+  private navigating = false;
+
+  /** Append `entry` as the current view, dropping any forward history. No-op while
+   *  replaying a back/forward step, or when it matches the current entry — so reconnect/
+   *  boot re-opening the same session never stacks a duplicate. */
+  private pushNav(entry: NavEntry): void {
+    if (this.navigating) return;
+    const cur = this.navStack[this.navIndex];
+    if (cur && navEntryEquals(cur, entry)) return;
+    this.navStack = [...this.navStack.slice(0, this.navIndex + 1), entry];
+    this.navIndex = this.navStack.length - 1;
+  }
+
+  /** Show the history entry at `index`, returning whether it could be shown (a session
+   *  since deleted can't). Sets `navigating` so the open/startDraft it fires isn't
+   *  re-recorded as a fresh step. */
+  private applyNav(index: number): boolean {
+    const entry = this.navStack[index];
+    if (!entry) return false;
+    if (entry.kind === "session") {
+      const target = this.sessions.find((s) => s.sessionId === entry.sessionId);
+      if (!target) return false;
+      this.navigating = true;
+      try {
+        this.openSession(target.path);
+      } finally {
+        this.navigating = false;
+      }
+    } else {
+      this.navigating = true;
+      try {
+        this.startDraft(entry.cwd);
+      } finally {
+        this.navigating = false;
+      }
+    }
+    this.navIndex = index;
+    return true;
+  }
+
+  /** ⌘[ — step back through visited views, skipping any whose session has vanished. */
+  navBack(): void {
+    for (let i = this.navIndex - 1; i >= 0; i--) if (this.applyNav(i)) return;
+  }
+  /** ⌘] — step forward through views revisited after going back. */
+  navForward(): void {
+    for (let i = this.navIndex + 1; i < this.navStack.length; i++)
+      if (this.applyNav(i)) return;
+  }
+
+  /** ⌘N — open a new-session draft, defaulting its project to the one you're in (the
+   *  focused session's cwd), else the last project you selected, else the server's
+   *  default ($HOME). Already drafting → just refocus the composer. */
+  newSessionHotkey(): void {
+    if (this.draft) {
+      this.focusComposer();
+      return;
+    }
+    const viewedId = this.session.ref?.sessionId ?? this.activeSessionId;
+    const active = this.sessions.find((s) => s.sessionId === viewedId)?.cwd;
+    this.startDraft(active || this.lastProjectCwd || this.defaultNewSessionCwd);
+  }
+
+  /** Remember the most recently selected project (a session's cwd, or a draft's target);
+   *  persisted per-device so ⌘N's default survives a reload with no session restored. */
+  private setLastProjectCwd(cwd: string): void {
+    const c = cwd.trim();
+    if (!c || c === this.lastProjectCwd) return;
+    this.lastProjectCwd = c;
+    persistLastProjectCwd(c);
   }
 
   // Bump to ask the transcript to jump to its bottom. Set whenever the user sends a
@@ -965,9 +1061,17 @@ class PilotStore {
     // before the composer re-points; navigating to a session exits any new-session draft.
     this.stashDraft();
     this.draft = null;
-    const id = this.sessions.find((s) => s.path === path)?.sessionId;
+    const entry = this.sessions.find((s) => s.path === path);
+    const id = entry?.sessionId;
     // Restore the target's saved draft into the composer (empty if none).
     this.loadDraft(id ? `s:${id}` : "none");
+    // Record this view for ⌘[ / ⌘] history and remember its project for ⌘N. Done before
+    // the no-switch early-return so exiting a draft onto the active session still records
+    // the move from draft → session.
+    if (id) {
+      this.pushNav({ kind: "session", sessionId: id });
+      if (entry?.cwd) this.setLastProjectCwd(entry.cwd);
+    }
     // Same session (e.g. tapped the active row while drafting) — we've exited the draft
     // and restored its text; nothing to switch.
     if (!switching) return;
@@ -1120,6 +1224,7 @@ class PilotStore {
           this.openSession(requested.path);
         } else {
           this.loadDraft(`s:${requested.sessionId}`);
+          this.pushNav({ kind: "session", sessionId: requested.sessionId });
         }
         return;
       }
@@ -1143,8 +1248,10 @@ class PilotStore {
       this.startDraft(this.defaultNewSessionCwd);
     } else if (!this.draft && this.activeSessionId) {
       // Booted/reconnected straight onto a session — restore its saved draft so a reload
-      // doesn't lose a half-typed prompt.
+      // doesn't lose a half-typed prompt, and seed it as the initial back/forward entry
+      // (this path skips openSession, so nothing else records it).
       this.loadDraft(`s:${this.activeSessionId}`);
+      this.pushNav({ kind: "session", sessionId: this.activeSessionId });
     }
   }
 
@@ -1181,6 +1288,9 @@ class PilotStore {
     };
     // Restore this project's pending new-session draft, if any (key now resolves to n:cwd).
     this.loadDraft(this.composerDraftKey);
+    // Record the draft view for ⌘[ / ⌘] history and remember its project for ⌘N.
+    this.pushNav({ kind: "draft", cwd });
+    if (cwd) this.setLastProjectCwd(cwd);
   }
   cancelDraft(): void {
     // Keep the new-session draft for next time, then drop back to the active session's draft.
@@ -1578,6 +1688,26 @@ function persistHideThinking(hide: boolean): void {
 const DRAFTS_KEY = "pilot.composerDrafts";
 const LAST_SESSION_PREFIX = "pilot.lastSession.";
 const LAST_SERVER_KEY = "pilot.lastServerId";
+
+const LAST_PROJECT_CWD_KEY = "pilot.lastProjectCwd";
+
+function loadLastProjectCwd(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return localStorage.getItem(LAST_PROJECT_CWD_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function persistLastProjectCwd(cwd: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(LAST_PROJECT_CWD_KEY, cwd);
+  } catch {
+    // Best effort — only affects ⌘N's default on a cold landing.
+  }
+}
 
 function loadLastServerId(): string | null {
   if (typeof window === "undefined") return null;
