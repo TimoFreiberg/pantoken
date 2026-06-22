@@ -147,6 +147,33 @@ test("copy button fades back out once the pointer leaves the message", async ({
     .toBe("0");
 });
 
+test("user prompt footer offers a copy button next to branch; it copies the prompt", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const user = page.locator(".row.user").first();
+  await user.hover();
+  const copy = user.getByRole("button", { name: "Copy message" });
+  const branch = user.getByRole("button", { name: "Branch from this prompt" });
+  await expect(copy).toBeVisible();
+  await expect(branch).toBeVisible();
+  // Copy sits to the LEFT of branch in the footer (matches the assistant order).
+  const copyBox = await copy.boundingBox();
+  const branchBox = await branch.boundingBox();
+  expect(copyBox).not.toBeNull();
+  expect(branchBox).not.toBeNull();
+  expect(copyBox!.x).toBeLessThan(branchBox!.x);
+
+  await copy.click();
+  await expect(copy).toHaveClass(/\bcopied\b/);
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  const promptText =
+    (await user.locator(".bubble").textContent())?.trim() ?? "";
+  expect(promptText.length).toBeGreaterThan(0);
+  expect(copied).toBe(promptText);
+});
+
 test("no stray working indicator after a turn ends via sessionUpdated (not runCompleted)", async ({
   page,
 }) => {
