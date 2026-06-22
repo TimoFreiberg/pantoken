@@ -914,9 +914,20 @@
     width: 100%;
     background: none;
     border: 0;
-    padding: 0;
+    /* A comfortable click target — the bare 11px label was a ~13px-tall hit area,
+       fiddly to tap on the mobile bottom-sheet. Padding adds the height; the 6px
+       bottom margin replaces .gtitle's 10px (the padding now carries that gap). */
+    padding: 6px 0;
+    margin-bottom: 6px;
     text-align: left;
     cursor: pointer;
+  }
+  /* Touch: section headers become a full 44px tap target (the panel is a phone
+     bottom-sheet there). align-items:center keeps the label/chevron/count centred. */
+  @media (pointer: coarse) {
+    .gtitle-toggle {
+      min-height: 44px;
+    }
   }
   .gtitle-toggle:hover {
     color: var(--text-muted);
@@ -931,9 +942,10 @@
     border-radius: var(--radius-xs);
     box-shadow: 0 0 0 1.5px var(--accent);
   }
-  /* Sub-header (Favorites, nested under Models) — separated from the selects above it. */
+  /* Sub-header (Favorites, nested under Models) — separated from the selects above it.
+     A touch less top space than 16px since the toggle already carries 6px padding-top. */
   .gtitle-toggle.subhead {
-    margin-top: 16px;
+    margin-top: 10px;
   }
   .gtitle-count {
     margin-left: auto;
