@@ -307,6 +307,64 @@ test("theme toggle drives the data-theme override and persists it", async ({
   await expect(html).toHaveAttribute("data-theme", "light");
 });
 
+test("text-size stepper scales the transcript and persists across reload", async ({
+  page,
+}) => {
+  const html = page.locator("html");
+  const scale = async () =>
+    Number.parseFloat(
+      (await html.evaluate((el) =>
+        getComputedStyle(el).getPropertyValue("--font-scale"),
+      )) || "1",
+    );
+
+  await expect(await scale()).toBe(1);
+
+  await page.getByTestId("settings-toggle").click();
+  const panel = page.getByTestId("settings-panel");
+  await expect(panel.getByTestId("font-reset")).toHaveText("100%");
+
+  // Grow twice → the var climbs above 1 and the readout tracks it.
+  await panel.getByTestId("font-larger").click();
+  await panel.getByTestId("font-larger").click();
+  expect(await scale()).toBeGreaterThan(1);
+  await expect(panel.getByTestId("font-reset")).not.toHaveText("100%");
+  const grown = await scale();
+
+  // Pre-paint restores the persisted scale before the bundle loads (no reflow flash).
+  await page.reload();
+  await expect(await scale()).toBe(grown);
+
+  // Reset returns to the default and clears the override; that too survives reload.
+  await page.getByTestId("settings-toggle").click();
+  await page.getByTestId("font-reset").click();
+  await expect(await scale()).toBe(1);
+  await page.reload();
+  await expect(await scale()).toBe(1);
+});
+
+test("Cmd/Ctrl +/-/0 zoom the transcript text", async ({ page }) => {
+  const html = page.locator("html");
+  const scale = async () =>
+    Number.parseFloat(
+      (await html.evaluate((el) =>
+        getComputedStyle(el).getPropertyValue("--font-scale"),
+      )) || "1",
+    );
+
+  await expect(await scale()).toBe(1);
+
+  await page.keyboard.press("Control+Equal");
+  expect(await scale()).toBeGreaterThan(1);
+
+  await page.keyboard.press("Control+Minus");
+  await expect(await scale()).toBe(1);
+
+  await page.keyboard.press("Control+Equal");
+  await page.keyboard.press("Control+Digit0");
+  await expect(await scale()).toBe(1);
+});
+
 test("Cmd/Ctrl+, toggles the settings panel", async ({ page }) => {
   const panel = page.getByTestId("settings-panel");
   await expect(panel).toBeHidden();

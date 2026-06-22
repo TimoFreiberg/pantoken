@@ -5,12 +5,17 @@
   import Button from "./ui/Button.svelte";
   import IconButton from "./ui/IconButton.svelte";
   import SegmentedControl from "./ui/SegmentedControl.svelte";
+  import { MAX_SCALE, MIN_SCALE, STEP } from "../lib/font-scale.js";
 
   // The settings panel. Per-client view state (theme, notifications, this device's
   // access token) sits next to server-side global pi config (provider credentials,
   // default model/thinking, favorites) which travels the WS and persists in pi.
 
   const open = $derived(store.settingsOpen);
+
+  // Transcript text-size, shown as a percentage of the default. The hotkeys (⌘=/⌘-/⌘0)
+  // and these buttons share store.bumpFontScale / resetFontScale.
+  const fontPct = $derived(Math.round(store.fontScale * 100));
 
   const THEMES: { mode: ThemeMode; label: string }[] = [
     { mode: "system", label: "System" },
@@ -237,6 +242,37 @@
             value={store.themeMode}
             onchange={(mode) => store.setTheme(mode)}
           />
+        </div>
+        <div class="row">
+          <div class="rinfo">
+            <div class="rlabel">Text size</div>
+            <div class="rdesc">Scales the conversation text. ⌘= / ⌘- / ⌘0.</div>
+          </div>
+          <div class="stepper" role="group" aria-label="Text size">
+            <button
+              class="step-btn"
+              data-testid="font-smaller"
+              title="Smaller text (⌘-)"
+              aria-label="Smaller text"
+              disabled={store.fontScale <= MIN_SCALE}
+              onclick={() => store.bumpFontScale(-STEP)}>A−</button
+            >
+            <button
+              class="step-btn val"
+              data-testid="font-reset"
+              title="Reset text size (⌘0)"
+              aria-label="Reset text size"
+              onclick={() => store.resetFontScale()}>{fontPct}%</button
+            >
+            <button
+              class="step-btn"
+              data-testid="font-larger"
+              title="Larger text (⌘=)"
+              aria-label="Larger text"
+              disabled={store.fontScale >= MAX_SCALE}
+              onclick={() => store.bumpFontScale(STEP)}>A+</button
+            >
+          </div>
         </div>
         <div class="row">
           <div class="rinfo">
@@ -851,6 +887,40 @@
     background: var(--surface);
     color: var(--text);
     box-shadow: var(--shadow-card);
+  }
+  /* Text-size stepper: A− / value / A+ in a segmented pill, mirroring the theme control. */
+  .stepper {
+    display: inline-flex;
+    align-items: stretch;
+    flex-shrink: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .step-btn {
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font-size: 13px;
+    padding: 5px 11px;
+    cursor: pointer;
+  }
+  .step-btn:not(:last-child) {
+    border-right: 1px solid var(--border);
+  }
+  .step-btn.val {
+    min-width: 52px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .step-btn:hover:not(:disabled) {
+    background: var(--surface-sunken);
+    color: var(--text);
+  }
+  .step-btn:disabled {
+    color: var(--text-faint);
+    cursor: default;
   }
   .actions {
     display: flex;

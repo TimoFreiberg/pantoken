@@ -37,6 +37,11 @@ import {
   watchSystemTheme,
 } from "./theme.js";
 import {
+  applyFontScale,
+  getFontScale,
+  setFontScale as persistFontScale,
+} from "./font-scale.js";
+import {
   currentPushState,
   ensurePushSubscription,
   type PushState,
@@ -250,6 +255,8 @@ class PilotStore {
   // Hide thinking blocks toggle — when on, thinking content is replaced with a
   // subtle non-expandable placeholder. Persisted per-device in localStorage.
   hideThinking = $state(initialHideThinking());
+  // Transcript reading-size multiplier (lib/font-scale.ts; ⌘=/⌘-/⌘0). Persisted per-device.
+  fontScale = $state<number>(getFontScale());
   // PWA: a newer service worker installed and is ready; we prompt for a refresh.
   swUpdateReady = $state(false);
   // Desktop app: a new origin/main is staged on the server's clone but deferred because
@@ -512,6 +519,8 @@ class PilotStore {
     // (cheap, idempotent) in case it was blocked, and track live OS changes.
     applyThemeMode(this.themeMode);
     watchSystemTheme();
+    // Likewise re-assert the pre-painted transcript text-scale (idempotent).
+    applyFontScale(this.fontScale);
   }
 
   async refreshPushState(): Promise<void> {
@@ -1439,6 +1448,18 @@ class PilotStore {
   setHideThinking(hide: boolean): void {
     this.hideThinking = hide;
     persistHideThinking(hide);
+  }
+  /** Set the transcript reading-size multiplier (clamped + persisted + applied). */
+  setFontScale(scale: number): void {
+    this.fontScale = persistFontScale(scale);
+  }
+  /** Nudge the transcript text-size by one step (⌘= / ⌘-). */
+  bumpFontScale(delta: number): void {
+    this.setFontScale(this.fontScale + delta);
+  }
+  /** Reset the transcript text-size to the default (⌘0). */
+  resetFontScale(): void {
+    this.setFontScale(1);
   }
   /** True if an access token is saved on this device (we never reveal its value). */
   get hasToken(): boolean {

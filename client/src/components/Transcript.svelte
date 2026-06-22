@@ -707,12 +707,69 @@
     }
   }
   .col {
-    max-width: var(--maxw);
+    /* Wide track so fenced code / tables can break out into the desktop gutter. Every
+       turn is re-capped to --maxw and centered below, so prose + chrome sit exactly where
+       a plain --maxw column would — only code opts wider. */
+    max-width: var(--maxw-wide);
     margin: 0 auto;
     padding: 22px 18px 28px;
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: 18px;
+    /* Per-device reading-size knob (lib/font-scale.ts; ⌘=/⌘-/⌘0). Scales the transcript
+       only — header / composer / sidebar keep the body size. */
+    font-size: calc(16.5px * var(--font-scale, 1));
+  }
+  /* Each turn sits at the reading measure, centered (:global so child-component roots —
+     tool cards, the markdown body — are capped too, not just Transcript's own elements). */
+  .col > :global(*) {
+    width: min(100%, var(--maxw));
+    min-width: 0;
+  }
+  /* …except an assistant turn, which may stretch to the wide track so its fenced code and
+     tables can break out (handled below). Its text still stays at the measure. */
+  .col > .row.assistant {
+    width: min(100%, var(--maxw-wide));
+  }
+  /* Assistant internals — thinking block + copy/timestamp footer — stay at the measure,
+     centered, so they align with the prose left edge. */
+  .row.assistant > :global(*) {
+    max-width: var(--maxw);
+    margin-inline: auto;
+  }
+  /* The markdown body fills the wide row. markstream wraps every block in
+     `.node-slot > .node-content > <element>` (its streaming/typewriter shell), so the
+     measure cap goes on the LEAF element, not the wrappers — let those fill the row.
+     Coupled to markstream's wrapper classes; if they ever change, breakout just stops
+     (text stays at the measure), it doesn't break. */
+  .row.assistant > :global(.markstream-svelte.markdown-renderer) {
+    width: 100%;
+    max-width: none;
+    margin-inline: 0;
+  }
+  .row.assistant :global(.node-slot),
+  .row.assistant :global(.node-content) {
+    width: auto;
+    max-width: none;
+    margin-inline: 0;
+  }
+  .row.assistant :global(.node-content) > :global(*) {
+    max-width: var(--maxw);
+    margin-inline: auto;
+  }
+  /* Allow — not force — fenced code and tables to break out: sized to content up to the
+     wide ceiling, left-aligned with the prose and extending into the right gutter; a short
+     snippet stays narrow. Past the ceiling they scroll (markstream sets overflow-x: auto). */
+  .row.assistant :global(.node-content) > :global(pre),
+  .row.assistant :global(.node-content) > :global(table) {
+    width: fit-content;
+    /* Cap at the space from the prose's left edge to the row's right edge, so a long
+       unbreakable line scrolls (overflow-x) instead of overflowing the viewport — NOT a
+       fixed --maxw-wide, which fit-content would blow past on an unbreakable min-content.
+       The row is already ≤ --maxw-wide, so this also honours that ceiling. */
+    max-width: calc(100% - max(0px, (100% - var(--maxw)) / 2));
+    margin-inline: max(0px, calc((100% - var(--maxw)) / 2)) 0;
   }
   .row, :global(.tool) {
     content-visibility: auto;
