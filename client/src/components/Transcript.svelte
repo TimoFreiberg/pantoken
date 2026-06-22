@@ -502,6 +502,7 @@
             <Markdown
               content={item.text}
               final={!(item.streaming && store.turnActive)}
+              fade={item.streaming && store.turnActive}
             />
           {/if}
           <!-- "Still working" lives in the bottom WorkingIndicator now, not as an

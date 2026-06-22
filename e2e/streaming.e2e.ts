@@ -38,6 +38,28 @@ test("a streamed reply renders user text, a working block, and the final answer"
   );
 });
 
+test("streaming text reveals with a fade wrapper; settled history stays static", async ({
+  page,
+}) => {
+  // gotoFresh already waited for the greeting turn to settle. Settled / historical
+  // assistant blocks must render statically — markstream's `.fade-node` reveal wrapper
+  // is scoped to the live-streaming turn only (Markdown `fade` prop), so none survive
+  // on settled content. A regression that drops the scoping would fade the whole
+  // transcript on every load / session switch / scroll-in.
+  await expect(
+    page.locator(".row.assistant .node-content.fade-node"),
+  ).toHaveCount(0);
+
+  // Drive a turn that stays open → its live assistant paragraph carries the fade-node
+  // reveal wrapper while it streams (streamHold never emits runCompleted, so the class
+  // persists and the assertion can't race a settle).
+  await drive(page, "streamhold");
+  await expect(page.getByText("Working on it", { exact: false })).toBeVisible();
+  await expect(
+    page.locator(".row.assistant .node-content.fade-node"),
+  ).not.toHaveCount(0);
+});
+
 test("thinking stays hidden by default even inside an expanded working block", async ({
   page,
 }) => {
