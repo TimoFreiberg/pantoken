@@ -400,6 +400,10 @@ export async function createPiDriver(
   // its TUI blocks on ui.select) until a client answers via respondTrust, or it denies
   // deny-safe on timeout / no client. Per-cwd, not per-session, by nature.
   const trustListeners = new Set<(ev: TrustEvent) => void>();
+  // Live "is any client connected?" predicate, wired by the hub via setClientPresence.
+  // Defaults to deny-safe (no client) until wired — the hub sets it at construction, well
+  // before any session can warm, so the default only covers an unwired direct-driver test.
+  let hasClients: () => boolean = () => false;
   const emitTrust = (ev: TrustEvent) => {
     for (const l of trustListeners) {
       try {
@@ -434,9 +438,12 @@ export async function createPiDriver(
 
   const ask: TrustAsk = ({ cwd, title, options }) =>
     new Promise<number | null>((resolve) => {
-      // No one to answer (e.g. a startup resume of an untrusted cwd before any client
-      // connects) → deny-safe at once rather than hang the swap for 5 minutes.
-      if (trustListeners.size === 0) {
+      // No client to answer (e.g. a startup resume of an untrusted cwd before any client
+      // connects, or a phone that flapped mid-warm) → deny-safe at once rather than hang
+      // the swap for 5 minutes. `trustListeners.size` can't tell us this: the hub
+      // subscribes once at construction and never unsubscribes, so it's a constant ≥1, not
+      // a live client count. `hasClients` (wired by the hub) reflects real connections.
+      if (!hasClients()) {
         resolve(null);
         return;
       }
@@ -858,6 +865,10 @@ export async function createPiDriver(
     subscribeTrust(l) {
       trustListeners.add(l);
       return () => trustListeners.delete(l);
+    },
+
+    setClientPresence(fn) {
+      hasClients = fn;
     },
 
     respondTrust(requestId, choice) {
