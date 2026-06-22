@@ -65,6 +65,18 @@ work (full policy in `scripts/desktop/update-watcher.ts`):
   notification **and** an in-app **update card** (sidebar) with an "update now"
   button — clicking it asks the watcher to apply on demand. Closing the app lets the
   next poll auto-apply.
+- **Force-update on demand**: right-click the build stamp (sidebar footer) → **Force-update**
+  for clicking right after you push to `main` — it applies even before the watcher's next
+  fetch has noticed the commit (the same menu also copies the build hash). The watcher polls
+  the server every few seconds so the force is picked up promptly.
+
+While an update applies (build + restart), the app raises a native **"Updating Pilot…"**
+overlay over the webview — a frosted scrim + indeterminate spinner + a phase label
+(`Building…`, `Restarting…`). It's driven by the watcher's `apply` events (one per phase on
+its stdout machine channel, alongside `update-deferred` / `restart-requested`) and torn down
+once the rebuilt server is healthy and the webview has reloaded the fresh build. Native, not
+web, because the web client is exactly what's restarting — it can't paint its own progress,
+and the restart leaves it showing a stale, offline page.
 
 "Current" means the *served bundle*, not git HEAD: the watcher compares the sha vite stamps
 into `client/dist/.pilot-built-sha` against `origin/main`, so a state where HEAD advanced but

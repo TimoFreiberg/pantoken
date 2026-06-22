@@ -350,28 +350,51 @@ async function readLock(clone: string): Promise<string | null> {
   return (await f.exists()) ? f.text() : null;
 }
 
-/** pull --ff-only → install (only if the lock moved) → build → ask server to restart. */
+/** pull --ff-only → install (only if the lock moved) → build → ask server to restart.
+ *  Emits an `apply` event at each phase (starting → installing? → building → restarting,
+ *  or failed) so the desktop shell can raise a "Updating Pilot…" overlay over the webview
+ *  for the whole apply — the build keeps the old UI alive but the restart makes it unusable,
+ *  so we cover the lot rather than flash a broken page. The matching teardown is the
+ *  server coming back healthy + the webview reloading the fresh build (no "done" event
+ *  needed). A failure emits `phase: "failed"` so the overlay drops instead of stranding. */
 async function applyUpdate(cfg: WatcherConfig): Promise<void> {
-  const before = await readLock(cfg.clone);
-  await capture("git", [
-    "-C",
-    cfg.clone,
-    "pull",
-    "--ff-only",
-    cfg.remote,
-    cfg.branch,
-  ]);
-  const after = await readLock(cfg.clone);
+  emitEvent({ event: "apply", phase: "starting", label: "Updating Pilot…" });
+  try {
+    const before = await readLock(cfg.clone);
+    await capture("git", [
+      "-C",
+      cfg.clone,
+      "pull",
+      "--ff-only",
+      cfg.remote,
+      cfg.branch,
+    ]);
+    const after = await readLock(cfg.clone);
 
-  if (lockfileChanged(before, after)) {
-    log("bun.lock changed — installing deps");
-    await capture("bun", ["install", "--frozen-lockfile"], cfg.clone);
+    if (lockfileChanged(before, after)) {
+      log("bun.lock changed — installing deps");
+      emitEvent({
+        event: "apply",
+        phase: "installing",
+        label: "Installing dependencies…",
+      });
+      await capture("bun", ["install", "--frozen-lockfile"], cfg.clone);
+    }
+
+    log("building client");
+    emitEvent({ event: "apply", phase: "building", label: "Building…" });
+    await capture("bun", ["run", "build"], cfg.clone);
+
+    emitEvent({ event: "apply", phase: "restarting", label: "Restarting…" });
+    await requestRestart(cfg);
+  } catch (e) {
+    emitEvent({
+      event: "apply",
+      phase: "failed",
+      message: e instanceof Error ? e.message : String(e),
+    });
+    throw e;
   }
-
-  log("building client");
-  await capture("bun", ["run", "build"], cfg.clone);
-
-  await requestRestart(cfg);
 }
 
 export function parseServerPid(text: string): number | null {
