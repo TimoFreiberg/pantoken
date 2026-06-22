@@ -44,6 +44,12 @@
   // panel; the server drives it via oauthPrompt/oauthProgress/oauthResult.
   const oauth = $derived(store.oauthFlow);
 
+  // The provider list is a long block you rarely touch once a provider is connected, so it
+  // collapses behind its section header (collapsed by default — the header shows a connected
+  // count so you can see at a glance without expanding).
+  let providersOpen = $state(false);
+  const connectedCount = $derived(providers.filter((p) => p.hasAuth).length);
+
   // Available models grouped by provider — drives both the default-model select and
   // the favorites checklist.
   const groups = $derived.by(() => {
@@ -72,6 +78,36 @@
       if (items.length > 0) out.push({ provider: g.provider, items });
     }
     return out;
+  });
+
+  // Per-provider collapse for the favorites checklist (mirrors the header ModelPicker): the
+  // list grows long with every provider, so groups start collapsed — except providers that
+  // already hold a favorite, seeded open so your existing curation stays visible. A non-empty
+  // search auto-expands every matching group.
+  let expandedFavProviders = $state<Set<string>>(new Set());
+  function isFavExpanded(provider: string): boolean {
+    return fq !== "" || expandedFavProviders.has(provider);
+  }
+  function toggleFavProvider(provider: string): void {
+    const next = new Set(expandedFavProviders);
+    if (next.has(provider)) next.delete(provider);
+    else next.add(provider);
+    expandedFavProviders = next;
+  }
+  // Re-seed the favorites collapse on each open transition only (not on every favorite
+  // toggle): expand providers that have a favorite, collapse the rest. `prevOpen` is a plain
+  // var so writing it here doesn't make the effect re-run on its own assignment.
+  let prevOpen = false;
+  $effect(() => {
+    if (open && !prevOpen) {
+      const seeded = new Set<string>();
+      for (const g of groups) {
+        if (g.items.some((m) => store.isFavorite(m.provider, m.modelId)))
+          seeded.add(g.provider);
+      }
+      expandedFavProviders = seeded;
+    }
+    prevOpen = open;
   });
 
   // pi's setDefaultThinkingLevel accepts this fixed union (independent of the current
@@ -241,10 +277,23 @@
 
       <!-- Providers -->
       <section class="group">
-        <div class="gtitle">Providers</div>
-        {#if providers.length === 0}
+        <button
+          class="gtitle gtitle-toggle"
+          type="button"
+          aria-expanded={providersOpen}
+          data-testid="providers-toggle"
+          title={providersOpen ? "Collapse providers" : "Expand providers"}
+          onclick={() => (providersOpen = !providersOpen)}
+        >
+          <span class="gchev" class:open={providersOpen}>▸</span>
+          <span class="gtitle-name">Providers</span>
+          {#if providers.length > 0}
+            <span class="gtitle-count">{connectedCount}/{providers.length} connected</span>
+          {/if}
+        </button>
+        {#if providersOpen && providers.length === 0}
           <p class="note">No providers reported by the server.</p>
-        {:else}
+        {:else if providersOpen}
           <div class="providers">
             {#each providers as p (p.id)}
               <div class="prow" data-testid="provider-{p.id}">
@@ -392,20 +441,42 @@
           />
           <div class="models">
             {#each favGroups as g (g.provider)}
-              <div class="mprovider">{g.provider}</div>
-              {#each g.items as opt (opt.modelId)}
-                <label class="mitem fav" data-testid="fav-{opt.provider}-{opt.modelId}">
-                  <input
-                    type="checkbox"
-                    title={store.isFavorite(opt.provider, opt.modelId)
-                      ? `Remove ${opt.label} from favorites`
-                      : `Add ${opt.label} to favorites`}
-                    checked={store.isFavorite(opt.provider, opt.modelId)}
-                    onchange={() => store.toggleFavorite(opt.provider, opt.modelId)}
-                  />
-                  <span class="mlabel">{opt.label}</span>
-                </label>
-              {/each}
+              {@const expanded = isFavExpanded(g.provider)}
+              {@const favCount = g.items.filter((m) =>
+                store.isFavorite(m.provider, m.modelId),
+              ).length}
+              <button
+                class="mprovider mprovider-toggle"
+                type="button"
+                aria-expanded={expanded}
+                data-testid="fav-group-{g.provider}"
+                title={expanded
+                  ? `Collapse ${g.provider}`
+                  : `Expand ${g.provider} (${g.items.length} model${g.items.length === 1 ? "" : "s"})`}
+                onclick={() => toggleFavProvider(g.provider)}
+              >
+                <span class="mchev" class:open={expanded}>▸</span>
+                <span class="mprovider-name">{g.provider}</span>
+                <span class="mprovider-count">
+                  {#if favCount > 0}<span class="favstar">{favCount}★</span> · {/if}{g.items
+                    .length}
+                </span>
+              </button>
+              {#if expanded}
+                {#each g.items as opt (opt.modelId)}
+                  <label class="mitem fav" data-testid="fav-{opt.provider}-{opt.modelId}">
+                    <input
+                      type="checkbox"
+                      title={store.isFavorite(opt.provider, opt.modelId)
+                        ? `Remove ${opt.label} from favorites`
+                        : `Add ${opt.label} to favorites`}
+                      checked={store.isFavorite(opt.provider, opt.modelId)}
+                      onchange={() => store.toggleFavorite(opt.provider, opt.modelId)}
+                    />
+                    <span class="mlabel">{opt.label}</span>
+                  </label>
+                {/each}
+              {/if}
             {/each}
             {#if favGroups.length === 0}
               <div class="mempty">No models match</div>
@@ -631,6 +702,41 @@
     color: var(--text-faint);
     margin-bottom: 10px;
   }
+  /* Collapsible section header (Providers) — same weight as .gtitle, but clickable. */
+  .gtitle-toggle {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    background: none;
+    border: 0;
+    padding: 0;
+    text-align: left;
+    cursor: pointer;
+  }
+  .gtitle-toggle:hover {
+    color: var(--text-muted);
+  }
+  .gtitle-toggle:focus-visible {
+    outline: none;
+    color: var(--text);
+    border-radius: var(--radius-xs);
+    box-shadow: 0 0 0 1.5px var(--accent);
+  }
+  .gtitle-count {
+    margin-left: auto;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 10.5px;
+    opacity: 0.8;
+  }
+  .gchev {
+    font-size: 9px;
+    transition: transform 0.15s ease;
+  }
+  .gchev.open {
+    transform: rotate(90deg);
+  }
   .row {
     display: flex;
     align-items: center;
@@ -731,6 +837,46 @@
     color: var(--text-faint);
     text-transform: uppercase;
     letter-spacing: 0.04em;
+  }
+  /* The favorites provider header doubles as a per-provider collapse toggle. */
+  .mprovider-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    background: none;
+    border: 0;
+    text-align: left;
+    cursor: pointer;
+  }
+  .mprovider-toggle:hover {
+    color: var(--text-muted);
+  }
+  .mprovider-toggle:focus-visible {
+    outline: none;
+    color: var(--text);
+    border-radius: var(--radius-xs);
+    box-shadow: inset 0 0 0 1.5px var(--accent);
+  }
+  .mprovider-name {
+    flex: 1;
+  }
+  .mprovider-count {
+    text-transform: none;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.85;
+  }
+  .favstar {
+    color: var(--accent);
+    opacity: 1;
+  }
+  .mchev {
+    font-size: 9px;
+    transition: transform 0.15s ease;
+  }
+  .mchev.open {
+    transform: rotate(90deg);
   }
   .mitem {
     display: flex;
