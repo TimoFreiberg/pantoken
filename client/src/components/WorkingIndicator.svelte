@@ -70,9 +70,10 @@
       </span>
       <span class="label">{thinking ? "Thinking…" : "Working…"}</span>
     </span>
-    <!-- aria-hidden: like the token counter, this lives inside the role=status live
-         region and ticks once a second; announcing every tick would spam a screen
-         reader. It's a visual liveness affordance — the label carries the announced state. -->
+    <!-- aria-hidden: both this elapsed timer and the token counter below live inside the
+         role=status live region and tick frequently; announcing every tick would spam a
+         screen reader. They're visual liveness affordances — the "Working…"/"Thinking…"
+         label carries the announced state. -->
     {#if elapsed}
       <span
         class="elapsed"
@@ -81,9 +82,6 @@
         title="Time elapsed on the current turn">{elapsed}</span
       >
     {/if}
-    <!-- aria-hidden: this lives inside the role=status live region, and a per-delta
-         ticking number would spam a screen reader. It's a visual liveness affordance;
-         the "Working…"/"Thinking…" label carries the announced state. -->
     <span
       class="tokens"
       data-testid="working-tokens"
