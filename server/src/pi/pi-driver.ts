@@ -18,7 +18,7 @@
 // This replaces the old runtime-swap model: AgentSessionRuntime exists precisely to
 // replace+dispose the active session, which is the opposite of keeping N warm.
 
-import { readdirSync, statSync } from "node:fs";
+import { type Dirent, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import {
@@ -310,9 +310,11 @@ function compareDirNames(a: string, b: string): number {
 function listDirOnDisk(dir: string): DirListing {
   const parent = dirname(dir);
   const parentOrNull = parent === dir ? null : parent;
-  let dirents: ReturnType<typeof readdirSync<{ withFileTypes: true }>>;
+  let dirents: Dirent[];
   try {
-    dirents = readdirSync(dir, { withFileTypes: true });
+    dirents = readdirSync(dir, {
+      withFileTypes: true,
+    }) as Dirent[];
   } catch {
     return { path: dir, parent: parentOrNull, entries: [], error: true };
   }
@@ -332,6 +334,22 @@ function listDirOnDisk(dir: string): DirListing {
   }
   entries.sort(compareDirNames);
   return { path: dir, parent: parentOrNull, entries };
+}
+
+/** Quick stat check for the new-session dir picker's inline validation hint.
+ *  Returns whether `path` exists and whether it's a directory, following symlinks. */
+function statPathOnDisk(path: string): {
+  path: string;
+  exists: boolean;
+  isDir: boolean;
+} {
+  const abs = resolveGuiPath(path);
+  try {
+    const s = statSync(abs);
+    return { path: abs, exists: true, isDir: s.isDirectory() };
+  } catch {
+    return { path: abs, exists: false, isDir: false };
+  }
 }
 
 export async function createPiDriver(
@@ -1167,6 +1185,10 @@ export async function createPiDriver(
       // the server's filesystem — the picker browses the server, not the client device.
       const dir = path?.trim() ? resolveGuiPath(path) : homedir();
       return listDirOnDisk(dir);
+    },
+
+    async statPath(path) {
+      return statPathOnDisk(path);
     },
 
     async listCommands(sessionId) {

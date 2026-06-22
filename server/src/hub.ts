@@ -676,6 +676,18 @@ export class SessionHub {
     }
   }
 
+  /** Quick existence + type check for a path the client typed into the new-session dir
+   *  picker. Not focus-scoped (the draft has no session yet) — it stats absolute paths
+   *  on the server. The client calls this debounced for inline validation. */
+  private async sendPathStat(conn: ClientConn, path: string): Promise<void> {
+    try {
+      const stat = await this.driver.statPath(path);
+      conn.send({ type: "pathStat", ...stat });
+    } catch (e) {
+      console.error("[hub] statPath failed", e);
+    }
+  }
+
   /** Fetch + send ONE client its focused session's branch tree (pi's /tree) for the tree
    *  view. Per-connection (scoped to the requester's focus, like the command/file lists),
    *  so a client opening the tree view sees ITS session, not whatever another client is on.
@@ -1283,6 +1295,9 @@ export class SessionHub {
         return;
       case "queryDir":
         void this.sendDirListing(conn, msg.path);
+        return;
+      case "statPath":
+        void this.sendPathStat(conn, msg.path);
         return;
       case "listProviders":
         void this.broadcastProviderList();

@@ -5,6 +5,7 @@
 import type {
   CommandInfo,
   DirListing,
+  PathStat,
   FileInfo,
   HostUiResponse,
   ImageContent,
@@ -189,6 +190,10 @@ export interface PilotDriver {
    *  no entries — never a silent empty listing. Not session-scoped (a new session has no
    *  cwd yet); it browses absolute paths. See {@link DirListing}. */
   listDir(path?: string): Promise<DirListing>;
+  /** Quick existence + type check for a path typed into the new-session dir picker.
+   *  The client calls this debounced for inline validation before a full `listDir`.
+   *  The real driver stats the disk; the mock checks its fixture tree. See {@link PathStat}. */
+  statPath(path: string): Promise<PathStat>;
   /** Switch a session's model. The driver emits a `sessionUpdated` reflecting it.
    *  sessionId omitted -> the driver's current session. */
   setModel(provider: string, modelId: string, sessionId?: SessionId): void;

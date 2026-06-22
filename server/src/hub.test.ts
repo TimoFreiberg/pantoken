@@ -182,6 +182,16 @@ class FakeDriver implements PilotDriver {
     this.fileListCalls.push({ query, sessionId, cwd });
     return [{ path: "README.md", isDirectory: false }];
   }
+  readonly listDirCalls: (string | undefined)[] = [];
+  async listDir(path?: string): Promise<import("@pilot/protocol").DirListing> {
+    this.listDirCalls.push(path);
+    return { path: path ?? "/home", parent: null, entries: [] };
+  }
+  readonly statPathCalls: string[] = [];
+  async statPath(path: string): Promise<import("@pilot/protocol").PathStat> {
+    this.statPathCalls.push(path);
+    return { path, exists: false, isDir: false };
+  }
   setModel(provider: string, modelId: string, sessionId?: string) {
     this.modelCalls.push({ provider, modelId, sessionId });
   }

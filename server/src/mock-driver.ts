@@ -8,6 +8,7 @@ import {
   isDialogRequest,
   type CommandInfo,
   type DirListing,
+  type PathStat,
   type FileInfo,
   type HostUiRequest,
   type HostUiResponse,
@@ -717,6 +718,12 @@ export class MockDriver implements PilotDriver {
       parent: parentOrNull,
       entries: entries ? [...entries] : [],
     };
+  }
+
+  async statPath(path: string): Promise<PathStat> {
+    const abs = resolve(path.trim());
+    const exists = MOCK_DIR_TREE.has(abs);
+    return { path: abs, exists, isDir: exists };
   }
 
   setModel(provider: string, modelId: string): void {

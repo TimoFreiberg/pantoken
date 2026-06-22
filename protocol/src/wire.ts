@@ -66,6 +66,19 @@ export interface DirListing {
   readonly error?: boolean;
 }
 
+/** A quick existence-and-type check for a path the user typed into the new-session
+ *  dir picker, so the client can show an inline hint before the full directory listing
+ *  arrives. The client sends {@link statPath} (debounced) and renders the reply as a
+ *  validation cue. */
+export interface PathStat {
+  /** The resolved absolute path that was checked. Echoes the request. */
+  readonly path: string;
+  /** True when `path` exists on the server's filesystem. */
+  readonly exists: boolean;
+  /** True when `path` exists AND is a directory (implies `exists`). */
+  readonly isDir: boolean;
+}
+
 /** Compact cross-session state for attention routing without broadcasting background
  * transcripts. `waiting` overrides the underlying run phase while dialogs are pending;
  * `done` remains useful until each client marks that session read locally. */
@@ -142,6 +155,10 @@ export type ServerMessage =
    *  Carries the resolved `path` so a client that navigated on can drop a stale response.
    *  See {@link DirListing}. */
   | ({ type: "dirListing" } & DirListing)
+  /** A path-existence check for the new-session dir picker's inline validation hint,
+   *  in reply to {@link statPath}. Echoes the request `path` so the client can drop a
+   *  stale response. See {@link PathStat}. */
+  | ({ type: "pathStat" } & PathStat)
   /** The model providers pilot can manage credentials for (curated key-capable +
    *  already-connected), server-authoritative like `modelList`. No secrets — see
    *  {@link ProviderInfo}. */
@@ -327,6 +344,10 @@ export type ClientMessage =
    *  `path` omitted/empty -> the server's $HOME; `~`/relative segments are resolved
    *  server-side. The server responds with {@link dirListing}. */
   | { type: "queryDir"; path?: string }
+  /** Check whether a typed path exists on the server — a quick stat for the new-session
+   *  dir picker's inline validation hint (debounced). The server responds with
+   *  {@link pathStat}. */
+  | { type: "statPath"; path: string }
   /** Answer a project-trust card (D12). `choice` indexes the request's `options`;
    *  null denies (cancel / dismiss). */
   | { type: "trustResponse"; requestId: string; choice: number | null }

@@ -5,6 +5,7 @@
 import {
   type CommandInfo,
   type DirListing,
+  type PathStat,
   type FileInfo,
   foldEvent,
   type HostUiResponse,
@@ -143,6 +144,9 @@ class PilotStore {
   dirListing = $state<DirListing | null>(null);
   // True while a `queryDir` is in flight, for the picker's loading hint.
   dirLoading = $state(false);
+  // Inline path validation hint for the dir picker — the most recent stat result for a
+  // typed path. Null when no stat is in flight or the path has been cleared.
+  pathStat = $state<PathStat | null>(null);
   // Interactive project-trust card (D12). Out-of-band, not part of the folded session
   // state: trust is decided per-cwd before a session exists. Null when none pending.
   trustRequest = $state<TrustRequest | null>(null);
@@ -527,6 +531,13 @@ class PilotStore {
           error: msg.error,
         };
         this.dirLoading = false;
+        break;
+      case "pathStat":
+        this.pathStat = {
+          path: msg.path,
+          exists: msg.exists,
+          isDir: msg.isDir,
+        };
         break;
       case "editorPrefill":
         // A branch landed on a user prompt — its text comes back to re-edit. Per-client
@@ -936,6 +947,12 @@ class PilotStore {
   queryDir(path?: string): void {
     this.dirLoading = true;
     send({ type: "queryDir", path });
+  }
+  /** Quick existence + type check for a path typed into the new-session dir picker.
+   *  The server responds with {@link pathStat} — the picker reads it for inline
+   *  validation. Debounced by the caller (the picker), not here. */
+  statPath(path: string): void {
+    send({ type: "statPath", path });
   }
   /** Jump the session to a prior tree entry and branch from it (pi's /tree). The server
    *  re-seeds every client's transcript to the new branch; if `entryId` was a user
