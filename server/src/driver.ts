@@ -230,6 +230,14 @@ export interface PilotDriver {
    *  interactive decision; the hub relays it to clients. Optional: a driver with no
    *  trust gate omits it. */
   subscribeTrust?(listener: (ev: TrustEvent) => void): () => void;
+  /** Wire a live predicate the driver can poll to learn whether any client is currently
+   *  connected. The pi driver uses it to deny-safe an interactive trust prompt the instant
+   *  nobody could answer it (a startup resume before anyone connects, or a phone that
+   *  flapped mid-warm), rather than hanging the swap until the prompt times out. The trust
+   *  subscription can't double as this signal — the hub subscribes once at construction
+   *  and never unsubscribes, so its listener count is a constant, not a client count. The
+   *  hub sets this at construction. Optional: a driver with no interactive prompts omits it. */
+  setClientPresence?(hasClients: () => boolean): void;
   /** Answer a pending trust request. `choice` indexes the request's options; null
    *  denies (deny-safe). Settling also fires a `resolved` TrustEvent. */
   respondTrust?(requestId: string, choice: number | null): void;

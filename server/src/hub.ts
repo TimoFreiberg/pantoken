@@ -196,6 +196,12 @@ export class SessionHub {
         this.broadcast({ type: "trustRequest", ...ev.request });
       else this.broadcast({ type: "trustResolved", requestId: ev.requestId });
     });
+    // Let the driver learn whether anyone is connected to answer an interactive prompt.
+    // The trust subscription above persists for the hub's life (it's the relay channel),
+    // so it can't double as a presence signal — this live predicate can. The driver
+    // deny-safes a project-trust card immediately when this reads false rather than
+    // hanging the swap for the prompt's full timeout.
+    driver.setClientPresence?.(() => this.clients.size > 0);
     this.seedDefault();
   }
 

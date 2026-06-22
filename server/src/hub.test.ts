@@ -61,6 +61,10 @@ class FakeDriver implements PilotDriver {
     // Mirror the real driver: settling fires a `resolved` event back through the channel.
     this.trustEmit({ kind: "resolved", requestId });
   }
+  clientPresence?: () => boolean;
+  setClientPresence(fn: () => boolean) {
+    this.clientPresence = fn;
+  }
   prompt(
     _text?: string,
     _deliverAs?: "steer" | "followUp",
@@ -579,6 +583,29 @@ describe("SessionHub", () => {
     // The driver's `resolved` echo dismisses the card on every client.
     for (const c of [a, b])
       expect(c.received.some((m) => m.type === "trustResolved")).toBe(true);
+  });
+
+  test("client-presence predicate tracks live connections (trust deny-safe signal)", () => {
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    // The hub wires a real presence predicate at construction. The trust subscription
+    // can't serve this role (it never unsubscribes), which is exactly the dead-guard bug
+    // this closes: the driver must be able to deny-safe a trust card when nobody's around.
+    expect(d.clientPresence).toBeDefined();
+    expect(d.clientPresence!()).toBe(false); // no clients yet
+
+    const a = client();
+    const unsubA = hub.addClient(a.send);
+    expect(d.clientPresence!()).toBe(true);
+
+    const b = client();
+    const unsubB = hub.addClient(b.send);
+    expect(d.clientPresence!()).toBe(true);
+
+    unsubA();
+    expect(d.clientPresence!()).toBe(true); // b still connected
+    unsubB();
+    expect(d.clientPresence!()).toBe(false); // everyone gone → deny-safe
   });
 
   test("a switch arriving mid-swap is coalesced, not rejected (boot-restore-vs-click)", async () => {
