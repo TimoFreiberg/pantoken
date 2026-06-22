@@ -495,9 +495,14 @@
       queueMicrotask(autosize);
       return;
     }
-    // New-session draft shortcuts: ⌥W toggles the worktree chip; Escape (with an empty
-    // prompt and no slash menu open) abandons the draft.
+    // New-session draft shortcuts: ⌥P opens/closes the project picker, ⌥W toggles the
+    // worktree chip; Escape (with an empty prompt and no slash menu open) abandons the draft.
     if (drafting) {
+      if (e.altKey && e.code === "KeyP") {
+        e.preventDefault();
+        pickingCwd = !pickingCwd;
+        return;
+      }
       if (e.altKey && e.code === "KeyW") {
         e.preventDefault();
         store.toggleDraftWorktree();
@@ -703,7 +708,7 @@
           class="chip"
           aria-haspopup="dialog"
           aria-expanded={pickingCwd}
-          title={`Project: ${store.draft.cwd || "home"} — click to browse for a directory`}
+          title={`Project: ${store.draft.cwd || "home"} — click to browse for a directory (⌥P)`}
           onclick={() => (pickingCwd = !pickingCwd)}
         >
           <span class="chip-ico" aria-hidden="true">▸</span>
