@@ -109,6 +109,15 @@ This is set up so you can verify autonomously — use it.
 - Keep `protocol/` free of runtime/DOM deps — it's imported by both halves.
 - The `PilotDriver` interface is the contract for swapping mock ↔ real pi. Add
   capabilities there, implement in both drivers.
+- **Collapse/disclosure affordances share two primitives.** The glyph is
+  `client/src/components/ui/Chevron.svelte` (stroked SVG; `variant="disclosure"`
+  for inline sections, `variant="menu"` for dropdown badges) — don't hand-roll a
+  `▸`/`▾` triangle. The open/close animation is `transition:reveal` from
+  `client/src/lib/transitions.js` (a `slide` wrapper that honours
+  `prefers-reduced-motion`) — don't call `slide` directly. The chevron inherits a
+  faint `currentColor`; brighten it on header hover with a scoped
+  `.header:hover :global(.chevron)` rule (a parent's plain class can't reach a
+  child component's element). Reference design: the sidebar project caret.
 - **Every UI action needs a hotkey and a tooltip.** Any clickable element — buttons,
   toggles, menu items, approval actions, settings controls — must have a `title`
   attribute naming the action (and its keyboard shortcut if one exists). Reviewers:
