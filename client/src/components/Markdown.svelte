@@ -5,7 +5,15 @@
   import { isDark } from "../lib/dark.svelte.js";
   import { copyCodeButtons } from "../lib/copy-code.js";
 
-  let { content, final = true }: { content: string; final?: boolean } = $props();
+  // `fade` lights up markstream's per-block reveal animation (the `.fade-node` /
+  // `.typewriter-node` wrappers, styled in markstream-theme.css). Default OFF: only the
+  // live-streaming turn should animate — history, settled turns, session switches and
+  // scroll-in must render statically, or the whole transcript would fade on every mount.
+  let {
+    content,
+    final = true,
+    fade = false,
+  }: { content: string; final?: boolean; fade?: boolean } = $props();
 </script>
 
 <!-- Render config:
@@ -34,6 +42,7 @@
     customMarkdownIt={(md) => md.set({ typographer: false })}
     renderCodeBlocksAsPre
     showTooltips={false}
+    {fade}
     isDark={isDark()}
   />
 </div>
