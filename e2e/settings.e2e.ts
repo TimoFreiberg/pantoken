@@ -251,6 +251,28 @@ test("the Providers list has a search that filters the rows", async ({
   await expect(settings.getByText("No providers match")).toBeVisible();
 });
 
+test("Escape in a section search clears the filter before closing the panel", async ({
+  page,
+}) => {
+  await page.getByTestId("settings-toggle").click();
+  await page.getByTestId("providers-toggle").click();
+  const panel = page.getByTestId("settings-panel");
+  const search = panel.getByPlaceholder("Search providers…");
+
+  await search.fill("google");
+  await expect(panel.getByTestId("provider-anthropic")).toHaveCount(0);
+
+  // First Escape clears the filter but leaves the panel open.
+  await search.press("Escape");
+  await expect(search).toHaveValue("");
+  await expect(panel).toBeVisible();
+  await expect(panel.getByTestId("provider-anthropic")).toBeVisible();
+
+  // A second Escape (empty box) closes the panel as usual.
+  await search.press("Escape");
+  await expect(panel).toBeHidden();
+});
+
 test("the Extensions list has a search that filters the rows", async ({
   page,
 }) => {
