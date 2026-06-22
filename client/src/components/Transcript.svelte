@@ -372,6 +372,39 @@
       </svg>
     {/snippet}
 
+    <!-- Copy affordance — swaps to a check on a successful copy. Shared by the user
+         prompt footer and the turn-final assistant footer. -->
+    {#snippet copyIcon(copied: boolean)}
+      {#if copied}
+        <svg
+          class="ico"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
+      {:else}
+        <svg
+          class="ico"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="9" y="9" width="13" height="13" rx="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+      {/if}
+    {/snippet}
+
     <!-- One transcript item, rendered the same whether it sits in a turn's collapsible
          work block or as the visible final response. -->
     {#snippet itemView(item: DisplayItem)}
@@ -418,8 +451,23 @@
               {/if}
             </div>
           {/if}
-          {#if item.entryId || (item.ts && !item.delivery)}
+          {#if item.text || item.entryId || (item.ts && !item.delivery)}
             <div class="umeta">
+              {#if item.text}
+                <button
+                  class="copy"
+                  class:copied={copiedId === item.id}
+                  type="button"
+                  onclick={(e) => {
+                    copyText(item.id, item.text);
+                    e.currentTarget.blur();
+                  }}
+                  title={copiedId === item.id ? "Copied" : "Copy message"}
+                  aria-label="Copy message"
+                >
+                  {@render copyIcon(copiedId === item.id)}
+                </button>
+              {/if}
               {#if item.entryId}
                 <button
                   class="branch"
@@ -478,34 +526,7 @@
                 title={copiedId === item.id ? "Copied" : "Copy message"}
                 aria-label="Copy message"
               >
-                {#if copiedId === item.id}
-                  <svg
-                    class="ico"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M20 6 9 17l-5-5" />
-                  </svg>
-                {:else}
-                  <svg
-                    class="ico"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    aria-hidden="true"
-                  >
-                    <rect x="9" y="9" width="13" height="13" rx="2" />
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                  </svg>
-                {/if}
+                {@render copyIcon(copiedId === item.id)}
               </button>
               {#if item.entryId && item.entryId !== leafEntryId}
                 <button
@@ -869,6 +890,7 @@
     height: 13px;
   }
   .assistant:hover .copy,
+  .row.user:hover .copy,
   .copy:focus-visible {
     opacity: 1;
   }
@@ -935,9 +957,11 @@
     outline: 2px solid var(--accent);
     outline-offset: 1px;
   }
-  /* Touch devices have no hover — keep branch reachable (phone is the primary target). */
+  /* Touch devices have no hover — keep branch + the user-prompt copy reachable (phone is
+     the primary target). The assistant copy is pinned via .scroller.touch .copy above. */
   @media (max-width: 859px) {
-    .branch {
+    .branch,
+    .row.user .copy {
       opacity: 1;
     }
   }
