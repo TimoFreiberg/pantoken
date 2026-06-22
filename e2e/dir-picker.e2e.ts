@@ -59,6 +59,27 @@ test("Escape closes the directory browser without abandoning the draft", async (
   await expect(draftBox(page)).toHaveValue("keep me");
 });
 
+test("⌥P opens the project picker from the draft composer", async ({
+  page,
+}) => {
+  await openDraft(page);
+  await draftBox(page).focus();
+  await expect(picker(page)).toBeHidden();
+
+  // ⌥P (KeyP, layout-independent) opens the picker, mirroring ⌥W for the worktree chip.
+  await draftBox(page).press("Alt+p");
+  await expect(picker(page)).toBeVisible();
+  // Focus lands in the picker's always-visible filter input (autofocus), ready to navigate.
+  await expect(filterInput(page)).toBeFocused();
+  // The hotkey is suppressed in the textarea — no stray character leaks into the draft.
+  await expect(draftBox(page)).toHaveValue("");
+
+  // Escape closes it again, leaving the draft alive.
+  await page.keyboard.press("Escape");
+  await expect(picker(page)).toBeHidden();
+  await expect(draftBox(page)).toBeVisible();
+});
+
 test("a recent project is a one-tap pick from the browser", async ({
   page,
 }) => {
