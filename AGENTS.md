@@ -115,9 +115,10 @@ This is set up so you can verify autonomously — use it.
   `▸`/`▾` triangle. The open/close animation is `transition:reveal` from
   `client/src/lib/transitions.js` (a `slide` wrapper that honours
   `prefers-reduced-motion`) — don't call `slide` directly. The chevron inherits a
-  faint `currentColor`; brighten it on header hover with a scoped
-  `.header:hover :global(.chevron)` rule (a parent's plain class can't reach a
-  child component's element). Reference design: the sidebar project caret.
+  faint `currentColor`; brighten it on header hover with a scoped rule on the
+  parent's own header class — e.g. `.group-head:hover :global(.chevron)` in the
+  sidebar (a parent's plain class can't reach a child component's scoped element
+  without `:global`). Reference design: the sidebar project caret.
 - **Every UI action needs a hotkey and a tooltip.** Any clickable element — buttons,
   toggles, menu items, approval actions, settings controls — must have a `title`
   attribute naming the action (and its keyboard shortcut if one exists). Reviewers:

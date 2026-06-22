@@ -201,8 +201,9 @@ const server = Bun.serve<WsData>({
 
     // Desktop auto-update relay. The update-watcher POSTs whether a new origin/main is
     // staged-and-waiting (body { available, sha?, applyFailed? }); the hub broadcasts the
-    // card to clients and returns { applying } so the watcher learns on this same poll
-    // whether the user clicked "update now". Token-gated like /push (off on the local
+    // card to clients and returns { applying, force } so the watcher learns on this same
+    // poll whether the user clicked "update now" (force = a force-update was requested).
+    // Token-gated like /push (off on the local
     // desktop app; required behind tailscale).
     if (url.pathname === "/update/state" && req.method === "POST") {
       if (!tokenOk(tokenFromRequest(req, url)))

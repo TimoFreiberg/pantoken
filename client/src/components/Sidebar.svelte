@@ -221,7 +221,7 @@
         closeMenu();
         return;
       }
-      if (e.key === "a" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (e.key.toLowerCase() === "a" && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const t = e.target as HTMLElement;
         if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)
           return;
@@ -311,10 +311,13 @@
         t.isContentEditable
       )
         return;
-      if (e.key === "c") {
+      // Case-insensitive: the kbd badges show uppercase C/U, and CapsLock makes e.key
+      // uppercase too — match both so the advertised shortcut never silently no-ops.
+      const k = e.key.toLowerCase();
+      if (k === "c") {
         e.preventDefault();
         void copyBuildHash();
-      } else if (e.key === "u") {
+      } else if (k === "u") {
         e.preventDefault();
         forceUpdate();
       }
