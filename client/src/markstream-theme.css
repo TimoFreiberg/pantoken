@@ -60,6 +60,68 @@
      at the theme foreground so it reads on the sunken surface in both themes. */
   color: var(--text);
 }
+
+/* ── Copy-code button (injected by the copy-code action) ──
+   The action wraps each rendered `<pre>` in `.code-block` so the button can pin to the
+   visible top-right corner without scrolling away on long lines (the `<pre>` itself is
+   the horizontal scroll container). The wrapper carries the code block's vertical margin
+   so spacing matches an un-wrapped `<pre>`. */
+.markstream-svelte.markdown-renderer .code-block {
+  position: relative;
+  margin: 1em 0;
+}
+.markstream-svelte.markdown-renderer .code-block > pre {
+  margin: 0;
+}
+.markstream-svelte.markdown-renderer .code-block > .code-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  /* Hidden until the code block is hovered (desktop); revealed below for touch. */
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+.markstream-svelte.markdown-renderer .code-block > .code-copy svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+.markstream-svelte.markdown-renderer .code-block:hover > .code-copy,
+.markstream-svelte.markdown-renderer .code-block > .code-copy:focus-visible {
+  opacity: 1;
+}
+.markstream-svelte.markdown-renderer .code-block > .code-copy:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.markstream-svelte.markdown-renderer .code-block > .code-copy:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* brief post-copy confirmation — the check icon picks up the accent tint */
+.markstream-svelte.markdown-renderer .code-block > .code-copy.copied {
+  opacity: 1;
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+/* Touch devices have no hover — pin the button visible so it stays reachable. */
+@media (pointer: coarse) {
+  .markstream-svelte.markdown-renderer .code-block > .code-copy {
+    opacity: 1;
+  }
+}
 .markstream-svelte.markdown-renderer :where(pre code) {
   background: none;
   border: 0;

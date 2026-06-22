@@ -3,6 +3,7 @@
   // The transcript renders agent/tool markdown through here.
   import MarkdownRender from "markstream-svelte";
   import { isDark } from "../lib/dark.svelte.js";
+  import { copyCodeButtons } from "../lib/copy-code.js";
 
   let { content, final = true }: { content: string; final?: boolean } = $props();
 </script>
@@ -13,11 +14,15 @@
      - customMarkdownIt disables typographer so quotes/dashes render verbatim — don't
        smart-quote technical text (markstream defaults it on). `md` is contextually typed.
      - renderCodeBlocksAsPre: plain <pre> code blocks (no Monaco peer, themed in app.css). -->
-<MarkdownRender
-  {content}
-  {final}
-  htmlPolicy="safe"
-  customMarkdownIt={(md) => md.set({ typographer: false })}
-  renderCodeBlocksAsPre
-  isDark={isDark()}
-/>
+<!-- The wrapper hosts the copy-code action: it decorates each rendered code block with a
+     pinned "copy" button (markstream owns the <pre>, so we enhance the DOM post-render). -->
+<div use:copyCodeButtons>
+  <MarkdownRender
+    {content}
+    {final}
+    htmlPolicy="safe"
+    customMarkdownIt={(md) => md.set({ typographer: false })}
+    renderCodeBlocksAsPre
+    isDark={isDark()}
+  />
+</div>
