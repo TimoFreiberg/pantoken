@@ -350,8 +350,8 @@ hit a session limit mid-verify; confirm each against the code before acting):_
       capabilities" checklist (status per surface + the rule of thumb) so the next
       host-mediated feature gets bridged on purpose. `swiftc -typecheck` clean; behavioral
       confirmation is a desktop rebuild (owner).
-- [ ] **Sidebar visuals → match Codex** — redesign the sidebar look to follow Codex's
-      style. Needs a Codex screenshot for reference.
+- [x] **Sidebar visuals → match Codex** → checked off 2026-06-22 (owner: "we're at a good
+      state now"). The sidebar look is settled; no Codex-screenshot redesign pass needed.
 - [x] **"New session" draft stays visible in sidebar while draft exists** + **groups
       under its project** → done 2026-06-21 (both, settled per-project after discussion).
       Sidebar draft rows are now derived from the persisted `draftMap` (`store.pendingDrafts`,
@@ -376,9 +376,21 @@ hit a session limit mid-verify; confirm each against the code before acting):_
       or leave a lone header). `e2e/models.e2e.ts` covers collapse-default, expand-to-pick, and
       search-auto-expand. (Subtle fix found via the thinking-picker test: the shared `sel` clamp
       had to be gated to the model menu, since the model list can now be empty.) _(Scoped to the
-      header dropdown — the **Settings favorites checklist** was left expanded on purpose: its
-      default state is "no favorites = show all," where collapse-by-default would hide every
-      model mid-curation; it has its own search. Redirect if that surface was the intent.)_
+      header dropdown at the time; the **Settings favorites checklist** later got the same
+      treatment — see "Collapse the Settings providers + favorites lists" below, done 2026-06-22.)_
+- [x] **Collapse the Settings providers + favorites lists** → done 2026-06-22. The Settings
+      panel had grown into a long scroll, so two lists now collapse (`Settings.svelte`): the
+      **Providers** section header is a disclosure (collapsed by default, shows a `N/M connected`
+      summary), and the **favorites checklist** gets per-provider collapse mirroring the header
+      `ModelPicker` (chevron + model count, `aria-expanded`) — groups start collapsed, a non-empty
+      search auto-expands matches, and providers that already hold a favorite are seeded open on
+      each panel-open so existing curation stays visible (re-seed gated to the open transition via
+      a plain `prevOpen` guard, so toggling a favorite mid-session doesn't re-collapse). Default
+      model + thinking selects stay always-visible (compact, primary controls). `e2e/settings.e2e.ts`
+      gains collapse-default/expand-on-click, search-auto-expand, and seeded-open-on-reopen specs;
+      the existing provider + favorites specs expand first. _(Scoped to the two long lists; the
+      whole Models section was deliberately not put behind one toggle — the selects are the
+      most-used controls. Reframe if a single Models toggle was the intent.)_
 - [x] **Smooth collapse animation for turn-ending autocollapse** → done 2026-06-21. The
       per-turn work block's body now uses a Svelte `transition:slide` (180ms, `cubicOut`), so
       the autocollapse at turn end (and the manual toggle) glides height+opacity instead of
@@ -456,11 +468,13 @@ hit a session limit mid-verify; confirm each against the code before acting):_
       appears AND the active row flips to `data-state="unread"`, then jump-to-bottom clears both.
       _(Owner asked to weigh in: verified working against the mock; if you saw it stay stubbornly
       "read" in practice — e.g. a mobile-specific timing — flag it and I'll chase that case.)_
-- [ ] **Session context indicator** — a small color-coded circle (or similar badge)
-      in the session list / header showing how much context the session has consumed,
+- [ ] **Session context indicator** _(owner endorsed 2026-06-22 — "is good imo"; kept on
+      the backlog as a wanted feature, not closed)_ — a small color-coded circle (or similar
+      badge) in the session list / header showing how much context the session has consumed,
       analogous to the Claude app's colored circle (green → yellow → red as the
       context window fills). Color could map to token-budget thresholds from the
-      snapshot's `config`/usage fields; exact threshold values TBD
+      snapshot's `config`/usage fields; exact threshold values TBD. Complements the shipped
+      85%-full composer cue (a one-line warning) with an at-a-glance dot.
 - [x] ~~**(discussion needed) Auto session titling via cheapest model**~~ → resolved
       2026-06-21 as **won't-build (pi already owns it)**. pi's `session-namer.ts`
       extension already does exactly this: on the first prompt of an unnamed session it
@@ -484,18 +498,23 @@ hit a session limit mid-verify; confirm each against the code before acting):_
       the `staleidle` regression), so they have no duration to render. `ToolCard.svelte` derives
       the badge from those `startedAt`/`finishedAt` timestamps. Checkbox was stale — no code
       change needed.
-- [ ] **`/tree` command (native pi command)** — pi's builtin `/tree` command shows
-      the directory tree. Currently TUI builtins are intentionally omitted from the
-      client command list. `/tree` should be passed through so typing `/tree` in the
-      composer sends it as a prompt for pi to execute, even if pilot doesn't render
-      the tree natively.
-- [ ] **Provider OAuth login** — sign-in / sign-out for OAuth-capable providers
-      (Anthropic, OpenAI, …) from the Settings panel. Deferred from the settings-panel
-      work (API-key entry shipped); needs a server-side OAuth callback reachable over
-      Tailscale, which is the bulk of the cost.
-- [ ] **Extensions enable/disable view** + compatibility-issue surfacing
-- [ ] **Session rename / archive / unarchive** — from the sidebar (the create/open
-      half landed; this is the remaining SHOULD from DESIGN's "Sessions & history")
+- [ ] **`/tree` command → open the native tree modal** _(reframed 2026-06-22)_ — pilot
+      already renders the session tree natively (the T2 modal, opened via the header button
+      or `⌘⇧T`). Wire a client-side `/tree` command so typing `/tree` in the composer opens
+      that modal locally **instead of** forwarding it to the pi SDK as a prompt. Pure
+      client-side intercept in the slash-command path; no protocol/driver change.
+- [~] **Provider OAuth login** → ~done (owner, 2026-06-22 — "i'll get back to it if there's
+      jank"). Sign-in / sign-out for OAuth-capable providers ships in the Settings panel via
+      the remote paste-the-code flow (open the auth page, paste the code/redirect back — no
+      Tailscale callback needed, which sidestepped the original cost). `oauth-dialog` +
+      `e2e/settings.e2e.ts` cover sign-in/cancel/sign-out. Left partial pending real-world use;
+      reopen if the flow shows jank.
+- [ ] **Extensions enable/disable view** + compatibility-issue surfacing _(owner, 2026-06-22:
+      would be neat — possibly as a submenu within the Settings panel)_
+- [ ] **Unarchive action in the sidebar** _(reframed 2026-06-22 — rename + archive already
+      ship)_ — the remaining gap is the toggle: when a session is already archived, the
+      sidebar's archive action should read (and behave as) **Unarchive** rather than only
+      offering archive. (The undo-toast on archive exists; this is the explicit per-row reverse.)
 
 ## 🔵 Later
 
@@ -621,11 +640,13 @@ the rest._
 - [x] **Edit-and-resubmit a prior prompt** → done 2026-06-19 as session-tree T1.
       “Branch from this prompt” rewinds to the prompt's parent and prefills the composer;
       `⌘/Ctrl+⇧+↑` applies it to the most recent prompt.
-- [~] **Live activity status line** — partly shipped with cross-session attention:
-      derived one-liners ("Reading foo.ts", "Running tests", "Editing bar.rs") now appear
-      in sidebar rows and failure notifications. The browser tab still shows only the
-      active session title; decide whether live activity belongs there before calling this
-      complete.
+- [x] ~~**Live activity status line**~~ → won't-build (owner, 2026-06-22). The derived
+      verbose one-liner ("Reading foo.ts", "Running tests", "Editing bar.rs") was shipped once
+      and **reverted as too noisy** — owner doesn't want it anywhere (sidebar rows, tab title,
+      or notifications). The coarse cross-session attention state (running / waiting / failed /
+      done) stays; this is specifically the chatty per-action line that's out. _(Doc note: the
+      earlier text here claimed the one-liners were live in sidebar rows — that was stale;
+      they were removed. Flag me if any verbose-activity remnant is still rendering in code.)_
 - [ ] **Files-changed-this-turn rollup** — at turn end, a collapsed card summarizing
       every file the agent wrote/edited this turn with `+N/−M` counts, expandable to
       the per-file diffs (reuses the `@pierre/diffs` work already landed).
