@@ -114,6 +114,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         let conf = WKWebViewConfiguration()
         conf.websiteDataStore = .default()  // persistent → localStorage / token survive
+        // JS→native bridge: the web client posts `pilotUpdate` the instant the user clicks the
+        // sidebar "Update now" button (client/src/lib/native-bridge.ts), so we raise the
+        // "Updating Pilot…" overlay right away instead of waiting ~one watcher poll (≈5s) for
+        // its first `apply` event. The content controller retains us strongly, but AppDelegate
+        // lives for the whole process, so the cycle is harmless.
+        let contentController = WKUserContentController()
+        contentController.add(self, name: "pilotUpdate")
+        conf.userContentController = contentController
 
         let wv = WKWebView(frame: w.contentView!.bounds, configuration: conf)
         wv.autoresizingMask = [.width, .height]
@@ -587,5 +595,26 @@ extension AppDelegate: WKDownloadDelegate {
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
         NSLog("Pilot: download failed: \(error.localizedDescription)")
+    }
+}
+
+// MARK: - JS → native bridge (WKScriptMessageHandler)
+
+extension AppDelegate: WKScriptMessageHandler {
+    /// The web client posts here the moment the user clicks the sidebar "Update now" button
+    /// (client/src/lib/native-bridge.ts → window.webkit.messageHandlers.pilotUpdate). We raise
+    /// the overlay right away rather than waiting for the watcher's first `apply` event, which
+    /// trails the click by up to one poll (≈5s). The watcher's subsequent phase events refresh
+    /// the label on the same overlay; teardown (post-restart reload / failure / failsafe) is
+    /// unchanged. Future message kinds branch on the body's `type`.
+    func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
+        guard message.name == "pilotUpdate" else { return }
+        let type = (message.body as? [String: Any])?["type"] as? String
+        if type == "updateStarting" {
+            presentUpdateOverlay("Updating Pilot…")
+        }
     }
 }
