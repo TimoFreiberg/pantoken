@@ -172,3 +172,33 @@ test("the delivery toggle is the source of truth: Enter respects it, Alt+Enter i
   await expect(box).toHaveValue("");
   await expect(followUp).toHaveClass(/active/);
 });
+
+test("holding Opt/Alt previews the follow-up the slider would queue, then snaps back", async ({
+  page,
+}) => {
+  await drive(page, "streamhold"); // a turn that stays running
+  const modes = page.getByRole("radiogroup", { name: "Delivery mode" });
+  const steer = modes.getByRole("radio", { name: "steer", exact: true });
+  const followUp = modes.getByRole("radio", { name: "follow-up" });
+  // Rest: the committed choice (steer) is shown.
+  await expect(steer).toHaveClass(/active/);
+
+  // Hold Opt: the slider slides to follow-up — an honest preview of the one-shot Alt+Enter
+  // delivery — WITHOUT committing it.
+  await page.keyboard.down("Alt");
+  await expect(followUp).toHaveClass(/active/);
+  await expect(steer).not.toHaveClass(/active/);
+
+  // Release: it snaps back to the still-committed steer (the toggle never actually moved).
+  await page.keyboard.up("Alt");
+  await expect(steer).toHaveClass(/active/);
+
+  // When the user HAS committed follow-up, holding Opt is a no-op (Alt+Enter would deliver
+  // follow-up anyway) — the slider stays put rather than jiggling.
+  await followUp.click();
+  await expect(followUp).toHaveClass(/active/);
+  await page.keyboard.down("Alt");
+  await expect(followUp).toHaveClass(/active/);
+  await page.keyboard.up("Alt");
+  await expect(followUp).toHaveClass(/active/);
+});

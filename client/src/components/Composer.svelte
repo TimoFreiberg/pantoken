@@ -28,6 +28,10 @@
   import { parseTasklist } from "../lib/tasklist.js";
 
   let deliverAs = $state<"steer" | "followUp">("steer");
+  // True while the Opt/Alt key is physically held. Holding Opt previews the one-shot
+  // Alt+Enter delivery (a follow-up) by sliding the toggle there WITHOUT committing it —
+  // an honest "Enter right now would queue a follow-up" hint that snaps back on release.
+  let altHeld = $state(false);
   // Delivery-mode options for the steer/follow-up switch. Typed so the SegmentedControl
   // generic infers `"steer" | "followUp"` and `bind:value={deliverAs}` stays type-safe.
   const deliverModes: { value: "steer" | "followUp"; label: string; title: string }[] = [
@@ -85,6 +89,12 @@
   // "A turn is in flight" — the robust signal (see store.turnActive), so the stop pill +
   // steer/queue affordances stay correct even if the folded status glitches mid-turn.
   const streaming = $derived(store.turnActive);
+  // The segment the slider shows: the Opt-held preview when held (only meaningful while a
+  // turn streams — that's the only time Alt+Enter forces follow-up and the toggle is shown),
+  // otherwise the committed choice. `undefined` lets SegmentedControl fall back to `value`.
+  const deliverDisplay = $derived(
+    altHeld && streaming ? ("followUp" as const) : undefined,
+  );
   // Drafting a brand-new session: the composer doubles as the new-session form (config
   // chips above, first prompt below). Send creates the session + delivers the prompt.
   const drafting = $derived(store.draft != null);
@@ -717,11 +727,27 @@
     function onPageHide() {
       store.stashDraft();
     }
+    // Track whether Opt/Alt is physically down so the delivery slider can preview the
+    // follow-up it'd queue. Sync off `e.altKey` (true through any combo, false on the
+    // Alt keyup itself); reset on blur because a key released while the window is
+    // unfocused (⌘-Tab away mid-hold) never fires keyup here, which would strand it.
+    function onAltSync(e: KeyboardEvent) {
+      altHeld = e.altKey;
+    }
+    function onWindowBlur() {
+      altHeld = false;
+    }
     window.addEventListener("keydown", onWindowKeydown);
+    window.addEventListener("keydown", onAltSync);
+    window.addEventListener("keyup", onAltSync);
+    window.addEventListener("blur", onWindowBlur);
     window.addEventListener("resize", onResize);
     window.addEventListener("pagehide", onPageHide);
     return () => {
       window.removeEventListener("keydown", onWindowKeydown);
+      window.removeEventListener("keydown", onAltSync);
+      window.removeEventListener("keyup", onAltSync);
+      window.removeEventListener("blur", onWindowBlur);
       window.removeEventListener("resize", onResize);
       window.removeEventListener("pagehide", onPageHide);
     };
@@ -781,7 +807,7 @@
 
     {#if streaming}
       <div class="streamrow">
-        <SegmentedControl size="sm" ariaLabel="Delivery mode" options={deliverModes} bind:value={deliverAs} />
+        <SegmentedControl size="sm" ariaLabel="Delivery mode" options={deliverModes} bind:value={deliverAs} displayValue={deliverDisplay} />
         <button
           class="stop"
           onclick={() => store.abort()}
