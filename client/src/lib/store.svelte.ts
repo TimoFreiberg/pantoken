@@ -932,6 +932,48 @@ class PilotStore {
       }
       return;
     }
+    // A new-session creation that failed before any session existed (no sessionId): its
+    // draft was already cleared on submit, and a kind:"newSession" rejection has no
+    // transcript surface (the optimistic overlay only renders kind:"prompt" rows for the
+    // focused session). So recover the prompt into a draft rather than strand it invisibly
+    // in the outbox. (A newSession that DID create a session but failed its first prompt
+    // carries a sessionId — that falls through to the normal rejected-row path below, which
+    // renders in the now-focused session with Retry/Edit.)
+    if (!result.sessionId && prompt.kind === "newSession") {
+      const competingDraft =
+        this.draft !== null &&
+        (this.composerDraft.trim().length > 0 ||
+          this.composerImages.length > 0);
+      if (!competingDraft) {
+        // Pane is free (no draft, or one you haven't typed into) — restore straight away.
+        await this.restoreFailedDraft(prompt);
+        return;
+      }
+      // You're mid-typing a different draft — don't clobber it. Keep the entry in the
+      // outbox as rejected (so flushOutbox won't resend it, and a reload during the offer
+      // window doesn't lose it) and offer a one-tap restore.
+      const stranded: PendingPrompt = {
+        ...prompt,
+        state: "rejected",
+        error: result.error ?? "The new session couldn't be created",
+      };
+      this.pendingPrompts = this.pendingPrompts.map((item) =>
+        item.promptId === result.promptId ? stranded : item,
+      );
+      try {
+        await savePendingPrompt(stranded);
+      } catch (e) {
+        this.lastError = `couldn't persist the failed prompt: ${errorText(e)}`;
+      }
+      this.toast("New session couldn't start — restore your prompt?", {
+        action: {
+          label: "Restore",
+          run: () => void this.restoreFailedDraft(stranded),
+        },
+        durationMs: 0,
+      });
+      return;
+    }
     const rejected: PendingPrompt = {
       ...prompt,
       kind: result.sessionId ? "prompt" : prompt.kind,
@@ -946,6 +988,41 @@ class PilotStore {
       await savePendingPrompt(rejected);
     } catch (e) {
       this.lastError = `couldn't persist the rejected prompt: ${errorText(e)}`;
+    }
+  }
+
+  /** Bring a failed new-session draft back into view: its config (cwd/worktree/model/
+   *  thinking) → chips, its prompt text/images → the composer, and drop the now-consumed
+   *  outbox entry. Mirrors startDraft's stash-then-flip, but seeds from the failed prompt
+   *  instead of model defaults, and persists the text immediately (a second stash) so a
+   *  reload right after recovery keeps it. Reused by both the auto-restore path and the
+   *  toast's Restore action. */
+  private async restoreFailedDraft(prompt: PendingPrompt): Promise<void> {
+    // Save whatever session/draft we're leaving before flipping into the recovered draft.
+    this.stashDraft();
+    this.searchOpen = false;
+    const ns = prompt.newSession;
+    this.draft = {
+      cwd: ns?.cwd ?? "",
+      worktree: ns?.worktree ?? false,
+      model: ns?.model,
+      thinking: ns?.thinking,
+    };
+    this.composerDraft = prompt.text;
+    this.composerImages = prompt.images ? [...prompt.images] : [];
+    // Persist the restored text under n:<cwd> now (stashDraft keys off the live draft),
+    // so a reload before the next keystroke-stash doesn't drop it.
+    this.stashDraft();
+    this.pushNav({ kind: "draft", cwd: this.draft.cwd });
+    if (this.draft.cwd) this.setLastProjectCwd(this.draft.cwd);
+    this.focusComposer();
+    try {
+      await deletePendingPrompt(prompt.promptId);
+      this.pendingPrompts = this.pendingPrompts.filter(
+        (item) => item.promptId !== prompt.promptId,
+      );
+    } catch (e) {
+      this.lastError = `restored your prompt, but couldn't clear its outbox copy: ${errorText(e)}`;
     }
   }
 
