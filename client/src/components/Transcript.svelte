@@ -21,6 +21,7 @@
   import PullIndicator from "./PullIndicator.svelte";
   import { pullToRefresh } from "../lib/pull-to-refresh.js";
   import { createPullRefresh } from "../lib/pull-to-refresh.svelte.js";
+  import { imageViewer } from "../lib/image-viewer.svelte.js";
 
   const items = $derived(store.transcriptItems);
 
@@ -414,13 +415,20 @@
           {#if item.images && item.images.length > 0}
             <div class="user-images">
               {#each item.images as image, index (index)}
-                <img
-                  class="att-img"
-                  src="data:{image.mimeType};base64,{image.data}"
-                  alt={`Attached image ${index + 1}`}
-                  title="Image you attached to this message"
-                  data-testid="sent-image"
-                />
+                <button
+                  type="button"
+                  class="att-img-btn"
+                  onclick={() => imageViewer.open(item.images!, index)}
+                  title="View image full screen (Enter)"
+                  aria-label={`View attached image ${index + 1} full screen`}
+                >
+                  <img
+                    class="att-img"
+                    src="data:{image.mimeType};base64,{image.data}"
+                    alt={`Attached image ${index + 1}`}
+                    data-testid="sent-image"
+                  />
+                </button>
               {/each}
             </div>
           {/if}
@@ -833,7 +841,20 @@
     max-width: min(86%, 366px);
     margin-bottom: 5px;
   }
-  .user-images img,
+  /* The thumbnail is a button so it's keyboard-reachable and opens the full-screen
+     viewer; it carries no chrome of its own — the bordered look lives on the inner img. */
+  .att-img-btn {
+    display: block;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: zoom-in;
+    border-radius: var(--radius-sm);
+  }
+  .att-img-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
   .att-img {
     display: block;
     width: 100%;
@@ -842,8 +863,13 @@
     border-radius: var(--radius-sm);
     background: var(--surface-sunken);
     object-fit: cover;
+    transition: border-color 0.12s;
   }
-  .user-images img:only-child {
+  .att-img-btn:hover .att-img {
+    border-color: var(--accent);
+  }
+  /* A lone attachment spans both grid columns and caps wider than a paired thumbnail. */
+  .att-img-btn:only-child {
     grid-column: 1 / -1;
     max-width: 300px;
   }
@@ -998,7 +1024,7 @@
   .row.user.rejected .bubble {
     border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
   }
-  .row.user.rejected .user-images img {
+  .row.user.rejected .att-img {
     border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
   }
   .delivery {
