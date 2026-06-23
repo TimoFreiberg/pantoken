@@ -80,6 +80,7 @@ import {
   resolveFavorites,
 } from "./model-config.js";
 import { firstUserPreview, mergeSessionLists } from "./session-list.js";
+import { buildSessionMcpConfigOverride } from "./mcp-cwd-workaround.js";
 import { makeTrustResolver, type TrustAsk } from "./trust.js";
 import { PiUiBridge } from "./ui-bridge.js";
 import { parseUnsupportedHostUiErrorMessage } from "./unsupported-host-ui.js";
@@ -682,6 +683,11 @@ export async function createPiDriver(
   // and returns the WarmSession.
   async function warmUp(sessionManager: SessionManager): Promise<WarmSession> {
     const cwd = sessionManager.getCwd();
+    // TEMP (see mcp-cwd-workaround.ts): make stdio MCP servers (e.g. playwright)
+    // spawn in THIS session's cwd instead of pilot's shared process cwd, so
+    // server-written files like screenshots land in the worktree the agent is in.
+    // Remove once the pi-mcp-adapter upstream fix is released (see docs/TODO.md).
+    const mcpConfigOverride = buildSessionMcpConfigOverride(agentDir, cwd);
     const services = await createAgentSessionServices({
       cwd,
       agentDir,
@@ -690,6 +696,9 @@ export async function createPiDriver(
       // settings manager is left to default (cwd-bound, for correct project layering).
       authStorage,
       modelRegistry,
+      ...(mcpConfigOverride
+        ? { extensionFlagValues: new Map([["mcp-config", mcpConfigOverride]]) }
+        : {}),
       // Without this, pi leaves projectTrusted=true and auto-loads every project's .pi
       // resources — the D12 gap. Resolve trust per cwd instead (non-interactive MVP;
       // honors trust.json, denies untrusted paths (no implicit trust — see createPiDriver).
