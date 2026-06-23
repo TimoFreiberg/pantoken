@@ -169,6 +169,9 @@ export class MockDriver implements PilotDriver {
   private listeners = new Set<(ev: SessionDriverEvent) => void>();
   private trustListeners = new Set<(ev: TrustEvent) => void>();
   private pendingTrust = new Set<string>();
+  // One-shot: when set, the next newSession() rejects then clears (armed via
+  // runScript("failnewsession")). Simulates a transient creation failure for e2e.
+  private failNextNewSession = false;
   // In-flight scripted steps, in chronological order. We keep the step alongside its
   // timer (not just the raw handle) so a NEW script can flush the in-flight one to
   // completion before it starts — see play() for why interleaving corrupts state.
@@ -371,6 +374,7 @@ export class MockDriver implements PilotDriver {
     this.queues.clear();
     this.sessions = SESSION_LIST.map((s) => ({ ...s }));
     this.liveCountBumps.clear();
+    this.failNextNewSession = false;
     this.worktrees = seedWorktrees(SESSION_LIST);
     this.config = { ...MOCK_DEFAULT_CONFIG };
     this.providers = MOCK_PROVIDERS.map((p) => ({ ...p }));
@@ -637,6 +641,15 @@ export class MockDriver implements PilotDriver {
   }
 
   async newSession(opts: NewSessionOpts = {}): Promise<SessionDriverEvent[]> {
+    // One-shot failure injection (armed via runScript("failnewsession")): reject before any
+    // state mutation, mirroring a real driver whose `jj workspace add` hits a stale working
+    // copy. Lets e2e exercise the client's draft-restore-on-failure path deterministically.
+    if (this.failNextNewSession) {
+      this.failNextNewSession = false;
+      throw new Error(
+        "The working copy is stale (mock newSession failure for tests)",
+      );
+    }
     this.cancelTimers();
     const { cwd, worktree, model, thinking } = opts;
     // Honor a typed cwd so the new row groups under that project in the sidebar
@@ -845,6 +858,11 @@ export class MockDriver implements PilotDriver {
   }
 
   runScript(name: string): void {
+    if (name === "failnewsession") {
+      // Arm a one-shot newSession() rejection (consumed by the next creation attempt).
+      this.failNextNewSession = true;
+      return;
+    }
     if (name === "trust") {
       // The trust card rides the out-of-band trust channel, not the event stream.
       const req = mockTrustRequest();
