@@ -59,10 +59,20 @@ function projectName(cwd: string): string {
   return parts[parts.length - 1] || cwd;
 }
 
+/** The sidebar sort key for a session: when the operator last sent a message here. This
+ *  is Claude-app-style "most recently used on top", but — unlike `updatedAt`, which the
+ *  agent bumps on every streamed turn — it only moves when you actually interact, so a
+ *  running session holds its place instead of jumping around as it emits tokens. Falls
+ *  back to `updatedAt` if the server didn't supply it. */
+function lastInteractionKey(entry: SessionListEntry): string {
+  return entry.lastUserMessageAt || entry.updatedAt;
+}
+
 /** Group sessions by project dir for the sidebar, applying the search query and the
- *  active-only filter. Items sort newest-first within a group; groups sort alphabetically
- *  by project name (the cwd's basename), case-insensitive. Empty groups are dropped — so a
- *  project whose sessions are all hidden (archived/stale) disappears from the active view. */
+ *  active-only filter. Within a group, sessions sort by last-interaction time, newest
+ *  first ({@link lastInteractionKey}). Groups sort alphabetically by project name (the
+ *  cwd's basename), case-insensitive. Empty groups are dropped — so a project whose
+ *  sessions are all hidden (archived/stale) disappears from the active view. */
 export function filterSessions(
   sessions: readonly SessionListEntry[],
   { query, showArchived, now }: FilterOptions,
@@ -88,11 +98,15 @@ export function filterSessions(
 
   const groups = [...byCwd.entries()].map(([cwd, items]) => ({
     cwd,
-    items: [...items].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    // Most recently used on top, by last-interaction time (not agent activity), so a
+    // streaming session doesn't leapfrog its siblings as its `updatedAt` keeps bumping.
+    items: [...items].sort((a, b) =>
+      lastInteractionKey(b).localeCompare(lastInteractionKey(a)),
+    ),
   }));
   // Projects A→Z by display name, case-insensitive, with the full cwd as a stable
   // tiebreaker when two projects share a basename. (Sessions within a group stay
-  // newest-first, sorted above.)
+  // most-recently-used-first, sorted above.)
   groups.sort((a, b) => {
     const byName = projectName(a.cwd).localeCompare(
       projectName(b.cwd),

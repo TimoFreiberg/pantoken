@@ -81,7 +81,7 @@ import { firstUserPreview, mergeSessionLists } from "./session-list.js";
 import { makeTrustResolver, type TrustAsk } from "./trust.js";
 import { PiUiBridge } from "./ui-bridge.js";
 import { parseUnsupportedHostUiErrorMessage } from "./unsupported-host-ui.js";
-import { countUserMessages } from "./user-message-count.js";
+import { userMessageStats } from "./user-message-count.js";
 
 export interface PiDriverOptions {
   /** Max kept-warm sessions before LRU eviction. Defaults to config.warmCap. */
@@ -801,30 +801,40 @@ export async function createPiDriver(
 
   const toEntry = async (
     info: Awaited<ReturnType<typeof SessionManager.list>>[number],
-  ): Promise<SessionListEntry> => ({
-    sessionId: info.id,
-    path: info.path,
-    cwd: info.cwd,
-    displayName: info.name,
-    preview: info.firstMessage ?? "",
-    // info.messageCount counts user + assistant + toolResult; the sidebar wants only
-    // the operator's turns, so re-scan for role-"user" entries (cached by mtime+total).
-    userMessageCount: await countUserMessages(
+  ): Promise<SessionListEntry> => {
+    // info.messageCount counts user + assistant + toolResult; the sidebar wants only the
+    // operator's turns (and the last one's time, for sorting), so re-scan for role-"user"
+    // entries in one pass (cached by mtime+total).
+    const stats = await userMessageStats(
       info.path,
       info.modified.getTime(),
       info.messageCount,
-    ),
-    updatedAt: info.modified.toISOString(),
-    createdAt: info.created.toISOString(),
-    parentSessionPath: info.parentSessionPath,
-    archived: archiveStore.has(info.path),
-    worktree: (() => {
-      const meta = worktreeStore.get(info.cwd);
-      return meta
-        ? { path: meta.path, base: meta.base, name: meta.name }
-        : undefined;
-    })(),
-  });
+    );
+    return {
+      sessionId: info.id,
+      path: info.path,
+      cwd: info.cwd,
+      displayName: info.name,
+      preview: info.firstMessage ?? "",
+      userMessageCount: stats.count,
+      updatedAt: info.modified.toISOString(),
+      createdAt: info.created.toISOString(),
+      // Last operator turn; fall back to creation time for a session with no user message
+      // yet, so it sorts by when it was made rather than to the bottom.
+      lastUserMessageAt:
+        stats.lastUserAtMs !== undefined
+          ? new Date(stats.lastUserAtMs).toISOString()
+          : info.created.toISOString(),
+      parentSessionPath: info.parentSessionPath,
+      archived: archiveStore.has(info.path),
+      worktree: (() => {
+        const meta = worktreeStore.get(info.cwd);
+        return meta
+          ? { path: meta.path, base: meta.base, name: meta.name }
+          : undefined;
+      })(),
+    };
+  };
 
   // A list entry for a warm session that isn't on disk yet. pi doesn't write a
   // session's .jsonl until its first ASSISTANT message — it buffers the header +
@@ -853,6 +863,9 @@ export async function createPiDriver(
       // covers warm-only and disk-superseded entries alike), so it's omitted here.
       updatedAt: nowIso,
       createdAt: nowIso,
+      // A warm session exists because the operator just sent its opening prompt, so
+      // "last user message" is now — sorts it to the top, same as updatedAt/createdAt.
+      lastUserMessageAt: nowIso,
       archived: archiveStore.has(path),
       // Carry the worktree flag from the moment of creation (keyed by the worktree dir
       // == ws.cwd), identical to toEntry. Without it the sidebar groups a brand-new

@@ -15,6 +15,7 @@ function entry(
     userMessageCount: 0,
     updatedAt: "2026-06-18T00:00:00.000Z",
     createdAt: "2026-06-18T00:00:00.000Z",
+    lastUserMessageAt: "2026-06-18T00:00:00.000Z",
     archived: false,
     ...over,
   };

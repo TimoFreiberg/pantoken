@@ -283,6 +283,13 @@ export interface SessionListEntry {
   readonly userMessageCount: number;
   readonly updatedAt: Timestamp;
   readonly createdAt: Timestamp;
+  /** When the operator last sent a message here — the timestamp of the last role-"user"
+   *  entry in the session, or `createdAt` if none yet. Pilot derives this itself from the
+   *  session .jsonl (no pi change). It's the sidebar's sort key: Claude-app-style "most
+   *  recently used on top", but WITHOUT `updatedAt`'s noise — `updatedAt` bumps on every
+   *  streamed agent turn, so sorting by it makes running sessions jump around as they
+   *  emit tokens; this only moves when you actually send something. */
+  readonly lastUserMessageAt: Timestamp;
   readonly parentSessionPath?: string;
   /** Context-window fill, present only for sessions already loaded in memory (the
    *  driver can read it for free from a warm session). Disk-only sessions omit it —
