@@ -650,6 +650,23 @@ hit a session limit mid-verify; confirm each against the code before acting):_
       strip — that's handled globally by the `strip-pi-docs` pi extension
       (`~/.pi/agent/extensions/`); this is the broader "different prompt for this session."
 
+- [ ] **Remove the MCP-cwd workaround once the `pi-mcp-adapter` fix ships** _(temporary;
+      added 2026-06-23)_. Stdio MCP servers (e.g. the playwright browser) were spawned by
+      `pi-mcp-adapter` (≤ 2.10.0) with `cwd = process.cwd()`, which in pilot is the shared
+      host-process dir — so every session's server-written files (screenshots especially)
+      landed in pilot's dir instead of the session's worktree, where the agent looks, and
+      the agent resorted to scanning the filesystem to find them. Stopgap: `warmUp`
+      (`server/src/pi/pi-driver.ts`) generates a per-session copy of the global `mcp.json`
+      with `cwd` injected into each stdio server (`server/src/pi/mcp-cwd-workaround.ts`,
+      `buildSessionMcpConfigOverride`) and passes it to the adapter via its `mcp-config`
+      flag (`extensionFlagValues`). Upstream fix: local branch
+      `feat/default-server-cwd-to-session` in `~/src/pi-mcp-adapter` defaults the stdio
+      spawn cwd to `ctx.cwd` in `McpServerManager`; PR to
+      https://github.com/nicobailon/pi-mcp-adapter not yet opened (open by hand). **When**
+      the fix is released and the installed adapter version includes it: delete
+      `mcp-cwd-workaround.ts`, its import in `pi-driver.ts`, and the `warmUp` call site +
+      `extensionFlagValues` spread, then verify screenshots still land in the worktree.
+
 ## 🧹 Code health & drift (2026-06-22 audit)
 
 _Audit lens: Svelte's ["When not to use `$effect`"](https://svelte.dev/docs/svelte/$effect#When-not-to-use-$effect)
