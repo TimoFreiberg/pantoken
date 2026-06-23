@@ -55,6 +55,45 @@ test("a pending new-session draft is restored when you reopen the new view", asy
   ).toHaveValue("a brand-new idea");
 });
 
+test("a pending new-session draft's worktree toggle survives leaving and reopening", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await page.getByRole("button", { name: "New session…" }).click();
+  const worktree = page.getByRole("button", { name: "worktree" });
+  await expect(worktree).toHaveAttribute("aria-pressed", "false");
+  await worktree.click();
+  await expect(worktree).toHaveAttribute("aria-pressed", "true");
+
+  // Navigate to an existing session — exits the draft.
+  await row(page, "Explore the fold reducer").click();
+  await openSidebar(page);
+  await expect(composer(page)).toHaveValue("");
+
+  // Reopen the new-session view (same project) — the toggle is still on.
+  await page.getByRole("button", { name: "New session…" }).click();
+  await expect(page.getByRole("button", { name: "worktree" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+});
+
+test("a pending new-session draft's worktree toggle survives a reload", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByRole("button", { name: "worktree" }).click();
+  await page.reload();
+  // Boot restores the focused session, not the draft, so reopen the new view.
+  await openSidebar(page);
+  await page.getByRole("button", { name: "New session…" }).click();
+  await expect(page.getByRole("button", { name: "worktree" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+});
+
 test("sending a prompt clears its stored draft (no resurrection on return)", async ({
   page,
 }) => {

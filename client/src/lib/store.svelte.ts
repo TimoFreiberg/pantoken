@@ -218,6 +218,12 @@ class PilotStore {
   // durable backing store, stashed on switch / debounced keystroke / pagehide. Pure client
   // state — no protocol change.
   private draftMap = $state<Record<string, string>>(loadDraftMap());
+  // Per new-session-draft config that isn't carried by composerDraft text — currently just
+  // the worktree toggle. Keyed identically to draftMap (`n:<cwd>`) so a switch / reload
+  // restores it; startDraft rebuilds the draft from defaults and would otherwise drop it.
+  // Only set entries are stored (worktree:true) — false is the default, i.e. absence.
+  private draftConfigMap =
+    $state<Record<string, { worktree: boolean }>>(loadDraftConfigMap());
   // Per-session (and per new-session-draft) submit log: every prompt the user has SENT,
   // recorded at the submit chokepoint and persisted in localStorage (key `pilot.promptHistory`).
   // This is the durable, independent backing for ArrowUp recall — independent of the transcript
@@ -490,6 +496,23 @@ class PilotStore {
     if (key in this.draftMap) {
       delete this.draftMap[key];
       persistDraftMap(this.draftMap);
+    }
+  }
+  /** Persist the active new-session draft's worktree toggle under its `n:<cwd>` key, so a
+   *  session switch / reload restores it (startDraft rebuilds the draft from defaults and
+   *  would otherwise drop it). Only `true` is stored — false is the default, i.e. absence. */
+  private persistDraftWorktree(): void {
+    if (!this.draft) return;
+    const key = this.composerDraftKey;
+    if (this.draft.worktree) this.draftConfigMap[key] = { worktree: true };
+    else delete this.draftConfigMap[key];
+    persistDraftConfigMap(this.draftConfigMap);
+  }
+  /** Drop a stored draft's config once it's been consumed (sent) or discarded. */
+  private clearStoredDraftConfig(key: string): void {
+    if (key in this.draftConfigMap) {
+      delete this.draftConfigMap[key];
+      persistDraftConfigMap(this.draftConfigMap);
     }
   }
 
@@ -1181,6 +1204,7 @@ class PilotStore {
     // Persist the restored text under n:<cwd> now (stashDraft keys off the live draft),
     // so a reload before the next keystroke-stash doesn't drop it.
     this.stashDraft();
+    this.persistDraftWorktree();
     this.pushNav({ kind: "draft", cwd: this.draft.cwd });
     if (this.draft.cwd) this.setLastProjectCwd(this.draft.cwd);
     this.focusComposer();
@@ -1605,6 +1629,10 @@ class PilotStore {
     };
     // Restore this project's pending new-session draft, if any (key now resolves to n:cwd).
     this.loadDraft(this.composerDraftKey);
+    // Restore the persisted worktree toggle for this project's draft (text rides draftMap,
+    // the worktree pref rides draftConfigMap, both keyed by n:<cwd>).
+    if (this.draftConfigMap[this.composerDraftKey]?.worktree)
+      this.draft = { ...this.draft, worktree: true };
     // Record the draft view for ⌘[ / ⌘] history and remember its project for ⌘N.
     this.pushNav({ kind: "draft", cwd });
     if (cwd) this.setLastProjectCwd(cwd);
@@ -1624,6 +1652,7 @@ class PilotStore {
       delete this.draftMap[key];
       persistDraftMap(this.draftMap);
     }
+    this.clearStoredDraftConfig(key);
     if (this.draft && this.composerDraftKey === key) {
       this.draft = null;
       this.composerDraft = "";
@@ -1638,14 +1667,21 @@ class PilotStore {
     // Retarget moves the draft's row to the new project — drop the old key's stashed
     // copy so the same draft doesn't ghost under the project we just left. The live
     // text rides `composerDraft` and re-stashes under newKey on the next switch.
-    if (oldKey !== newKey && oldKey in this.draftMap) {
-      delete this.draftMap[oldKey];
-      persistDraftMap(this.draftMap);
+    if (oldKey !== newKey) {
+      if (oldKey in this.draftMap) {
+        delete this.draftMap[oldKey];
+        persistDraftMap(this.draftMap);
+      }
+      // The worktree pref follows the draft to its new project key.
+      if (oldKey in this.draftConfigMap) delete this.draftConfigMap[oldKey];
+      this.persistDraftWorktree(); // re-writes the live pref under newKey (+ persists)
     }
   }
   toggleDraftWorktree(): void {
-    if (this.draft)
+    if (this.draft) {
       this.draft = { ...this.draft, worktree: !this.draft.worktree };
+      this.persistDraftWorktree();
+    }
   }
   /** Commit the draft: create the session and deliver its first prompt in one
    *  message. Mirrors prompt()'s permission/push gesture since this IS the first turn. */
@@ -1675,6 +1711,7 @@ class PilotStore {
     // then drop the pending new-session draft's stored copy.
     this.recordPromptHistory(this.composerDraftKey, t);
     this.clearStoredDraft(this.composerDraftKey);
+    this.clearStoredDraftConfig(this.composerDraftKey);
     this.draft = null;
     this.composerDraft = "";
     this.composerImages = [];
@@ -2061,6 +2098,7 @@ function persistHideThinking(hide: boolean): void {
 }
 
 const DRAFTS_KEY = "pilot.composerDrafts";
+const DRAFT_CONFIG_KEY = "pilot.draftConfig";
 const LAST_SESSION_PREFIX = "pilot.lastSession.";
 const LAST_SERVER_KEY = "pilot.lastServerId";
 
@@ -2180,6 +2218,41 @@ function persistDraftMap(map: Record<string, string>): void {
     localStorage.setItem(DRAFTS_KEY, JSON.stringify(map));
   } catch {
     // Storage full / unavailable (private mode) — drafts stay in-memory this session.
+  }
+}
+
+/** Read per-new-session-draft config (worktree toggle) from localStorage. Tolerant of a
+ *  missing / corrupt value — a lost toggle is never worth a thrown boot. Only worktree:true
+ *  entries are kept (false == default == absent). */
+function loadDraftConfigMap(): Record<string, { worktree: boolean }> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(DRAFT_CONFIG_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, { worktree: boolean }> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>))
+      if (
+        v &&
+        typeof v === "object" &&
+        (v as { worktree?: unknown }).worktree === true
+      )
+        out[k] = { worktree: true };
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function persistDraftConfigMap(
+  map: Record<string, { worktree: boolean }>,
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(DRAFT_CONFIG_KEY, JSON.stringify(map));
+  } catch {
+    // Storage full / unavailable (private mode) — the toggle stays in-memory this session.
   }
 }
 
