@@ -16,9 +16,41 @@ test("settings panel opens from the header gear and lists its sections", async (
   await expect(panel.getByText("Notifications", { exact: true })).toBeVisible();
   await expect(panel.getByText("Providers", { exact: true })).toBeVisible();
   await expect(panel.getByText("Models", { exact: true })).toBeVisible();
+  await expect(panel.getByText("Environment", { exact: true })).toBeVisible();
   await expect(panel.getByText("Access token", { exact: true })).toBeVisible();
   // The dev/mock server runs without PILOT_TOKEN, so no token is saved client-side.
   await expect(panel.getByText("No token saved")).toBeVisible();
+});
+
+test("the Environment section shows login-shell status and persists an override", async ({
+  page,
+}) => {
+  await page.getByTestId("settings-toggle").click();
+  const env = page.getByTestId("settings-panel").getByTestId("env-section");
+  await expect(env.getByText("Login shell", { exact: true })).toBeVisible();
+  // Mock mode never runs the startup capture, so the status reads "Not captured".
+  await expect(env.getByTestId("login-shell-status")).toContainText(
+    "Not captured",
+  );
+
+  await env.getByTestId("login-shell-input").fill("/opt/homebrew/bin/fish");
+  await env.getByRole("button", { name: "Save" }).click();
+
+  // Round-trips through the server's pilotSettings broadcast, which reads back the
+  // persisted file. Reload (a fresh WS connection) + reopen: the field is re-seeded
+  // from disk, proving it persisted server-side.
+  await page.reload();
+  await page.getByTestId("settings-toggle").click();
+  await expect(page.getByTestId("login-shell-input")).toHaveValue(
+    "/opt/homebrew/bin/fish",
+  );
+
+  // Clear back to the default (also leaves the e2e data dir clean for sibling specs).
+  await page
+    .getByTestId("env-section")
+    .getByRole("button", { name: "Default" })
+    .click();
+  await expect(page.getByTestId("login-shell-input")).toHaveValue("");
 });
 
 test("saving a provider API key flips it to connected", async ({ page }) => {

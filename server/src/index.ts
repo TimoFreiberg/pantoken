@@ -108,6 +108,13 @@ if (process.env.PILOT_DRIVER === "mock") {
   mock = new MockDriver();
   driver = mock;
 } else {
+  // Reconstruct the interactive-shell env (PATH, tool shims, exported vars) and merge it
+  // into process.env BEFORE pi exists — pi's bash tool spawns with `{ ...process.env }`,
+  // so this is what makes the agent's shell see the same tools a terminal session has.
+  // Mock mode skips it (deterministic + fast e2e/dev). Loud-warns + keeps the launch PATH
+  // on failure; never blocks startup. See pi/login-env.ts.
+  const { applyLoginEnv } = await import("./pi/login-env.js");
+  await applyLoginEnv();
   const { createPiDriver } = await import("./pi/pi-driver.js");
   driver = await createPiDriver();
 }

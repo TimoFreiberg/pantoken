@@ -25,6 +25,30 @@ import type { SessionState } from "./state.js";
 
 export const PROTOCOL_VERSION = 1;
 
+/** Pilot-local settings (distinct from pi's global/session config). Persisted
+ *  server-side in `pilot-settings.json`, broadcast to every client, edited from the
+ *  Settings panel. */
+export interface PilotSettings {
+  /** Explicit login shell pilot runs at startup to reconstruct your interactive
+   *  environment (PATH, language-manager shims, exported vars) — the env a TUI tool
+   *  inherits when launched from a terminal. `null` = use `$SHELL` / the OS login
+   *  shell. A launchd daemon / GUI `.app` has no interactive-shell ancestor, so pilot
+   *  captures this once at boot; changing it applies on the NEXT server restart. */
+  loginShell: string | null;
+}
+
+/** Runtime status of pilot's startup login-shell env capture, so the Settings panel
+ *  can show what's ACTIVE now vs. what's configured (→ "restart to apply"). */
+export interface LoginEnvStatus {
+  /** Shell pilot actually captured env from at startup, or null if capture was
+   *  skipped (mock/dev) or never ran. */
+  activeShell: string | null;
+  /** Did the capture succeed? false → pilot kept its minimal launch PATH. */
+  ok: boolean;
+  /** Human-readable outcome (var count, skip reason, or failure), for the panel. */
+  detail?: string;
+}
+
 /** One choice on the project-trust card (D12). The label is display-only; the index
  *  into a request's `options` is what the client sends back. `trusted` lets the card
  *  style allow-vs-deny without parsing the label. */
@@ -178,6 +202,17 @@ export type ServerMessage =
    *  favorites subset the header picker filters to. Distinct from a session's
    *  `config` (the CURRENT selection). See {@link ModelDefaults}. */
   | { type: "modelDefaults"; defaults: ModelDefaults }
+  /** Pilot-local settings + the live login-env capture status, for the Settings
+   *  "Environment" section. Sent on connect and re-sent after `setLoginShell`.
+   *  `pendingRestart` is server-computed (the client can't resolve the server's default
+   *  `$SHELL`): true when the shell pilot WOULD use now differs from the one it actually
+   *  captured with at boot — i.e. a restart is needed to apply the configured change. */
+  | {
+      type: "pilotSettings";
+      settings: PilotSettings;
+      env: LoginEnvStatus;
+      pendingRestart: boolean;
+    }
   /** Surface an interactive project-trust card (D12). Broadcast to every client; the
    *  first answer wins. Carried as its own message — see {@link TrustRequest}. */
   | ({ type: "trustRequest" } & TrustRequest)
@@ -290,6 +325,11 @@ export type ClientMessage =
   /** Replace the favorites subset. `refs` are `provider:modelId`; empty clears the
    *  filter (header picker shows every model again). */
   | { type: "setFavoriteModels"; refs: readonly string[] }
+  /** Set the explicit login shell pilot captures env from at startup (null = the
+   *  `$SHELL` / OS-login-shell default). Persists server-side; the env is captured
+   *  once at boot, so it applies on the next server restart. The server re-broadcasts
+   *  `pilotSettings`. */
+  | { type: "setLoginShell"; path: string | null }
   /** Ask the server to re-scan providers + defaults and re-broadcast them. */
   | { type: "listProviders" }
   /** Switch the active session to this .jsonl path. */
