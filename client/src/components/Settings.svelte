@@ -52,6 +52,23 @@
   // panel; the server drives it via oauthPrompt/oauthProgress/oauthResult.
   const oauth = $derived(store.oauthFlow);
 
+  // Environment: the login shell pilot captures your PATH/tools from at startup, the live
+  // status of that capture, and whether a config change is still waiting on a restart.
+  const loginEnv = $derived(store.loginEnv);
+  const shellPending = $derived(store.loginShellPendingRestart);
+  // Draft for the shell-path field; seeded from the configured value on panel open.
+  let shellDraft = $state("");
+  const shellDirty = $derived(
+    shellDraft.trim() !== (store.pilotSettings.loginShell ?? ""),
+  );
+  function saveLoginShell(): void {
+    store.setLoginShell(shellDraft.trim() || null);
+  }
+  function useDefaultShell(): void {
+    shellDraft = "";
+    store.setLoginShell(null);
+  }
+
   // The provider list is a long block you rarely touch once a provider is connected, so it
   // collapses behind its section header (collapsed by default — the header shows a connected
   // count so you can see at a glance without expanding).
@@ -158,6 +175,8 @@
           seeded.add(g.provider);
       }
       expandedFavProviders = seeded;
+      // Seed the login-shell field from the server's configured value each open.
+      shellDraft = store.pilotSettings.loginShell ?? "";
       // Fetch the extension list on open (even while the section is collapsed) so its
       // header can show the at-a-glance "N/M on" count without making you expand first.
       store.queryExtensions();
@@ -678,6 +697,67 @@
           </p>
           {/if}
           </div>
+        {/if}
+      </section>
+
+      <!-- Environment -->
+      <section class="group" data-testid="env-section">
+        <div class="gtitle">Environment</div>
+        <div class="row">
+          <div class="rinfo">
+            <div class="rlabel">Login shell</div>
+            <div class="rdesc">
+              Pilot runs this shell at startup to load your PATH and tools, so the agent's
+              commands see what your terminal does. Leave blank for your default
+              (<code>$SHELL</code>). Applies on the next restart.
+            </div>
+          </div>
+        </div>
+        <form
+          class="shellform"
+          onsubmit={(e) => {
+            e.preventDefault();
+            saveLoginShell();
+          }}
+        >
+          <input
+            bind:value={shellDraft}
+            type="text"
+            placeholder="Default ($SHELL) — e.g. /opt/homebrew/bin/fish"
+            title="Absolute path to the login shell pilot captures your environment from"
+            aria-label="Login shell path"
+            spellcheck="false"
+            autocapitalize="off"
+            autocorrect="off"
+            autocomplete="off"
+            data-testid="login-shell-input"
+          />
+          <Button
+            variant="primary"
+            type="submit"
+            title="Save the login shell (applies after a restart)"
+            disabled={!shellDirty}>Save</Button
+          >
+          {#if store.pilotSettings.loginShell}
+            <Button
+              type="button"
+              title="Use the default login shell ($SHELL)"
+              onclick={useDefaultShell}>Default</Button
+            >
+          {/if}
+        </form>
+        <p class="note" data-testid="login-shell-status">
+          {#if loginEnv.activeShell}
+            Active: <code>{loginEnv.activeShell}</code>{#if loginEnv.detail}
+              · {loginEnv.detail}{/if}
+          {:else}
+            Not captured{#if loginEnv.detail} · {loginEnv.detail}{/if}
+          {/if}
+        </p>
+        {#if shellPending}
+          <p class="note warn" data-testid="login-shell-restart">
+            Restart Pilot to apply the new login shell.
+          </p>
         {/if}
       </section>
 
@@ -1218,6 +1298,29 @@
     outline: none;
   }
   .keyform input:focus {
+    border-color: var(--accent);
+  }
+  .note.warn {
+    color: var(--accent);
+  }
+  /* Login-shell path entry, mirroring .tokenform. */
+  .shellform {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .shellform input {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    padding: 9px 11px;
+    font-size: 16px;
+    background: var(--bg);
+    color: var(--text);
+    outline: none;
+  }
+  .shellform input:focus {
     border-color: var(--accent);
   }
   .tokenform {

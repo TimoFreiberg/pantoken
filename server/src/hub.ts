@@ -16,6 +16,8 @@ import {
   type SessionState,
 } from "@pilot/protocol";
 import type { OAuthLoginIO, PilotDriver } from "./driver.js";
+import { getLoginEnvStatus, resolveLoginShell } from "./pi/login-env.js";
+import { readPilotSettings, writePilotSettings } from "./settings-store.js";
 
 export type Send = (msg: ServerMessage) => void;
 
@@ -785,6 +787,20 @@ export class SessionHub {
     }
   }
 
+  /** Build the pilot-local-settings message: the persisted settings + the live login-env
+   *  capture status (so the Settings panel can show configured-vs-active and prompt for a
+   *  restart when they differ). */
+  private pilotSettingsMsg(): ServerMessage {
+    const settings = readPilotSettings();
+    const env = getLoginEnvStatus();
+    // A restart is pending when the shell we'd resolve now differs from the one captured
+    // at boot. Guard on activeShell so mock/dev (no capture ran) never flags a restart.
+    const pendingRestart =
+      env.activeShell !== null &&
+      resolveLoginShell(settings.loginShell) !== env.activeShell;
+    return { type: "pilotSettings", settings, env, pendingRestart };
+  }
+
   /** Fetch + broadcast pi's global model defaults + favorites (Settings panel). */
   private async broadcastModelDefaults(): Promise<void> {
     if (!this.driver.getModelDefaults) return;
@@ -1139,6 +1155,9 @@ export class SessionHub {
       sha: this.updateSha ?? undefined,
       applying: this.applying,
     });
+    // Pilot-local settings + live login-env status (Settings "Environment" section).
+    // Synchronous: both are in-memory / a small file read.
+    send(this.pilotSettingsMsg());
     // Fire the session + model + provider lists asynchronously (driver disk/registry
     // reads); they arrive as follow-up messages, keeping hello+snapshot synchronous +
     // first.
@@ -1407,6 +1426,15 @@ export class SessionHub {
           this.driver.setFavoriteModels?.(msg.refs),
         );
         return;
+      case "setLoginShell": {
+        // Persist the override; the capture only re-runs at startup, so this applies on
+        // the next restart (the UI says so). Re-broadcast so every client reflects the
+        // new configured value next to the still-current active shell.
+        const path = msg.path?.trim() ? msg.path.trim() : null;
+        writePilotSettings({ loginShell: path });
+        this.broadcast(this.pilotSettingsMsg());
+        return;
+      }
       case "trustResponse":
         // The driver dedups (first answer settles it); a stale/duplicate id no-ops.
         this.driver.respondTrust?.(msg.requestId, msg.choice);
