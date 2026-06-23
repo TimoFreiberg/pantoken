@@ -52,7 +52,7 @@ describe("QueuedDeliveryTracker", () => {
     expect(t.isDelivery(userStart)).toBe(true);
   });
 
-  test("reset() drops undelivered messages (abort / clearQueue) so a later prompt is safe", () => {
+  test("reset() drops undelivered messages (abort / clearQueue / run-end) so a later prompt is safe", () => {
     const t = new QueuedDeliveryTracker();
     t.onQueued();
     t.onQueued();
@@ -60,6 +60,17 @@ describe("QueuedDeliveryTracker", () => {
     expect(t.outstanding).toBe(0);
     // A subsequent first prompt's message_start must not be mistaken for a delivery.
     expect(t.isDelivery(userStart)).toBe(false);
+  });
+
+  test("run-end (agent_end) reset: an error-stranded follow-up doesn't leak into the next run", () => {
+    const t = new QueuedDeliveryTracker();
+    t.onQueued(); // a follow-up queued mid-run
+    // The run errors before delivering it; the driver resets on agent_end.
+    t.reset();
+    // Next run opens with a fresh prompt — its message_start must NOT steal the leftover's
+    // slot (which would dupe the prompt and drop the follow-up live).
+    expect(t.isDelivery(userStart)).toBe(false);
+    expect(t.outstanding).toBe(0);
   });
 
   test("a partial drain then reset: delivered ones stay delivered, the rest are dropped", () => {

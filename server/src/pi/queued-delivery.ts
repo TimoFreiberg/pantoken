@@ -55,9 +55,13 @@ export class QueuedDeliveryTracker {
     return false;
   }
 
-  /** Undelivered queued messages are gone (abort clears pi's queues; clearQueue/Alt+Up
-   *  restores them to the editor). Drop the count so a later first prompt's message_start
-   *  isn't mistaken for a delivery. */
+  /** Drop the count of undelivered queued messages — called when they can no longer be
+   *  delivered as expected: abort clears pi's queues, clearQueue/Alt+Up restores them to the
+   *  editor, and a run ending with some still outstanding means an error stranded them (a
+   *  clean stop delivers them all first). Without this a later run's opening prompt would be
+   *  mistaken for a leftover delivery. (A stranded message still renders on reload from pi's
+   *  history; only the live bubble is lost — the "jankiness" a full identity-correlation
+   *  rewrite would close.) */
   reset(): void {
     this.pending = 0;
   }

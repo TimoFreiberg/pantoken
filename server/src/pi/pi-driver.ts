@@ -761,6 +761,14 @@ export async function createPiDriver(
           text: textFromContent(msg?.content),
           images: imagesFromContent(msg?.content),
         });
+      } else if (start.type === "agent_end") {
+        // Run ended with queued deliveries still outstanding → an error stranded them
+        // (abort already reset us; a clean stop delivers them all BEFORE agent_end, so the
+        // count is normally 0 here). Drop the count so the next run's opening prompt isn't
+        // mistaken for a leftover delivery. The stranded message still renders correctly on
+        // reload (pi's history has its true position). Full identity-correlation would emit
+        // it live too; this just keeps the count from leaking into the next run.
+        ws.queuedDeliveries.reset();
       }
       for (const out of mapPiEvent(ev, {
         ref,
