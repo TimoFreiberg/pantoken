@@ -272,29 +272,61 @@ test("timeout-bearing dialog shows a countdown and auto-resolves deny-safe", asy
   await expect(page.getByText("Denied — skipping that step.")).toBeVisible();
 });
 
-test("Ctrl/Cmd+Up jumps to the most recent user prompt", async ({ page }) => {
-  // Add several turns so the transcript is tall enough to scroll (otherwise
-  // everything fits and nothing leaves the view).
-  for (let i = 0; i < 3; i++) {
+test("Ctrl/Cmd+Up anchors to the scroll position, not always the last prompt", async ({
+  page,
+}) => {
+  // Build enough turns that early prompts have room to scroll to the top of the viewport.
+  for (let i = 0; i < 5; i++) {
     await drive(page, "reply");
     await expect(
       page.getByText("That confirms it", { exact: false }).last(),
     ).toBeVisible();
   }
-  // Final response text appears before runCompleted. Wait for the fourth settled work
-  // block (greeting + three replies) so no remaining delta can auto-scroll the viewport.
-  await waitForSettledWorkBlocks(page, 4);
-  const lastPrompt = page
-    .getByText("Show me the streamed reply script.")
-    .last();
-  // Scroll to the top so the last prompt is out of view…
-  await page
-    .locator(".scroller")
-    .evaluate((el) => ((el as HTMLElement).scrollTop = 0));
-  await expect(lastPrompt).not.toBeInViewport();
-  // …then the hotkey brings it back into view.
+  await waitForSettledWorkBlocks(page, 6);
+  const count = await page.locator(".row.user").count();
+  expect(count).toBeGreaterThanOrEqual(6);
+  const last = count - 1;
+
+  // Park user prompt #2 at the top of the viewport, well away from the live tail.
+  await page.evaluate(() => {
+    const sc = document.querySelector(".scroller") as HTMLElement;
+    const row = document.querySelectorAll(".row.user")[2] as HTMLElement;
+    sc.scrollTop +=
+      row.getBoundingClientRect().top - sc.getBoundingClientRect().top;
+  });
+  // Confirm we're genuinely scrolled up off the tail before pressing the hotkey.
+  const gap = () =>
+    page.evaluate(() => {
+      const sc = document.querySelector(".scroller") as HTMLElement;
+      return sc.scrollHeight - sc.scrollTop - sc.clientHeight;
+    });
+  await expect.poll(gap).toBeGreaterThan(80);
+
+  // Index of the `.row.user` whose top sits nearest the scroller's top.
+  const topRowIndex = () =>
+    page.evaluate(() => {
+      const sc = document.querySelector(".scroller") as HTMLElement;
+      const sTop = sc.getBoundingClientRect().top;
+      let best = -1;
+      let dist = Infinity;
+      document.querySelectorAll(".row.user").forEach((r, i) => {
+        const d = Math.abs(r.getBoundingClientRect().top - sTop);
+        if (d < dist) {
+          dist = d;
+          best = i;
+        }
+      });
+      return best;
+    });
+
+  // ⌘↑ jumps to the prompt at the top of where we're reading (#1, just above the parked
+  // #2) — it does NOT yank down to the most recent prompt the way it used to.
   await page.keyboard.press("Control+ArrowUp");
-  await expect(lastPrompt).toBeInViewport();
+  await expect.poll(topRowIndex).toBeLessThanOrEqual(2);
+  const idx = await topRowIndex();
+  expect(idx).toBeGreaterThanOrEqual(1); // moved up to an early prompt
+  expect(idx).toBeLessThan(last); // and nowhere near the live tail
+  expect(await gap()).toBeGreaterThan(80); // didn't scroll back to the bottom
 });
 
 test("Ctrl/Cmd+Up/Down step through user prompts", async ({ page }) => {
