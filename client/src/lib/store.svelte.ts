@@ -236,6 +236,9 @@ class PilotStore {
   // config chips + composer for a session that does NOT exist yet. Creation is
   // deferred — submitDraft() sends `newSession` (cwd/worktree/model/thinking + the
   // first prompt) atomically, so nothing hits the server until the user sends.
+  // Convention (docs/DECISIONS.md D17): every field settable here should survive a
+  // session switch / reload — persist it via draftConfigMap unless there's a concrete
+  // reason it can't be (then add an e2e round-trip in e2e/drafts.e2e.ts).
   draft = $state<{
     cwd: string;
     worktree: boolean;
