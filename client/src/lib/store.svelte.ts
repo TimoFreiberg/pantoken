@@ -29,6 +29,7 @@ import {
   type TrustRequest,
 } from "@pilot/protocol";
 import { clearToken, getToken, setToken } from "./auth.js";
+import { notifyNativeUpdateStarting } from "./native-bridge.js";
 import { filterSessions } from "./session-filter.js";
 import { dedupeConsecutive } from "./prompt-history.js";
 import { deliveryState } from "./delivery.js";
@@ -1235,9 +1236,14 @@ class PilotStore {
       this.lastError = "Can't restore queued messages while offline.";
   }
   /** Apply the staged desktop update now (the sidebar card's button). The server marks
-   *  it applying; the watcher pulls/rebuilds/restarts and the card clears on reconnect. */
+   *  it applying; the watcher pulls/rebuilds/restarts and the card clears on reconnect.
+   *  We also ping the native desktop shell (no-op in a browser/PWA) so it raises its
+   *  fullscreen "Updating…" overlay immediately, rather than trailing the click by ~one
+   *  watcher poll (≈5s) until the watcher's first `apply` event reaches it. Gated on the
+   *  send landing: if the socket is down the request never reaches the hub, so don't raise
+   *  an overlay that nothing would ever tear down (until the native 5-min failsafe). */
   requestAppUpdate(): void {
-    send({ type: "applyUpdate" });
+    if (send({ type: "applyUpdate" })) notifyNativeUpdateStarting();
   }
   /** Force an update now (the build-stamp right-click menu) — for clicking right after a
    *  push to main, before the watcher's next fetch has noticed the commit. Unlike
