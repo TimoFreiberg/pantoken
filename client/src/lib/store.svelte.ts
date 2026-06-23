@@ -820,6 +820,19 @@ class PilotStore {
           }
         }
         break;
+      case "worktreeRetained": {
+        // Archive reaped the session but kept its worktree (dirty). Explain the leftover
+        // and offer a force-delete so it isn't a mystery directory on disk.
+        const path = msg.path;
+        this.toast(`Worktree kept — ${msg.reason}`, {
+          action: {
+            label: "Delete anyway",
+            run: () => this.cleanupWorktree(path, true),
+          },
+          durationMs: 12000,
+        });
+        break;
+      }
     }
   }
 

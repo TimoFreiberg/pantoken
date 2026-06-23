@@ -236,6 +236,11 @@ export type ServerMessage =
       steering: readonly string[];
       followUp: readonly string[];
     }
+  /** After archiving a session whose cwd was a pilot worktree, the server tried to reap
+   *  it but kept it (it was dirty — uncommitted changes). Sent ONLY to the archiving
+   *  client so its archived toast can explain the leftover and offer a force-delete.
+   *  `path` == the worktree dir (== the session's cwd), the key `cleanupWorktree` takes. */
+  | { type: "worktreeRetained"; path: string; reason: string }
   | { type: "error"; message: string };
 
 export type ClientMessage =

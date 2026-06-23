@@ -87,8 +87,13 @@ export interface PilotDriver {
   ): Promise<{ removed: boolean; reason?: string }>;
   /** Archive or unarchive a session by its .jsonl path (pilot-side flag). Optional:
    *  a bare driver may omit it and the hub guards with `?.`. The hub re-broadcasts the
-   *  session list afterward so every client's active-only filter updates. */
-  setArchived?(path: string, archived: boolean): Promise<void>;
+   *  session list afterward so every client's active-only filter updates. Resolves with
+   *  `worktreeRetained` when archiving a worktree-backed session failed to reap its
+   *  worktree (dirty); the hub relays that to the archiving client as an explanatory toast. */
+  setArchived?(
+    path: string,
+    archived: boolean,
+  ): Promise<{ worktreeRetained?: { path: string; reason: string } } | void>;
   /** Rename a session by its .jsonl path, writing pi's display name. Optional: a bare
    *  driver may omit it (the hub guards with `?.`). A warm (open) session is renamed
    *  through its live AgentSession so its header title updates immediately; a cold one
