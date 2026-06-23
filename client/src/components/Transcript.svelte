@@ -327,11 +327,30 @@
   // True when the active session has content below the viewport (drives the pill).
   const showNewPill = $derived(!pinned && store.activeUnread);
 
+  /** Where the first ⌘↑ lands when you're not already stepping. At the live tail it's the
+   *  most recent prompt (re-read what you just asked) — a short final turn can leave that
+   *  prompt mid-viewport instead of scrolled off the top, so the tail is detected from the
+   *  scroll gap, not the top edge. Scrolled up, it's the most recent prompt above the
+   *  viewport top: the jump stays relative to where you're reading and never yanks you
+   *  back down to the tail. */
+  function firstUpAnchor(prompts: NodeListOf<HTMLElement>): number {
+    const last = prompts.length - 1;
+    if (!scroller) return last;
+    const gap = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+    if (gap < 80) return last; // at/near the live bottom
+    const sTop = scroller.getBoundingClientRect().top;
+    for (let i = last; i >= 0; i--) {
+      const top = prompts[i]?.getBoundingClientRect().top ?? Infinity;
+      if (top < sTop - 1) return i;
+    }
+    return 0; // nothing scrolled off the top yet → the oldest prompt
+  }
+
   /** Step the prompt cursor and scroll the target prompt to the top of the viewport
-   *  (your message + the response below it). ⌘↑ (dir -1) walks toward older prompts —
-   *  the first press from the live tail lands on the most recent prompt, for re-reading a
-   *  long turn; ⌘↓ (dir +1) walks back toward newer ones, and stepping past the newest
-   *  returns to the live bottom. */
+   *  (your message + the response below it). ⌘↑ (dir -1) walks toward older prompts; the
+   *  first press anchors relative to where you're reading (see firstUpAnchor). ⌘↓ (dir +1)
+   *  walks back toward newer ones, and stepping past the newest returns to the live
+   *  bottom. */
   function stepPrompt(dir: -1 | 1): void {
     if (!scroller) return;
     const prompts = scroller.querySelectorAll<HTMLElement>(".row.user");
@@ -348,8 +367,8 @@
       navIndex += 1;
     } else {
       if (last < 0) return; // no prompts to step to
-      // ⌘↑: first press → most recent prompt; otherwise one older, clamped at the oldest.
-      navIndex = navIndex === null ? last : Math.max(0, navIndex - 1);
+      // ⌘↑: first press anchors to your reading spot; otherwise one older, clamped oldest.
+      navIndex = navIndex === null ? firstUpAnchor(prompts) : Math.max(0, navIndex - 1);
     }
     markProgScroll();
     prompts[navIndex]?.scrollIntoView({ block: "start", behavior: "smooth" });
