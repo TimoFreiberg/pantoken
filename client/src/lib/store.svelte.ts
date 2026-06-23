@@ -28,6 +28,7 @@ import {
 } from "@pilot/protocol";
 import { clearToken, getToken, setToken } from "./auth.js";
 import { filterSessions } from "./session-filter.js";
+import { dedupeConsecutive } from "./prompt-history.js";
 import { deliveryState } from "./delivery.js";
 import { ensurePermission } from "./notify.js";
 import {
@@ -205,6 +206,13 @@ class PilotStore {
   // durable backing store, stashed on switch / debounced keystroke / pagehide. Pure client
   // state — no protocol change.
   private draftMap = $state<Record<string, string>>(loadDraftMap());
+  // Per-session (and per new-session-draft) submit log: every prompt the user has SENT,
+  // recorded at the submit chokepoint and persisted in localStorage (key `pilot.promptHistory`).
+  // This is the durable, independent backing for ArrowUp recall — independent of the transcript
+  // and the outbox on purpose, so a prompt eaten by an API error / a future janky bug is still
+  // recallable. Keyed like draftMap (`s:<sessionId>` / `n:<cwd>`). The navigable list merges this
+  // with the focused session's transcript user messages (see currentPromptHistory).
+  private promptHistory = $state<Record<string, string[]>>(loadPromptHistory());
   // New-session draft (Claude-app style): when non-null the main pane shows the
   // config chips + composer for a session that does NOT exist yet. Creation is
   // deferred — submitDraft() sends `newSession` (cwd/worktree/model/thinking + the
@@ -453,6 +461,38 @@ class PilotStore {
       delete this.draftMap[key];
       persistDraftMap(this.draftMap);
     }
+  }
+
+  /** The navigable prompt history for the current composer (oldest→newest), for ArrowUp/
+   *  ArrowDown recall. Merges the focused session's transcript user messages (so an old
+   *  session recalls immediately) with this client's local submit log (so a just-sent — or
+   *  eaten — prompt is recallable even before/without the transcript). Consecutive duplicates
+   *  collapse, which absorbs the window where a just-sent prompt sits in the log but hasn't
+   *  yet folded into the transcript. While drafting a new session there's no transcript, so
+   *  only the project's submit log applies. */
+  get currentPromptHistory(): string[] {
+    const logged = this.promptHistory[this.composerDraftKey] ?? [];
+    const fromTranscript = this.draft
+      ? []
+      : this.session.items
+          .filter((it) => it.kind === "user")
+          .map((it) => it.text);
+    const merged = [...fromTranscript, ...logged]
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0);
+    return dedupeConsecutive(merged);
+  }
+  /** Append a sent prompt to the local submit log under `key`, capped + persisted. Skips a
+   *  consecutive duplicate (resend / retry of the same text). Called from the submit
+   *  chokepoints — prompt() and submitDraft(). */
+  private recordPromptHistory(key: string, text: string): void {
+    const t = text.trim();
+    if (!t) return;
+    const list = this.promptHistory[key] ?? [];
+    if (list[list.length - 1] === t) return;
+    const next = [...list, t].slice(-PROMPT_HISTORY_CAP);
+    this.promptHistory = { ...this.promptHistory, [key]: next };
+    persistPromptHistory(this.promptHistory);
   }
 
   get connection(): ConnectionState {
@@ -1091,7 +1131,8 @@ class PilotStore {
       sessionId: this.session.ref?.sessionId ?? undefined,
     });
     if (!accepted) return false;
-    // The draft was consumed — clear the live text AND its stored copy.
+    // Record the sent prompt for ArrowUp recall, then clear the live text AND its stored copy.
+    this.recordPromptHistory(this.composerDraftKey, t);
     this.clearStoredDraft(this.composerDraftKey);
     this.composerDraft = "";
     this.composerImages = [];
@@ -1534,8 +1575,9 @@ class PilotStore {
       },
     });
     if (!queued) return false;
-    // The pending new-session draft is consumed — drop its stored copy (key is n:cwd
-    // while the draft is still set).
+    // Record the sent prompt for ArrowUp recall (key is n:cwd while the draft is still set),
+    // then drop the pending new-session draft's stored copy.
+    this.recordPromptHistory(this.composerDraftKey, t);
     this.clearStoredDraft(this.composerDraftKey);
     this.draft = null;
     this.composerDraft = "";
@@ -2021,6 +2063,39 @@ function persistDraftMap(map: Record<string, string>): void {
     localStorage.setItem(DRAFTS_KEY, JSON.stringify(map));
   } catch {
     // Storage full / unavailable (private mode) — drafts stay in-memory this session.
+  }
+}
+
+const PROMPT_HISTORY_KEY = "pilot.promptHistory";
+// Per-key cap on the submit log. Plenty for recall; bounds localStorage growth (the
+// navigable list is padded further by the transcript, which is server-side anyway).
+const PROMPT_HISTORY_CAP = 100;
+
+/** Read the per-session prompt submit log from localStorage. Tolerant of a missing /
+ *  corrupt value (returns an empty map) — lost recall history is never worth a thrown boot. */
+function loadPromptHistory(): Record<string, string[]> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(PROMPT_HISTORY_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, string[]> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>))
+      if (Array.isArray(v))
+        out[k] = v.filter((x): x is string => typeof x === "string");
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function persistPromptHistory(map: Record<string, string[]>): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(PROMPT_HISTORY_KEY, JSON.stringify(map));
+  } catch {
+    // Storage full / unavailable (private mode) — history stays in-memory this session.
   }
 }
 

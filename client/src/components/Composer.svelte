@@ -8,6 +8,11 @@
     prepareImageFiles,
   } from "../lib/image-attachments.js";
   import { filterCommands, slashQuery } from "../lib/slash.js";
+  import {
+    caretOnFirstLine,
+    caretOnLastLine,
+    nextHistoryIndex,
+  } from "../lib/prompt-history.js";
   import { contextTone } from "../lib/context-tone.js";
   import SlashMenu from "./SlashMenu.svelte";
   import FileMenu from "./FileMenu.svelte";
@@ -149,6 +154,25 @@
   // --- Cursor tracking (textarea). Needed so @-mentions work inline, not just at
   // the end of the draft. Updated on every input/click/keyboard event.
   let cursorPos = $state(0);
+
+  // --- Readline-style prompt history (ArrowUp/ArrowDown). `histIndex` is the navigation
+  // cursor: null = showing the live draft, otherwise an index into store.currentPromptHistory.
+  // `histWip` stashes the live draft when navigation starts so ArrowDown can restore it;
+  // `histNavKey` records the composer key (session/draft) navigation began under. State resets
+  // on a fresh keystroke (onInput), after a send, and — lazily, at keypress time — when the
+  // composer has since re-pointed at a different session/draft. Resetting lazily (rather than
+  // via an $effect on store.session) avoids a transient boot re-snapshot nulling the cursor
+  // mid-navigation.
+  let histIndex: number | null = null;
+  let histWip = "";
+  let histNavKey = "";
+  // The composer's current history context — mirrors store.composerDraftKey (which is private),
+  // so a session/draft switch invalidates an in-progress navigation.
+  function composerKey(): string {
+    return store.draft
+      ? `n:${store.draft.cwd}`
+      : (store.session.ref?.sessionId ?? "");
+  }
 
   // --- @-file mention autocomplete (hybrid: instant local matching + server fallback).
   // Same shape as slash: an active query (the text after `@` at/before cursor), a
@@ -307,6 +331,9 @@
     pickingCwd = false;
     expanded = false;
     attachmentStatus = null;
+    // Restart history navigation so the next ArrowUp recalls the just-sent prompt.
+    histIndex = null;
+    histWip = "";
     queueMicrotask(autosize);
   }
 
@@ -442,6 +469,8 @@
     autosize();
     // Track cursor so @-mentions work inline.
     cursorPos = ta?.selectionStart ?? 0;
+    // A user keystroke ends history navigation: the edited text is the new live draft.
+    histIndex = null;
     // A fresh keystroke restarts the selection at the top; leaving slash/file mode
     // clears a prior Escape so the next trigger reopens the menu.
     slashSel = 0;
@@ -565,6 +594,54 @@
         e.preventDefault();
         fileDismissed = true;
         return;
+      }
+    }
+    // Readline-style prompt history. Plain ArrowUp on the first line recalls the previous
+    // prompt (an empty field is the degenerate case — the just-sent prompt comes back);
+    // ArrowDown on the last line walks back toward the live draft. Multi-line editing keeps
+    // the arrows for caret movement until the caret reaches the top/bottom line. Placed
+    // after the slash/file menus, which own the arrows while open.
+    if (
+      (e.key === "ArrowUp" || e.key === "ArrowDown") &&
+      !e.altKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.shiftKey &&
+      ta &&
+      ta.selectionStart === ta.selectionEnd
+    ) {
+      // A session/draft switch since navigation started invalidates the cursor + stashed WIP.
+      const key = composerKey();
+      if (histIndex !== null && key !== histNavKey) {
+        histIndex = null;
+        histWip = "";
+      }
+      const value = store.composerDraft;
+      const caret = ta.selectionStart;
+      const up = e.key === "ArrowUp";
+      const atEdge = up ? caretOnFirstLine(value, caret) : caretOnLastLine(value, caret);
+      if (atEdge) {
+        const history = store.currentPromptHistory;
+        const next = nextHistoryIndex(history.length, histIndex, up ? "up" : "down");
+        if (next !== undefined) {
+          e.preventDefault();
+          if (histIndex === null) {
+            histWip = value; // entering nav: stash the live draft + its context
+            histNavKey = key;
+          }
+          histIndex = next;
+          const text = next === null ? histWip : (history[next] ?? "");
+          store.composerDraft = text;
+          queueMicrotask(() => {
+            autosize();
+            if (ta) {
+              const end = store.composerDraft.length;
+              ta.selectionStart = ta.selectionEnd = end;
+              cursorPos = end;
+            }
+          });
+          return;
+        }
       }
     }
     // Esc aborts a running turn (parity with pi TUI / Claude). Placed after the
