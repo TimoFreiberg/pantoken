@@ -6,6 +6,7 @@
   import Button from "./ui/Button.svelte";
   import IconButton from "./ui/IconButton.svelte";
   import Chevron from "./ui/Chevron.svelte";
+  import DefaultModelPicker from "./DefaultModelPicker.svelte";
   import SegmentedControl from "./ui/SegmentedControl.svelte";
   import { MAX_SCALE, MIN_SCALE, STEP } from "../lib/font-scale.js";
 
@@ -246,12 +247,6 @@
     store.setProviderApiKey(id, k);
     keyProviderId = null;
     keyDraft = "";
-  }
-  function onDefaultModel(e: Event): void {
-    const v = (e.target as HTMLSelectElement).value;
-    const i = v.indexOf(":");
-    if (i < 0) return;
-    store.setDefaultModel(v.slice(0, i), v.slice(i + 1));
   }
 </script>
 
@@ -494,30 +489,14 @@
       <!-- Models -->
       <section class="group">
         <div class="gtitle">Models</div>
-        <div class="row">
+        <div class="row dm-row">
           <div class="rinfo">
             <div class="rlabel">Default model</div>
             <div class="rdesc">
               For new sessions. Switch the current session from the header.
             </div>
           </div>
-          <select
-            class="select"
-            data-testid="default-model"
-            onchange={onDefaultModel}
-            value={defaults.provider && defaults.modelId
-              ? `${defaults.provider}:${defaults.modelId}`
-              : ""}
-          >
-            <option value="">Choose…</option>
-            {#each groups as g (g.provider)}
-              <optgroup label={g.provider}>
-                {#each g.items as opt (opt.modelId)}
-                  <option value={`${opt.provider}:${opt.modelId}`}>{opt.label}</option>
-                {/each}
-              </optgroup>
-            {/each}
-          </select>
+          <DefaultModelPicker />
         </div>
         <div class="row">
           <div class="rinfo">
@@ -991,6 +970,12 @@
     align-items: center;
     justify-content: space-between;
     gap: 14px;
+  }
+  /* The default-model row wraps so its picker can drop a full-width menu onto a second
+     line (the menu is a sibling flex item with flex-basis:100%). */
+  .dm-row {
+    flex-wrap: wrap;
+    row-gap: 6px;
   }
   .rinfo {
     min-width: 0;

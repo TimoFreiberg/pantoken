@@ -97,10 +97,42 @@ test("OAuth sign-out disconnects a provider", async ({ page }) => {
 
 test("setting a default model persists in the panel", async ({ page }) => {
   await page.getByTestId("settings-toggle").click();
-  const select = page.getByTestId("default-model");
-  await select.selectOption("openai:gpt-5");
-  // Round-trips through the server's modelDefaults broadcast.
-  await expect(select).toHaveValue("openai:gpt-5");
+  const trigger = page.getByTestId("default-model");
+  // Opens the custom picker (a native <select> can't host the search box), then picks GPT-5.
+  await trigger.click();
+  await page.getByTestId("default-model-option-openai-gpt-5").click();
+  // Round-trips through the server's modelDefaults broadcast; the trigger shows the label.
+  await expect(trigger).toHaveText(/GPT-5/);
+});
+
+test("the default-model picker filters to favorites and offers a search", async ({
+  page,
+}) => {
+  // Favorite only GPT-5; the picker should then offer just that (plus the current default,
+  // marked "not favorited" so it stays selectable).
+  await page.getByTestId("settings-toggle").click();
+  await page.getByTestId("favorites-toggle").click();
+  await page.getByTestId("fav-group-openai").click();
+  await page.getByTestId("fav-openai-gpt-5").getByRole("checkbox").check();
+
+  const trigger = page.getByTestId("default-model");
+  await trigger.click();
+  const menu = page.getByTestId("default-model-menu");
+  // The favorite + the active default show; the other non-favorites are hidden.
+  await expect(
+    menu.getByTestId("default-model-option-openai-gpt-5"),
+  ).toBeVisible();
+  await expect(
+    menu.getByTestId("default-model-option-anthropic-claude-opus-4-8"),
+  ).toBeVisible();
+  await expect(menu.getByText("not favorited")).toBeVisible();
+  await expect(
+    menu.getByTestId("default-model-option-anthropic-claude-sonnet-4-6"),
+  ).toHaveCount(0);
+
+  // The search box narrows the (here, favorites-filtered) list.
+  await menu.getByPlaceholder("Search models…").fill("zzzz");
+  await expect(menu.getByText("No models match")).toBeVisible();
 });
 
 test("favorites filter the header model picker, keeping the active model visible", async ({
