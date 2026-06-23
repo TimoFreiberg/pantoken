@@ -111,6 +111,7 @@ class FakeDriver implements PilotDriver {
         userMessageCount: 1,
         updatedAt: "t",
         createdAt: "t",
+        lastUserMessageAt: "t",
         archived: this.archiveCalls.some(
           (c) => c.path === "/s.jsonl" && c.archived,
         ),
@@ -123,6 +124,7 @@ class FakeDriver implements PilotDriver {
         userMessageCount: 2,
         updatedAt: "t",
         createdAt: "t",
+        lastUserMessageAt: "t",
         archived: false,
       },
     ];

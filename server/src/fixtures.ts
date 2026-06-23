@@ -1763,6 +1763,8 @@ export const SESSION_LIST: SessionListEntry[] = [
     usage: MOCK_USAGE,
     updatedAt: isoAgo(5 * 60_000),
     createdAt: isoAgo(2 * DAY_MS),
+    // The operator's last prompt landed just before the agent's last activity.
+    lastUserMessageAt: isoAgo(6 * 60_000),
     archived: false,
   },
   {
@@ -1776,6 +1778,7 @@ export const SESSION_LIST: SessionListEntry[] = [
     usage: MOCK_USAGE_HIGH,
     updatedAt: isoAgo(2 * 60 * 60_000),
     createdAt: isoAgo(3 * DAY_MS),
+    lastUserMessageAt: isoAgo(2 * 60 * 60_000 + 60_000),
     archived: false,
   },
   {
@@ -1787,6 +1790,7 @@ export const SESSION_LIST: SessionListEntry[] = [
     userMessageCount: 1,
     updatedAt: isoAgo(6 * 60 * 60_000),
     createdAt: isoAgo(4 * DAY_MS),
+    lastUserMessageAt: isoAgo(6 * 60 * 60_000 + 60_000),
     archived: false,
   },
   {
@@ -1798,6 +1802,7 @@ export const SESSION_LIST: SessionListEntry[] = [
     userMessageCount: 4,
     updatedAt: isoAgo(60 * 60_000),
     createdAt: isoAgo(5 * DAY_MS),
+    lastUserMessageAt: isoAgo(60 * 60_000 + 60_000),
     archived: true,
   },
   {
@@ -1809,6 +1814,7 @@ export const SESSION_LIST: SessionListEntry[] = [
     userMessageCount: 2,
     updatedAt: isoAgo(10 * DAY_MS),
     createdAt: isoAgo(12 * DAY_MS),
+    lastUserMessageAt: isoAgo(10 * DAY_MS),
     archived: false,
   },
 ];
@@ -1881,6 +1887,7 @@ export const NEW_SESSION_ENTRY: SessionListEntry = {
   userMessageCount: 0,
   updatedAt: isoAgo(0),
   createdAt: isoAgo(0),
+  lastUserMessageAt: isoAgo(0),
   archived: false,
 };
 

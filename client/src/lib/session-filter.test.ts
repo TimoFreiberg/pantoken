@@ -14,6 +14,7 @@ function entry(over: Partial<SessionListEntry> = {}): SessionListEntry {
     userMessageCount: 1,
     updatedAt: isoAgo(0),
     createdAt: isoAgo(0),
+    lastUserMessageAt: isoAgo(0),
     archived: false,
     ...over,
   };
@@ -34,19 +35,61 @@ describe("isStale", () => {
 });
 
 describe("filterSessions", () => {
-  test("groups projects alphabetically by name; items stay newest-first", () => {
+  test("groups projects alphabetically by name; items stay most-recently-used first", () => {
     const { groups } = filterSessions(
       [
         // /zebra holds the newest item overall, /apple older ones — alphabetical group
         // order must still put apple first, proving groups don't sort by recency.
-        entry({ path: "/z1", cwd: "/zebra", updatedAt: isoAgo(1000) }),
-        entry({ path: "/a1", cwd: "/apple", updatedAt: isoAgo(3000) }),
-        entry({ path: "/a2", cwd: "/apple", updatedAt: isoAgo(2000) }),
+        entry({ path: "/z1", cwd: "/zebra", lastUserMessageAt: isoAgo(1000) }),
+        entry({ path: "/a1", cwd: "/apple", lastUserMessageAt: isoAgo(3000) }),
+        entry({ path: "/a2", cwd: "/apple", lastUserMessageAt: isoAgo(2000) }),
       ],
       active,
     );
     expect(groups.map((g) => g.cwd)).toEqual(["/apple", "/zebra"]); // A→Z by basename
-    expect(groups[0].items.map((i) => i.path)).toEqual(["/a2", "/a1"]); // newest first within
+    expect(groups[0].items.map((i) => i.path)).toEqual(["/a2", "/a1"]); // newest interaction first
+  });
+
+  test("sorts by last user-message time, not by agent activity (updatedAt)", () => {
+    const { groups } = filterSessions(
+      [
+        // /streaming is mid-run: its updatedAt is the freshest of all (the agent just
+        // emitted a token), but the operator last prompted it a while ago. /idle was
+        // prompted more recently. Recency-of-interaction must put /idle on top — proving
+        // a streaming session can't leapfrog by bumping updatedAt.
+        entry({
+          path: "/streaming",
+          updatedAt: isoAgo(1),
+          lastUserMessageAt: isoAgo(10 * 60_000),
+        }),
+        entry({
+          path: "/idle",
+          updatedAt: isoAgo(60_000),
+          lastUserMessageAt: isoAgo(60_000),
+        }),
+      ],
+      active,
+    );
+    expect(groups[0].items.map((i) => i.path)).toEqual(["/idle", "/streaming"]);
+  });
+
+  test("falls back to updatedAt when lastUserMessageAt is absent", () => {
+    const { groups } = filterSessions(
+      [
+        entry({
+          path: "/older",
+          updatedAt: isoAgo(3000),
+          lastUserMessageAt: "",
+        }),
+        entry({
+          path: "/newer",
+          updatedAt: isoAgo(1000),
+          lastUserMessageAt: "",
+        }),
+      ],
+      active,
+    );
+    expect(groups[0].items.map((i) => i.path)).toEqual(["/newer", "/older"]);
   });
 
   test("project sort uses the cwd basename, case-insensitively", () => {
@@ -100,16 +143,16 @@ describe("filterSessions", () => {
       entry({
         path: "/wt",
         cwd: "/proj-pilot-abc",
-        updatedAt: isoAgo(1000),
+        lastUserMessageAt: isoAgo(1000),
         worktree: { path: "/proj-pilot-abc", base: "/proj", name: "pilot-abc" },
       }),
-      entry({ path: "/main", cwd: "/proj", updatedAt: isoAgo(3000) }),
+      entry({ path: "/main", cwd: "/proj", lastUserMessageAt: isoAgo(3000) }),
     ];
     const { groups } = filterSessions(sessions, active);
     // One group keyed by the parent project, not two — and no group labelled
     // "proj-pilot-abc".
     expect(groups.map((g) => g.cwd)).toEqual(["/proj"]);
-    // Interleaved newest-first: the worktree session (newer) on top of the main one.
+    // Interleaved most-recently-used first: the worktree session (newer) above the main one.
     expect(groups[0].items.map((i) => i.path)).toEqual(["/wt", "/main"]);
   });
 
