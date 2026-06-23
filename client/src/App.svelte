@@ -16,6 +16,8 @@
   import TreeView from "./components/TreeView.svelte";
   import Tooltip from "./components/Tooltip.svelte";
   import Toast from "./components/Toast.svelte";
+  import ImageLightbox from "./components/ImageLightbox.svelte";
+  import { imageViewer } from "./lib/image-viewer.svelte.js";
   import IconButton from "./components/ui/IconButton.svelte";
   import { notifyIfUnfocused } from "./lib/notify.js";
   import { wakeLock } from "./lib/wake-lock.js";
@@ -201,6 +203,17 @@
 <TrustCard />
 <Settings />
 <TreeView />
+<!-- Shared full-screen viewer for any read-only transcript image (user attachments,
+     tool image output). Opened via imageViewer.open(batch, index) from Transcript /
+     ToolCard; the composer drives its own local lightbox. -->
+{#if imageViewer.index !== null}
+  <ImageLightbox
+    images={imageViewer.images}
+    index={imageViewer.index}
+    onClose={() => imageViewer.close()}
+    onIndex={(i) => imageViewer.setIndex(i)}
+  />
+{/if}
 {#if store.swUpdateReady}
   <div class="update-toast" role="status">
     <span class="update-msg">A new version of pilot is available.</span>

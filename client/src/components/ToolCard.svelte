@@ -3,6 +3,7 @@
   import { reveal } from "../lib/transitions.js";
   import type { ToolItem } from "@pilot/protocol";
   import Chevron from "./ui/Chevron.svelte";
+  import { imageViewer } from "../lib/image-viewer.svelte.js";
 
   let { item }: { item: ToolItem } = $props();
   let open = $state(false);
@@ -371,12 +372,19 @@
          card chrome (args, text note, duration) stays tucked away under the header. -->
     <div class="out-images">
       {#each outImages as img, i (i)}
-        <img
-          class="out-img"
-          src={`data:${img.mimeType};base64,${img.data}`}
-          alt={`Tool image output ${i + 1}`}
-          title="Image returned by this tool"
-        />
+        <button
+          type="button"
+          class="out-img-btn"
+          onclick={() => imageViewer.open(outImages, i)}
+          title="View image full screen (Enter)"
+          aria-label={`View tool image output ${i + 1} full screen`}
+        >
+          <img
+            class="out-img"
+            src={`data:${img.mimeType};base64,${img.data}`}
+            alt={`Tool image output ${i + 1}`}
+          />
+        </button>
       {/each}
     </div>
   {/if}
@@ -598,12 +606,31 @@
     padding: 10px 12px;
     border-top: 1px solid var(--border);
   }
+  /* The image is wrapped in a button so it's keyboard-reachable and opens the
+     full-screen viewer; the button carries no chrome — the border lives on the img. */
+  .out-img-btn {
+    display: block;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: zoom-in;
+    max-width: 100%;
+    border-radius: var(--radius-xs);
+  }
+  .out-img-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
   .out-img {
     max-width: 100%;
     max-height: 360px;
     border-radius: var(--radius-xs);
     border: 1px solid var(--border);
     display: block;
+    transition: border-color 0.12s;
+  }
+  .out-img-btn:hover .out-img {
+    border-color: var(--accent);
   }
   .args {
     display: flex;
