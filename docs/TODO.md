@@ -628,6 +628,18 @@ hit a session limit mid-verify; confirm each against the code before acting):_
 - [x] **Queued-messages editing** → whole-queue restore/edit shipped in the urgent item
       above. Individual replacement remains intentionally unbuilt unless dogfooding shows
       it is worth a second queue mutation API.
+- [ ] **Bulletproof queued-message delivery position** _(optional; pick up only if
+      “jankiness with queued messages” bites)_. The live transcript now places queued
+      (steer/follow-up) messages at their real delivery point via a per-session counter
+      (`QueuedDeliveryTracker` in `server/src/pi/pi-driver.ts`, reset on abort/clearQueue/
+      agent_end). Two residual edges can drop/misplace a queued bubble **live** — an
+      error-stranded follow-up, and an `Alt+Up` clearQueue racing a drain — both self-heal
+      on reload (pi's on-disk history has the true position). Full fix: identity-correlation
+      via `queue_update` snapshot diffing (drain vs clear) instead of counting. Wrinkles:
+      pi's queue snapshot is text-only (a queued image would need content re-read from
+      `message_start`), and there's no pi-driver integration test harness, so the real-driver
+      path isn't covered by the mock e2e. _(From the 2026-06-23 follow-up position bug fix;
+      tdo `d10a`.)_
 
 - [ ] **Per-session system-prompt override** _(deprioritized 2026-06-18 — owner doesn't
       expect to need this soon; parked at the back of the backlog)_. Let a new session
