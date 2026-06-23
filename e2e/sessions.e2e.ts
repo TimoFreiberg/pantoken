@@ -388,11 +388,14 @@ test("the worktree chip creates the session in an isolated worktree dir, grouped
 
 // Create a worktree-backed session at /Users/timo/src/demo (→ demo-worktree) and leave
 // the sidebar open. Shared by the indicator/cleanup specs below.
-async function createWorktreeSession(page: import("@playwright/test").Page) {
+async function createWorktreeSession(
+  page: import("@playwright/test").Page,
+  project = "demo",
+) {
   await openSidebar(page);
   await page.getByTestId("sidebar").getByText("New session…").click();
   await page.getByRole("button", { name: "worktree" }).click();
-  await chooseProjectDir(page, "demo");
+  await chooseProjectDir(page, project);
   const composer = page.getByPlaceholder("Describe a task or ask a question…");
   await composer.fill("get started");
   await composer.press("Enter");
@@ -439,5 +442,30 @@ test("archiving a worktree session reaps the worktree", async ({ page }) => {
   await expect(
     sidebar.getByText("demo-worktree", { exact: true }),
   ).toBeVisible();
+  await expect(sidebar.locator(".wt")).toHaveCount(0);
+});
+
+test("archiving a dirty worktree session keeps it and explains why in a toast", async ({
+  page,
+}) => {
+  // A worktree under the `dirty` mock project simulates uncommitted changes, so archive
+  // can't safely reap it (force=false).
+  await createWorktreeSession(page, "dirty");
+  const sidebar = page.getByTestId("sidebar");
+
+  const row = sidebar
+    .locator("li.row-wrap")
+    .filter({ has: page.locator(".wt") });
+  await row.getByTestId("session-menu").click();
+  await sidebar.getByRole("menuitem", { name: "Archive" }).click();
+
+  // The retained-worktree toast explains the leftover instead of leaving a mystery dir.
+  const toast = page.getByTestId("toast").filter({ hasText: "Worktree kept" });
+  await expect(toast).toBeVisible();
+
+  // It offers a one-tap force-delete; clicking it reaps the worktree (indicator clears).
+  await sidebar.getByTestId("filter-toggle").click();
+  await expect(sidebar.locator(".wt")).toHaveCount(1);
+  await toast.getByRole("button", { name: "Delete anyway" }).click();
   await expect(sidebar.locator(".wt")).toHaveCount(0);
 });

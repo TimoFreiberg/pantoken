@@ -1091,10 +1091,21 @@ export async function createPiDriver(
       const info = (await SessionManager.listAll()).find(
         (s) => s.path === path,
       );
-      if (info && worktreeStore.get(info.cwd))
-        await reapWorktree(info.cwd, false).catch((e) =>
-          console.error("[worktree] archive cleanup failed", e),
-        );
+      if (!info || !worktreeStore.get(info.cwd)) return;
+      const res = await reapWorktree(info.cwd, false).catch((e) => {
+        console.error("[worktree] archive cleanup failed", e);
+        return { removed: false, reason: String(e) };
+      });
+      // A dirty worktree is left in place by design — report it back so the archiving
+      // client can explain the leftover (and offer a force-delete) instead of leaving
+      // a mystery directory on disk.
+      if (!res.removed)
+        return {
+          worktreeRetained: {
+            path: info.cwd,
+            reason: res.reason ?? "uncommitted changes",
+          },
+        };
     },
 
     async cleanupWorktree(path: string, opts?: { force?: boolean }) {

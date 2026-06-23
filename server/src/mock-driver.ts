@@ -140,7 +140,18 @@ const MOCK_DIR_LAYOUT: Readonly<Record<string, readonly string[]>> = {
   "": ["src", "Documents", "Downloads", "Projects", ".config"],
   // `demo` / `elsewhere` are empty project dirs the e2e suite navigates into to start a
   // session (incl. worktree creation) somewhere other than the seeded sessions' cwds.
-  src: ["pilot", "pi", "pi-gui", "kellercomm", "scratch", "demo", "elsewhere"],
+  src: [
+    "pilot",
+    "pi",
+    "pi-gui",
+    "kellercomm",
+    "scratch",
+    "demo",
+    "elsewhere",
+    // A worktree created under `dirty` is treated as having uncommitted changes, so
+    // archiving keeps it — exercises the "worktree kept" toast path deterministically.
+    "dirty",
+  ],
   "src/pilot": ["client", "server", "protocol", "e2e", "docs"],
   "src/pi": ["src", "docs", "examples"],
   Documents: ["notes", "receipts"],
@@ -194,8 +205,11 @@ export class MockDriver implements PilotDriver {
   // and cleanup/archive only ever touch mock worktrees. Seeded from SESSION_LIST at
   // construction + reset (mirroring how the real WorktreeStore loads its index from
   // disk) so any fixture worktree session carries its base/name into the overlay.
-  // Mock worktrees are always clean.
+  // Mock worktrees are always clean, EXCEPT ones created under a `dirty` project (see
+  // MOCK_DIR_LAYOUT) — those land in this set so archive keeps them and exercises the
+  // "worktree kept" toast.
   private worktrees = seedWorktrees(SESSION_LIST);
+  private dirtyWorktrees = new Set<string>();
   // The mock's current model selection, mutated by setModel/setThinking so the picker
   // reflects a switch. (Scripted replies still emit the fixture default — fine for a
   // deterministic mock; the picker is exercised on its own.)
@@ -376,6 +390,7 @@ export class MockDriver implements PilotDriver {
     this.liveCountBumps.clear();
     this.failNextNewSession = false;
     this.worktrees = seedWorktrees(SESSION_LIST);
+    this.dirtyWorktrees = new Set<string>();
     this.config = { ...MOCK_DEFAULT_CONFIG };
     this.providers = MOCK_PROVIDERS.map((p) => ({ ...p }));
     this.defaults = {
@@ -550,15 +565,25 @@ export class MockDriver implements PilotDriver {
     };
   }
 
-  async setArchived(path: string, archived: boolean): Promise<void> {
+  async setArchived(
+    path: string,
+    archived: boolean,
+  ): Promise<{ worktreeRetained?: { path: string; reason: string } } | void> {
     this.sessions = this.sessions.map((s) =>
       s.path === path ? { ...s, archived } : s,
     );
-    // Archiving a worktree session reaps the (always-clean) mock worktree, mirroring the
-    // real driver's safe cleanup so the indicator clears.
+    // Archiving a worktree session reaps the (clean) mock worktree, mirroring the real
+    // driver's safe cleanup so the indicator clears. A dirty one is kept and reported
+    // back, exactly as the real driver does, so the client can explain the leftover.
     if (archived) {
       const cwd = this.sessions.find((s) => s.path === path)?.cwd;
-      if (cwd) this.worktrees.delete(cwd);
+      if (cwd && this.worktrees.has(cwd)) {
+        if (this.dirtyWorktrees.has(cwd))
+          return {
+            worktreeRetained: { path: cwd, reason: "uncommitted changes" },
+          };
+        this.worktrees.delete(cwd);
+      }
     }
   }
 
@@ -657,7 +682,10 @@ export class MockDriver implements PilotDriver {
     // is simulated as a sibling "-worktree" dir so the isolated path is visible in e2e.
     const base = cwd?.trim() || NEW_SESSION_ENTRY.cwd;
     const dir = worktree ? `${base.replace(/\/+$/, "")}-worktree` : base;
-    if (worktree) this.worktrees.set(dir, { base, name: `pilot-mock-${dir}` });
+    if (worktree) {
+      this.worktrees.set(dir, { base, name: `pilot-mock-${dir}` });
+      if (/(^|\/)dirty$/.test(base)) this.dirtyWorktrees.add(dir);
+    }
     const sessionId =
       dir === NEW_SESSION_ENTRY.cwd
         ? NEW_SESSION_ENTRY.sessionId

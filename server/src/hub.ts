@@ -909,8 +909,11 @@ export class SessionHub {
     path: string,
     archived: boolean,
   ): Promise<void> {
+    let result: Awaited<
+      ReturnType<NonNullable<typeof this.driver.setArchived>>
+    >;
     try {
-      await this.driver.setArchived?.(path, archived);
+      result = await this.driver.setArchived?.(path, archived);
     } catch (e) {
       send({
         type: "error",
@@ -918,6 +921,14 @@ export class SessionHub {
       });
       return;
     }
+    // A worktree-backed session whose worktree couldn't be reaped (dirty) is reported
+    // back to the archiving client only, so its archived toast can explain the leftover.
+    if (result?.worktreeRetained)
+      send({
+        type: "worktreeRetained",
+        path: result.worktreeRetained.path,
+        reason: result.worktreeRetained.reason,
+      });
     await this.broadcastSessionList();
   }
 
