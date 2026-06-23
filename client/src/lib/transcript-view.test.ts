@@ -312,6 +312,53 @@ describe("groupTurns", () => {
   });
 });
 
+// Regression for the queued-follow-up position bug: a follow-up sent mid-run is delivered
+// by pi only once the agent would stop, so it belongs AFTER the prior turn's final
+// response. pilot used to insert it at SEND time (mid-work), which split the turn early
+// and pushed the real final response into a later turn's collapsible work — it vanished
+// behind "Worked for Ns". The driver fix repositions the bubble to its delivery point;
+// these two cases pin both halves of that contract.
+describe("groupTurns: queued follow-up delivery position", () => {
+  test("fixed order — follow-up AFTER the final response keeps that response visible", () => {
+    // origPrompt → work → finalA → [follow-up delivered] → work → finalB
+    const turns = groupTurns([
+      user("orig"),
+      asst("narration"),
+      tool("b1"),
+      asst("finalA"), // the real final response to the original prompt
+      user("followup"), // delivered here, once the agent would stop
+      tool("b2"),
+      asst("finalB"),
+    ]);
+    expect(turns).toHaveLength(2);
+    // Turn 0's final response stays visible (NOT collapsed into work).
+    expect(turns[0]!.response.map((i) => i.id)).toEqual(["finalA"]);
+    expect(turns[0]!.work.map((i) => i.id)).not.toContain("finalA");
+    // Turn 1 (the follow-up) keeps its own final response too.
+    expect(turns[1]!.user!.id).toBe("followup");
+    expect(turns[1]!.response.map((i) => i.id)).toEqual(["finalB"]);
+  });
+
+  test("buggy order — follow-up BEFORE the final response swallows it into work", () => {
+    // The pre-fix shape: the bubble lands mid-work (at send time), so finalA — now
+    // trailed by a tool inside the follow-up's turn — collapses instead of showing.
+    const turns = groupTurns([
+      user("orig"),
+      asst("narration"),
+      tool("b1"),
+      user("followup"), // mis-positioned at send time, mid-run
+      asst("finalA"),
+      tool("b2"),
+      asst("finalB"),
+    ]);
+    // Turn 0 ends on a tool — no visible response at all.
+    expect(turns[0]!.response).toEqual([]);
+    // finalA is buried in the follow-up turn's collapsible work, not its response.
+    expect(turns[1]!.work.map((i) => i.id)).toContain("finalA");
+    expect(turns[1]!.response.map((i) => i.id)).toEqual(["finalB"]);
+  });
+});
+
 describe("groupTurns: answer (visible) tools", () => {
   test("the answer tool is pulled out of work into visible, in order", () => {
     const turns = groupTurns([

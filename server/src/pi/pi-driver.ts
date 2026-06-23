@@ -66,6 +66,8 @@ import {
   type HistoryMessage,
   historyToEvents,
 } from "./history-map.js";
+import { imagesFromContent, textFromContent } from "./content.js";
+import { QueuedDeliveryTracker } from "./queued-delivery.js";
 import { createWorktree, removeWorktree } from "./worktree.js";
 import { WorktreeStore } from "../worktree-store.js";
 import { evictionPlan } from "./warm-cap.js";
@@ -123,6 +125,10 @@ interface WarmSession {
   cwd: string;
   bridge: PiUiBridge;
   unsubscribe: () => void;
+  /** Tracks queued (steer/followUp) messages accepted but not yet delivered, so the
+   *  subscribe handler can place each at its real delivery position instead of where it was
+   *  queued. See {@link QueuedDeliveryTracker}. */
+  queuedDeliveries: QueuedDeliveryTracker;
 }
 
 /** `fd` matches its pattern as a regex by default, so a raw query is wrong twice over:
@@ -689,6 +695,7 @@ export async function createPiDriver(
       cwd,
       bridge,
       unsubscribe: () => {},
+      queuedDeliveries: new QueuedDeliveryTracker(),
     };
 
     // Extension UI calls (approvals + ambient) flow through this session's bridge;
@@ -731,6 +738,30 @@ export async function createPiDriver(
       },
     });
     ws.unsubscribe = session.subscribe((ev) => {
+      // Queued-message delivery — the counterpart to prompt()'s suppressed send-time
+      // emit. pi injects a drained steer/followUp message as a role:"user" message_start
+      // at its REAL delivery point: a turn boundary (steer) or once the agent would stop
+      // (followUp). Synthesize the user turn HERE so it lands at that position instead of
+      // where it was queued — mis-positioning it was the bug that swallowed the prior
+      // turn's final response into the collapsed work block. Gated by the per-session
+      // counter so a normal first prompt (count 0, shown via the optimistic send-path
+      // emit) isn't double-emitted. The queue tray clears itself via the drain's
+      // queueUpdated, so no id correlation is needed.
+      const start = ev as {
+        type?: string;
+        message?: { role?: string; content?: unknown; timestamp?: number };
+      };
+      if (ws.queuedDeliveries.isDelivery(start)) {
+        const msg = start.message;
+        emit({
+          sessionRef: ref,
+          timestamp: msg?.timestamp != null ? String(msg.timestamp) : now(),
+          type: "userMessage",
+          id: `u-${now()}-${userSeq++}`,
+          text: textFromContent(msg?.content),
+          images: imagesFromContent(msg?.content),
+        });
+      }
       for (const out of mapPiEvent(ev, {
         ref,
         now,
@@ -926,8 +957,10 @@ export async function createPiDriver(
       let preflightAccepted = false;
       const options: Record<string, unknown> = {};
       if (images && images.length > 0) options.images = images;
-      if (ws.session.isStreaming && deliverAs)
-        options.streamingBehavior = deliverAs;
+      // A queued send: the agent is mid-run and the client picked a delivery mode, so pi
+      // holds the message (steer → next turn boundary, followUp → once it would stop).
+      const willQueue = ws.session.isStreaming && Boolean(deliverAs);
+      if (willQueue) options.streamingBehavior = deliverAs;
 
       return new Promise<void>((resolve, reject) => {
         options.preflightResult = (accepted: boolean) => {
@@ -938,14 +971,24 @@ export async function createPiDriver(
             return;
           }
           preflightAccepted = true;
-          emit({
-            sessionRef: ws.ref,
-            timestamp: now(),
-            type: "userMessage",
-            id: promptId ?? `u-${now()}-${userSeq++}`,
-            text,
-            images,
-          });
+          if (willQueue) {
+            // Don't insert a send-time userMessage for a queued message: pi delivers it
+            // later, at the correct transcript position, where the subscribe handler
+            // synthesizes it (see the message_start delivery branch). Until then it rides
+            // the queue tray (queueUpdated). Emitting it here is what mis-positioned
+            // follow-ups. The outbox still clears on this resolve()'s promptResult ACK,
+            // independent of the transcript echo, so nothing is stranded.
+            ws.queuedDeliveries.onQueued();
+          } else {
+            emit({
+              sessionRef: ws.ref,
+              timestamp: now(),
+              type: "userMessage",
+              id: promptId ?? `u-${now()}-${userSeq++}`,
+              text,
+              images,
+            });
+          }
           resolve();
         };
 
@@ -970,13 +1013,17 @@ export async function createPiDriver(
     },
 
     abort(sessionId) {
-      target(sessionId)
-        ?.session.abort()
-        .catch(() => {});
+      const ws = target(sessionId);
+      // Aborting clears pi's queues (it won't deliver them), so drop the pending count —
+      // otherwise a leftover would mis-fire on a later first prompt's message_start.
+      ws?.queuedDeliveries.reset();
+      ws?.session.abort().catch(() => {});
     },
 
     clearQueue(sessionId) {
       const ws = target(sessionId);
+      // Restoring/clearing the queue removes undelivered messages, so reset the count.
+      ws?.queuedDeliveries.reset();
       return ws?.session.clearQueue() ?? { steering: [], followUp: [] };
     },
 
