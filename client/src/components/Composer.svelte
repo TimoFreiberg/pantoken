@@ -507,19 +507,10 @@
       queueMicrotask(autosize);
       return;
     }
-    // New-session draft shortcuts: ⌥P opens/closes the project picker, ⌥W toggles the
-    // worktree chip; Escape (with an empty prompt and no slash menu open) abandons the draft.
+    // New-session draft shortcut: Escape (with an empty prompt and no slash menu open)
+    // abandons the draft. ⌥P / ⌥W are handled by the window keydown listener so they
+    // also work before the textarea is focused (⌘N leaves it blurred).
     if (drafting) {
-      if (e.altKey && e.code === "KeyP") {
-        e.preventDefault();
-        pickingCwd = !pickingCwd;
-        return;
-      }
-      if (e.altKey && e.code === "KeyW") {
-        e.preventDefault();
-        store.toggleDraftWorktree();
-        return;
-      }
       if (e.key === "Escape" && !slashOpen && !fileOpen && !store.composerDraft.trim()) {
         e.preventDefault();
         store.cancelDraft();
@@ -604,6 +595,19 @@
       // The lightbox owns the keyboard while open (Esc/←/→) — don't steal focus or
       // re-open the picker underneath it.
       if (lightboxIndex !== null) return;
+      // New-session draft shortcuts also work when the textarea isn't focused yet
+      // (⌘N leaves it blurred): ⌥P toggles the project picker, ⌥W the worktree chip.
+      // Handle ⌥P before the pickingCwd guard so it can also close an open picker.
+      if (drafting && e.altKey && e.code === "KeyP") {
+        e.preventDefault();
+        pickingCwd = !pickingCwd;
+        return;
+      }
+      if (drafting && e.altKey && e.code === "KeyW") {
+        e.preventDefault();
+        store.toggleDraftWorktree();
+        return;
+      }
       // The directory picker owns the keyboard while open (arrows / Enter / Esc to
       // navigate); don't pull focus back to the textarea on a keystroke.
       if (pickingCwd) return;
