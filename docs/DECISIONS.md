@@ -218,3 +218,28 @@ Isolation. Pilot has almost no directory-scoped state today — the git status/d
 panels that would need it are LATER / out-of-scope — so the formal split is premature.
 When directory-scoped state does land, key it by `(server, cwd)`; the cwd-grouped
 sidebar + worktree checkbox already cover the lightweight version.
+
+## 2026-06-23 — New-session draft persistence
+
+### D17. Everything settable in the new-session draft UI is persisted, if reasonably possible
+The new-session draft (the deferred-creation composer: project · worktree · model ·
+effort, plus the prompt text) is per-client view state (D5), but it should survive a
+session switch **and** a reload. Losing a half-configured draft because you glanced at
+another session is the kind of small betrayal that quietly erodes trust in the tool. So
+the **default for any control we add to the draft UI is: persist it**, per-project, keyed
+`n:<cwd>` in localStorage, restored when the draft reopens.
+
+Coverage today (`client/src/lib/store.svelte.ts`): prompt text rides `draftMap`
+(localStorage `pilot.composerDrafts`); worktree + model + effort ride `draftConfigMap`
+(`pilot.draftConfig`). Model/effort persist only when they *diverge* from the current
+global default, so an untouched draft keeps tracking the default rather than pinning a
+stale snapshot; worktree stores only `true` (false == default == absent). Sending or
+discarding a draft clears its stored config alongside its text, and retargeting the
+project moves it to the new `n:<cwd>` key.
+
+"If reasonably possible" is the only escape hatch: a new draft control skips persistence
+only when there's a concrete reason — it's inherently ephemeral, or its value can't be
+meaningfully restored (e.g. an in-flight file pick). Absent such a reason, persist it,
+and add an e2e round-trip in `e2e/drafts.e2e.ts` (switch-away + reload) the way worktree
+and model/effort did. New persisted fields extend `StoredDraftConfig` + its load-time
+validation; no protocol change — this is all client-local.
