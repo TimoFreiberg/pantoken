@@ -212,12 +212,30 @@
   // Starts at -1 so the first measurement never reads as growth.
   let prevSize = -1;
 
+  // --- Prompt-stepping nav (Cmd/Ctrl+↑/↓). `navIndex` is a cursor into the visible
+  //     `.row.user` list: null = not stepping (sitting at the live tail). ↑ walks toward
+  //     older prompts, ↓ toward newer ones, and stepping past the newest returns to the
+  //     live bottom. The CURSOR — not the scroll position — is the source of truth, so a
+  //     rapid burst of presses steps deterministically even while a smooth scroll from the
+  //     previous press is still animating (reading scrollTop mid-animation would stutter).
+  let navIndex: number | null = null;
+  // A smooth scroll fires `scroll` events of its own; treat scrolls within this window as
+  // ours and keep the cursor. Once it lapses, a genuine user scroll drops the cursor so
+  // the next ↑ re-anchors to the most recent prompt. A mis-timed window only costs that
+  // re-anchor, never breakage — so a too-long smooth scroll degrades gracefully.
+  let progScrollUntil = 0;
+  function markProgScroll(): void {
+    progScrollUntil = Date.now() + 800;
+  }
+
   function onScroll() {
     if (!scroller) return;
     const gap = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
     pinned = gap < 80;
     // Reaching the bottom clears the active-session unread flag (you've seen it all).
     if (pinned) store.clearActiveUnread();
+    // A user scroll (not one of ours) abandons prompt-stepping, so the next ⌘↑ re-anchors.
+    if (Date.now() >= progScrollUntil) navIndex = null;
   }
 
   /** Force the viewport to the true bottom, re-asserting across a few frames. A single
@@ -252,6 +270,7 @@
     lastFocusId = id;
     pinned = true;
     prevSize = -1;
+    navIndex = null;
     store.clearActiveUnread();
     snapToBottom();
   });
@@ -285,6 +304,7 @@
     if (n === lastSendN) return;
     lastSendN = n;
     pinned = true;
+    navIndex = null;
     store.clearActiveUnread();
     // Re-assert across frames (not a single scrollTo): sending while scrolled up jumps
     // from the top, where the rows between were `content-visibility`-skipped and reporting
@@ -307,14 +327,32 @@
   // True when the active session has content below the viewport (drives the pill).
   const showNewPill = $derived(!pinned && store.activeUnread);
 
-  /** Scroll so the most recent user prompt sits at the top of the viewport (your
-   *  message + the response below it) — for re-reading what you last asked after
-   *  scrolling through a long turn. Bound to Cmd/Ctrl+↑. */
-  function jumpToLastPrompt(): void {
+  /** Step the prompt cursor and scroll the target prompt to the top of the viewport
+   *  (your message + the response below it). ⌘↑ (dir -1) walks toward older prompts —
+   *  the first press from the live tail lands on the most recent prompt, for re-reading a
+   *  long turn; ⌘↓ (dir +1) walks back toward newer ones, and stepping past the newest
+   *  returns to the live bottom. */
+  function stepPrompt(dir: -1 | 1): void {
     if (!scroller) return;
     const prompts = scroller.querySelectorAll<HTMLElement>(".row.user");
-    const last = prompts[prompts.length - 1];
-    last?.scrollIntoView({ block: "start", behavior: "smooth" });
+    const last = prompts.length - 1;
+    if (dir === 1) {
+      // ⌘↓: not stepping yet, or already at/past the newest prompt → return to the live
+      // bottom (preserves the old "⌘↓ jumps to the tail from anywhere" gesture).
+      if (navIndex === null || navIndex >= last) {
+        navIndex = null;
+        markProgScroll();
+        scrollToBottom();
+        return;
+      }
+      navIndex += 1;
+    } else {
+      if (last < 0) return; // no prompts to step to
+      // ⌘↑: first press → most recent prompt; otherwise one older, clamped at the oldest.
+      navIndex = navIndex === null ? last : Math.max(0, navIndex - 1);
+    }
+    markProgScroll();
+    prompts[navIndex]?.scrollIntoView({ block: "start", behavior: "smooth" });
   }
 
   // Global hotkey. Cmd/Ctrl modifier keeps it clear of the composer's type-to-focus
@@ -324,13 +362,13 @@
     function onKey(e: KeyboardEvent): void {
       if ((e.metaKey || e.ctrlKey) && e.key === "ArrowUp") {
         e.preventDefault();
-        // Shift = act on the last prompt (branch/re-edit); plain = just scroll to it.
+        // Shift = act on the last prompt (branch/re-edit); plain = step to the previous one.
         if (e.shiftKey) store.branchLastPrompt();
-        else jumpToLastPrompt();
+        else stepPrompt(-1);
       } else if ((e.metaKey || e.ctrlKey) && e.key === "ArrowDown") {
-        // The inverse of ⌘↑: return to the live bottom from anywhere in scrollback.
+        // ⌘↓ steps to the next prompt; past the newest it returns to the live bottom.
         e.preventDefault();
-        scrollToBottom();
+        stepPrompt(1);
       }
     }
     window.addEventListener("keydown", onKey);
@@ -679,7 +717,7 @@
   <button
     class="new-pill"
     data-testid="new-messages-pill"
-    title="Jump to the newest messages (⌘↓) · ⌘↑ jumps to your last prompt"
+    title="Jump to the newest messages (⌘↓) · ⌘↑/⌘↓ step through your prompts"
     aria-label="New messages below — jump to newest"
     onclick={scrollToBottom}
   >

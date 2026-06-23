@@ -297,6 +297,62 @@ test("Ctrl/Cmd+Up jumps to the most recent user prompt", async ({ page }) => {
   await expect(lastPrompt).toBeInViewport();
 });
 
+test("Ctrl/Cmd+Up/Down step through user prompts", async ({ page }) => {
+  // Build several turns so the oldest prompts have enough content below them to scroll to
+  // the top (a short final turn can't, which is fine — the stepper clamps there).
+  for (let i = 0; i < 5; i++) {
+    await drive(page, "reply");
+    await expect(
+      page.getByText("That confirms it", { exact: false }).last(),
+    ).toBeVisible();
+  }
+  await waitForSettledWorkBlocks(page, 6);
+
+  const count = await page.locator(".row.user").count(); // greeting + 5 replies
+  expect(count).toBeGreaterThanOrEqual(6);
+  const last = count - 1;
+
+  // True when the scroller sits at prompt `idx`'s block-start target. `scrollIntoView`
+  // clamps at the max scroll offset, so a prompt too near the tail to reach the top
+  // settles at the bottom — `min(within, max)` models that. (Asserting by scroll position,
+  // not prompt text: the reply fixture reuses one prompt string across turns.)
+  const atPrompt = (idx: number) =>
+    page.evaluate((i) => {
+      const sc = document.querySelector(".scroller") as HTMLElement;
+      const row = document.querySelectorAll(".row.user")[i] as HTMLElement;
+      const within =
+        row.getBoundingClientRect().top -
+        sc.getBoundingClientRect().top +
+        sc.scrollTop;
+      const max = sc.scrollHeight - sc.clientHeight;
+      return Math.abs(sc.scrollTop - Math.min(within, max)) < 4;
+    }, idx);
+  const atBottom = () =>
+    page.evaluate(() => {
+      const sc = document.querySelector(".scroller") as HTMLElement;
+      return sc.scrollHeight - sc.scrollTop - sc.clientHeight < 4;
+    });
+
+  // From the live tail, ⌘↑ walks one prompt older per press, all the way to the oldest.
+  // Stepping one at a time (settling between presses) keeps each smooth scroll short.
+  for (let i = last; i >= 0; i--) {
+    await page.keyboard.press("Control+ArrowUp");
+    await expect.poll(() => atPrompt(i)).toBe(true);
+  }
+  // Past the oldest, ⌘↑ clamps — it stays on the first prompt.
+  await page.keyboard.press("Control+ArrowUp");
+  await expect.poll(() => atPrompt(0)).toBe(true);
+
+  // ⌘↓ walks back toward newer prompts…
+  for (let i = 1; i <= last; i++) {
+    await page.keyboard.press("Control+ArrowDown");
+    await expect.poll(() => atPrompt(i)).toBe(true);
+  }
+  // …and stepping past the newest returns to the live bottom.
+  await page.keyboard.press("Control+ArrowDown");
+  await expect.poll(atBottom).toBe(true);
+});
+
 test("sending a prompt while scrolled up jumps the transcript to the bottom", async ({
   page,
 }) => {
