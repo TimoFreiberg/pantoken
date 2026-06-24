@@ -8,11 +8,11 @@
     prepareImageFiles,
   } from "../lib/image-attachments.js";
   import { filterCommands, slashQuery } from "../lib/slash.js";
+  import { nextHistoryIndex } from "../lib/prompt-history.js";
   import {
-    caretOnFirstLine,
-    caretOnLastLine,
-    nextHistoryIndex,
-  } from "../lib/prompt-history.js";
+    caretOnFirstVisualLine,
+    caretOnLastVisualLine,
+  } from "../lib/caret-visual-line.js";
   import { contextTone } from "../lib/context-tone.js";
   import SlashMenu from "./SlashMenu.svelte";
   import FileMenu from "./FileMenu.svelte";
@@ -606,11 +606,12 @@
         return;
       }
     }
-    // Readline-style prompt history. Plain ArrowUp on the first line recalls the previous
-    // prompt (an empty field is the degenerate case — the just-sent prompt comes back);
-    // ArrowDown on the last line walks back toward the live draft. Multi-line editing keeps
-    // the arrows for caret movement until the caret reaches the top/bottom line. Placed
-    // after the slash/file menus, which own the arrows while open.
+    // Readline-style prompt history. Plain ArrowUp on the first *visual* row recalls the
+    // previous prompt (an empty field is the degenerate case — the just-sent prompt comes
+    // back); ArrowDown on the last visual row walks back toward the live draft. Visual rows
+    // respect soft wrap, so a long wrapped paragraph keeps the arrows for caret movement
+    // until the caret reaches its top/bottom rendered row. Placed after the slash/file
+    // menus, which own the arrows while open.
     if (
       (e.key === "ArrowUp" || e.key === "ArrowDown") &&
       !e.altKey &&
@@ -627,9 +628,8 @@
         histWip = "";
       }
       const value = store.composerDraft;
-      const caret = ta.selectionStart;
       const up = e.key === "ArrowUp";
-      const atEdge = up ? caretOnFirstLine(value, caret) : caretOnLastLine(value, caret);
+      const atEdge = up ? caretOnFirstVisualLine(ta) : caretOnLastVisualLine(ta);
       if (atEdge) {
         const history = store.currentPromptHistory;
         const next = nextHistoryIndex(history.length, histIndex, up ? "up" : "down");
