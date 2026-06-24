@@ -7,24 +7,40 @@ import { type Plugin, defineConfig } from "vite";
 const SERVER = process.env.PILOT_SERVER ?? "http://localhost:8787";
 
 // Stamp the build with the last commit's short hash + date, surfaced in the UI as an
-// unobtrusive version string. Works in dev (the jj worktree resolves git) and in prod
-// (the deploy slots are plain git clones). Falls back to "dev" if git isn't reachable
-// rather than failing the build. `fullHash` is the un-abbreviated sha, written to a marker
-// file (see stampBuiltSha) so the desktop update-watcher can tell when the *served* bundle
-// has fallen behind HEAD — which short-hash display can't express and HEAD-only checks miss.
+// unobtrusive version string. Resolves via git in a normal checkout (and the deploy
+// slots, which are plain git clones); falls back to jj for a pure jj workspace/worktree
+// that has no colocated `.git` (where `git rev-parse` throws "not a git repository") —
+// running tests from such a worktree is routine, and a meaningful stamp beats "dev".
+// Falls back to "dev" only if neither VCS is reachable, rather than failing the build.
+// `fullHash` is the un-abbreviated sha, written to a marker file (see stampBuiltSha) so
+// the desktop update-watcher can tell when the *served* bundle has fallen behind HEAD —
+// which short-hash display can't express and HEAD-only checks miss.
+function run(cmd: string): string {
+  return execSync(cmd, { stdio: ["ignore", "pipe", "ignore"] })
+    .toString()
+    .trim();
+}
 function gitInfo(): { hash: string; date: string; fullHash: string } {
   try {
-    const git = (args: string): string =>
-      execSync(`git ${args}`, { stdio: ["ignore", "pipe", "ignore"] })
-        .toString()
-        .trim();
     return {
-      hash: git("rev-parse --short HEAD"),
-      date: git("log -1 --format=%cd --date=short"),
-      fullHash: git("rev-parse HEAD"),
+      hash: run("git rev-parse --short HEAD"),
+      date: run("git log -1 --format=%cd --date=short"),
+      fullHash: run("git rev-parse HEAD"),
     };
   } catch {
-    return { hash: "dev", date: "", fullHash: "" };
+    // No reachable git — try jj. `@-` is the working copy's parent, i.e. the last
+    // committed revision, the same thing `git HEAD` points at in a colocated repo.
+    try {
+      const jj = (template: string): string =>
+        run(`jj log --no-graph --color=never -r @- -T '${template}'`);
+      return {
+        hash: jj("commit_id.short(9)"),
+        date: jj('committer.timestamp().format("%Y-%m-%d")'),
+        fullHash: jj("commit_id"),
+      };
+    } catch {
+      return { hash: "dev", date: "", fullHash: "" };
+    }
   }
 }
 const BUILD = gitInfo();
