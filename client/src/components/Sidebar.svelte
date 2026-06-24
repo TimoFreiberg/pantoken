@@ -148,6 +148,13 @@
     store.setArchived(s.path, !s.archived);
     closeMenu();
   }
+  // Reload a wedged session: the server throws out the warm pi session and rebuilds it
+  // from disk with fresh config + extensions. The recovery move after fixing an extension
+  // bug in another session. Closes the menu; the reseeded transcript arrives over the WS.
+  function reloadSession(s: SessionListEntry): void {
+    store.reloadSession(s.path);
+    closeMenu();
+  }
   // Inline rename. Holds the path of the session being renamed (one at a time), the
   // working text, and the input ref so we can focus+select on open.
   let renamingFor = $state<string | null>(null);
@@ -192,8 +199,8 @@
 
   // Dismiss the menu on an outside click, Escape, or scroll/resize (which would detach the
   // fixed popover from its row). The click listener is deferred so the opening click doesn't
-  // immediately re-close it. While open, `a` archives/unarchives the targeted session —
-  // unless focus is in a text field, where `a` should type.
+  // immediately re-close it. While open, `a` archives/unarchives, `r` renames, and `l`
+  // reloads the targeted session — unless focus is in a text field, where they should type.
   async function copyWorktreePath(s: SessionListEntry): Promise<void> {
     if (s.worktree) await store.copyToClipboard(s.worktree.path);
     closeMenu();
@@ -233,6 +240,9 @@
         } else if (k === "r" && menuSession) {
           e.preventDefault();
           startRename(menuSession);
+        } else if (k === "l" && menuSession) {
+          e.preventDefault();
+          reloadSession(menuSession);
         }
       }
     };
@@ -767,6 +777,15 @@
                         <kbd class="hotkey" aria-hidden="true">R</kbd>
                       </button
                       >
+                      <button
+                        class="menu-item"
+                        role="menuitem"
+                        data-testid="reload-session"
+                        title="Reload pi context from scratch (config + extensions reloaded) and restore the transcript — recovery for a session a buggy extension wedged (L)"
+                        onclick={() => reloadSession(s)}>
+                        <span>Reload pi session</span>
+                        <kbd class="hotkey" aria-hidden="true">L</kbd>
+                      </button>
                       <button
                         class="menu-item"
                         role="menuitem"

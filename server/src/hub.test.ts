@@ -148,6 +148,17 @@ class FakeDriver implements PilotDriver {
       ev({ type: "userMessage", id: "u2", text: "new session" }),
     ];
   }
+  readonly reloadCalls: string[] = [];
+  // Reload keeps the SAME session id (it re-warms the same .jsonl) — model that by
+  // returning a seed for "s" with a marker message, so a test can assert the wedged
+  // transcript was replaced wholesale.
+  async reloadSession(path: string): Promise<SessionDriverEvent[]> {
+    this.reloadCalls.push(path);
+    return [
+      ev({ type: "sessionOpened", snapshot: snap("s") }),
+      ev({ type: "userMessage", id: "u-reloaded", text: "reloaded session" }),
+    ];
+  }
   async newSession(): Promise<SessionDriverEvent[]> {
     return [ev({ type: "sessionOpened", snapshot: snap("new") })];
   }
@@ -581,6 +592,52 @@ describe("SessionHub", () => {
     const lastList = a.received.filter((m) => m.type === "sessionList").at(-1);
     if (lastList?.type === "sessionList")
       expect(lastList.activeSessionId).toBe("s2");
+  });
+
+  test("reloadSession rebuilds a wedged session from a fresh seed for every viewer", async () => {
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    // Wedge session "s" (the default focus both clients adopt) with a stale transcript.
+    d.emit(ev({ type: "userMessage", id: "u1", text: "wedged msg" }));
+    const a = client();
+    const b = client();
+    hub.addClient(a.send);
+    hub.addClient(b.send);
+
+    hub.handleClient(a.send, { type: "reloadSession", path: "/s.jsonl" });
+    await flush();
+
+    expect(d.reloadCalls).toEqual(["/s.jsonl"]);
+    // Reseed re-snapshots EVERY viewer of the reloaded session, not just the requester,
+    // so a second client looking at the broken session also recovers. The wedged
+    // transcript is replaced wholesale by the fresh seed.
+    for (const c of [a, b]) {
+      const lastSnap = c.received.filter((m) => m.type === "snapshot").at(-1);
+      expect(lastSnap?.type).toBe("snapshot");
+      if (lastSnap?.type === "snapshot") {
+        expect(lastSnap.state.items.some((i) => i.text === "wedged msg")).toBe(
+          false,
+        );
+        expect(
+          lastSnap.state.items.some((i) => i.text === "reloaded session"),
+        ).toBe(true);
+      }
+    }
+  });
+
+  test("reloadSession reports an error when the driver doesn't support it", async () => {
+    const d = new FakeDriver();
+    (d as unknown as { reloadSession?: unknown }).reloadSession = undefined;
+    const hub = new SessionHub(d);
+    const a = client();
+    hub.addClient(a.send);
+
+    hub.handleClient(a.send, { type: "reloadSession", path: "/s.jsonl" });
+    await flush();
+
+    const err = a.received.filter((m) => m.type === "error").at(-1);
+    expect(err?.type).toBe("error");
+    if (err?.type === "error") expect(err.message).toMatch(/reload/i);
   });
 
   test("trust requests relay to clients and responses route back to the driver", () => {

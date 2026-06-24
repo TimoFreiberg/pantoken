@@ -107,6 +107,19 @@ export interface PilotDriver {
    * via `subscribe` — the hub orchestrates the reset so the swap is atomic.
    */
   openSession(path: string): Promise<SessionDriverEvent[]>;
+  /**
+   * Reload a session from scratch by its .jsonl path: dispose the warm session if one is
+   * open (aborting any in-flight run), then warm it up again from disk — which rebuilds
+   * pi's whole context anew (config, project-trust resolution, and extensions all loaded
+   * fresh), the recovery path when an extension bug wedges a session. Resolves with the
+   * SEED events for the now-reloaded session, exactly like {@link openSession}, so the hub
+   * resets + re-broadcasts the transcript through the same atomic path (it reseeds, so a
+   * client already viewing the session swaps to the fresh state instead of keeping the
+   * wedged one). The persisted transcript is restored; in-memory-only state (an undelivered
+   * queue, an un-persisted branch jump) is not. Optional: a bare driver omits it and the
+   * hub reports that reload isn't supported.
+   */
+  reloadSession?(path: string): Promise<SessionDriverEvent[]>;
   /** The landing session a freshly-connecting client adopts when it has no focus of
    *  its own yet (per-client focus): the seed for the driver's current/default session,
    *  or null for an empty landing. The mock returns its bootstrap greeting; the pi

@@ -342,6 +342,14 @@ export type ClientMessage =
   | { type: "listProviders" }
   /** Switch the active session to this .jsonl path. */
   | { type: "openSession"; path: string }
+  /** Reload a session from scratch (by its .jsonl `path`): dispose the warm pi session
+   *  (aborting any in-flight run) and re-warm it from disk, rebuilding pi's context anew —
+   *  config, project trust, and extensions all loaded fresh. Restores the persisted
+   *  transcript as closely as possible; in-memory-only state (an undelivered steer/followUp
+   *  queue, an un-persisted branch jump) is lost. The recovery path for when an extension
+   *  bug wedges a session: fix the extension elsewhere, then reload here to continue without
+   *  restarting pilot. The server re-seeds every client viewing the session. */
+  | { type: "reloadSession"; path: string }
   /** Jump the session to a prior tree entry and branch from it (pi's /tree). `entryId`
    *  is a pilot transcript item's `entryId` (a pi tree node). The server calls
    *  navigateTree, then re-seeds every client's transcript to the new branch; if the

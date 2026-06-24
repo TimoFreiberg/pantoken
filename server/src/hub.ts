@@ -1259,6 +1259,23 @@ export class SessionHub {
       case "openSession":
         void this.switchTo(conn, () => this.driver.openSession(msg.path));
         return;
+      case "reloadSession": {
+        if (!this.driver.reloadSession) {
+          send({
+            type: "error",
+            message: "reloading a session isn't supported here",
+          });
+          return;
+        }
+        // Reseed: the reloaded session keeps its sessionId, so a client already viewing it
+        // has a (now-wedged) shared state. Force-rebuild from the fresh seed instead of
+        // reusing it — and re-snapshot every viewer of it, not just the requester, so a
+        // second client looking at the broken session also recovers.
+        void this.switchTo(conn, () => this.driver.reloadSession!(msg.path), {
+          reseed: true,
+        });
+        return;
+      }
       case "branch": {
         if (!this.driver.branchFrom) {
           send({ type: "error", message: "branching isn't supported here" });
