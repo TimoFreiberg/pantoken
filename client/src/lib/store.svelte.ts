@@ -2061,6 +2061,13 @@ class PilotStore {
   cleanupWorktree(path: string, force = false): void {
     send({ type: "cleanupWorktree", path, force });
   }
+  /** Reload a session from scratch (by its .jsonl path): the server disposes the warm pi
+   *  session and re-warms it from disk, rebuilding pi's context anew (config + extensions
+   *  loaded fresh). The recovery path for a session an extension bug has wedged — fix the
+   *  extension elsewhere, then reload here. The server re-seeds every client viewing it. */
+  reloadSession(path: string): void {
+    send({ type: "reloadSession", path });
+  }
   /** Copy text to the clipboard (worktree path, session id, …). Returns whether it
    *  succeeded so the caller can flash feedback; degrades quietly where the clipboard
    *  API is unavailable (insecure context / older browser). */

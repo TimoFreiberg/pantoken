@@ -671,6 +671,13 @@ export class MockDriver implements PilotDriver {
     return [...withQueue, ...pending];
   }
 
+  /** Deterministic stand-in for the pi driver's dispose-and-re-warm. The mock has no
+   *  warm AgentSession to throw away, so a reload is just a fresh seed of the same
+   *  session \u2014 enough to exercise the hub's reseed path and the client wiring. */
+  async reloadSession(path: string): Promise<SessionDriverEvent[]> {
+    return this.openSession(path);
+  }
+
   /** Deterministic stand-in for pi's navigateTree. Branching from a USER node rewinds to
    *  an empty branch and hands that prompt's text back to prefill the composer (the re-edit
    *  gesture, mirroring navigateTree on a user message); any other node re-seeds the

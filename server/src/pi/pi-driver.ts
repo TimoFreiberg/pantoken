@@ -1170,6 +1170,38 @@ export async function createPiDriver(
       return seedFor(ws);
     },
 
+    async reloadSession(path: string) {
+      // Recovery path: an extension bug (or any wedged state) broke this session. Throw
+      // out the warm AgentSession entirely and build a brand-new one from the same .jsonl
+      // on disk. warmUp re-runs createAgentSessionServices (re-resolves project trust and
+      // re-reads the resource loader -> config + extensions) and session.bindExtensions
+      // (re-loads every extension), so a since-fixed extension is picked up. This is the
+      // ONE place that rebuilds a live session's context without restarting pilot.
+      const existing = [...warm.values()].find(
+        (w) => w.session.sessionFile === path,
+      );
+      if (existing) {
+        // dispose() aborts any in-flight run and tears down pi's listeners, so no stray
+        // event leaks from the old session after this. We don't emit a synthetic
+        // sessionClosed (as LRU eviction does): the requester is viewing this session, so
+        // a sessionClosed would flash "ended" into their transcript for the whole re-warm
+        // window. The fresh seed's idle sessionOpened resets the running indicator when
+        // the hub folds it (switchTo, with reseed) instead.
+        existing.unsubscribe();
+        existing.session.dispose();
+        warm.delete(existing.ref.sessionId);
+        console.log(
+          `[pi] reload: disposed warm session ${existing.ref.sessionId}; re-warming ${path}`,
+        );
+      }
+      // Re-warm from disk. SessionManager.open throws loudly on a missing/unreadable file
+      // (e.g. a warm-but-never-persisted session has no .jsonl yet) — the hub surfaces it
+      // as a switch failure rather than silently doing nothing.
+      const ws = await warmUp(SessionManager.open(path));
+      focus(ws.ref.sessionId);
+      return seedFor(ws);
+    },
+
     async branchFrom(
       entryId: string,
       opts: { summarize?: boolean },
