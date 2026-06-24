@@ -404,11 +404,17 @@ class PilotStore {
 
   /** Session IDs the sidebar keeps visible even when archived/stale would hide them:
    *  the one currently shown in the transcript, plus every running session. Feeds
-   *  `filterSessions`' `pinnedIds` at both callsites (here + the Sidebar component). */
+   *  `filterSessions`' `pinnedIds` at both callsites (here + the Sidebar component).
+   *  The viewed-session pin only holds while it's actually on screen: in a new-session
+   *  draft the transcript is replaced by the draft form, so the previously-viewed session
+   *  isn't shown and shouldn't be force-kept. This is what lets `setArchived` drop the
+   *  focused row — it flips into a draft, and the pin releases. */
   get pinnedSidebarIds(): ReadonlySet<string> {
     const ids = new Set(this.runningIds);
-    const viewed = this.session.ref?.sessionId ?? this.activeSessionId;
-    if (viewed) ids.add(viewed);
+    if (!this.draft) {
+      const viewed = this.session.ref?.sessionId ?? this.activeSessionId;
+      if (viewed) ids.add(viewed);
+    }
     return ids;
   }
 
@@ -2040,8 +2046,23 @@ class PilotStore {
       const s = this.sessions.find((x) => x.path === path);
       const name = s?.displayName || s?.preview || "Session";
       const label = name.length > 32 ? `${name.slice(0, 31)}…` : name;
+      // Archiving the session you're looking at: it would otherwise linger (pinned as the
+      // viewed row) until you navigated away by hand. Flip into a new-session draft for the
+      // same project so the row drops immediately and you land on a prompt page rather than
+      // the just-archived transcript. A pilot worktree session's cwd may be reaped on
+      // archive, so draft into the parent repo (`worktree.base`) instead of the dead dir.
+      const viewedId = this.session.ref?.sessionId ?? this.activeSessionId;
+      const archivingFocused = s != null && s.sessionId === viewedId;
+      if (archivingFocused) this.startDraft(s.worktree?.base ?? s.cwd);
       this.toast(`Archived “${label}”`, {
-        action: { label: "Undo", run: () => this.setArchived(path, false) },
+        action: {
+          label: "Undo",
+          run: () => {
+            this.setArchived(path, false);
+            // Restore the prior view too, if archiving had navigated us into a draft.
+            if (archivingFocused) this.openSession(path);
+          },
+        },
       });
     }
   }
