@@ -84,6 +84,27 @@ test("ArrowUp moves the caret within a multi-line draft before recalling", async
   await expect(ta).toHaveValue(GREETING);
 });
 
+test("ArrowUp walks visual rows of a soft-wrapped line before recalling", async ({
+  page,
+}) => {
+  const ta = composer(page);
+  // One logical line (no newlines) long enough to soft-wrap into several visual rows.
+  const wrapped = "wrap ".repeat(60).trim();
+  await ta.focus();
+  await ta.fill(wrapped);
+  // Caret at the end sits on the LAST visual row. Under logical-line gating this string is
+  // first-AND-last line, so ArrowUp would recall immediately (the jank). Visual gating
+  // moves the caret up a row instead — the draft must stay put.
+  await page.keyboard.press("ArrowUp");
+  await expect(ta).toHaveValue(wrapped);
+  // Jump to the very start (first visual row); now ArrowUp recalls.
+  await ta.evaluate((el: HTMLTextAreaElement) => {
+    el.selectionStart = el.selectionEnd = 0;
+  });
+  await page.keyboard.press("ArrowUp");
+  await expect(ta).toHaveValue(GREETING);
+});
+
 test("history navigation does not hijack the slash-command menu arrows", async ({
   page,
 }) => {
