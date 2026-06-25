@@ -104,7 +104,19 @@ cmd_uninstall() {
 
 cmd_restart() {
   local pid
-  pid="$( [[ -f "$DATA_DIR/pilot.pid" ]] && tr -d '[:space:]' < "$DATA_DIR/pilot.pid" || true )"
+  # pilot.pid may be a bare int (deploy/run.sh) or JSON {"pid":N,...} (pidlock.ts).
+  # `tr -d '[:space:]'` leaves the JSON object whole, which `kill -0` rejects as a
+  # pid — so a restart never lands. Pull the digits out of either form.
+  pid="$(
+    [[ -f "$DATA_DIR/pilot.pid" ]] || exit 0
+    raw=$(< "$DATA_DIR/pilot.pid")
+    pat='"pid"[[:space:]]*:[[:space:]]*([0-9]+)'
+    if [[ "$raw" =~ $pat ]]; then
+      printf '%s' "${BASH_REMATCH[1]}"
+    else
+      tr -dc '0-9' <<< "$raw"
+    fi
+  )"
   if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
     kill "$pid"
     echo "killed server pid $pid — KeepAlive will respawn from $(readlink "$LIVE_LINK")"

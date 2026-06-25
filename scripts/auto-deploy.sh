@@ -70,7 +70,24 @@ log_event() {
 }
 trap 'log_event "error" "Unexpected failure (line $LINENO, exit $?)"' ERR
 
-read_pid() { [[ -f "$PIDFILE" ]] && tr -d '[:space:]' < "$PIDFILE" || true; }
+# pilot.pid is written either as a bare integer (deploy/run.sh's pre-exec echo) or as
+# JSON {"pid":N,"serverId":"..."} (server/src/pidlock.ts acquirePidLock). A bare
+# `tr -d '[:space:]'` returns the whole JSON object as one token, and `kill -0
+# '{"pid":...}'` always fails — which silently breaks restart detection and rolls every
+# deploy back. Parse the pid out of either format instead.
+read_pid() {
+  [[ -f "$PIDFILE" ]] || return 0
+  local raw pat
+  raw=$(< "$PIDFILE")
+  # Store the pattern in a var: quoting inside [[ =~ ]] makes bash treat the
+  # quoted part as a literal and the whole ERE fails to compile.
+  pat='"pid"[[:space:]]*:[[:space:]]*([0-9]+)'
+  if [[ "$raw" =~ $pat ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  else
+    tr -dc '0-9' <<< "$raw"   # tolerate a bare int (or stray digits)
+  fi
+}
 
 health_ok() { curl -fsS --max-time 3 "http://127.0.0.1:${LIVE_PORT}/health" >/dev/null 2>&1; }
 
