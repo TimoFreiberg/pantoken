@@ -121,6 +121,13 @@ const backendEnv = {
     : bunNodePath,
   PILOT_PORT: backendPort,
   PILOT_DATA_DIR: dataDir,
+  // In auto-port mode the instance must be tokenless (auth disabled), like every other
+  // dev/preview/e2e instance. The live desktop app exports its own PILOT_TOKEN into the
+  // shell it spawns (same leak as PILOT_PORT/PILOT_DATA_DIR above); inheriting it would
+  // enable the token gate here, so the tokenless /debug reset + /?dev load in e2e (and a
+  // mock preview) hit the TokenGate instead of the app. Outside auto-port an explicit
+  // PILOT_TOKEN still wins, so a real `bun run dev` behind a token keeps it.
+  ...(autoPort ? { PILOT_TOKEN: undefined } : {}),
 };
 
 // Start the backend first and wait until it answers /health before launching Vite.
