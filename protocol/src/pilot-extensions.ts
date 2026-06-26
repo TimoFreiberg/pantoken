@@ -15,6 +15,7 @@
 export const PILOT_OWNED_EXTENSION_NAMES: readonly string[] = [
   "session-namer",
   "tasklist",
+  "answer",
 ];
 
 /** Is `nameOrBasename` a pilot-OWNED extension? Accepts the basename with or without a
