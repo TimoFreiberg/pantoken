@@ -19,13 +19,14 @@
 // replace+dispose the active session, which is the opposite of keeping N warm.
 
 import { type Dirent, readdirSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import {
   type AgentSession,
   AuthStorage,
   createAgentSessionFromServices,
   createAgentSessionServices,
+  DefaultResourceLoader,
   type ExtensionUIContext,
   getAgentDir,
   ModelRegistry,
@@ -360,6 +361,43 @@ function statPathOnDisk(path: string): {
   }
 }
 
+/**
+ * Load user-scope extensions once at boot and register every `pi.registerProvider()` they
+ * queued into the shared `modelRegistry` — mirroring pi CLI's main.ts startup pass so
+ * extension providers (e.g. umans) show in the Settings favorites/provider lists
+ * before any session warms. See createPiDriver for the full rationale + scope choice.
+ *
+ * Mirrors the drain loop in pi's `createAgentSessionServices` exactly, so registration
+ * semantics (try/catch per extension, clear the pending queue) stay in lockstep.
+ */
+async function registerGlobalExtensionProviders(opts: {
+  agentDir: string;
+  settingsManager: SettingsManager;
+  modelRegistry: ModelRegistry;
+}): Promise<void> {
+  // tmpdir is guaranteed to have no `.pi/`, so the loader's project-scope filesystem
+  // auto-discovery finds nothing — only user-scope (agentDir/extensions + global config)
+  // is loaded. No `resolveProjectTrust` is needed: there's nothing to trust-gate.
+  const loader = new DefaultResourceLoader({
+    cwd: tmpdir(),
+    agentDir: opts.agentDir,
+    settingsManager: opts.settingsManager,
+  });
+  await loader.reload();
+  const { pendingProviderRegistrations } = loader.getExtensions().runtime;
+  for (const { name, config, extensionPath } of pendingProviderRegistrations) {
+    try {
+      opts.modelRegistry.registerProvider(name, config);
+    } catch (e) {
+      console.error(
+        `[pi] boot extension provider "${name}" (${extensionPath}) failed:`,
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
+  pendingProviderRegistrations.length = 0;
+}
+
 export async function createPiDriver(
   opts: PiDriverOptions = {},
 ): Promise<PilotDriver> {
@@ -412,6 +450,26 @@ export async function createPiDriver(
   // file at the (irrelevant) cwd is never loaded — this manager is cwd-independent.
   const globalSettings = SettingsManager.create(homedir(), agentDir, {
     projectTrusted: false,
+  });
+
+  // Boot-time global extension load: register extension-provided providers into
+  // the SHARED registry so they're visible to getModelDefaults()/listProviders()
+  // (the Settings favorites + provider lists) WITHOUT first warming a session.
+  // pi's CLI does this same pass in main.ts at startup; pilot previously deferred all
+  // extension loading to createAgentSessionServices during warmUp(), so an extension
+  // provider (e.g. umans) was invisible in the global menus until some session opened.
+  //
+  // USER-SCOPE ONLY: the loader is pointed at a neutral cwd (tmpdir, guaranteed no
+  // `.pi/`) + the cwd-independent globalSettings (projectTrusted:false) — so this
+  // never drags in a project's `.pi/extensions` auto-discovery or project-scope config.
+  // Project-scope extension providers remain session-scoped (they only register when
+  // that project's session warms), which is correct: they don't exist relative to the
+  // global favorites list. A provider that has no auth after registration is still
+  // filtered out by getAvailable(), exactly as in a warm session.
+  await registerGlobalExtensionProviders({
+    agentDir,
+    settingsManager: globalSettings,
+    modelRegistry,
   });
 
   // Available models as the small shape model-config helpers want.
