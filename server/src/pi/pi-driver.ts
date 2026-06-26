@@ -85,6 +85,7 @@ import { buildSessionMcpConfigOverride } from "./mcp-cwd-workaround.js";
 import { makeTrustResolver, type TrustAsk } from "./trust.js";
 import { PiUiBridge } from "./ui-bridge.js";
 import { parseUnsupportedHostUiErrorMessage } from "./unsupported-host-ui.js";
+import { readPilotSettings } from "../settings-store.js";
 import { userMessageStats } from "./user-message-count.js";
 
 export interface PiDriverOptions {
@@ -763,6 +764,18 @@ export async function createPiDriver(
     // server-written files like screenshots land in the worktree the agent is in.
     // Remove once the pi-mcp-adapter upstream fix is released (see docs/TODO.md).
     const mcpConfigOverride = buildSessionMcpConfigOverride(agentDir, cwd);
+    // The extension-flag values pilot threads into createAgentSessionServices. The
+    //   `mcp-config` entry is the per-cwd MCP override (see mcp-cwd-workaround.ts); the
+    //   `background-model` entry is the D2 setting read from pilot-settings.json, so the
+    //   ported extensions (Chunks 2/4) read it via ctx.getFlag("background-model") and
+    //   resolve with ctx.modelRegistry. null/unset → omitted (extensions fall back).
+    //   NOTE: only the VALUE is threaded here; the extension-side registerFlag/getFlag
+    //   code belongs to Chunks 2/4 (this chunk ships no extensions yet).
+    const backgroundModel = readPilotSettings().backgroundModel;
+    const extensionFlagValues = new Map<string, boolean | string>();
+    if (mcpConfigOverride) extensionFlagValues.set("mcp-config", mcpConfigOverride);
+    if (backgroundModel)
+      extensionFlagValues.set("background-model", backgroundModel);
     const services = await createAgentSessionServices({
       cwd,
       agentDir,
@@ -771,9 +784,7 @@ export async function createPiDriver(
       // settings manager is left to default (cwd-bound, for correct project layering).
       authStorage,
       modelRegistry,
-      ...(mcpConfigOverride
-        ? { extensionFlagValues: new Map([["mcp-config", mcpConfigOverride]]) }
-        : {}),
+      ...(extensionFlagValues.size > 0 ? { extensionFlagValues } : {}),
       // SPIKE (Chunk 0): register the no-op pilot extension so it loads through pi's
       // resource loader the same way a CLI `-e <path>` would. resolveExtensionSources
       // tags it source:"cli", scope:"temporary", origin:"top-level". The real extensions

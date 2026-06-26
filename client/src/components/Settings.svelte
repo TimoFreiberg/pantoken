@@ -113,6 +113,24 @@
     store.setLoginShell(null);
   }
 
+  // Background model: the cheap model spec pilot's own extensions run their out-of-band
+  // LLM calls against (session auto-naming, the answer tool's structured-extraction).
+  // A `provider/model[:thinking]` spec OR a `script:`-prefixed path. Draft seeded from
+  // the server's configured value each open; the resolved `warning` (bad/unresolvable
+  // spec) surfaces as a loud red error under the field.
+  let bgModelDraft = $state("");
+  const bgModelDirty = $derived(
+    bgModelDraft.trim() !== (store.pilotSettings.backgroundModel ?? ""),
+  );
+  const bgModelWarning = $derived(store.backgroundModelWarning);
+  function saveBackgroundModel(): void {
+    store.setBackgroundModel(bgModelDraft.trim() || null);
+  }
+  function clearBackgroundModel(): void {
+    bgModelDraft = "";
+    store.setBackgroundModel(null);
+  }
+
   // The provider list is a long block you rarely touch once a provider is connected, so it
   // collapses behind its section header (collapsed by default — the header shows a connected
   // count so you can see at a glance without expanding).
@@ -221,6 +239,8 @@
       expandedFavProviders = seeded;
       // Seed the login-shell field from the server's configured value each open.
       shellDraft = store.pilotSettings.loginShell ?? "";
+      // Seed the background-model field likewise.
+      bgModelDraft = store.pilotSettings.backgroundModel ?? "";
       // Fetch the extension list on open (even while the section is collapsed) so its
       // header can show the at-a-glance "N/M on" count without making you expand first.
       store.queryExtensions();
@@ -634,6 +654,57 @@
             {/each}
           </select>
         </div>
+
+        <div class="row" data-testid="background-model-row">
+          <div class="rinfo">
+            <div class="rlabel">Background model</div>
+            <div class="rdesc">
+              The cheap model pilot's own extensions use for out-of-band tasks (session
+              auto-naming, the answer tool's extraction) — separate from the session's
+              primary model. A <code>provider/model[:thinking]</code> spec, or a
+              <code>script:</code>-prefixed path whose stdout is one. Blank = unset
+              (extensions fall back).
+            </div>
+          </div>
+        </div>
+        <form
+          class="shellform"
+          onsubmit={(e) => {
+            e.preventDefault();
+            saveBackgroundModel();
+          }}
+        >
+          <input
+            bind:value={bgModelDraft}
+            type="text"
+            placeholder="e.g. anthropic/claude-haiku-4-5:low"
+            title="Background model spec — provider/model[:thinking], or script:<path> (blank = unset)"
+            aria-label="Background model spec"
+            spellcheck="false"
+            autocapitalize="off"
+            autocorrect="off"
+            autocomplete="off"
+            data-testid="background-model-input"
+          />
+          <Button
+            variant="primary"
+            type="submit"
+            title="Save the background model spec (Ctrl+Enter)"
+            disabled={!bgModelDirty}>Save</Button
+          >
+          {#if store.pilotSettings.backgroundModel}
+            <Button
+              type="button"
+              title="Clear the background model spec (extensions fall back)"
+              onclick={clearBackgroundModel}>Clear</Button
+            >
+          {/if}
+        </form>
+        {#if bgModelWarning}
+          <p class="note warn" data-testid="background-model-warning">
+            ⚠ {bgModelWarning}
+          </p>
+        {/if}
 
         <button
           class="gtitle gtitle-toggle subhead"

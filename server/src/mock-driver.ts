@@ -26,12 +26,8 @@ import {
   type SessionUsage,
   type TreeSnapshot,
 } from "@pilot/protocol";
-import type {
-  NewSessionOpts,
-  OAuthLoginIO,
-  PilotDriver,
-  TrustEvent,
-} from "./driver.js";
+import type { NewSessionOpts, OAuthLoginIO, PilotDriver, TrustEvent } from "./driver.js";
+import { writePilotSettings } from "./settings-store.js";
 import {
   ambient,
   answerCard,
@@ -64,6 +60,7 @@ import {
   MOCK_MODEL_DEFAULTS,
   MOCK_MODELS,
   MOCK_PROVIDERS,
+  MOCK_BACKGROUND_MODEL,
   MOCK_USAGE,
   mockSessionSeed,
   mockTrustRequest,
@@ -385,6 +382,11 @@ export class MockDriver implements PilotDriver {
    *  double-folding a streaming greeting. */
   bootstrap(): void {
     this.bootstrapped = true;
+    // Seed a sample background-model spec so the dev preview's Settings "Models" section
+    // shows a populated, cleanly-resolving control on first load. The e2e's `/debug/reset`
+    // (hub.reset) wipes pilot-settings back to defaults before each test, so this seed
+    // only affects the eyeball-the-preview path, not the deterministic e2e baseline.
+    writePilotSettings({ backgroundModel: MOCK_BACKGROUND_MODEL });
   }
 
   /** The landing session's seed (the greeting) when bootstrapped, else null (the

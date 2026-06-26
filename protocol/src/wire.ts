@@ -35,6 +35,18 @@ export interface PilotSettings {
    *  shell. A launchd daemon / GUI `.app` has no interactive-shell ancestor, so pilot
    *  captures this once at boot; changing it applies on the NEXT server restart. */
   loginShell: string | null;
+  /** Cheap "background model" spec for the tasks pilot's own extensions run
+   *  (session auto-naming, the answer tool's structured-extraction) — the model those
+   *  out-of-band LLM calls use, separate from the session's primary model. Replaces
+   *  the dotfiles `_lib/roles.mjs` per-role resolver.
+   *
+   *  Value: a pi model spec `provider/model[:thinking]` (e.g.
+   *  `anthropic/claude-haiku-4-5:low`), OR a `script:`-prefixed path whose stdout is
+   *  such a spec (the escape hatch for an operator who wants their own resolver).
+   *  `null` = unset; extensions fall back to a sensible default or no-op. The server
+   *  resolves + validates this on read (see `resolveBackgroundModel`) and surfaces a
+   *  loud `warning` to the Settings UI when the spec is bad — never silent. */
+  backgroundModel: string | null;
 }
 
 /** Runtime status of pilot's startup login-shell env capture, so the Settings panel
@@ -203,15 +215,20 @@ export type ServerMessage =
    *  `config` (the CURRENT selection). See {@link ModelDefaults}. */
   | { type: "modelDefaults"; defaults: ModelDefaults }
   /** Pilot-local settings + the live login-env capture status, for the Settings
-   *  "Environment" section. Sent on connect and re-sent after `setLoginShell`.
+   *  panel. Sent on connect and re-sent after `setLoginShell`/`setBackgroundModel`.
    *  `pendingRestart` is server-computed (the client can't resolve the server's default
    *  `$SHELL`): true when the shell pilot WOULD use now differs from the one it actually
-   *  captured with at boot — i.e. a restart is needed to apply the configured change. */
+   *  captured with at boot — i.e. a restart is needed to apply the configured change.
+   *  `backgroundModelWarning` is the server's resolution of `settings.backgroundModel`
+   *  against the live model registry: present (non-empty) when the spec is bad or
+   *  doesn't resolve — the Settings "Models" section surfaces it as a loud red error.
+   *  Absent when the spec is unset or resolves cleanly. */
   | {
       type: "pilotSettings";
       settings: PilotSettings;
       env: LoginEnvStatus;
       pendingRestart: boolean;
+      backgroundModelWarning?: string;
     }
   /** Surface an interactive project-trust card (D12). Broadcast to every client; the
    *  first answer wins. Carried as its own message — see {@link TrustRequest}. */
@@ -338,6 +355,11 @@ export type ClientMessage =
    *  once at boot, so it applies on the next server restart. The server re-broadcasts
    *  `pilotSettings`. */
   | { type: "setLoginShell"; path: string | null }
+  /** Set the background-model spec pilot's own extensions run their cheap out-of-band
+   *  LLM calls against (null = unset; extensions fall back). A `provider/model[:thinking]`
+   *  spec OR a `script:`-prefixed path. Persists server-side; the server resolves +
+   *  re-broadcasts `pilotSettings` (carrying any validation `warning` for a bad spec). */
+  | { type: "setBackgroundModel"; spec: string | null }
   /** Ask the server to re-scan providers + defaults and re-broadcast them. */
   | { type: "listProviders" }
   /** Switch the active session to this .jsonl path. */

@@ -270,6 +270,14 @@ export const MOCK_MODEL_DEFAULTS: ModelDefaults = {
   favorites: [],
 };
 
+/** A sample background-model spec the mock seeds on boot so the Settings "Models"
+ *  section shows a populated, cleanly-resolving control in the dev preview (the
+ *  e2e's `reset()` wipes it back to null before each test for a deterministic
+ *  baseline). Resolves against `MOCK_MODELS` — picks the cheaper of the two Anthropic
+ *  models in the fixture list with a low thinking level, the shape a real
+ *  background-model setting takes. */
+export const MOCK_BACKGROUND_MODEL = "anthropic/claude-sonnet-4-6:low";
+
 export const WORKSPACE = {
   workspaceId: "ws-demo",
   path: "/Users/timo/src/pilot",
