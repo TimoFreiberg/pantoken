@@ -271,3 +271,38 @@ meaningfully restored (e.g. an in-flight file pick). Absent such a reason, persi
 and add an e2e round-trip in `e2e/drafts.e2e.ts` (switch-away + reload) the way worktree
 and model/effort did. New persisted fields extend `StoredDraftConfig` + its load-time
 validation; no protocol change — this is all client-local.
+
+### D15. Self-contained UX extensions (2026-06-26) — pilot ships its own; dotfiles set is personal-extras-only
+
+Pilot now ships the three pi extensions its UX depends on — `answer` (the Q&A
+widget + `ctx.ui.qna` seam), `tasklist` (the ambient task widget), and
+`session-namer` (auto-titling) — as in-repo `.ts` files under `pilot/extensions/`,
+registered via `DefaultResourceLoader`'s `additionalExtensionPaths` (D1 of
+`docs/PLAN-self-contained-extensions.md`). A stock `pi` install + pilot now
+reproduces the polished UX; the operator's `~/dotfiles/agents/extensions` set
+(reached via the `~/.pi/agent/extensions` symlink) is optional personal extras,
+NOT load-bearing.
+
+The three were REMOVED from `~/dotfiles/agents/extensions/` (commit `49a83501`
+in the dotfiles repo) — mandatory, because pi does no path dedup on
+`additionalExtensionPaths`: leaving them there caused double-registration
+collisions (the `answer` tool registered twice; both handlers live). A symlinked
+copy IS realpath-deduped, but the dotfiles copies are real files.
+
+Pilot-owned extensions are NOT toggleable via pi's `-<resolvedPath>` force-exclude
+(pi's `resolveLocalExtensionSource` hardcodes `enabled:true` for
+`additionalExtensionPaths` entries — never consults overrides). Pilot keeps its
+OWN `enabledExtensions` set in `PilotSettings` and omits disabled owned paths
+from the `additionalExtensionPaths` array instead (the [OPEN E] resolution).
+They badge as "Pilot" (not "cli"/"temporary") in the Settings Extensions list
+via a `listExtensions` projection tweak, and carry `@pilot` frontmatter
+descriptions.
+
+The `answer`/`tasklist`/`session-namer` extensions resolve their cheap
+background model via pilot's `backgroundModel` setting (threaded as a
+`background-model` extension flag in `warmUp`), NOT the dotfiles
+`_lib/roles.mjs` resolver — so the per-machine `roles.json` map stays in
+`~/.pi/agent/` but the extensions no longer depend on it. See
+`docs/PLAN-self-contained-extensions.md` for the full chunk-by-chunk outcome
+incl. the `qna` seam canary (`server/src/pi/ui-bridge-coupling.test.ts`) that
+pins the raw-bridge coupling pilot now owns both sides of.
