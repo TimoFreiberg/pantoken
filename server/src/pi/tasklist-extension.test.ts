@@ -28,6 +28,7 @@ import {
   DefaultResourceLoader,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { pilotExtensionDescription } from "./pi-driver.js";
 
 // The same pilot-owned, repo-root-absolute resolution pi-driver.ts uses (it builds its
 // PILOT_OWNED_EXTENSIONS map from PILOT_OWNED_EXTENSION_NAMES the same way). Hardcoded
@@ -83,9 +84,9 @@ describe("Chunk 3: tasklist pilot extension via additionalExtensionPaths", () =>
     });
     await loader.reload();
 
-    const tasklist = loader.getExtensions().extensions.find(
-      (e) => e.path === TASKLIST_PATH,
-    );
+    const tasklist = loader
+      .getExtensions()
+      .extensions.find((e) => e.path === TASKLIST_PATH);
     // The four tasklist tools.
     expect(tasklist?.tools.has("tasklist_add")).toBe(true);
     expect(tasklist?.tools.has("tasklist_done")).toBe(true);
@@ -113,9 +114,9 @@ describe("Chunk 3: tasklist pilot extension via additionalExtensionPaths", () =>
     });
     await loader.reload();
 
-    const tasklist = loader.getExtensions().extensions.find(
-      (e) => e.path === TASKLIST_PATH,
-    );
+    const tasklist = loader
+      .getExtensions()
+      .extensions.find((e) => e.path === TASKLIST_PATH);
     expect(tasklist?.sourceInfo.source).toBe("cli");
     expect(tasklist?.sourceInfo.scope).toBe("temporary");
     expect(tasklist?.sourceInfo.origin).toBe("top-level");
@@ -123,21 +124,10 @@ describe("Chunk 3: tasklist pilot extension via additionalExtensionPaths", () =>
 
   test("(d) the @pilot frontmatter parses to the expected description (D3)", async () => {
     // The driver's listExtensions parses the leading `/** @pilot … description: … */`
-    // block to surface a description on the Settings row. Assert the parser finds the
-    // line by running the same regex against the file — a regression guard if the
-    // frontmatter shape drifts from what the parser expects.
-    const src = await Bun.file(TASKLIST_PATH).text();
-    const m = src.match(/^\/\*\*[\s\S]*?\*\//);
-    expect(m).not.toBeNull();
-    expect(m?.[0]).toContain("@pilot");
-    const lines = m![0]
-      .split("\n")
-      .map((l) => l.replace(/^\s*\*\s?/, "").trim());
-    const descLine = lines.find((l) =>
-      l.toLowerCase().startsWith("description:"),
-    );
-    expect(descLine).toBeDefined();
-    const desc = descLine!.slice("description:".length).trim();
+    // block to surface a description on the Settings row. Call the PRODUCTION parser
+    // (pilotExtensionDescription) directly so a regex drift in it is caught here, not
+    // just a stale copy.
+    const desc = pilotExtensionDescription(TASKLIST_PATH);
     expect(desc).toBe(
       "In-session task tracking widget — the agent maintains a focused task list with reminders.",
     );

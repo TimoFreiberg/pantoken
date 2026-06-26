@@ -426,7 +426,7 @@ test("pilot-owned extensions group under a Pilot origin header with their descri
   await page.getByTestId("extensions-toggle").click();
 
   // The Pilot origin header is present and expanded by default, grouping pilot's owned
-  // extensions (session-namer for now) under it — the D3 "Pilot" badge projection.
+  // extensions (session-namer + tasklist) under it — the D3 "Pilot" badge projection.
   const pilotHeader = page.getByTestId("ext-origin-Pilot");
   await expect(pilotHeader).toBeVisible();
   await expect(pilotHeader).toHaveAttribute("aria-expanded", "true");
@@ -439,6 +439,18 @@ test("pilot-owned extensions group under a Pilot origin header with their descri
     "Auto-names a session from its first prompt via the background model.",
   );
   await expect(page.getByTestId("ext-toggle-session-namer.ts")).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+
+  // tasklist also appears under the Pilot group with its frontmatter description
+  // (the second pilot-owned extension — Chunks 2 + 3 share the Pilot header).
+  const tasklist = page.getByTestId("ext-tasklist.ts");
+  await expect(tasklist).toBeVisible();
+  await expect(tasklist).toContainText(
+    "In-session task tracking widget — the agent maintains a focused task list with reminders.",
+  );
+  await expect(page.getByTestId("ext-toggle-tasklist.ts")).toHaveAttribute(
     "aria-checked",
     "true",
   );
@@ -690,9 +702,9 @@ test("the background-model spec round-trips and warns loud on a bad spec", async
 
   // Set a spec that RESOLVES against the mock's model list (claude-sonnet-4-6 is in
   // MOCK_MODELS) and save.
-  await settings.getByTestId("background-model-input").fill(
-    "anthropic/claude-sonnet-4-6:low",
-  );
+  await settings
+    .getByTestId("background-model-input")
+    .fill("anthropic/claude-sonnet-4-6:low");
   await settings.getByRole("button", { name: "Save" }).click();
 
   // No warning: the spec resolved cleanly.
