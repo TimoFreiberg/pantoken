@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ModelOption } from "@pilot/protocol";
-  import { PILOT_OWNED_EXTENSION_NAMES } from "@pilot/protocol";
+  import { isPilotOwnedExtension } from "@pilot/protocol";
   import { reveal } from "../lib/transitions.js";
   import { store } from "../lib/store.svelte.js";
   import type { ThemeMode } from "../lib/theme.js";
@@ -216,10 +216,10 @@
   //   can add ["answer","tasklist"] warnings without touching the markup.
   const EXT_LOAD_BEARING_WARNINGS: Record<string, string> = {};
   // Whether a row is one of pilot's OWNED extensions (its toggle routes to pilot's
-  //   `enabledExtensions`, not pi's force-exclude — Chunk 0 finding). Keyed off the
-  //   protocol name list so client + server agree.
+  //   `enabledExtensions`, not pi's force-exclude — Chunk 0 finding). Delegates to the
+  //   shared protocol predicate so client + server can't disagree on what counts as owned.
   function isPilotOwnedExt(name: string): boolean {
-    return PILOT_OWNED_EXTENSION_NAMES.includes(name.replace(/\.ts$/, ""));
+    return isPilotOwnedExtension(name);
   }
 
   // Available models grouped by provider — drives both the default-model select and

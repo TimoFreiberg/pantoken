@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import {
   isDialogRequest,
   PILOT_OWNED_EXTENSION_NAMES,
+  isPilotOwnedExtension,
   type CommandInfo,
   type DirListing,
   type ExtensionInfo,
@@ -784,8 +785,7 @@ export class MockDriver implements PilotDriver {
     //   owned paths). null = all owned enabled; an array = the enabled subset by name.
     const enabledExtensions = readPilotSettings().enabledExtensions;
     return this.extensions.map((e) => {
-      if (!PILOT_OWNED_EXTENSION_NAMES.includes(e.name.replace(/\.ts$/, "")))
-        return { ...e };
+      if (!isPilotOwnedExtension(e.name)) return { ...e };
       const name = e.name.replace(/\.ts$/, "");
       const on =
         enabledExtensions === null || enabledExtensions.includes(name);
@@ -803,7 +803,7 @@ export class MockDriver implements PilotDriver {
     //   driver's ownedExtensionBasename. null = all enabled; an array = the subset.
     const owned = this.extensions.find((e) => e.resolvedPath === resolvedPath);
     const ownedName =
-      owned && PILOT_OWNED_EXTENSION_NAMES.includes(owned.name.replace(/\.ts$/, ""))
+      owned && isPilotOwnedExtension(owned.name)
         ? owned.name.replace(/\.ts$/, "")
         : undefined;
     if (ownedName) {

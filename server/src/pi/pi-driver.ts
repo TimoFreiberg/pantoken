@@ -53,6 +53,10 @@ import type {
 import { PILOT_OWNED_EXTENSION_NAMES } from "@pilot/protocol";
 import { ArchiveStore } from "../archive-store.js";
 import { config } from "../config.js";
+import {
+  asBackgroundModelRegistry,
+  resolveBackgroundModel,
+} from "./background-model.js";
 import type {
   NewSessionOpts,
   OAuthLoginIO,
@@ -140,7 +144,7 @@ function ownedExtensionBasename(resolvedPath: string): string | undefined {
  *  per path — the file is read once at first list. Never throws: a malformed/unreadable
  *  block just yields no description. */
 const pilotDescriptionCache = new Map<string, string>();
-function pilotExtensionDescription(resolvedPath: string): string | undefined {
+export function pilotExtensionDescription(resolvedPath: string): string | undefined {
   const cached = pilotDescriptionCache.get(resolvedPath);
   if (cached !== undefined) return cached || undefined;
   let desc = "";
@@ -824,7 +828,36 @@ export async function createPiDriver(
     //   ported extensions (session-namer now; answer in Chunk 4) read it via
     //   ctx.getFlag("background-model") and resolve with ctx.modelRegistry.
     //   null/unset → omitted (extensions fall back to no-op).
-    const backgroundModel = readPilotSettings().backgroundModel;
+    //
+    //   C1: resolve the spec SERVER-SIDE before threading. The setting may be a
+    //   `script:/path` spec (an operator's resolver); the session-namer extension's
+    //   `resolveSpec` does NOT handle `script:` (its contract), so threading the raw
+    //   value would have it fail `registry.find()` and no-op per-prompt with a warning —
+    //   WHILE the Settings UI shows the same setting as VALID (hub.ts resolves it via
+    //   `resolveBackgroundModel`, which DOES run the script). Two readers, two
+    //   interpretations: Settings green, runtime broken, failing silently. Resolve here
+    //   with the SAME resolver Settings uses, then reconstruct a PLAIN
+    //   `provider/id[:thinking]` spec for the extension (which is all it accepts). When
+    //   the spec is unset (null) or doesn't resolve (fatal warning, no model) → thread
+    //   nothing (the extension no-ops, matching the unset path). The `script:` spawn cost
+    //   is narrow: `resolveBackgroundModel` only spawns for `script:` specs; plain specs
+    //   pay zero (parseSpec is pure). This makes Settings-validation and runtime AGREE —
+    //   the parity the extension's docstring already claims.
+    const backgroundModelSetting = readPilotSettings().backgroundModel;
+    const resolvedBg = resolveBackgroundModel(
+      backgroundModelSetting,
+      asBackgroundModelRegistry(modelRegistry),
+    );
+    let backgroundModel: string | undefined;
+    if (resolvedBg.model) {
+      // Reconstruct a plain `provider/id[:thinking]` spec from the resolved model +
+      //   level. `model` is `unknown` (pi's `Model<Api>` isn't exported) — cast to the
+      //   structural `ModelLike` shape to read `.provider`/`.id`.
+      const m = resolvedBg.model as { provider: string; id: string };
+      backgroundModel = `${m.provider}/${m.id}${
+        resolvedBg.thinkingLevel ? `:${resolvedBg.thinkingLevel}` : ""
+      }`;
+    }
     const extensionFlagValues = new Map<string, boolean | string>();
     if (mcpConfigOverride) extensionFlagValues.set("mcp-config", mcpConfigOverride);
     if (backgroundModel)
