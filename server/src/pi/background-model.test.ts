@@ -20,8 +20,6 @@ const MODELS: ModelLike[] = [
 function registry(models: ModelLike[] = MODELS): BackgroundModelRegistry {
   return {
     getAvailable: () => models,
-    find: (provider, id) =>
-      models.find((m) => m.provider === provider && m.id === id),
   };
 }
 
@@ -77,10 +75,23 @@ describe("resolveBackgroundModel — bad spec (loud warning)", () => {
     expect(r.warning).toMatch(/No registered model matches/);
   });
 
-  test("invalid thinking level → warning naming the level", () => {
+  test("invalid thinking level on a RESOLVING prefix → model + non-fatal warning (matches pi scope-warn)", () => {
+    // The prefix `anthropic/claude-haiku-4-5` resolves, so pi's scope-warn path returns
+    // the model with the bad `:thinking` level DROPPED + a non-fatal warning. Settings
+    // thus agrees with runtime (the model works; the suffix is just noted), instead of
+    // rejecting a spec the runtime would happily use.
     const r = resolveBackgroundModel("anthropic/claude-haiku-4-5:banana", registry());
+    expect(r.model).toEqual(MODELS[0]);
+    expect(r.thinkingLevel).toBeUndefined();
+    expect(r.warning).toMatch(/Invalid thinking level "banana" in spec ".*" — dropped/);
+  });
+
+  test("invalid thinking level on a NON-resolving prefix → fatal warning, no model", () => {
+    // The prefix doesn't resolve either: the missing model is the real problem, the bad
+    // suffix is moot, so pi (and pilot) return no model + the inner (fatal) warning.
+    const r = resolveBackgroundModel("anthropic/nope-9-9:banana", registry());
     expect(r.model).toBeUndefined();
-    expect(r.warning).toMatch(/Invalid thinking level "banana"/);
+    expect(r.warning).toMatch(/No registered model matches/);
   });
 
   test("ambiguous bare id falls back to partial match (mirrors pi's tryMatchModel)", () => {

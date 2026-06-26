@@ -16,18 +16,27 @@
 // matches the runtime contract the ported extensions will use: the dotfiles `roles.mjs`
 // resolves via `parseSpec()` + `registry.find(provider, modelId)` (both PUBLIC pi API),
 // NOT via pi's internal `parseModelPattern`. So this resolver mirrors `parseSpec`'s
-// spec grammar + `ModelRegistry.getAvailable()`/`find()` for matching — public surface
-// only. Semantics (alias-vs-dated preference, thinking-level validity) track pi's
-// `tryMatchModel`/`isValidThinkingLevel` so a spec that resolves here resolves the same
-// way at runtime.
+// spec grammar + `ModelRegistry.getAvailable()` for matching — public surface only.
+//
+// PARITY WITH PI (precise — not a blanket claim): the MATCHING semantics track pi so a
+// spec resolves to the SAME model here as at runtime — exact/canonical reference, partial
+// (substring) match with alias-vs-dated preference (`tryMatchModel`), valid `:thinking`
+// suffixes, AND the invalid-thinking scope-warn path (recurse on the prefix; if it
+// resolves, return the model with the bad level dropped + a non-fatal warning). The
+// WARNING channel is pilot's own, stricter surfacing: pi is silent on a no-match (returns
+// no model, no warning), but pilot warns so the operator sees a bad spec in Settings — a
+// deliberate divergence in surfacing only (the model a spec resolves to still agrees;
+// pi's no-match yields neither, pilot's yields no model + a warning). The `script:` path
+// has no pi analogue.
 
 import { spawnSync } from "node:child_process";
-import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 /** The resolved background model. `model` is undefined when the spec is unset (null) or
- *  doesn't resolve to a registered model; `warning` carries the loud-error string for
- *  the bad-spec case (the Settings UI surfaces it in red). Never both set: a resolved
- *  model has no warning. */
+ *  doesn't resolve to a registered model. `warning` is a human-readable note the Settings
+ *  UI surfaces (red): a FATAL warning (no `model`) means the spec didn't resolve; a
+ *  NON-FATAL warning (alongside a resolved `model`) means the model resolved but
+ *  something is off (e.g. an invalid `:thinking` suffix was dropped). `model` and
+ *  `warning` CAN both be set (non-fatal case); a fatal warning stands alone. */
 export interface ResolvedBackgroundModel {
   /** The matched model object (carries provider/id/name/...), or undefined. Opaque to
    *  pilot — the extensions hand it straight to pi's stream API. */
@@ -35,8 +44,10 @@ export interface ResolvedBackgroundModel {
   /** pi thinking level (`off`|`minimal`|`low`|`medium`|`high`|`xhigh`) when one was
    *  parsed from a `:thinking` suffix, else undefined (use the model/provider default). */
   thinkingLevel?: string;
-  /** Loud-error channel: a human-readable reason the spec did NOT resolve. Surfaced to
-   *  the Settings UI. undefined when the spec is unset or resolved cleanly. */
+  /** Note channel surfaced to the Settings UI. FATAL (no `model`): the spec didn't
+   *  resolve. NON-FATAL (with `model`): the model resolved but something's off (e.g. an
+   *  invalid `:thinking` level was dropped). undefined when the spec is unset or
+   *  resolved cleanly. */
   warning?: string;
 }
 
@@ -45,10 +56,8 @@ export interface ResolvedBackgroundModel {
  *  constructing a real `ModelRegistry` (which wants an `AuthStorage` + models.json). */
 export interface BackgroundModelRegistry {
   /** Models with working credentials (the ones actually usable). Mirrors
-   *  `ModelRegistry.getAvailable()`. */
+   *  `ModelRegistry.getAvailable()` — the only matching primitive the resolver needs. */
   getAvailable(): readonly ModelLike[];
-  /** Exact (provider, modelId) lookup. Mirrors `ModelRegistry.find()`. */
-  find(provider: string, modelId: string): ModelLike | undefined;
 }
 
 /** The model fields the matcher reads. A structural slice of pi's `Model<Api>` — kept
@@ -151,10 +160,11 @@ function tryMatchModel(
 }
 
 /** Parse a `provider/model[:thinking]` spec against the available models. Returns
- *  `{model, thinkingLevel}` on a clean resolve, `{warning}` on a bad spec, or `{}` when
- *  the spec simply doesn't match any registered model (not an error — `null`/unset is
- *  the only true no-op; an unresolvable-but-well-formed spec still warns so the operator
- *  sees it). Tracks pi's `parseModelPattern` colon-splitting + thinking-level rules. */
+ *  `{model, thinkingLevel}` on a clean resolve, `{model, warning}` when the model resolves
+ *  but a `:thinking` suffix was invalid (dropped — non-fatal, matches pi's scope-warn
+ *  path), or `{warning}` (no model) when the spec doesn't resolve (a fatal warning so the
+ *  operator sees a bad spec; `null`/unset is the only true no-op). Tracks pi's
+ *  `parseModelPattern` colon-splitting + thinking-level rules. */
 function parseSpec(
   spec: string,
   registry: BackgroundModelRegistry,
@@ -182,11 +192,20 @@ function parseSpec(
       // Prefix didn't resolve either — fall through to the not-found warning below,
       // reporting the FULL spec so the operator sees what they typed.
     } else {
-      // Invalid thinking level: warn (don't silently strip it) — matches pi's
-      // `allowInvalidThinkingLevelFallback` scope-warn path.
-      return {
-        warning: `Invalid thinking level "${suffix}" in spec "${spec}". Valid: ${VALID_THINKING_LEVELS.join(", ")}.`,
-      };
+      // Invalid thinking level. Mirror pi's scope-warn path
+      // (`allowInvalidThinkingLevelFallback`): recurse on the prefix. If it resolves,
+      // return the model with the bad level DROPPED + a non-fatal warning (so Settings
+      // agrees with runtime — the model works, the suffix is just noted). If the prefix
+      // doesn't resolve, return the inner result's warning (no model): the missing model
+      // is the real problem, the bad suffix is moot.
+      const inner = parseSpec(prefix, registry);
+      if (inner.model) {
+        return {
+          model: inner.model,
+          warning: `Invalid thinking level "${suffix}" in spec "${spec}" — dropped; valid: ${VALID_THINKING_LEVELS.join(", ")}.`,
+        };
+      }
+      return { warning: inner.warning };
     }
   }
 
@@ -253,17 +272,4 @@ export function resolveBackgroundModel(
     return resolveScriptSpec(spec.slice(SCRIPT_PREFIX.length).trim(), registry);
   }
   return parseSpec(spec, registry);
-}
-
-/** Adapt a real `ModelRegistry` to the `BackgroundModelRegistry` slice the resolver
- *  wants. Pilot creates ONE shared `ModelRegistry` in `createPiDriver` and reuses it
- *  across sessions + the Settings panel — this is the adapter so the resolver shares
- *  that same registry (no second instance). */
-export function asBackgroundModelRegistry(
-  registry: ModelRegistry,
-): BackgroundModelRegistry {
-  return {
-    getAvailable: () => registry.getAvailable(),
-    find: (provider, modelId) => registry.find(provider, modelId),
-  };
 }

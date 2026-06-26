@@ -2013,10 +2013,13 @@ class PilotStore {
   }
   /** Set (or clear, with null/empty) the background-model spec pilot's own extensions
    *  run their cheap out-of-band LLM calls against. Optimistic local update; the
-   *  server persists + re-broadcasts (carrying the resolved `warning` for a bad spec). */
+   *  server persists + re-broadcasts (carrying the resolved `warning` for a bad spec).
+   *  Clears `backgroundModelWarning` optimistically too so saving a good spec right
+   *  after a bad one doesn't flash the stale red error until the broadcast lands. */
   setBackgroundModel(spec: string | null): void {
     const next = spec?.trim() ? spec.trim() : null;
     this.pilotSettings = { ...this.pilotSettings, backgroundModel: next };
+    this.backgroundModelWarning = undefined;
     send({ type: "setBackgroundModel", spec: next });
   }
   setDefaultThinking(level: string): void {

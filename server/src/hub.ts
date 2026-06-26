@@ -19,7 +19,6 @@ import {
 import type { OAuthLoginIO, PilotDriver } from "./driver.js";
 import { getLoginEnvStatus, resolveLoginShell } from "./pi/login-env.js";
 import {
-  asBackgroundModelRegistry,
   resolveBackgroundModel,
 } from "./pi/background-model.js";
 import { readPilotSettings, writePilotSettings } from "./settings-store.js";
@@ -852,9 +851,11 @@ export class SessionHub {
     const pendingRestart =
       env.activeShell !== null &&
       resolveLoginShell(settings.loginShell) !== env.activeShell;
-    // Resolve the background-model spec against the cached available models. The adapter
-    // maps the wire `ModelOption` ({provider, modelId, label}) to the resolver's `ModelLike`
-    // ({provider, id, name}); an empty cache (pre-first-list) yields no warning.
+    // Resolve the background-model spec against the cached available models — the wire
+    // `ModelOption` cache is what's in hand on this synchronous broadcast path, so adapt
+    // it inline to the resolver's `ModelLike` rather than threading the real
+    // `ModelRegistry` here (a bigger change for no fidelity gain: the resolver only reads
+    // `getAvailable()`). Empty cache (pre-first-list) → no warning (arrives a tick later).
     const registry = {
       getAvailable: () =>
         this.availableModels.map((m) => ({
@@ -862,12 +863,6 @@ export class SessionHub {
           id: m.modelId,
           name: m.label,
         })),
-      find: (provider: string, modelId: string) =>
-        this.availableModels.find(
-          (m) => m.provider === provider && m.modelId === modelId,
-        )
-          ? { provider, id: modelId }
-          : undefined,
     };
     const resolved = resolveBackgroundModel(
       settings.backgroundModel,
