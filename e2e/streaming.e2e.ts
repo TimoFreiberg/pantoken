@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { drive, expandWork, gotoFresh } from "./helpers.js";
+import { drive, expandWork, gotoFresh, openSettings } from "./helpers.js";
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
@@ -81,7 +81,7 @@ test("disabling Hide thinking reveals the expandable thinking block", async ({
   page,
 }) => {
   // Turn the (default-on) hide-thinking toggle off via Settings.
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "appearance");
   const toggle = page.getByTestId("hide-thinking");
   await expect(toggle).toHaveAttribute("aria-checked", "true");
   await toggle.click();

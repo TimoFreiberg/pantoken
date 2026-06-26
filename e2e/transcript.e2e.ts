@@ -3,6 +3,7 @@ import {
   drive,
   expandWork,
   gotoFresh,
+  openSettings,
   waitForSettledWorkBlocks,
 } from "./helpers.js";
 
@@ -116,7 +117,7 @@ test("with thinking visible, the same run fragments around the thinking blocks",
   // Reveal thinking, then run the same fixture. Now the thinking bubbles are visible
   // content, so they legitimately break the run: four standalone tool cards with a
   // "Thought process" block between each pair.
-  await page.locator('button[title^="Settings"]').click();
+  await openSettings(page, "appearance");
   await page.getByTestId("hide-thinking").click();
   await page.getByRole("button", { name: "Close settings" }).click();
 
