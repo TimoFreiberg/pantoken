@@ -16,6 +16,50 @@
 
   const open = $derived(store.settingsOpen);
 
+  // Section navigation. The panel is a left-rail of section tabs + a content pane
+  // showing only the active section — so the long lists (Providers, Models+Favorites,
+  // Extensions) each get their own scroll instead of crowding one. The rail labels ARE
+  // the six top-level section names, so every name stays visible (and reachable) the
+  // moment the panel opens. On the phone bottom-sheet the rail reflows to a horizontal
+  // scrollable strip (see the media query). Tabs are flat — not a drill-in stack — so
+  // Escape closes the panel as before (section searches still clear on the first Esc).
+  //
+  // Active section persists across close/reopen AND reload, mirroring the app's other
+  // per-device localStorage prefs (pilot.sidebarOpen, pilot.theme, …). So reopening
+  // lands you on the section you last viewed — e.g. tweak an API key, Esc, reopen →
+  // back on Providers. Defaults to Appearance when no pref is stored (or on SSR/tests).
+  type SectionId =
+    | "appearance"
+    | "notifications"
+    | "providers"
+    | "models"
+    | "extensions"
+    | "environment"
+    | "token";
+  const SECTIONS: { id: SectionId; label: string }[] = [
+    { id: "appearance", label: "Appearance" },
+    { id: "notifications", label: "Notifications" },
+    { id: "providers", label: "Providers" },
+    { id: "models", label: "Models" },
+    { id: "extensions", label: "Extensions" },
+    { id: "environment", label: "Environment" },
+    { id: "token", label: "Access token" },
+  ];
+  const ACTIVE_SECTION_KEY = "pilot.settingsSection";
+  function initialSection(): SectionId {
+    if (typeof window === "undefined") return "appearance";
+    const stored = localStorage.getItem(ACTIVE_SECTION_KEY);
+    return stored && SECTIONS.some((s) => s.id === stored)
+      ? (stored as SectionId)
+      : "appearance";
+  }
+  let activeSection = $state<SectionId>(initialSection());
+  function setSection(id: SectionId): void {
+    activeSection = id;
+    if (typeof window !== "undefined")
+      localStorage.setItem(ACTIVE_SECTION_KEY, id);
+  }
+
   // Transcript text-size, shown as a percentage of the default. The hotkeys (⌘=/⌘-/⌘0)
   // and these buttons share store.bumpFontScale / resetFontScale.
   const fontPct = $derived(Math.round(store.fontScale * 100));
@@ -237,6 +281,19 @@
       close();
       return;
     }
+    // Alt+1..6 — jump straight to a section tab (the rail order). Only when the panel
+    // is open; the composer/inputs aren't focused then, so this never fights typing.
+    // noUncheckedIndexedAccess makes SECTIONS[idx] `T | undefined`; the guard narrows it
+    // at runtime but not to TS, so capture the element after the bound check.
+    if (open && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      const idx = Number(e.key) - 1;
+      const target = idx >= 0 && idx < SECTIONS.length ? SECTIONS[idx] : undefined;
+      if (target) {
+        e.preventDefault();
+        setSection(target.id);
+        return;
+      }
+    }
     // ⌘+, / Ctrl+, — the standard "open preferences" shortcut. Toggles the panel
     // so the keyboard can both summon and dismiss it.
     if ((e.metaKey || e.ctrlKey) && e.key === "," && !e.altKey && !e.shiftKey) {
@@ -285,10 +342,27 @@
       <IconButton title="Close settings" aria-label="Close settings" onclick={close}>✕</IconButton>
     </header>
 
-    <div class="body">
+    <div class="settings-shell">
+      <nav class="settings-nav" aria-label="Settings sections">
+        {#each SECTIONS as s, i (s.id)}
+          <button
+            class="tab"
+            type="button"
+            role="tab"
+            aria-selected={activeSection === s.id}
+            data-testid="settings-tab-{s.id}"
+            title={`${s.label} section (Alt+${i + 1})`}
+            onclick={() => setSection(s.id)}
+          >
+            <span class="tab-label">{s.label}</span>
+          </button>
+        {/each}
+      </nav>
+
+      <div class="body">
       <!-- Appearance -->
+      {#if activeSection === "appearance"}
       <section class="group">
-        <div class="gtitle">Appearance</div>
         <div class="row">
           <div class="rinfo">
             <div class="rlabel">Theme</div>
@@ -350,10 +424,11 @@
           </button>
         </div>
       </section>
+      {/if}
 
       <!-- Notifications -->
+      {#if activeSection === "notifications"}
       <section class="group">
-        <div class="gtitle">Notifications</div>
         <div class="row">
           <div class="rinfo">
             <div class="rlabel">Push on this device</div>
@@ -383,8 +458,10 @@
           requires Add-to-Home-Screen first).
         </p>
       </section>
+      {/if}
 
       <!-- Providers -->
+      {#if activeSection === "providers"}
       <section class="group">
         <button
           class="gtitle gtitle-toggle"
@@ -504,10 +581,11 @@
           </div>
         {/if}
       </section>
+      {/if}
 
       <!-- Models -->
+      {#if activeSection === "models"}
       <section class="group">
-        <div class="gtitle">Models</div>
         <div class="row dm-row">
           <div class="rinfo">
             <div class="rlabel">Default model</div>
@@ -622,8 +700,10 @@
           </div>
         {/if}
       </section>
+      {/if}
 
       <!-- Extensions -->
+      {#if activeSection === "extensions"}
       <section class="group">
         <button
           class="gtitle gtitle-toggle"
@@ -699,10 +779,11 @@
           </div>
         {/if}
       </section>
+      {/if}
 
       <!-- Environment -->
+      {#if activeSection === "environment"}
       <section class="group" data-testid="env-section">
-        <div class="gtitle">Environment</div>
         <div class="row">
           <div class="rinfo">
             <div class="rlabel">Login shell</div>
@@ -760,10 +841,11 @@
           </p>
         {/if}
       </section>
+      {/if}
 
       <!-- Access token -->
+      {#if activeSection === "token"}
       <section class="group">
-        <div class="gtitle">Access token</div>
         <div class="row">
           <div class="rinfo">
             <div class="rlabel">{store.hasToken ? "Saved on this device" : "No token saved"}</div>
@@ -792,6 +874,8 @@
           <Button variant="primary" type="submit" title="Save this access token on this device" disabled={!tokenDraft.trim()}>Save</Button>
         </form>
       </section>
+      {/if}
+      </div>
     </div>
   </div>
 {/if}
@@ -960,8 +1044,94 @@
     font-weight: 600;
   }
   .body {
+    flex: 1 1 auto;
+    min-width: 0;
     overflow-y: auto;
     padding: 4px 20px calc(20px + env(safe-area-inset-bottom));
+  }
+  /* Section nav: a left-rail of section tabs whose labels ARE the six top-level
+     section names, so every name stays visible the instant the panel opens. Only the
+     active section renders, keeping the long lists from sharing one scroll. On the
+     phone bottom-sheet the rail reflows to a horizontal scrollable strip (below). */
+  .settings-shell {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .settings-nav {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    gap: 2px;
+    padding: 12px 8px calc(12px + env(safe-area-inset-bottom));
+    border-right: 1px solid var(--border);
+    /* The rail scrolls on its own if the viewport is short (many tabs + a tall
+       font scale) rather than pushing the content pane off-screen. */
+    overflow-y: auto;
+  }
+  .tab {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    background: none;
+    border: 0;
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    text-align: left;
+    font-size: 13px;
+    color: var(--text-muted);
+    cursor: pointer;
+    /* A comfortable tap target on the mobile bottom-sheet (coarse pointer bumps it
+       to a full 44px via the media query below, matching .gtitle-toggle). */
+    min-height: 34px;
+  }
+  .tab:hover {
+    background: var(--surface);
+    color: var(--text);
+  }
+  .tab:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1.5px var(--accent);
+  }
+  .tab[aria-selected="true"] {
+    background: var(--surface);
+    color: var(--text);
+    font-weight: 600;
+  }
+  .tab-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  @media (pointer: coarse) {
+    .tab {
+      min-height: 44px;
+    }
+  }
+  /* Phone bottom-sheet (matches the <600px panel-is-a-sheet breakpoint): the rail
+     reflows from a left column to a horizontal scrollable strip pinned under the
+     header, so the narrow sheet keeps its full width for the active section's
+     content. All section names stay visible/reachable by scrolling the strip. */
+  @media (max-width: 599px) {
+    .settings-shell {
+      flex-direction: column;
+    }
+    .settings-nav {
+      flex-direction: row;
+      overflow-x: auto;
+      overflow-y: hidden;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+      padding: 6px 10px;
+      gap: 4px;
+      /* The strip never wraps; excess tabs scroll horizontally. */
+      flex-wrap: nowrap;
+    }
+    .tab {
+      width: auto;
+      flex-shrink: 0;
+      padding: 8px 12px;
+    }
   }
   .group {
     padding: 16px 0;

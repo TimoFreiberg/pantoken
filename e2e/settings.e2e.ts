@@ -1,8 +1,13 @@
 import { expect, test } from "@playwright/test";
-import { gotoFresh } from "./helpers.js";
+import { gotoFresh, openSettings } from "./helpers.js";
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
+  // The active settings section persists in localStorage (pilot.settingsSection), so
+  // a prior spec could leave the panel on e.g. Providers. Each spec navigates to the
+  // section it exercises, but clear the pref so the default-open assumption (Appearance)
+  // holds deterministically — no cross-spec bleed.
+  await page.evaluate(() => localStorage.removeItem("pilot.settingsSection"));
 });
 
 test("settings panel opens from the header gear and lists its sections", async ({
@@ -19,13 +24,15 @@ test("settings panel opens from the header gear and lists its sections", async (
   await expect(panel.getByText("Environment", { exact: true })).toBeVisible();
   await expect(panel.getByText("Access token", { exact: true })).toBeVisible();
   // The dev/mock server runs without PILOT_TOKEN, so no token is saved client-side.
+  // Only the active section renders, so jump to the Access token tab to see its body.
+  await page.getByTestId("settings-tab-token").click();
   await expect(panel.getByText("No token saved")).toBeVisible();
 });
 
 test("the Environment section shows login-shell status and persists an override", async ({
   page,
 }) => {
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "environment");
   const env = page.getByTestId("settings-panel").getByTestId("env-section");
   await expect(env.getByText("Login shell", { exact: true })).toBeVisible();
   // Mock mode never runs the startup capture, so the status reads "Not captured".
@@ -40,7 +47,7 @@ test("the Environment section shows login-shell status and persists an override"
   // persisted file. Reload (a fresh WS connection) + reopen: the field is re-seeded
   // from disk, proving it persisted server-side.
   await page.reload();
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "environment");
   await expect(page.getByTestId("login-shell-input")).toHaveValue(
     "/opt/homebrew/bin/fish",
   );
@@ -54,7 +61,7 @@ test("the Environment section shows login-shell status and persists an override"
 });
 
 test("saving a provider API key flips it to connected", async ({ page }) => {
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "providers");
   // The Providers list starts collapsed — expand it to reach the rows.
   await page.getByTestId("providers-toggle").click();
 
@@ -73,7 +80,7 @@ test("saving a provider API key flips it to connected", async ({ page }) => {
 });
 
 test("OAuth sign-in flow connects a provider", async ({ page }) => {
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "providers");
   await page.getByTestId("providers-toggle").click();
 
   // OpenAI Codex ships OAuth-capable but unconnected in the mock.
@@ -99,7 +106,7 @@ test("OAuth sign-in flow connects a provider", async ({ page }) => {
 test("cancelling the OAuth dialog leaves the provider unconnected", async ({
   page,
 }) => {
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "providers");
   await page.getByTestId("providers-toggle").click();
   const codex = page.getByTestId("provider-openai-codex");
   await codex.getByTestId("provider-signin").click();
@@ -114,7 +121,7 @@ test("cancelling the OAuth dialog leaves the provider unconnected", async ({
 });
 
 test("OAuth sign-out disconnects a provider", async ({ page }) => {
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "providers");
   await page.getByTestId("providers-toggle").click();
 
   // Anthropic ships OAuth-connected in the mock.
@@ -128,7 +135,7 @@ test("OAuth sign-out disconnects a provider", async ({ page }) => {
 });
 
 test("setting a default model persists in the panel", async ({ page }) => {
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "models");
   const trigger = page.getByTestId("default-model");
   // Opens the custom picker (a native <select> can't host the search box), then picks GPT-5.
   await trigger.click();
@@ -142,7 +149,7 @@ test("the default-model picker filters to favorites and offers a search", async 
 }) => {
   // Favorite only GPT-5; the picker should then offer just that (plus the current default,
   // marked "not favorited" so it stays selectable).
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "models");
   await page.getByTestId("favorites-toggle").click();
   await page.getByTestId("fav-group-openai").click();
   await page.getByTestId("fav-openai-gpt-5").getByRole("checkbox").check();
@@ -171,7 +178,7 @@ test("favorites filter the header model picker, keeping the active model visible
   page,
 }) => {
   // Favorite only DeepSeek; the active model stays anthropic/claude-opus-4-8.
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "models");
   // The Favorites list starts collapsed — open it, then expand deepseek to reach its box.
   await page.getByTestId("favorites-toggle").click();
   await page.getByTestId("fav-group-deepseek").click();
@@ -197,7 +204,7 @@ test("favorites filter the header model picker, keeping the active model visible
 test("the favorites list has a search that filters models", async ({
   page,
 }) => {
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "models");
   const settings = page.getByTestId("settings-panel");
   // The Favorites list (with its search) starts collapsed — open it first.
   await page.getByTestId("favorites-toggle").click();
@@ -216,7 +223,7 @@ test("the favorites list has a search that filters models", async ({
 test("the Providers list is collapsed by default and expands on click", async ({
   page,
 }) => {
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "providers");
   const toggle = page.getByTestId("providers-toggle");
   // The header is present but the rows are hidden until expanded.
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -231,7 +238,7 @@ test("favorites groups collapse by default, expand on click, and a search auto-e
   page,
 }) => {
   const settings = page.getByTestId("settings-panel");
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "models");
   await page.getByTestId("favorites-toggle").click();
 
   // No favorites in the mock, so every provider group starts collapsed.
@@ -254,7 +261,7 @@ test("favorites groups collapse by default, expand on click, and a search auto-e
 test("a provider with a favorite is seeded open when the panel reopens", async ({
   page,
 }) => {
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "models");
   // Open the Favorites list, then favorite a deepseek model (its group starts collapsed).
   await page.getByTestId("favorites-toggle").click();
   await page.getByTestId("fav-group-deepseek").click();
@@ -283,7 +290,7 @@ test("a provider with a favorite is seeded open when the panel reopens", async (
 test("the Favorites list is collapsed by default and expands on click", async ({
   page,
 }) => {
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "models");
   const toggle = page.getByTestId("favorites-toggle");
   // Header present (with a model count); the search + groups hide until expanded.
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -302,7 +309,7 @@ test("the Favorites list is collapsed by default and expands on click", async ({
 test("the Providers list has a search that filters the rows", async ({
   page,
 }) => {
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "providers");
   await page.getByTestId("providers-toggle").click();
   const settings = page.getByTestId("settings-panel");
 
@@ -318,7 +325,7 @@ test("the Providers list has a search that filters the rows", async ({
 test("Escape in a section search clears the filter before closing the panel", async ({
   page,
 }) => {
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "providers");
   await page.getByTestId("providers-toggle").click();
   const panel = page.getByTestId("settings-panel");
   const search = panel.getByPlaceholder("Search providers…");
@@ -340,7 +347,7 @@ test("Escape in a section search clears the filter before closing the panel", as
 test("the Extensions list has a search that filters the rows", async ({
   page,
 }) => {
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "extensions");
   await page.getByTestId("extensions-toggle").click();
   const settings = page.getByTestId("settings-panel");
 
@@ -356,7 +363,7 @@ test("the Extensions list has a search that filters the rows", async ({
 test("the Extensions section is collapsed by default and lists on expand", async ({
   page,
 }) => {
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "extensions");
   const toggle = page.getByTestId("extensions-toggle");
   // Header present + summary count; rows hidden until expanded (and not yet queried).
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -380,7 +387,7 @@ test("the Extensions section is collapsed by default and lists on expand", async
 test("toggling an extension flips its switch and reconciles with the server", async ({
   page,
 }) => {
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "extensions");
   await page.getByTestId("extensions-toggle").click();
 
   // answer.ts ships enabled; noisy-notify.ts ships disabled (so re-enable is exercisable).
@@ -419,7 +426,7 @@ test("theme toggle drives the data-theme override and persists it", async ({
   // Fresh device defaults to "system"; the emulated OS scheme is light.
   await expect(html).toHaveAttribute("data-theme", "light");
 
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "appearance");
   await expect(page.getByTestId("theme-system")).toHaveAttribute(
     "aria-checked",
     "true",
@@ -444,7 +451,7 @@ test("theme toggle drives the data-theme override and persists it", async ({
   await expect(themeColor).toHaveAttribute("content", "#242522");
 
   // "System" clears the override and re-resolves to the emulated light scheme.
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "appearance");
   await page.getByTestId("theme-system").click();
   await expect(html).toHaveAttribute("data-theme", "light");
 });
@@ -462,7 +469,7 @@ test("text-size stepper scales the transcript and persists across reload", async
 
   await expect(await scale()).toBe(1);
 
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "appearance");
   const panel = page.getByTestId("settings-panel");
   await expect(panel.getByTestId("font-reset")).toHaveText("100%");
 
@@ -478,7 +485,7 @@ test("text-size stepper scales the transcript and persists across reload", async
   await expect(await scale()).toBe(grown);
 
   // Reset returns to the default and clears the override; that too survives reload.
-  await page.getByTestId("settings-toggle").click();
+  await openSettings(page, "appearance");
   await page.getByTestId("font-reset").click();
   await expect(await scale()).toBe(1);
   await page.reload();
@@ -532,4 +539,63 @@ test("settings panel closes via Escape and the close button", async ({
   await expect(panel).toBeVisible();
   await page.getByRole("button", { name: "Close settings" }).click();
   await expect(panel).toBeHidden();
+});
+
+test("the section rail deep-links to a section without scrolling", async ({
+  page,
+}) => {
+  // The default-open section is Appearance; Environment's controls live further down
+  // the old single scroll. With the left-rail nav, clicking the Environment tab lands
+  // on its body immediately — the env-section is visible without scrolling.
+  await page.getByTestId("settings-toggle").click();
+  // Sanity: the Environment tab is present and not yet selected (Appearance is).
+  const envTab = page.getByTestId("settings-tab-environment");
+  await expect(envTab).toHaveAttribute("aria-selected", "false");
+
+  await envTab.click();
+  await expect(envTab).toHaveAttribute("aria-selected", "true");
+
+  // The Environment section's body is visible in the viewport (not just in the DOM).
+  const env = page.getByTestId("settings-panel").getByTestId("env-section");
+  await expect(env.getByTestId("login-shell-status")).toBeVisible();
+  // …and the Appearance section (the default) is no longer rendered at all.
+  await expect(page.getByTestId("settings-panel").getByTestId("theme-system")).toHaveCount(0);
+});
+
+test("Alt+1..6 jump between section tabs", async ({ page }) => {
+  await page.getByTestId("settings-toggle").click();
+  const panel = page.getByTestId("settings-panel");
+
+  // Alt+2 → Notifications: its push control appears, Appearance's theme control is gone.
+  await page.keyboard.press("Alt+2");
+  await expect(panel.getByTestId("settings-tab-notifications")).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(panel.getByText("Push on this device")).toBeVisible();
+  await expect(panel.getByTestId("theme-system")).toHaveCount(0);
+
+  // Alt+1 → back to Appearance: the theme control returns.
+  await page.keyboard.press("Alt+1");
+  await expect(panel.getByTestId("theme-system")).toBeVisible();
+});
+
+test("Escape closes the panel from a non-default section tab", async ({
+  page,
+}) => {
+  const panel = page.getByTestId("settings-panel");
+  await openSettings(page, "environment");
+  await expect(panel.getByTestId("env-section")).toBeVisible();
+
+  // Esc from a non-default (Environment) tab still closes the whole panel.
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden();
+
+  // Reopening lands back on the persisted Environment tab (the chosen reopen behavior).
+  await page.getByTestId("settings-toggle").click();
+  await expect(panel.getByTestId("settings-tab-environment")).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(panel.getByTestId("env-section")).toBeVisible();
 });
