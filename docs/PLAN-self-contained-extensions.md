@@ -230,7 +230,7 @@ PRE-EXISTING failures in `e2e/sessions.e2e.ts` (worktree/dir-picker tests
 timing out on `.row.up`) — verified to fail at the clean base commit too,
 unrelated to this refactor; logged in `docs/TODO.md`.
 
-### Chunk 1 — Settings: "background model" entry (D2)
+### Chunk 1 — Settings: "background model" entry (D2)  ✅ DONE (2026-06-26)
 The dependency D2 removes is shared by answer + session-namer, so land it
 first — neither can be ported cleanly without it.
 
@@ -261,6 +261,31 @@ first — neither can be ported cleanly without it.
 
 **Verify:** new `e2e/settings.e2e.ts` case — set a spec, confirm it's read
 back; set a bad spec, confirm a loud error (the resolver's `warning` surfacing).
+
+**Outcome:** shipped across all layers. `backgroundModel: string | null` in
+`PilotSettings` + `setBackgroundModel` wire message (mirrors `setLoginShell`).
+Server resolver in `server/src/pi/background-model.ts` — **reimplemented pi's
+spec parser on PUBLIC pi API** (`registry.getAvailable()`/`find()`), because the
+plan's planned `parseModelPattern` is `@internal Exported for testing` and NOT
+re-exported by the published `@earendil-works/pi-coding-agent` package (verified:
+`index.d.ts` exports `ModelRegistry` but not `parseModelPattern`, and
+`Model<Api>`/`ThinkingLevel` aren't exported either). The reimplementation
+tracks pi's `tryMatchModel`/`isAlias`/thinking-level semantics, including the
+invalid-`:thinking`-suffix scope-warn path (returns model + non-fatal warning on
+a resolving prefix, fatal warning otherwise — matches pi so Settings validation
+agrees with runtime in Chunks 2/4). `script:` paths run via `spawnSync` with a
+5s timeout + handle non-zero exit / empty stdout / missing script as warnings.
+`null`/unset = clean no-op. Flag value threaded in `warmUp` (`extensionFlagValues`
+gets `background-model` alongside `mcp-config`; extension-side registerFlag/getFlag
+belongs to Chunks 2/4). Mock seeds `MOCK_BACKGROUND_MODEL`; e2e reset wipes to
+defaults. Settings control under the Models section; `warning` surfaces loud red.
+
+Loop: round 1 review `needs attention` (1 P1 parity comment/behavior + 3 P2);
+round 1 fix made the invalid-thinking behavior match pi + removed dead
+`asBackgroundModelRegistry`/`find` + optimistic warning clear + tooltip fix;
+round 2 review `correct` (2 trivial P2); round 2 fix (full-spec warning text +
+doc plural). 16/16 resolver unit tests + 476/476 unit + 263 e2e (5 pre-existing
+dir-picker failures unrelated). Working copy clean.
 
 ### Chunk 2 — Port session-namer.ts (simplest of the 3) + owned-ext toggle machinery
 Smallest, softest coupling (only `setSessionName`, no host-UI bespoke methods).
