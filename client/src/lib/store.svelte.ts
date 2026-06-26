@@ -19,6 +19,7 @@ import {
   type OAuthDeviceInfo,
   type OAuthLoginPrompt,
   PILOT_OWNED_EXTENSION_NAMES,
+  isPilotOwnedExtension,
   type ProviderInfo,
   type ServerMessage,
   type SessionAttention,
@@ -1823,7 +1824,7 @@ class PilotStore {
     const ownedName = this.extensions.find(
       (e) => e.resolvedPath === resolvedPath,
     )?.name.replace(/\.ts$/, "");
-    if (ownedName && PILOT_OWNED_EXTENSION_NAMES.includes(ownedName)) {
+    if (ownedName && isPilotOwnedExtension(ownedName)) {
       const cur = this.pilotSettings.enabledExtensions ?? [
         ...PILOT_OWNED_EXTENSION_NAMES,
       ];

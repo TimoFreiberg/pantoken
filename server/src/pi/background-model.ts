@@ -61,6 +61,18 @@ export interface BackgroundModelRegistry {
   getAvailable(): readonly ModelLike[];
 }
 
+/** Adapt pi's `ModelRegistry` (or any `{getAvailable()}`-shaped object) to the resolver's
+ *  `BackgroundModelRegistry` slice. The resolver only needs `getAvailable()`, so this is a
+ *  thin passthrough — but it lives here so callers (`hub.ts` Settings validation, pi-driver
+ *  `warmUp`) share ONE adapter and can't drift on the slice shape. It was dropped as dead
+ *  in Chunk 1's S1 cleanup once `hub.ts` moved to a hand-rolled inline registry; C1
+ *  (resolve the `script:` spec server-side in `warmUp`) gives it a real caller again. */
+export function asBackgroundModelRegistry<T extends { getAvailable(): readonly ModelLike[] }>(
+  registry: T,
+): BackgroundModelRegistry {
+  return { getAvailable: () => registry.getAvailable() };
+}
+
 /** The model fields the matcher reads. A structural slice of pi's `Model<Api>` — kept
  *  loose (no `Api` typing, since that's not exported) so pilot doesn't couple to the
  *  full model shape. `name` is optional because custom/user models may omit it. */

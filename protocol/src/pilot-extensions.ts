@@ -13,3 +13,14 @@
 // its name→path map from this list so the two can't drift. Add a name here in the same
 // chunk that ships the extension file (session-namer = Chunk 2; answer/tasklist = 3/4).
 export const PILOT_OWNED_EXTENSION_NAMES: readonly string[] = ["session-namer"];
+
+/** Is `nameOrBasename` a pilot-OWNED extension? Accepts the basename with or without a
+ *  trailing `.ts` (the Settings list / fixture rows carry `name.ts`; the protocol list
+ *  stores the bare basename). The shared predicate so the client + server can't disagree
+ *  on what counts as owned — collapse any `name.replace(/\.ts$/, "") + includes` into this.
+ *  NOTE: this keys off the NAME only. It does NOT verify the path is pilot's in-repo copy,
+ *  so a user's own `session-namer.ts` on disk would also match — use the server's
+ *  path-equality reverse lookup (`ownedExtensionBasename`) where path identity matters. */
+export function isPilotOwnedExtension(nameOrBasename: string): boolean {
+  return PILOT_OWNED_EXTENSION_NAMES.includes(nameOrBasename.replace(/\.ts$/, ""));
+}

@@ -9,7 +9,7 @@ import {
   initialSessionState,
   isDialogRequest,
   type ModelOption,
-  PILOT_OWNED_EXTENSION_NAMES,
+  isPilotOwnedExtension,
   PROTOCOL_VERSION,
   type ServerMessage,
   type SessionAttention,
@@ -725,7 +725,7 @@ export class SessionHub {
     // ownedExtensionBasename and the mock's name match both reduce to this.
     const base = resolvedPath.split(/[/\\]/).pop() ?? resolvedPath;
     const name = base.replace(/\.ts$/, "");
-    if (PILOT_OWNED_EXTENSION_NAMES.includes(name)) {
+    if (isPilotOwnedExtension(name)) {
       this.broadcast(this.pilotSettingsMsg());
     }
   }

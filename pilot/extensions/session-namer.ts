@@ -26,7 +26,8 @@
  * Only fires when ALL of these hold:
  *  - the session has no explicit name yet  -> never overrides a manual name
  *  - the input is a real idle prompt        -> not a mid-stream steer / followup
- *  - source is interactive or rpc           -> not an extension-injected message
+ *  - source is not extension-injected     -> interactive / rpc / etc. all pass; another
+ *                                            extension's injected input does not
  *  - we're in a UI mode (hasUI)             -> skips one-shot `-p` / json runs
  * An in-flight guard stops a quick second prompt from launching a parallel name.
  *
@@ -43,10 +44,12 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
-// The flag pilot threads (Chunk 1 warmUp): its value is the `backgroundModel` setting —
-// a `provider/model[:thinking]` spec string, or a `script:`-prefixed path. We only read
-// it; the `script:` path is resolved server-side and the resolved spec is what's threaded,
-// so here it's always a plain spec (or unset). Registered so `getFlag` can read it.
+// The flag pilot threads (Chunk 1 warmUp): its value is a PLAIN `provider/model[:thinking]`
+// spec string — the one `resolveBackgroundModel` resolved the `backgroundModel` setting
+// (which may itself be `script:`-prefixed) to SERVER-SIDE in warmUp (C1). We only read it;
+// the `script:` path is resolved server-side and the resolved spec is what's threaded, so
+// here it's always a plain spec (or unset, when the setting is null or didn't resolve).
+// Registered so `getFlag` can read it.
 const BACKGROUND_MODEL_FLAG = "background-model";
 
 // Hard cap. ~25 is the readable sweet spot; the prompt asks the model to aim there, and
