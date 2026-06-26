@@ -370,18 +370,25 @@ Medium coupling: the `setWidget("tasklist", lines)` wire format + pilot's
 
 - Copy `tasklist.ts` → `pilot/extensions/tasklist.ts`.
 - Register via `additionalExtensionPaths`. No roles.mjs dep (tasklist doesn't
-  use a model).
-- **Per-chunk decision [OPEN B]:** keep the string-line wire format (parser
-  unchanged, behavior identical) OR switch to a structured payload
-  (`{tasks:[{id,description}…]}`) and simplify the parser. The "shared with pi's
-  TUI" constraint that forced the string format **goes away** once pilot owns
-  it — so the structured option is newly viable. Lean: structured, since the
-  comment in `tasklist.ts` explicitly calls the string recovery a workaround.
-- Add frontmatter/description per D3.
+  use a model). Add to `PILOT_OWNED_EXTENSION_NAMES` (Chunk 2's shared list).
+  The pilot-side toggle ([OPEN E]) + D3 "Pilot" badge + frontmatter apply to it
+  for free once it's in the owned list.
+- **[OPEN B] resolved → id internal-only:** `setWidget` only accepts `string[]`
+  (no structured overload), so the widget stays string lines — BUT drop the `#id:`
+  from each line (just `  ○ description` instead of `  ○ #v23gry: description`).
+  The id stays internal to the extension (generated as before, surfaced to the
+  *agent* via `tasklist_add`'s result, never to the human widget). The operator
+  references tasks via `tasklist_done`'s existing fuzzy matcher (exact id / prefix /
+  description substring). This simplifies BOTH the wire format (no `#id:` convention)
+  AND the client: `client/src/lib/tasklist.ts`'s regex drops the id-capture group
+  (just `/^\s*[○◯o*-]\s*(.*)$/u`), and `TaskList.svelte` drops the `#id` display
+  badge. Update `tasklist.test.ts` accordingly. The header line (`Open Tasks (N):`)
+  stays; the parser still keys on the `○` glyph.
+- Add `@pilot` frontmatter/description per D3.
 
 **Verify:** existing tasklist rendering in the transcript; add an e2e case that
-pushes a tasklist widget and asserts structured rendering. If going structured,
-update `client/src/lib/tasklist.ts` + its `.test.ts`.
+pushes a tasklist widget and asserts the simplified rendering (no `#id` badge).
+Update `client/src/lib/tasklist.ts` + its `.test.ts`.
 
 ### Chunk 4 — Port answer.ts (hardest; saved for last)
 The hard coupling: `ctx.ui.qna(...)`, the D2 `structured-extraction` role, the
@@ -432,9 +439,21 @@ existing one? **Resolved: (a) under Models** — it's a model picker, keeps
 related controls together, no new section. (Chunk 0.5's nav refactor means it
 lands as a row inside the Models tab, not crowding a single scroll.)
 
-### [OPEN B] — tasklist wire format: keep string lines or go structured?
-See Chunk 3. The structured option is newly viable once pilot owns the
-extension (the "shared with pi's TUI" constraint lifts). Lean: structured.
+### [OPEN B] — RESOLVED (owner, 2026-06-26): id internal-only (string lines, no `#id` in the widget)
+See Chunk 3. The plan's lean was "structured" (`{tasks:[{id,description}…]}`),
+but that's **not possible**: pi's `ExtensionUIContext.setWidget(key, content:
+string[] | undefined)` (types.ts:162) only accepts `string[]` — no structured-object
+overload. So structured-via-setWidget is out. **Owner's resolution (better than any
+of the three options surveyed): make the `#id` purely internal.** The operator never
+needs to see the id — `tasklist_done`/`tasklist_delete` already fuzzy-match
+(exact id / prefix / description substring via `findTask`), so a description
+fragment resolves a task without the id being visible. The widget lines drop the
+`#id:` prefix (just `  ○ fix foo` instead of `  ○ #v23gry: fix foo`); the id stays
+internal to the extension (generated as before, surfaced to the *agent* via
+`tasklist_add`'s result, never to the human-facing widget). This simplifies both
+the wire format (no `#id:` convention to drift) AND the client: the regex drops
+the id-capture group, and `TaskList.svelte` drops the `#id` display badge. The
+parser still keys on the `○` glyph to distinguish item-lines from the header.
 
 ### [OPEN C] — RESOLVED: the "Settings submenus" refactor IS part of this work
 The owner flagged that the Settings view is getting large enough to warrant
