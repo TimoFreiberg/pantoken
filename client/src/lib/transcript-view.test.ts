@@ -368,8 +368,10 @@ describe("groupTurns: answer (visible) tools", () => {
       asst("final"),
     ]);
     const t = turns[0]!;
-    expect(t.visible.map((i) => i.id)).toEqual(["a1"]);
-    expect(t.work.map((i) => i.id)).toEqual(["narration"]);
+    // `narration` is the lead-up paragraph immediately before the answer card, so the
+    // keep-visible peel moves it into `visible` alongside the answer tool.
+    expect(t.visible.map((i) => i.id)).toEqual(["narration", "a1"]);
+    expect(t.work.map((i) => i.id)).toEqual([]);
     expect(t.response.map((i) => i.id)).toEqual(["final"]);
   });
 
@@ -406,6 +408,88 @@ describe("groupTurns: answer (visible) tools", () => {
     // Both work runs collapse (each holds a tool + the turn has a response).
     expect(pre!.kind === "work" && pre.collapsible).toBe(true);
     expect(post!.kind === "work" && post.collapsible).toBe(true);
+  });
+
+  test("lead-up paragraph before an answer card stays visible, not collapsed", () => {
+    // The repro from docs/TODO.md: a long work run, then the agent writes a lead-up
+    // paragraph and immediately asks via the answer tool. Without the keep-visible
+    // peel, that paragraph is the trailing item of the pre-answer work run and folds
+    // into "Worked for Ns" — hiding the question's context directly above the answer
+    // card. The peel moves it into a pinned lane between the tools and the Q&A.
+    const turns = groupTurns([
+      user("u1"),
+      tool("b1"),
+      tool("b2"),
+      asst("lead-up"), // the paragraph that asks the question's context
+      tool("a1", "answer"),
+      tool("b3"),
+      asst("final"),
+    ]);
+    const t = turns[0]!;
+    const lanes = t.lanes;
+    expect(lanes.map((l) => l.kind)).toEqual([
+      "work",
+      "pinned",
+      "pinned",
+      "work",
+    ]);
+    expect(lanes.map((l) => (l.kind === "pinned" ? l.item.id : l.id))).toEqual([
+      "u1:w0",
+      "lead-up",
+      "a1",
+      "u1:w1",
+    ]);
+    // The pre-answer work run is just the tools now; lead-up is pinned visible.
+    expect(
+      lanes[0]!.kind === "work" && lanes[0]!.items.map((i) => i.id),
+    ).toEqual(["b1", "b2"]);
+    expect(lanes[1]!.kind === "pinned" && lanes[1]!.item.id).toBe("lead-up");
+    expect(lanes[2]!.kind === "pinned" && lanes[2]!.item.id).toBe("a1");
+    expect(
+      lanes[3]!.kind === "work" && lanes[3]!.items.map((i) => i.id),
+    ).toEqual(["b3"]);
+    // Flat splits reflect the peel: lead-up is in `visible`, not `work`.
+    expect(t.visible.map((i) => i.id)).toEqual(["lead-up", "a1"]);
+    expect(t.work.map((i) => i.id)).toEqual(["b1", "b2", "b3"]);
+    // The pre-answer run still collapses (it still holds tools).
+    expect(lanes[0]!.kind === "work" && lanes[0]!.collapsible).toBe(true);
+  });
+
+  test("multiple lead-up paragraphs before an answer all stay visible", () => {
+    const turns = groupTurns([
+      user("u1"),
+      tool("b1"),
+      asst("lead-1"),
+      asst("lead-2"),
+      tool("a1", "answer"),
+      asst("final"),
+    ]);
+    const t = turns[0]!;
+    expect(t.lanes.map((l) => l.kind)).toEqual([
+      "work",
+      "pinned",
+      "pinned",
+      "pinned",
+    ]);
+    expect(
+      t.lanes.filter((l) => l.kind === "pinned").map((l) => l.item.id),
+    ).toEqual(["lead-1", "lead-2", "a1"]);
+  });
+
+  test("lead-up peel is scoped to the answer tool, not image tools", () => {
+    // A screenshot tool is pinned (visible) but isn't a blocking prompt, so its
+    // preceding narration should NOT be peeled — it stays in the collapsible work run.
+    const png = [{ type: "image", data: "x", mimeType: "image/png" }] as const;
+    const turns = groupTurns([
+      user("u1"),
+      tool("b1"),
+      asst("narration"),
+      tool("s1", "preview_screenshot", { images: [...png] }),
+      asst("final"),
+    ]);
+    const t = turns[0]!;
+    expect(t.visible.map((i) => i.id)).toEqual(["s1"]);
+    expect(t.work.map((i) => i.id)).toEqual(["b1", "narration"]);
   });
 
   test("an active last turn forces every work lane non-collapsible", () => {

@@ -35,6 +35,7 @@ import type {
 import {
   ambient,
   answerCard,
+  answerLeadUpCard,
   bgRun,
   bgWait,
   branchedSeed,
@@ -995,6 +996,7 @@ export class MockDriver implements PilotDriver {
       ambient,
       compat,
       answercard: answerCard,
+      answerleadup: answerLeadUpCard,
       bgrun: bgRun,
       bgwait: bgWait,
       reply: () => promptReply("Show me the streamed reply script."),
