@@ -364,7 +364,7 @@ flag/metadata only). A future chunk could export `resolveSpec` + add a
 table-driven test mirroring `background-model.test.ts`. Logged here, not in
 TODO — it's a pre-existing structural gap, not a regression.
 
-### Chunk 3 — Port tasklist.ts
+### Chunk 3 — Port tasklist.ts  ✅ DONE (2026-06-26)
 Medium coupling: the `setWidget("tasklist", lines)` wire format + pilot's
 `client/src/lib/tasklist.ts` line-regex parser.
 
@@ -389,6 +389,25 @@ Medium coupling: the `setWidget("tasklist", lines)` wire format + pilot's
 **Verify:** existing tasklist rendering in the transcript; add an e2e case that
 pushes a tasklist widget and asserts the simplified rendering (no `#id` badge).
 Update `client/src/lib/tasklist.ts` + its `.test.ts`.
+
+**Outcome:** ported `tasklist.ts` to `pilot/extensions/` (no roles.mjs/model dep —
+pure state management; rides on Chunk 2's toggle + Pilot-badge machinery via the
+shared `PILOT_OWNED_EXTENSION_NAMES` list, which gained `"tasklist"`). [OPEN B]
+resolved as **id internal-only**: the human-facing widget lines (`updateWidget`)
++ reminder (`formatReminder`) + `/tasks` notify command drop the `#id:` prefix
+(just `  ○ description`); the id stays internal to the extension, surfaced to the
+AGENT via `tasklist_add`'s result + `formatTaskList` (the `tasklist_list` tool
+result) — both UNCHANGED (the dev correctly read the plan's "formatTaskList"
+mention as a mislabel for the widget formatter; `formatTaskList` is agent-facing
+at `tasklist.ts:485`). The client parser regex simplified to
+`/^\s*[○◯o*-]\s*(.*)$/u` (no id capture), `ParsedTask` drops `id`;
+`TaskList.svelte` drops the `#id` badge + `.id` CSS, keys `{#each}` by
+`${i}:${description}` (dup-safe). The operator references tasks via `findTask`'s
+existing fuzzy matcher (exact id / prefix / description substring).
+
+Loop: 1 review round, `correct` (3 P2 — frontmatter-parser test anti-pattern,
+`summaryLine` doc contradiction, stale "session-namer for now" e2e comment) →
+all 3 fixed. 491 unit + 265 e2e green; no regressions. Working copy clean.
 
 ### Chunk 4 — Port answer.ts (hardest; saved for last)
 The hard coupling: `ctx.ui.qna(...)`, the D2 `structured-extraction` role, the
