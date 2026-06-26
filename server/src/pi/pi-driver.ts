@@ -829,7 +829,7 @@ export async function createPiDriver(
     //   `mcp-config` entry is the per-cwd MCP override (see mcp-cwd-workaround.ts); the
     //   `background-model` entry is the D2 setting read from pilot-settings.json, so the
     //   ported extensions (session-namer + answer) read it via
-    //   ctx.getFlag("background-model") and resolve with ctx.modelRegistry.
+    //   pi.getFlag("background-model") and resolve with ctx.modelRegistry.
     //   null/unset → omitted (extensions fall back to no-op).
     //
     //   C1: resolve the spec SERVER-SIDE before threading. The setting may be a

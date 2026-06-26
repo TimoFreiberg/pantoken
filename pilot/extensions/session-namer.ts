@@ -18,7 +18,7 @@
  * this is a local file now. The model comes from pilot's `backgroundModel` setting
  * (D2), threaded into the session as the `background-model` extension flag in
  * pi-driver `warmUp` (Chunk 1). Here we `registerFlag` + read it via
- * `ctx.getFlag("background-model")` and resolve the spec string against
+ * `pi.getFlag("background-model")` and resolve the spec string against
  * `ctx.modelRegistry` (public pi API only — `getAvailable()`/`find()`), the same
  * contract the server's `resolveBackgroundModel` validates against. Unset → no-op (the
  * dotfiles version's role-unresolved path is the analogue), never crashes.
@@ -240,7 +240,10 @@ async function nameSession(
     if (ctx.hasUI) ctx.ui.notify(msg, "warning");
   };
 
-  const spec = ctx.getFlag(BACKGROUND_MODEL_FLAG);
+  // `getFlag` lives on the ExtensionAPI (pi), not the per-event ExtensionContext —
+  // `ctx.getFlag` is undefined at runtime and would crash (the pilot/extensions tree
+  // isn't in any tsconfig project, so tsc never caught the type error).
+  const spec = pi.getFlag(BACKGROUND_MODEL_FLAG);
   if (typeof spec !== "string" || !spec.trim()) {
     // Unset → no-op, the dotfiles version's "role resolved to no model" analogue.
     // Naming is a convenience; an unconfigured background model is not an error to

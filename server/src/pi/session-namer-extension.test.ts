@@ -79,11 +79,11 @@ describe("Chunk 2: session-namer pilot extension via additionalExtensionPaths", 
     });
     await loader.reload();
 
-    const namer = loader.getExtensions().extensions.find(
-      (e) => e.path === NAMER_PATH,
-    );
+    const namer = loader
+      .getExtensions()
+      .extensions.find((e) => e.path === NAMER_PATH);
     // The flag pilot threads in warmUp (extensionFlagValues.set("background-model", …)).
-    // The extension registers it so ctx.getFlag can read it; without registration getFlag
+    // The extension registers it so pi.getFlag can read it; without registration getFlag
     // returns undefined (pi's loader gates flag reads on registration).
     expect(namer?.flags.has("background-model")).toBe(true);
     const flag = namer?.flags.get("background-model");
@@ -105,9 +105,9 @@ describe("Chunk 2: session-namer pilot extension via additionalExtensionPaths", 
     });
     await loader.reload();
 
-    const namer = loader.getExtensions().extensions.find(
-      (e) => e.path === NAMER_PATH,
-    );
+    const namer = loader
+      .getExtensions()
+      .extensions.find((e) => e.path === NAMER_PATH);
     expect(namer?.sourceInfo.source).toBe("cli");
     expect(namer?.sourceInfo.scope).toBe("temporary");
     expect(namer?.sourceInfo.origin).toBe("top-level");
