@@ -476,7 +476,7 @@ self-containment trade-off, documented inline). 496 unit + 264 e2e green (5
 pre-existing dir-picker + 1 flaky sidebar-drafts hitting the same picker — all
 unrelated). Working copy clean.
 
-### Chunk 5 — Migration: remove the 3 from dotfiles + update docs
+### Chunk 5 — Migration: remove the 3 from dotfiles + update docs  ✅ DONE (2026-06-26)
 After all three are ported and pilot-side verified:
 
 - Delete `answer.ts`, `tasklist.ts`, `session-namer.ts` from
@@ -491,6 +491,30 @@ After all three are ported and pilot-side verified:
   qna, tasklist widget, session auto-naming all work.
 
 **Verify:** end-to-end manual + the full `bun run test:e2e` suite green.
+
+**Outcome:** deleted `answer.ts` + `tasklist.ts` + `session-namer.ts` from
+`~/dotfiles/agents/extensions/` + the orphaned `~/dotfiles/agents/_tests/answer.test.ts`
+(which imported the deleted `answer.ts`) — committed in the dotfiles repo as
+`49a83501` "Remove answer/tasklist/session-namer extensions (moved to pilot)".
+The `~/.pi/agent/extensions` symlink now stops resolving them, so pi loads only
+pilot's owned copies (no double-registration). Updated pilot docs: `DECISIONS.md`
+gained D15 (self-contained UX extensions — pilot ships its own; dotfiles is
+personal-extras-only; the toggle/badge/flag mechanics); `TODO.md`'s two stale
+"pi's session-namer" references (lines ~210 + ~490) now note the namer is
+pilot-owned (ported in Chunk 2). The pilot repo-root `AGENTS.md` needed no
+correction (it never claimed a hard dotfiles-extensions dependency).
+
+**Smoke-test status:** the full `bun run test:e2e` (mock driver) is green except
+the 5 pre-existing `sessions.e2e.ts` dir-picker failures (unrelated, logged in
+TODO). The plan's "stock pi + pilot, no dotfiles extensions → answer qna,
+tasklist widget, session auto-naming all work" smoke-test needs a LIVE pi
+instance (the mock driver doesn't exercise `createAgentSessionServices`, so the
+owned extensions don't actually load under mock) — **flagged as the owner's to
+run**: `PILOT_DRIVER=mock bun run dev` won't exercise the ports; a real-pi run
+(`bun run dev`, no `PILOT_DRIVER=mock`) with the dotfiles now stripped is the
+faithful smoke test. The loader tests (`{session-namer,tasklist,answer}-
+extension.test.ts`, driving the real `DefaultResourceLoader`) cover the
+load/register/source/flag mechanics the mock-driver e2e can't.
 
 ## Open questions
 

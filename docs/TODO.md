@@ -218,8 +218,10 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       only when the request carries an explicit title, otherwise the question itself is the
       header (owner's call). Multi-question forms still show the `Question N of M` progress.
       _(Session auto-title keeping a literal markdown `#` was triaged out: it's the
-      session-namer pi extension's gap, not pilot's to defend against — owner declined a
-      pilot-side strip.)_
+      session-namer extension's gap, not pilot's to defend against — owner declined a
+      pilot-side strip. The session-namer extension is now PILOT-OWNED, ported in
+      `docs/PLAN-self-contained-extensions.md` Chunk 2 — so this gap is now in pilot's
+      own `pilot/extensions/session-namer.ts`.)_
 
 ### Jank / polish found in the 2026-06-20 UX survey
 
@@ -506,6 +508,11 @@ hit a session limit mid-verify; confirm each against the code before acting):_
       (`pi-driver.ts:617`), which is exactly the condition the namer needs to fire — same
       seam that made the `answer`/qna tool work. Building a pilot-side titler would
       duplicate and fight pi, against the pi-only/deep-SDK lane (cf. the line-197 call to
+      _(Update 2026-06-26: the session-namer extension is now PILOT-OWNED — ported into
+      `pilot/extensions/session-namer.ts` per `docs/PLAN-self-contained-extensions.md`
+      Chunk 2, reading pilot's `backgroundModel` setting instead of the dotfiles roles.mjs.
+      The won't-build conclusion still holds — pilot owns the namer, so a separate
+      pilot-side titler would duplicate ITSELF.)_
       leave auto-title cleanup to the namer extension, not pilot). A live session that
       isn't named yet shows its first prompt as preview, not "New session" — that label is
       only the unsent-draft placeholder. _(Loose end: not re-verified against a live
