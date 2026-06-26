@@ -1823,9 +1823,122 @@ export function answerCard(): ScriptStep[] {
   return steps;
 }
 
+/** The docs/TODO.md repro: an assistant lead-up paragraph immediately precedes the
+ *  `answer` tool (no intervening tool call), then the agent keeps working after the
+ *  reply. Without the keep-visible peel, that lead-up paragraph is the trailing item of
+ *  the pre-answer work run and folds into "Worked for Ns" — hiding the question's
+ *  context directly above the Q&A card. Drives the dev-bar `answerleadup` button. */
+export function answerLeadUpCard(): ScriptStep[] {
+  const steps: ScriptStep[] = [
+    {
+      wait: 0,
+      event: {
+        ...base(),
+        type: "userMessage",
+        id: "alu-u1",
+        text: "Ship the bump. Anything I should decide before you commit?",
+        entryId: "e-alu-u1",
+      },
+    },
+    {
+      wait: 0,
+      event: {
+        ...base(),
+        type: "sessionUpdated",
+        snapshot: snapshot({ status: "running" }),
+      },
+    },
+    ...deltas("Let me check the current pinned version first.", "text"),
+    ...toolSpan(
+      {
+        callId: "alu-t1",
+        toolName: "bash",
+        label: "Run shell command",
+        description: "Execute a command in the workspace shell",
+        input: { command: 'rg -n "pi-coding-agent" server/package.json' },
+      },
+      {
+        callId: "alu-t1",
+        success: true,
+        output: '"@earendil-works/pi-coding-agent": "^0.79.5"',
+      },
+      { startWait: 120, wait: 220, durationMs: 900 },
+    ),
+    // The lead-up paragraph — immediately before the answer tool, no tool between them.
+    // This is the item the keep-visible peel must lift out of the work run.
+    ...deltas(
+      "The bump is straightforward, but there's one call to make: 0.80.2 reworks the patch format, so I can either re-key the existing patch or drop it and re-derive from scratch. Re-keying is faster but carries the old assumptions; re-deriving is cleaner but adds ~10 minutes. How do you want to proceed?",
+      "text",
+    ),
+    // The answer tool fires right after the lead-up paragraph.
+    ...toolSpan(
+      {
+        callId: "alu-t2",
+        toolName: "answer",
+        label: "Ask the operator",
+        description: "Ask one or more multiple-choice questions",
+        input: {
+          questions: [
+            {
+              question:
+                "How do you want to handle the pi 0.79.9 → 0.80.2 patch re-key?",
+              options: [
+                { label: "Re-key the existing patch" },
+                { label: "Re-derive from scratch" },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        callId: "alu-t2",
+        success: true,
+        output:
+          "Q: How do you want to handle the pi 0.79.9 → 0.80.2 patch re-key?\n" +
+          "Options:\n  [x] Re-key the existing patch\n  [ ] Re-derive from scratch\n" +
+          "A: Re-key the existing patch",
+      },
+      { startWait: 120, wait: 220, durationMs: 0 },
+    ),
+    // Post-answer work: the agent resumes in the same turn.
+    ...deltas("Re-keying the patch against 0.80.2 now.", "text"),
+    ...toolSpan(
+      {
+        callId: "alu-t3",
+        toolName: "bash",
+        label: "Run shell command",
+        description: "Execute a command in the workspace shell",
+        input: { command: "bun install --force 2>&1 | tail -4" },
+      },
+      {
+        callId: "alu-t3",
+        success: true,
+        output: "patch re-keyed, applies clean ✓",
+      },
+      { startWait: 120, wait: 220, durationMs: 830 },
+    ),
+    ...deltas(
+      "Done — re-keyed against 0.80.2, patch applies clean, the gate is green.",
+      "text",
+    ),
+    {
+      wait: 60,
+      event: {
+        ...base(),
+        type: "runCompleted",
+        snapshot: snapshot({ status: "idle" }),
+        userEntryId: "e-alu-u1",
+        assistantEntryId: "e-alu-a1",
+      },
+    },
+  ];
+  return steps;
+}
+
 export const SCRIPTS: Record<string, () => ScriptStep[]> = {
   greeting,
   answercard: answerCard,
+  answerleadup: answerLeadUpCard,
   journalnudge: journalNudge,
   skill: skillLoad,
   confirm: confirmDialog,

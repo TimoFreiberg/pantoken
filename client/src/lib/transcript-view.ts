@@ -53,6 +53,25 @@ function isVisibleTool(i: DisplayItem): i is ToolItem {
   return i.kind === "tool" && (VISIBLE_TOOLS.has(i.name) || toolHasImages(i));
 }
 
+/** A blocking Q&A prompt: the `answer` tool. Scoped to `answer` only — image-bearing
+ *  tools are pinned too, but they're not prompts, so their lead-up narration doesn't
+ *  get the keep-visible treatment (see keepLeadUp below). HostUi dialogs (confirm/
+ *  input/select/qna) don't flow through tools at all, so they're out of scope here. */
+function isAnswerTool(i: DisplayItem): i is ToolItem {
+  return i.kind === "tool" && i.name === "answer";
+}
+
+/** The lead-up paragraph(s) the agent wrote immediately before asking via the `answer`
+ *  tool — the trailing assistant items of the work run that precedes a pinned answer
+ *  card. These carry the question's context, so they must stay visible directly above
+ *  the Q&A card and the user's answer instead of folding into "Worked for Ns". Returns
+ *  the split: [collapsibleWork, visibleLeadUp]. */
+function splitLeadUp(run: DisplayItem[]): [DisplayItem[], DisplayItem[]] {
+  let j = run.length;
+  while (j > 0 && run[j - 1]!.kind === "assistant") j--;
+  return [run.slice(0, j), run.slice(j)];
+}
+
 export interface MergedToolsItem {
   readonly kind: "mergedTools";
   id: string;
@@ -393,16 +412,28 @@ function buildTurn(
   // screenshot or rendered mockup) out of the collapsible work so they never hide.
   // `work`/`visible` are flat splits kept for the footer text scan + tests; `lanes`
   // (below) is what actually renders, keeping each pinned item in chronological place.
+  // NOTE: the lead-up peel (below) moves assistant paragraphs into pinned lanes too,
+  // so `work`/`visible` are recomputed from `lanes` after the loop — not from these
+  // initial filters. `collapsible` still reads the pre-peel work set, which is fine:
+  // peeling only removes trailing assistant items, so `work.some(isWorkTool)` is stable.
   const workItems = body.slice(0, k);
-  const visible = workItems.filter(isVisibleTool);
-  const work = workItems.filter((i) => !isVisibleTool(i));
   const response = body.slice(k);
   const turnHasResponse = response.length > 0;
+  const prePeelWork = workItems.filter((i) => !isVisibleTool(i));
+  // `DisplayItem[]` (not the narrower `ToolItem[]` the isVisibleTool guard yields) so the
+  // lead-up peel can push assistant paragraphs into `visible` too.
+  let work: DisplayItem[] = prePeelWork;
+  let visible: DisplayItem[] = workItems.filter(isVisibleTool);
   const collapsible = turnHasResponse && work.some(isWorkTool);
 
   // Lanes preserve chronological order: a contiguous run of non-visible work folds into
   // one collapsible run; each visible tool stays pinned in place between runs, so it
   // doesn't float to the bottom of the work block as later work streams in.
+  //
+  // Lead-up keep-visible: when a work run is immediately followed by a pinned `answer`
+  // card, peel its trailing assistant paragraph(s) into pinned lanes too. Those carry
+  // the question's context — they belong directly above the Q&A + the user's answer, not
+  // hidden inside the collapsed "Worked for Ns" run. Scoped to `answer` only.
   const turnId = user?.id ?? body[0]?.id ?? `turn-${index}`;
   const lanes: TurnLane[] = [];
   let run: DisplayItem[] = [];
@@ -420,15 +451,40 @@ function buildTurn(
       endTs: itemEnd(items[items.length - 1]!),
     });
   };
+  const flushLeadUp = (leadUpItems: DisplayItem[]) => {
+    for (const it of leadUpItems)
+      lanes.push({ kind: "pinned", id: it.id, item: it });
+  };
   for (const it of workItems) {
     if (isVisibleTool(it)) {
-      flushRun();
+      // Peel the lead-up paragraph(s) off the run BEFORE pinning the answer card, so
+      // they render between the (now shorter) collapsible work run and the Q&A.
+      if (isAnswerTool(it) && run.length > 0) {
+        const [work, leadUp] = splitLeadUp(run);
+        run = work;
+        flushRun();
+        flushLeadUp(leadUp);
+      } else {
+        flushRun();
+      }
       lanes.push({ kind: "pinned", id: it.id, item: it });
     } else {
       run.push(it);
     }
   }
   flushRun();
+
+  // Recompute the flat `work`/`visible` splits FROM the lanes so they reflect the
+  // lead-up peel: assistant paragraphs moved into pinned lanes are visible, not work.
+  // Keeps the footer text scan (turnText in Transcript.svelte) + tests in sync with
+  // what actually renders. Pinned answer/image tools land in `visible`; pinned
+  // lead-up assistant items land in `visible` too.
+  work = [];
+  visible = [];
+  for (const lane of lanes) {
+    if (lane.kind === "work") work.push(...lane.items);
+    else visible.push(lane.item);
+  }
 
   // Explicit undefined checks, not `||`: a timestamp can be a numeric string like "0",
   // which is falsy — `||` would wrongly skip it.

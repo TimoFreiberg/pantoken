@@ -9,7 +9,18 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
 
 ## 🔴 Next (urgent / blocking)
 
-- [ ] don't collapse agent end-turn paragraphs that also ask user questions (is this distinguishable from a mid-turn user question? i have a session here, 019ef8d7-35a9-7738-afac-e718fdbaccc2, where Opus 4.8 sent a very final-response-paragraph looking message which also triggered a question and then continued working based on my response, and the pre-question paragraph was hidden. i would like to see this paragraph directly above my answers in the transcript!)
+- [x] **Don't collapse the lead-up paragraph when an agent asks via the `answer` tool.**
+      Repro (session `019ef8d7-35a9-7738-afac-e718fdbaccc2`, Opus 4.8): the agent wrote a
+      final-response-looking paragraph, then immediately fired the `answer` tool to ask a
+      question, then kept working after the user's reply. That lead-up paragraph was the
+      trailing assistant item of the pre-answer work run, so it folded into "Worked for
+      Ns" — hiding the question's context directly above the Q&A card. Fix (2026-06-26):
+      in `buildTurn`, peel the trailing assistant paragraph(s) of the work run
+      immediately preceding a pinned `answer` card into pinned visible lanes, so they
+      sit visibly between the (now shorter) collapsible tool run and the Q&A. Scoped to
+      the `answer` tool only — image-bearing tools and HostUi dialogs (confirm/input/
+      select/qna) are out of scope (no repros). The case-2 "prose question with no
+      `answer` tool" variant remains unhandled (would need heuristic detection).
 - [ ] cmd+= / cmd+- (font size changes) aren't applied to the question widget, they should
 - [ ] hotkey for hiding/showing the question widget?
 
