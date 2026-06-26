@@ -51,9 +51,10 @@ export interface ResolvedBackgroundModel {
   warning?: string;
 }
 
-/** A read-only slice of `ModelRegistry` — just the matching primitives the resolver
- *  needs. Declared locally so unit tests can pass a hand-rolled fake without
- *  constructing a real `ModelRegistry` (which wants an `AuthStorage` + models.json). */
+/** A read-only slice of `ModelRegistry` — the only matching primitive the resolver
+ *  needs (the unused `find` was dropped in the S1 cleanup). Declared locally so unit
+ *  tests can pass a hand-rolled fake without constructing a real `ModelRegistry` (which
+ *  wants an `AuthStorage` + models.json). */
 export interface BackgroundModelRegistry {
   /** Models with working credentials (the ones actually usable). Mirrors
    *  `ModelRegistry.getAvailable()` — the only matching primitive the resolver needs. */
@@ -183,7 +184,11 @@ function parseSpec(
   if (colon !== -1 && colon > slash) {
     const suffix = spec.slice(colon + 1);
     const prefix = spec.slice(0, colon);
-    if (VALID_THINKING_LEVELS.includes(suffix as (typeof VALID_THINKING_LEVELS)[number])) {
+    if (
+      VALID_THINKING_LEVELS.includes(
+        suffix as (typeof VALID_THINKING_LEVELS)[number],
+      )
+    ) {
       const inner = parseSpec(prefix, registry);
       if (inner.model) {
         // Only honour the thinking level when the prefix resolved cleanly.
@@ -205,7 +210,12 @@ function parseSpec(
           warning: `Invalid thinking level "${suffix}" in spec "${spec}" — dropped; valid: ${VALID_THINKING_LEVELS.join(", ")}.`,
         };
       }
-      return { warning: inner.warning };
+      return {
+        // Name the FULL spec (incl. the bad suffix) so the operator sees everything
+        // they typed — the missing model is the real problem, but the bad suffix is moot
+        // only AFTER a model resolves; until then both are wrong and both should show.
+        warning: `No registered model matches "${spec}" (invalid thinking level "${suffix}" dropped; valid: ${VALID_THINKING_LEVELS.join(", ")}).`,
+      };
     }
   }
 
