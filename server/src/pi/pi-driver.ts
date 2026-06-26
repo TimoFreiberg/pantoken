@@ -106,7 +106,7 @@ export interface PiDriverOptions {
 // only resolve each name to its absolute server path. ONE source of truth for the list,
 // read by `warmUp` (filter disabled ones out of the array), `listExtensions` (project
 // `source:"Pilot"` + parse the frontmatter description), and `setExtensionEnabled` (route
-// the pilot-side toggle). answer.ts + tasklist.ts join the protocol list in Chunks 3/4.
+// the pilot-side toggle). tasklist.ts joined in Chunk 3; answer.ts in Chunk 4.
 //
 // Resolved to ABSOLUTE paths at module init (NOT per-warmUp, NOT against process.cwd()):
 // the server cwd carries no operator intent (a Finder-launched desktop app starts in
@@ -828,7 +828,7 @@ export async function createPiDriver(
     // The extension-flag values pilot threads into createAgentSessionServices. The
     //   `mcp-config` entry is the per-cwd MCP override (see mcp-cwd-workaround.ts); the
     //   `background-model` entry is the D2 setting read from pilot-settings.json, so the
-    //   ported extensions (session-namer now; answer in Chunk 4) read it via
+    //   ported extensions (session-namer + answer) read it via
     //   ctx.getFlag("background-model") and resolve with ctx.modelRegistry.
     //   null/unset → omitted (extensions fall back to no-op).
     //
@@ -922,6 +922,16 @@ export async function createPiDriver(
     // extensions (e.g. a notify ext writing OSC escape codes) detect a non-tui host and
     // self-suppress, instead of firing a stray escape sequence into the server's stdout.
     await session.bindExtensions({
+      // SEAM (D2 tracked risk, docs/DECISIONS.md D13): pi hands extensions the RAW,
+      // UNWRAPPED `bridge` as `ctx.ui` — the cast lets methods BEYOND pi's typed
+      // `ExtensionUIContext` through (notably `PiUiBridge.qna`, which the answer
+      // extension calls on its `ctx.mode !== "tui"` pilot branch). Pilot now owns
+      // BOTH sides of that seam: the extension (pilot/extensions/answer.ts) that
+      // calls `ctx.ui.qna`, and `PiUiBridge` that implements it — so the coupling
+      // is intentional, not incidental. The canary `ui-bridge-coupling.test.ts`
+      // keeps it loud (compile-time: `qna` stays off the typed interface; runtime:
+      // `PiUiBridge` exposes it). If pi ever wraps `ctx.ui`, `qna` silently
+      // degrades and that test fires.
       uiContext: bridge as unknown as ExtensionUIContext,
       mode: "rpc",
       // pi catches throws from extension handlers, tags them with which

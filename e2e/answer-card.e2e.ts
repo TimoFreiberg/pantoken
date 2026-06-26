@@ -7,6 +7,15 @@ import { drive, gotoFresh, waitForSettledWorkBlocks } from "./helpers.js";
 // that streamed in after the answer shoved it further down. The `answercard` fixture
 // asks via the answer tool, then keeps working, so a settled turn has the card pinned
 // between a pre-answer and a post-answer work run.
+//
+// Chunk 4 note: this spec mocks the WIRE, not the answer extension. The `answercard`
+// fixture (server/src/fixtures.ts) drives a canned `answer` toolSpan whose output is the
+// extension's `formatQnA` text — the client-side QnaResult parses that wire text into the
+// card. So porting answer.ts from ~/dotfiles into pilot/extensions/ (and registering it
+// via additionalExtensionPaths) does NOT change this spec: the mock driver never calls
+// createAgentSessionServices, so the real extension never runs here. The port's load +
+// wiring is instead covered by answer-extension.test.ts (real pi loader); the qna seam
+// itself by ui-bridge-coupling.test.ts. This spec stays the card-rendering guard.
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
   await drive(page, "answercard");
