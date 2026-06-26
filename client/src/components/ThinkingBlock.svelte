@@ -53,6 +53,14 @@
       background-position: -200% 0;
     }
   }
+  /* Honour the app's reduced-motion contract (WorkingIndicator + the markstream
+     fade both guard theirs). The shimmer animates background-position (a paint,
+     not a composited transform), so it must stop under prefers-reduced-motion. */
+  @media (prefers-reduced-motion: reduce) {
+    .shimmer {
+      animation: none;
+    }
+  }
   .body {
     margin-top: 6px;
     font-size: 13.5px;
