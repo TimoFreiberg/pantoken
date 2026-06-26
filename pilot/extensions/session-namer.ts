@@ -89,21 +89,6 @@ interface ResolvedModel {
   thinkingLevel?: string;
 }
 
-/**
- * Resolve a `provider/model[:thinking]` spec against the registry, inline (the server's
- * `resolveBackgroundModel` validates the SAME spec for Settings — parity matters so a
- * spec that validates also runs). Public pi API only: `getAvailable()` + `find()`.
- *
- * - `provider/modelId` exact (via `find`), optionally with a trailing `:thinking`.
- * - Bare `modelId` matches against `getAvailable()` (rejected when ambiguous across
- *   providers, so a bare id two providers ship resolves to nothing — matches the server).
- * - An invalid `:thinking` suffix is dropped with a non-fatal warning surface (the
- *   caller's note channel); a valid one is honoured on the stream call.
- *
- * Returns `null` when the spec doesn't resolve (caller no-ops). Does NOT handle the
- * `script:` prefix — pilot resolves those server-side and threads the plain spec.
- */
-
 /** Try an exact `provider/modelId` (or bare-id) match against available models BEFORE the
  *  colon-split. Mirrors the server's `findExactModelReferenceMatch` (background-model.ts):
  *  a canonical `provider/id` exact match (case-insensitive); a bare-id match only when
@@ -126,6 +111,20 @@ function tryExactMatch(
   return byId.length === 1 ? byId[0] : undefined;
 }
 
+/**
+ * Resolve a `provider/model[:thinking]` spec against the registry, inline (the server's
+ * `resolveBackgroundModel` validates the SAME spec for Settings — parity matters so a
+ * spec that validates also runs). Public pi API only: `getAvailable()` + `find()`.
+ *
+ * - `provider/modelId` exact (via `find`), optionally with a trailing `:thinking`.
+ * - Bare `modelId` matches against `getAvailable()` (rejected when ambiguous across
+ *   providers, so a bare id two providers ship resolves to nothing — matches the server).
+ * - An invalid `:thinking` suffix is dropped with a non-fatal warning surface (the
+ *   caller's note channel); a valid one is honoured on the stream call.
+ *
+ * Returns `null` when the spec doesn't resolve (caller no-ops). Does NOT handle the
+ * `script:` prefix — pilot resolves those server-side and threads the plain spec.
+ */
 function resolveSpec(
   spec: string,
   registry: ExtensionContext["modelRegistry"],
@@ -170,7 +169,14 @@ function resolveSpec(
   // validation and runtime in parity (the D2 "a spec that validates also runs" promise).
   // The colon-split below still handles a real `:thinking` suffix on a colon-bearing id.
   let model: Model<Api> | undefined = tryExactMatch(trimmed, available);
-  if (!model) {
+  if (model) {
+    // Exact match on the FULL spec (incl. any colons in the id) means there was no
+    // `:thinking` suffix to honour — the colon-split above may have set one for a
+    // model id that literally ends in a level token (e.g. `some-model:low`). Drop it
+    // to match the server's `return { model: exact }` (no thinking level) and keep
+    // Settings-vs-runtime parity.
+    thinkingLevel = undefined;
+  } else {
     const providerSlash = core.indexOf("/");
     if (providerSlash !== -1) {
       const provider = core.slice(0, providerSlash).trim();
