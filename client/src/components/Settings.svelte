@@ -689,7 +689,7 @@
           <Button
             variant="primary"
             type="submit"
-            title="Save the background model spec (Ctrl+Enter)"
+            title="Save the background model spec"
             disabled={!bgModelDirty}>Save</Button
           >
           {#if store.pilotSettings.backgroundModel}
