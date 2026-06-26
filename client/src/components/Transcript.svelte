@@ -280,9 +280,14 @@
     const grew = size > prevSize && prevSize !== -1;
     prevSize = size;
     if (pinned && scroller) {
-      queueMicrotask(
-        () => scroller && scroller.scrollTo({ top: scroller.scrollHeight }),
-      );
+      // Re-assert across a few frames, not a single scrollTo: without content-visibility,
+      // rows lay out at true height and a prior turn's "Worked for Ns" block collapses
+      // (animated) while the next turn streams — both make scrollHeight jump AFTER a one-shot
+      // scrollTo runs, leaving it short. A short landing fires a scroll event read as a
+      // scroll-away, unpinning us for good (the pin then stops, so it never recovers, and
+      // every later delta false-flags the active session unread). snapToBottom chases the
+      // true bottom for a few frames so the pin holds. (Same reason send/switch use it.)
+      snapToBottom();
       // Pinned + caught up: nothing is below the fold.
       store.clearActiveUnread();
     } else if (grew) {
