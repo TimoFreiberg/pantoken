@@ -20,6 +20,12 @@ async function chooseProjectDir(
   await page.locator(".chips .chip").first().click();
   const picker = page.getByTestId("dir-picker");
   await expect(picker).toBeVisible();
+  // Wait for the picker's open-dir listing to land before navigating: `up()` reads
+  // `showing.parent`, which is undefined until the opening `queryDir` reply arrives,
+  // so a Backspace fired during that window is a no-op and the test hangs waiting for
+  // the target row. The breadcrumb renders from `showing.path`, so "src" proving it
+  // populated (every fixture cwd is /Users/timo/src/...) is the readiness signal.
+  await expect(picker.locator(".bc")).toContainText("src");
   // The filter input is auto-focused on open; Backspace with it empty goes up one dir
   // (/Users/timo/src/pilot -> /Users/timo/src).
   await picker.locator(".filter-input").press("Backspace");
