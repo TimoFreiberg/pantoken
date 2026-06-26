@@ -218,8 +218,8 @@ function updateWidget(ui: ExtensionContext["ui"]): void {
 
 /**
  * One-line summary for pre-flight injection.
- * Always injected on non-use turns so the model knows tasks are pending
- * without the full-list token cost every time.
+ * Was injected on non-use turns in the dotfiles design so the model knows tasks are
+ * pending without the full-list token cost every time.
  *
  * (Currently unused — preserved verbatim from the dotfiles source; the dotfiles version
  * likewise defines but does not call it. Kept to honor "drop nothing else.")
