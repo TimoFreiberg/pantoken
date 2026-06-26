@@ -8,6 +8,7 @@ import {
   foldEvent,
   initialSessionState,
   isDialogRequest,
+  type ModelOption,
   PROTOCOL_VERSION,
   type ServerMessage,
   type SessionAttention,
@@ -17,6 +18,10 @@ import {
 } from "@pilot/protocol";
 import type { OAuthLoginIO, PilotDriver } from "./driver.js";
 import { getLoginEnvStatus, resolveLoginShell } from "./pi/login-env.js";
+import {
+  asBackgroundModelRegistry,
+  resolveBackgroundModel,
+} from "./pi/background-model.js";
 import { readPilotSettings, writePilotSettings } from "./settings-store.js";
 
 export type Send = (msg: ServerMessage) => void;
@@ -187,6 +192,13 @@ export class SessionHub {
   // one login at a time keeps the pending map unambiguous (a single user, one browser).
   private oauthPending = new Map<string, (value: string | null) => void>();
   private oauthSeq = 0;
+  // Cached view of the available models (the `ModelOption[]` the driver returns via
+  // listModels), so `pilotSettingsMsg()` can resolve the background-model spec's
+  // `warning` SYNCHRONOUSLY without an async driver call on every settings broadcast.
+  // Refreshed whenever `broadcastModelList` runs (connect, key change, model switch).
+  // Empty until the first list arrives — the background-model warning is a validation
+  // display, not load-bearing, so it arriving a tick after hello is fine.
+  private availableModels: readonly ModelOption[] = [];
   private oauthInFlight = false;
   // Prompt acceptance is idempotent per client-generated id. The promise is stored
   // before dispatch so a reconnect/retry racing the original request attaches to the
@@ -646,7 +658,12 @@ export class SessionHub {
   private async broadcastModelList(): Promise<void> {
     try {
       const models = await this.driver.listModels();
+      this.availableModels = models;
       this.broadcast({ type: "modelList", models });
+      // Re-broadcast pilot settings so the background-model `warning` reflects the
+      // freshly-cached model list (it's resolved from this cache; an empty pre-list
+      // cache would otherwise suppress the warning until the next settings change).
+      this.broadcast(this.pilotSettingsMsg());
     } catch (e) {
       console.error("[hub] listModels failed", e);
     }
@@ -822,7 +839,11 @@ export class SessionHub {
 
   /** Build the pilot-local-settings message: the persisted settings + the live login-env
    *  capture status (so the Settings panel can show configured-vs-active and prompt for a
-   *  restart when they differ). */
+   *  restart when they differ), PLUS the resolved `backgroundModelWarning` (a loud red
+   *  error in the Models section when the spec is bad or doesn't resolve). The warning is
+   *  resolved synchronously from the cached `availableModels` (refreshed on each
+   *  model-list broadcast) — empty cache → no warning (it arrives a tick later, after the
+   *  first list broadcasts). */
   private pilotSettingsMsg(): ServerMessage {
     const settings = readPilotSettings();
     const env = getLoginEnvStatus();
@@ -831,7 +852,34 @@ export class SessionHub {
     const pendingRestart =
       env.activeShell !== null &&
       resolveLoginShell(settings.loginShell) !== env.activeShell;
-    return { type: "pilotSettings", settings, env, pendingRestart };
+    // Resolve the background-model spec against the cached available models. The adapter
+    // maps the wire `ModelOption` ({provider, modelId, label}) to the resolver's `ModelLike`
+    // ({provider, id, name}); an empty cache (pre-first-list) yields no warning.
+    const registry = {
+      getAvailable: () =>
+        this.availableModels.map((m) => ({
+          provider: m.provider,
+          id: m.modelId,
+          name: m.label,
+        })),
+      find: (provider: string, modelId: string) =>
+        this.availableModels.find(
+          (m) => m.provider === provider && m.modelId === modelId,
+        )
+          ? { provider, id: modelId }
+          : undefined,
+    };
+    const resolved = resolveBackgroundModel(
+      settings.backgroundModel,
+      registry,
+    );
+    return {
+      type: "pilotSettings",
+      settings,
+      env,
+      pendingRestart,
+      backgroundModelWarning: resolved.warning,
+    };
   }
 
   /** Fetch + broadcast pi's global model defaults + favorites (Settings panel). */
@@ -1487,6 +1535,15 @@ export class SessionHub {
         this.broadcast(this.pilotSettingsMsg());
         return;
       }
+      case "setBackgroundModel": {
+        // Persist the spec; re-broadcast so every client reflects it + the resolved
+        // `warning` (a bad spec surfaces as a loud red error in the Models section).
+        // Trim: empty/whitespace is stored as null (unset — extensions fall back).
+        const spec = msg.spec?.trim() ? msg.spec.trim() : null;
+        writePilotSettings({ backgroundModel: spec });
+        this.broadcast(this.pilotSettingsMsg());
+        return;
+      }
       case "trustResponse":
         // The driver dedups (first answer settles it); a stale/duplicate id no-ops.
         this.driver.respondTrust?.(msg.requestId, msg.choice);
@@ -1537,6 +1594,11 @@ export class SessionHub {
     this.applying = false;
     this.desktopStale = false;
     this.forceRequested = false;
+    // Restore pilot-local settings to defaults so a test's `setBackgroundModel`/
+    // `setLoginShell` mutation doesn't leak into sibling specs (the persisted file is
+    // shared across the per-port data dir for the whole e2e run). Mirrors how the mock
+    // driver's reset() restores providers/defaults/extensions to their fixture baseline.
+    writePilotSettings({ loginShell: null, backgroundModel: null });
     this.driver.reset?.(opts);
     this.seedDefault();
     for (const conn of this.clients.values()) {

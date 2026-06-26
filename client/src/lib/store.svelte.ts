@@ -185,11 +185,15 @@ class PilotStore {
   // server's startup login-shell env capture. Server-authoritative, sent on connect and
   // after a change. `loginEnv.activeShell` is what the running server captured with;
   // compare to `pilotSettings.loginShell` to know whether a restart is pending.
-  pilotSettings = $state<PilotSettings>({ loginShell: null });
+  pilotSettings = $state<PilotSettings>({ loginShell: null, backgroundModel: null });
   loginEnv = $state<LoginEnvStatus>({ activeShell: null, ok: false });
   // Server-computed: the configured login shell differs from the one captured at boot,
   // so a restart is needed to apply it. Drives the Settings "restart to apply" hint.
   loginShellPendingRestart = $state(false);
+  // Server-resolved warning for the background-model spec (a bad/unresolvable spec →
+  // a non-empty string the Settings "Models" section shows as a loud red error).
+  // undefined = unset or resolved cleanly.
+  backgroundModelWarning = $state<string | undefined>(undefined);
   // OAuth sign-in flow (Settings panel). Global + interactive like `trustRequest` —
   // not part of the folded session state. Null when no login is running. `progress`
   // accumulates status lines; `prompt` is the step awaiting the operator (open the URL,
@@ -911,6 +915,7 @@ class PilotStore {
         this.pilotSettings = msg.settings;
         this.loginEnv = msg.env;
         this.loginShellPendingRestart = msg.pendingRestart;
+        this.backgroundModelWarning = msg.backgroundModelWarning;
         break;
       case "trustRequest":
         this.trustRequest = {
@@ -2005,6 +2010,14 @@ class PilotStore {
     const next = path?.trim() ? path.trim() : null;
     this.pilotSettings = { ...this.pilotSettings, loginShell: next };
     send({ type: "setLoginShell", path: next });
+  }
+  /** Set (or clear, with null/empty) the background-model spec pilot's own extensions
+   *  run their cheap out-of-band LLM calls against. Optimistic local update; the
+   *  server persists + re-broadcasts (carrying the resolved `warning` for a bad spec). */
+  setBackgroundModel(spec: string | null): void {
+    const next = spec?.trim() ? spec.trim() : null;
+    this.pilotSettings = { ...this.pilotSettings, backgroundModel: next };
+    send({ type: "setBackgroundModel", spec: next });
   }
   setDefaultThinking(level: string): void {
     this.modelDefaults = { ...this.modelDefaults, thinkingLevel: level };
