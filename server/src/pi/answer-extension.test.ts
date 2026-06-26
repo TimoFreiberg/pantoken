@@ -17,12 +17,26 @@
 //
 // The mock driver never calls createAgentSessionServices, so a mock-driver e2e can't
 // exercise the `additionalExtensionPaths` wiring — driving the real loader is the
-// faithful substitute (same as the other two ports' loader tests). The extension's
-// runtime behaviour — the `qna` seam (ctx.ui.qna), the structured-extraction model call,
-// crash recovery — needs a live pi session + model auth and is out of unit reach; the
-// qna seam is instead pinned by the compile/runtime canary `ui-bridge-coupling.test.ts`
-// (qna NOT on the typed ExtensionUIContext; PiUiBridge exposes it), and the failure-
-// philosophy guards are reviewed in the source, not asserted here.
+// faithful substitute (same as the other two ports' loader tests).
+//
+// KNOWN COVERAGE GAP (round-1 review, carried forward): the dotfiles answer.ts HAS
+// upstream unit tests (`~/dotfiles/agents/_tests/answer.test.ts`, 14 tests) covering
+// `formatQnA`, the non-tui `runQnAWidget` routing (the pilot path), and
+// `pendingAnswerQuestions` crash recovery — using plain fake doubles (no live pi).
+// Those are unit-reachable in principle, but NOT from pilot: `pilot/extensions/*.ts`
+// aren't in a tsconfig AND import `@earendil-works/pi-ai`, which transitively needs
+// `typebox/compile` — a module pi provides via jiti's virtualModules at LOAD time, not
+// via Bun's direct resolution (typebox isn't even in pilot's node_modules; pilot
+// doesn't use it). So a direct `import` of answer.ts fails on typebox, and the loader
+// API (getExtensions) exposes only the registered Extension (tools/commands/source),
+// not the module's named exports. Closing this would require either adding typebox
+// as a pilot dep (wrong — pilot doesn't use it) or factoring the pure functions into
+// an importable module (reopens the plan's "extensions are self-contained, can't
+// share a _lib" constraint). The parity/review is read-verified against the dotfiles
+// source instead. SAME structural gap as session-namer (Chunk 2) + tasklist (Chunk 3).
+// The `ui-bridge-coupling.test.ts` canary pins the SEAM (qna NOT on the typed
+// ExtensionUIContext; PiUiBridge exposes it) — but note it checks existence only, not
+// the routing/forwarding/formatting `runQnAWidget` performs.
 
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
