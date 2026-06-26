@@ -29,8 +29,8 @@
  * realpath-cross-symlink dynamic import. That whole dance is gone — this is a
  * local file now. The extraction model comes from pilot's `backgroundModel`
  * setting (D2), threaded into the session as the `background-model` extension
- * flag in pi-driver `warmUp` (Chunk 1). Here we `registerFlag` + read it via
- * `ctx.getFlag("background-model")` and resolve the spec string against
+ * flag in pi-driver `warmUp` (Chunk 1); the extensions register + read it via
+ * `pi.getFlag("background-model")` and resolve the spec string against
  * `ctx.modelRegistry` (public pi API only — `getAvailable()`/`find()`), the same
  * contract the server's `resolveBackgroundModel` validates against. Unset → the
  * extraction candidate list degrades to the provider-pattern scan + the session
@@ -312,7 +312,9 @@ function resolveBackgroundModelSpec(
   }
 
   if (!model) {
-    note(`answer: background-model "${trimmed}" did not resolve to a registered model`);
+    note(
+      `answer: background-model "${trimmed}" did not resolve to a registered model`,
+    );
     return null;
   }
   return model;
@@ -1385,7 +1387,7 @@ export default function (pi: ExtensionAPI) {
     // Build candidate model list for extraction. The background-model note goes to
     // stderr (like the subagent extension) so it surfaces without popping a modal over
     // the extraction spinner.
-    const backgroundModelSpec = ctx.getFlag(BACKGROUND_MODEL_FLAG);
+    const backgroundModelSpec = pi.getFlag(BACKGROUND_MODEL_FLAG);
     const candidates = await getCandidateModels(
       ctx.model,
       ctx.modelRegistry,

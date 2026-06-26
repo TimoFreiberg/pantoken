@@ -90,7 +90,7 @@ describe("Chunk 4: answer pilot extension via additionalExtensionPaths", () => {
   test("(b) it registers the `background-model` flag (the D2/[OPEN F] channel)", async () => {
     // The `/answer` extraction path resolves the background-model spec (the D2 setting,
     // threaded in warmUp) for its question-extraction model call — same channel
-    // session-namer uses. The extension registers it so ctx.getFlag can read it; without
+    // session-namer uses. The extension registers it so pi.getFlag can read it; without
     // registration getFlag returns undefined (pi's loader gates flag reads on the
     // caller's own registration, and the per-extension namespace means session-namer
     // registering the same name independently is fine).
