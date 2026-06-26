@@ -287,7 +287,7 @@ round 2 review `correct` (2 trivial P2); round 2 fix (full-spec warning text +
 doc plural). 16/16 resolver unit tests + 476/476 unit + 263 e2e (5 pre-existing
 dir-picker failures unrelated). Working copy clean.
 
-### Chunk 2 — Port session-namer.ts (simplest of the 3) + owned-ext toggle machinery
+### Chunk 2 — Port session-namer.ts (simplest of the 3) + owned-ext toggle machinery  ✅ DONE (2026-06-26)
 Smallest, softest coupling (only `setSessionName`, no host-UI bespoke methods).
 Good first real port — proves the porting pattern (copy file → swap roles.mjs
 for the D2 setting → drop realpath-cross-symlink scaffolding → register via
@@ -324,6 +324,45 @@ reference `answer.ts`/`tasklist.ts` mocks — extend with a session-namer mock +
 assert it appears under the "Pilot" origin group with its description. Add a
 case that the pilot-side toggle actually disables an owned extension (the
 chunk-0 finding that pi's force-exclude couldn't).
+
+**Outcome:** ported `session-namer.ts` to `pilot/extensions/` (roles.mjs → the
+`background-model` extension flag + `ctx.getFlag` + inline spec parse via
+`ctx.modelRegistry.getAvailable()`/`find()`; realpath/pathToFileURL dance gone;
+prompt/MAX_LEN/sanitizeName/guards/failure-philosophy preserved). Removed the
+Chunk 0 spike (`_spike.ts` + `PILOT_SPIKE_EXTENSION_PATH` + spike test), replaced
+with a `session-namer-extension.test.ts` loader test (load + flag + source +
+frontmatter). Built the [OPEN E] (b) pilot-side toggle: `enabledExtensions:
+string[]|null` in `PilotSettings` (null=all-enabled default, array=enabled
+subset by basename), filtered in `warmUp`, routed in `setExtensionEnabled`/hub/
+mock/store. D3 "Pilot" badge + `@pilot` frontmatter parse in `listExtensions`.
+The owned-extension name list lives once in `protocol/src/pilot-extensions.ts`
+(`PILOT_OWNED_EXTENSION_NAMES` + `isPilotOwnedExtension` predicate) so warmUp/
+listExtensions/UI agree.
+
+**C1 fix (round 2, load-bearing):** `warmUp` initially threaded the RAW
+`backgroundModel` setting into the flag — so a `script:` spec silently never
+auto-named (Settings green, runtime broken). Fixed by resolving server-side in
+`warmUp` via `resolveBackgroundModel` + reconstructing a plain `provider/id
+[:thinking]` spec (extracted as `reconstructPlainSpec` so warmUp + its test share
+one implementation). The `asBackgroundModelRegistry` adapter (dropped as dead in
+Chunk 1's S1 cleanup) was re-added — now it has a real caller. The extension's
+`resolveSpec` gained a `tryExactMatch`-first step (parity with the server's
+`findExactModelReferenceMatch`) so colon-bearing model ids (OpenRouter `:exacto`/
+`:nitro`) resolve; exact-match drops any split-off `thinkingLevel` to match the
+server.
+
+Loop: 3 review rounds. R1 `needs attention` (1 P1 + 4 P2) → fixed; R2 `needs
+attention` (1 P1 test-anti-pattern + 2 P2) → fixed (extracted reconstructPlainSpec,
+exact-match parity, adapter doc); R3 `correct` (3 P2) → fixed 2 quick ones
+(thinkingLevel-on-exact-match, orphaned doc). 484 unit + 3 Chunk-2 e2e green;
+no regressions. Working copy clean.
+
+**Carried forward (not blocking):** the extension's `resolveSpec`/`tryExactMatch`
+are module-private + `pilot/extensions/*.ts` aren't in a tsconfig, so the
+parity logic is verified by reading, not execution (the loader test covers load/
+flag/metadata only). A future chunk could export `resolveSpec` + add a
+table-driven test mirroring `background-model.test.ts`. Logged here, not in
+TODO — it's a pre-existing structural gap, not a regression.
 
 ### Chunk 3 — Port tasklist.ts
 Medium coupling: the `setWidget("tasklist", lines)` wire format + pilot's
