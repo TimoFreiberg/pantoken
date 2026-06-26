@@ -5,6 +5,13 @@ import { expect, type Page } from "@playwright/test";
  *  state. */
 export async function gotoFresh(page: Page): Promise<void> {
   await page.request.get("/debug/reset");
+  // Clear persisted scroll positions before the app boots so each test starts clean:
+  // localStorage survives a same-origin navigation, so a prior test's saved reading
+  // position would otherwise boot-restore the greeting to a stale spot AND leak into
+  // session-switch assertions. Scoped to this one key (drafts/theme/etc. persist).
+  // addInitScript runs before each navigation in this page's lifetime — once per test,
+  // no extra reload.
+  page.addInitScript(() => localStorage.removeItem("pilot.scrollPositions"));
   await page.goto("/?dev");
   // The final text starts rendering before the fixture emits runCompleted. Wait for
   // the settled work block instead: its appearance proves the turn finished and the

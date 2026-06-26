@@ -425,7 +425,7 @@ test("sending a prompt while scrolled up jumps the transcript to the bottom", as
   await expect(page.getByTestId("new-messages-pill")).toHaveCount(0);
 });
 
-test("switching sessions lands at the bottom, even when the previous one was scrolled up", async ({
+test("switching sessions restores the saved reading position", async ({
   page,
 }) => {
   // Shrink the viewport so the short mock fixtures exceed the fold — only then is
@@ -441,14 +441,8 @@ test("switching sessions lands at the bottom, even when the previous one was scr
       return s.scrollHeight - s.scrollTop - s.clientHeight;
     });
 
-  // Leave the greeting scrolled to the very top, so we exit it un-pinned — the case that
-  // used to drop you at the TOP of whatever you opened next (the Transcript kept the prior
-  // session's pinned/scroll state across the switch).
-  await scroller.evaluate((el) => ((el as HTMLElement).scrollTop = 0));
-  await expect.poll(top).toBe(0);
-  await expect.poll(gap).toBeGreaterThan(80); // genuinely taller than the fold
-
-  // Open a different session that is itself taller than the fold.
+  // Open a different session (taller than the fold) and scroll it PART-way up so it has a
+  // saved reading position distinct from the bottom.
   await openSidebar(page);
   await page
     .getByTestId("sidebar")
@@ -457,11 +451,76 @@ test("switching sessions lands at the bottom, even when the previous one was scr
   await expect(page.locator("header .title")).toContainText(
     "Explore the fold reducer",
   );
+  await expect.poll(gap).toBeLessThan(80); // landed at the live bottom (no saved pos)
+  // Scroll part-way up (not the very top, so the saved ratio is unambiguously mid-transcript)
+  // and let the debounced save fire. The fixture is short, so target a clear mid-point and
+  // assert relative to IT, not an absolute px threshold.
+  const targetTop = await scroller.evaluate((el) => {
+    const s = el as HTMLElement;
+    const t = Math.floor((s.scrollHeight - s.clientHeight) * 0.5);
+    s.scrollTo({ top: t });
+    return t;
+  });
+  await expect.poll(top).toBe(targetTop);
+  await expect.poll(gap).toBeGreaterThan(40); // genuinely scrolled up off the bottom
+  // Wait for the debounced persist (200ms) to land in localStorage.
+  await page.waitForTimeout(350);
+  const savedTop = await top();
 
-  // It opens at the live bottom — not dropped at the carried-over top (scrollTop 0).
+  // Switch to the greeting (a DIFFERENT session), then back. The restored session should
+  // land near where we left it, NOT at the live bottom. (We don't assert the greeting's
+  // own position — it may restore to ITS saved spot or the bottom; either is fine. We
+  // only care that older-session, when we return to it, lands at its saved reading spot.)
+  await openSidebar(page);
+  await page.getByTestId("sidebar").getByText("Wire up the WebSocket").click();
+  await expect(page.locator("header .title")).toContainText(
+    "Wire up the WebSocket",
+  );
+  await openSidebar(page);
+  await page
+    .getByTestId("sidebar")
+    .getByText("Explore the fold reducer")
+    .click();
+  // Restored to the saved reading position (within a tolerance — the ratio is re-derived
+  // against the current scrollHeight, which may differ slightly from the saved height).
+  await expect.poll(top).toBeGreaterThan(targetTop - 30);
+  const restoredTop = await top();
+  expect(Math.abs(restoredTop - savedTop)).toBeLessThan(30);
+  // …and NOT at the live bottom (gap is meaningfully large, no pill).
+  await expect.poll(gap).toBeGreaterThan(40);
+  await expect(page.getByTestId("new-messages-pill")).toHaveCount(0);
+});
+
+test("a session with no saved position still lands at the live bottom", async ({
+  page,
+}) => {
+  // Companion to the restore test: a session you've never scrolled (or whose position was
+  // cleared) opens at the live tail, not a stale/carried-over spot.
+  await page.setViewportSize({ width: 1100, height: 380 });
+
+  const scroller = page.locator(".scroller");
+  const top = () => scroller.evaluate((el) => (el as HTMLElement).scrollTop);
+  const gap = () =>
+    scroller.evaluate((el) => {
+      const s = el as HTMLElement;
+      return s.scrollHeight - s.scrollTop - s.clientHeight;
+    });
+
+  // Leave the greeting scrolled to the very top, then switch to a different session that
+  // has no saved position — it should open at the live bottom, not the carried-over top.
+  await scroller.evaluate((el) => ((el as HTMLElement).scrollTop = 0));
+  await expect.poll(top).toBe(0);
+  await expect.poll(gap).toBeGreaterThan(80);
+  await openSidebar(page);
+  await page
+    .getByTestId("sidebar")
+    .getByText("Explore the fold reducer")
+    .click();
+  await expect(page.locator("header .title")).toContainText(
+    "Explore the fold reducer",
+  );
   await expect.poll(top).toBeGreaterThan(80);
   await expect.poll(gap).toBeLessThan(80);
-  // …and no "New messages ↓" pill: we're at the tail, nothing below the fold.
   await expect(page.getByTestId("new-messages-pill")).toHaveCount(0);
 });
 
