@@ -534,6 +534,135 @@ hit a session limit mid-verify; confirm each against the code before acting):_
       _(If the gap you felt was *discoverability* — hard to reach an archived row to unarchive —
       say so and I'll add a more direct affordance; the toggle logic itself is done.)_
 
+## ⚡ Performance & network efficiency (2026-06-26 audit)
+
+Goals: snappy UI, battery/thermal-friendly, reliable on spotty wifi. The agent runs on
+the server; the UI should stay smooth even when text is slow to arrive. Measured with
+`scripts/perf-streaming.ts` + `scripts/perf-streaming-scale.ts` (drive the real
+`foldEvent` → `parseMarkdownToStructure` path in-process). Findings triaged below;
+the trivial ones shipped inline this same day.
+
+### Shipped inline (2026-06-26)
+
+- [x] **WebSocket `perMessageDeflate`** → `server/src/index.ts`. Bun defaults it off;
+   assistant markdown, fenced code, and full reconnect snapshots are highly compressible,
+   so this trims per-frame overhead on Tailscale-over-spotty-wifi and buys down the
+   reconnect-resend cost (partially mitigates the snapshot-on-reconnect item below).
+   Cost is per-connection deflate memory + CPU on the Mac Mini — negligible for a
+   single-user app.
+- [x] **ThinkingBlock shimmer honours `prefers-reduced-motion`** →
+   `client/src/components/ThinkingBlock.svelte`. The shimmer animates `background-position`
+   (a paint, not a composited transform) and was the one animation in the app with no
+   reduced-motion guard — unlike WorkingIndicator's orbit and the markstream fade.
+   Cosmetic/contract fix; no behavior change.
+
+### 🟡 High-leverage — plan it (the headline)
+
+- [ ] **Server-side coalescing of streamed `assistantDelta`s (N1).** The highest-leverage
+      fix for both CPU and network. Today every pi `text_delta` becomes its own
+      `assistantDelta` WS frame (`server/src/pi/event-map.ts`) and is forwarded one-by-one
+      (`server/src/hub.ts` `onEvent`). One model response = hundreds of tiny frames, each
+      driving a full client markdown re-parse (see C1).
+      _Measured (perf-streaming.ts, 930-char / 101-token answer):_
+      - fold only (no parse): 0.3ms total (0.05ms/stream)
+      - fold + re-parse whole bubble per token (today): **56.8ms total (11.36ms/stream)**
+      - coalesced x5 (parse every 5th token): 15.4ms (**73% saved**)
+      - coalesced x10: 6.2ms (**89% saved**)
+      _Scaling (perf-streaming-scale.ts) confirms super-linear (O(n²)) cost:_ ms-per-1k-chars-
+      streamed climbs 11.9 → 94.4 as the answer grows 5× (324→10.5k chars). A 10KB answer
+      costs ~1s of pure main-thread parse work today.
+      **Fix:** buffer deltas in the hub keyed by `(sessionId, channel)`, flush on a ~50ms
+      timer (or any non-`assistantDelta` event for that sid — toolStarted/userMessage/
+      runCompleted/runFailed/sessionClosed/usageUpdated/channel switch — keep the flush
+      rule dumb and total). Fold the *coalesced* delta into `st` so authoritative state and
+      broadcast stay in lockstep. Coalescing is **not** a wire contract change: the
+      reducer does `target.text += ev.text`, so folding N deltas vs. one concatenation
+      yields a byte-identical `SessionState`; client untouched, fold stays identical.
+      **Window:** ~50ms, drop the char cap (or set it ≥512 as a burst guard only). A pure
+      time window scales the batch with token rate automatically. Bonus polish: emit the
+      first delta of each new bubble immediately, then window the rest, so every response
+      feels like it starts instantly.
+      **UX tradeoff to confirm before building:** slightly chunkier text reveal vs.
+      token-smooth. markstream's per-block fade animation masks it, and it's the right call
+      for the spotty-wifi target — but it's a visible UX change, not a pure optimization.
+      Note: with `hideThinking` on (the default), thinking deltas never reach markstream,
+      so coalescing the thinking channel buys only network, not CPU. Subsumes most of C1
+      and C3 for free.
+- [ ] **Client markdown re-parse is O(n²) per streamed message (C1).** `Markdown.svelte`
+      feeds `content` into markstream's `NodeRenderer`, whose `parsedNodes = $derived.by`
+      calls `parseMarkdownToStructure(FULL content)` on every content change
+      (`markstream-svelte/dist/components/NodeRenderer.svelte`). `stream-markdown-parser`
+      has **no incremental/prefix caching** (grepped the source). pilot's `Markdown.svelte`
+      doesn't pass `smoothStreaming`, so it defaults to `'auto'` → `smoothStreamingEligible`
+      is false → `renderContent = content` (raw) → re-parse per token. Mostly fixed by N1
+      (fewer, larger deltas → fewer parses). A client-side rAF coalescer feeding `Markdown`
+      is a fallback if N1 isn't enough; the deeper fix is upstream in the parser.
+
+### 🟡 Correctness risk on spotty wifi — raise now, defer build
+
+- [ ] **Backpressure drops can silently desync the client fold (N4).** `server/src/index.ts`
+      `rawSend` discards the return value of `ws.send()`. Past Bun's `maxBackpressure`
+      (default ~16MB) a slow socket drops messages (`send` returns 0). A dropped
+      *incremental event* silently desyncs the client's folded transcript from the server
+      with no recovery until a manual reconnect — exactly what a congested phone link can
+      trigger. Aligns with the repo's crash-loud-don't-corrupt philosophy: this is a quiet
+      corruption path. **Fix:** check `ws.send()`; on a dropped *event* mark the connection
+      desynced and force a re-snapshot (or close→reconnect). N1 (coalescing) reduces the
+      frame count that can be dropped, but doesn't remove the drop path itself.
+
+### 🟢 Later / when it bites
+
+- [ ] **Full-state resend on every reconnect (N3).** `hub.ts` `addClient` sends a full
+      `structuredClone` snapshot on every connect. Spotty wifi means frequent reconnects,
+      each re-shipping the entire transcript. No "I have up to event N" resume. `perMessageDeflate`
+      (shipped) compresses the resend and buys down urgency. **Fix (nontrivial):**
+      sequence-number events; client sends `lastSeq` on `hello`; server replays only the
+      tail, falling back to a full snapshot when the gap is too large.
+- [ ] **Stable transcript IDs across live and replay (reconnect quality cliff).** The live
+      fold assigns `id = a-${ev.timestamp}-${items.length}` (`protocol/src/state.ts`), while
+      replay assigns `u-${seq}` and uses pi's persisted message timestamp
+      (`server/src/pi/history-map.ts`). `turn.id` derives from these, so a reconnect that
+      reseeds from history (when the session was evicted from the warm cache — the pi
+      driver's LRU warm-cap emits a synthetic `sessionClosed` → `sessionStates.delete`)
+      re-keys every turn → `{#each turns (turn.id)}` tears down + rebuilds the entire
+      transcript, re-parses every markdown block, re-fires fade animations, resets scroll.
+      On spotty wifi under multi-session churn that's a flicker-on-every-reconnect quality
+      bug. The common case is fine: `hub.switchTo` reuses warm state (same IDs) and
+      markstream skips the re-parse when `content` is `===`. **Fix:** derive item ids from
+      pi's message id / `entryId` on both paths (fiddly — `entryId` is undefined mid-turn
+      on the live path, backfilled at `runCompleted`, so a synthetic-but-deterministic
+      scheme both paths reproduce is needed). Elevate the moment a reconnect flicker is
+      observed under session switching — it's a visual-quality regression, not just a
+      benchmark number, which is exactly the "stay pretty on spotty wifi" mandate.
+- [ ] **Virtualize the transcript + memoize per-turn grouping (C2).** `Transcript.svelte`
+      recomputes `mergeTools` then `groupTurns` over the whole item list on every structural
+      event (every tool start/finish, new bubble, user message) — O(n) per event, and it
+      rebuilds *all* turn objects, not just the active one. `content-visibility:auto` skips
+      off-screen paint/layout but not these JS passes or the DOM node count. The roadmap
+      already lists "Virtualized transcript >80 rows — SHOULD" (`docs/DESIGN.md`). **Fix:**
+      memoize per-turn grouping so only the last/active turn recomputes during streaming;
+      real windowing after that.
+- [ ] **Scope the copy-code `MutationObserver` (C4).** `client/src/lib/copy-code.ts` observes
+      `{childList:true, subtree:true}` and runs `scan()` (`querySelectorAll` over the whole
+      `.md-host` subtree) on every mutation batch while markstream streams. The
+      `:not([data-copy-decorated])` selector keeps the follow-up small, but the subtree walk
+      recurs per batch, per streaming bubble. **Fix:** only re-scan when an added node is /
+      contains a `<pre>`, and/or disconnect the observer once `final`.
+
+### Investigated and intentionally NOT changed (2026-06-26)
+
+- [ ] **rAF-coalescing the per-token pinned-scroll write (C3) — reverted.** The streaming-pin
+      `$effect` ran `queueMicrotask(() => scroller.scrollTo(...))` per token. An rAF-coalesced
+      version (one write per frame) is theoretically more efficient and the fold/bookkeeping
+      was kept synchronous. But it **broke `e2e/active-unread` + `e2e/polish` reproducibly**:
+      the per-token microtask re-fire is load-bearing for `content-visibility` row heights
+      to firm up across frames (a single rAF can't chase multi-frame convergence the way
+      per-token re-firing did), so the scroll lands short, `onScroll` unpins, and a later
+      delta spuriously flags the session unread. The code is visibly battle-scarred (multiple
+      comments, e2e guards). Decision: drop C3, defer to N1 — once deltas drop to ~1 per 50ms
+      the per-token scroll storm is 5–10× thinner and this path likely needs no change.
+      Re-measure after N1 before revisiting.
+
 ## 🔵 Later
 
 - [x] **@-completion in new-session draft uses wrong cwd** → done 2026-06-21. The `@`
