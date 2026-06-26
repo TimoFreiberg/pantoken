@@ -409,7 +409,7 @@ Loop: 1 review round, `correct` (3 P2 — frontmatter-parser test anti-pattern,
 `summaryLine` doc contradiction, stale "session-namer for now" e2e comment) →
 all 3 fixed. 491 unit + 265 e2e green; no regressions. Working copy clean.
 
-### Chunk 4 — Port answer.ts (hardest; saved for last)
+### Chunk 4 — Port answer.ts (hardest; saved for last)  ✅ DONE (2026-06-26)
 The hard coupling: `ctx.ui.qna(...)`, the D2 `structured-extraction` role, the
 `/answer` command, the `answer` tool, TUI component (`QnAComponent`), and the
 realpath-cross-symlink roles.mjs dance.
@@ -433,6 +433,48 @@ realpath-cross-symlink roles.mjs dance.
 
 **Verify:** existing `e2e/answer-card.e2e.ts` covers the qna card UI; extend to
 confirm the ported extension drives it. Run `ui-bridge-coupling.test.ts`.
+
+**Outcome:** ported `answer.ts` (1469→1569 lines) into `pilot/extensions/`. Swapped
+`resolveRoleModel("structured-extraction", …)` for the D2 `background-model` flag
+(`registerFlag` + `ctx.getFlag` + inline spec parse via `ctx.modelRegistry`, incl.
+the `tryExactMatch`-first step for parity — inlined from session-namer, justified:
+extensions can't share a `_lib` + aren't in a tsconfig). The realpath/pathToFileURL/
+roles.mjs dance is fully gone (verified `fs`/`path` used ONLY by that dance). The TUI
+`QnAComponent` path stayed untouched; confirmed `ctx.mode !== "tui"` (ctx.mode is
+`"rpc"` under pilot) is the branch that fires + the TUI path is inert — documented
+in two places. Added `"answer"` to `PILOT_OWNED_EXTENSION_NAMES` (toggle/badge/
+frontmatter applied for free).
+
+**qna seam audit:** the `as unknown as ExtensionUIContext` cast at `pi-driver.ts`
+bindExtensions is unchanged (pi still hands extensions the raw bridge). Documented
+at the cast site that pilot now owns BOTH sides (the extension calling `ctx.ui.qna`
+AND `PiUiBridge` implementing it) — coupling intentional, not incidental. The
+`ui-bridge-coupling.test.ts` canary stays green (compile-time: `qna` NOT on
+`ExtensionUIContext`; runtime: `PiUiBridge` exposes `qna`).
+
+**Judgment call (verified faithful):** the dotfiles `complete()` call never
+passed the `:thinking` level the role resolver returned (it `pushCandidate(resolved.
+model)`, dropping `.thinking`). The port PRESERVES that (resolve to model only,
+strip the suffix) rather than threading thinking through — not a behavior change.
+
+**Coverage gap (T1, [OPEN G], accepted by owner):** the dotfiles `answer.ts` has
+upstream unit tests (`~/dotfiles/agents/_tests/answer.test.ts`, 14 tests) covering
+`formatQnA` + the non-tui `runQnAWidget` routing + crash recovery, using plain fake
+doubles. But those CAN'T run against the port — the extension imports
+`@earendil-works/pi-ai`, which transitively needs `typebox/compile` (provided by
+jiti's virtualModules at LOAD time, not Bun's direct resolution; typebox isn't in
+pilot's node_modules). So `import { formatQnA } from './answer.ts'` fails, and the
+loader API exposes only the registered Extension, not the module's named exports.
+Owner accepted the gap (option a) — read-verified against the faithful port + the
+qna seam canary + the answer-card e2e cover the card UI. Same structural gap as
+session-namer/tasklist (see [OPEN G]).
+
+Loop: 1 review round, `needs attention` (T1 P1 coverage gap + D1 P2 misleading
+comment + S1 P2 noted-duplication). D1 fixed (honest comment); T1 accepted as a
+documented constraint (owner); S1 DISAGREED (the duplication is the intended
+self-containment trade-off, documented inline). 496 unit + 264 e2e green (5
+pre-existing dir-picker + 1 flaky sidebar-drafts hitting the same picker — all
+unrelated). Working copy clean.
 
 ### Chunk 5 — Migration: remove the 3 from dotfiles + update docs
 After all three are ported and pilot-side verified:
@@ -530,6 +572,26 @@ pi-native, no filesystem coupling, no coupling to pilot's data-dir location.
 **Chunk 1 ships the flag-value threading** (read `backgroundModel` from
 `PilotSettings`, add to the `extensionFlagValues` Map in `warmUp`); the
 extension-side `registerFlag`/`getFlag` code belongs to Chunks 2/4 (the ports).
+
+### [OPEN G] — ACKNOWLEDGED (owner, 2026-06-26): pilot-owned extensions aren't directly unit-testable (typebox resolution)
+The three ported extensions (`session-namer`, `tasklist`, `answer`) import
+`@earendil-works/pi-ai`, which transitively needs `typebox/compile`. pi provides
+`typebox` via jiti's `virtualModules` at EXTENSION LOAD time — NOT via Bun's direct
+module resolution (typebox isn't in pilot's `node_modules`; pilot doesn't use it).
+So a direct `import { someFn } from './pilot/extensions/<name>.ts'` fails on
+`typebox/compile`, and pi's loader API (`getExtensions()`) exposes only the
+registered `Extension` (tools/commands/sourceInfo), not the module's named
+exports. Consequence: the extensions' pure functions (`formatQnA`, `resolveSpec`,
+`parseSpec`, etc.) are READ-VERIFIED against the dotfiles source, not
+execution-tested. The dotfiles `answer.ts` has upstream unit tests
+(`~/dotfiles/agents/_tests/answer.test.ts`, 14 tests) that CAN'T be ported as-is.
+**Owner accepted this gap (option a)** — fixing properly = either adding typebox as
+a pilot dep (wrong fit; pilot doesn't use it) or factoring the pure functions into
+an importable module (reopens the plan's "extensions are self-contained, can't
+share a `_lib`" constraint). The qna seam has a compile+runtime canary
+(`ui-bridge-coupling.test.ts`); the loader tests cover load/flag/source/metadata;
+the e2e specs cover the UI surfaces. A future session could revisit if a
+pure-function regression bites.
 
 ## Non-goals
 
