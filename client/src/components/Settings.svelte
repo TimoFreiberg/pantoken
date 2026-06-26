@@ -19,7 +19,7 @@
   // Section navigation. The panel is a left-rail of section tabs + a content pane
   // showing only the active section — so the long lists (Providers, Models+Favorites,
   // Extensions) each get their own scroll instead of crowding one. The rail labels ARE
-  // the six top-level section names, so every name stays visible (and reachable) the
+  // the seven top-level section names, so every name stays visible (and reachable) the
   // moment the panel opens. On the phone bottom-sheet the rail reflows to a horizontal
   // scrollable strip (see the media query). Tabs are flat — not a drill-in stack — so
   // Escape closes the panel as before (section searches still clear on the first Esc).
@@ -281,13 +281,18 @@
       close();
       return;
     }
-    // Alt+1..6 — jump straight to a section tab (the rail order). Only when the panel
-    // is open; the composer/inputs aren't focused then, so this never fights typing.
-    // noUncheckedIndexedAccess makes SECTIONS[idx] `T | undefined`; the guard narrows it
-    // at runtime but not to TS, so capture the element after the bound check.
+    // Alt+1..7 — jump straight to a section tab (the rail order). Read e.code
+    // ("Digit1".."Digit7") rather than e.key: on macOS Option+digit composes a glyph
+    // (Option+1 → "¡"), so Number(e.key) is NaN and the shortcut would silently no-op
+    // on the project's primary platform. e.code is the physical key, layout/OS-
+    // independent. Safe even while a field is focused — the provider/favorites/
+    // extension searches and the key/shell/token fields all leave Alt+digit alone
+    // (Alt combos aren't text input), so this never fights typing. noUncheckedIndexed-
+    // Access makes SECTIONS[idx] `T | undefined`; the guard narrows it at runtime but
+    // not to TS, so capture the element after the bound check.
     if (open && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-      const idx = Number(e.key) - 1;
-      const target = idx >= 0 && idx < SECTIONS.length ? SECTIONS[idx] : undefined;
+      const m = /^Digit([1-7])$/.exec(e.code);
+      const target = m ? SECTIONS[Number(m[1]) - 1] : undefined;
       if (target) {
         e.preventDefault();
         setSection(target.id);
@@ -343,13 +348,22 @@
     </header>
 
     <div class="settings-shell">
-      <nav class="settings-nav" aria-label="Settings sections">
+      <!-- ARIA tabs: the rail is the tablist, each tab aria-controls the shared panel
+           body below (which aria-labelledby points back to the active tab). Matches
+           QnaForm's dot-tab pattern, completed with the panel-side wiring. -->
+      <div
+        class="settings-nav"
+        role="tablist"
+        aria-label="Settings sections"
+      >
         {#each SECTIONS as s, i (s.id)}
           <button
             class="tab"
             type="button"
+            id="settings-tab-{s.id}"
             role="tab"
             aria-selected={activeSection === s.id}
+            aria-controls="settings-panel-body"
             data-testid="settings-tab-{s.id}"
             title={`${s.label} section (Alt+${i + 1})`}
             onclick={() => setSection(s.id)}
@@ -357,9 +371,15 @@
             <span class="tab-label">{s.label}</span>
           </button>
         {/each}
-      </nav>
+      </div>
 
-      <div class="body">
+      <div
+        class="body"
+        id="settings-panel-body"
+        role="tabpanel"
+        aria-labelledby="settings-tab-{activeSection}"
+        tabindex="0"
+      >
       <!-- Appearance -->
       {#if activeSection === "appearance"}
       <section class="group">
@@ -1049,7 +1069,7 @@
     overflow-y: auto;
     padding: 4px 20px calc(20px + env(safe-area-inset-bottom));
   }
-  /* Section nav: a left-rail of section tabs whose labels ARE the six top-level
+  /* Section nav: a left-rail of section tabs whose labels ARE the seven top-level
      section names, so every name stays visible the instant the panel opens. Only the
      active section renders, keeping the long lists from sharing one scroll. On the
      phone bottom-sheet the rail reflows to a horizontal scrollable strip (below). */

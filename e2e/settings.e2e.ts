@@ -1,13 +1,13 @@
 import { expect, test } from "@playwright/test";
 import { gotoFresh, openSettings } from "./helpers.js";
 
+// Playwright gives each test a fresh BrowserContext (empty localStorage), so there's
+// no cross-spec bleed of the persisted pilot.settingsSection — each spec opens the
+// section it exercises via openSettings() anyway. (An earlier beforeEach cleared the
+// pref after gotoFresh, but the component had already read it at mount, so it was a
+// no-op; removed.)
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
-  // The active settings section persists in localStorage (pilot.settingsSection), so
-  // a prior spec could leave the panel on e.g. Providers. Each spec navigates to the
-  // section it exercises, but clear the pref so the default-open assumption (Appearance)
-  // holds deterministically — no cross-spec bleed.
-  await page.evaluate(() => localStorage.removeItem("pilot.settingsSection"));
 });
 
 test("settings panel opens from the header gear and lists its sections", async ({
@@ -555,14 +555,21 @@ test("the section rail deep-links to a section without scrolling", async ({
   await envTab.click();
   await expect(envTab).toHaveAttribute("aria-selected", "true");
 
-  // The Environment section's body is visible in the viewport (not just in the DOM).
+  // toBeVisible() only checks rendered + not CSS-hidden, not "in the viewport". The
+  // left-rail swaps sections without scroll, so the env body's scroll container should
+  // still be at the top (scrollTop 0) — assert that directly.
   const env = page.getByTestId("settings-panel").getByTestId("env-section");
   await expect(env.getByTestId("login-shell-status")).toBeVisible();
+  const bodyScrollTop = await page
+    .getByTestId("settings-panel")
+    .locator(".body")
+    .evaluate((el) => el.scrollTop);
+  expect(bodyScrollTop).toBe(0);
   // …and the Appearance section (the default) is no longer rendered at all.
   await expect(page.getByTestId("settings-panel").getByTestId("theme-system")).toHaveCount(0);
 });
 
-test("Alt+1..6 jump between section tabs", async ({ page }) => {
+test("Alt+1..7 jump between section tabs", async ({ page }) => {
   await page.getByTestId("settings-toggle").click();
   const panel = page.getByTestId("settings-panel");
 
@@ -574,6 +581,14 @@ test("Alt+1..6 jump between section tabs", async ({ page }) => {
   );
   await expect(panel.getByText("Push on this device")).toBeVisible();
   await expect(panel.getByTestId("theme-system")).toHaveCount(0);
+
+  // Alt+7 → Access token: its body appears too, proving the shortcut spans the rail.
+  await page.keyboard.press("Alt+7");
+  await expect(panel.getByTestId("settings-tab-token")).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(panel.getByText("No token saved")).toBeVisible();
 
   // Alt+1 → back to Appearance: the theme control returns.
   await page.keyboard.press("Alt+1");
