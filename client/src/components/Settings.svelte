@@ -132,10 +132,8 @@
     store.setBackgroundModel(null);
   }
 
-  // The provider list is a long block you rarely touch once a provider is connected, so it
-  // collapses behind its section header (collapsed by default — the header shows a connected
-  // count so you can see at a glance without expanding).
-  let providersOpen = $state(false);
+  // Providers has its own tab now, so the list is always shown (no collapse). The static
+  // header carries a connected count for at-a-glance status.
   const connectedCount = $derived(providers.filter((p) => p.hasAuth).length);
   // Filter-as-you-type over the provider list (name or id). Matches the favorites search.
   let providerQuery = $state("");
@@ -149,17 +147,12 @@
       : providers,
   );
 
-  // The pi extensions for the focused session (Settings "Extensions" view). Fetched on
-  // demand when the section expands (collapsed by default) — re-queried each expand so it
-  // reflects any toggles since. Toggling applies on the session's NEXT start (pi loads
-  // extensions at start), which the section's note spells out.
+  // The pi extensions for the focused session (Settings "Extensions" view). Extensions has
+  // its own tab now, so the list is always shown (no collapse) — fetched on panel open (the
+  // $effect below) so it reflects toggles since. Toggling applies on the session's NEXT
+  // start (pi loads extensions at start), which the section's note spells out.
   const extensions = $derived(store.extensions);
   const extensionsOn = $derived(extensions.filter((x) => x.enabled).length);
-  let extensionsOpen = $state(false);
-  function toggleExtensionsSection(): void {
-    extensionsOpen = !extensionsOpen;
-    if (extensionsOpen) store.queryExtensions();
-  }
   // Filter-as-you-type over the extension list (name or source).
   let extQuery = $state("");
   const xq = $derived(extQuery.trim().toLowerCase());
@@ -294,8 +287,8 @@
       shellDraft = store.pilotSettings.loginShell ?? "";
       // Seed the background-model field likewise.
       bgModelDraft = store.pilotSettings.backgroundModel ?? "";
-      // Fetch the extension list on open (even while the section is collapsed) so its
-      // header can show the at-a-glance "N/M on" count without making you expand first.
+      // Fetch the extension list on open so the Extensions tab's header count + rows are
+      // ready without a separate expand step (the section is always shown now).
       store.queryExtensions();
     }
     prevOpen = open;
@@ -557,25 +550,15 @@
       <!-- Providers -->
       {#if activeSection === "providers"}
       <section class="group">
-        <button
-          class="gtitle gtitle-toggle"
-          type="button"
-          aria-expanded={providersOpen}
-          data-testid="providers-toggle"
-          title={providersOpen ? "Collapse providers" : "Expand providers"}
-          onclick={() => (providersOpen = !providersOpen)}
-        >
-          <Chevron open={providersOpen} size={10} />
+        <div class="gtitle gtitle-static">
           <span class="gtitle-name">Providers</span>
           {#if providers.length > 0}
             <span class="gtitle-count">{connectedCount}/{providers.length} connected</span>
           {/if}
-        </button>
-        {#if providersOpen}
-          <div class="section-body" transition:reveal>
-          {#if providers.length === 0}
-            <p class="note">No providers reported by the server.</p>
-          {:else}
+        </div>
+        {#if providers.length === 0}
+          <p class="note">No providers reported by the server.</p>
+        {:else}
           {#if providers.length > 1}
             <input
               class="sub-search"
@@ -671,8 +654,6 @@
             terminal <code>pi</code> on this machine. Providers configured via environment
             variables show as connected but aren't editable here.
           </p>
-          {/if}
-          </div>
         {/if}
       </section>
       {/if}
@@ -850,25 +831,15 @@
       <!-- Extensions -->
       {#if activeSection === "extensions"}
       <section class="group">
-        <button
-          class="gtitle gtitle-toggle"
-          type="button"
-          aria-expanded={extensionsOpen}
-          data-testid="extensions-toggle"
-          title={extensionsOpen ? "Collapse extensions" : "Expand extensions"}
-          onclick={toggleExtensionsSection}
-        >
-          <Chevron open={extensionsOpen} size={10} />
+        <div class="gtitle gtitle-static">
           <span class="gtitle-name">Extensions</span>
           {#if extensions.length > 0}
             <span class="gtitle-count">{extensionsOn}/{extensions.length} on</span>
           {/if}
-        </button>
-        {#if extensionsOpen}
-          <div class="section-body" transition:reveal>
-          {#if extensions.length === 0}
-            <p class="note">No extensions loaded for this session.</p>
-          {:else}
+        </div>
+        {#if extensions.length === 0}
+          <p class="note">No extensions loaded for this session.</p>
+        {:else}
           {#if extensions.length > 1}
             <input
               class="sub-search"
@@ -952,8 +923,6 @@
             Enabling or disabling takes effect on the session's <strong>next start</strong> —
             pi loads extensions when a session begins, so the change isn't live.
           </p>
-          {/if}
-          </div>
         {/if}
       </section>
       {/if}
@@ -1324,7 +1293,15 @@
     color: var(--text-faint);
     margin-bottom: 10px;
   }
-  /* Collapsible section header (Providers) — same weight as .gtitle, but clickable. */
+  /* Static section header (Providers, Extensions) — each has its own tab now, so the
+     list isn't collapsed behind a toggle. Carries the at-a-glance count (connected / on)
+     without being clickable. Same weight as .gtitle; flex so the count sits on the right. */
+  .gtitle-static {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  /* Collapsible section header (Favorites, nested under Models) — same weight as .gtitle, but clickable. */
   .gtitle-toggle {
     display: flex;
     align-items: center;
@@ -1372,7 +1349,7 @@
     font-size: 10.5px;
     opacity: 0.8;
   }
-  /* Search box shared by the Providers / Extensions collapsible sections. */
+  /* Search box shared by the Providers / Extensions sections. */
   .sub-search {
     width: 100%;
     box-sizing: border-box;
