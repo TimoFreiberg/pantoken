@@ -524,6 +524,121 @@ test("a session with no saved position still lands at the live bottom", async ({
   await expect(page.getByTestId("new-messages-pill")).toHaveCount(0);
 });
 
+test("switching away does not corrupt the leaving session's saved position", async ({
+  page,
+}) => {
+  // Regression guard for the root save bug: the switch-away save used to run in a
+  // post-DOM-patch $effect, by which point the scroller already showed the INCOMING
+  // session — so it overwrote the leaving session's ratio with the new session's geometry.
+  // Here we record the saved ratio BEFORE the switch and assert it is untouched AFTER.
+  await page.setViewportSize({ width: 1100, height: 380 });
+  const scroller = page.locator(".scroller");
+  const top = () => scroller.evaluate((el) => (el as HTMLElement).scrollTop);
+  const gap = () =>
+    scroller.evaluate((el) => {
+      const s = el as HTMLElement;
+      return s.scrollHeight - s.scrollTop - s.clientHeight;
+    });
+  const savedRatio = (id: string) =>
+    page.evaluate((sid) => {
+      const raw = localStorage.getItem("pilot.scrollPositions");
+      return raw ? (JSON.parse(raw)[sid]?.ratio ?? null) : null;
+    }, id);
+
+  // Open older-session and scroll it to a clear mid-transcript spot; let the debounce land.
+  await openSidebar(page);
+  await page
+    .getByTestId("sidebar")
+    .getByText("Explore the fold reducer")
+    .click();
+  await expect(page.locator("header .title")).toContainText(
+    "Explore the fold reducer",
+  );
+  await expect.poll(gap).toBeLessThan(80); // wait for the open to land before scrolling
+  await page.waitForTimeout(550); // let the open's settle/save-suppression window lapse
+  const targetTop = await scroller.evaluate((el) => {
+    const s = el as HTMLElement;
+    const t = Math.floor((s.scrollHeight - s.clientHeight) * 0.5);
+    s.scrollTo({ top: t });
+    return t;
+  });
+  await expect.poll(top).toBe(targetTop);
+  await page.waitForTimeout(350); // debounced persist (200ms) + margin
+  const before = await savedRatio("older-session");
+  expect(before).not.toBeNull();
+
+  // Switch to a DIFFERENT session. The leaving session's saved ratio must be unchanged —
+  // the switch must not re-save it against the incoming transcript's geometry.
+  await openSidebar(page);
+  await page.getByTestId("sidebar").getByText("Wire up the WebSocket").click();
+  await expect(page.locator("header .title")).toContainText(
+    "Wire up the WebSocket",
+  );
+  const after = await savedRatio("older-session");
+  expect(after).not.toBeNull();
+  expect(Math.abs((after as number) - (before as number))).toBeLessThan(0.01);
+});
+
+test("a session left at the live tail returns to the tail on focus", async ({
+  page,
+}) => {
+  // Factor 3 (owner's call): if you were at the END when you switched away, you come back
+  // to the END — not a stale proportional spot. The position is saved with an explicit
+  // `atBottom` flag (NOT inferable from the ratio once content grows), and restore chases
+  // the live tail for it.
+  await page.setViewportSize({ width: 1100, height: 380 });
+  const scroller = page.locator(".scroller");
+  const top = () => scroller.evaluate((el) => (el as HTMLElement).scrollTop);
+  const gap = () =>
+    scroller.evaluate((el) => {
+      const s = el as HTMLElement;
+      return s.scrollHeight - s.scrollTop - s.clientHeight;
+    });
+
+  // Open older-session, then deliberately scroll up and back to the bottom so a REAL scroll
+  // event (not the open's programmatic snap) persists an at-bottom position.
+  await openSidebar(page);
+  await page
+    .getByTestId("sidebar")
+    .getByText("Explore the fold reducer")
+    .click();
+  await expect(page.locator("header .title")).toContainText(
+    "Explore the fold reducer",
+  );
+  await expect.poll(gap).toBeLessThan(80); // wait for the open to land before scrolling
+  await page.waitForTimeout(900); // let the open's settle/progScrollUntil window lapse
+  await scroller.evaluate((el) => ((el as HTMLElement).scrollTop = 0));
+  await expect.poll(top).toBe(0);
+  await page.waitForTimeout(300); // debounced persist of the scrolled-up spot
+  await scroller.evaluate(
+    (el) => ((el as HTMLElement).scrollTop = (el as HTMLElement).scrollHeight),
+  );
+  await expect.poll(gap).toBeLessThan(80);
+  await page.waitForTimeout(350); // debounced persist
+  const atBottom = await page.evaluate(() => {
+    const raw = localStorage.getItem("pilot.scrollPositions");
+    return raw ? JSON.parse(raw)["older-session"]?.atBottom : undefined;
+  });
+  expect(atBottom).toBe(true);
+
+  // Switch away and back — we should land at the live tail, not the mid-transcript ratio.
+  await openSidebar(page);
+  await page.getByTestId("sidebar").getByText("Wire up the WebSocket").click();
+  await expect(page.locator("header .title")).toContainText(
+    "Wire up the WebSocket",
+  );
+  await openSidebar(page);
+  await page
+    .getByTestId("sidebar")
+    .getByText("Explore the fold reducer")
+    .click();
+  await expect(page.locator("header .title")).toContainText(
+    "Explore the fold reducer",
+  );
+  await expect.poll(gap).toBeLessThan(80); // back at the live tail
+  await expect(page.getByTestId("new-messages-pill")).toHaveCount(0);
+});
+
 test("PWA update prompt appears and can be dismissed", async ({ page }) => {
   // The ?dev bar's "update" button stands in for a real service-worker update.
   await page.getByRole("button", { name: "update", exact: true }).click();

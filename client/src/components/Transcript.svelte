@@ -26,7 +26,8 @@
     loadScrollPositions,
     persistScrollPositions,
     saveScrollPosition,
-    restoreScrollTop,
+    planRestore,
+    BOTTOM_GAP,
   } from "../lib/scroll-position.js";
 
   const items = $derived(store.transcriptItems);
@@ -237,19 +238,24 @@
   // Per-session reading position, persisted so switching back to a warmed session
   // restores where you were instead of always jumping to the bottom. Saved on scroll
   // (debounced), on session-switch-away, and on pagehide (mirrors the draft stash).
-  let scrollPositions = $state<Record<string, { ratio: number; at: number }>>(
-    loadScrollPositions(),
-  );
+  let scrollPositions = $state<
+    Record<string, { ratio: number; atBottom: boolean; at: number }>
+  >(loadScrollPositions());
   let savePosTimer: ReturnType<typeof setTimeout> | undefined;
   function scheduleSavePosition(): void {
     if (!scroller || !store.session.ref?.sessionId) return;
     const id = store.session.ref.sessionId;
+    // Capture geometry NOW (at scroll time, on the session in view), not in the timer:
+    // by the time the debounce fires the session may have swapped, and the scroller would
+    // then read the new transcript's geometry against the old id (the exact mis-pairing
+    // the switch-away save used to commit).
     const top = scroller.scrollTop;
     const h = scroller.scrollHeight;
+    const c = scroller.clientHeight;
     // Debounce: a burst of streaming-delta scrolls coalesces into one write.
     clearTimeout(savePosTimer);
     savePosTimer = setTimeout(() => {
-      scrollPositions = saveScrollPosition(scrollPositions, id, top, h);
+      scrollPositions = saveScrollPosition(scrollPositions, id, top, h, c);
       persistScrollPositions(scrollPositions);
     }, 200);
   }
@@ -267,6 +273,7 @@
       id,
       scroller.scrollTop,
       scroller.scrollHeight,
+      scroller.clientHeight,
     );
     persistScrollPositions(scrollPositions);
   }
@@ -274,49 +281,77 @@
   function onScroll() {
     if (!scroller) return;
     const gap = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
-    pinned = gap < 80;
+    pinned = gap < BOTTOM_GAP;
     // Reaching the bottom clears the active-session unread flag (you've seen it all).
     if (pinned) store.clearActiveUnread();
     // A user scroll (not one of ours) abandons prompt-stepping, so the next ⌘↑ re-anchors.
     if (Date.now() >= progScrollUntil) navIndex = null;
     // Persist where the user is reading (debounced). Skipped during our own programmatic
-    // scrolls (prompt-stepping / snapToBottom) — those set progScrollUntil, and saving a
+    // scrolls (prompt-stepping / settleScroll) — those set progScrollUntil, and saving a
     // transient mid-scroll position would restore to a spot the user never chose.
     if (Date.now() >= progScrollUntil) scheduleSavePosition();
   }
 
-  /** Re-assert the scroll position across a few frames. A single scrollTo can land short
-   *  when content arrives after the first layout (images decoding, markstream finalizing
-   *  blocks), so re-running per frame lets those settle and the position hold. The
-   *  streaming pin gets this convergence for free by re-firing on every delta — a one-shot
-   *  switch into an idle session does not, so it has to settle itself.
-   *
-   *  With no `target`, chases the live bottom. With a target, chases that scrollTop,
-   *  clamped each frame to the (possibly still-growing) scrollHeight — used to restore a
-   *  saved reading position: content may have grown since it was saved, so the stored
-   *  ratio is re-derived against the current height and the chase lets late reflow settle. */
-  function snapToBottom(target?: number): void {
-    // Mark these scrolls as ours so onScroll doesn't save a transient mid-snap reading
-    // position (the 4 chase frames fire scroll events while scrollTop is still settling;
-    // saving those would restore to a spot the user never chose). 800ms covers the chase.
-    progScrollUntil = Date.now() + 800;
-    let frames = 0;
-    const settle = () => {
-      if (!scroller) return;
-      const top =
-        target === undefined ? scroller.scrollHeight : Math.min(target, scroller.scrollHeight);
-      scroller.scrollTo({ top });
-      if (++frames < 4) requestAnimationFrame(settle);
-    };
-    settle();
+  // Re-assert a scroll position as late layout changes the content height — images decode,
+  // markstream finalizes blocks ASYNCHRONOUSLY (mermaid/infographic/code swaps change a
+  // block's height over its own rAF passes after first paint), and a turn's "Worked for Ns"
+  // block collapses. So `scrollHeight` measured once at switch/restore time is NOT the
+  // settled height — a single scrollTo lands short (wrong spot, sometimes blank past the
+  // content end). The OLD code froze a pixel `target = ratio * staleHeight` and chased 4
+  // frames clamping with `Math.min`, which can never correct UPWARD as content grows.
+  //
+  // Instead we keep a target (a `ratio`, or `undefined` = the live bottom) and re-apply it
+  // RE-DERIVED against the CURRENT height whenever the content actually resizes, for a short
+  // window. A ResizeObserver — not a tight rAF loop — is the right tool: it fires only on real
+  // height changes, so static content is left alone (the loop version re-scrolled every frame
+  // and, because markstream nudges height sub-pixel for a while, never hit its stable-exit —
+  // locking the scroll for its whole cap and fighting any scroll the user/test did meanwhile).
+  let settleRatio: number | undefined;
+  let settleUntil = 0;
+  let content = $state<HTMLDivElement>();
+  let settleObserver: ResizeObserver | undefined;
+  function applySettle(): void {
+    if (!scroller) return;
+    if (settleRatio === undefined) {
+      // Live-bottom follow: only while still pinned, so a user scrolling up mid-window isn't
+      // yanked back down (mirrors the streaming pin's `pinned` gate).
+      if (!pinned) return;
+      scroller.scrollTo({ top: scroller.scrollHeight });
+    } else {
+      scroller.scrollTo({ top: settleRatio * scroller.scrollHeight });
+    }
+  }
+  /** Scroll to a target and hold it against late reflow for ~half a second. `ratio`
+   *  undefined chases the live bottom; a number restores that proportional reading spot. */
+  function settleScroll(ratio?: number): void {
+    settleRatio = ratio;
+    settleUntil = Date.now() + 500;
+    // Mark these scrolls as ours so onScroll doesn't persist a transient mid-settle position.
+    progScrollUntil = Date.now() + 500;
+    applySettle();
   }
 
-  // Switching sessions restores where you were reading, if you left a saved position and
-  // nothing has changed the stakes since: a session that's UNREAD (new content arrived
-  // while away) or RUNNING/INITIALIZING (a live turn is in flight) jumps to the live
-  // bottom — you want to see the new/live output, not a stale reading spot. Otherwise the
-  // saved ratio is re-derived against the current scrollHeight (content may have grown)
-  // and chased across frames so late reflow (images, markstream) doesn't land it short.
+  // SAVE the leaving session's reading position BEFORE the swap. This MUST be an
+  // `$effect.pre`: a regular `$effect` runs AFTER Svelte patches the DOM, by which point
+  // the scroller already shows the INCOMING session's transcript — reading its geometry
+  // there saved the leaving session's id against the wrong height (proven: it stored
+  // demo-session's position using older-session's scrollHeight). A pre-effect fires before
+  // the patch, while the scroller still shows the OLD transcript, so the geometry is right.
+  let leavingId: string | undefined;
+  $effect.pre(() => {
+    const id = store.session.ref?.sessionId;
+    if (id === leavingId) return;
+    if (leavingId) savePositionFor(leavingId); // old DOM still mounted here
+    leavingId = id;
+  });
+
+  // RESTORE on focus. Runs after the DOM patch (post-effect), then `settleScroll` chases
+  // the settling layout. Policy (the owner's call): honour the saved position whatever the
+  // session's live state — if you were at the live tail, return to the tail (even if it
+  // grew while you were away); if you were scrolled up, return to that spot and let the
+  // "new messages ↓" pill flag anything below. Only a session with NO saved position (or no
+  // id) defaults to the bottom. (Previously UNREAD/RUNNING/INITIALIZING force-jumped to the
+  // bottom, overriding a scrolled-up reader — that's the "I'm not where I left it" miss.)
   // Keyed off the focused session id, not every snapshot: a same-session re-snapshot
   // mid-turn (rename, model change) must NOT yank the position out from under you.
   // Declared before the streaming-pin effect so it wins the flush — it rebaselines
@@ -326,42 +361,20 @@
   $effect(() => {
     const id = store.session.ref?.sessionId;
     if (id === lastFocusId) return;
-    // Stash the session we're LEAVING before flipping, keyed by ITS id (not the new ref —
-    // see savePositionFor). At this point lastFocusId is still the old session and the
-    // scroller still shows its transcript.
-    if (lastFocusId) savePositionFor(lastFocusId);
     lastFocusId = id;
     prevSize = -1;
     navIndex = null;
-    // Decide restore-vs-bottom BEFORE reading scroller (the new transcript may not have
-    // laid out yet). `running`/`initializing`/unread sessions go to the live tail.
-    const live =
-      !id ||
-      store.runningIds.has(id) ||
-      store.initializingIds.has(id) ||
-      store.unread.has(id);
-    if (live) {
-      pinned = true;
-      store.clearActiveUnread();
-      snapToBottom();
-      return;
-    }
-    // Restore: the saved ratio against the current scrollHeight. The first snapToBottom
-    // frame runs before layout fully settles, so re-derive in each chase frame via the
-    // closure-captured `id` + `scrollPositions` — but those are fixed at effect time, so
-    // we read them once here and let snapToBottom clamp per frame as scrollHeight grows.
-    const target =
-      scroller && restoreScrollTop(scrollPositions, id, scroller.scrollHeight);
-    if (target !== null && scroller) {
-      // Restored position: NOT pinned (the user had scrolled up). Stays put; the streaming
-      // pin won't fire (turn is settled — `grew` is false on the swap).
+    const plan = id ? planRestore(scrollPositions, id) : null;
+    if (plan && plan !== "bottom") {
+      // Scrolled-up reading spot: NOT pinned. settleScroll re-derives ratio * scrollHeight
+      // each frame, so late reflow (markstream/images/work-block collapse) lands it right.
       pinned = false;
-      snapToBottom(target);
+      settleScroll(plan.ratio);
     } else {
-      // No saved position — the live tail.
+      // "bottom" (left at the tail) or null (never scrolled this session) — the live tail.
       pinned = true;
       store.clearActiveUnread();
-      snapToBottom();
+      settleScroll();
     }
   });
 
@@ -376,9 +389,9 @@
       // (animated) while the next turn streams — both make scrollHeight jump AFTER a one-shot
       // scrollTo runs, leaving it short. A short landing fires a scroll event read as a
       // scroll-away, unpinning us for good (the pin then stops, so it never recovers, and
-      // every later delta false-flags the active session unread). snapToBottom chases the
-      // true bottom for a few frames so the pin holds. (Same reason send/switch use it.)
-      snapToBottom();
+      // every later delta false-flags the active session unread). settleScroll chases the
+      // true bottom until it holds steady. (Same reason send/switch use it.)
+      settleScroll();
       // Pinned + caught up: nothing is below the fold.
       store.clearActiveUnread();
     } else if (grew) {
@@ -403,16 +416,16 @@
     store.clearActiveUnread();
     // Re-assert across frames (not a single scrollTo): sending while scrolled up jumps
     // from the top, where content between may still be settling (images decoding,
-    // markstream finalizing). A one-shot scroll can land short; snapToBottom chases the
-    // true bottom for a few frames so the pin holds. (Same reason session-switch uses it.)
-    snapToBottom();
+    // markstream finalizing). A one-shot scroll can land short; settleScroll chases the
+    // true bottom until it holds steady. (Same reason session-switch uses it.)
+    settleScroll();
   });
 
   /** Jump to the newest content and clear the unread flag (the "new messages ↓" pill). */
   function scrollToBottom(): void {
     if (!scroller) return;
-    // Ours — don't save transient mid-smooth-scroll positions (see snapToBottom).
-    progScrollUntil = Date.now() + 800;
+    // Ours — don't save transient mid-smooth-scroll positions (see settleScroll).
+    progScrollUntil = Date.now() + 900;
     scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
     pinned = true;
     store.clearActiveUnread();
@@ -490,9 +503,19 @@
     // so a return from the back-stack still has the position.
     const onPageHide = () => savePositionNow();
     window.addEventListener("pagehide", onPageHide);
+    // Re-apply the active settle target whenever the content's height actually changes (late
+    // markstream block enhancement, image decode, work-block collapse) — but only inside the
+    // brief window a switch/restore/send opened (settleUntil). See settleScroll.
+    if (content && typeof ResizeObserver !== "undefined") {
+      settleObserver = new ResizeObserver(() => {
+        if (Date.now() < settleUntil) applySettle();
+      });
+      settleObserver.observe(content);
+    }
     return () => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("pagehide", onPageHide);
+      settleObserver?.disconnect();
     };
   });
 </script>
@@ -511,7 +534,7 @@
     onChange: pull.onChange,
   }}
 >
-  <div class="col">
+  <div class="col" bind:this={content}>
     <!-- Branch ("jump here") affordance — a git-fork glyph. Reused on user prompts and
          turn-final assistant paragraphs. -->
     {#snippet branchIcon()}
