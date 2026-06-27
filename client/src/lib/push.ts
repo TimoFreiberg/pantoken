@@ -29,7 +29,9 @@ function authHeaders(extra?: Record<string, string>): Record<string, string> {
 // VAPID public keys are base64url; PushManager.subscribe wants a BufferSource.
 // Allocate over an explicit ArrayBuffer so the type is ArrayBuffer-backed (not the
 // generic ArrayBufferLike, which the DOM lib types reject for applicationServerKey).
-function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
+// Exported so the base64url→bytes decode (the regression-prone pure part: padding,
+// -/_ char mapping, byte copy) is unit-testable without a DOM / PushManager.
+export function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   const padding = "=".repeat((4 - (base64.length % 4)) % 4);
   const b64 = (base64 + padding).replace(/-/g, "+").replace(/_/g, "/");
   const raw = atob(b64);
