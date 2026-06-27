@@ -1020,6 +1020,32 @@
           <Button variant="primary" type="submit" title="Save this access token on this device" disabled={!tokenDraft.trim()}>Save</Button>
         </form>
       </section>
+
+      <section class="group" data-testid="data-dir-section">
+        <div class="row">
+          <div class="rinfo">
+            <div class="rlabel">Data directory</div>
+            <div class="rdesc">
+              Where pilot.log, settings, and the session archive live on this server.
+              <code data-testid="data-dir-path">{store.dataDir || "unknown"}</code>
+            </div>
+          </div>
+          {#if store.dataDir}
+            <div class="actions">
+              <Button
+                title="Copy the data directory path to the clipboard"
+                onclick={() => store.copyDataDirPath()}
+              >Copy path</Button
+              >
+              <Button
+                title="Reveal the data directory in your file manager (Finder on macOS)"
+                onclick={() => store.openDataDir()}
+              >Reveal</Button
+              >
+            </div>
+          {/if}
+        </div>
+      </section>
       {/if}
       </div>
     </div>

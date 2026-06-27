@@ -80,8 +80,7 @@ export interface Toast {
 /** A view in the back/forward navigation history (⌘[ / ⌘]): a focused session, or a
  *  pending new-session draft identified by its project cwd. Client-only view state. */
 type NavEntry =
-  | { kind: "session"; sessionId: string }
-  | { kind: "draft"; cwd: string };
+  { kind: "session"; sessionId: string } | { kind: "draft"; cwd: string };
 
 function navEntryEquals(a: NavEntry, b: NavEntry): boolean {
   if (a.kind !== b.kind) return false;
@@ -93,6 +92,10 @@ function navEntryEquals(a: NavEntry, b: NavEntry): boolean {
 class PilotStore {
   session = $state<SessionState>(initialSessionState());
   serverId = $state<string | null>(loadLastServerId());
+  /** The server's data directory (absolute path), broadcast in `hello`. Shown in Settings
+   *  with copy + reveal-in-Finder actions. Empty string until hello arrives (or when the
+   *  server didn't provide one — older/mock servers). */
+  dataDir = $state("");
   ready = $state(false);
   unauthorized = $state(false);
   /** Why the auth gate is showing, so it can explain itself. "expired" = a token was
@@ -606,17 +609,15 @@ class PilotStore {
           prompt.sessionId === sessionId &&
           !existing.has(prompt.promptId),
       )
-      .map(
-        (prompt): TranscriptItem => ({
-          kind: "user",
-          id: prompt.promptId,
-          text: prompt.text,
-          images: prompt.images,
-          ts: prompt.createdAt,
-          delivery: deliveryState(prompt.state, this.connection),
-          deliveryError: prompt.error,
-        }),
-      );
+      .map((prompt): TranscriptItem => ({
+        kind: "user",
+        id: prompt.promptId,
+        text: prompt.text,
+        images: prompt.images,
+        ts: prompt.createdAt,
+        delivery: deliveryState(prompt.state, this.connection),
+        deliveryError: prompt.error,
+      }));
     const items = [...this.session.items, ...optimistic];
     // While a new session is being created, surface its first prompt at the top of the
     // (otherwise empty) transcript until the real userMessage lands — `existing.has`
@@ -765,6 +766,7 @@ class PilotStore {
     switch (msg.type) {
       case "hello":
         this.serverId = msg.serverId;
+        this.dataDir = msg.dataDir ?? "";
         persistLastServerId(msg.serverId);
         void this.hydrateOutbox(msg.serverId);
         // A hello after the first is a reconnect: the hub will re-snapshot us onto the
@@ -1821,9 +1823,9 @@ class PilotStore {
     this.extensions = this.extensions.map((e) =>
       e.resolvedPath === resolvedPath ? { ...e, enabled } : e,
     );
-    const ownedName = this.extensions.find(
-      (e) => e.resolvedPath === resolvedPath,
-    )?.name.replace(/\.ts$/, "");
+    const ownedName = this.extensions
+      .find((e) => e.resolvedPath === resolvedPath)
+      ?.name.replace(/\.ts$/, "");
     if (ownedName && isPilotOwnedExtension(ownedName)) {
       const cur = this.pilotSettings.enabledExtensions ?? [
         ...PILOT_OWNED_EXTENSION_NAMES,
@@ -2150,6 +2152,20 @@ class PilotStore {
       this.lastError = "couldn't copy to clipboard (needs a secure context)";
       return false;
     }
+  }
+  /** Copy the server's data directory path to the clipboard. The path is already known
+   *  to this client (from `hello`), so this is a local copy — no server round-trip.
+   *  Returns whether it succeeded so the caller can flash feedback. */
+  async copyDataDirPath(): Promise<boolean> {
+    if (!this.dataDir) return false;
+    return this.copyToClipboard(this.dataDir);
+  }
+  /** Ask the server to reveal its data directory in the platform file manager
+   *  (Finder on macOS). The client can't spawn processes, so this goes over the WS as
+   *  an `openDataDir` message; a headless/remote host answers with an `error`. */
+  openDataDir(): void {
+    if (!this.dataDir) return;
+    send({ type: "openDataDir" });
   }
   get activeSessionPath(): string | null {
     return (

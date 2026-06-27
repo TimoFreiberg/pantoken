@@ -137,7 +137,12 @@ export interface SessionAttention {
 }
 
 export type ServerMessage =
-  | { type: "hello"; protocolVersion: number; serverId: string }
+  | {
+      type: "hello";
+      protocolVersion: number;
+      serverId: string;
+      dataDir: string;
+    }
   /** Full authoritative state — sent on (re)connect so clients catch up. */
   | { type: "snapshot"; state: SessionState }
   /** One incremental driver event to fold. */
@@ -479,6 +484,12 @@ export type ClientMessage =
   | { type: "forceUpdate" }
   /** Dev-only: drive the mock fixture to a named scripted state. */
   | { type: "mock"; script: string }
+  /** Reveal the server's data directory in the platform file manager (Finder on macOS).
+   *  The client can't spawn processes, so this is a server-side action. The server
+   *  best-efforts the spawn; a failure surfaces as an `error` message (e.g. on a
+   *  headless/remote host with no GUI). The path itself is already known to the client
+   *  via `hello.dataDir`, so copying it is local and needs no round-trip. */
+  | { type: "openDataDir" }
   | { type: "ping" };
 
 export function parseClientMessage(raw: string): ClientMessage | null {
