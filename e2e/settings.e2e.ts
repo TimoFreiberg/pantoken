@@ -62,8 +62,6 @@ test("the Environment section shows login-shell status and persists an override"
 
 test("saving a provider API key flips it to connected", async ({ page }) => {
   await openSettings(page, "providers");
-  // The Providers list starts collapsed — expand it to reach the rows.
-  await page.getByTestId("providers-toggle").click();
 
   // Google ships unconnected + key-capable in the mock.
   const google = page.getByTestId("provider-google");
@@ -81,7 +79,6 @@ test("saving a provider API key flips it to connected", async ({ page }) => {
 
 test("OAuth sign-in flow connects a provider", async ({ page }) => {
   await openSettings(page, "providers");
-  await page.getByTestId("providers-toggle").click();
 
   // OpenAI Codex ships OAuth-capable but unconnected in the mock.
   const codex = page.getByTestId("provider-openai-codex");
@@ -107,7 +104,6 @@ test("cancelling the OAuth dialog leaves the provider unconnected", async ({
   page,
 }) => {
   await openSettings(page, "providers");
-  await page.getByTestId("providers-toggle").click();
   const codex = page.getByTestId("provider-openai-codex");
   await codex.getByTestId("provider-signin").click();
 
@@ -122,7 +118,6 @@ test("cancelling the OAuth dialog leaves the provider unconnected", async ({
 
 test("OAuth sign-out disconnects a provider", async ({ page }) => {
   await openSettings(page, "providers");
-  await page.getByTestId("providers-toggle").click();
 
   // Anthropic ships OAuth-connected in the mock.
   const anthropic = page.getByTestId("provider-anthropic");
@@ -220,18 +215,17 @@ test("the favorites list has a search that filters models", async ({
   await expect(settings.getByText("No models match")).toBeVisible();
 });
 
-test("the Providers list is collapsed by default and expands on click", async ({
+test("the Providers list shows its rows directly with a connected count", async ({
   page,
 }) => {
   await openSettings(page, "providers");
-  const toggle = page.getByTestId("providers-toggle");
-  // The header is present but the rows are hidden until expanded.
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
-  await expect(page.getByTestId("provider-google")).toHaveCount(0);
-
-  await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  // The Providers tab owns its own scroll now, so the list isn't collapsed behind a
+  // toggle — the rows render immediately, and the static header shows the connected count.
   await expect(page.getByTestId("provider-google")).toBeVisible();
+  await expect(page.getByTestId("provider-anthropic")).toBeVisible();
+  await expect(page.locator(".gtitle-static")).toContainText(
+    /\d+\/\d+ connected/,
+  );
 });
 
 test("favorites groups collapse by default, expand on click, and a search auto-expands", async ({
@@ -310,7 +304,6 @@ test("the Providers list has a search that filters the rows", async ({
   page,
 }) => {
   await openSettings(page, "providers");
-  await page.getByTestId("providers-toggle").click();
   const settings = page.getByTestId("settings-panel");
 
   const search = settings.getByPlaceholder("Search providers…");
@@ -326,7 +319,6 @@ test("Escape in a section search clears the filter before closing the panel", as
   page,
 }) => {
   await openSettings(page, "providers");
-  await page.getByTestId("providers-toggle").click();
   const panel = page.getByTestId("settings-panel");
   const search = panel.getByPlaceholder("Search providers…");
 
@@ -348,7 +340,6 @@ test("the Extensions list has a search that filters the rows", async ({
   page,
 }) => {
   await openSettings(page, "extensions");
-  await page.getByTestId("extensions-toggle").click();
   const settings = page.getByTestId("settings-panel");
 
   const search = settings.getByPlaceholder("Search extensions…");
@@ -360,19 +351,14 @@ test("the Extensions list has a search that filters the rows", async ({
   await expect(settings.getByText("No extensions match")).toBeVisible();
 });
 
-test("the Extensions section is collapsed by default and lists on expand", async ({
+test("the Extensions section lists its rows directly with an on-count", async ({
   page,
 }) => {
   await openSettings(page, "extensions");
-  const toggle = page.getByTestId("extensions-toggle");
-  // Header present + summary count; rows hidden until expanded (and not yet queried).
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
-  await expect(toggle).toContainText("4/5 on");
-  await expect(page.getByTestId("ext-answer.ts")).toHaveCount(0);
-
-  await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-expanded", "true");
-  // The mock's loaded extensions list, with counts; the errored one shows its problem.
+  // The Extensions tab owns its own scroll now, so the list isn't collapsed behind a
+  // toggle — rows render immediately, fetched on panel open. The static header shows the
+  // on-count.
+  await expect(page.locator(".gtitle-static")).toContainText("4/5 on");
   await expect(page.getByTestId("ext-answer.ts")).toBeVisible();
   await expect(page.getByTestId("ext-tasklist.ts")).toContainText("4 tools");
   await expect(page.getByTestId("ext-fancy-tui.ts")).toContainText(
@@ -388,7 +374,6 @@ test("toggling an extension flips its switch and reconciles with the server", as
   page,
 }) => {
   await openSettings(page, "extensions");
-  await page.getByTestId("extensions-toggle").click();
 
   // answer.ts ships enabled; noisy-notify.ts ships disabled (so re-enable is exercisable).
   const answer = page.getByTestId("ext-toggle-answer.ts");
@@ -404,9 +389,9 @@ test("toggling an extension flips its switch and reconciles with the server", as
   await noisy.click();
   await expect(noisy).toHaveAttribute("aria-checked", "true");
 
-  // The flip survives a re-open (server is authoritative — the mock persisted both toggles).
-  // The section stays expanded across close/reopen and re-queries on open, so the rows are
-  // already shown without re-expanding.
+  // The flip survives a re-open (server is authoritative — the mock persisted both
+  // toggles). The section is always shown and re-queries on open, so the rows are present
+  // without re-expanding.
   await page.keyboard.press("Escape");
   await page.getByTestId("settings-toggle").click();
   await expect(page.getByTestId("ext-toggle-answer.ts")).toHaveAttribute(
@@ -423,7 +408,6 @@ test("pilot-owned extensions group under a Pilot origin header with their descri
   page,
 }) => {
   await openSettings(page, "extensions");
-  await page.getByTestId("extensions-toggle").click();
 
   // The Pilot origin header is present and expanded by default, grouping pilot's owned
   // extensions (session-namer + tasklist) under it — the D3 "Pilot" badge projection.
@@ -465,7 +449,6 @@ test("the pilot-side toggle disables a pilot-owned extension (pi's force-exclude
   // asserts that toggle actually persists for a pilot-owned row — the gap the force-exclude
   // path leaves for owned extensions.
   await openSettings(page, "extensions");
-  await page.getByTestId("extensions-toggle").click();
 
   const toggle = page.getByTestId("ext-toggle-session-namer.ts");
   await expect(toggle).toHaveAttribute("aria-checked", "true");
