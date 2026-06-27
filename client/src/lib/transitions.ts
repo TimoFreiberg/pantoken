@@ -18,10 +18,24 @@ function prefersReducedMotion(): boolean {
   );
 }
 
+/** The pure core of {@link reveal}: the effective duration for a transition given the
+ *  reduced-motion preference + caller params. Split out (mirroring theme.ts's
+ *  resolveThemeMode / notify.ts's shouldNotify pattern) so the duration decision is
+ *  unit-testable without a window/matchMedia dependency. Reduced motion forces 0
+ *  (instant snap) regardless of the caller's requested duration; otherwise the caller's
+ *  duration wins, falling back to REVEAL_MS. */
+export function revealDuration(
+  params: SlideParams,
+  reducedMotion: boolean,
+): number {
+  if (reducedMotion) return 0;
+  return params.duration ?? REVEAL_MS;
+}
+
 export function reveal(
   node: Element,
   params: SlideParams = {},
 ): TransitionConfig {
-  const duration = prefersReducedMotion() ? 0 : (params.duration ?? REVEAL_MS);
+  const duration = revealDuration(params, prefersReducedMotion());
   return slide(node, { ...params, duration });
 }
