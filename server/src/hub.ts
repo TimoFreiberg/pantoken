@@ -24,6 +24,22 @@ import { readPilotSettings, writePilotSettings } from "./settings-store.js";
 
 export type Send = (msg: ServerMessage) => void;
 
+/** The production opener: spawn the platform file manager on a directory (Finder on
+ *  macOS, Explorer on Windows, xdg-open elsewhere). Fire-and-forget — a non-zero exit
+ *  (e.g. no xdg-open installed on a headless host) surfaces nowhere, which is the
+ *  designed graceful degrade. Extracted so `openDataDir` can take it as a seam:
+ *  mock mode (e2e/dev) injects a no-op so automated UI never opens real GUI windows. */
+export function defaultOpenInFileManager(dir: string): void {
+  const cmd =
+    process.platform === "darwin"
+      ? ["open", dir]
+      : process.platform === "win32"
+        ? ["explorer", dir]
+        : ["xdg-open", dir];
+  const child = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
+  void child.exited.catch(() => {});
+}
+
 // How long an OAuth prompt waits for the operator before the login aborts itself. The
 // browser hop + copy/paste is slow but human-paced; a few minutes is generous without
 // leaving a zombie login (and its loopback server) pending forever if a phone is closed.
@@ -223,6 +239,12 @@ export class SessionHub {
     // and used by `openDataDir` to spawn the platform file manager. Optional so tests
     // that don't exercise it don't have to pass one.
     private dataDir?: string,
+    // Spawns the platform file manager (Finder/explorer/xdg-open) on `openDataDir`.
+    // Defaults to the real spawn (`defaultOpenInFileManager`); production passes that
+    // explicitly, mock mode (e2e/dev) passes a no-op so automated UI never opens real
+    // GUI windows on the host. Injected rather than env-gated inside the hub so unit
+    // tests can assert the call without touching process state.
+    private openInFileManager: (dir: string) => void = defaultOpenInFileManager,
   ) {
     driver.subscribe((ev) => this.onEvent(ev));
     // Project-trust cards travel their own channel (D12): they're decided before a
@@ -1590,7 +1612,9 @@ export class SessionHub {
    *  The client can't spawn processes, so this is a server-side best-effort: on a
    *  headless/remote host `open` either no-ops or errors, which surfaces as an `error`
    *  message rather than crashing. macOS uses `open` (reveals the folder); other platforms
-   *  fall back to the path-copy action the UI offers alongside this. */
+   *  fall back to the path-copy action the UI offers alongside this. The spawn itself is
+   *  the injected `openInFileManager` — a no-op in mock mode so tests never open a real
+   *  GUI window. */
   private async openDataDir(send: (msg: ServerMessage) => void): Promise<void> {
     const dir = this.dataDir;
     if (!dir) {
@@ -1601,15 +1625,7 @@ export class SessionHub {
       return;
     }
     try {
-      const cmd =
-        process.platform === "darwin"
-          ? ["open", dir]
-          : process.platform === "win32"
-            ? ["explorer", dir]
-            : ["xdg-open", dir];
-      const child = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
-      // Don't await the GUI; a non-zero exit (e.g. no xdg-open installed) surfaces later.
-      void child.exited.catch(() => {});
+      this.openInFileManager(dir);
     } catch (e) {
       send({
         type: "error",

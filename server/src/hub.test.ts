@@ -1782,4 +1782,44 @@ describe("desktop update relay", () => {
     hub.addClient(late.send);
     expect(lastUpdate(late)).toMatchObject({ desktopStale: true });
   });
+
+  test("openDataDir calls the injected opener, not the real spawn", () => {
+    // Regression: the e2e settings spec clicks Reveal, which sends `openDataDir`; the
+    // hub used to Bun.spawn(`open <dir>`) directly and pop real Finder windows on the
+    // host. The opener is now a seam — mock mode injects a no-op, and this asserts the
+    // hub honors it (no real spawn reachable from a unit test).
+    const opened: string[] = [];
+    const hub = new SessionHub(
+      new FakeDriver(),
+      undefined,
+      1000,
+      "stable-server-id",
+      "/tmp/pilot-data",
+      (dir) => opened.push(dir),
+    );
+    const a = client();
+    hub.addClient(a.send);
+    hub.handleClient(a.send, { type: "openDataDir" });
+    expect(opened).toEqual(["/tmp/pilot-data"]);
+    // No error surfaced: the opener ran, the graceful-degrade path stayed silent.
+    expect(a.received.some((m) => m.type === "error")).toBe(false);
+  });
+
+  test("openDataDir surfaces an error when no data dir is configured", () => {
+    const opened: string[] = [];
+    const hub = new SessionHub(
+      new FakeDriver(),
+      undefined,
+      1000,
+      "stable-server-id",
+      undefined,
+      (dir) => opened.push(dir),
+    );
+    const a = client();
+    hub.addClient(a.send);
+    hub.handleClient(a.send, { type: "openDataDir" });
+    expect(opened).toEqual([]);
+    const err = a.received.find((m) => m.type === "error");
+    expect(err?.type === "error" && err.message).toMatch(/not configured/);
+  });
 });

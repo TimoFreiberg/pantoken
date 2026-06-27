@@ -128,6 +128,11 @@ const push = new PushService();
 // Arm the greeting as the landing fixture BEFORE the hub is built — the hub seeds its
 // landing default from driver.defaultSeed() at construction.
 mock?.bootstrap();
+// Mock mode (e2e + agent UI dev) runs against the same prod entrypoint as the
+// live app, so the data-dir "Reveal" button would otherwise spawn a real Finder/
+// Explorer window on the host every time a test clicks it. Inject a no-op opener
+// here — the real driver path keeps the live spawn (defaultOpenInFileManager).
+const openInFileManager = mock ? () => {} : undefined; // falls back to the hub's real default
 const hub = new SessionHub(
   driver,
   (n) => {
@@ -136,6 +141,7 @@ const hub = new SessionHub(
   config.liveRefreshMs,
   serverId,
   config.dataDir,
+  openInFileManager,
 );
 
 const rawSend = (ws: ServerWebSocket<WsData>, msg: ServerMessage) =>
