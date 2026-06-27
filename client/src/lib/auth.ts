@@ -4,16 +4,31 @@
 
 const KEY = "pilot_token";
 
-export function getToken(): string | null {
-  const url = new URL(location.href);
+/** The pure core of {@link getToken}: given a URL + a KV-like store, decide the token
+ *  to use AND whether the URL needs scrubbing (because it carried `?token=`). Split
+ *  out (mirroring theme.ts's resolveThemeMode / notify.ts's shouldNotify) so the
+ *  capture-then-scrub flow is unit-testable without the location/localStorage/history
+ *  globals — the security-relevant part is that a `?token=` URL is persisted AND flagged
+ *  for scrubbing so the token doesn't linger in history/Referer/logs. Returns the token
+ *  (from the URL if present, else whatever's in the store) + the scrubbed URL (null when
+ *  no scrub is needed). */
+export function captureTokenFromUrl(
+  url: URL,
+  kv: Pick<Storage, "getItem" | "setItem">,
+): { token: string | null; scrubbedUrl: string | null } {
   const fromUrl = url.searchParams.get("token");
   if (fromUrl) {
-    localStorage.setItem(KEY, fromUrl);
+    kv.setItem(KEY, fromUrl);
     url.searchParams.delete("token");
-    history.replaceState(null, "", url.toString());
-    return fromUrl;
+    return { token: fromUrl, scrubbedUrl: url.toString() };
   }
-  return localStorage.getItem(KEY);
+  return { token: kv.getItem(KEY), scrubbedUrl: null };
+}
+
+export function getToken(): string | null {
+  const result = captureTokenFromUrl(new URL(location.href), localStorage);
+  if (result.scrubbedUrl) history.replaceState(null, "", result.scrubbedUrl);
+  return result.token;
 }
 
 export function setToken(t: string): void {
