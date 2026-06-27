@@ -218,16 +218,35 @@ function resolveSpec(
 }
 
 /**
- * Clean up whatever the model returns into a tidy <=MAX_LEN label: first line only, strip
- * wrapping quotes and any "Title:"-style prefix, collapse whitespace, then truncate on a
- * word boundary when one is close to the cap.
+ * Clean up whatever the model returns into a tidy <=MAX_LEN label: strip wrapping
+ * quotes and any "Title:"-style prefix, collapse whitespace, then truncate on a word
+ * boundary when one is close to the cap.
+ *
+ * LABEL-STRIP IS PER-LINE, THEN FIRST NON-EMPTY LINE WINS. The model (umans-flash in
+ * particular) intermittently emits the title on line 2 under a `Title:`/`Name:` label —
+ * e.g. `Title:\nFix Auth Redirect Loop`. An earlier version took `split("\n")[0]`
+ * (line 0 only) BEFORE stripping the label, so a label-only first line sanitized to
+ * empty and the real title on line 1+ was discarded — producing "model returned an empty
+ * name" warnings despite the response containing a valid `text` block. Stripping the
+ * label across every line first turns a label-only line 0 into an empty line, so the
+ * first-non-empty-line pick then lands on the real title. A label WITH trailing content
+ * on line 0 (`Title: Fix Auth`) still resolves to that content — first line wins, only
+ * bare labels fall through. (The first-line preference is deliberate: it discards
+ * trailing reasoning/preamble the model sometimes appends after the title.)
  */
 function sanitizeName(raw: string): string {
-  let name = (raw.split("\n")[0] ?? "").trim();
+  // Strip a leading label (Title/Name/Session[/Name] + `:` or `-`) from EACH line first,
+  // so a label-only line 0 empties out and the real title on a later line is reached.
+  const lines = raw
+    .split("\n")
+    .map((l) => l.trim())
+    .map((l) =>
+      l.replace(/^(session\s*name|title|name|session)\s*[:\-]\s*/i, "").trim(),
+    );
+  // First non-empty line (after label stripping). Preserves the first-line preference
+  // for discarding trailing preamble — only bare-label line 0s fall through to line 1+.
+  let name = lines.find((l) => l.length > 0) ?? "";
   name = name.replace(/^["'`]+|["'`]+$/g, "").trim();
-  name = name
-    .replace(/^(session\s*name|title|name|session)\s*[:\-]\s*/i, "")
-    .trim();
   name = name.replace(/\s+/g, " ");
 
   if (name.length > MAX_LEN) {
@@ -315,17 +334,7 @@ async function nameSession(
 
   const name = sanitizeName(text);
   if (!name) {
-    // DIAGNOSTIC (temporary): the model returned no usable text. Surface the raw response
-    // shape BOTH on the process stderr (visible when running `bun run dev` in a terminal)
-    // AND in the UI notify text itself (the popup you see in the live desktop app —
-    // `console.error` alone goes to the GUI app's stderr, which isn't captured in
-    // pilot.log and is hard to reach, so the notify carries the detail too). The leading
-    // suspects: reasoning burning the budget (thinking block, no text, stop=length), the
-    // gateway returning a non-text content shape the namer doesn't read, or an
-    // intermittent quirk. One captured failure here resolves which. Remove once confirmed.
-    const diag = `spec=${spec} stop=${response.stopReason} blocks=[${response.content.map((c) => c.type).join(",")}] textLen=${text.length} out=${response.usage?.output ?? "?"} errMsg=${response.errorMessage ?? "(none)"}`;
-    console.error("[session-namer] empty name —", diag);
-    note(`session-namer: model returned an empty name (${diag})`);
+    note("session-namer: model returned an empty name");
     return;
   }
 
