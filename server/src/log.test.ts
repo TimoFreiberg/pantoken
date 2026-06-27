@@ -138,4 +138,45 @@ describe("Logger", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("captureConsole tees console.* into the log file without recursion", () => {
+    const dir = freshDir();
+    try {
+      const file = join(dir, "pilot.log");
+      const log = new Logger({ file, serverId: "srv-x" });
+      log.captureConsole();
+      // A console.error from a pi extension should land in the log file as a
+      // source:"console" line, with the message preserved.
+      console.error(
+        "[session-namer] empty name —",
+        "stop=length",
+        "blocks=[thinking]",
+      );
+      console.log("[pi] refocus warm session abc123");
+      const lines = readFileSync(file, "utf8")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l));
+      const errLine = lines.find(
+        (l) => l.level === "error" && l.source === "console",
+      );
+      expect(errLine).toBeDefined();
+      expect(errLine.msg).toContain("[session-namer] empty name");
+      expect(errLine.msg).toContain("blocks=[thinking]");
+      const logLine = lines.find(
+        (l) => l.level === "info" && l.source === "console",
+      );
+      expect(logLine).toBeDefined();
+      expect(logLine.msg).toContain("[pi] refocus warm session abc123");
+      // No recursion: a recursion bug (mirror re-teed through captureConsole) would
+      // emit [pilot ...] mirror lines as their OWN console lines. Assert none.
+      const pilotMirrorCount = lines.filter(
+        (l) => typeof l.msg === "string" && l.msg.startsWith("[pilot"),
+      ).length;
+      expect(pilotMirrorCount).toBe(0);
+      log.restoreConsole();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

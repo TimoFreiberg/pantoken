@@ -19,9 +19,7 @@ import {
 } from "@pilot/protocol";
 import type { OAuthLoginIO, PilotDriver } from "./driver.js";
 import { getLoginEnvStatus, resolveLoginShell } from "./pi/login-env.js";
-import {
-  resolveBackgroundModel,
-} from "./pi/background-model.js";
+import { resolveBackgroundModel } from "./pi/background-model.js";
 import { readPilotSettings, writePilotSettings } from "./settings-store.js";
 
 export type Send = (msg: ServerMessage) => void;
@@ -221,6 +219,10 @@ export class SessionHub {
     // Stable per data-dir identity. Production passes the persisted id minted at startup;
     // tests that construct a hub directly get a process-local fallback.
     private serverId = `pilot-${Math.floor(Date.now() / 1000)}`,
+    // The server's data directory. Surfaced in `hello` so the client can show/copy it,
+    // and used by `openDataDir` to spawn the platform file manager. Optional so tests
+    // that don't exercise it don't have to pass one.
+    private dataDir?: string,
   ) {
     driver.subscribe((ev) => this.onEvent(ev));
     // Project-trust cards travel their own channel (D12): they're decided before a
@@ -633,18 +635,16 @@ export class SessionHub {
             sessionId,
           }),
         )
-        .catch(
-          (e): Extract<ServerMessage, { type: "promptResult" }> => ({
-            type: "promptResult",
-            promptId,
-            accepted: false,
-            sessionId:
-              e && typeof e === "object" && "sessionId" in e
-                ? (e.sessionId as SessionId | undefined)
-                : undefined,
-            error: e instanceof Error ? e.message : String(e),
-          }),
-        );
+        .catch((e): Extract<ServerMessage, { type: "promptResult" }> => ({
+          type: "promptResult",
+          promptId,
+          accepted: false,
+          sessionId:
+            e && typeof e === "object" && "sessionId" in e
+              ? (e.sessionId as SessionId | undefined)
+              : undefined,
+          error: e instanceof Error ? e.message : String(e),
+        }));
       this.promptResults.set(promptId, result);
       if (this.promptResults.size > SessionHub.PROMPT_RESULT_CAP) {
         const oldest = this.promptResults.keys().next().value;
@@ -874,10 +874,7 @@ export class SessionHub {
           name: m.label,
         })),
     };
-    const resolved = resolveBackgroundModel(
-      settings.backgroundModel,
-      registry,
-    );
+    const resolved = resolveBackgroundModel(settings.backgroundModel, registry);
     return {
       type: "pilotSettings",
       settings,
@@ -1222,6 +1219,7 @@ export class SessionHub {
       type: "hello",
       protocolVersion: PROTOCOL_VERSION,
       serverId: this.serverId,
+      dataDir: this.dataDir ?? "",
     });
     send({ type: "snapshot", state: this.snapshotOf(conn.focusedId) });
     // Tell the fresh client what's already running / warming up (in-memory, synchronous).
@@ -1577,11 +1575,46 @@ export class SessionHub {
       case "mock":
         this.driver.runScript?.(msg.script);
         return;
+      case "openDataDir":
+        void this.openDataDir(send);
+        return;
       default:
         send({
           type: "error",
           message: `unknown message: ${(msg as { type: string }).type}`,
         });
+    }
+  }
+
+  /** Open the server's data directory in the platform file manager (Finder on macOS).
+   *  The client can't spawn processes, so this is a server-side best-effort: on a
+   *  headless/remote host `open` either no-ops or errors, which surfaces as an `error`
+   *  message rather than crashing. macOS uses `open` (reveals the folder); other platforms
+   *  fall back to the path-copy action the UI offers alongside this. */
+  private async openDataDir(send: (msg: ServerMessage) => void): Promise<void> {
+    const dir = this.dataDir;
+    if (!dir) {
+      send({
+        type: "error",
+        message: "data directory is not configured on this server",
+      });
+      return;
+    }
+    try {
+      const cmd =
+        process.platform === "darwin"
+          ? ["open", dir]
+          : process.platform === "win32"
+            ? ["explorer", dir]
+            : ["xdg-open", dir];
+      const child = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
+      // Don't await the GUI; a non-zero exit (e.g. no xdg-open installed) surfaces later.
+      void child.exited.catch(() => {});
+    } catch (e) {
+      send({
+        type: "error",
+        message: `couldn't open the data directory: ${e instanceof Error ? e.message : String(e)}`,
+      });
     }
   }
 

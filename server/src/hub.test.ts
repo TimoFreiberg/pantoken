@@ -330,6 +330,7 @@ describe("SessionHub", () => {
       type: "hello",
       protocolVersion: 1,
       serverId: "stable-server-id",
+      dataDir: "",
     });
   });
 
@@ -1626,8 +1627,7 @@ describe("SessionHub", () => {
 describe("desktop update relay", () => {
   const lastUpdate = (c: ReturnType<typeof client>) =>
     [...c.received].reverse().find((m) => m.type === "updateStatus") as
-      | Extract<ServerMessage, { type: "updateStatus" }>
-      | undefined;
+      Extract<ServerMessage, { type: "updateStatus" }> | undefined;
 
   test("reportUpdate broadcasts availability to clients", () => {
     const hub = new SessionHub(new FakeDriver());

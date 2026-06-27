@@ -39,6 +39,23 @@ const DEFAULT_MAX_GENERATIONS = 3;
 
 type Fields = Record<string, unknown>;
 
+/** Stringify a console.* argument the way the platform would for a human-readable line:
+ *  strings as-is, Errors as `name: message`, everything else via JSON (truncated so a
+ *  huge object can't blow up the log line). Mirrors Node/Bun's console rendering closely
+ *  enough for the `source: "console"` lines to read like the terminal would. */
+function stringifyForConsole(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value instanceof Error) return `${value.name}: ${value.message}`;
+  if (value === undefined) return "undefined";
+  if (value === null) return "null";
+  try {
+    const json = JSON.stringify(value);
+    return json.length > 2000 ? `${json.slice(0, 2000)}…(truncated)` : json;
+  } catch {
+    return String(value);
+  }
+}
+
 /**
  * Rotate `file` if it is at/over `maxBytes`. Shifts generations down
  * (file.N-1 -> file.N, dropping the old file.N), then file -> file.1. Keeps at
@@ -128,7 +145,8 @@ export class Logger {
     if (this.serverId) record.serverId = this.serverId;
     if (fields) Object.assign(record, fields);
 
-    // Console mirror first — it must never be blocked by a disk problem.
+    // Console mirror first — it must never be blocked by a disk problem. Uses the
+    // captured originals (see captureConsole) so a tee'd console.* doesn't recurse.
     this.mirrorToConsole(level, ts, msg, fields);
 
     try {
@@ -137,7 +155,11 @@ export class Logger {
     } catch (e) {
       // Don't let a logging failure take down the server. Surface it on the
       // console (which still works) so it isn't silent.
-      console.error("[log] failed to write log file", this.file, e);
+      this.originalConsole.error(
+        "[log] failed to write log file",
+        this.file,
+        e,
+      );
     }
   }
 
@@ -151,8 +173,57 @@ export class Logger {
     const extra =
       fields && Object.keys(fields).length ? ` ${JSON.stringify(fields)}` : "";
     const line = `[pilot${id}] ${ts} ${level} ${msg}${extra}`;
-    if (level === "error") console.error(line);
-    else if (level === "warn") console.warn(line);
-    else console.log(line);
+    if (level === "error") this.originalConsole.error(line);
+    else if (level === "warn") this.originalConsole.warn(line);
+    else this.originalConsole.log(line);
+  }
+
+  // Captured at construction, before captureConsole() swaps the globals — so the
+  // Logger's own mirror writes go to the REAL stdout/stderr, never back through the tee
+  // (which would recurse: console.error -> write() -> mirrorToConsole -> console.error).
+  private readonly originalConsole: Pick<
+    Console,
+    "log" | "warn" | "error" | "debug"
+  > = {
+    log: console.log.bind(console),
+    warn: console.warn.bind(console),
+    error: console.error.bind(console),
+    debug: console.debug.bind(console),
+  };
+
+  /** Tee global console.* into this log file as `console`/level lines, in addition to
+   *  their normal stderr/stdout output. This is how pi extension `console.error` (and
+   *  pilot's own `[pi] ...` lines) reach `pilot.log` in the live desktop app, where the
+   *  process stderr is otherwise unreached (ServerSupervisor attaches no stderr pipe).
+   *  Must be called AFTER construction — the originals are captured in the constructor so
+   *  the Logger's own mirror path never recurses through the tee.
+   *
+   *  The log line carries `source: "console"` so it's distinguishable from structured
+   *  Logger calls; arguments are stringified like the platform would (.join(' ')). */
+  captureConsole(): void {
+    const self = this;
+    const tee =
+      (level: LogLevel) =>
+      (...args: unknown[]): void => {
+        const msg = args.map((a) => stringifyForConsole(a)).join(" ");
+        self.write(level, msg, { source: "console" });
+        // The write() above already mirrored to the real stderr/stdout via the captured
+        // originals — don't also call them here, or every line prints twice.
+      };
+    console.log = tee("info") as Console["log"];
+    console.info = tee("info") as Console["info"];
+    console.warn = tee("warn") as Console["warn"];
+    console.error = tee("error") as Console["error"];
+    console.debug = tee("debug") as Console["debug"];
+  }
+
+  /** Restore the global console.* captured at construction time. Pairs with
+   *  captureConsole() so tests can swap back; production never calls this. */
+  restoreConsole(): void {
+    console.log = this.originalConsole.log;
+    console.info = this.originalConsole.info;
+    console.warn = this.originalConsole.warn;
+    console.error = this.originalConsole.error;
+    console.debug = this.originalConsole.debug;
   }
 }

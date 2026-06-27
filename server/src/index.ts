@@ -24,6 +24,12 @@ import { serveStatic } from "./static.js";
 // data dir so the id is available to the logger from the first line.
 const serverId = mintOrReadServerId(config.dataDir);
 const log = new Logger({ file: join(config.dataDir, "pilot.log"), serverId });
+// Tee global console.* into pilot.log so pi extension `console.error` (and pilot's
+// own `[pi] ...` lines) reach the durable log file in the live desktop app, where the
+// process stderr is otherwise unreached (ServerSupervisor attaches no stderr pipe).
+// Called before anything logs so nothing is missed; the originals are captured in the
+// Logger ctor so its own mirror path never recurses through this tee.
+log.captureConsole();
 export { log };
 
 // Acquire the single-server lock BEFORE any store opens the data dir. Two servers
@@ -129,6 +135,7 @@ const hub = new SessionHub(
   },
   config.liveRefreshMs,
   serverId,
+  config.dataDir,
 );
 
 const rawSend = (ws: ServerWebSocket<WsData>, msg: ServerMessage) =>
