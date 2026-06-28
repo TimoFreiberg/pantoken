@@ -5,14 +5,15 @@
 > alongside pi. Decisions D-A…D-D below are settled with Timo; next step is the
 > Chunk 0 spike. A design input, not a TODO list.
 >
-> **Confidence caveat — read first.** Most of this is reverse-engineered from the
-> polytoken *binary's* self-describing contracts (`polytoken --help`,
-> `polytoken openapi`, `polytoken event-schema`) — NOT from running the daemon and
-> NOT from the docs prose (docs.polytoken.dev returns 403 to automated fetches).
-> polytoken is installed on the mini (`brew`, `/opt/homebrew/bin/polytoken`) but
-> **not yet configured** (no `~/.config/polytoken`), so nothing here has been
-> exercised against a live daemon. Everything tagged **[VERIFY]** is an inference
-> from the schemas that a Chunk 0 spike must confirm before building on it.
+> **Confidence caveat — read first.** This is built from two sources, neither of
+> which is a running daemon: (1) the polytoken *binary's* self-describing contracts
+> (`polytoken --help`, `polytoken openapi`, `polytoken event-schema`), and (2) the
+> **published docs** at docs.polytoken.dev — now reachable: WebFetch 403s on a
+> user-agent bot-block, but `curl` with a browser UA returns 200 (so docs prose is
+> citable; see "Documented behavior" below). polytoken is installed on the mini
+> (`brew`, `/opt/homebrew/bin/polytoken`) but **not yet configured**, so nothing
+> here is exercised against a live daemon. **[VERIFY]** = still needs the Chunk 0
+> spike (Timo runs it on a hands-on machine — this one is remote).
 
 ## TL;DR
 
@@ -43,7 +44,7 @@ lifecycle and filling pilot's `PilotDriver` methods from daemon endpoints.
 | Authoritative state | pilot reconstructs `SessionState` from pi events | daemon owns session state; `GET /state` + `GET /history` are snapshots pilot folds |
 | Event stream | in-process callback (`session.subscribe`) | `GET /events` SSE, `Envelope<DaemonEvent>` (seq'd, `emitted_at`, `session_id`) |
 | Contract stability | pinned to `@earendil-works/pi-coding-agent` types (breaks on SDK bumps) | `polytoken openapi` + `polytoken event-schema` are **published JSON Schemas** — codegen-able, version-checkable |
-| Multi-client | pilot is the sole consumer of the in-process session | `tui-attachment` lease + heartbeat → a local TUI and pilot can **co-attach the same live session** **[VERIFY]** |
+| Multi-client | pilot is the sole consumer of the in-process session | `tui-attachment` lease + heartbeat; docs describe **serial detach/reconnect** (one client at a time) — pilot is the attacher, the local TUI detaches while pilot drives. Concurrent co-attach unconfirmed **[VERIFY]** |
 | Multi-provider | pi's provider set | "poly" = provider-agnostic auth (`polytoken auth provider`), Anthropic + OpenAI/Codex profiles visible in the schema |
 
 The seam pilot already designed for the mock↔pi swap is exactly the seam this
@@ -73,14 +74,55 @@ agent."* A third implementor is the intended extension point.
 - **One daemon process = one session = one port** (vs. one daemon hosting many).
   Strong read: endpoints are flat (`/prompt`, `/events`, `/state` — no
   `/session/{id}/…`), `--session-id` is singular, `new` = "a new daemon session",
-  `sessions` lists+stale-cleans live ones (a registry of processes). **[VERIFY]**
+  the Sessions doc says *"the daemon, which holds your session and does the work"*.
+  Still **[VERIFY]** the exact spawn/registry mechanics.
 - The exact `PromptRequest` / steering shape, the `interrogative` & `permission`
-  request/response payloads, whether `/history` exposes a **branch DAG** (pi's
-  `/tree`) or only a linear log, and whether the `tui-attachment` lease truly
-  permits a second concurrent client. All **[VERIFY]**.
+  request/response wire payloads, the `content_block_*` delta shapes, and whether
+  the `tui-attachment` lease permits a *concurrent* second client (docs only show
+  serial detach/reconnect). All **[VERIFY]**.
 - Provider/model auth is **CLI/config-level** (`polytoken auth`, `config`), not a
   daemon endpoint — so pilot's Settings "providers" panel would shell out / edit
   config rather than hit the daemon. **[VERIFY]**
+
+## Documented behavior (from docs.polytoken.dev, 2026-06-28)
+
+Read via `curl`; these are now **documented facts**, not inferences. They reshape
+several decisions below.
+
+- **History is a linear event log, rewind is destructive (resolves D-B).** *"A
+  session is the durable record … Polytoken writes every event in order … and
+  replays those events."* It is *"one continuous record"* — **no branch DAG.**
+  `/rewind` *"drops the selected prompt and every event after it"* (the prompt text
+  returns to the input for re-edit); *"the rewind is destructive, and the dropped
+  events do not come back."* It can rewind past a clear/compaction, but **cannot**
+  rewind into the middle of a tool call (returns to a clean boundary). → **pilot's
+  `/tree` branch view does NOT port** (nothing to branch); "re-edit" becomes a
+  destructive truncation the UX must clearly signal.
+- **Daemon/TUI split is the product's own model.** *"closing the interface does not
+  end the work … Detach with `/detach` … run `polytoken` again in the same project
+  and the TUI reconnects."* `polytoken continue` resumes after a crash. Confirms
+  pilot-as-a-client; supports detach/reconnect but documents it as **serial**.
+- **Permissions are a rich, daemon-side system** (resolves the approval mapping).
+  Approval scopes: **Allow once / Allow for session / Allow forever (project) /
+  Allow forever (user) / No.** Four modes via `/permissions`: **Standard /
+  Autonomous** (a classifier model auto-decides routine approvals) **/ Bypass /
+  Bypass+** (bypass except explicit denies). Plus secret-files/secret-words
+  filtering. All server-side → pilot renders the approval card (5 scopes) + a mode
+  switcher; the logic stays in the daemon. Aligns with pilot's existing mobile
+  approval cards + project-trust gate.
+- **Facets = mid-conversation persona switches, and plan/execute is built in.** A
+  facet (Markdown + frontmatter) swaps system prompt, tool/skill access, model
+  pin, and an accent color *while keeping the conversation*. Shipped `plan` (edit/
+  shell withheld, runs a built-in `plan-reviewer`, `handoff_plan` for approval) →
+  `execute`. This is the `/facet` + `/adventurous-handoff` endpoints and the
+  `facet_switch` / `PlanHandoffContext` schema. **A headline "why polytoken"
+  feature pilot gets mostly for free** by rendering the facet indicator (name +
+  color) and the plan-handoff approval. *Authoring* facets is config-side, not
+  pilot's job. (Promotes facets from "v1-skip" to "v1-surface".)
+- **Misc:** `/clear` also resets the shell env (and `/reset-shell` does only that);
+  todos live on the session and survive compaction/clear; the daemon auto-compacts
+  at a context threshold. First-run config is interactive (`config ui`); Codex and
+  z.ai GLM are the doc's suggested starter providers.
 
 ## Architecture
 
@@ -171,8 +213,8 @@ matrix writes itself).
 | `openSession` | spawn `daemon --resume --session-id`; seed from `GET /history` + `GET /state` | seed = the atomic re-broadcast path |
 | `reloadSession` | `POST /reload` (or respawn) | |
 | `newSession` | `polytoken new --no-attach` / `daemon` (no `--resume`) | worktree creation stays pilot-side |
-| `branchFrom` / re-edit | `POST /rewind` → `session_rewound` → re-seed | **D-B**: does `/history` expose a branch DAG (pi's `/tree`) or only linear history? `getTree`/the tree view depends on this — Timo verifies via the polytoken TUI |
-| `getTree` | `GET /history` projected | gated on D-B |
+| `branchFrom` / re-edit | `POST /rewind` → `session_rewound` → re-seed | **D-B (resolved): destructive** — drops prompt + everything after; UX must warn. Re-edit only, no branching |
+| `getTree` | — (cut) | **D-B**: no branch DAG → no tree view (see Documented behavior) |
 | `getUsage` / context meter | `GET /state` | usage in the state snapshot |
 | `listModels` / `setModel` | `polytoken models` / `POST /model` | |
 | `setThinking` | `POST /model` (reasoning variant) | polytoken models carry "selectable reasoning variants" |
@@ -208,7 +250,7 @@ matrix writes itself).
 | `compaction_*` (started/complete/cancelled/failed) | `hostUiRequest{notify}` + `usageUpdated` | like pi's `compaction_start` |
 | `subagent_compaction_notice` | `hostUiRequest{notify}` | |
 | `interrogative`, `ask_user_question` | `hostUiRequest` (input/select/confirm; qna) | `AskUserQuestionPayload`/`ClarificationOption` → pilot's `qna`/`select` cards |
-| `permission_monitor_switch` (+ `/permission-monitor`) | pilot **approval cards** (`hostUiRequest{confirm}` / trust channel) | `PermissionToolCallContext`/`PermissionCandidateRuleContext` → pilot's mobile approval UX |
+| `permission_monitor_switch` (+ `/permission-monitor`) | pilot **approval cards** (5-scope) + mode switcher | scopes: once / session / project-forever / user-forever / no; modes: Standard/Autonomous/Bypass/Bypass+. All daemon-side, pilot renders — see Documented behavior |
 | `notification_queued`, `notifications_drained`, `notification_autodrain_switch` | `hostUiRequest{notify}` / push | feeds pilot's push (`push.ts`) |
 | `system_reminder` | `customMessage(display:false)` or ignore | turn-split robustness |
 | `hook_fired` | — (v1 ignore) | `HookOutcome` ambient |
@@ -218,7 +260,8 @@ matrix writes itself).
 | `mcp_server_*` (connected/disconnected/reconnecting/disabled) | Settings MCP status | new ambient channel or reuse `extensionCompatibilityIssue` |
 | `image_reference_resolved` | (feeds `images` on messages/tools) | |
 | `extension_registered` | refresh `listExtensions` | |
-| `facet_switch`, `classifier_decision`, `job_*` | — (v1 ignore) | new concepts, later |
+| `facet_switch` (+ `/facet`, `/adventurous-handoff`) | header facet indicator (name + accent color) + **plan-handoff approval** | v1-surface: built-in plan/execute is a headline feature; `PlanHandoffContext` → an approval card. Facet *authoring* is config-side |
+| `classifier_decision`, `job_*` | — (v1 ignore) | autonomous-mode internals; jobs = "Managing Work", later |
 | `heartbeat` | — (liveness only) | also confirms SSE alive |
 
 17 pilot event types are comfortably covered; the unmapped polytoken variants are
@@ -230,12 +273,14 @@ either new concepts (facets, jobs) or ambient metadata safely ignored in v1.
   reaper) rather than pi-driver's single-warm-session swap. polytoken's
   out-of-process model makes this its natural advantage: instant session switch,
   background turns keep running. Cap value lands in Chunk 4.
-- **D-B — Adapt to polytoken's history model. ✅ (constraint, not a choice)** Pilot
-  bends to whatever `GET /history` actually exposes. Branch DAG → the `/tree` view +
-  `branchFrom` re-edit port over; linear-only → `POST /rewind` still gives
-  jump-back / re-edit, and the tree *view* is cut from v1. **Timo verifies the
-  history model directly via the polytoken TUI**; the driver is written to the
-  confirmed shape once known. (See [HISTORY-MODEL] in Risks.)
+- **D-B — History is linear; rewind is destructive. ✅ (resolved by docs)** Not a
+  branch DAG — *"one continuous record."* So: **the `/tree` branch view is cut**
+  (structurally, not just v1 — there are no branches), and `branchFrom`/re-edit
+  maps to `POST /rewind`, which **drops the prompt + everything after it**
+  (irreversible) and returns the prompt text for editing. The pilot UX must signal
+  "this deletes everything after this point" rather than pi's safe branch-and-keep.
+  `session_rewound` → re-seed with the truncated history. Timo can sanity-check in
+  the TUI, but the docs are explicit. (See [HISTORY-MODEL] in Risks.)
 - **D-C — Skip pi extensions entirely. ✅** The PolytokenDriver loads **no** pi
   extensions. Two of pilot's three owned extensions are **polytoken built-ins** —
   the task list and `ask_user_question`/`interrogative` are native daemon events,
@@ -269,12 +314,14 @@ either new concepts (facets, jobs) or ambient metadata safely ignored in v1.
   `event-schema` and pin a version check in `doctor`.
 - **Two-driver maintenance.** Keeping both pi and polytoken drivers behind the seam
   doubles surface. Decide early whether this is additive or a migration.
-- **`tui-attachment` semantics.** If the lease is single-holder, "TUI + pilot at
-  once" doesn't hold and pilot must be the exclusive attacher.
-- **[HISTORY-MODEL] (D-B).** Whether `GET /history` is a branch DAG or a linear log
-  decides if the tree view ships in v1. Timo confirms via the polytoken TUI; until
-  then the driver targets the linear subset (open/rewind/re-edit), and the tree
-  view is additive once the shape is known.
+- **`tui-attachment` semantics.** Docs show *serial* detach/reconnect, so plan for
+  pilot as the **exclusive** attacher (TUI detaches while pilot drives). If the
+  lease turns out to allow a concurrent read-client, "TUI + pilot at once" is a
+  bonus, not a dependency.
+- **[HISTORY-MODEL] (D-B) — resolved.** Linear log, **destructive** rewind, no
+  branches (Documented behavior). Consequence: the tree view is dropped, and the
+  re-edit affordance must warn that it deletes everything after the chosen point —
+  a UX departure from pi's safe branch-and-keep that's easy to get wrong.
 
 ## Phased plan
 
@@ -312,18 +359,20 @@ which is the whole reason polytoken is interesting here.
 
 ## Status: ready for Chunk 0
 
-Design questions resolved (D-A…D-D). Next step is the **Chunk 0 spike**: drive a
-live daemon by hand and assert the remaining **[VERIFY]** shapes (process-per-
-session, prompt/steer payloads, interrogative + permission shapes, default-on
-auto-naming, lease multi-client). Timo verifies the **history model** (D-B) in
-parallel via the polytoken TUI. Findings land in `docs/polytoken-spike.md` before
-any `PolytokenDriver` code.
+Design questions resolved (D-A…D-D); docs resolved D-B and the permission/facet
+shapes. The **Chunk 0 spike** runs on a **hands-on machine of Timo's** (the mini
+this plan was drafted on is remote, and the spike wants interactive control +
+`polytoken config ui` for provider auth). It should assert the remaining
+**[VERIFY]** wire shapes against a live daemon:
 
-**Gating dependency:** Chunk 0 needs polytoken *configured* (provider auth). That
-step is partly Timo's — `polytoken config ui` is interactive and provider
-credentials are his. Path: Timo runs `polytoken config ui` (or I scaffold a config
-non-interactively from `polytoken schemas` + `config edit --user` and he adds
-auth), then the curl-spike is fully automatable.
+- process-per-session spawn + registry mechanics
+- `PromptRequest` / steering (`/turn/input`) payloads
+- `content_block_*` delta shapes (the event-fold's input)
+- `interrogative` / `permission` request+response wire payloads
+- auto-naming is on by default (D-C1)
+- whether the lease allows a *concurrent* client (else pilot-exclusive)
+
+Findings land in `docs/polytoken-spike.md`, then Chunk 1 codegen + skeleton start.
 
 ---
 
