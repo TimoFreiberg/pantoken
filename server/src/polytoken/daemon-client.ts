@@ -362,13 +362,36 @@ export class DaemonClient {
     if (status !== 200) throw new Error(`POST /title failed (${status}): ${error}`);
   }
 
-  /** `POST /interrogative/{id}/respond` — answer a pending interrogative. */
+  /** `POST /interrogative/{id}/respond` — answer a pending interrogative.
+   *  Has a 10s timeout: a wedged daemon that accepts the connection but never
+   *  responds would otherwise hang the caller's `hostUiResolved` deferred
+   *  promise indefinitely, stranding the approval card. The timeout triggers the
+   *  `.catch()` path so the driver can dismiss the card + surface an error. */
   async respondInterrogative(id: string, response: InterrogativeResponse): Promise<void> {
-    const { status, error } = await this.post(
-      `/interrogative/${encodeURIComponent(id)}/respond`,
-      response,
-    );
-    if (status !== 200) throw new Error(`POST /interrogative/respond failed (${status}): ${error}`);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const res = await fetch(
+        `${this.baseUrl}/interrogative/${encodeURIComponent(id)}/respond`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(response),
+          signal: controller.signal,
+        },
+      );
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`POST /interrogative/respond failed (${res.status}): ${text.slice(0, 200)}`);
+      }
+    } catch (e) {
+      if (controller.signal.aborted) {
+        throw new Error(`POST /interrogative/respond timed out (10s) for ${id}`);
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** `POST /permission-monitor` — switch the permission mode. */

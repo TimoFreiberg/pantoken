@@ -728,37 +728,228 @@ describe("mapDaemonEvent", () => {
     });
   });
 
-  test("permission_monitor_switch -> empty (Chunk 3)", () => {
-    expect(
-      fold({
-        type: "permission_monitor_switch",
-        from_monitor: { type: "standard" },
-        to_monitor: { type: "bypass" },
-      }),
-    ).toEqual({ events: [], effects: [] });
+  // ===== Host UI + permissions (Chunk 3) =====
+
+  test("permission_monitor_switch -> notify (mode change)", () => {
+    const out = fold({
+      type: "permission_monitor_switch",
+      from_monitor: { type: "standard" },
+      to_monitor: { type: "bypass" },
+    });
+    expect(out.events).toHaveLength(1);
+    expect(out.events[0]).toMatchObject({
+      type: "hostUiRequest",
+      request: {
+        kind: "notify",
+        message: "Permission mode: standard → bypass",
+        level: "info",
+      },
+    });
+    expect(out.effects).toEqual([]);
   });
 
-  test("interrogative -> empty (Chunk 3)", () => {
-    expect(
-      fold({
-        type: "interrogative",
-        interrogative_id: "i1",
-        interrogative_type: "confirmation",
-        question: "Continue?",
-        prompt_id: "p1",
-      }),
-    ).toEqual({ events: [], effects: [] });
+  test("interrogative (confirmation) -> confirm card + registerInterrogative", () => {
+    const out = fold({
+      type: "interrogative",
+      interrogative_id: "i1",
+      interrogative_type: "confirmation",
+      question: "Continue?",
+      prompt_id: "p1",
+    });
+    expect(out.events).toHaveLength(1);
+    expect(out.events[0]).toMatchObject({
+      type: "hostUiRequest",
+      request: { kind: "confirm", requestId: "i1", message: "Continue?" },
+    });
+    expect(out.effects).toEqual([
+      {
+        type: "registerInterrogative",
+        pending: { interrogativeId: "i1", interrogativeType: "confirmation" },
+      },
+    ]);
   });
 
-  test("ask_user_question -> empty (Chunk 3)", () => {
-    expect(
-      fold({
-        type: "ask_user_question",
-        interrogative_id: "i1",
-        payload: { questions: [] },
-        prompt_id: "p1",
-      }),
-    ).toEqual({ events: [], effects: [] });
+  test("interrogative (clarification) -> select card + option keys captured", () => {
+    const out = fold({
+      type: "interrogative",
+      clarification_options: [
+        { key: "yes", label: "Yes" },
+        { key: "no", label: "No" },
+      ],
+      interrogative_id: "i2",
+      interrogative_type: "clarification",
+      prompt_id: "p1",
+      question: "Which?",
+    });
+    expect(out.events[0]).toMatchObject({
+      type: "hostUiRequest",
+      request: { kind: "select", requestId: "i2", options: ["Yes", "No"] },
+    });
+    expect(out.effects[0]).toMatchObject({
+      type: "registerInterrogative",
+      pending: {
+        interrogativeId: "i2",
+        interrogativeType: "clarification",
+        clarificationLabels: ["Yes", "No"],
+        clarificationOptionKeys: ["yes", "no"],
+      },
+    });
+  });
+
+  test("interrogative (capability) -> confirm card", () => {
+    const out = fold({
+      type: "interrogative",
+      interrogative_id: "i3",
+      interrogative_type: "capability",
+      prompt_id: "p1",
+      question: "Grant network access?",
+    });
+    expect(out.events[0]).toMatchObject({
+      type: "hostUiRequest",
+      request: { kind: "confirm", requestId: "i3", message: "Grant network access?" },
+    });
+  });
+
+  test("interrogative (plan_handoff) -> select card with action labels", () => {
+    const out = fold({
+      type: "interrogative",
+      interrogative_id: "i4",
+      interrogative_type: "plan_handoff",
+      plan_handoff: {
+        action_labels: {
+          cancel: "Cancel",
+          implement_current_context: "Implement here",
+          implement_new_context: "Implement fresh",
+        },
+        display_path: "/plan.md",
+        plan_path: "/plan.md",
+        plan_text: "the plan",
+        target_facet: "execute",
+        title: "Review plan",
+      },
+      prompt_id: "p1",
+      question: "Approve plan?",
+    });
+    expect(out.events[0]).toMatchObject({
+      type: "hostUiRequest",
+      request: {
+        kind: "select",
+        requestId: "i4",
+        title: "Review plan",
+        options: ["Implement fresh", "Implement here", "Cancel"],
+      },
+    });
+  });
+
+  test("interrogative (plan_handoff) with null plan_handoff -> fallback labels", () => {
+    const out = fold({
+      type: "interrogative",
+      interrogative_id: "i4",
+      interrogative_type: "plan_handoff",
+      plan_handoff: null,
+      prompt_id: "p1",
+      question: "Approve plan?",
+    });
+    expect(out.events[0]).toMatchObject({
+      request: {
+        options: ["Implement (new context)", "Implement (current context)", "Cancel"],
+      },
+    });
+  });
+
+  test("interrogative (permission) -> select card with 7 approval choices", () => {
+    const out = fold({
+      type: "interrogative",
+      interrogative_id: "i5",
+      interrogative_type: "permission",
+      prompt_id: "p1",
+      question: "Run bash?",
+    });
+    expect(out.events[0]).toMatchObject({
+      type: "hostUiRequest",
+      request: {
+        kind: "select",
+        requestId: "i5",
+        options: [
+          "Deny",
+          "Allow once",
+          "Allow for session",
+          "Allow for project (local)",
+          "Allow for project",
+          "Allow for user (local)",
+          "Allow for user",
+        ],
+      },
+    });
+  });
+
+  test("ask_user_question -> qna card + question/option ids captured", () => {
+    const out = fold({
+      type: "ask_user_question",
+      interrogative_id: "q1",
+      payload: {
+        questions: [
+          {
+            id: "q-a",
+            mode: "single_select",
+            options: [
+              { id: "o1", label: "Opt1", description: "desc" },
+              { id: "o2", label: "Opt2" },
+            ],
+            question: "Pick one?",
+          },
+          {
+            id: "q-b",
+            mode: "text",
+            question: "Free text?",
+            allow_free_text: true,
+          },
+        ],
+      },
+      prompt_id: "p1",
+    });
+    expect(out.events[0]).toMatchObject({
+      type: "hostUiRequest",
+      request: {
+        kind: "qna",
+        requestId: "q1",
+        questions: [
+          {
+            question: "Pick one?",
+            options: [
+              { label: "Opt1", description: "desc" },
+              { label: "Opt2", description: undefined },
+            ],
+            multiSelect: false,
+          },
+          { question: "Free text?", multiSelect: false },
+        ],
+      },
+    });
+    expect(out.effects[0]).toMatchObject({
+      type: "registerInterrogative",
+      pending: {
+        interrogativeId: "q1",
+        interrogativeType: "ask_user_question",
+        questions: [
+          { questionId: "q-a", optionIds: ["o1", "o2"], optionLabels: ["Opt1", "Opt2"] },
+          { questionId: "q-b", optionIds: [], optionLabels: [] },
+        ],
+      },
+    });
+  });
+
+  test("interrogative with subagent_handle is skipped (not top-level)", () => {
+    const out = fold({
+      type: "interrogative",
+      interrogative_id: "i1",
+      interrogative_type: "confirmation",
+      prompt_id: "p1",
+      question: "ok?",
+      subagent_handle: "sub1",
+    });
+    expect(out.events).toEqual([]);
+    expect(out.effects).toEqual([]);
   });
 
   test("hook_fired -> empty", () => {

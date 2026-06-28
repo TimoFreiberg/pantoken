@@ -26,6 +26,11 @@ import type {
   SessionUsage,
   WorkspaceRef,
 } from "@pilot/protocol";
+import type { PendingInterrogative } from "./ui-bridge.js";
+import {
+  PERMISSION_APPROVAL_LABELS,
+  type PendingQuestion,
+} from "./ui-bridge.js";
 
 type DaemonEvent = components["schemas"]["DaemonEvent"];
 type DaemonState = components["schemas"]["SessionStateSnapshot"];
@@ -132,7 +137,14 @@ export type DaemonEffect =
   /** GET /turn/input → queueUpdated with the refreshed queue. The queue events
    *  (queued/dequeued/discarded) don't carry the FULL queue, only one item +
    *  revision; pilot's queueUpdated REPLACES the full queue, so we must fetch. */
-  | { type: "refetchQueue" };
+  | { type: "refetchQueue" }
+  /** Register a pending interrogative in the driver's pending map (so respondUi
+   *  can build the reverse InterrogativeResponse from a later HostUiResponse) AND
+   *  emit the matching pilot hostUiRequest card. The effect carries the
+   *  PendingInterrogative metadata the reverse builder needs; the hostUiRequest
+   *  event is in the returned `events` (emitted before effects, per the driver's
+   *  emit-then-execute contract). */
+  | { type: "registerInterrogative"; pending: PendingInterrogative };
 
 export interface FoldResult {
   /** Pilot driver events to emit (broadcast to hub listeners). */
@@ -292,6 +304,181 @@ function drainedQueueMessage(
     createdAt: ts,
     updatedAt: ts,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Forward interrogative mapping — DaemonEvent → pilot hostUiRequest card.
+//
+// Each builder returns (a) the pilot hostUiRequest event to emit AND (b) the
+// PendingInterrogative metadata the reverse builder (ui-bridge.ts) needs to
+// translate a later HostUiResponse back. The mapper bundles the metadata into
+// a registerInterrogative effect; the driver stores it in its pending map.
+//
+// The index↔key/id mappings here are the SINGLE source of truth — ui-bridge.ts's
+// reverse builders read them back by index, so the order here MUST match.
+// ---------------------------------------------------------------------------
+
+/** Build the pilot hostUiRequest + pending metadata for an `interrogative` event.
+ *  One interrogative_type → one card kind. The card carries a stable requestId
+ *  equal to the daemon's interrogative_id, so respondUi can look it up. Returns
+ *  `pending: null` for an unrecognized type (a runtime-only path — the
+ *  `_exhaustive` guard catches codegen'd types): the caller emits the notify
+ *  but registers no pending, since no answerable card was rendered. */
+function buildInterrogativeMapping(
+  ev: Extract<DaemonEvent, { type: "interrogative" }>,
+  meta: { sessionRef: SessionRef; timestamp: string },
+): { event: SessionDriverEvent; pending: PendingInterrogative | null } {
+  const requestId = ev.interrogative_id;
+  const pending: PendingInterrogative = {
+    interrogativeId: ev.interrogative_id,
+    interrogativeType: ev.interrogative_type,
+  };
+  switch (ev.interrogative_type) {
+    case "confirmation": {
+      const event: SessionDriverEvent = {
+        ...meta,
+        type: "hostUiRequest",
+        request: { kind: "confirm", requestId, title: "Confirm", message: ev.question },
+      };
+      return { event, pending };
+    }
+    case "clarification": {
+      // Clarification options carry {key,label}. pilot's select renders labels;
+      // the response carries the chosen LABEL, which the reverse builder maps
+      // back to the daemon's key via the parallel labels/keys arrays.
+      const options = ev.clarification_options ?? [];
+      const labels = options.map((o) => o.label);
+      const keys = options.map((o) => o.key);
+      pending.clarificationLabels = labels;
+      pending.clarificationOptionKeys = keys;
+      const event: SessionDriverEvent = {
+        ...meta,
+        type: "hostUiRequest",
+        request: {
+          kind: "select",
+          requestId,
+          title: ev.question,
+          options: labels,
+        },
+      };
+      return { event, pending };
+    }
+    case "capability": {
+      // A capability grant is a yes/no — pilot's confirm card fits.
+      const event: SessionDriverEvent = {
+        ...meta,
+        type: "hostUiRequest",
+        request: { kind: "confirm", requestId, title: "Grant capability?", message: ev.question },
+      };
+      return { event, pending };
+    }
+    case "plan_handoff": {
+      // Plan handoff: 3 choices. The action_labels (from PlanHandoffContext) give
+      // the button text; the index order matches ui-bridge's PLAN_HANDOFF_DECISIONS.
+      // Capture the rendered labels so the reverse builder can map the chosen
+      // label → index → decision (the client sends the label, not an index).
+      const ph = ev.plan_handoff;
+      const labels = ph
+        ? [
+            ph.action_labels.implement_new_context,
+            ph.action_labels.implement_current_context,
+            ph.action_labels.cancel,
+          ]
+        : ["Implement (new context)", "Implement (current context)", "Cancel"];
+      pending.planHandoffLabels = labels;
+      const event: SessionDriverEvent = {
+        ...meta,
+        type: "hostUiRequest",
+        request: {
+          kind: "select",
+          requestId,
+          title: ph?.title ?? "Plan handoff",
+          options: labels,
+        },
+      };
+      return { event, pending };
+    }
+    case "permission": {
+      // Permission approval: 7 choices (deny + 6 grants). The index↔target
+      // mapping lives in ui-bridge.ts's PERMISSION_APPROVAL_CHOICES — this just
+      // renders the labels in that exact order.
+      const event: SessionDriverEvent = {
+        ...meta,
+        type: "hostUiRequest",
+        request: {
+          kind: "select",
+          requestId,
+          title: "Approve?",
+          options: [...PERMISSION_APPROVAL_LABELS],
+        },
+      };
+      return { event, pending };
+    }
+    default: {
+      // Runtime safety: a compile-time exhaustiveness guard can't catch an
+      // out-of-enum `interrogative_type` from a newer daemon (the wire is
+      // JSON.parse'd). Surface it as a notify (loud-failure principle) so the
+      // fold stays live — the operator sees an unknown interrogative was
+      // dropped rather than a silent stall. No pending is registered: the notify
+      // card is fire-and-forget (no requestId == interrogative_id), so there's
+      // nothing for respondUi to match. The daemon's turn is stuck waiting (the
+      // operator can cancel/abort), but that's strictly better than crashing
+      // the whole SSE fold.
+      const _exhaustive: never = ev.interrogative_type;
+      void _exhaustive;
+      const unknownType = (ev as { interrogative_type?: string }).interrogative_type ?? "unknown";
+      const event: SessionDriverEvent = {
+        ...meta,
+        type: "hostUiRequest",
+        request: {
+          kind: "notify",
+          requestId: `unknown-interrogative-${meta.timestamp}`,
+          message: `Unrecognized interrogative type: ${unknownType}`,
+          level: "warning",
+        },
+      };
+      return { event, pending: null };
+    }
+  }
+}
+
+/** Build the pilot hostUiRequest (qna) + pending metadata for an
+ *  ask_user_question event. Each question maps to a QnaQuestion; the option ids
+ *  are captured so the reverse builder can map selected indices → ids. */
+function buildAskUserQuestionMapping(
+  ev: Extract<DaemonEvent, { type: "ask_user_question" }>,
+  meta: { sessionRef: SessionRef; timestamp: string },
+): { event: SessionDriverEvent; pending: PendingInterrogative } {
+  const requestId = ev.interrogative_id;
+  const questions = ev.payload.questions;
+  const pendingQuestions: PendingQuestion[] = questions.map((q) => ({
+    questionId: q.id,
+    optionIds: (q.options ?? []).map((o) => o.id),
+    optionLabels: (q.options ?? []).map((o) => o.label),
+  }));
+  const pending: PendingInterrogative = {
+    interrogativeId: ev.interrogative_id,
+    interrogativeType: "ask_user_question",
+    questions: pendingQuestions,
+  };
+  // Map the daemon's AskUserQuestion to pilot's QnaQuestion. single_select /
+  // multi_select → a choice card (options present); text → free-text.
+  const pilotQuestions = questions.map((q) => ({
+    question: q.question,
+    context: q.context ?? undefined,
+    options: (q.options ?? []).map((o) => ({ label: o.label, description: o.description ?? undefined })),
+    multiSelect: q.mode === "multi_select",
+  }));
+  const event: SessionDriverEvent = {
+    ...meta,
+    type: "hostUiRequest",
+    request: {
+      kind: "qna",
+      requestId,
+      questions: pilotQuestions,
+    },
+  };
+  return { event, pending };
 }
 
 // ---------------------------------------------------------------------------
@@ -721,6 +908,56 @@ export function mapDaemonEvent(
       ]);
     }
 
+    // ===== Host UI + permissions (Chunk 3) =====
+    //
+    // interrogative / ask_user_question / permission_monitor_switch are the
+    // daemon's host-UI surface. The first two emit a pilot hostUiRequest card
+    // (the turn is paused until the operator answers) and a registerInterrogative
+    // effect so the driver can build the reverse response. The third is an
+    // ambient mode-change notify (the mode SWITCHER itself is a Chunk 5 concern;
+    // the approval CARDS surface via interrogative{type:"permission"}).
+
+    case "interrogative": {
+      // The 5 interrogative_types each map to a pilot card kind. The card's
+      // requestId == the daemon's interrogative_id, so respondUi can look up the
+      // pending metadata to build the InterrogativeResponse. An unrecognized type
+      // returns a notify + null pending (no registerInterrogative effect).
+      const { event, pending } = buildInterrogativeMapping(ev, meta);
+      return pending
+        ? events([event], [{ type: "registerInterrogative", pending }])
+        : events([event]);
+    }
+
+    case "ask_user_question": {
+      // A separate DaemonEvent (not an interrogative_type), but responds via the
+      // same /interrogative/{id}/respond endpoint with kind:"ask_user_question_answers".
+      // Maps to pilot's qna card (purpose-built multi-question form).
+      const { event, pending } = buildAskUserQuestionMapping(ev, meta);
+      return events([event], [{ type: "registerInterrogative", pending }]);
+    }
+
+    case "permission_monitor_switch": {
+      // The permission MODE changed (standard/bypass/autonomous). Surface it as
+      // a notify so the operator sees the daemon's mode flipped (e.g. an
+      // autonomous classifier took over approvals). The mode SWITCHER UI (the
+      // POST /permission-monitor control) is a Chunk 5 Settings concern; this is
+      // just the ambient "the daemon's mode changed" signal.
+      const fromMode = ev.from_monitor.type;
+      const toMode = ev.to_monitor.type;
+      return events([
+        {
+          ...meta,
+          type: "hostUiRequest",
+          request: {
+            kind: "notify",
+            requestId: `perm-mode-${meta.timestamp}`,
+            message: `Permission mode: ${fromMode} → ${toMode}`,
+            level: "info",
+          },
+        },
+      ]);
+    }
+
     // ===== v1-ignored variants (return empty — the stream stays live) =====
     //
     // These are ambient metadata, new concepts not yet surfaced, or Chunk 3/5
@@ -730,9 +967,6 @@ export function mapDaemonEvent(
     case "heartbeat":
     case "notification_autodrain_switch":
     case "notifications_drained":
-    case "permission_monitor_switch":
-    case "interrogative":
-    case "ask_user_question":
     case "hook_fired":
     case "context_loaded":
     case "tool_reveal":
