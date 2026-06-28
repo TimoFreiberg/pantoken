@@ -105,14 +105,18 @@ interface WsData {
 }
 
 // Driver selection. Default is the live pi driver; PILOT_DRIVER=mock forces the
-// deterministic mock (used by e2e tests and local UI dev without a running pi).
-// The MockDriver import is static so types stay available; the pi SDK is
-// dynamic so it never loads in mock mode.
+// deterministic mock (used by e2e tests and local UI dev without a running pi);
+// PILOT_DRIVER=polytoken selects the out-of-process polytoken daemon driver.
+// The MockDriver import is static so types stay available; the pi SDK and
+// polytoken driver are dynamic so they never load in mock mode.
 let driver: PilotDriver;
 let mock: MockDriver | null = null;
 if (process.env.PILOT_DRIVER === "mock") {
   mock = new MockDriver();
   driver = mock;
+} else if (process.env.PILOT_DRIVER === "polytoken") {
+  const { createPolytokenDriver } = await import("./polytoken/polytoken-driver.js");
+  driver = await createPolytokenDriver();
 } else {
   // Reconstruct the interactive-shell env (PATH, tool shims, exported vars) and merge it
   // into process.env BEFORE pi exists — pi's bash tool spawns with `{ ...process.env }`,
@@ -318,7 +322,12 @@ const server = Bun.serve<WsData>({
 log.info("pilot server started", {
   url: `http://${config.host}:${server.port}`,
   dataDir: config.dataDir,
-  driver: process.env.PILOT_DRIVER === "mock" ? "mock" : "pi",
+  driver:
+    process.env.PILOT_DRIVER === "mock"
+      ? "mock"
+      : process.env.PILOT_DRIVER === "polytoken"
+        ? "polytoken"
+        : "pi",
   token: config.token ? "required" : "off",
   debug: config.debug,
 });
