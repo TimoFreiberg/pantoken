@@ -51,6 +51,7 @@ import {
   resetAccumulator,
   snapshotFromState,
 } from "./event-map.js";
+import { buildInterrogativeResponse, type PendingInterrogative } from "./ui-bridge.js";
 
 interface PolytokenDriverOptions {
   /** Path to the polytoken binary. Defaults to "polytoken" ($PATH lookup). */
@@ -75,6 +76,13 @@ interface WarmSession {
    *  updated whenever the driver reads GET /state. Lets ctx.snapshot() be
    *  synchronous (the pure mapper never does I/O). */
   lastState: DaemonStateSnapshot | null;
+  /** Pending host-UI interrogatives awaiting an operator response, keyed by the
+   *  daemon's interrogative id. Populated by registerInterrogative effects;
+   *  drained by respondUi. Lets the reverse builder (ui-bridge.ts) recover the
+   *  option keys/ids it needs to map a pilot HostUiResponse back to the daemon's
+   *  InterrogativeResponse shape. Cleared on dispose (a closed session's
+   *  pending cards can't be answered). */
+  pendingInterrogatives: Map<string, PendingInterrogative>;
 }
 
 export async function createPolytokenDriver(
@@ -170,10 +178,19 @@ export async function createPolytokenDriver(
     effect:
       | { type: "fetchState"; emit: "runCompleted" | "sessionUpdated" }
       | { type: "reseed" }
-      | { type: "refetchQueue" },
+      | { type: "refetchQueue" }
+      | { type: "registerInterrogative"; pending: PendingInterrogative },
     ctx: ReturnType<typeof makeCtx>,
   ): void {
     switch (effect.type) {
+      case "registerInterrogative": {
+        // Store the pending interrogative so respondUi can build the reverse
+        // InterrogativeResponse from a later HostUiResponse. The hostUiRequest
+        // card was already emitted (in the events array, before effects run);
+        // this just registers the metadata for the response path.
+        ws.pendingInterrogatives.set(effect.pending.interrogativeId, effect.pending);
+        return;
+      }
       case "fetchState": {
         // Refresh the cached state, then build the follow-up event from the
         // refreshed cache (buildPostFetchEvent is pure + tested).
@@ -259,6 +276,7 @@ export async function createPolytokenDriver(
       unsub: null,
       acc: createAccumulator(),
       lastState: initialState ?? null,
+      pendingInterrogatives: new Map(),
     };
 
     // Subscribe to the SSE stream and fold every frame.
@@ -279,6 +297,9 @@ export async function createPolytokenDriver(
   async function disposeSession(ws: WarmSession): Promise<void> {
     ws.unsub?.();
     ws.unsub = null;
+    // Clear pending interrogatives — a closed session's cards can't be answered,
+    // and the daemon will reject any late POST. Leaving them would leak the map.
+    ws.pendingInterrogatives.clear();
     await ws.client.close();
     // Remove from the pool (by sessionId).
     for (const [id, entry] of warm) {
@@ -328,10 +349,114 @@ export async function createPolytokenDriver(
       void ws.client.cancelTurn();
     },
 
-    respondUi(_response: HostUiResponse, _sessionId?: SessionId): void {
-      // Chunk 3: interrogative/permission responses. The daemon client has the
-      // respondInterrogative method; the HostUiRequest → interrogative mapping is
-      // the host-UI bridge work.
+    respondUi(response: HostUiResponse, sessionId?: SessionId): void {
+      // The reverse half of the host-UI bridge: translate pilot's HostUiResponse
+      // back into the daemon's InterrogativeResponse and POST it, so the paused
+      // turn resumes. The requestId IS the daemon's interrogative_id (the forward
+      // mapping set them equal), so we look up the pending metadata, build the
+      // response via the pure ui-bridge, POST it, and emit hostUiResolved so the
+      // hub dismisses the card.
+      //
+      // Ordering matters for retry/failure UX:
+      // - Drain the pending entry BEFORE the POST. This is the ACTUAL double-answer
+      //   guard: a second client's respondUi hits the now-empty pending map and
+      //   no-ops. The hub's first-responder-wins does NOT cover the in-flight-POST
+      //   window (hostUiResolved is deferred, so the entry stays in the hub's
+      //   pendingApprovals during the POST), so this drain is load-bearing, not
+      //   belt-and-suspenders — don't remove it thinking the hub covers it.
+      // - Defer hostUiResolved until the POST resolves. Emitting it before the
+      //   POST would dismiss the card everywhere on a flaky POST (realistic over
+      //   Tailscale), stranding the turn with no retry UI — the operator's only
+      //   escape would be cancel. Instead, on POST failure we emit hostUiResolved
+      //   (to dismiss the dead card) + an error notify so the operator sees the
+      //   failure (the daemon keeps waiting, but the UI isn't frozen on a dead card).
+      const ws = sessionId ? warm.get(sessionId) ?? null : active();
+      if (!ws) {
+        console.error("[polytoken] respondUi: no warm session for", sessionId);
+        return;
+      }
+      const pending = ws.pendingInterrogatives.get(response.requestId);
+      if (!pending) {
+        // No pending interrogative for this requestId — either it was already
+        // answered, or the requestId isn't a polytoken interrogative id (a
+        // notify/status card pilot generated internally). Silently ignore: those
+        // fire-and-forget cards have no daemon response path.
+        return;
+      }
+      const interrogativeResponse = buildInterrogativeResponse(pending, response);
+      if (!interrogativeResponse) {
+        // The response shape didn't match the pending type (a misroute, or a
+        // malformed/out-of-range value). Dismiss the card so the UI isn't
+        // stuck, but surface an error notify so the operator knows the answer
+        // was rejected (not silently dropped). The daemon still awaits a
+        // response; the operator can re-trigger the turn if needed.
+        ws.pendingInterrogatives.delete(response.requestId);
+        emit({
+          sessionRef: ws.ref,
+          timestamp: now(),
+          type: "hostUiResolved",
+          requestId: response.requestId,
+        });
+        emit({
+          sessionRef: ws.ref,
+          timestamp: now(),
+          type: "hostUiRequest",
+          request: {
+            kind: "notify",
+            requestId: `respond-reject-${response.requestId}`,
+            message: `Answer rejected (type ${pending.interrogativeType})`,
+            level: "error",
+          },
+        });
+        console.error(
+          "[polytoken] respondUi: response shape didn't match interrogative type",
+          pending.interrogativeType,
+          "for",
+          response.requestId,
+        );
+        return;
+      }
+      // Drain before POST (double-answer safety). Then POST, deferring
+      // hostUiResolved until success so a flaky POST doesn't strand the card.
+      ws.pendingInterrogatives.delete(response.requestId);
+      void ws.client
+        .respondInterrogative(pending.interrogativeId, interrogativeResponse)
+        .then(() => {
+          emit({
+            sessionRef: ws.ref,
+            timestamp: now(),
+            type: "hostUiResolved",
+            requestId: response.requestId,
+          });
+        })
+        .catch((e) => {
+          // POST failed (network/daemon). The card is already dismissed from the
+          // pending map, but we held hostUiResolved — so emit it now to dismiss
+          // the UI card, plus an error notify so the operator sees the failure
+          // (the turn is paused; re-prompting or cancel resumes it).
+          emit({
+            sessionRef: ws.ref,
+            timestamp: now(),
+            type: "hostUiResolved",
+            requestId: response.requestId,
+          });
+          emit({
+            sessionRef: ws.ref,
+            timestamp: now(),
+            type: "hostUiRequest",
+            request: {
+              kind: "notify",
+              requestId: `respond-failed-${response.requestId}`,
+              message: `Failed to send answer: ${e instanceof Error ? e.message : String(e)}`,
+              level: "error",
+            },
+          });
+          console.error(
+            "[polytoken] respondInterrogative failed for",
+            pending.interrogativeId,
+            e,
+          );
+        });
     },
 
     async listSessions(): Promise<SessionListEntry[]> {
