@@ -59,6 +59,7 @@ import { mergeSessionLists } from "../pi/session-list.js";
 import {
   DaemonClient,
   spawnDaemon,
+  defaultGlobalConfigDir,
   type SseEnvelope,
   type SessionStateSnapshot as DaemonStateSnapshot,
 } from "./daemon-client.js";
@@ -96,6 +97,11 @@ interface PolytokenDriverOptions {
    *  `~/.local/share/polytoken/sessions`). Override to match a daemon spawned with
    *  `--sessions-dir`. */
   sessionsDir?: string;
+  /** The global config dir (where `config.yaml` lives). Defaults to polytoken's own
+   *  default (`$XDG_CONFIG_HOME/polytoken` or `~/.config/polytoken`). The `daemon`
+   *  resume subcommand needs this explicitly (it doesn't walk upward from the project
+   *  dir like `new --working-dir` does). */
+  globalConfigDir?: string;
   /** Idle reap timeout in ms. A warm session untouched (no prompt/switch) for this
    *  long is disposed — frees the daemon process + port. Defaults to 10 min; 0
    *  disables reaping (sessions stay warm until the cap evicts them). */
@@ -142,6 +148,7 @@ export async function createPolytokenDriver(
   const polytokenBin = opts.bin ?? "polytoken";
   const warmCap = opts.warmCap ?? 8;
   const sessionsDir = opts.sessionsDir ?? defaultSessionsDir();
+  const globalConfigDir = opts.globalConfigDir ?? defaultGlobalConfigDir();
   const idleReapMs = opts.idleReapMs ?? 10 * 60 * 1000;
 
   // Pilot-side stores, mirrored from pi-driver: the archive flag + the worktree
@@ -369,7 +376,12 @@ export async function createPolytokenDriver(
     cwd: string,
     sessionId?: string,
   ): Promise<WarmSession> {
-    const spawned = await spawnDaemon(polytokenBin, { cwd, sessionId });
+    const spawned = await spawnDaemon(polytokenBin, {
+      cwd,
+      sessionId,
+      sessionsDir,
+      globalConfigDir,
+    });
     const client = new DaemonClient(spawned.sessionId, spawned.port, process.pid);
 
     // Wait for the daemon to be ready (health check), then claim the lease.

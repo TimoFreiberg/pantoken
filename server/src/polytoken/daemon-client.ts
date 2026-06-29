@@ -13,6 +13,9 @@
 // - `Last-Event-ID` resume is supported by the `id:` field (== `seq`); not yet wired.
 // - All endpoints are flat (no `/session/{id}/…`) — the daemon IS the session.
 
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { components } from "./wire-types.js";
 
 // Pull out the wire types we need from the generated schema. These are the shapes
@@ -83,23 +86,83 @@ export function parseSpawnOutput(stdout: string): SpawnedDaemon {
   return { sessionId, port: Number(portStr) };
 }
 
-/** Spawn a polytoken daemon (one session, no TUI attach) and return its session id + port.
- *  `--working-dir` is a GLOBAL option (before the subcommand), not a `new` flag. */
-export async function spawnDaemon(
+/** Resolve the default global config dir the daemon uses, mirroring polytoken's own
+ *  resolution: `$XDG_CONFIG_HOME/polytoken` or `~/.config/polytoken`. The daemon's
+ *  `--global-config-dir` flag overrides this; the `daemon` subcommand needs it
+ *  explicitly (unlike `new --working-dir`, which resolves config upward from the
+ *  project dir and finds the global config automatically). */
+export function defaultGlobalConfigDir(): string {
+  const xdg = process.env.XDG_CONFIG_HOME?.trim();
+  const base = xdg || join(homedir(), ".config");
+  return join(base, "polytoken");
+}
+
+/** Read the `startup.json` a `polytoken daemon` writes to its session dir. Returns
+ *  null when the file is absent or unparseable (a loud-fail to a console warning,
+ *  never a crash). The daemon writes `{state:"ready", pid, port}` on success or
+ *  `{state:"failed", pid, message}` on failure. */
+interface StartupJson {
+  state: string;
+  session_id?: string;
+  pid?: number;
+  port?: number;
+  message?: string;
+}
+function readStartupJson(sessionDir: string): StartupJson | null {
+  const file = join(sessionDir, "startup.json");
+  if (!existsSync(file)) return null;
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as StartupJson;
+  } catch (e) {
+    console.error(`[polytoken] failed to parse ${file}`, e);
+    return null;
+  }
+}
+
+/** Wait for a `polytoken daemon` (foreground) to write a `ready` startup.json,
+ *  polling every 100ms up to `timeoutMs`. Returns the port. Throws on `failed`,
+ *  timeout, or a malformed startup.json. The daemon writes `startup.json` to its
+ *  session dir (under the sessions dir) once it has bound its port. */
+async function waitForDaemonStartup(
+  sessionsDir: string,
+  sessionId: string,
+  timeoutMs: number,
+): Promise<number> {
+  const sessionDir = join(sessionsDir, sessionId);
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const json = readStartupJson(sessionDir);
+    if (json) {
+      if (json.state === "ready" && typeof json.port === "number") {
+        return json.port;
+      }
+      if (json.state === "failed") {
+        throw new Error(
+          `polytoken daemon failed to start: ${json.message ?? "no message"}`,
+        );
+      }
+      // state is something else (e.g. "starting") — keep polling.
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `polytoken daemon did not become ready within ${timeoutMs}ms (startup.json: ${JSON.stringify(readStartupJson(sessionDir))})`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+/** Spawn a NEW polytoken daemon session (no resume). `polytoken --working-dir <cwd>
+ *  new --no-attach` prints `session_id=<id> port=<port>` to stdout and exits 0;
+ *  the daemon runs detached. */
+async function spawnNewDaemon(
   polytokenBin: string,
-  opts: { cwd?: string; sessionId?: string } = {},
+  opts: { cwd?: string },
 ): Promise<SpawnedDaemon> {
-  // Global options come before the subcommand: `polytoken --working-dir <dir> new --no-attach`
   const globalArgs: string[] = [];
   if (opts.cwd) globalArgs.push("--working-dir", opts.cwd);
-
-  const subArgs = ["new", "--no-attach"];
-  // --resume with --session-id reopens an existing session's daemon.
-  if (opts.sessionId) {
-    subArgs.push("--resume", "--session-id", opts.sessionId);
-  }
   const proc = Bun.spawn({
-    cmd: [polytokenBin, ...globalArgs, ...subArgs],
+    cmd: [polytokenBin, ...globalArgs, "new", "--no-attach"],
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -112,6 +175,106 @@ export async function spawnDaemon(
     );
   }
   return parseSpawnOutput(stdout);
+}
+
+/** Spawn a daemon to RESUME an existing session. Unlike `new --no-attach` (which
+ *  prints session_id/port and exits), the resume path uses `polytoken daemon
+ *  --resume --session-id <id> --project-dir <cwd>` — a FOREGROUND process that
+ *  writes `startup.json` (with pid/port) to the session dir. We spawn it in the
+ *  background, poll `startup.json` for readiness, and keep the process alive
+ *  (the caller owns it via the returned DaemonClient + its close()/kill()).
+ *
+ *  `--global-config-dir` and `--sessions-dir` are passed explicitly because the
+ *  `daemon` subcommand resolves config differently than `new --working-dir`
+ *  (it does NOT walk upward from the project dir to find the global config). */
+async function spawnResumeDaemon(
+  polytokenBin: string,
+  opts: {
+    sessionId: string;
+    cwd: string;
+    sessionsDir: string;
+    globalConfigDir: string;
+  },
+): Promise<SpawnedDaemon> {
+  const args = [
+    "daemon",
+    "--project-dir",
+    opts.cwd,
+    "--session-id",
+    opts.sessionId,
+    "--resume",
+    "--global-config-dir",
+    opts.globalConfigDir,
+    "--sessions-dir",
+    opts.sessionsDir,
+  ];
+  const proc = Bun.spawn({
+    cmd: [polytokenBin, ...args],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  // Poll startup.json for readiness (the daemon writes it once it has bound its
+  // port). 15s is generous — a cold config load + history replay can take a moment.
+  try {
+    const port = await waitForDaemonStartup(
+      opts.sessionsDir,
+      opts.sessionId,
+      15_000,
+    );
+    return { sessionId: opts.sessionId, port };
+  } catch (e) {
+    // Startup failed — kill the background daemon so it doesn't leak.
+    try {
+      proc.kill();
+    } catch {
+      // Already dead.
+    }
+    // Surface the daemon's stderr for diagnostics.
+    const stderr = await new Response(proc.stderr).text().catch(() => "");
+    throw new Error(
+      `${e instanceof Error ? e.message : String(e)}\ndaemon stderr: ${stderr.slice(0, 500)}`,
+    );
+  }
+}
+
+/** Spawn a polytoken daemon (one session, no TUI attach) and return its session id +
+ *  port. A new session uses `polytoken --working-dir <cwd> new --no-attach` (prints
+ *  session_id/port to stdout, exits 0). Resuming an existing session uses
+ *  `polytoken daemon --resume --session-id <id> --project-dir <cwd>` (foreground;
+ *  writes startup.json with the port). The two paths are NOT interchangeable — `new`
+ *  does not accept `--resume`/`--session-id`, and `daemon` doesn't print to stdout. */
+export async function spawnDaemon(
+  polytokenBin: string,
+  opts: {
+    cwd?: string;
+    sessionId?: string;
+    /** Required for resume: the on-disk sessions registry dir (where startup.json
+     *  is written). Ignored for new sessions. */
+    sessionsDir?: string;
+    /** Required for resume: the global config dir. Ignored for new sessions. */
+    globalConfigDir?: string;
+  } = {},
+): Promise<SpawnedDaemon> {
+  if (opts.sessionId) {
+    // Resume path — needs cwd + sessionsDir + globalConfigDir.
+    if (!opts.cwd) {
+      throw new Error("spawnDaemon: resume requires cwd");
+    }
+    if (!opts.sessionsDir) {
+      throw new Error("spawnDaemon: resume requires sessionsDir");
+    }
+    if (!opts.globalConfigDir) {
+      throw new Error("spawnDaemon: resume requires globalConfigDir");
+    }
+    return spawnResumeDaemon(polytokenBin, {
+      sessionId: opts.sessionId,
+      cwd: opts.cwd,
+      sessionsDir: opts.sessionsDir,
+      globalConfigDir: opts.globalConfigDir,
+    });
+  }
+  // New session path.
+  return spawnNewDaemon(polytokenBin, { cwd: opts.cwd });
 }
 
 /**
