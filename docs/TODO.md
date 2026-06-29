@@ -49,6 +49,44 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       modelId, never the bare `session.config` one). Fix: use the full `active_model` as
       `config.modelId` in both sites. Has its own test surface in `event-map.test.ts`.
       Flagged with `// NOTE:` comments at the two split sites.
+- [ ] **polytoken: permission popup doesn't show what's being requested.**
+      Surfaced 2026-06-29 (second dogfood, via Pilot): the permission popup
+      triggered by tool calls (e.g. `shell_exec`) doesn't display the actual
+      content of the request — the command string, the file path being written,
+      the tool args. The operator is asked to approve/deny blind. The popup body
+      should surface the tool name + the substantive payload so the operator can
+      make an informed decision. (Mirrors the AGENTS.md convention: every UI
+      action needs a tooltip — the permission popup is the most consequential
+      action of all and currently has the least context.)
+- [ ] **polytoken: permission popup shows options that aren't actually available.**
+      Surfaced 2026-06-29 (second dogfood): the permission popup can render more
+      options/buttons than are actually valid in the current context — i.e. buttons
+      that don't map to real harness actions. Need to audit which permission
+      actions the popup exposes vs. what the harness actually supports, and prune
+      any non-functional buttons. A button that does nothing on click is worse
+      than no button.
+- [ ] **polytoken: retry button re-sends the last prompt instead of resuming.**
+      Surfaced 2026-06-29 (second dogfood): the "retry" button re-sends the last
+      user prompt verbatim. Mid-flow (e.g. after a tool was cancelled/denied) this
+      restarts the whole turn instead of nudging the agent to proceed. If retry is
+      meant to resume, it should send a fixed minimal signal — "continue" or an
+      empty string — rather than replaying the full prior message. If both
+      "resume after interruption" and "retry the whole turn" are wanted, give them
+      separate buttons with distinct semantics.
+- [ ] **polytoken: facet switching has no GUI affordance.**
+      Surfaced 2026-06-29 (second dogfood): the TUI cycles facets with Shift+Tab,
+      but that doesn't map cleanly to a GUI. Pilot needs a hotkey (TBD) and/or a
+      visible UI control to switch facets (e.g. execute ↔ plan). Until this lands,
+      facet switching is TUI-only and inaccessible from the Pilot UI. Decide on a
+      hotkey (Shift+Tab is the TUI convention but may conflict with focus
+      traversal in a web context) and surface the active facet somewhere visible.
+- [ ] **polytoken: plan-mode plan display overlay.**
+      Surfaced 2026-06-29 (second dogfood): when running in the `plan` facet, there
+      should be a plan display overlay in the Pilot UI — a persistent, visible
+      rendering of the current plan (the structured handoff doc the plan facet
+      produces). Currently there's no way to view the plan from the GUI; it's
+      TUI-only. Needs a design for how the plan renders (inline in transcript?
+      sidebar panel? floating overlay?) and where it lives in the layout.
 - [ ] **e2e: dir-picker `.row.up` "go up" button times out (pre-existing flake).** Surfaced
       during the Chunk 0.5 Settings-nav verification (2026-06-26): 5 `e2e/sessions.e2e.ts`
       worktree/dir-picker tests (`started in a directory chosen via the browser`, `worktree
