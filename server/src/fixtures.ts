@@ -1667,6 +1667,36 @@ via the reverse mapping in \`ui-bridge.ts\` (no change needed there).`;
   ];
 }
 
+/** A plan-handoff card with a SHORT timeout so the deny-safe autoResolve path
+ *  fires: a timed-out `plan` dialog must send the Cancel label (a typed
+ *  plan_handoff_answer), not the universal {cancelled}. Drives the e2e timeout
+ *  test. Mirrors `timeoutConfirm()`. */
+export function planHandoffTimeout(): ScriptStep[] {
+  return [
+    {
+      wait: 0,
+      event: {
+        ...base(),
+        type: "hostUiRequest",
+        request: {
+          kind: "plan",
+          requestId: "req-plan-handoff-timeout-1",
+          title: "Plan handoff (timed)",
+          planText: "A short plan that will auto-dismiss on timeout.",
+          displayPath: "plan.md",
+          targetFacet: "execute",
+          actionLabels: [
+            "Implement (new context)",
+            "Implement (current context)",
+            "Cancel",
+          ],
+          timeoutMs: 1200,
+        },
+      },
+    },
+  ];
+}
+
 /** Drives the StatusHeader facet badge: emits a sessionUpdated snapshot carrying
  *  `facet: "plan"` so the badge appears, dwells long enough to assert it, then
  *  emits a snapshot with `facet: "execute"` so the badge disappears. Exercises the

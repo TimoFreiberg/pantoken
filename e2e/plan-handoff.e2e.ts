@@ -79,3 +79,16 @@ test("no facet badge in the default (execute) state", async ({ page }) => {
   // The greeting fixture's default state has no facet (or execute) — no badge.
   await expect(page.getByTestId("facet-badge")).toBeHidden();
 });
+
+test("a timed-out plan card auto-dismisses to the cancel decision", async ({
+  page,
+}) => {
+  // The deny-safe autoResolve path for a `plan` kind must send the Cancel label
+  // (a typed plan_handoff_answer), not the universal {cancelled} — matching the
+  // visible Cancel button's wire shape (the C1 fix).
+  await drive(page, "planhandofftimeout");
+  await expect(page.getByText(/Auto-dismiss in \d+s/)).toBeVisible();
+  // After the timeout it auto-resolves to the deny-safe default (the cancel label).
+  await expect(page.getByRole("dialog")).toBeHidden({ timeout: 8000 });
+  await expect(page.getByText("Received: Cancel")).toBeVisible();
+});
