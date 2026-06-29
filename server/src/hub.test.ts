@@ -751,6 +751,56 @@ describe("SessionHub", () => {
     ).toBe(false);
   });
 
+  test("a superseded switch's failure is suppressed, not surfaced to the client", async () => {
+    // A cold-attach failure (the connection-race / lease-claim timeout path) would
+    // otherwise surface as a "session switch failed" error to a client that has
+    // since clicked another session. Like the success path, a superseded switch's
+    // failure must be silent — the queued switch surfaces its own outcome.
+    // Each openSession call gets its OWN release, so the first can reject while
+    // the second is queued behind it.
+    const releases: {
+      resolve: (v: SessionDriverEvent[]) => void;
+      reject: (e: unknown) => void;
+    }[] = [];
+    const d = new FakeDriver();
+    // biome-ignore lint/suspicious/noExplicitAny: test stub override
+    (d as any).openSession = () =>
+      new Promise<SessionDriverEvent[]>((resolve, reject) =>
+        releases.push({ resolve, reject }),
+      );
+    const hub = new SessionHub(d);
+    const a = client();
+    hub.addClient(a.send);
+
+    // First open (A) starts warming; a second (B) queues behind it.
+    hub.handleClient(a.send, { type: "openSession", path: "/a.jsonl" });
+    hub.handleClient(a.send, { type: "openSession", path: "/b.jsonl" });
+    await flush();
+    expect(releases.length).toBe(1);
+
+    // A's attach fails (e.g. lease claim timed out). This must NOT reach the
+    // client — B has superseded it.
+    releases[0]!.reject(new Error("lease claim failed (0): fetch failed"));
+    await flush();
+    expect(
+      a.received.some(
+        (m) => m.type === "error" && /session switch failed/.test(m.message),
+      ),
+    ).toBe(false);
+
+    // B's swap was dispatched from A's finally; release it successfully.
+    expect(releases.length).toBe(2);
+    releases[1]!.resolve([ev({ type: "sessionOpened", snapshot: snap("b") })]);
+    await flush();
+
+    // The client landed on B and never saw A's stale failure.
+    const last = a.received.filter((m) => m.type === "snapshot").at(-1);
+    expect(last?.type === "snapshot" && last.state.ref?.sessionId).toBe("b");
+    expect(
+      a.received.some((m) => m.type === "error"),
+    ).toBe(false);
+  });
+
   test("only a client's focused session reaches its transcript stream", () => {
     const d = new FakeDriver();
     const hub = new SessionHub(d);

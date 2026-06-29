@@ -1163,7 +1163,12 @@ export class SessionHub {
       try {
         seed = await swap();
       } catch (e) {
-        conn.send({ type: "error", message: `session switch failed: ${e}` });
+        // A newer switch queued up while this one was warming: the operator has
+        // already moved on, so this failure is stale — suppress it and let the
+        // queued switch surface its own outcome. (Mirrors the success path's
+        // `if (conn.pendingSwitch) return sid;` below.)
+        if (!conn.pendingSwitch)
+          conn.send({ type: "error", message: `session switch failed: ${e}` });
         return null;
       }
       // Fold into a fresh state to learn the authoritative session id — the seed's
@@ -1179,10 +1184,11 @@ export class SessionHub {
       }
       const sid = built.ref?.sessionId ?? seed[0]?.sessionRef.sessionId ?? null;
       if (!sid) {
-        conn.send({
-          type: "error",
-          message: "session switch returned no session",
-        });
+        if (!conn.pendingSwitch)
+          conn.send({
+            type: "error",
+            message: "session switch returned no session",
+          });
         return null;
       }
       // (Re)build the shared state from this authoritative seed when the session isn't
