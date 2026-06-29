@@ -59,7 +59,7 @@
   // appends), so the turn-final assistant footer suppresses its branch button there.
   // "Last item with an entry id" (any kind) — not "last assistant" — so a committed user
   // prompt with no answer yet correctly shifts the tip off the prior assistant, keeping
-  // that earlier turn genuinely branchable. (Real pi backfills an entry id on every
+  // that earlier turn genuinely branchable. (The real daemon backfills an entry id on every
   // settled turn; the mock now matches so this holds across both drivers.)
   const leafEntryId = $derived.by(() => {
     for (let i = items.length - 1; i >= 0; i--) {

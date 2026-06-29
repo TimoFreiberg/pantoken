@@ -1,5 +1,5 @@
-// Pilot-local settings persisted across restarts. Distinct from pi's global config
-// (auth.json + pi settings, reached through the driver): these are pilot's OWN knobs,
+// Pilot-local settings persisted across restarts. Distinct from the daemon's global config
+// (auth.json + the daemon's settings, reached through the driver): these are pilot's OWN knobs,
 // stored as a small JSON file in the data dir alongside the VAPID key / archive index.
 // Currently just the login-shell override (see login-env.ts); structured as an object
 // so future pilot-local settings slot in without a new store.

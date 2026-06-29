@@ -5,7 +5,7 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-// An extension nudge (pi's sendMessage, e.g. journal-nudge) triggers a fresh run with
+// An extension nudge (the daemon's sendMessage, e.g. journal-nudge) triggers a fresh run with
 // no user prompt. Before the turn-boundary fix, that second run glued onto the prior
 // turn and its REAL final response collapsed into the "Worked for Ns" work block. The
 // fix surfaces the injected message as a tiny pill that opens a new turn, so the prior

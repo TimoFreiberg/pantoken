@@ -1,5 +1,7 @@
 # Pilot — Design & Feature Catalog
 
+> **Note:** this branch is polytoken-only; pi-coupled design references are historical.
+
 A personal, single-user remote-control web UI for the **pi** coding agent. pi runs
 on a Mac Mini; you drive it from a work MacBook browser and a phone over Tailscale.
 Default look/feel mirrors the Claude app; pi extensions stay at least visible.

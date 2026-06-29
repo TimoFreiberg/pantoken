@@ -8,7 +8,7 @@ import {
   type ModelLike,
 } from "./background-model.js";
 
-// A couple of known models — mirrors the shape ModelRegistry.getAvailable() returns
+// A couple of known models — mirrors the shape getAvailable() returns
 // (provider/id/name), without needing a real AuthStorage + models.json. Covers the
 // canonical `provider/id`, bare-id, and thinking-suffix paths.
 const MODELS: ModelLike[] = [
@@ -24,7 +24,7 @@ function registry(models: ModelLike[] = MODELS): BackgroundModelRegistry {
 }
 
 describe("resolveBackgroundModel — null / unset", () => {
-  test("null → no model, no warning (extensions fall back, not an error)", () => {
+  test("null → no model, no warning (callers fall back, not an error)", () => {
     const r = resolveBackgroundModel(null, registry());
     expect(r.model).toBeUndefined();
     expect(r.thinkingLevel).toBeUndefined();
@@ -75,8 +75,8 @@ describe("resolveBackgroundModel — bad spec (loud warning)", () => {
     expect(r.warning).toMatch(/No registered model matches/);
   });
 
-  test("invalid thinking level on a RESOLVING prefix → model + non-fatal warning (matches pi scope-warn)", () => {
-    // The prefix `anthropic/claude-haiku-4-5` resolves, so pi's scope-warn path returns
+  test("invalid thinking level on a RESOLVING prefix → model + non-fatal warning (scope-warn)", () => {
+    // The prefix `anthropic/claude-haiku-4-5` resolves, so the scope-warn path returns
     // the model with the bad `:thinking` level DROPPED + a non-fatal warning. Settings
     // thus agrees with runtime (the model works; the suffix is just noted), instead of
     // rejecting a spec the runtime would happily use.
@@ -88,17 +88,17 @@ describe("resolveBackgroundModel — bad spec (loud warning)", () => {
 
   test("invalid thinking level on a NON-resolving prefix → fatal warning, no model", () => {
     // The prefix doesn't resolve either: the missing model is the real problem, the bad
-    // suffix is moot, so pi (and pilot) return no model + the inner (fatal) warning.
+    // suffix is moot, so the resolver returns no model + the inner (fatal) warning.
     const r = resolveBackgroundModel("anthropic/nope-9-9:banana", registry());
     expect(r.model).toBeUndefined();
     expect(r.warning).toMatch(/No registered model matches/);
   });
 
-  test("ambiguous bare id falls back to partial match (mirrors pi's tryMatchModel)", () => {
+  test("ambiguous bare id falls back to partial match (tryMatchModel)", () => {
     // Two providers ship a model with id "dupe". An exact bare-id match is ambiguous and
-    // rejected, BUT pi's tryMatchModel then falls back to a partial (substring) match
-    // and picks an alias — so a bare ambiguous id is NOT a loud warning. This tracks
-    // pi's semantics; the loud-reject-on-ambiguity holds for the canonical form below.
+    // rejected, BUT tryMatchModel then falls back to a partial (substring) match and
+    // picks an alias — so a bare ambiguous id is NOT a loud warning. The
+    // loud-reject-on-ambiguity holds for the canonical form below.
     const dup = [
       { provider: "anthropic", id: "dupe" },
       { provider: "openai", id: "dupe" },

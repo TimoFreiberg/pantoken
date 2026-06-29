@@ -100,7 +100,7 @@ test("right-clicking a session row opens its overflow menu", async ({
   await expect(sidebar.getByText("Explore the fold reducer")).toHaveCount(0);
 });
 
-test("the overflow menu copies the pi session id to the clipboard", async ({
+test("the overflow menu copies the session id to the clipboard", async ({
   page,
   context,
 }) => {
@@ -118,7 +118,7 @@ test("the overflow menu copies the pi session id to the clipboard", async ({
   await row.getByTestId("session-menu").click();
   await sidebar.getByTestId("copy-session-id").click();
 
-  // Clipboard holds the raw pi session id, and the menu closed itself.
+  // Clipboard holds the raw session id, and the menu closed itself.
   const copied = await page.evaluate(() => navigator.clipboard.readText());
   expect(copied).toBe("older-session");
   await expect(sidebar.getByTestId("copy-session-id")).toHaveCount(0);

@@ -109,7 +109,7 @@ const dataDir =
 const viteArgs = ["run", "dev"];
 if (vitePort) viteArgs.push("--port", vitePort);
 
-// Pilot embeds pi inside a Bun process. Some pi provider deps are CJS packages that
+// Pilot embeds the polytoken daemon inside a Bun process. Some provider deps are CJS packages that
 // Bun resolves from ~/.bun/install/cache, where transitive deps are not laid out as
 // siblings. NODE_PATH must be present before Bun starts so those cached packages can
 // resolve through this workspace's real dependency symlink forest.

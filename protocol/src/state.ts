@@ -23,7 +23,7 @@ export interface UserItem {
   images?: readonly ImageContent[];
   /** ISO timestamp of when this user turn was sent. */
   ts?: string;
-  /** pi's tree entry id for this prompt — the handle "branch from this prompt" sends to
+  /** the daemon's tree entry id for this prompt — the handle "branch from this prompt" sends to
    *  the server (→ navigateTree). Distinct from `id` (a synthetic {#each} key); undefined
    *  until the live backfill / replay supplies it, in which case no branch button shows. */
   entryId?: string;
@@ -42,7 +42,7 @@ export interface AssistantItem {
   streaming: boolean;
   /** ISO timestamp of when this assistant turn began. */
   ts?: string;
-  /** pi's tree entry id for this turn — the handle "branch from here" sends to the server.
+  /** the daemon's tree entry id for this turn — the handle "branch from here" sends to the server.
    *  Set on the turn-final assistant; absent → no branch button. See UserItem.entryId. */
   entryId?: string;
   /** ISO timestamp (or epoch-ms string) of when the turn settled — stamped on the
@@ -61,7 +61,7 @@ export interface ToolItem {
   description?: string;
   input?: unknown;
   output?: unknown;
-  /** Image content blocks the tool returned (pi's `{type:"image"}`). Folded from
+  /** Image content blocks the tool returned (the daemon's `{type:"image"}`). Folded from
    *  `toolFinished.images`; rendered as <img> by the tool card. Same data on the live
    *  and reloaded paths (event-map / history-map both populate it). */
   images?: readonly ImageContent[];
@@ -80,7 +80,7 @@ export interface NoticeItem {
   level: "info" | "warning" | "error";
   text: string;
 }
-/** An extension-injected custom message (pi's `sendMessage`). Folded from a
+/** An extension-injected custom message (the daemon's `sendMessage`). Folded from a
  *  `customMessage` event. Acts as a turn boundary (see transcript-view.groupTurns):
  *  the run it triggered gets its own turn instead of gluing onto the prior one.
  *  `display:false` items render nothing but still split the turn. */
@@ -166,7 +166,7 @@ function closeOpenAssistant(
   }
 }
 
-/** Backfill a pi tree entry id onto the most recent item of `kind` (the live-path
+/** Backfill a daemon tree entry id onto the most recent item of `kind` (the live-path
  *  branch handle — see RunCompletedEvent). The most recent assistant item is the
  *  turn-final one; the most recent user item is the turn's prompt. Idempotent: a
  *  re-fold stamps the same id. */
@@ -192,7 +192,7 @@ function stampLastEntryId(
 
 /** Settle tool cards that never received a matching toolFinished event. This only
  *  runs at authoritative turn boundaries: an idle sessionUpdated can be a transient
- *  mid-tool snapshot (pi's isStreaming briefly reads false), while runCompleted,
+ *  mid-tool snapshot (the daemon's isStreaming briefly reads false), while runCompleted,
  *  runFailed, and sessionClosed guarantee that the tool is no longer executing. */
 function interruptRunningTools(
   items: TranscriptItem[],
@@ -248,7 +248,7 @@ export function foldEvent(
       // leave a historical card "running" forever.
       if (ev.type === "runCompleted") {
         interruptRunningTools(state.items, ev.timestamp);
-        // Live-path branch handles: pi only knows the just-completed turn's entry ids
+        // Live-path branch handles: the daemon only knows the just-completed turn's entry ids
         // now that its messages have persisted (they can't ride the deltas). Stamp them
         // onto the turn-final assistant + this turn's user item so the "branch from here"
         // buttons light up without a reload. No-op on replay (ids ride the per-message

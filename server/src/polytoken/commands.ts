@@ -10,13 +10,13 @@
 //       ...
 //     ] }
 //
-// polytoken's commands are all daemon BUILTINS (no pi extensions load under this
+// polytoken's commands are all daemon BUILTINS (no daemon extensions load under this
 // driver — D-C). pilot's `CommandInfo.source` union gains `"builtin"` for them; the
 // client renders `source` as a string badge, so a new value needs no client change.
 // Sending `/name args` as a normal prompt routes through polytoken's prompt path,
-// which runs the builtin — exactly how pi's extension commands work.
+// which runs the builtin — exactly how the daemon's extension commands work.
 //
-// The pi-driver deliberately OMITS TUI builtins (/model, /settings) because pilot
+// The original pi driver (deleted) deliberately OMITS TUI builtins (/model, /settings) because pilot
 // has native UI for those. Under polytoken the same applies to /model + /models
 // (pilot's ModelPicker drives POST /model). The rest (/compact, /rewind, /facet,
 // /permissions, /title, /clear, …) have no first-class pilot affordance OR are
@@ -41,7 +41,7 @@ interface RawSlashCommands {
 }
 
 /** Commands pilot has a native first-class UI for, so they don't need a slash-menu
- *  duplicate (pilot's affordance is richer than a text command). Mirrors pi-driver's
+ *  duplicate (pilot's affordance is richer than a text command). Mirrors the original driver's
  *  omission of TUI builtins. `/model` + `/models` both drive the ModelPicker. */
 const OMITTED_CANONICALS = new Set(["/model", "/models"]);
 

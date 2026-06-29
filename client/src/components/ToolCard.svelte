@@ -79,10 +79,10 @@
     }));
   }
 
-  // Live tool results arrive as pi's raw object { content: [{type:"text",text}|{type:"image",data,mimeType}], details? },
+  // Live tool results arrive as the daemon's raw object { content: [{type:"text",text}|{type:"image",data,mimeType}], details? },
   // while replayed-from-history results are already plain text. Pull the text blocks
   // out so a tool card renders the SAME before and after a reload. '' when there are
-  // none (or the shape isn't pi's content array).
+  // none (or the shape isn't the daemon's content array).
   function contentText(out: unknown): string {
     if (out && typeof out === "object") {
       const content = (out as { content?: unknown }).content;
@@ -161,10 +161,10 @@
   const durationLabel = $derived(durationMs === null ? null : fmtDuration(durationMs));
 
   // ── Edit-tool diff support ────────────────────────────────────────────────
-  // Detect pi's edit tool by SHAPE, not name: input is an object with a `path`
+  // Detect the agent's edit tool by SHAPE, not name: input is an object with a `path`
   // (string) plus either `edits: [{oldText,newText}]` or legacy top-level
-  // oldText/newText strings. `file_path` is an accepted alias for `path` in pi.
-  // Contract confirmed in pi's edit.ts / edit-diff.ts.
+  // oldText/newText strings. `file_path` is an accepted alias for `path` in the agent.
+  // Contract confirmed in the agent's edit.ts / edit-diff.ts.
   type Edit = { oldText: string; newText: string };
 
   function editFrom(input: unknown): { path: string; edits: Edit[] } | null {
@@ -210,7 +210,7 @@
     };
   }
 
-  // A pi edit result may carry a richer standard unified patch in details.patch —
+  // An agent edit result may carry a richer standard unified patch in details.patch —
   // prefer it when present, otherwise the input-derived oldFile/newFile is truth.
   function patchFrom(out: unknown): string | null {
     if (!out || typeof out !== "object") return null;

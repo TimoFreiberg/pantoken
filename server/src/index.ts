@@ -1,7 +1,8 @@
 // Pilot server: Bun.serve with a WebSocket control channel, an agent-legible
 // /debug introspection surface, an optional auth-token gate, and static serving of
-// the built client (so prod is one process behind `tailscale serve`). M0 wires the
-// deterministic mock driver; M5 swaps in the real pi-sdk driver behind PilotDriver.
+// the built client (so prod is one process behind `tailscale serve`). The default
+// driver is the out-of-process polytoken daemon; PILOT_DRIVER=mock selects the
+// deterministic mock for e2e + local UI dev.
 
 import { type ServerMessage, parseClientMessage } from "@pilot/protocol";
 import { join } from "node:path";
@@ -24,8 +25,8 @@ import { serveStatic } from "./static.js";
 // data dir so the id is available to the logger from the first line.
 const serverId = mintOrReadServerId(config.dataDir);
 const log = new Logger({ file: join(config.dataDir, "pilot.log"), serverId });
-// Tee global console.* into pilot.log so pi extension `console.error` (and pilot's
-// own `[pi] ...` lines) reach the durable log file in the live desktop app, where the
+// Tee global console.* into pilot.log so extension/daemon `console.error` (and
+// pilot's own log lines) reach the durable log file in the live desktop app, where the
 // process stderr is otherwise unreached (ServerSupervisor attaches no stderr pipe).
 // Called before anything logs so nothing is missed; the originals are captured in the
 // Logger ctor so its own mirror path never recurses through this tee.
@@ -71,12 +72,11 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 }
 
 // A pilot host outlives the sessions it drives, so a stray async error from
-// third-party pi extension code must not take the whole process down with every
-// other session and client. Concretely (D13): an extension's fire-and-forget
-// work — e.g. prompt-editor loading prompt history on session_start — can touch
-// a `ctx` that went stale mid-await when we swap sessions; pi's ctx getters then
-// throw "stale after session replacement", and the unawaited rejection would
-// otherwise exit the process.
+// third-party daemon/extension code must not take the whole process down with every
+// other session and client. Concretely: fire-and-forget work can touch a `ctx` that
+// went stale mid-await when we swap sessions; the daemon's ctx getters then throw
+// "stale after session replacement", and the unawaited rejection would otherwise exit
+// the process.
 //
 // This is NOT a silent swallow: we log loudly, and a line that recurs is a
 // signal to fix the extension or stop loading it in pilot, not noise to ignore.
@@ -104,29 +104,24 @@ interface WsData {
   unsub: (() => void) | null;
 }
 
-// Driver selection. Default is the live pi driver; PILOT_DRIVER=mock forces the
-// deterministic mock (used by e2e tests and local UI dev without a running pi);
-// PILOT_DRIVER=polytoken selects the out-of-process polytoken daemon driver.
-// The MockDriver import is static so types stay available; the pi SDK and
-// polytoken driver are dynamic so they never load in mock mode.
+// Driver selection. Default is the out-of-process polytoken daemon driver;
+// PILOT_DRIVER=mock forces the deterministic mock (used by e2e tests and local UI dev
+// without a running daemon). The pi driver has been removed from this branch — setting
+// PILOT_DRIVER=pi is a hard error so a stale config surfaces loud rather than silently
+// falling through. The MockDriver import is static so types stay available; the
+// polytoken driver is dynamic so it never loads in mock mode.
 let driver: PilotDriver;
 let mock: MockDriver | null = null;
 if (process.env.PILOT_DRIVER === "mock") {
   mock = new MockDriver();
   driver = mock;
-} else if (process.env.PILOT_DRIVER === "polytoken") {
+} else {
+  if (process.env.PILOT_DRIVER === "pi")
+    throw new Error(
+      "pi driver removed on this branch — use 'mock' or 'polytoken' (default)",
+    );
   const { createPolytokenDriver } = await import("./polytoken/polytoken-driver.js");
   driver = await createPolytokenDriver();
-} else {
-  // Reconstruct the interactive-shell env (PATH, tool shims, exported vars) and merge it
-  // into process.env BEFORE pi exists — pi's bash tool spawns with `{ ...process.env }`,
-  // so this is what makes the agent's shell see the same tools a terminal session has.
-  // Mock mode skips it (deterministic + fast e2e/dev). Loud-warns + keeps the launch PATH
-  // on failure; never blocks startup. See pi/login-env.ts.
-  const { applyLoginEnv } = await import("./pi/login-env.js");
-  await applyLoginEnv();
-  const { createPiDriver } = await import("./pi/pi-driver.js");
-  driver = await createPiDriver();
 }
 const push = new PushService();
 // Arm the greeting as the landing fixture BEFORE the hub is built — the hub seeds its
@@ -323,11 +318,7 @@ log.info("pilot server started", {
   url: `http://${config.host}:${server.port}`,
   dataDir: config.dataDir,
   driver:
-    process.env.PILOT_DRIVER === "mock"
-      ? "mock"
-      : process.env.PILOT_DRIVER === "polytoken"
-        ? "polytoken"
-        : "pi",
+    process.env.PILOT_DRIVER === "mock" ? "mock" : "polytoken",
   token: config.token ? "required" : "off",
   debug: config.debug,
 });

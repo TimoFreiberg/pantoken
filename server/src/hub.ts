@@ -18,8 +18,8 @@ import {
   type SessionState,
 } from "@pilot/protocol";
 import type { OAuthLoginIO, PilotDriver } from "./driver.js";
-import { getLoginEnvStatus, resolveLoginShell } from "./pi/login-env.js";
-import { resolveBackgroundModel } from "./pi/background-model.js";
+import { getLoginEnvStatus, resolveLoginShell } from "./shared/login-env.js";
+import { resolveBackgroundModel } from "./shared/background-model.js";
 import { readPilotSettings, writePilotSettings } from "./settings-store.js";
 
 export type Send = (msg: ServerMessage) => void;
@@ -121,7 +121,7 @@ function classifySwitchError(raw: unknown): {
   );
   if (failedMatch) {
     return {
-      message: `Couldn't open this session — the daemon failed to start (${failedMatch[1].trim()}). Try again, or open it in the TUI to diagnose.`,
+      message: `Couldn't open this session — the daemon failed to start (${(failedMatch[1] ?? "").trim()}). Try again, or open it in the TUI to diagnose.`,
       kind: "session-switch",
     };
   }
@@ -171,7 +171,7 @@ interface ClientConn {
   // The session this connection is viewing (null = the empty landing). Points into
   // `sessionStates`; null until the client adopts the default or opens a session.
   focusedId: SessionId | null;
-  // Single-flight per connection: a swap can block (warming pi, or a trust card awaiting
+  // Single-flight per connection: a swap can block (warming the session, or a trust card awaiting
   // input), so only one runs at a time on THIS connection (others are free). A second
   // request arriving meanwhile isn't rejected — it's coalesced into `pendingSwitch` and
   // run when the current one finishes (see switchTo). This kills the boot-restore-vs-click
@@ -198,7 +198,7 @@ export class SessionHub {
   // below — their transcript stays private to the driver until someone focuses them.
   private sessionStates = new Map<SessionId, SessionState>();
   // The landing session a freshly-connecting client with no focus of its own adopts:
-  // the mock's bootstrap greeting, or null for pi's empty startup landing. Established
+  // the mock's bootstrap greeting, or null for the daemon's empty startup landing. Established
   // from the driver's defaultSeed() on construction + reset.
   private defaultFocusId: SessionId | null = null;
   // Session ids with a live turn right now — tracked across ALL sessions, not just
@@ -217,7 +217,7 @@ export class SessionHub {
   private sessionTitles = new Map<SessionId, string>();
   private clients = new Map<Send, ClientConn>();
   // Whether any client has connected since startup. Gates push so replayed history
-  // — the mock's bootstrap greeting, or the pi driver's on-load session replay
+  // — the mock's bootstrap greeting, or the polytoken driver's on-load session replay
   // (both can end in runCompleted while clientCount is 0) — doesn't buzz a stored
   // subscription on every restart. This is also how replay is told apart from live
   // events (D13): cold-start seeds fold before anyone connects, and switchTo folds
@@ -258,7 +258,7 @@ export class SessionHub {
   // reportUpdate hands it to that one caller and clears it (the apply's restart wipes hub
   // state anyway; a failed apply un-flags via applyFailed).
   private forceRequested = false;
-  // OAuth login (Settings panel) is a GLOBAL interactive flow — it writes pi's shared
+  // OAuth login (Settings panel) is a GLOBAL interactive flow — it writes the daemon's shared
   // auth.json, not a session — so it rides its own wire messages, not the session-scoped
   // Host UI channel. While a login runs, its prompts wait here keyed by requestId; an
   // `oauthRespond` resolves one (first-responder-wins across devices). Single-flight:
@@ -275,7 +275,7 @@ export class SessionHub {
   private oauthInFlight = false;
   // Prompt acceptance is idempotent per client-generated id. The promise is stored
   // before dispatch so a reconnect/retry racing the original request attaches to the
-  // same result instead of invoking pi twice. Bounded because this is only a short-term
+  // same result instead of invoking the driver twice. Bounded because this is only a short-term
   // reconnect ledger, not durable session history.
   private promptResults = new Map<
     string,
@@ -325,7 +325,7 @@ export class SessionHub {
 
   /** Establish the landing session a fresh client adopts: fold the driver's
    *  defaultSeed() into a shared session state and record it as `defaultFocusId`.
-   *  No-op (empty landing) when the driver has no default — pi at boot, or the mock
+   *  No-op (empty landing) when the driver has no default — the daemon at boot, or the mock
    *  reset with bootstrap:false. Called on construction + after reset. */
   private seedDefault(): void {
     const seed = this.driver.defaultSeed?.();
@@ -358,7 +358,7 @@ export class SessionHub {
     const sid = ev.sessionRef.sessionId;
     // Cross-session tracking is GLOBAL and runs for every event regardless of focus —
     // a background turn never folds into a transcript, but the running/attention
-    // indicators must still update. LRU eviction (pi-driver) disposes a warm session
+    // indicators must still update. LRU eviction (the polytoken driver) disposes a warm session
     // inside another client's swap and emits a synthetic sessionClosed for it; that
     // must clear the running set here regardless of who is focused where.
     const statusChanged = this.trackRunning(sid, ev);
@@ -800,7 +800,7 @@ export class SessionHub {
       console.error("[hub] setExtensionEnabled failed", e);
     }
     void this.sendExtensionList(conn);
-    // A pilot-OWNED toggle writes pilot's `enabledExtensions` (not pi's force-exclude),
+    // A pilot-OWNED toggle writes pilot's `enabledExtensions` (not the daemon's force-exclude),
     // so re-broadcast `pilotSettings` so every client's owned-row state stays in sync.
     // Key off the basename (without .ts) the protocol list carries — the real driver's
     // ownedExtensionBasename and the mock's name match both reduce to this.
@@ -874,7 +874,7 @@ export class SessionHub {
     }
   }
 
-  /** Fetch + send ONE client its focused session's branch tree (pi's /tree) for the tree
+  /** Fetch + send ONE client its focused session's branch tree (the daemon's /tree) for the tree
    *  view. Per-connection (scoped to the requester's focus, like the command/file lists),
    *  so a client opening the tree view sees ITS session, not whatever another client is on.
    *  No-op if the driver can't read a tree. */
@@ -965,7 +965,7 @@ export class SessionHub {
     };
   }
 
-  /** Fetch + broadcast pi's global model defaults + favorites (Settings panel). */
+  /** Fetch + broadcast the daemon's global model defaults + favorites (Settings panel). */
   private async broadcastModelDefaults(): Promise<void> {
     if (!this.driver.getModelDefaults) return;
     try {
@@ -1188,7 +1188,7 @@ export class SessionHub {
    * seeds the target; we fold that seed into the target's shared state (unless it's
    * already live — see below), point this connection at it, and re-snapshot. Other
    * clients are untouched: focus is per-connection. Single-flight per connection (a swap
-   * can block for seconds warming pi, or minutes on a trust card): a second request
+   * can block for seconds warming the session, or minutes on a trust card): a second request
    * arriving mid-swap is coalesced (queued, latest wins) and run when this one finishes,
    * not rejected — so an operator clicking a session during the fresh-start boot-restore
    * warm lands on it instead of getting a spurious error. The session LIST re-broadcasts
@@ -1293,7 +1293,7 @@ export class SessionHub {
   }
 
   /** Register a client. Synchronously sends hello + a snapshot of the session this
-   *  connection focuses (the landing default; a brand-new pi client has none and lands
+   *  connection focuses (the landing default; a brand-new client has none and lands
    *  empty, then restores its own last-focused session). Focus is per-connection. */
   addClient(send: Send): () => void {
     const conn: ClientConn = {
@@ -1402,7 +1402,7 @@ export class SessionHub {
       case "respondUi": {
         // First-responder-wins: only the first answer for a still-pending dialog
         // reaches the driver. A second device (or co-viewer of the same session)
-        // answering the same id is dropped, so the real pi session never gets a double
+        // answering the same id is dropped, so the real daemon session never gets a double
         // resolution. The dialog lives in the targeted session's shared state.
         const sid = msg.sessionId ?? conn.focusedId ?? undefined;
         const st = sid ? this.sessionStates.get(sid) : undefined;

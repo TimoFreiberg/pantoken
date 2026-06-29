@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { WorktreeMeta } from "./pi/worktree.js";
+import type { WorktreeMeta } from "./shared/worktree.js";
 import { WorktreeStore } from "./worktree-store.js";
 
 const meta = (path: string, base = "/repo"): WorktreeMeta => ({

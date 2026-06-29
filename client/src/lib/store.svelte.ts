@@ -152,7 +152,7 @@ class PilotStore {
   // Slash commands the focused session offers, for the composer typeahead. Server-
   // authoritative, delivered like `models`; refreshed on session switch (cwd-scoped).
   commands = $state<CommandInfo[]>([]);
-  // The focused session's pi extensions, for the Settings "Extensions" view. Fetched on
+  // The focused session's agent extensions, for the Settings "Extensions" view. Fetched on
   // demand (queryExtensions) when that section expands; re-sent after a toggle.
   extensions = $state<ExtensionInfo[]>([]);
   // The focused session's full file index (cwd-scoped), pushed by the server on connect +
@@ -182,7 +182,7 @@ class PilotStore {
   // Interactive project-trust card (D12). Out-of-band, not part of the folded session
   // state: trust is decided per-cwd before a session exists. Null when none pending.
   trustRequest = $state<TrustRequest | null>(null);
-  // Settings panel: the providers pilot can manage credentials for, and pi's global
+  // Settings panel: the providers pilot can manage credentials for, and the agent's global
   // model defaults + favorites. Server-authoritative, delivered like `models`.
   providers = $state<ProviderInfo[]>([]);
   modelDefaults = $state<ModelDefaults>({ favorites: [] });
@@ -220,7 +220,7 @@ class PilotStore {
   // per-client view state — local only (never sent upstream; see D5)
   composerDraft = $state("");
   composerImages = $state<ImageContent[]>([]);
-  // Durable client outbox. Entries remain until the server explicitly ACKs pi's prompt
+  // Durable client outbox. Entries remain until the server explicitly ACKs the agent's prompt
   // preflight; reconnect/reload resends queued entries by stable promptId.
   pendingPrompts = $state<PendingPrompt[]>([]);
   private hydratedOutboxServerId: string | null = null;
@@ -259,7 +259,7 @@ class PilotStore {
     thinking?: string;
   } | null>(null);
   // A newSession prompt was just submitted and we're awaiting the new session's first
-  // authoritative snapshot from the server (pi warm-up can take a beat). Holds the
+  // authoritative snapshot from the server (session warm-up can take a beat). Holds the
   // submitted prompt (id + content). While set, the transcript renders a fresh/empty
   // session seeded with this first-prompt row + a "Starting session…" indicator — instead
   // of flashing the previously focused session's transcript, which `this.session` still
@@ -649,7 +649,7 @@ class PilotStore {
    *
    *  The folded `session.status` alone is NOT enough: it only changes on snapshot-
    *  bearing events, while raw deltas/tool events never touch it. An out-of-band
-   *  re-snapshot mid-turn (a rename / model change while a tool runs, when pi's
+   *  re-snapshot mid-turn (a rename / model change while a tool runs, when the agent's
    *  `isStreaming` momentarily reads false) flips it to "idle" even though the run
    *  continues — and on reconnect that corrupted status rides the snapshot. So we OR
    *  it with three independent in-flight signals a single glitch can't all clear at
@@ -676,7 +676,7 @@ class PilotStore {
    *  a liveness counter shown beside the working spinner so you can tell the API is
    *  actually feeding you (the number climbs) from a stall (it freezes). Sums assistant
    *  text + thinking since the last user/inject turn boundary; tools and earlier turns are
-   *  excluded, so it resets per turn for free. It's an ESTIMATE (~4 chars/token): pi only
+   *  excluded, so it resets per turn for free. It's an ESTIMATE (~4 chars/token): the agent only
    *  surfaces context-window usage to pilot, not exact per-turn output token counts, so we
    *  approximate from the streamed characters we already fold. Counting the thinking channel
    *  too is the point — it proves liveness during "Thinking…" when no answer text shows.
@@ -1424,7 +1424,7 @@ class PilotStore {
   statPath(path: string): void {
     send({ type: "statPath", path });
   }
-  /** Jump the session to a prior tree entry and branch from it (pi's /tree). The server
+  /** Jump the session to a prior tree entry and branch from it (the daemon's /tree). The server
    *  re-seeds every client's transcript to the new branch; if `entryId` was a user
    *  prompt, this client also gets an `editorPrefill` with its text. No-op while a turn
    *  is running (the server rejects it — a mid-turn navigate would corrupt the branch). */
@@ -1664,7 +1664,7 @@ class PilotStore {
   }
 
   /** Open the new-session draft. `cwd` prefills the project (the sidebar passes the
-   *  group's cwd, or the active session's). Model/thinking seed from pi's global
+   *  group's cwd, or the active session's). Model/thinking seed from the agent's global
    *  defaults so the chips reflect what a plain new session would use. */
   startDraft(cwd = ""): void {
     // Save whatever session/draft we're leaving before flipping into the new draft.
@@ -1780,7 +1780,7 @@ class PilotStore {
     this.composerDraft = "";
     this.composerImages = [];
     // Hand the transcript a clean slate immediately. Without this it keeps rendering the
-    // PREVIOUSLY focused session (still held in `this.session`) for the whole pi warm-up
+    // PREVIOUSLY focused session (still held in `this.session`) for the whole session warm-up
     // window, flashing that old transcript before the new session's snapshot lands. We
     // reset to an empty state and mark the creation pending so the only thing shown is the
     // optimistic first-prompt row (transcriptItems) + the "Starting session…" indicator,
@@ -1821,14 +1821,14 @@ class PilotStore {
   closeSearch(): void {
     this.searchOpen = false;
   }
-  /** Ask the server for the focused session's pi extensions (the Settings "Extensions"
+  /** Ask the server for the focused session's agent extensions (the Settings "Extensions"
    *  section just expanded). Re-query on each expand so it reflects any toggles since. */
   queryExtensions(): void {
     send({ type: "queryExtensions" });
   }
   /** Enable/disable an extension (applies on the session's next start). Optimistic — flip
    *  the local row now; the server persists and re-sends the authoritative list to reconcile.
-   *  A pilot-OWNED row's toggle writes pilot's `enabledExtensions` set (not pi's
+   *  A pilot-OWNED row's toggle writes pilot's `enabledExtensions` set (not the daemon's
    *  force-exclude, which Chunk 0 proved is a no-op on owned paths), so optimistically
    *  mirror that too — the server re-broadcasts `pilotSettings` to reconcile. */
   setExtensionEnabled(resolvedPath: string, enabled: boolean): void {
@@ -2146,8 +2146,8 @@ class PilotStore {
   cleanupWorktree(path: string, force = false): void {
     send({ type: "cleanupWorktree", path, force });
   }
-  /** Reload a session from scratch (by its .jsonl path): the server disposes the warm pi
-   *  session and re-warms it from disk, rebuilding pi's context anew (config + extensions
+  /** Reload a session from scratch (by its .jsonl path): the server disposes the warm
+   *  session and re-warms it from disk, rebuilding the agent's context anew (config + extensions
    *  loaded fresh). The recovery path for a session an extension bug has wedged — fix the
    *  extension elsewhere, then reload here. The server re-seeds every client viewing it. */
   reloadSession(path: string): void {

@@ -1,21 +1,21 @@
 # AGENTS.md — working in the pilot repo
 
-Pilot is a personal, single-user remote-control web UI for the **pi** coding agent.
-pi runs on a Mac Mini; you drive it from a browser/phone over Tailscale. The UI
-mirrors the Claude app. See `docs/DESIGN.md` for architecture + the feature
+Pilot is a personal, single-user remote-control web UI for a coding agent. The agent
+runs as an out-of-process daemon; pilot drives it from a browser/phone over Tailscale.
+The UI mirrors the Claude app. See `docs/DESIGN.md` for architecture + the feature
 roadmap, `docs/DECISIONS.md` for settled calls, `docs/OPEN-QUESTIONS.md` for what's
 awaiting the owner's input.
 
+> **This branch is polytoken-only.** The former in-process pi SDK driver has been
+> removed; the live driver is the **polytoken** daemon, with a **mock** driver for
+> dev/e2e. pi-coupled decisions in the historical docs are retained as record.
+
 ## Facts that save you a wrong turn
 
-- **`@earendil-works/pi-*` ≡ `@mariozechner/pi-*`** — same project. Mario was
-  acquired by Earendil and the repo moved to the org scope. Depend on the published
-  `@earendil-works/pi-coding-agent`. (Confirmed importable under Bun, v0.79.5.)
-- pi source is at `~/src/pi`; its docs/examples are the contract — read them, don't
-  guess (`extend-pi` skill points at them). Prior art studied, not forked:
-  `~/src/pi-gui` (Electron React shell; its `session-driver` types we vendored, its
-  extension-visibility UI is worth mining) and `~/src/kellercomm` (the Axum+Svelte+WS
-  template whose *patterns* we ported to TS).
+- **The live driver is `polytoken`** — an out-of-process daemon pilot talks to over a
+  local socket/HTTP. The server's `PilotDriver` seam has two implementors: `mock`
+  (deterministic, for dev/e2e) and `polytoken` (the live daemon). There is no in-process
+  agent SDK on this branch; `PILOT_DRIVER=pi` is a hard error.
 - **Ports 8787 (WS backend) and 5173 (Vite proxy) are the agent harness's own dev
   server.** Never `kill` or `lsof -ti:8787 | xargs kill` them — that nukes the
   harness you're talking through, and the session dies. If `EADDRINUSE` on 8787,
@@ -24,41 +24,40 @@ awaiting the owner's input.
 ## Stack & layout
 
 Monorepo, Bun workspaces.
-- `protocol/` — shared, JSON-serializable WS contract (vendored from pi-gui's
-  `session-driver`) + the `foldEvent` reducer that runs identically on server & client.
+- `protocol/` — shared, JSON-serializable WS contract + the `foldEvent` reducer that
+  runs identically on server & client.
 - `server/` — Bun (`Bun.serve`) WS bridge + `/debug/state`. Embeds a `PilotDriver`
-  (the seam). M0 = `MockDriver` (deterministic fixtures); M5 swaps in the real
-  pi-sdk driver behind the same interface — the hub never changes.
+  (the seam). `MockDriver` is the deterministic fixture driver for dev/e2e;
+  `polytoken-driver.ts` is the live daemon driver. The hub never changes between them.
 - `client/` — Svelte 5 + Vite PWA. Reconnecting WS singleton, the same fold reducer,
   Claude-app theming in `src/app.css` (warm paper, light + dark).
+- `server/src/shared/` — agent-agnostic utilities both drivers + the hub use
+  (worktree, warm-cap, session-list, login-env, background-model).
 
 ## Commands
 
 ```bash
 bun install
-PILOT_DRIVER=mock bun run dev   # server + client, using mock driver (no pi needed)
-bun run dev                     # same, but uses real pi driver (needs pi running)
+PILOT_DRIVER=mock bun run dev   # server + client, using mock driver (no daemon needed)
+bun run dev                     # default: polytoken driver (needs a running daemon)
 bun test                        # unit tests — no driver needed, no mock required
 bun run test:e2e                # Playwright — sets PILOT_DRIVER=mock automatically
 bunx tsc --noEmit -p protocol/tsconfig.json   # typecheck server/protocol the same way
-bunx tsc --noEmit -p tsconfig.extensions.json # typecheck pilot/extensions (paths-mapped; see the file)
-bunx tsc --noEmit -p tsconfig.scripts.json   # typecheck scripts/ (dev tooling, live smoke tools)
+bunx tsc --noEmit -p tsconfig.scripts.json   # typecheck scripts/ (dev tooling)
 bunx tsc --noEmit -p tsconfig.e2e.json       # typecheck e2e/ (Playwright doesn't, by default)
 bun run --cwd client check                    # svelte-check
 bun run --cwd client build                    # prod bundle
 ```
 
-`bun run check` runs protocol + server + extensions + scripts + e2e + client typechecks
-end to end — the extensions step (`tsconfig.extensions.json`) is what closed the blind
-spot that let the `ctx.getFlag`/`Api`-from-wrong-package class of runtime crash ship
-uncaught (those files weren't in any tsconfig project). `tsconfig.scripts.json` and
-`tsconfig.e2e.json` close the same gap for the dev-tooling and Playwright trees. Keep
-it green.
+`bun run check` runs protocol + server + scripts + e2e + client typechecks end to end.
+`tsconfig.scripts.json` and `tsconfig.e2e.json` close the typecheck gap for the
+dev-tooling and Playwright trees. Keep it green.
 
-**Driver note:** the server defaults to the real pi SDK driver. Set `PILOT_DRIVER=mock`
-to use the deterministic mock instead — you want this for UI dev without a running
-pi instance and for the dev-bar (`/?dev`). The e2e suite sets it automatically;
-unit tests don't touch the driver at all.
+**Driver note:** the server defaults to the polytoken daemon driver. Set
+`PILOT_DRIVER=mock` to use the deterministic mock instead — you want this for UI dev
+without a running daemon and for the dev-bar (`/?dev`). The e2e suite sets it
+automatically; unit tests don't touch the driver at all. `PILOT_DRIVER=pi` is a hard
+error (the driver was removed on this branch).
 
 **Worktree note:** if you're spawned in an isolated worktree, work there — don't
 fall back to `~/src/pilot` (a concurrent session may be committing there; two
@@ -90,11 +89,11 @@ This is set up so you can verify autonomously — use it.
   **mock driver** on an **auto-assigned free port** (`autoPort`, so parallel worktree
   sessions never fight over one hardcoded port — `scripts/dev.ts` takes the harness's
   `$PORT` for Vite and grabs its own free backend port). It boots deterministic fixture
-  sessions + the `/?dev` dev bar, which is what you want for UI work (no running pi
+  sessions + the `/?dev` dev bar, which is what you want for UI work (no running daemon
   needed). `preview_start("pilot")` → `preview_screenshot`; the call's returned `port`
   is where it landed. Use `preview_resize` for mobile/light/dark. Verify text/structure
   with `preview_snapshot`, errors with `preview_console_logs`. (`pilot-real`, port 5173,
-  runs the real pi driver for eyeballing live output — rarely what you want from an
+  runs the real daemon driver for eyeballing live output — rarely what you want from an
   agent.) `scripts/dev.ts` gates Vite on the server's `/health`, so the page is
   connected on first load — no "Offline" warmup window to wait through.
 - **Drive any UI state deterministically:** open `/?dev` to get a dev bar with
@@ -117,7 +116,7 @@ This is set up so you can verify autonomously — use it.
 - VCS is **jj** (see the `jj` skill). Commit when done; review with `jj diff --git`;
   imperative subject ≤72 chars.
 - Keep `protocol/` free of runtime/DOM deps — it's imported by both halves.
-- The `PilotDriver` interface is the contract for swapping mock ↔ real pi. Add
+- The `PilotDriver` interface is the contract for swapping mock ↔ polytoken. Add
   capabilities there, implement in both drivers.
 - **Collapse/disclosure affordances share two primitives.** The glyph is
   `client/src/components/ui/Chevron.svelte` (stroked SVG; `variant="disclosure"`

@@ -11,7 +11,7 @@
 
   // The session-tree (/tree) view: a browsable visualization of the whole session DAG so
   // you can jump to / branch from ANY node, not just the always-visible prompts + turn-final
-  // answers. Renders pi's tree as a flattened indented list with continuous CSS rails (no
+  // answers. Renders the daemon's tree as a flattened indented list with continuous CSS rails (no
   // per-character gutter gaps). Selecting a node reuses the existing `branch` flow — no new
   // driver surface. Filter + search are client-side over the server-projected nodes.
 

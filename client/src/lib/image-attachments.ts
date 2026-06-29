@@ -19,7 +19,7 @@ const WIRE_TYPES = new Set([
 const SUPPORTED_TYPES = new Set([
   ...WIRE_TYPES,
   // Camera pickers may expose HEIC/HEIF. These are accepted only as conversion inputs;
-  // they must decode to JPEG before reaching pi/provider APIs.
+  // they must decode to JPEG before reaching the agent/provider APIs.
   "image/heic",
   "image/heif",
 ]);

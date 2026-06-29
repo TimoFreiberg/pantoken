@@ -3,7 +3,7 @@ import { gotoFresh, openSidebar } from "./helpers.js";
 
 // Sending the first prompt of a deferred new session used to flash the PREVIOUSLY focused
 // session's transcript for a beat — the draft hero cleared instantly, but `store.session`
-// still held the old session until pi finished warming up and its snapshot landed. The fix
+// still held the old session until the daemon finished warming up and its snapshot landed. The fix
 // resets the session to an empty slate on submit and overlays the just-sent prompt, so the
 // view goes straight from "draft hero + composer" to "the new prompt at the top + the
 // in-session composer", with the working indicator carrying the warm-up gap.
@@ -35,7 +35,7 @@ test("a new session's first prompt never flashes the previously focused transcri
   await expect(oldPrompt).toHaveCount(0);
 
   // We're in the in-session view (the draft hero is gone) and the warm-up / turn indicator
-  // is up — "Starting session…" while pi warms, then "Working…" once the run streams.
+  // is up — "Starting session…" while the session warms, then "Working…" once the run streams.
   await expect(page.getByTestId("new-session")).toHaveCount(0);
   await expect(page.getByTestId("working-indicator")).toBeVisible();
 

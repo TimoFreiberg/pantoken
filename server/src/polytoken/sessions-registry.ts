@@ -89,7 +89,7 @@ export function listSessionIds(sessionsDir: string): string[] {
 
 /** Build a `SessionListEntry` for a COLD session (no daemon spawned) from its
  *  on-disk `session.json`. `path` is the `session.json` file path — the stable
- *  switch key the client sends to `openSession` (mirrors pi's .jsonl-path key).
+ *  switch key the client sends to `openSession` (mirrors the daemon's .jsonl-path key).
  *  `archived` + `worktree` are resolved by the caller (pilot-side stores) since
  *  they're pilot's own flags, not polytoken's. Returns null when the session has
  *  no readable `session.json` (a failed startup) — those dirs are skipped. */

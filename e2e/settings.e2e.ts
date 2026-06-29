@@ -440,10 +440,10 @@ test("pilot-owned extensions group under a Pilot origin header with their descri
   );
 });
 
-test("the pilot-side toggle disables a pilot-owned extension (pi's force-exclude couldn't)", async ({
+test("the pilot-side toggle disables a pilot-owned extension (the daemon's force-exclude couldn't)", async ({
   page,
 }) => {
-  // Chunk 0 finding: pi's `-<resolvedPath>` force-exclude override is a NO-OP on
+  // Chunk 0 finding: the daemon's `-<resolvedPath>` force-exclude override is a NO-OP on
   // `additionalExtensionPaths` entries. So pilot owns its own enabled/disabled set
   // (`enabledExtensions`) and omits disabled owned paths from the array in warmUp. This
   // asserts that toggle actually persists for a pilot-owned row — the gap the force-exclude

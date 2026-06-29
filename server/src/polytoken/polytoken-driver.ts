@@ -13,7 +13,7 @@
 // Chunk 4 (this revision): SESSIONS & LIFECYCLE — list cold sessions from the on-disk
 // registry (sessions-registry.ts), open/reload by spawning `--resume --session-id` +
 // seeding from GET /history (history-seed.ts), rename via POST /title, the warm POOL
-// with LRU eviction + idle reaper (mirroring pi-driver), worktree integration, the
+// with LRU eviction + idle reaper (mirroring the original pi driver (deleted)), worktree integration, the
 // new-session project picker (fs-helpers.ts), and branchFrom → POST /rewind
 // (destructive; the history is linear, no branch DAG — spike §7).
 //
@@ -53,9 +53,9 @@ import {
   createWorktree,
   removeWorktree,
   type WorktreeMeta,
-} from "../pi/worktree.js";
-import { evictionPlan } from "../pi/warm-cap.js";
-import { mergeSessionLists } from "../pi/session-list.js";
+} from "../shared/worktree.js";
+import { evictionPlan } from "../shared/warm-cap.js";
+import { mergeSessionLists } from "../shared/session-list.js";
 import {
   DaemonClient,
   spawnDaemon,
@@ -142,7 +142,7 @@ interface WarmSession {
   lastFocusedAt: number;
   /** Cached last-seed transcript events (the replayed history). Updated by
    *  reseedFromHistory so defaultSeed() can return the full transcript synchronously
-   *  (it must not do I/O). Mirrors pi-driver's in-memory `ws.session.messages` —
+   *  (it must not do I/O). Mirrors the original driver's in-memory `ws.session.messages` —
    *  without this, a reconnecting client sees the header but an empty transcript. */
   lastSeed: SessionDriverEvent[];
 }
@@ -156,7 +156,7 @@ export async function createPolytokenDriver(
   const globalConfigDir = opts.globalConfigDir ?? defaultGlobalConfigDir();
   const idleReapMs = opts.idleReapMs ?? 10 * 60 * 1000;
 
-  // Pilot-side stores, mirrored from pi-driver: the archive flag + the worktree
+  // Pilot-side stores, mirrored from the original driver: the archive flag + the worktree
   // index are pilot's own state (polytoken has no concept of either), keyed by
   // the session path / cwd. They persist under config.dataDir next to the VAPID key.
   const archiveStore = new ArchiveStore();
@@ -426,7 +426,7 @@ export async function createPolytokenDriver(
     warm.set(spawned.sessionId, ws);
     focus(spawned.sessionId);
     // Enforce the warm cap: evict the least-recently-focused sessions (never the
-    // one just warmed). Mirrors pi-driver's evictionPlan.
+    // one just warmed). Mirrors the original driver's evictionPlan.
     for (const id of evictionPlan(
       [...warm.keys()],
       spawned.sessionId,
@@ -436,7 +436,7 @@ export async function createPolytokenDriver(
       if (!victim) continue;
       // Emit a synthetic sessionClosed BEFORE dispose so the hub clears the
       // running indicator on an evicted mid-run session (dispose tears down SSE,
-      // so the abort's terminal event never arrives). Exactly pi-driver's pattern.
+      // so the abort's terminal event never arrives). Exactly the original driver's pattern.
       emit({
         sessionRef: victim.ref,
         timestamp: now(),
@@ -456,7 +456,7 @@ export async function createPolytokenDriver(
    *  the replayed transcript from GET /history. The hub resets + folds these
    *  atomically on open/reload/new. `emitOpened=false` skips the sessionOpened
    *  (the reseed path — the session is already open, just refresh the transcript).
-   *  Mirrors pi-driver's seedFor. */
+   *  Mirrors the original driver's seedFor. */
   async function seedFor(
     ws: WarmSession,
     emitOpened = true,
@@ -512,13 +512,13 @@ export async function createPolytokenDriver(
     // the replayed transcript's last assistant stays streaming:true and any tool
     // without a persisted tool_result stays "running" → turnActive stays true → the
     // sidebar spinner + working indicator show on an idle reopened session. This was
-    // the "open an existing session shows as in-progress" bug. Mirrors pi-driver's
+    // the "open an existing session shows as in-progress" bug. Mirrors the original driver's
     // historyToEvents, which appends a trailing runCompleted(idle). The idle snapshot
     // is correct here because reseedFromHistory already refreshed lastState above, so
     // statusFromState reflects the daemon's authoritative turn_in_flight (false for a
     // resumed idle session). On the refocus path (a genuinely running warm session),
     // the sessionOpened snapshot carries "running" and arrives BEFORE this trailing
-    // event, so a live turn's spinner is preserved — same ordering as pi-driver.
+    // event, so a live turn's spinner is preserved — same ordering as the original driver.
     if (events.length > 0) {
       const ts = now();
       events.push({
@@ -621,7 +621,7 @@ export async function createPolytokenDriver(
   /** The worktree field for a session's cwd, or undefined. Resolved from the
    *  worktree store at list time (pilot's own flag — polytoken has no concept).
    *  Carries `name` + `reaped` so the sidebar can show a tooltip + a tombstoned
-   *  indicator, exactly like pi-driver's worktreeFieldFor. */
+   *  indicator, exactly like the original driver's worktreeFieldFor. */
   function worktreeFieldFor(
     cwd: string,
   ): { path: string; base: string; name: string; reaped?: boolean } | undefined {
@@ -655,7 +655,7 @@ export async function createPolytokenDriver(
 
   /** Remove a pilot-created worktree at `cwd` and tombstone it. `force=false` leaves
    *  a dirty worktree in place (returns removed:false). The index is the gate — we
-   *  never touch a worktree pilot didn't create. Mirrors pi-driver's reapWorktree. */
+   *  never touch a worktree pilot didn't create. Mirrors the original driver's reapWorktree. */
   async function reapWorktree(
     cwd: string,
     force: boolean,
@@ -688,7 +688,7 @@ export async function createPolytokenDriver(
       }
       focus(ws.ref.sessionId);
       // Echo the user's message into the transcript immediately (optimistic, like the
-      // mock/pi drivers) so the client's row renders before the model streams.
+      // mock/polytoken drivers) so the client's row renders before the model streams.
       emit({
         sessionRef: ws.ref,
         timestamp: now(),
@@ -822,7 +822,7 @@ export async function createPolytokenDriver(
       // authoritative source is the on-disk registry (sessions-registry.ts): each
       // `session.json` has the metadata, no daemon needed. Warm sessions not yet
       // flushed (a just-created one with no turn) are merged in via mergeSessionLists,
-      // mirroring pi-driver. Live usage is overlaid only where a session is warm.
+      // mirroring the original driver. Live usage is overlaid only where a session is warm.
       const onDisk = listColdSessions(sessionsDir, {
         archivedFor: (p) => archiveStore.has(p),
         worktreeFor: (cwd) => worktreeFieldFor(cwd),
@@ -890,7 +890,7 @@ export async function createPolytokenDriver(
       // Recovery path: dispose the warm daemon (if any) and re-spawn from the same
       // session id. POST /reload exists but a fresh spawn guarantees a clean state
       // (no stale accumulator, no leaked lease) — and the daemon re-reads its config
-      // + project files on resume. Mirrors pi-driver's reloadSession semantics.
+      // + project files on resume. Mirrors the original driver's reloadSession semantics.
       const sessionId = sessionIdFromPath(path);
       if (sessionId && warm.has(sessionId)) {
         const existing = warm.get(sessionId)!;
@@ -898,7 +898,7 @@ export async function createPolytokenDriver(
         // viewing this session, so a sessionClosed would flash "ended" into their
         // transcript for the whole re-warm window. The fresh seed's idle
         // sessionOpened resets the running indicator when the hub folds it instead.
-        // (Mirrors pi-driver's reloadSession — see its comment at pi-driver.ts.)
+        // (Mirrors the original driver's reloadSession — see its comment in the deleted driver.)
         await disposeSession(existing).catch(() => {});
         console.log(`[polytoken] reload: disposed warm session ${sessionId}; re-spawning`);
       }
@@ -918,7 +918,7 @@ export async function createPolytokenDriver(
       let cwd = opts.cwd?.trim() || join(homedir(), "projects");
       cwd = resolveGuiPath(cwd);
       // Validate the cwd exists + is a dir, loudly — don't let the daemon spawn
-      // against a typo'd path. Mirrors pi-driver's newSession guard.
+      // against a typo'd path. Mirrors the original driver's newSession guard.
       const stat = statPathOnDisk(cwd);
       if (!stat.exists) throw new Error(`no such directory: ${cwd}`);
       if (!stat.isDir) throw new Error(`not a directory: ${cwd}`);
@@ -963,7 +963,7 @@ export async function createPolytokenDriver(
       // session_title_changed event follows, mapped to sessionUpdated by event-map).
       // A cold session has no daemon — but POST /title requires a warm daemon. So
       // cold rename spawns the daemon, sets the title, and leaves it warm (the
-      // operator just opened it in everything but name). This differs from pi-driver
+      // operator just opened it in everything but name). This differs from the original driver
       // (which appends to the .jsonl cold), but polytoken's title is daemon-owned.
       const next = name.trim();
       if (!next) return;
@@ -1003,7 +1003,7 @@ export async function createPolytokenDriver(
       // NOT a branch — it's a destructive REWIND. POST /rewind drops the target
       // prompt + everything after it (irreversible), and the prompt text returns to
       // the input for re-editing. pilot's UX must warn "deletes everything after
-      // this point" (not pi's safe branch-and-keep). `entryId` is a prompt_id or
+      // this point" (not the original driver's safe branch-and-keep). `entryId` is a prompt_id or
       // message index the client derived from the transcript; we pass it through.
       const ws = target(sessionId);
       if (!ws) {
@@ -1045,7 +1045,7 @@ export async function createPolytokenDriver(
     ): Promise<{ worktreeRetained?: { path: string; reason: string } } | void> {
       // The archive flag is pilot-side state (polytoken has no concept), keyed by
       // the session.json path. Archiving a worktree-backed session reaps the
-      // worktree when clean (mirrors pi-driver); a dirty one is left in place.
+      // worktree when clean (mirrors the original driver); a dirty one is left in place.
       archiveStore.set(path, archived);
       if (!archived) return;
       // Reap the worktree if this session's cwd is a pilot-created worktree.
@@ -1084,7 +1084,7 @@ export async function createPolytokenDriver(
       // not just the header. The transcript cache (lastSeed) is updated by
       // seedFor/reseedFromHistory; without it a reconnect would show an empty
       // transcript (the out-of-process daemon isn't readable synchronously).
-      // Mirrors pi-driver, which reads ws.session.messages in-memory here.
+      // Mirrors the original driver, which reads ws.session.messages in-memory here.
       if (!activeSessionId) return null;
       const ws = warm.get(activeSessionId);
       if (!ws) return null;
@@ -1187,8 +1187,8 @@ export async function createPolytokenDriver(
       // dirs trailing `/`). This is the @-mention index the client fuzzy-matches
       // locally — it replaces pilot's `fd`-based index under this driver. The daemon
       // does not expose a cap param, so we cap client-side to FILE_INDEX_CAP (the same
-      // cap pi-driver's fd index uses) and report `truncated: true` on overflow —
-      // matching pi-driver's contract exactly, so the client's per-query `fd` fallback
+      // cap the original driver's fd index uses) and report `truncated: true` on overflow —
+      // matching the original driver's contract exactly, so the client's per-query `fd` fallback
       // (listFiles) engages on a large repo identically under both drivers. A cold
       // (no-warm-session) call returns empty — there's no daemon to ask.
       const ws = target(sessionId);
@@ -1215,7 +1215,7 @@ export async function createPolytokenDriver(
     ): Promise<FileInfo[]> {
       // Fallback @-mention search when the index was truncated (or for a new-session
       // draft with no session). The daemon's GET /files has no query param, so the
-      // fallback is the shared `fd` search — the same path the pi driver uses. `cwd`
+      // fallback is the shared `fd` search — the same path the polytoken driver uses. `cwd`
       // (the draft's target dir) overrides; otherwise resolve from the session.
       const root = cwd ?? target(sessionId)?.cwd;
       if (!root) return [];
@@ -1224,7 +1224,7 @@ export async function createPolytokenDriver(
 
     async listDir(path?: string): Promise<DirListing> {
       // New-session project picker browses the SERVER's filesystem — same as
-      // pi-driver. Empty/blank → $HOME; otherwise expand + resolve on the server.
+      // the original driver. Empty/blank → $HOME; otherwise expand + resolve on the server.
       const dir = path?.trim() ? resolveGuiPath(path) : homedir();
       return listDirOnDisk(dir);
     },
@@ -1240,7 +1240,7 @@ export async function createPolytokenDriver(
       // against ModelConfig.name (the registry map key) — which is the FULL
       // `provider/id` that modelId already carries, so POST it directly via
       // modelPostKey (no join). `provider` is kept for the PilotDriver contract
-      // (pi-driver uses it for modelRegistry.find) but unused here. Preserve the
+      // (the original driver uses it for modelRegistry.find) but unused here. Preserve the
       // current reasoning_effort (setModel requires both fields).
       const effort = ws.lastState?.active_reasoning_effort ?? undefined;
       void ws.client.setModel(modelPostKey(modelId), effort).catch((e) => {

@@ -1,5 +1,5 @@
-// Shared filesystem helpers for the new-session project picker. Both the pi driver
-// and the polytoken driver need to (a) expand a GUI-supplied path (`~` → $HOME,
+// Shared filesystem helpers for the new-session project picker. Both drivers
+// need to (a) expand a GUI-supplied path (`~` → $HOME,
 // resolve relative segments) and (b) list/stat directories on the SERVER's
 // filesystem — the picker browses the server regardless of which device the
 // client is on. Extracted here so the two drivers stay in lockstep and the pure

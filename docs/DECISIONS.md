@@ -1,5 +1,7 @@
 # Pilot — Decisions knocked down (2026-06-16, overnight session)
 
+> **Note:** this branch is polytoken-only; pi-coupled decisions are historical.
+
 These are the calls I made autonomously so the build could proceed. Each is
 **reversible** unless noted, and the one genuinely contentious one (backend
 language) is flagged at the top of `OPEN-QUESTIONS.md` for your veto.
