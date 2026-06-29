@@ -93,11 +93,14 @@
   const remainingSec = $derived(Math.max(0, Math.ceil(remainingMs / 1000)));
   const progress = $derived(timeoutMs ? Math.max(0, Math.min(1, remainingMs / timeoutMs)) : 0);
 
-  // Deny-safe auto-resolution: confirm → confirm(false); everything else → cancel().
+  // Deny-safe auto-resolution: confirm → confirm(false); plan → the cancel label
+  // (a typed plan_handoff_answer, matching the visible Cancel button's wire shape —
+  // not the universal {cancelled} that other kinds use); everything else → cancel().
   function autoResolve() {
     const c = current;
     if (!c) return;
     if (c.kind === "confirm") confirm(false);
+    else if (c.kind === "plan") submitValue(c.actionLabels[2]);
     else cancel();
   }
 
