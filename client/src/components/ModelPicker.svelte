@@ -20,9 +20,11 @@
   const modelLabel = $derived(activeModel?.label ?? cfg.modelId ?? "model");
   const modelTitle = $derived(
     cfg.modelId
-      ? cfg.provider
-        ? `${cfg.provider}:${cfg.modelId}`
-        : cfg.modelId
+      ? cfg.modelId.includes("/")
+        ? cfg.modelId
+        : cfg.provider
+          ? `${cfg.provider}:${cfg.modelId}`
+          : cfg.modelId
       : "model",
   );
   const thinking = $derived(cfg.thinkingLevel);

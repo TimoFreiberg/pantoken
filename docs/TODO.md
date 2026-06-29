@@ -37,7 +37,7 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       the full registry name directly via `modelPostKey()`. Part 2 (the synthesis) is a
       TEMPORARY workaround pending an upstream `polytoken models` feature to list
       catalog-provider models as `models:` blocks — remove once native.
-- [ ] **polytoken: event-map bare modelId shows bare id on active-session badge.**
+- [x] **polytoken: event-map bare modelId shows bare id on active-session badge.**
       Surfaced 2026-06-29 while resolving catalog models: `event-map.ts`
       (`snapshotFromState` + the `model_switch` handler) splits `active_model` on `/`
       and takes `[1]` as the **bare** modelId for `SessionSnapshot.config`, while
@@ -49,6 +49,10 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       modelId, never the bare `session.config` one). Fix: use the full `active_model` as
       `config.modelId` in both sites. Has its own test surface in `event-map.test.ts`.
       Flagged with `// NOTE:` comments at the two split sites.
+      **Done (2026-06-29):** aligned polytoken config to the full registry name by reusing
+      `defaultModelRef` (mirroring `parseModels`/`defaultModelRef`) at both split sites,
+      and de-duplicated the picker tooltip so a full-form modelId renders unqualified.
+      Scoped to the polytoken driver only — pi driver untouched.
 - [ ] **polytoken: permission popup doesn't show what's being requested.**
       Surfaced 2026-06-29 (second dogfood, via Pilot): the permission popup
       triggered by tool calls (e.g. `shell_exec`) doesn't display the actual

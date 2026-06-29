@@ -13,6 +13,7 @@ import {
   createAccumulator,
   mapDaemonEvent,
   resetAccumulator,
+  snapshotFromState,
 } from "./event-map.js";
 
 type DaemonEvent = components["schemas"]["DaemonEvent"];
@@ -45,7 +46,7 @@ const ctx: MapCtx = {
     title: "Test Session",
     status,
     updatedAt: "t",
-    config: { provider: "anthropic", modelId: "claude-sonnet-4", thinkingLevel: "medium" },
+    config: { provider: "anthropic", modelId: "anthropic/claude-sonnet-4", thinkingLevel: "medium" },
     usage: { tokens: 50_000, contextWindow: 200_000, percent: 25 },
   }),
   liveStatus: () => "idle",
@@ -562,7 +563,7 @@ describe("mapDaemonEvent", () => {
     expect(out.events[0]).toMatchObject({
       type: "sessionUpdated",
       snapshot: {
-        config: { provider: "openai", modelId: "gpt-5", thinkingLevel: "high" },
+        config: { provider: "openai", modelId: "openai/gpt-5", thinkingLevel: "high" },
       },
     });
   });
@@ -1412,5 +1413,38 @@ describe("streaming pipeline integration", () => {
     expect(out.events).toEqual([
       { sessionRef: ref, timestamp: "t", type: "runFailed", error: { message: "Authentication failed" } },
     ]);
+  });
+});
+
+describe("snapshotFromState config", () => {
+  // Site A direct coverage: active_model is the FULL `provider/id` registry name, so
+  // modelId must stay the full form (matching ModelOption.modelId) for the picker's
+  // find() to resolve the friendly label — not the bare split-on-`/` id.
+  test("slash-bearing active_model -> full-form modelId + bare provider prefix", () => {
+    const snap = snapshotFromState(baseState, ref, workspace, "idle", "t");
+    expect(snap.config).toEqual({
+      provider: "anthropic",
+      modelId: "anthropic/claude-sonnet-4",
+      thinkingLevel: "medium",
+    });
+  });
+
+  // No-slash fallback: defaultModelRef returns the whole string as both provider and
+  // modelId (mirrors parseModels' provider fallback). Pins the behavior delta — today
+  // a slash-less active_model yields modelId: undefined; after the fix it yields the
+  // whole string, so the badge shows the local name instead of falling back to "model".
+  test("slash-less active_model -> whole string as both provider and modelId", () => {
+    const state = { ...baseState, active_model: "local-model" };
+    const snap = snapshotFromState(state, ref, workspace, "idle", "t");
+    expect(snap.config).toEqual({
+      provider: "local-model",
+      modelId: "local-model",
+      thinkingLevel: "medium",
+    });
+  });
+
+  test("null state -> undefined config", () => {
+    const snap = snapshotFromState(null, ref, workspace, "idle", "t");
+    expect(snap.config).toBeUndefined();
   });
 });
