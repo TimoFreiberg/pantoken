@@ -5,9 +5,9 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-// The mock has no warm pi session to throw away, so its reloadSession reseeds the same
+// The mock has no warm session to throw away, so its reloadSession reseeds the same
 // transcript openSession would — enough to prove the menu → WS → reseed round-trip. The
-// real recovery (dispose + re-warm with fresh config/extensions) lives in the pi driver.
+// real recovery (dispose + re-warm with fresh config/extensions) lives in the polytoken driver.
 test("the overflow menu reloads a session, reseeding its transcript", async ({
   page,
 }) => {

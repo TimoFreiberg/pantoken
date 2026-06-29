@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionListEntry } from "@pilot/protocol";
-import type { HistoryMessage } from "./history-map.js";
-import { firstUserPreview, mergeSessionLists } from "./session-list.js";
+import { mergeSessionLists } from "./session-list.js";
 
 function entry(
   sessionId: string,
@@ -56,57 +55,5 @@ describe("mergeSessionLists", () => {
       "disk1",
       "disk2",
     ]);
-  });
-});
-
-describe("firstUserPreview", () => {
-  const msg = (over: Partial<HistoryMessage>): HistoryMessage => ({
-    role: "user",
-    ...over,
-  });
-
-  test("returns the first user message's text (string content)", () => {
-    const messages = [
-      msg({ role: "user", content: "Add a /health route to the server." }),
-      msg({ role: "assistant", content: [{ type: "text", text: "On it." }] }),
-    ];
-    expect(firstUserPreview(messages)).toBe(
-      "Add a /health route to the server.",
-    );
-  });
-
-  test("flattens block content and collapses whitespace", () => {
-    const messages = [
-      msg({
-        role: "user",
-        content: [
-          { type: "text", text: "line one\n\n  line two" },
-          { type: "image" },
-        ],
-      }),
-    ];
-    expect(firstUserPreview(messages)).toBe("line one line two[image]");
-  });
-
-  test("skips non-user messages to find the opening prompt", () => {
-    const messages = [
-      msg({ role: "assistant", content: [{ type: "text", text: "hi" }] }),
-      msg({ role: "user", content: "the actual prompt" }),
-    ];
-    expect(firstUserPreview(messages)).toBe("the actual prompt");
-  });
-
-  test("caps long prompts", () => {
-    const messages = [msg({ role: "user", content: "x".repeat(500) })];
-    expect(firstUserPreview(messages, 200)).toHaveLength(200);
-  });
-
-  test("empty when there's no user message yet", () => {
-    expect(firstUserPreview([])).toBe("");
-    expect(
-      firstUserPreview([
-        msg({ role: "assistant", content: [{ type: "text", text: "hi" }] }),
-      ]),
-    ).toBe("");
   });
 });

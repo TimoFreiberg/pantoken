@@ -18,7 +18,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { config } from "./config.js";
-import type { WorktreeMeta } from "./pi/worktree.js";
+import type { WorktreeMeta } from "./shared/worktree.js";
 
 export function defaultWorktreeFile(): string {
   return join(config.dataDir, "worktrees.json");

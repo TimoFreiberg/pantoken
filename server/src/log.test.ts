@@ -145,14 +145,14 @@ describe("Logger", () => {
       const file = join(dir, "pilot.log");
       const log = new Logger({ file, serverId: "srv-x" });
       log.captureConsole();
-      // A console.error from a pi extension should land in the log file as a
+      // A console.error from an extension should land in the log file as a
       // source:"console" line, with the message preserved.
       console.error(
         "[session-namer] empty name —",
         "stop=length",
         "blocks=[thinking]",
       );
-      console.log("[pi] refocus warm session abc123");
+      console.log("[polytoken] refocus warm session abc123");
       const lines = readFileSync(file, "utf8")
         .trim()
         .split("\n")
@@ -167,7 +167,7 @@ describe("Logger", () => {
         (l) => l.level === "info" && l.source === "console",
       );
       expect(logLine).toBeDefined();
-      expect(logLine.msg).toContain("[pi] refocus warm session abc123");
+      expect(logLine.msg).toContain("[polytoken] refocus warm session abc123");
       // No recursion: a recursion bug (mirror re-teed through captureConsole) would
       // emit [pilot ...] mirror lines as their OWN console lines. Assert none.
       const pilotMirrorCount = lines.filter(

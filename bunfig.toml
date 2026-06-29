@@ -14,17 +14,3 @@
 #   gates NEW picks; `bun audit` covers already-installed ones. It also means a
 #   plain `bun install` / deploy honors the committed lockfile and is unaffected.
 minimumReleaseAge = 259200
-
-# Exempt the whole pi release train from the cooldown so it updates same-day
-# (new-model support ships via pi releases). The exclude is name-scoped — no
-# transitive subtree, no globs — so every pi package the lockfile resolves is
-# listed individually. If a future pi release adds/renames a sub-package, add
-# it here (the dep-bump skill's pi mode flags this).
-# The @mariozechner/clipboard* native binaries are intentionally left gated:
-# platform artifacts, not part of pi's logic cadence.
-minimumReleaseAgeExcludes = [
-  "@earendil-works/pi-coding-agent",
-  "@earendil-works/pi-agent-core",
-  "@earendil-works/pi-ai",
-  "@earendil-works/pi-tui",
-]

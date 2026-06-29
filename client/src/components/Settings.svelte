@@ -12,8 +12,8 @@
   import { MAX_SCALE, MIN_SCALE, STEP } from "../lib/font-scale.js";
 
   // The settings panel. Per-client view state (theme, notifications, this device's
-  // access token) sits next to server-side global pi config (provider credentials,
-  // default model/thinking, favorites) which travels the WS and persists in pi.
+  // access token) sits next to server-side global agent config (provider credentials,
+  // default model/thinking, favorites) which travels the WS and persists in the agent.
 
   const open = $derived(store.settingsOpen);
 
@@ -147,10 +147,10 @@
       : providers,
   );
 
-  // The pi extensions for the focused session (Settings "Extensions" view). Extensions has
+  // The agent's extensions for the focused session (Settings "Extensions" view). Extensions has
   // its own tab now, so the list is always shown (no collapse) — fetched on panel open (the
   // $effect below) so it reflects toggles since. Toggling applies on the session's NEXT
-  // start (pi loads extensions at start), which the section's note spells out.
+  // start (the daemon loads extensions at start), which the section's note spells out.
   const extensions = $derived(store.extensions);
   const extensionsOn = $derived(extensions.filter((x) => x.enabled).length);
   // Filter-as-you-type over the extension list (name or source).
@@ -212,7 +212,7 @@
       "Disabling this hides the open-tasks widget above the composer.",
   };
   // Whether a row is one of pilot's OWNED extensions (its toggle routes to pilot's
-  //   `enabledExtensions`, not pi's force-exclude — Chunk 0 finding). Delegates to the
+  //   `enabledExtensions`, not the daemon's force-exclude — Chunk 0 finding). Delegates to the
   //   shared protocol predicate so client + server can't disagree on what counts as owned.
   function isPilotOwnedExt(name: string): boolean {
     return isPilotOwnedExtension(name);
@@ -294,7 +294,7 @@
     prevOpen = open;
   });
 
-  // pi's setDefaultThinkingLevel accepts this fixed union (independent of the current
+  // The agent's setDefaultThinkingLevel accepts this fixed union (independent of the current
   // model's supported levels — it's the default for whatever new session is created).
   const DEFAULT_THINKING_LEVELS = [
     "off",
@@ -650,8 +650,8 @@
             {/if}
           </div>
           <p class="note">
-            Keys save into pi's <code>auth.json</code> on the server — shared with the
-            terminal <code>pi</code> on this machine. Providers configured via environment
+            Keys save into the agent's <code>auth.json</code> on the server — shared with the
+            terminal agent on this machine. Providers configured via environment
             variables show as connected but aren't editable here.
           </p>
         {/if}
@@ -921,7 +921,7 @@
           </div>
           <p class="note">
             Enabling or disabling takes effect on the session's <strong>next start</strong> —
-            pi loads extensions when a session begins, so the change isn't live.
+            the agent loads extensions when a session begins, so the change isn't live.
           </p>
         {/if}
       </section>

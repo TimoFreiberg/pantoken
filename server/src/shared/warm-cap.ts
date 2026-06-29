@@ -1,5 +1,5 @@
-// LRU eviction policy for the pi driver's kept-warm session set. Pure + generic so the
-// policy is unit-tested without touching real AgentSessions.
+// LRU eviction policy for a driver's kept-warm session set. Pure + generic so the
+// policy is unit-tested without touching real sessions.
 
 /** Pick the least-recently-focused ids to evict so the set fits `cap`. `order` is
  *  oldest→newest by focus recency; `protectedId` is never evicted (the session about to

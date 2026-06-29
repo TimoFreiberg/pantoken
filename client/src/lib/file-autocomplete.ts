@@ -82,7 +82,7 @@ export function extractAtQuery(
 /**
  * Rank the prefetched file index against an @-mention query, for instant client-side
  * matching. Case-insensitive substring match on the path (consistent with the slash-command
- * filter and pi's TUI autocomplete); a query is dropped if it isn't a substring of the path.
+ * filter and the agent's TUI autocomplete); a query is dropped if it isn't a substring of the path.
  *
  * Ranking, best first:
  *   1. query matches the start of the basename (the file/dir name itself) — `hub` → `…/hub.ts`

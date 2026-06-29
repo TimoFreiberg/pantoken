@@ -703,7 +703,7 @@ describe("SessionHub", () => {
   });
 
   test("a switch arriving mid-swap is coalesced, not rejected (boot-restore-vs-click)", async () => {
-    // A swap that doesn't resolve until released models pi warming on a fresh start (or a
+    // A swap that doesn't resolve until released models the session warming on a fresh start (or a
     // trust card awaiting input). Each openSession call gets its OWN release, so we can
     // tell the queued second swap actually ran after the first finished.
     const releases: ((v: SessionDriverEvent[]) => void)[] = [];
@@ -1103,7 +1103,7 @@ describe("SessionHub", () => {
   });
 
   test("a terminal event clears running for a background session mid-switch", async () => {
-    // LRU eviction (pi-driver) disposes a warm session *inside* a swap, while
+    // LRU eviction (the polytoken driver) disposes a warm session *inside* a swap, while
     // `switching` is true, and emits a synthetic sessionClosed for it. That must still
     // clear the cross-session running set — otherwise the evicted session shows a
     // perpetual running indicator. Regression: the `switching` guard used to sit above
@@ -1191,7 +1191,7 @@ describe("SessionHub", () => {
   // streaming:true) but no terminal close event — so without a trailing
   // runCompleted the folded state stays streaming + turnActive. The polytoken
   // driver's reseedFromHistory appends a trailing runCompleted(idle) to settle
-  // it (mirroring pi-driver's historyToEvents). This test pins the hub-side
+  // it (mirroring the original driver's historyToEvents). This test pins the hub-side
   // contract: a seed whose snapshot is idle + a trailing runCompleted leaves the
   // session NOT running, even when the replayed transcript's last item is a
   // streaming assistant delta.

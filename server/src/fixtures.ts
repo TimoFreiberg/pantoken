@@ -1,4 +1,4 @@
-// Deterministic mock-pi fixtures. Each script is an ordered list of timed events
+// Deterministic mock fixtures. Each script is an ordered list of timed events
 // that the mock driver replays. Same script -> same event order -> same rendered
 // pixels, so an agent can screenshot any UI state reproducibly without a live model.
 
@@ -23,7 +23,7 @@ import type {
 /** Thinking levels the mock's models "support" — drives the picker's thinking menu. */
 export const MOCK_THINKING_LEVELS = ["off", "low", "medium", "high"] as const;
 
-/** A deterministic spread of models for the picker (mirrors pi's provider:model ids).
+/** A deterministic spread of models for the picker (mirrors the daemon's provider:model ids).
  *  `thinkingLevels` vary by model so the new-session draft's effort picker has a
  *  realistic (and e2e-distinguishable) per-model set; DeepSeek Flash is non-reasoning. */
 export const MOCK_MODELS: readonly ModelOption[] = [
@@ -112,7 +112,7 @@ export const MOCK_FILES: readonly FileInfo[] = [
   { path: "server/src/mock-driver.ts", isDirectory: false },
   { path: "server/src/hub.test.ts", isDirectory: false },
   { path: "server/src/fixtures.ts", isDirectory: false },
-  { path: "server/src/pi/pi-driver.ts", isDirectory: false },
+  { path: "server/src/polytoken/polytoken-driver.ts", isDirectory: false },
   { path: "client", isDirectory: true },
   { path: "client/src/app.css", isDirectory: false },
   { path: "client/src/components/Composer.svelte", isDirectory: false },
@@ -212,7 +212,7 @@ export const MOCK_PROVIDERS: readonly ProviderInfo[] = [
   },
 ];
 
-/** The mock's pi extensions for the Settings "Extensions" view: a couple of healthy
+/** The mock's agent extensions for the Settings "Extensions" view: a couple of healthy
  *  loaded ones, one with a load error (drives the problems styling), and one already
  *  disabled (so the re-enable path is exercisable). The mock driver toggles `enabled`
  *  in-memory; reset() restores this baseline. */
@@ -230,7 +230,7 @@ export const MOCK_EXTENSIONS: readonly ExtensionInfo[] = [
   //  a `description` (parsed from the file's @pilot frontmatter in the real driver). The
   //  resolved path matches the name a pilot-owned toggle keys off, so the mock's
   //  setExtensionEnabled routes it to pilot's `enabledExtensions` set (the [OPEN E]
-  //  toggle — pi's force-exclude is a no-op on owned paths). Mirrors the session-namer
+  //  toggle — the daemon's force-exclude is a no-op on owned paths). Mirrors the session-namer
   //  row below; tool/command counts reflect what the ported extension actually
   //  registers (tasklist_add/done/delete/list + the /tasks command).
   {
@@ -247,7 +247,7 @@ export const MOCK_EXTENSIONS: readonly ExtensionInfo[] = [
   //  carries a `description` (parsed from the file's @pilot frontmatter in the real
   //  driver). The resolved path matches the name a pilot-owned toggle keys off, so the
   //  mock's setExtensionEnabled routes it to pilot's `enabledExtensions` set (the
-  //  [OPEN E] toggle — pi's force-exclude is a no-op on owned paths).
+  //  [OPEN E] toggle — the daemon's force-exclude is a no-op on owned paths).
   {
     resolvedPath: "session-namer",
     name: "session-namer.ts",
@@ -427,8 +427,8 @@ export function greeting(): ScriptStep[] {
         type: "userMessage",
         id: "u1",
         text: GREETING_PROMPT,
-        // Mock branch handle: a stable pi-style entry id so the user prompt offers a
-        // "branch from this prompt" button (the real driver supplies these from pi).
+        // Mock branch handle: a stable daemon-style entry id so the user prompt offers a
+        // "branch from this prompt" button (the real driver supplies these from the daemon).
         entryId: "e-u1",
       },
     },
@@ -645,7 +645,7 @@ export function promptReply(
   const callId = `t-${ts()}`;
   // Stable branch handles for this turn, derived from the user message id so the turn-final
   // assistant offers "branch from here" and the prompt offers "branch from this prompt" —
-  // mirroring real pi, which backfills an entry id on every settled turn. (The greeting
+  // mirroring the real daemon, which backfills an entry id on every settled turn. (The greeting
   // fixture already does this; promptReply lagged, which left sent-prompt turns without
   // handles and the active-path tip detection unable to tell a real leaf from a stale one.)
   const uId = userId ?? `u-${ts()}`;
@@ -967,7 +967,7 @@ export function confirmDialog(): ScriptStep[] {
 
 // The interactive project-trust card (D12). NOT a ScriptStep — it rides the driver's
 // out-of-band trust channel, not the session event stream — so the mock emits it
-// directly via emitTrust rather than through play(). Mirrors the five options pi's CLI
+// directly via emitTrust rather than through play(). Mirrors the five options the daemon's CLI
 // selector offers for an untrusted cwd with gated .pi resources.
 export function mockTrustRequest(): TrustRequest {
   return {
@@ -1115,7 +1115,7 @@ export function contextFull(): ScriptStep[] {
 }
 
 /** An extension reaching for a terminal-only capability against pilot's non-tui
- *  host — folds into a warning notice. Mirrors what the real pi driver emits when
+ *  host — folds into a warning notice. Mirrors what the real driver emits when
  *  an extension's `ui.custom()` call goes unhandled. */
 export function compat(): ScriptStep[] {
   return [
@@ -1128,7 +1128,7 @@ export function compat(): ScriptStep[] {
           capability: "custom",
           classification: "terminal-only",
           message:
-            "Custom UI is not available in the pilot remote; run pi in a terminal for this workflow.",
+            "Custom UI is not available in the pilot remote; run the agent in a terminal for this workflow.",
           extensionPath: "~/.pi/agent/extensions/fancy-tui.ts",
           eventName: "session_start",
         },
@@ -1337,7 +1337,7 @@ const SHOT_PNG_B64 =
   "iVBORw0KGgoAAAANSUhEUgAAAHgAAABQCAIAAABd+SbeAAAAqElEQVR4nO3QAQkAIADAMFMaw5QGs4XCHTzA2dhr6kLj+cEngQbdCjToVqBBtwINuhVo0K1Ag24FGnQr0KBbgQbdCjToVqBBtwINuhVo0K1Ag24FGnQr0KBbgQbdCjToVqBBtwINuhVo0K1Ag24FGnQr0KBbgQbdCjToVqBBtwINuhVo0K1Ag24FGnQr0KBbgQbdCjToVqBBtwINuhVo0K1Ag24FGnSrA0Iub1g8jaYyAAAAAElFTkSuQmCC";
 
 /** Exercises BOTH image-render paths in one turn: the user attaches a screenshot, and the
- *  agent runs a tool that returns an image content block (pi's `{type:"image"}`). Drives
+ *  agent runs a tool that returns an image content block (the daemon's `{type:"image"}`). Drives
  *  ToolCard's <img> output + the user-attachment echo in the transcript. */
 export function imageReply(): ScriptStep[] {
   const callId = `img-${ts()}`;
@@ -1491,8 +1491,8 @@ export function idleNoComplete(): ScriptStep[] {
 /** Reproduces the "missing stop affordance while running" bug: a turn goes running,
  *  streams text, starts a tool, and then a STRAY `sessionUpdated(idle)` lands while the
  *  tool is still executing (the real trigger: an out-of-band re-snapshot mid-turn — a
- *  rename / model change / pi auto-title via `session_info_changed` — taken at an instant
- *  pi's `isStreaming` reads false during a tool gap). The folded `session.status` flips to
+ *  rename / model change / the daemon's auto-title via `session_info_changed` — taken at an instant
+ *  the daemon's `isStreaming` reads false during a tool gap). The folded `session.status` flips to
  *  idle and the hub's running set clears, yet the run is plainly still in flight (the tool
  *  never finished). The robust `turnActive` signal must keep the stop pill + working
  *  indicator visible here; before the fix they vanished. The turn deliberately never
@@ -1872,7 +1872,7 @@ export function answerCard(): ScriptStep[] {
         ...base(),
         type: "userMessage",
         id: "ac-u1",
-        text: "Bump pi to 0.80.2 and re-create the patch.",
+        text: "Strip the unused dep and regenerate the lockfile.",
         entryId: "e-ac-u1",
       },
     },
@@ -1884,19 +1884,19 @@ export function answerCard(): ScriptStep[] {
         snapshot: snapshot({ status: "running" }),
       },
     },
-    ...deltas("Let me check the current pinned version first.", "text"),
+    ...deltas("Let me check what's currently declared first.", "text"),
     ...toolSpan(
       {
         callId: "ac-t1",
         toolName: "bash",
         label: "Run shell command",
         description: "Execute a command in the workspace shell",
-        input: { command: 'rg -n "pi-coding-agent" server/package.json' },
+        input: { command: 'rg -n "unused-pkg" server/package.json' },
       },
       {
         callId: "ac-t1",
         success: true,
-        output: '"@earendil-works/pi-coding-agent": "^0.79.5"',
+        output: '"unused-pkg": "^1.2.3"',
       },
       { startWait: 120, wait: 220, durationMs: 900 },
     ),
@@ -1912,7 +1912,7 @@ export function answerCard(): ScriptStep[] {
           questions: [
             {
               question:
-                "How do you want to proceed with the pi 0.79.9 → 0.80.2 bump?",
+                "How do you want to proceed with removing the unused-pkg dependency?",
             },
           ],
         },
@@ -1921,16 +1921,16 @@ export function answerCard(): ScriptStep[] {
         callId: "ac-t2",
         success: true,
         output:
-          "Q: How do you want to proceed with the pi 0.79.9 → 0.80.2 bump?\n" +
-          "> The bump needs the right edit site (server/package.json) and the pi-ai patch re-created for 0.80.2.\n" +
-          "A: Re-create the patch for 0.80.2 + bump in server/package.json, then run the full gate and commit",
+          "Q: How do you want to proceed with removing the unused-pkg dependency?\n" +
+          "> The dep is declared in server/package.json and pulled transitively elsewhere; removing it needs the manifest edit + a lockfile regenerate.\n" +
+          "A: Drop the line from server/package.json, then run bun install to regenerate the lockfile, then run the full gate and commit",
       },
       { startWait: 120, wait: 220, durationMs: 0 },
     ),
     // Post-answer work: this used to render ABOVE the answer card (pulled out of work),
     // shoving it down as it streamed in. With lanes it lands BELOW the pinned card.
     ...deltas(
-      "Patch created and re-keyed to 0.80.2. Verifying it applies.",
+      "Removed the line from server/package.json. Regenerating the lockfile.",
       "text",
     ),
     ...toolSpan(
@@ -1939,17 +1939,17 @@ export function answerCard(): ScriptStep[] {
         toolName: "bash",
         label: "Run shell command",
         description: "Execute a command in the workspace shell",
-        input: { command: "bun install --force 2>&1 | tail -4" },
+        input: { command: "bun install 2>&1 | tail -4" },
       },
       {
         callId: "ac-t3",
         success: true,
-        output: "installed file has the fix ✓",
+        output: "lockfile regenerated, no transitive holdouts ✓",
       },
       { startWait: 120, wait: 220, durationMs: 830 },
     ),
     ...deltas(
-      "Done — bumped to 0.80.2, patch re-applies, the gate is green.",
+      "Done — dep dropped, lockfile regenerated, the gate is green.",
       "text",
     ),
     {
@@ -1979,7 +1979,7 @@ export function answerLeadUpCard(): ScriptStep[] {
         ...base(),
         type: "userMessage",
         id: "alu-u1",
-        text: "Ship the bump. Anything I should decide before you commit?",
+        text: "Ship the dep removal. Anything I should decide before you commit?",
         entryId: "e-alu-u1",
       },
     },
@@ -1991,26 +1991,26 @@ export function answerLeadUpCard(): ScriptStep[] {
         snapshot: snapshot({ status: "running" }),
       },
     },
-    ...deltas("Let me check the current pinned version first.", "text"),
+    ...deltas("Let me check what's currently declared first.", "text"),
     ...toolSpan(
       {
         callId: "alu-t1",
         toolName: "bash",
         label: "Run shell command",
         description: "Execute a command in the workspace shell",
-        input: { command: 'rg -n "pi-coding-agent" server/package.json' },
+        input: { command: 'rg -n "unused-pkg" server/package.json' },
       },
       {
         callId: "alu-t1",
         success: true,
-        output: '"@earendil-works/pi-coding-agent": "^0.79.5"',
+        output: '"unused-pkg": "^1.2.3"',
       },
       { startWait: 120, wait: 220, durationMs: 900 },
     ),
     // The lead-up paragraph — immediately before the answer tool, no tool between them.
     // This is the item the keep-visible peel must lift out of the work run.
     ...deltas(
-      "The bump is straightforward, but there's one call to make: 0.80.2 reworks the patch format, so I can either re-key the existing patch or drop it and re-derive from scratch. Re-keying is faster but carries the old assumptions; re-deriving is cleaner but adds ~10 minutes. How do you want to proceed?",
+      "The removal is straightforward, but there's one call to make: the dep is also pulled transitively by a dev-only package, so I can either drop the manifest line and let the transitive copy resolve on its own, or pin an explicit override so the transitive copy disappears too. Dropping is faster but leaves the transitive copy; pinning is cleaner but needs a bunfig override. How do you want to proceed?",
       "text",
     ),
     // The answer tool fires right after the lead-up paragraph.
@@ -2024,10 +2024,10 @@ export function answerLeadUpCard(): ScriptStep[] {
           questions: [
             {
               question:
-                "How do you want to handle the pi 0.79.9 → 0.80.2 patch re-key?",
+                "How do you want to handle the transitive copy of unused-pkg?",
               options: [
-                { label: "Re-key the existing patch" },
-                { label: "Re-derive from scratch" },
+                { label: "Drop the manifest line only" },
+                { label: "Drop + pin a bunfig override" },
               ],
             },
           ],
@@ -2037,31 +2037,31 @@ export function answerLeadUpCard(): ScriptStep[] {
         callId: "alu-t2",
         success: true,
         output:
-          "Q: How do you want to handle the pi 0.79.9 → 0.80.2 patch re-key?\n" +
-          "Options:\n  [x] Re-key the existing patch\n  [ ] Re-derive from scratch\n" +
-          "A: Re-key the existing patch",
+          "Q: How do you want to handle the transitive copy of unused-pkg?\n" +
+          "Options:\n  [x] Drop the manifest line only\n  [ ] Drop + pin a bunfig override\n" +
+          "A: Drop the manifest line only",
       },
       { startWait: 120, wait: 220, durationMs: 0 },
     ),
     // Post-answer work: the agent resumes in the same turn.
-    ...deltas("Re-keying the patch against 0.80.2 now.", "text"),
+    ...deltas("Dropping the manifest line and regenerating now.", "text"),
     ...toolSpan(
       {
         callId: "alu-t3",
         toolName: "bash",
         label: "Run shell command",
         description: "Execute a command in the workspace shell",
-        input: { command: "bun install --force 2>&1 | tail -4" },
+        input: { command: "bun install 2>&1 | tail -4" },
       },
       {
         callId: "alu-t3",
         success: true,
-        output: "patch re-keyed, applies clean ✓",
+        output: "lockfile regenerated, transitive copy resolves ✓",
       },
       { startWait: 120, wait: 220, durationMs: 830 },
     ),
     ...deltas(
-      "Done — re-keyed against 0.80.2, patch applies clean, the gate is green.",
+      "Done — dep dropped, lockfile regenerated, the gate is green.",
       "text",
     ),
     {

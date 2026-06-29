@@ -25,7 +25,7 @@ import type { SessionState } from "./state.js";
 
 export const PROTOCOL_VERSION = 1;
 
-/** Pilot-local settings (distinct from pi's global/session config). Persisted
+/** Pilot-local settings (distinct from the daemon's global/session config). Persisted
  *  server-side in `pilot-settings.json`, broadcast to every client, edited from the
  *  Settings panel. */
 export interface PilotSettings {
@@ -40,7 +40,7 @@ export interface PilotSettings {
    *  out-of-band LLM calls use, separate from the session's primary model. Replaces
    *  the dotfiles `_lib/roles.mjs` per-role resolver.
    *
-   *  Value: a pi model spec `provider/model[:thinking]` (e.g.
+   *  Value: a daemon model spec `provider/model[:thinking]` (e.g.
    *  `anthropic/claude-haiku-4-5:low`), OR a `script:`-prefixed path whose stdout is
    *  such a spec (the escape hatch for an operator who wants their own resolver).
    *  `null` = unset; extensions fall back to a sensible default or no-op. The server
@@ -49,11 +49,11 @@ export interface PilotSettings {
   backgroundModel: string | null;
   /** Pilot's own enabled/disabled set for the OWNED extension paths (the
    *  `additionalExtensionPaths` entries — session-namer now, answer/tasklist in Chunks
-   *  3/4). pi's `-<path>` force-exclude override is a NO-OP on those (Chunk 0 finding),
+   *  3/4). the daemon's `-<path>` force-exclude override is a NO-OP on those (Chunk 0 finding),
    *  so pilot maintains its own set and omits disabled owned paths from the array in
    *  `warmUp`. `null` = all owned enabled (the default); an array = the enabled subset
    *  by basename (e.g. `["session-namer"]`) — the operator thinks in names, not paths.
-   *  User/project extensions keep pi's force-exclude toggle unchanged. */
+   *  User/project extensions keep the daemon's force-exclude toggle unchanged. */
   enabledExtensions: string[] | null;
 }
 
@@ -82,7 +82,7 @@ export interface TrustRequestOption {
  * `SessionDriverEvent` — because trust resolves inside the driver's session warm-up,
  * before that session (and its UI bridge) exists and while the hub is mid-swap
  * (`switching`), so it can't ride the per-session event/fold path. It's a per-cwd
- * question by nature: "may pi load this folder's .pi resources?".
+ * question by nature: "may the agent load this folder's .pi resources?".
  */
 export interface TrustRequest {
   readonly requestId: string;
@@ -92,7 +92,7 @@ export interface TrustRequest {
 }
 
 /** A directory's browsable contents for the new-session project picker. The server
- *  resolves `path` on ITS OWN filesystem (pi runs server-side), so the picker browses
+ *  resolves `path` on ITS OWN filesystem (the agent runs server-side), so the picker browses
  *  the server, not whichever device the client runs on — a native browser file picker
  *  can't do that (it only sees the client device, and never yields a real path string).
  *  Files are omitted: you're choosing a working directory, so only child directories
@@ -179,7 +179,7 @@ export type ServerMessage =
    *  composer's typeahead. Server-authoritative like `modelList`; re-broadcast on
    *  session switch because the set is cwd-scoped. See {@link CommandInfo}. */
   | { type: "commandList"; commands: readonly CommandInfo[] }
-  /** The focused session's full branch tree (pi's /tree). Sent on demand when a client
+  /** The focused session's full branch tree (the daemon's /tree). Sent on demand when a client
    *  opens the tree view (it sends {@link queryTree}) and re-broadcast after a `branch` so
    *  an open tree view refreshes. `sessionId` is the session the tree belongs to, so a
    *  client that has since switched away can drop a late tree. See {@link TreeNodeInfo}. */
@@ -189,7 +189,7 @@ export type ServerMessage =
       nodes: readonly TreeNodeInfo[];
       leafId: string | null;
     }
-  /** The focused session's pi extensions (loaded + any pilot-disabled), for the Settings
+  /** The focused session's agent extensions (loaded + any pilot-disabled), for the Settings
    *  "Extensions" view. Sent on demand when a client expands that section (it sends
    *  {@link queryExtensions}) and re-sent after a {@link setExtensionEnabled} toggle.
    *  `sessionId` is the session the list belongs to, so a client that switched away can
@@ -223,7 +223,7 @@ export type ServerMessage =
    *  already-connected), server-authoritative like `modelList`. No secrets — see
    *  {@link ProviderInfo}. */
   | { type: "providerList"; providers: readonly ProviderInfo[] }
-  /** pi's global model config: default model/thinking for new sessions + the
+  /** the daemon's global model config: default model/thinking for new sessions + the
    *  favorites subset the header picker filters to. Distinct from a session's
    *  `config` (the CURRENT selection). See {@link ModelDefaults}. */
   | { type: "modelDefaults"; defaults: ModelDefaults }
@@ -293,7 +293,7 @@ export type ServerMessage =
    *  back that prompt's text for re-editing. Sent ONLY to the client that asked to
    *  branch (per-client composer state, never broadcast / folded into shared state). */
   | { type: "editorPrefill"; text: string }
-  /** Acceptance result for a client-generated prompt id. `accepted` means pi's prompt
+  /** Acceptance result for a client-generated prompt id. `accepted` means the daemon's prompt
    *  preflight accepted/queued/handled it; later run failures still arrive normally. */
   | {
       type: "promptResult";
@@ -302,7 +302,7 @@ export type ServerMessage =
       sessionId?: SessionId;
       error?: string;
     }
-  /** Text returned after atomically clearing pi's steering/follow-up queues. Sent only
+  /** Text returned after atomically clearing the daemon's steering/follow-up queues. Sent only
    *  to the client that requested restore; the shared empty queue arrives as an event. */
   | {
       type: "queueRestored";
@@ -341,13 +341,13 @@ export type ClientMessage =
     }
   /** Switch a session's thinking level. Omit sessionId to target the focused one. */
   | { type: "setThinking"; level: string; sessionId?: SessionId }
-  /** Save an API key for a provider (writes pi's auth.json — shared with terminal
-   *  pi). The server refreshes the model registry and re-broadcasts provider/model
+  /** Save an API key for a provider (writes the daemon's auth.json — shared with terminal
+   *  agent). The server refreshes the model registry and re-broadcasts provider/model
    *  lists; a failure (unsupported provider / empty key) comes back as `error`. */
   | { type: "setProviderApiKey"; providerId: string; apiKey: string }
   /** Remove a pilot-saved API key for a provider (auth_file source only). */
   | { type: "removeProviderApiKey"; providerId: string }
-  /** Start an interactive OAuth login for a provider (pi's OAuth registry). The server
+  /** Start an interactive OAuth login for a provider (the daemon's OAuth registry). The server
    *  drives the flow — surfacing `oauthPrompt`/`oauthProgress`/`oauthDeviceCode` and
    *  finishing with `oauthResult` — then re-broadcasts the provider + model lists. */
   | { type: "oauthLogin"; providerId: string }
@@ -356,9 +356,9 @@ export type ClientMessage =
   | { type: "oauthRespond"; requestId: string; value: string | null }
   /** Sign out of an OAuth provider (clears its stored credentials in auth.json). */
   | { type: "oauthLogout"; providerId: string }
-  /** Set pi's global default model for NEW sessions (not the current one). */
+  /** Set the daemon's global default model for NEW sessions (not the current one). */
   | { type: "setDefaultModel"; provider: string; modelId: string }
-  /** Set pi's global default thinking level for NEW sessions. */
+  /** Set the daemon's global default thinking level for NEW sessions. */
   | { type: "setDefaultThinking"; level: string }
   /** Replace the favorites subset. `refs` are `provider:modelId`; empty clears the
    *  filter (header picker shows every model again). */
@@ -377,19 +377,19 @@ export type ClientMessage =
   | { type: "listProviders" }
   /** Switch the active session to this .jsonl path. */
   | { type: "openSession"; path: string }
-  /** Reload a session from scratch (by its .jsonl `path`): dispose the warm pi session
-   *  (aborting any in-flight run) and re-warm it from disk, rebuilding pi's context anew —
+  /** Reload a session from scratch (by its .jsonl `path`): dispose the warm session
+   *  (aborting any in-flight run) and re-warm it from disk, rebuilding the session's context anew —
    *  config, project trust, and extensions all loaded fresh. Restores the persisted
    *  transcript as closely as possible; in-memory-only state (an undelivered steer/followUp
    *  queue, an un-persisted branch jump) is lost. The recovery path for when an extension
    *  bug wedges a session: fix the extension elsewhere, then reload here to continue without
    *  restarting pilot. The server re-seeds every client viewing the session. */
   | { type: "reloadSession"; path: string }
-  /** Jump the session to a prior tree entry and branch from it (pi's /tree). `entryId`
-   *  is a pilot transcript item's `entryId` (a pi tree node). The server calls
+  /** Jump the session to a prior tree entry and branch from it (the daemon's /tree). `entryId`
+   *  is a pilot transcript item's `entryId` (a daemon tree node). The server calls
    *  navigateTree, then re-seeds every client's transcript to the new branch; if the
    *  target was a user prompt, the requester also gets an `editorPrefill` with its text.
-   *  `summarize` asks pi to summarize the abandoned branch first (an LLM call) — the UI
+   *  `summarize` asks the daemon to summarize the abandoned branch first (an LLM call) — the UI
    *  ships without it, but the flag is carried so the summarize path is additive later.
    *  Omit sessionId to target the focused session. */
   | {
@@ -403,7 +403,7 @@ export type ClientMessage =
    *  `worktree`: create an isolated jj/git worktree of `cwd` and run the session
    *  there, leaving the main tree clean (like the Claude app's worktree toggle).
    *  `model`/`thinking`: apply this model + thinking level at creation, so the
-   *  new-session draft's config carries through without mutating pi's global
+   *  new-session draft's config carries through without mutating the daemon's global
    *  defaults. `prompt`: deliver this as the first message once the session is
    *  active — creation + first turn ride one message, so nothing is created on the
    *  server until the user actually sends (the draft lives client-side until then). */
@@ -425,7 +425,7 @@ export type ClientMessage =
    *  the session list so every client's active-only filter updates. Archiving a session
    *  whose cwd is a pilot-created worktree also reaps that worktree when it's clean. */
   | { type: "setArchived"; path: string; archived: boolean }
-  /** Rename a session (by its .jsonl `path`). Writes pi's session display name (a
+  /** Rename a session (by its .jsonl `path`). Writes the daemon's session display name (a
    *  `session_info` entry); the server re-broadcasts the session list so every client's
    *  sidebar updates, and a warm session's header title updates live. Empty `name` is a
    *  no-op server-side (the client shouldn't submit one). */
@@ -443,8 +443,8 @@ export type ClientMessage =
    *  section just expanded). The server responds with {@link extensionList}. Omit sessionId
    *  to target the focused one. */
   | { type: "queryExtensions"; sessionId?: SessionId }
-  /** Enable or disable a pi extension by its `resolvedPath` (writes a force-exclude override
-   *  to pi's user settings). pi loads extensions at session START, so this applies on the
+  /** Enable or disable an agent extension by its `resolvedPath` (writes a force-exclude override
+   *  to the daemon's user settings). the daemon loads extensions at session START, so this applies on the
    *  session's NEXT start, not live — the UI labels it so. The server persists, then re-sends
    *  {@link extensionList}. Omit sessionId to target the focused session. */
   | {

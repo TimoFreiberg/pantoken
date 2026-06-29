@@ -162,7 +162,7 @@
     store.setArchived(s.path, !s.archived);
     closeMenu();
   }
-  // Reload a wedged session: the server throws out the warm pi session and rebuilds it
+  // Reload a wedged session: the server throws out the warm session and rebuilds it
   // from disk with fresh config + extensions. The recovery move after fixing an extension
   // bug in another session. Closes the menu; the reseeded transcript arrives over the WS.
   function reloadSession(s: SessionListEntry): void {
@@ -822,7 +822,7 @@
           class="menu-item"
           role="menuitem"
           data-testid="copy-session-id"
-          title={`Copy the pi session id to the clipboard: ${menuSession.sessionId}`}
+          title={`Copy the session id to the clipboard: ${menuSession.sessionId}`}
           onclick={() => copySessionId(menuSession)}
           >Copy session ID</button
         >
@@ -839,9 +839,9 @@
           class="menu-item"
           role="menuitem"
           data-testid="reload-session"
-          title="Reload pi context from scratch (config + extensions reloaded) and restore the transcript — recovery for a session a buggy extension wedged (L)"
+          title="Reload context from scratch (config + extensions reloaded) and restore the transcript — recovery for a session a buggy extension wedged (L)"
           onclick={() => reloadSession(menuSession)}>
-          <span>Reload pi session</span>
+          <span>Reload session</span>
           <kbd class="hotkey" aria-hidden="true">L</kbd>
         </button>
         <button

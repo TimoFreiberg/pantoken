@@ -1,5 +1,5 @@
 // The seam between the WS hub and whatever produces session events. The mock
-// driver and the real pi-sdk driver both implement this, so the hub never changes
+// driver and the real polytoken driver both implement this, so the hub never changes
 // when we swap the fixture for a live agent.
 
 import type {
@@ -31,7 +31,7 @@ export type TrustEvent =
   | { kind: "resolved"; requestId: string };
 
 /** How the driver drives an interactive OAuth login through the hub. The hub provides
- *  this to {@link PilotDriver.oauthLogin}; the driver maps pi's OAuth callbacks onto it.
+ *  this to {@link PilotDriver.oauthLogin}; the driver maps the daemon's OAuth callbacks onto it.
  *  Each `prompt` renders to clients and resolves with the operator's answer — a pasted
  *  code/URL or a selected option id — or null if they cancelled / it timed out (the
  *  driver should treat null as an aborted login). `progress`/`deviceCode` are
@@ -65,14 +65,14 @@ export interface PilotDriver {
     promptId?: string,
   ): Promise<void>;
   abort(sessionId?: SessionId): void;
-  /** Atomically clear and return the targeted session's text-only pi queues. */
+  /** Atomically clear and return the targeted session's text-only driver queues. */
   clearQueue?(sessionId?: SessionId): {
     steering: string[];
     followUp: string[];
   };
   respondUi(response: HostUiResponse, sessionId?: SessionId): void;
 
-  /** Sessions on disk available to open (D13: pi's .jsonl files are authoritative).
+  /** Sessions on disk available to open (D13: the daemon's .jsonl files are authoritative).
    *  Each entry's `archived` flag is resolved here from the driver's archive index, and
    *  `worktree` from its worktree index. */
   listSessions(): Promise<SessionListEntry[]>;
@@ -94,7 +94,7 @@ export interface PilotDriver {
     path: string,
     archived: boolean,
   ): Promise<{ worktreeRetained?: { path: string; reason: string } } | void>;
-  /** Rename a session by its .jsonl path, writing pi's display name. Optional: a bare
+  /** Rename a session by its .jsonl path, writing the daemon's display name. Optional: a bare
    *  driver may omit it (the hub guards with `?.`). A warm (open) session is renamed
    *  through its live AgentSession so its header title updates immediately; a cold one
    *  is renamed by appending a `session_info` entry to its file. The hub re-broadcasts
@@ -110,7 +110,7 @@ export interface PilotDriver {
   /**
    * Reload a session from scratch by its .jsonl path: dispose the warm session if one is
    * open (aborting any in-flight run), then warm it up again from disk — which rebuilds
-   * pi's whole context anew (config, project-trust resolution, and extensions all loaded
+   * the session's context anew (config, project-trust resolution, and extensions all loaded
    * fresh), the recovery path when an extension bug wedges a session. Resolves with the
    * SEED events for the now-reloaded session, exactly like {@link openSession}, so the hub
    * resets + re-broadcasts the transcript through the same atomic path (it reseeds, so a
@@ -122,7 +122,7 @@ export interface PilotDriver {
   reloadSession?(path: string): Promise<SessionDriverEvent[]>;
   /** The landing session a freshly-connecting client adopts when it has no focus of
    *  its own yet (per-client focus): the seed for the driver's current/default session,
-   *  or null for an empty landing. The mock returns its bootstrap greeting; the pi
+   *  or null for an empty landing. The mock returns its bootstrap greeting; the polytoken
    *  driver returns the current warm session's seed (null at boot — it starts empty).
    *  Read synchronously by the hub on connect/reset, so it must not block. The events
    *  must NOT also be emitted via `subscribe` — the hub folds this once. Optional: a bare
@@ -133,19 +133,19 @@ export interface PilotDriver {
    *  empty `sessionOpened`). `cwd` (an absolute dir) picks the workspace per D12;
    *  omit it for $HOME. `worktree`: create an isolated jj/git
    *  worktree of `cwd` first and bind the session to it. `model`/`thinking`: apply
-   *  this config to the new session at creation (not pi's global defaults). The
+   *  this config to the new session at creation (not the daemon's global defaults). The
    *  first prompt is NOT delivered here — the hub sends it after the switch lands,
    *  so creation + first turn stay correctly ordered. */
   newSession(opts?: NewSessionOpts): Promise<SessionDriverEvent[]>;
 
-  /** Jump the session to a prior tree entry (pi's /tree) and branch from it. Mutates the
+  /** Jump the session to a prior tree entry (the daemon's /tree) and branch from it. Mutates the
    *  live session's leaf, then resolves with the new branch's SEED events — like
    *  {@link openSession}, so the hub resets + re-broadcasts the transcript through the same
    *  atomic path. `editorText` is set when the target was a user prompt (its text comes
    *  back for re-editing); the hub forwards it to the requesting client's composer.
    *  `cancelled`/`aborted` mirror navigateTree (a no-op jump to the current leaf, or an
    *  aborted summary) — the seed still reflects the (unchanged) branch so the re-seed is
-   *  safe. `summarize` runs pi's branch-summarization (an LLM call) first. Throws if the
+   *  safe. `summarize` runs the daemon's branch-summarization (an LLM call) first. Throws if the
    *  session/entry can't be resolved (the hub keeps the current transcript on a throw).
    *  Optional: a bare driver omits it and the hub guards with `?.`. */
   branchFrom?(
@@ -159,7 +159,7 @@ export interface PilotDriver {
     aborted?: boolean;
   }>;
 
-  /** The focused (warm) session's full branch tree + active leaf — pi's /tree, projected
+  /** The focused (warm) session's full branch tree + active leaf — the daemon's /tree, projected
    *  JSON-safe. Read on demand when a client opens the tree view; the hub broadcasts it as
    *  `treeState`, and re-broadcasts after a `branchFrom`. Optional (the hub guards with
    *  `?.`); sessionId omitted -> the driver's current session. Resolves undefined when
@@ -173,12 +173,12 @@ export interface PilotDriver {
    *  omitted -> the driver's current session. Undefined when no model / no window. */
   getUsage?(sessionId?: SessionId): SessionUsage | undefined;
 
-  /** Models available to switch to (driver-wide; the real driver reads pi's model
+  /** Models available to switch to (driver-wide; the real driver reads the daemon's model
    *  registry, the mock returns a fixture set). */
   listModels(): Promise<ModelOption[]>;
 
   /** Slash commands the targeted session offers (extension commands + prompt templates
-   *  + skills, pi's `get_commands` set). Per-session because the set is cwd-scoped;
+   *  + skills, the daemon's `get_commands` set). Per-session because the set is cwd-scoped;
    *  sessionId omitted -> the driver's current session. The mock returns a fixture set. */
   listCommands(sessionId?: SessionId): Promise<CommandInfo[]>;
   /** The full file index for a session's cwd — pushed on connect + switch so the client
@@ -203,7 +203,7 @@ export interface PilotDriver {
   ): Promise<FileInfo[]>;
   /** List a directory's child directories for the new-session project picker. `path`
    *  omitted/empty -> $HOME; `~` and relative segments are resolved. Resolution and the
-   *  read happen on the SERVER's filesystem (pi runs server-side), so the picker browses
+   *  read happen on the SERVER's filesystem (the agent runs server-side), so the picker browses
    *  the server regardless of which device the client is on. The real driver reads disk;
    *  the mock returns a fixture tree. Unreadable paths come back with `error: true` and
    *  no entries — never a silent empty listing. Not session-scoped (a new session has no
@@ -220,8 +220,8 @@ export interface PilotDriver {
   setThinking(level: string, sessionId?: SessionId): void;
 
   // --- Global model/provider config (Settings panel). All optional: the mock and
-  // pi driver implement them; a future bare driver may omit, and the hub guards with
-  // `?.`. These touch pi's GLOBAL state (auth.json + global settings), not a session.
+  // polytoken driver implement them; a future bare driver may omit, and the hub guards with
+  // `?.`. These touch the daemon's GLOBAL state (auth.json + global settings), not a session.
 
   /** Providers pilot can manage (curated key-capable + already-connected). Carries
    *  no secrets — only auth presence/source. */
@@ -231,7 +231,7 @@ export interface PilotDriver {
   setProviderApiKey?(providerId: string, apiKey: string): Promise<void>;
   /** Remove a pilot-saved API key (auth_file source only) and refresh availability. */
   removeProviderApiKey?(providerId: string): Promise<void>;
-  /** Run an interactive OAuth sign-in for a provider in pi's OAuth registry (Anthropic
+  /** Run an interactive OAuth sign-in for a provider in the daemon's OAuth registry (Anthropic
    *  Claude Pro/Max, OpenAI Codex, GitHub Copilot), driving the flow's prompts through
    *  `io`. Resolves once credentials are stored; rejects on failure/cancel. The hub
    *  re-broadcasts the provider + model lists afterward. */
@@ -240,23 +240,23 @@ export interface PilotDriver {
    *  availability so the now-unauthed provider's models drop out. */
   oauthLogout?(providerId: string): Promise<void>;
 
-  /** pi's global default model/thinking for new sessions + the favorites subset. */
+  /** The daemon's global default model/thinking for new sessions + the favorites subset. */
   getModelDefaults?(): Promise<ModelDefaults>;
-  /** Set the global default model for NEW sessions (persists to pi's settings). */
+  /** Set the global default model for NEW sessions (persists to the daemon's settings). */
   setDefaultModel?(provider: string, modelId: string): Promise<void>;
   /** Set the global default thinking level for NEW sessions. */
   setDefaultThinking?(level: string): Promise<void>;
   /** Replace the favorites subset (concrete `provider:modelId` refs). */
   setFavoriteModels?(refs: readonly string[]): Promise<void>;
 
-  /** The targeted session's pi extensions (loaded, projected JSON-safe via pi's
+  /** The targeted session's daemon extensions (loaded, projected JSON-safe via the daemon's
    *  `resourceLoader.getExtensions()`), plus any pilot-disabled ones reconstructed from the
-   *  force-exclude overrides in pi's settings. Read on demand for the Settings "Extensions"
+   *  force-exclude overrides in the daemon's settings. Read on demand for the Settings "Extensions"
    *  view; the hub sends it as `extensionList`. sessionId omitted -> the driver's current
    *  session. The mock returns a fixture set. */
   listExtensions?(sessionId?: SessionId): Promise<ExtensionInfo[]>;
   /** Enable/disable an extension by its `resolvedPath`, persisting a force-exclude override
-   *  to pi's user settings. pi loads extensions at session START, so the change applies on
+   *  to the daemon's user settings. The daemon loads extensions at session START, so the change applies on
    *  the session's NEXT start, not live (the UI labels it). The hub re-sends `extensionList`
    *  afterward. sessionId omitted -> the driver's current session. */
   setExtensionEnabled?(
@@ -271,7 +271,7 @@ export interface PilotDriver {
    *  trust gate omits it. */
   subscribeTrust?(listener: (ev: TrustEvent) => void): () => void;
   /** Wire a live predicate the driver can poll to learn whether any client is currently
-   *  connected. The pi driver uses it to deny-safe an interactive trust prompt the instant
+   *  connected. The polytoken driver uses it to deny-safe an interactive trust prompt the instant
    *  nobody could answer it (a startup resume before anyone connects, or a phone that
    *  flapped mid-warm), rather than hanging the swap until the prompt times out. The trust
    *  subscription can't double as this signal — the hub subscribes once at construction

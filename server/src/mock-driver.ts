@@ -1,4 +1,4 @@
-// Replays deterministic fixture scripts as a PilotDriver. Stands in for a real pi
+// Replays deterministic fixture scripts as a PilotDriver. Stands in for the real polytoken driver
 // session so the whole UI pipeline can be built and screenshot-verified without a
 // live model or API keys.
 
@@ -208,7 +208,7 @@ export class MockDriver implements PilotDriver {
     { request: HostUiRequest; sessionRef: SessionDriverEvent["sessionRef"] }
   >();
   // Tool callIds that have started but not yet finished. Tracked so abort() can settle
-  // them (emit a toolFinished), mirroring real pi's tool_execution_end on abort —
+  // them (emit a toolFinished), mirroring the real driver's tool_execution_end on abort —
   // otherwise an aborted turn leaves a tool card "running" forever.
   private openTools = new Set<string>();
   private sessions: SessionListEntry[] = SESSION_LIST.map((s) => ({ ...s }));
@@ -329,7 +329,7 @@ export class MockDriver implements PilotDriver {
     // foldEvent appends each delta to whichever assistant is currently open — so an
     // overlapping greeting + reply splits one thinking block across two turns and
     // leaks the greeting's tail text into the reply. Flushing keeps the mock's
-    // one-turn-at-a-time semantics, matching real pi. (Tests drive a new script the
+    // one-turn-at-a-time semantics, matching the real driver. (Tests drive a new script the
     // moment the greeting's first line is visible, well before it finishes streaming.)
     this.flushScheduled();
     let t = 0;
@@ -458,7 +458,7 @@ export class MockDriver implements PilotDriver {
   abort(): void {
     for (const entry of this.scheduled) clearTimeout(entry.timer);
     this.scheduled = [];
-    // Settle any tool the aborted turn left running, mirroring real pi (which emits a
+    // Settle any tool the aborted turn left running, mirroring the real driver (which emits a
     // tool_execution_end on abort). Without this the tool card stays "running" and the
     // robust turnActive signal would keep the stop affordance up after the turn ended.
     for (const callId of this.openTools)
@@ -516,7 +516,7 @@ export class MockDriver implements PilotDriver {
       requestId: response.requestId,
     });
 
-    // Q&A submissions: mirror real pi, where the `answer` tool records the filled-in
+    // Q&A submissions: mirror the real driver, where the `answer` tool records the filled-in
     // Q&A as its result. The client surfaces that as a visible transcript block, so
     // emit a real toolStarted/toolFinished pair (not a notify) to exercise that path.
     if ("answers" in response) {
@@ -680,19 +680,19 @@ export class MockDriver implements PilotDriver {
     return [...withQueue, ...pending];
   }
 
-  /** Deterministic stand-in for the pi driver's dispose-and-re-warm. The mock has no
+  /** Deterministic stand-in for the driver's dispose-and-re-warm. The mock has no
    *  warm AgentSession to throw away, so a reload is just a fresh seed of the same
    *  session \u2014 enough to exercise the hub's reseed path and the client wiring. */
   async reloadSession(path: string): Promise<SessionDriverEvent[]> {
     return this.openSession(path);
   }
 
-  /** Deterministic stand-in for pi's navigateTree. Branching from a USER node rewinds to
+  /** Deterministic stand-in for the driver's navigateTree. Branching from a USER node rewinds to
    *  an empty branch and hands that prompt's text back to prefill the composer (the re-edit
    *  gesture, mirroring navigateTree on a user message); any other node re-seeds the
    *  greeting unchanged (a no-op continue-from-here jump). The user prompts come from the
    *  tree fixture so any tree-view selection of a user node behaves consistently. Real tree
-   *  navigation lives in the pi driver. */
+   *  navigation lives in the polytoken driver. */
   async branchFrom(
     entryId: string,
     _opts: { summarize?: boolean },
@@ -713,7 +713,7 @@ export class MockDriver implements PilotDriver {
   }
 
   /** The mock's branch tree — a fixed multi-branch fixture so the /tree view can be built
-   *  and screenshot-verified without a real pi session that's been navigated. */
+   *  and screenshot-verified without a real daemon session that's been navigated. */
   async getTree(): Promise<TreeSnapshot> {
     return mockTree();
   }
@@ -784,7 +784,7 @@ export class MockDriver implements PilotDriver {
 
   async listExtensions(): Promise<ExtensionInfo[]> {
     // Mirror the real driver's projection: a pilot-OWNED row's `enabled` reflects pilot's
-    //   `enabledExtensions` set (the [OPEN E] toggle — pi's force-exclude is a no-op on
+    //   `enabledExtensions` set (the [OPEN E] toggle — the daemon's force-exclude is a no-op on
     //   owned paths). null = all owned enabled; an array = the enabled subset by name.
     const enabledExtensions = readPilotSettings().enabledExtensions;
     return this.extensions.map((e) => {
@@ -801,7 +801,7 @@ export class MockDriver implements PilotDriver {
     enabled: boolean,
   ): Promise<void> {
     // Pilot-OWNED rows route to pilot's `enabledExtensions` set (mirrors the real
-    //   driver — pi's force-exclude override is a no-op on additionalExtensionPaths).
+    //   driver — the daemon's force-exclude override is a no-op on additionalExtensionPaths).
     //   The mock keys off the fixture row's name (basename without .ts), like the real
     //   driver's ownedExtensionBasename. null = all enabled; an array = the subset.
     const owned = this.extensions.find((e) => e.resolvedPath === resolvedPath);
@@ -826,7 +826,7 @@ export class MockDriver implements PilotDriver {
       });
       return;
     }
-    // User/project extension: flip the in-memory flag (the mock doesn't persist pi
+    // User/project extension: flip the in-memory flag (the mock doesn't persist the daemon's
     // settings); the re-broadcast list reflects it (the row stays visible either way).
     this.extensions = this.extensions.map((e) =>
       e.resolvedPath === resolvedPath ? { ...e, enabled } : e,

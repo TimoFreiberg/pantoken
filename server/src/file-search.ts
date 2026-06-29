@@ -1,10 +1,10 @@
-// Shared `fd`-backed file search for the @-mention autocomplete — used by both the
-// pi driver and the polytoken driver. Extracted from pi-driver.ts so both drivers
+// Shared `fd`-backed file search for the @-mention autocomplete — used by both drivers.
+// Extracted from the original driver so both drivers
 // share one implementation of the path-escaping, cap, and spawn-and-collect logic.
 //
 // The polytoken driver uses the daemon's GET /files for the index (daemon-native,
 // ignore-aware) but falls back to this `fd` search for a truncated-index query —
-// the same fallback the pi driver uses. `fd` is .gitignore-aware, lists files + dirs,
+// the same fallback the polytoken driver uses. `fd` is .gitignore-aware, lists files + dirs,
 // follows symlinks, and includes dotfiles (excluding .git).
 
 import type { FileInfo } from "@pilot/protocol";
@@ -12,8 +12,8 @@ import type { FileInfo } from "@pilot/protocol";
 /** `fd` matches its pattern as a regex by default, so a raw query is wrong twice over:
  *  path chars like `.` become wildcards, and unbalanced metacharacters (`(`, `[`) make
  *  `fd` exit non-zero — a file literally named `foo[1].txt` would be uncompletable. Port
- *  pi's escaping: regex-escape each path segment, joining on a separator class. Mirrors
- *  `escapeRegex`/`buildFdPathQuery` in pi's TUI `autocomplete.ts`. */
+ *  the daemon's escaping: regex-escape each path segment, joining on a separator class. Mirrors
+ *  `escapeRegex`/`buildFdPathQuery` in the daemon's TUI `autocomplete.ts`. */
 export function escapeFdRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -44,7 +44,7 @@ export const FILE_QUERY_CAP = 50;
 
 /** Shared fd flags for both the index and the fallback query: cap results, list files +
  *  dirs, follow symlinks, include dotfiles, exclude the `.git` tree. `.gitignore`-aware
- *  by default. Mirrors pi's TUI `autocomplete.ts`. */
+ *  by default. Mirrors the daemon's TUI `autocomplete.ts`. */
 export function baseFdArgs(cwd: string, maxResults: number): string[] {
   return [
     "--base-directory",

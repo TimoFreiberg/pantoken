@@ -1,12 +1,12 @@
 // Flatten a session's branch tree (the wire's flat TreeNodeInfo[] + leafId) into a list of
-// rows the TreeView renders, mirroring pi's /tree layout but tuned for a web list:
+// rows the TreeView renders, mirroring the daemon's /tree layout but tuned for a web list:
 //
 //   - single-child chains stay FLAT (same indent, no connector) — only true branch points
-//     indent their children one level (pi's core rule);
+//     indent their children one level (the daemon's core rule);
 //   - the active root->leaf path is marked, and its branch sorts first among siblings;
 //   - filtering hides entries by mode/search; hidden intermediate nodes are bypassed so a
 //     child re-attaches to its nearest visible ancestor (the fork stays visible even when
-//     the exact fork node is filtered out), matching pi's recalculateVisualStructure.
+//     the exact fork node is filtered out), matching the daemon's recalculateVisualStructure.
 //
 // Each row carries enough connector metadata for a CSS render with CONTINUOUS rails (no
 // per-character gutter gaps like the terminal): a rail is drawn for every ancestor branch
@@ -15,7 +15,7 @@
 import type { TreeNodeInfo, TreeNodeKind } from "@pilot/protocol";
 
 /** Tree view filter modes. `default` is the "skeleton": prompts + answers + branch points
- *  (tools, bash, and bookkeeping entries hidden). The others mirror pi's tree filters. */
+ *  (tools, bash, and bookkeeping entries hidden). The others mirror the daemon's tree filters. */
 export type TreeFilterMode = "default" | "all" | "user-only" | "labeled-only";
 
 export const TREE_FILTER_MODES: readonly {
@@ -141,7 +141,7 @@ export function buildTreeRows(
   }
 
   // Order siblings: the active branch first (there's at most one active child per branch
-  // point), then oldest-first by timestamp — matching pi.
+  // point), then oldest-first by timestamp — matching the daemon.
   const sortChildren = (ids: string[]): string[] =>
     [...ids].sort((a, b) => {
       const aActive = activePath.has(a) ? 0 : 1;

@@ -116,7 +116,7 @@
       : null,
   );
   // Project chip → server-side directory browser (DirPicker). The path is chosen on the
-  // server's filesystem because pi runs server-side; a native picker would see the client.
+  // server's filesystem because the agent runs server-side; a native picker would see the client.
   let pickingCwd = $state(false);
   // Never carry an open picker across drafts (it would auto-pop on the next new session).
   $effect(() => {
@@ -146,7 +146,7 @@
   // (slashQuery != null), the user hasn't dismissed it for this token, and there are
   // matches to show. Selection + dismissal are this component's state; the menu itself
   // is presentational. Execution is free: sending `/name args` is a normal prompt, and
-  // pi's prompt() runs the command / expands the template.
+  // the agent's prompt() runs the command / expands the template.
   let slashSel = $state(0);
   let slashDismissed = $state(false);
   const slashQ = $derived(slashQuery(store.composerDraft));
@@ -312,7 +312,7 @@
   async function submit(deliverOverride?: "steer" | "followUp") {
     if (submitting) return;
     const text = store.composerDraft;
-    // `/tree` is a client-native view, not a pi command (pi's /tree is a TUI builtin that
+    // `/tree` is a client-native view, not a daemon command (the daemon's /tree is a TUI builtin that
     // can't run headless). Intercept it before send: open the tree view and clear the box.
     if (text.trim() === "/tree") {
       store.composerDraft = "";
@@ -504,7 +504,7 @@
 
   /** Replace the @-mention span (`@<query>`) with the selected file path, keeping
    *  the cursor after the inserted text. Directories get a trailing "/" so the user
-   *  can continue typing to narrow further (pi convention). */
+   *  can continue typing to narrow further (agent convention). */
   function acceptFile(file: FileInfo) {
     const m = fileMatch;
     if (!m) return;
@@ -654,7 +654,7 @@
         }
       }
     }
-    // Esc aborts a running turn (parity with pi TUI / Claude). Placed after the
+    // Esc aborts a running turn (parity with the agent TUI / Claude). Placed after the
     // slash/file/draft Esc handlers so an open menu or draft-cancel wins first.
     if (e.key === "Escape" && streaming) {
       e.preventDefault();

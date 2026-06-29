@@ -30,7 +30,7 @@
   const thinking = $derived(cfg.thinkingLevel);
   const levels = $derived(cfg.availableThinkingLevels ?? []);
 
-  // Group the picker's models by provider, like pi-gui's selector. `pickerModels` is
+  // Group the picker's models by provider, like a standard model picker. `pickerModels` is
   // filtered to favorites (when any are set), always keeping the active model visible.
   const groups = $derived.by(() => {
     const m = new Map<string, ModelOption[]>();

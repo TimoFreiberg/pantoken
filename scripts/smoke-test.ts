@@ -4,7 +4,7 @@
 // auto-deploy.sh (step 4); also runnable by hand: `bun scripts/smoke-test.ts [dir]`.
 //
 // It boots with the MOCK driver on a scratch port and a throwaway data dir, so it
-// never touches real pi state, the live instance's port, or the prod push
+// never touches real daemon state, the live instance's port, or the prod push
 // subscriptions. Exit 0 = safe to flip; non-zero = abort, live slot untouched.
 
 import { mkdtempSync, rmSync } from "node:fs";

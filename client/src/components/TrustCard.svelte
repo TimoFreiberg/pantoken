@@ -2,7 +2,7 @@
   import { store } from "../lib/store.svelte.js";
 
   // The interactive project-trust card (D12). Out-of-band from session dialogs —
-  // it gates whether pi may load this folder's .pi resources, decided per-cwd before
+  // it gates whether the agent may load this folder's .pi resources, decided per-cwd before
   // a session's transcript exists. Dismissing (scrim / Escape) denies, deny-safe.
   const req = $derived(store.trustRequest);
 
@@ -21,7 +21,7 @@
     <h2>{req.title}</h2>
     <p class="path" title={req.cwd}>{req.cwd}</p>
     <p class="msg">
-      Trusting lets pi load this folder's <code>.pi</code> settings, skills, and
+      Trusting lets the agent load this folder's <code>.pi</code> settings, skills, and
       extensions, and run its project packages. Only trust folders you know.
     </p>
     <div class="options">

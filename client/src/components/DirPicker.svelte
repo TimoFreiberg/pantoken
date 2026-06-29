@@ -3,7 +3,7 @@
   import { scrollIndexIntoView } from "../lib/scroll-into-view.js";
 
   // A server-side directory browser for the new-session project picker. The server
-  // resolves + reads paths on ITS filesystem (pi runs server-side), so this browses the
+  // resolves + reads paths on ITS filesystem (the agent runs server-side), so this browses the
   // server regardless of which device the client is on — a native browser file picker
   // would see the wrong machine and never yield a real path. Tap a folder to descend,
   // the breadcrumb to jump up, "Use this folder" to pick the one you're in.

@@ -15,7 +15,7 @@
 // image_reference) are metadata, not transcript rows — they're skipped on the
 // replay path exactly as the live event-fold skips or handles them ambiently.
 //
-// This mirrors pi's historyToEvents: a pure function over a typed input, so it's
+// This mirrors the original driver's historyToEvents: a pure function over a typed input, so it's
 // unit-testable without a daemon. Tool input comes from the assistant's
 // `tool_use` blocks (not a separate tool_call event in history), so we emit
 // `toolStarted` inline as we walk the assistant blocks, then pair the later

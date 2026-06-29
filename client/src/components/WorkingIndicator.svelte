@@ -26,7 +26,7 @@
   // client first sees the turn go active (Date.now()), not a server event timestamp:
   // the mock driver's scripted fixtures stamp events with a fake epoch-0 clock, so a
   // Date.now()-minus-event-ts reading would be off by decades in the preview / e2e.
-  // Client-side capture is identical under the mock and real pi. Tradeoff: a page reload
+  // Client-side capture is identical under the mock and real driver. Tradeoff: a page reload
   // mid-turn restarts the count from 0 — it measures "time since observed active", not
   // absolute turn start. Acceptable for an ephemeral liveness affordance (same per-client
   // scope as the token counter beside it).
@@ -53,7 +53,7 @@
     startedAt === null ? "" : formatWorkedDuration(nowMs - startedAt),
   );
 
-  // A new session is being created server-side (pi warming up + first prompt in flight),
+  // A new session is being created server-side (session warming up + first prompt in flight),
   // before its first turn has started. We show the indicator through this gap too so the
   // just-sent prompt isn't left under a silent, idle-looking composer; the real turn's
   // "Working…"/"Thinking…" takes over the moment the run starts (turnActive wins the label).
@@ -63,7 +63,7 @@
   );
 </script>
 
-<!-- The "pi is still working" affordance. Lives at the bottom of the chat window,
+<!-- The "agent is still working" affordance. Lives at the bottom of the chat window,
      just above the composer, so it sits below the last output and stays visible
      through thinking/tool gaps (not only while text streams). Replaces the inline
      streaming caret. Driven by store.turnActive — the robust in-flight signal, so it
@@ -75,8 +75,8 @@
       title={creating
         ? "Starting the new session"
         : thinking
-          ? "pi is thinking"
-          : "pi is working"}
+          ? "Agent is thinking"
+          : "Agent is working"}
     >
       <span class="mark" aria-hidden="true">
         <span class="pi">π</span>

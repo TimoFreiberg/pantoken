@@ -1,9 +1,9 @@
 // The archive index: pilot's source of truth for which sessions the operator has
-// archived (option B). Keyed by the session's .jsonl path — stable, since pi names
+// archived (option B). Keyed by the session's .jsonl path — stable, since the daemon names
 // session files by timestamp and never moves them, and it's the same key the client
 // sends for openSession.
 //
-// Why an index and not pi's `appendCustomEntry`: pi's `listAll()` (what the sidebar is
+// Why an index and not the daemon's `appendCustomEntry`: the daemon's `listAll()` (what the sidebar is
 // built from) parses messages + the session name and throws away custom entries, so a
 // flag written into the JSONL would be write-only — reading it back means re-opening and
 // scanning every session file, on top of the full read `listAll` already does. A small

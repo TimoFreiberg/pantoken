@@ -3,11 +3,11 @@
 // an accumulator, and a little context, it returns zero or more pilot events to fold +
 // broadcast, plus zero or more side-effect descriptors for the driver to execute.
 //
-// Mirrors server/src/pi/event-map.ts in discipline (pure, table-driven-tested), but
-// polytoken's stream is LOWER LEVEL than pi's: it's Anthropic Messages-API-shaped
+// Mirrors the original pi driver's (deleted) event-map in discipline (pure, table-driven-tested), but
+// polytoken's stream is LOWER LEVEL than the original driver's: it's Anthropic Messages-API-shaped
 // (message_start → content_block_start → content_block_delta → content_block_stop →
 // message_complete), so this mapper carries a small ACCUMULATOR that tracks the
-// current block kind and accrues tool-use input. pi's stream was already semantic
+// current block kind and accrues tool-use input. The original driver's stream was already semantic
 // (text_delta, tool_execution_start, agent_end), so its mapper was near-stateless.
 //
 // Shapes grounded in docs/polytoken-spike.md (confirmed against a running daemon,
@@ -43,12 +43,12 @@ type ProviderError = components["schemas"]["ProviderError"];
 // polytoken streams content blocks incrementally: content_block_start sets the
 // kind, content_block_delta(s) feed text or accrue tool-use input, content_block_stop
 // closes the window. tool_call (authoritative, per spike §4) emits toolStarted.
-// message_complete is the turn boundary (like pi's agent_end).
+// message_complete is the turn boundary (like the original driver's agent_end).
 //
 // The accumulator also tracks turn-level error state: model_error sets it,
 // message_start (a retry/new message) clears it, message_complete consumes it to
-// decide runFailed vs runCompleted. This mirrors pi's pattern of deferring the
-// failure decision to the turn boundary (pi scans messages at agent_end for
+// decide runFailed vs runCompleted. This mirrors the original driver's pattern of deferring the
+// failure decision to the turn boundary (the original driver scans messages at agent_end for
 // stopReason:"error"), rather than failing the run on every transient error that
 // the daemon might retry past.
 // ---------------------------------------------------------------------------
@@ -100,7 +100,7 @@ export function resetAccumulator(acc: FoldAccumulator): void {
 }
 
 // ---------------------------------------------------------------------------
-// Context — provided by the driver, like pi's MapCtx.
+// Context — provided by the driver, like the original driver's MapCtx.
 // ---------------------------------------------------------------------------
 
 export interface MapCtx {
@@ -251,7 +251,7 @@ function parseToolInput(buffer: string): unknown {
  * `content` is the short-form truncated string; `content_full` carries the rich
  * display content (ToolLiveDisplayContent = ToolResultContent | {diff_preview}).
  * ToolResultContent has three variants: {text}, {blocks}, {image}. We lift the
- * image into the typed `images` field (like pi's splitToolResult) and extract text
+ * image into the typed `images` field (like the original driver's splitToolResult) and extract text
  * for `output`.
  */
 function extractToolResult(
@@ -540,7 +540,7 @@ export function mapDaemonEvent(
     // ===== Turn boundaries =====
 
     case "message_start": {
-      // A turn began — the turn-start signal (like pi's agent_start). Also clears
+      // A turn began — the turn-start signal (like the original driver's agent_start). Also clears
       // any transient error state: if the daemon retries after a model_error, this
       // new message_start means the retry is underway.
       acc.turnError = null;
@@ -550,7 +550,7 @@ export function mapDaemonEvent(
     }
 
     case "message_complete": {
-      // The turn ended — the boundary choke point (like pi's agent_end). If a
+      // The turn ended — the boundary choke point (like the original driver's agent_end). If a
       // model_error occurred during the turn (and wasn't cleared by a retry's
       // message_start), fail the run; otherwise fetch fresh state for usage +
       // emit runCompleted.
@@ -706,7 +706,7 @@ export function mapDaemonEvent(
     case "model_error": {
       // A provider error occurred. Don't fail the run yet — the daemon may retry
       // (retry_wait → message_start clears the error). Defer the failure decision
-      // to message_complete, like pi defers to agent_end. Surface a warning notify.
+      // to message_complete, like the original driver defers to agent_end. Surface a warning notify.
       const message = providerErrorMessage(ev.error);
       acc.turnError = { message };
       return events([
@@ -724,7 +724,7 @@ export function mapDaemonEvent(
     }
 
     case "retry_wait": {
-      // The daemon is waiting before retrying (like pi's auto_retry_start).
+      // The daemon is waiting before retrying (like the original driver's auto_retry_start).
       return events([
         {
           ...meta,
@@ -905,7 +905,7 @@ export function mapDaemonEvent(
     // ===== System reminders =====
 
     case "system_reminder": {
-      // A system-injected reminder — like pi's role:"custom" message with
+      // A system-injected reminder — like the original driver's role:"custom" message with
       // display:false: it splits the turn (a robustness net) without rendering
       // user-facing content. Chunk 5 may surface some reminders visibly.
       return events([

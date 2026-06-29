@@ -191,7 +191,7 @@ function lastMergedIndex(result: DisplayItem[]): number {
 }
 
 // ── Skill-load detection ─────────────────────────────────────────────────────
-// pi has no model-facing "skill" tool: its system prompt lists the available skills
+// The agent has no model-facing "skill" tool: its system prompt lists the available skills
 // with their `<location>` and instructs the model to *read the SKILL.md* when a task
 // matches. So a skill load surfaces as an ordinary `read` of a `SKILL.md`. We detect
 // that shape so the summary can say "loaded skill X" instead of "read a file".
@@ -209,7 +209,7 @@ function readPath(t: ToolItem): string | null {
 
 /**
  * If a tool is a `read` of a `SKILL.md`, return the skill's name (its parent directory,
- * matching pi's own `name = parentDirName` convention); otherwise null. Heuristic by
+ * matching the agent's own `name = parentDirName` convention); otherwise null. Heuristic by
  * design: reading a SKILL.md you're *editing* also matches, an acceptable false positive
  * — the dominant meaning of "read a SKILL.md" is "load that skill". Only SKILL.md files
  * are detectable; root `.md` skills are indistinguishable from any other markdown read.
@@ -537,7 +537,7 @@ export function groupTurns(
   };
   for (const item of items) {
     // A user prompt OR an injected custom message opens a new turn. The inject case is
-    // the fix for extension nudges (e.g. journal-nudge): pi's sendMessage triggers a
+    // the fix for extension nudges (e.g. journal-nudge): the daemon's sendMessage triggers a
     // fresh run with no user prompt, so without splitting here the new run's tools +
     // reply glue onto the prior turn and collapse its final response into "work".
     if (item.kind === "user" || item.kind === "inject") {
@@ -619,7 +619,7 @@ export function workedLabel(span: {
 
 // ── Answer (Q&A) result rendering ────────────────────────────────────────────
 
-/** Extract plain text from a tool's `output`. Live results arrive as pi's raw
+/** Extract plain text from a tool's `output`. Live results arrive as the daemon's raw
  *  object `{ content: [{ type:"text", text }], details? }`; replayed-from-history
  *  results are already plain strings. Mirrors ToolCard.outputText so the answer
  *  block reads the same before and after a reload. */

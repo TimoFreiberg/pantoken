@@ -145,7 +145,7 @@ export function defaultModelRef(marker: string): {
 /** The model string to POST to /model. Polytoken's ModelConfig.name (the registry
  *  key) is the FULL `provider/id`, which is exactly what ModelOption.modelId and
  *  the default markers already carry — so the POST key IS the modelId, unmodified.
- *  (Contrast pi, where modelId is bare and the driver joins provider/modelId for
+ *  (Contrast the original driver, where modelId is bare and the driver joins provider/modelId for
  *  modelRegistry.find.) Centralized here so setModel/newSession share one tested
  *  path instead of each inlining a (previously buggy) `${provider}/${modelId}` join. */
 export function modelPostKey(modelId: string): string {

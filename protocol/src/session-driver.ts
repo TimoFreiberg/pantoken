@@ -1,6 +1,5 @@
-// Vendored from pi-gui's @pi-gui/session-driver (private 0.0.0).
-// This is the normalized, JSON-serializable surface of a pi session.
-// Source: ~/src/pi-gui/packages/session-driver/src/types.ts
+// Pilot's WS contract types (originally adapted from pi-gui's session-driver).
+// This is the normalized, JSON-serializable surface of a daemon session.
 // We adopt it as pilot's wire contract; trimmed to what pilot consumes.
 
 export type WorkspaceId = string;
@@ -29,7 +28,7 @@ export interface SessionRef {
 export type SessionStatus = "idle" | "initializing" | "running" | "failed";
 export type SessionMessageDeliveryMode = "steer" | "followUp";
 
-/** An image attachment for a user message, as pi's SDK carries them. Base64-encoded
+/** An image attachment for a user message, as the daemon carries them. Base64-encoded
  *  image data with a MIME type — serializable across the WS wire as plain JSON. */
 export interface ImageContent {
   readonly type: "image";
@@ -54,7 +53,7 @@ export interface SessionConfig {
 }
 
 /** How full the active model's context window is — drives the composer's context
- *  meter. A JSON-safe projection of pi's `AgentSession.getContextUsage()`. `tokens`
+ *  meter. A JSON-safe projection of the daemon's `AgentSession.getContextUsage()`. `tokens`
  *  is the estimated token count currently in context; it's `null` when unknown
  *  (e.g. right after a compaction, until the next assistant response re-grounds it),
  *  in which case `percent` is null too but `contextWindow` (the model's max) is still
@@ -71,19 +70,19 @@ export interface ModelOption {
   readonly provider: string;
   readonly modelId: string;
   readonly label: string;
-  /** Thinking levels this model supports (pi's `getSupportedThinkingLevels`). Lets the
+  /** Thinking levels this model supports (the daemon's `getSupportedThinkingLevels`). Lets the
    *  new-session draft's effort picker offer accurate options before a session exists —
    *  per-session `availableThinkingLevels` is only known once a model is warm. */
   readonly thinkingLevels?: readonly string[];
 }
 
 /** One slash command the composer's typeahead can offer — a JSON-safe projection of
- *  pi's `get_commands` (extension commands, prompt templates, skills) or, under the
+ *  the daemon's `get_commands` (extension commands, prompt templates, skills) or, under the
  *  polytoken driver, the daemon's builtin slash commands. The heavy `sourceInfo`
  *  path metadata is dropped; `source` drives a small origin badge. Commands are
  *  cwd/session-scoped (loaded from the focused session's `.pi`), so the list is
  *  re-broadcast on every session switch — see `commandList`. Execution needs
- *  nothing extra: sending `/name args` as a normal prompt routes through pi's
+ *  nothing extra: sending `/name args` as a normal prompt routes through the daemon's
  *  `prompt()` (or polytoken's `/prompt`), which runs extension commands and expands
  *  templates/skills. */
 export interface CommandInfo {
@@ -91,17 +90,17 @@ export interface CommandInfo {
   readonly name: string;
   readonly description?: string;
   /** Origin of the command — drives a small badge in the slash menu. `"builtin"` is
-   *  the polytoken driver's daemon-native commands; the other three are pi's sources. */
+   *  the polytoken driver's daemon-native commands; the other three are the daemon's sources. */
   readonly source: "extension" | "prompt" | "skill" | "builtin";
   /** Usage hint shown after the name (prompt templates only), e.g. "[path]". */
   readonly argumentHint?: string;
 }
 
-/** One pi extension, projected JSON-safe for the Settings "Extensions" view — a DOM-free
- *  reduction of pi's `Extension` (the heavy `handlers`/`tools` Maps dropped to counts).
- *  LOADED (enabled) extensions come from pi's `resourceLoader.getExtensions()`; a DISABLED
+/** One agent extension, projected JSON-safe for the Settings "Extensions" view — a DOM-free
+ *  reduction of the daemon's `Extension` (the heavy `handlers`/`tools` Maps dropped to counts).
+ *  LOADED (enabled) extensions come from the daemon's `resourceLoader.getExtensions()`; a DISABLED
  *  one is reconstructed from the `-<resolvedPath>` force-exclude override pilot wrote to
- *  pi's settings — it isn't loaded, so it carries no counts. `resolvedPath` is the stable
+ *  the daemon's settings — it isn't loaded, so it carries no counts. `resolvedPath` is the stable
  *  id AND the toggle key (it's exactly what the override pattern matches). Broadcast as
  *  {@link extensionList}; see {@link setExtensionEnabled}. */
 export interface ExtensionInfo {
@@ -109,11 +108,11 @@ export interface ExtensionInfo {
   readonly resolvedPath: string;
   /** Display name — the basename of the source path (e.g. "answer.ts"). */
   readonly name: string;
-  /** Where it came from: "user" / "project" (pi's source scope), with " · package" when
+  /** Where it came from: "user" / "project" (the daemon's source scope), with " · package" when
    *  it's a published package rather than a top-level local file. Display-only. */
   readonly source: string;
   /** Whether it's currently enabled (loaded). A disabled row is one pilot force-excluded;
-   *  toggling persists and applies on the session's NEXT start (pi loads at start). */
+   *  toggling persists and applies on the session's NEXT start (the daemon loads at start). */
   readonly enabled: boolean;
   /** Tools this extension registers (loaded extensions only; 0 when disabled/errored). */
   readonly toolCount: number;
@@ -121,10 +120,10 @@ export interface ExtensionInfo {
   readonly commandCount: number;
   /** A short, human-readable description of what this extension does. Currently only
    *  pilot-OWNED extensions carry one (parsed from the file's `@pilot` frontmatter, D3);
-   *  user/project/package extensions leave it undefined until pi grows the field.
+   *  user/project/package extensions leave it undefined until the daemon grows the field.
    *  Display-only. */
   readonly description?: string;
-  /** A load error pi reported for this extension, if any — drives the problems styling. */
+  /** A load error the daemon reported for this extension, if any — drives the problems styling. */
   readonly error?: string;
 }
 
@@ -141,7 +140,7 @@ export interface FileInfo {
 }
 
 /** Coarse category for a session-tree node — drives the tree view's filtering, preview
- *  styling, and the row icon/colour. A flat projection of pi's `SessionEntry.type` (with
+ *  styling, and the row icon/colour. A flat projection of the daemon's `SessionEntry.type` (with
  *  the message role folded in) so the client can filter without re-deriving roles. */
 export type TreeNodeKind =
   | "user"
@@ -156,7 +155,7 @@ export type TreeNodeKind =
   | "session-info"
   | "custom";
 
-/** One node of a session's branch tree — a JSON-safe, DOM-free projection of pi's
+/** One node of a session's branch tree — a JSON-safe, DOM-free projection of the daemon's
  *  `SessionTreeNode`/`SessionEntry` (the heavy message payload reduced to a one-line
  *  `preview`, projected server-side so `protocol/` stays runtime-free). `id` is the same
  *  handle the `branch` client message takes, so selecting a node needs no extra lookup.
@@ -171,9 +170,9 @@ export interface TreeNodeInfo {
   /** One-line, whitespace-normalised preview (projected server-side). Empty for an
    *  assistant turn that produced only tool calls — the client hides those by default. */
   readonly preview: string;
-  /** ISO timestamp of the entry — siblings render oldest-first, matching pi. */
+  /** ISO timestamp of the entry — siblings render oldest-first, matching the daemon. */
   readonly ts?: string;
-  /** A user-assigned label for this node, if any (pi's tree labels). */
+  /** A user-assigned label for this node, if any (the daemon's tree labels). */
   readonly label?: string;
 }
 
@@ -197,9 +196,9 @@ export interface ProviderInfo {
    *  remove; "env"/"external" = configured outside pilot (env var, models.json) and
    *  read-only here; "oauth" = an OAuth token; "none" = unauthed. */
   readonly authSource: "none" | "oauth" | "auth_file" | "env" | "external";
-  /** Whether pilot can set a plain API key for this provider (pi's curated set). */
+  /** Whether pilot can set a plain API key for this provider (the daemon's curated set). */
   readonly apiKeySetupSupported: boolean;
-  /** Whether pilot can start an OAuth sign-in for this provider (it's in pi's OAuth
+  /** Whether pilot can start an OAuth sign-in for this provider (it's in the daemon's OAuth
    *  registry — Anthropic Claude Pro/Max, OpenAI Codex, GitHub Copilot). Drives the
    *  "Sign in" button; `authSource === "oauth"` means already signed in, so offer
    *  sign-out instead. */
@@ -207,11 +206,11 @@ export interface ProviderInfo {
 }
 
 // --- OAuth provider login (global + interactive, like the trust channel) ---
-// Sign-in is a global action (it writes pi's shared auth.json, not a session), so it
+// Sign-in is a global action (it writes the daemon's shared auth.json, not a session), so it
 // travels its own wire messages rather than the session-scoped Host UI / event stream.
-// The flow can be remote: pi opens an authorize URL the operator loads on their phone,
+// The flow can be remote: the daemon opens an authorize URL the operator loads on their phone,
 // then they paste the resulting code/redirect-URL back — no callback reachable over
-// Tailscale needed (pi's loginAnthropic races a localhost loopback against this paste).
+// Tailscale needed (the daemon's loginAnthropic races a localhost loopback against this paste).
 
 /** One option in an OAuth `select` step (e.g. browser vs device-code login method). */
 export interface OAuthSelectOption {
@@ -245,9 +244,9 @@ export interface OAuthDeviceInfo {
   readonly expiresInSeconds?: number;
 }
 
-/** Pilot's view of pi's GLOBAL model config (not per-session): the default new
+/** Pilot's view of the daemon's GLOBAL model config (not per-session): the default new
  *  sessions start from, plus the favorites subset the header picker is filtered to.
- *  `favorites` are concrete `provider:modelId` refs (resolved server-side from pi's
+ *  `favorites` are concrete `provider:modelId` refs (resolved server-side from the daemon's
  *  glob-capable `enabledModels` patterns); empty = no filter, show every model.
  *  Broadcast as `modelDefaults`. */
 export interface ModelDefaults {
@@ -277,9 +276,9 @@ export interface SessionSnapshot {
 }
 
 /**
- * One row in the session picker — a JSON-safe projection of pi's `SessionInfo`
+ * One row in the session picker — a JSON-safe projection of the daemon's `SessionInfo`
  * (Dates rendered as ISO strings, the heavy `allMessagesText` dropped). `path` (the
- * .jsonl file) is the switch key, since pi's resume/open APIs are path-based and the
+ * .jsonl file) is the switch key, since the daemon's resume/open APIs are path-based and the
  * `sessionId`/cwd can be empty for older sessions.
  */
 export interface SessionListEntry {
@@ -289,7 +288,7 @@ export interface SessionListEntry {
   readonly displayName?: string;
   readonly preview: string;
   /** Count of the operator's own turns (messages with role "user") — NOT every
-   *  message. pi's session files interleave assistant + toolResult messages, so a
+   *  message. the daemon's session files interleave assistant + toolResult messages, so a
    *  raw message count balloons with tool traffic; the sidebar wants "how many times
    *  did I write something", which is this. */
   readonly userMessageCount: number;
@@ -297,7 +296,7 @@ export interface SessionListEntry {
   readonly createdAt: Timestamp;
   /** When the operator last sent a message here — the timestamp of the last role-"user"
    *  entry in the session, or `createdAt` if none yet. Pilot derives this itself from the
-   *  session .jsonl (no pi change). It's the sidebar's sort key: Claude-app-style "most
+   *  session .jsonl (no daemon change). It's the sidebar's sort key: Claude-app-style "most
    *  recently used on top", but WITHOUT `updatedAt`'s noise — `updatedAt` bumps on every
    *  streamed agent turn, so sorting by it makes running sessions jump around as they
    *  emit tokens; this only moves when you actually send something. */
@@ -504,10 +503,10 @@ export interface AssistantDeltaEvent extends SessionEventBase {
   readonly text: string;
   /** pilot extension: distinguish reasoning deltas from answer text */
   readonly channel?: "text" | "thinking";
-  /** pilot extension: pi's tree entry id for the assistant message this delta belongs
+  /** pilot extension: the daemon's tree entry id for the assistant message this delta belongs
    *  to — the branch handle a "branch from here" button names (see PilotDriver.branchFrom).
    *  Set only on the REPLAY path (history-map), where the persisted entry is known; absent
-   *  on the live stream (pi doesn't assign the id until the message persists at turn end,
+   *  on the live stream (the daemon doesn't assign the id until the message persists at turn end,
    *  so the live path backfills it via {@link RunCompletedEvent.assistantEntryId}). All
    *  deltas of one assistant message carry the same id. */
   readonly entryId?: string;
@@ -529,17 +528,17 @@ export interface UserMessageEvent extends SessionEventBase {
   readonly id: string;
   readonly text: string;
   readonly images?: readonly ImageContent[];
-  /** pilot extension: pi's tree entry id for this user prompt — the branch handle a
+  /** pilot extension: the daemon's tree entry id for this user prompt — the branch handle a
    *  "branch from this prompt" button names. Set on the REPLAY path (history-map); absent
-   *  on the live emit (pilot emits userMessage before pi persists the entry), where it's
+   *  on the live emit (pilot emits userMessage before the daemon persists the entry), where it's
    *  backfilled via {@link RunCompletedEvent.userEntryId} at turn end. */
   readonly entryId?: string;
 }
 export interface CustomMessageEvent extends SessionEventBase {
-  // An extension-injected `role:"custom"` message (pi's `sendMessage`). These trigger
-  // a fresh pi run with no user prompt, so they double as a TURN BOUNDARY: without
+  // An extension-injected `role:"custom"` message (the daemon's `sendMessage`). These trigger
+  // a fresh daemon run with no user prompt, so they double as a TURN BOUNDARY: without
   // one, the new run's tools + reply glue onto the prior turn and collapse its final
-  // response into the "Worked for Ns" work block. `display` mirrors pi's own "show
+  // response into the "Worked for Ns" work block. `display` mirrors the daemon's own "show
   // this in the transcript" flag — true ones render as a tiny expandable note, false
   // ones render nothing but still split the turn (the robustness net).
   readonly type: "customMessage";
@@ -568,7 +567,7 @@ export interface ToolFinishedEvent extends SessionEventBase {
   readonly callId: string;
   readonly success: boolean;
   readonly output?: unknown;
-  /** Image content blocks the tool returned (pi's `{type:"image"}`), lifted out of
+  /** Image content blocks the tool returned (the daemon's `{type:"image"}`), lifted out of
    *  `output` into a typed field so the client renders them without sniffing the raw
    *  result shape — and so the SAME data survives a reload (history-map populates this
    *  too). The base64 lives ONLY here; the live path strips it from `output` to avoid
@@ -578,7 +577,7 @@ export interface ToolFinishedEvent extends SessionEventBase {
 export interface RunCompletedEvent extends SessionEventBase {
   readonly type: "runCompleted";
   readonly snapshot: SessionSnapshot;
-  /** pilot extension: pi's tree entry ids for the turn that just completed, used to
+  /** pilot extension: the daemon's tree entry ids for the turn that just completed, used to
    *  backfill the branch handle onto the LIVE-streamed transcript (the ids don't exist
    *  until the messages persist at turn end — see AssistantDeltaEvent.entryId). The
    *  reducer stamps `assistantEntryId` onto the turn-final assistant item and
@@ -611,7 +610,7 @@ export interface HostUiRequestEvent extends SessionEventBase {
 }
 export interface HostUiResolvedEvent extends SessionEventBase {
   // pilot-synthetic: a pending dialog settled (a client answered, or the agent
-  // auto-resolved on timeout). Emitted by the server, never by pi.
+  // auto-resolved on timeout). Emitted by the server, never by the daemon.
   readonly type: "hostUiResolved";
   readonly requestId: string;
 }

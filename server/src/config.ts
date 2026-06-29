@@ -35,8 +35,8 @@ export const config = {
   debug: process.env.PILOT_DEBUG !== "0",
   // Built client bundle (served in prod; in dev Vite serves it instead).
   clientDist: resolve(import.meta.dir, "../../client/dist"),
-  // Max kept-warm pi sessions before the least-recently-focused one is evicted
-  // (its services disposed). ≤0 disables the cap. Only the real pi driver honors it.
+  // Max kept-warm sessions before the least-recently-focused one is evicted
+  // (its services disposed). ≤0 disables the cap. Only the polytoken driver honors it.
   warmCap: Number(process.env.PILOT_WARM_CAP ?? 8),
   // Cadence (ms) of the hub's live-refresh ticker, which re-pushes the session list +
   // the focused session's context usage while a turn runs (so the sidebar rows + the

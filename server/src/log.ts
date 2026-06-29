@@ -183,17 +183,18 @@ export class Logger {
   // (which would recurse: console.error -> write() -> mirrorToConsole -> console.error).
   private readonly originalConsole: Pick<
     Console,
-    "log" | "warn" | "error" | "debug"
+    "log" | "info" | "warn" | "error" | "debug"
   > = {
     log: console.log.bind(console),
+    info: console.info.bind(console),
     warn: console.warn.bind(console),
     error: console.error.bind(console),
     debug: console.debug.bind(console),
   };
 
   /** Tee global console.* into this log file as `console`/level lines, in addition to
-   *  their normal stderr/stdout output. This is how pi extension `console.error` (and
-   *  pilot's own `[pi] ...` lines) reach `pilot.log` in the live desktop app, where the
+   *  their normal stderr/stdout output. This is how extension/daemon `console.error`
+   *  (and pilot's own log lines) reach `pilot.log` in the live desktop app, where the
    *  process stderr is otherwise unreached (ServerSupervisor attaches no stderr pipe).
    *  Must be called AFTER construction — the originals are captured in the constructor so
    *  the Logger's own mirror path never recurses through the tee.

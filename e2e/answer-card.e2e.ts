@@ -11,11 +11,7 @@ import { drive, gotoFresh, waitForSettledWorkBlocks } from "./helpers.js";
 // Chunk 4 note: this spec mocks the WIRE, not the answer extension. The `answercard`
 // fixture (server/src/fixtures.ts) drives a canned `answer` toolSpan whose output is the
 // extension's `formatQnA` text — the client-side QnaResult parses that wire text into the
-// card. So porting answer.ts from ~/dotfiles into pilot/extensions/ (and registering it
-// via additionalExtensionPaths) does NOT change this spec: the mock driver never calls
-// createAgentSessionServices, so the real extension never runs here. The port's load +
-// wiring is instead covered by answer-extension.test.ts (real pi loader); the qna seam
-// itself by ui-bridge-coupling.test.ts. This spec stays the card-rendering guard.
+// card. This spec stays the card-rendering guard.
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
   await drive(page, "answercard");
@@ -28,10 +24,10 @@ test("the answer card shows the submitted Q&A", async ({ page }) => {
   await expect(card).toBeVisible();
   await expect(card.getByText("Your answers")).toBeVisible();
   await expect(
-    card.getByText("How do you want to proceed with the pi", { exact: false }),
+    card.getByText("How do you want to proceed with removing the unused-pkg", { exact: false }),
   ).toBeVisible();
   await expect(
-    card.getByText("Re-create the patch for 0.80.2", { exact: false }),
+    card.getByText("Drop the line from server/package.json", { exact: false }),
   ).toBeVisible();
 });
 
@@ -59,7 +55,7 @@ test("the card is inline with the reading measure, not hugging the wide-track le
   // The turn-final response paragraph sits at the centered measure. The card's left
   // edge must match it (a few px tolerance), not sit to its left in the wide gutter.
   const response = await page
-    .getByText("bumped to 0.80.2", { exact: false })
+    .getByText("dep dropped, lockfile regenerated", { exact: false })
     .boundingBox();
   expect(card).not.toBeNull();
   expect(response).not.toBeNull();
