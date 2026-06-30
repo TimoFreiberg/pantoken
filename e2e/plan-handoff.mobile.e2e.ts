@@ -43,7 +43,10 @@ test("facet badge renders on mobile when the facet is plan", async ({ page }) =>
   await drive(page, "planfacet");
   const badge = page.getByTestId("facet-badge");
   await expect(badge).toBeVisible();
-  await expect(badge).toHaveText("Plan mode");
-  // Reverts to execute after the dwell → badge hides.
-  await expect(badge).toBeHidden();
+  await expect(badge).toHaveText("Plan");
+  // Reverts to execute after the dwell → badge stays visible (always-visible state
+  // readout) and shows the actual facet "Execute". (The old toBeHidden() assertion
+  // was stale — it predated the always-visible change and was failing.)
+  await expect(badge).toBeVisible();
+  await expect(badge).toHaveText("Execute");
 });
