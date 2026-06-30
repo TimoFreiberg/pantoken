@@ -19,6 +19,7 @@
   import DirPicker from "./DirPicker.svelte";
   import ImageLightbox from "./ImageLightbox.svelte";
   import ModelPicker from "./ModelPicker.svelte";
+  import FacetBadge from "./FacetBadge.svelte";
   import ContextMeter from "./ContextMeter.svelte";
   import SegmentedControl from "./ui/SegmentedControl.svelte";
   import IconButton from "./ui/IconButton.svelte";
@@ -1000,6 +1001,7 @@
             </svg>
           </IconButton>
         {/if}
+        <FacetBadge />
         <ModelPicker />
       </div>
     </div>

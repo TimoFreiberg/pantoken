@@ -1734,9 +1734,11 @@ export function permissionDialog(): ScriptStep[] {
   ];
 }
 
-/** Drives the StatusHeader facet badge: emits a sessionUpdated snapshot carrying
- *  `facet: "plan"` so the badge appears, dwells long enough to assert it, then
- *  emits a snapshot with `facet: "execute"` so the badge disappears. Exercises the
+/** Drives the facet badge (now in the composer toolbar): emits a sessionUpdated
+ *  snapshot carrying `facet: "plan"` so the badge shows the accent-tinted "Plan"
+ *  state, dwells long enough to assert it, then emits a snapshot with
+ *  `facet: "execute"` so the badge reverts to the subtle "Execute" chip (the badge
+ *  is always visible — a state readout, not a toggle that hides). Exercises the
  *  full snapshot→foldEvent→state.facet→UI path (the critical data path). */
 export function planFacet(): ScriptStep[] {
   return [
@@ -1749,7 +1751,7 @@ export function planFacet(): ScriptStep[] {
       },
     },
     {
-      // Dwell so the badge is stable on capture, then revert to execute (badge hides).
+      // Dwell so the badge is stable on capture, then revert to execute (badge → "Execute").
       wait: 1500,
       event: {
         ...base(),

@@ -62,32 +62,33 @@ test("⌘/Ctrl+Enter submits the primary action (Implement, new context)", async
   await expect(page.getByRole("dialog")).toBeHidden();
 });
 
-test("facet badge shows 'Plan mode' when the active facet is plan", async ({
+test("facet badge shows 'Plan' when the active facet is plan", async ({
   page,
 }) => {
   await drive(page, "planfacet");
-  // The badge appears as the accent-tinted "Plan mode" pill while the snapshot
+  // The badge shows the actual facet "Plan" (accent-tinted) while the snapshot
   // carries facet:"plan" (AC.4).
   const badge = page.getByTestId("facet-badge");
   await expect(badge).toBeVisible();
-  await expect(badge).toHaveText("Plan mode");
+  await expect(badge).toHaveText("Plan");
   await expect(badge).toHaveAttribute(
     "title",
-    "Active facet: plan — click to switch to execute (Shift+Tab)",
+    "Facet: plan — click to switch to execute (Shift+Tab)",
   );
   // After the dwell, the script reverts to facet:"execute" and the badge returns
-  // to its dormant "Plan" toggle state (no longer hidden — it's always visible now).
-  await expect(badge).toHaveText("Plan");
+  // to its subtle "Execute" chip (always visible — a state readout, not a toggle
+  // that hides).
+  await expect(badge).toHaveText("Execute");
 });
 
-test("facet toggle shows dormant 'Plan' in the default (execute) state", async ({
+test("facet toggle shows 'Execute' in the default (execute) state", async ({
   page,
 }) => {
-  // The greeting fixture's default state has no facet (or execute) — the toggle
-  // renders as a subtle "Plan" button (always visible now, not hidden).
+  // The greeting fixture's default state has no facet (or execute) — the badge
+  // shows the actual facet "Execute" (a state readout, always visible).
   const badge = page.getByTestId("facet-badge");
   await expect(badge).toBeVisible();
-  await expect(badge).toHaveText("Plan");
+  await expect(badge).toHaveText("Execute");
 });
 
 test("a timed-out plan card auto-dismisses to the cancel decision", async ({
