@@ -10,20 +10,6 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
 ## 🔴 Next (urgent / blocking)
 
 - [ ] hotkey for hiding/showing the question widget? hotkey choice needs discussion
-- [ ] **Facet badge: show the current facet value, and reclaim Shift+Tab as a focus move.**
-      `StatusHeader.svelte:141` renders the badge as the literal strings `"Plan"` (when
-      execute/unknown) or `"Plan mode"` (when plan) — it never shows "Execute", so the control
-      reads as a static label, not state. Show the actual current facet ("Execute" / "Plan").
-      Separately, the facet-cycle hotkey is **Shift+Tab** (`App.svelte:155–171`, gated on no
-      form field focused) — but Shift+Tab is the browser's reverse-focus traversal and should
-      stay that way in a GUI. Replacement candidates (must fit macOS, Linux, and Windows):
-      `⌥/Alt+F` is clean on macOS but `Alt+F` opens the File menu on Win/Linux; `⌘/Ctrl+Shift+F`
-      is cross-platform and free in the installed PWA, but clashes with the near-universal
-      "Find in Files" muscle memory (VS Code et al.). Pick one and handle the Shift-modifier
-      special-case — the global keydown early-returns on `e.shiftKey` at `App.svelte:173`, so
-      any Shift combo must be matched *before* that line, like Ctrl+Tab already is. 2026-06-30.
-      i think the facet should be displayed at the bottom near model/effort
-      hotkey choice needs discussion
 - [ ] **Show + edit the agent's permission level in the UI.** The polytoken daemon exposes
       the runtime permission monitor — `GET/POST /permission-monitor`
       (`server/src/polytoken/wire-types.ts:389`, `:1996–2021`), with `PermissionMonitorMode`
