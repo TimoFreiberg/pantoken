@@ -9,17 +9,7 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
 
 ## 🔴 Next (urgent / blocking)
 
-- [ ] **e2e: dir-picker `.row.up` "go up" button times out (pre-existing flake).** Surfaced
-      during the Chunk 0.5 Settings-nav verification (2026-06-26): 5 `e2e/sessions.e2e.ts`
-      worktree/dir-picker tests (`started in a directory chosen via the browser`, `worktree
-      chip creates…`, `worktree session shows a path indicator`, `archiving a worktree session
-      reaps…`, `archiving a dirty worktree session…`) all fail with a 30s timeout waiting for
-      `dir-picker`'s `.row.up`. VERIFIED to fail at the clean base commit `b3c98cac` (no
-      Settings changes) — NOT a regression from the nav refactor. Likely environmental
-      (the `chooseProjectDir` helper's `.row.up` click never resolves). Not blocking the
-      extensions plan, but it's noisy in the suite and should be diagnosed separately.
-- [ ] cmd+= / cmd+- (font size changes) aren't applied to the question widget, they should
-- [ ] hotkey for hiding/showing the question widget?
+- [ ] hotkey for hiding/showing the question widget? hotkey choice needs discussion
 - [ ] **Facet badge: show the current facet value, and reclaim Shift+Tab as a focus move.**
       `StatusHeader.svelte:141` renders the badge as the literal strings `"Plan"` (when
       execute/unknown) or `"Plan mode"` (when plan) — it never shows "Execute", so the control
@@ -32,6 +22,8 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       "Find in Files" muscle memory (VS Code et al.). Pick one and handle the Shift-modifier
       special-case — the global keydown early-returns on `e.shiftKey` at `App.svelte:173`, so
       any Shift combo must be matched *before* that line, like Ctrl+Tab already is. 2026-06-30.
+      i think the facet should be displayed at the bottom near model/effort
+      hotkey choice needs discussion
 - [ ] **Show + edit the agent's permission level in the UI.** The polytoken daemon exposes
       the runtime permission monitor — `GET/POST /permission-monitor`
       (`server/src/polytoken/wire-types.ts:389`, `:1996–2021`), with `PermissionMonitorMode`
@@ -43,6 +35,7 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       like `facet`), and a UI control (beside the facet badge in `StatusHeader.svelte` or in
       Settings) to display the current mode and switch it. Mirror the `setFacet` wire shape
       (`protocol/src/wire.ts:346`) for the change request. 2026-06-30.
+      permission should be a UI element in the bottom bar, next to model and effort level!
 - [ ] **Drop the steer/follow-up toggle + investigate steer behavior (BUG).** The
       composer exposes a `steer` ↔ `follow-up` SegmentedControl
       (`client/src/components/Composer.svelte:30,37–48`) whose chosen `deliverAs` is passed
@@ -62,8 +55,51 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       actual steer path end-to-end before deleting the toggle; confirm whether mid-turn sends
       even reach the queue or wrongly start a new turn. Also check the "press Esc after send
       submits the next message" behavior the user mentioned. 2026-06-30.
+      investigate code and fix if the situation looks clear, otherwise explore an interactive test
+- [ ] set up a test environment for automated testing using the actual polytoken backend, both interactive UI and tmux-driven tui polytoken (to compare features) - set up a tmp dir as a test project and run the agent sessions in there, configure the dir to either use umans-flash or deepseek-v4-flash as default agent and then ensure all agent features are testable by the dev agent in that dir
+- [ ] add UI support for `goal` (polytoken shows the text "(goal)" next to the facet in the sidebar, we can find a nicer place but we should also show it, if the protocol exposes it)
 
 ## 🟢 Polish / fast-follow
+
+
+- [ ] **Stop merging subsequent tool calls into "Worked for Ns" (keep the early-turn collapse).**
+      `client/src/lib/transcript-view.ts` `mergeTools` folds runs of "summarizable" tool calls
+      (`isSummarizedTool`, `:100–107`) into a single collapsible `MergedToolsItem` rendered as
+      "Worked for Ns" — today this applies across the whole turn (gated only by
+      `mergeTrailing=false` while a turn streams, `Transcript.svelte:86`). The user finds this
+      hurts readability now that polytoken enforces **≤4 tool calls before each agent text
+      output** — tool groups are already small and self-bounded, so the merge is over-collapsing
+      distinct steps into one opaque blob. Desired: keep the collapse for the early part of a
+      DONE turn (so a long finished turn still summarizes to "Worked 5m23s"), but render
+      post-boundary tool runs as individual cards. Concretely — only seal a run to prose when
+      it's followed by an assistant text bubble AND the turn is complete; unsealed runs (the
+      active/streaming tail, or runs between visible items) already render as a bare flat list,
+      so the change is about not folding the *settled* middle either. Touches `mergeTools`'s
+      `sealed` logic + the `mergeTrailing` call site. Update `transcript-view.test.ts`
+      `mergeTools` suite (the `:158` `mergeTrailing=true` case expects sealing). 2026-06-30.
+      **human comment:** this paragraph was written by an agent summarizing my short instructions.
+      i think this might have been a misunderstanding - my intent was to _never_ merge single tool calls (e.g. 1 bash, 2 reads) into a single line, but keep merging the early part of a _turn_ into the "worked for <time>" summary.
+- [ ] **Right-side sidebar: flagged files, todos, async jobs (polytoken TUI parity).** The
+      polytoken TUI shows a right-hand sidebar with live session context the daemon already
+      exposes over HTTP but pilot never surfaces. Sources (all in
+      `server/src/polytoken/wire-types.ts`):
+      - **Flagged files** — `SessionStateSnapshot.flags: FlagEntry[]` (`:2354`), each
+        `{path, mode}` where `FlagMode = "included" | "referenced"` (`:1438`). Already carried
+        on every `/state` fetch; pilot just doesn't read it.
+      - **Todos** — `SessionStateSnapshot.todos: TodoSnapshot[]` (`:2364`), each with
+        `{description, dependencies[], …}` (`:2655`), and live `todo_create/update/complete/
+        deleted` + `todo_status_nudge` events (`:2457–2475,2587`).
+      - **Async jobs (subagents etc.)** — `JobStatus` (`:1588`, statuses `reserved/running/…`)
+        surfaced via the `top-level background jobs` field (`:3424`).
+      Also possibly **session diffs** (stretch goal — the user said "leave that as a maybe"):
+      `SourceControlSnapshot` (`:2363`) is on the session snapshot. Needs: read these off the
+      daemon's `/state` (and the live events), project them onto `SessionState` (overwrite-
+      guarded like `facet`/`queued`, `protocol/src/state.ts:235–245`), and a new right-drawer
+      component (mirror the left `Sidebar.svelte` scrim+dialog pattern). Flagged-files + todos
+      are the concrete ask; jobs + diffs are stretch. The `investigated and NOT changed` note
+      on the old `Bulletproof queued-message delivery` item covers the queue plumbing this
+      depends on. 2026-06-30.
+
 
 - [~] **Provider OAuth login** → ~done (owner, 2026-06-22 — "i'll get back to it if there's
       jank"). Sign-in / sign-out for OAuth-capable providers ships in the Settings panel via
@@ -121,6 +157,7 @@ the trivial ones shipped inline this same day.
       is false → `renderContent = content` (raw) → re-parse per token. Mostly fixed by N1
       (fewer, larger deltas → fewer parses). A client-side rAF coalescer feeding `Markdown`
       is a fallback if N1 isn't enough; the deeper fix is upstream in the parser.
+      **needs doublechecking if this changed with the move to polytoken!**
 
 ### 🟡 Correctness risk on spotty wifi — raise now, defer build
 
@@ -188,42 +225,6 @@ the trivial ones shipped inline this same day.
       Re-measure after N1 before revisiting.
 
 ## 🔵 Later
-
-- [ ] **Stop merging subsequent tool calls into "Worked for Ns" (keep the early-turn collapse).**
-      `client/src/lib/transcript-view.ts` `mergeTools` folds runs of "summarizable" tool calls
-      (`isSummarizedTool`, `:100–107`) into a single collapsible `MergedToolsItem` rendered as
-      "Worked for Ns" — today this applies across the whole turn (gated only by
-      `mergeTrailing=false` while a turn streams, `Transcript.svelte:86`). The user finds this
-      hurts readability now that polytoken enforces **≤4 tool calls before each agent text
-      output** — tool groups are already small and self-bounded, so the merge is over-collapsing
-      distinct steps into one opaque blob. Desired: keep the collapse for the early part of a
-      DONE turn (so a long finished turn still summarizes to "Worked 5m23s"), but render
-      post-boundary tool runs as individual cards. Concretely — only seal a run to prose when
-      it's followed by an assistant text bubble AND the turn is complete; unsealed runs (the
-      active/streaming tail, or runs between visible items) already render as a bare flat list,
-      so the change is about not folding the *settled* middle either. Touches `mergeTools`'s
-      `sealed` logic + the `mergeTrailing` call site. Update `transcript-view.test.ts`
-      `mergeTools` suite (the `:158` `mergeTrailing=true` case expects sealing). 2026-06-30.
-- [ ] **Right-side sidebar: flagged files, todos, async jobs (polytoken TUI parity).** The
-      polytoken TUI shows a right-hand sidebar with live session context the daemon already
-      exposes over HTTP but pilot never surfaces. Sources (all in
-      `server/src/polytoken/wire-types.ts`):
-      - **Flagged files** — `SessionStateSnapshot.flags: FlagEntry[]` (`:2354`), each
-        `{path, mode}` where `FlagMode = "included" | "referenced"` (`:1438`). Already carried
-        on every `/state` fetch; pilot just doesn't read it.
-      - **Todos** — `SessionStateSnapshot.todos: TodoSnapshot[]` (`:2364`), each with
-        `{description, dependencies[], …}` (`:2655`), and live `todo_create/update/complete/
-        deleted` + `todo_status_nudge` events (`:2457–2475,2587`).
-      - **Async jobs (subagents etc.)** — `JobStatus` (`:1588`, statuses `reserved/running/…`)
-        surfaced via the `top-level background jobs` field (`:3424`).
-      Also possibly **session diffs** (stretch goal — the user said "leave that as a maybe"):
-      `SourceControlSnapshot` (`:2363`) is on the session snapshot. Needs: read these off the
-      daemon's `/state` (and the live events), project them onto `SessionState` (overwrite-
-      guarded like `facet`/`queued`, `protocol/src/state.ts:235–245`), and a new right-drawer
-      component (mirror the left `Sidebar.svelte` scrim+dialog pattern). Flagged-files + todos
-      are the concrete ask; jobs + diffs are stretch. The `investigated and NOT changed` note
-      on the old `Bulletproof queued-message delivery` item covers the queue plumbing this
-      depends on. 2026-06-30.
 
 - [ ] **gondolin egress containment** (D10) — for the autonomous Mac Mini
       user account; preserves TS-embed via pi-gondolin extension
@@ -302,7 +303,6 @@ the trivial ones shipped inline this same day.
       (`packages/coding-agent/src/core/extensions/loader.ts`, no runtime disable), so a live
       toggle needs per-session load config or a session restart, not a flag.
 
-- [ ] **Right-side session minimap** (nebulous, OP8)
 - [ ] **Bulletproof queued-message delivery position** _(optional; pick up only if
       “jankiness with queued messages” bites)_. The live transcript now places queued
       (steer/follow-up) messages at their real delivery point via a per-session counter
@@ -324,23 +324,6 @@ the trivial ones shipped inline this same day.
       replace, or `appendSystemPrompt` for additive. NOT needed for the pi-docs-pointer
       strip — that's handled globally by the `strip-pi-docs` pi extension
       (`~/.pi/agent/extensions/`); this is the broader "different prompt for this session."
-
-- [ ] **Remove the MCP-cwd workaround once the `pi-mcp-adapter` fix ships** _(temporary;
-      added 2026-06-23)_. Stdio MCP servers (e.g. the playwright browser) were spawned by
-      `pi-mcp-adapter` (≤ 2.10.0) with `cwd = process.cwd()`, which in pilot is the shared
-      host-process dir — so every session's server-written files (screenshots especially)
-      landed in pilot's dir instead of the session's worktree, where the agent looks, and
-      the agent resorted to scanning the filesystem to find them. Stopgap: `warmUp`
-      (`server/src/pi/pi-driver.ts`) generates a per-session copy of the global `mcp.json`
-      with `cwd` injected into each stdio server (`server/src/pi/mcp-cwd-workaround.ts`,
-      `buildSessionMcpConfigOverride`) and passes it to the adapter via its `mcp-config`
-      flag (`extensionFlagValues`). Upstream fix: local branch
-      `feat/default-server-cwd-to-session` in `~/src/pi-mcp-adapter` defaults the stdio
-      spawn cwd to `ctx.cwd` in `McpServerManager`; PR to
-      https://github.com/nicobailon/pi-mcp-adapter not yet opened (open by hand). **When**
-      the fix is released and the installed adapter version includes it: delete
-      `mcp-cwd-workaround.ts`, its import in `pi-driver.ts`, and the `warmUp` call site +
-      `extensionFlagValues` spread, then verify screenshots still land in the worktree.
 
 ## 🧹 Code health & drift (2026-06-22 audit)
 
