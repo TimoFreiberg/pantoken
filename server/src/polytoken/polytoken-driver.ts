@@ -1261,6 +1261,14 @@ export async function createPolytokenDriver(
         });
       });
     },
+
+    setFacet(facet: string, sessionId?: SessionId): void {
+      const ws = target(sessionId);
+      if (!ws) return;
+      void ws.client.setFacet(facet).catch((e) => {
+        console.error("[polytoken] setFacet failed", e);
+      });
+    },
   };
 
   // --- Driver shutdown: tear down all warm daemons on process exit. ---

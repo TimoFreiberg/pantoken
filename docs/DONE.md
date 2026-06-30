@@ -5,6 +5,24 @@ and its resolution note. Latest completions first.
 
 ---
 
+- [x] **polytoken: facet switching has no GUI affordance.**
+      Surfaced 2026-06-29 (second dogfood): the TUI cycles facets with Shift+Tab,
+      but that doesn't map cleanly to a GUI. Pilot needs a hotkey (TBD) and/or a
+      visible UI control to switch facets (e.g. execute ↔ plan). Until this lands,
+      facet switching is TUI-only and inaccessible from the Pilot UI. Decide on a
+      hotkey (Shift+Tab is the TUI convention but may conflict with focus
+      traversal in a web context) and surface the active facet somewhere visible.
+      → Done 2026-06-30: wired `setFacet` end-to-end (mirroring `setModel`): a new
+      `setFacet` ClientMessage (wire.ts) → hub handler → PilotDriver method →
+      mock (emits `snapshot({ facet })`) + polytoken (POSTs `/facet`) impls. The
+      StatusHeader facet badge is now a clickable toggle — always visible (dormant
+      "Plan" button in execute mode, accent-tinted "Plan mode" pill in plan mode).
+      Shift+Tab (the TUI convention) also toggles, guarded to not fire when a form
+      field is focused (preserving browser focus-traversal) and not collide with
+      Ctrl+Shift+Tab (session cycling). The daemon's `facet_switch` SSE → event-map
+      → sessionUpdated round-trip was already handled; this just adds the driver
+      seam + wire message + UI control.
+
 - [x] **polytoken: retry button re-sends the last prompt instead of resuming.**
       Surfaced 2026-06-29 (second dogfood): the "retry" button re-sends the last
       user prompt verbatim. Mid-flow (e.g. after a tool was cancelled/denied) this

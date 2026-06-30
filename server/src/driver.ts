@@ -218,6 +218,9 @@ export interface PilotDriver {
   setModel(provider: string, modelId: string, sessionId?: SessionId): void;
   /** Switch a session's thinking level, emitting a `sessionUpdated`. */
   setThinking(level: string, sessionId?: SessionId): void;
+  /** Switch a session's active facet (e.g. "execute" ↔ "plan"), emitting a
+   *  `sessionUpdated` snapshot. */
+  setFacet(facet: string, sessionId?: SessionId): void;
 
   // --- Global model/provider config (Settings panel). All optional: the mock and
   // polytoken driver implement them; a future bare driver may omit, and the hub guards with

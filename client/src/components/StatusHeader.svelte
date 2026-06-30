@@ -50,12 +50,12 @@
       : s.ambient.title || s.title || "pilot",
   );
 
-  // Facet indicator: show a badge when the active facet is not the default
-  // "execute" (e.g. "plan" → "Plan mode"). Display-only — facet switching is
-  // daemon-side, not a pilot UI action yet.
-  const facet = $derived(
-    s.facet && s.facet !== "execute" ? s.facet : null,
-  );
+  // Facet indicator: a clickable toggle. When the active facet is not the default
+  // "execute" (e.g. "plan" → "Plan mode"), show the colored badge — clicking it
+  // switches back to "execute". When it IS "execute" (or unknown), show a subtle
+  // "Plan" toggle — clicking it switches to "plan". This makes facet switching
+  // discoverable (a visible control) rather than hidden behind a hotkey.
+  const facet = $derived(s.facet ?? null);
 
   // The "where am I" subtitle. The folded snapshot carries no cwd/worktree, so we
   // read the active session's list entry (same lookup the sidebar uses) — its cwd
@@ -131,13 +131,14 @@
         ></span>
       {/if}
       <span class="title">{title}</span>
-      {#if facet}
-        <span
-          class="facet-badge"
-          data-testid="facet-badge"
-          title="Active facet: {facet}"
-        >{facet === "plan" ? "Plan mode" : facet}</span>
-      {/if}
+      <button
+        class="facet-toggle {facet && facet !== 'execute' ? 'facet-badge' : 'facet-dormant'}"
+        data-testid="facet-badge"
+        title={facet && facet !== 'execute'
+          ? `Active facet: ${facet} — click to switch to execute (Shift+Tab)`
+          : 'Switch to plan mode (Shift+Tab)'}
+        onclick={() => store.setFacet(facet === 'plan' ? 'execute' : 'plan')}
+      >{facet && facet !== 'execute' ? (facet === 'plan' ? 'Plan mode' : facet) : 'Plan'}</button>
     </span>
     <div class="sub">
       <span class="path" title={subtitleTitle}>{subtitle}</span>
@@ -229,20 +230,37 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  /* Facet indicator pill — accent-tinted, uppercase, small. Appears only when
-     the active facet is not the default "execute" (e.g. plan mode). */
-  .facet-badge {
+  /* Facet indicator — a clickable toggle. Two states:
+     .facet-badge (active non-execute, e.g. plan mode): accent-tinted pill.
+     .facet-dormant (execute / unknown): subtle, low-emphasis — clickable to
+     switch to plan mode. Both are buttons (no select/outline on click). */
+  .facet-toggle {
     flex-shrink: 0;
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: var(--accent);
-    background: var(--accent-soft);
-    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
     border-radius: 999px;
     padding: 1px 7px;
     line-height: 1.6;
+    cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .facet-toggle.facet-badge {
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  .facet-toggle.facet-dormant {
+    color: var(--text-dim);
+    background: transparent;
+  }
+  .facet-toggle:hover {
+    border-color: var(--border-strong);
+  }
+  .facet-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
   }
   /* A small rotating ring beside the title while the focused session warms up. */
   .init-spinner {

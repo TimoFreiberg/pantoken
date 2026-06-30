@@ -66,18 +66,28 @@ test("facet badge shows 'Plan mode' when the active facet is plan", async ({
   page,
 }) => {
   await drive(page, "planfacet");
-  // The badge appears while the snapshot carries facet:"plan" (AC.4).
+  // The badge appears as the accent-tinted "Plan mode" pill while the snapshot
+  // carries facet:"plan" (AC.4).
   const badge = page.getByTestId("facet-badge");
   await expect(badge).toBeVisible();
   await expect(badge).toHaveText("Plan mode");
-  await expect(badge).toHaveAttribute("title", "Active facet: plan");
-  // After the dwell, the script reverts to facet:"execute" and the badge disappears.
-  await expect(badge).toBeHidden();
+  await expect(badge).toHaveAttribute(
+    "title",
+    "Active facet: plan — click to switch to execute (Shift+Tab)",
+  );
+  // After the dwell, the script reverts to facet:"execute" and the badge returns
+  // to its dormant "Plan" toggle state (no longer hidden — it's always visible now).
+  await expect(badge).toHaveText("Plan");
 });
 
-test("no facet badge in the default (execute) state", async ({ page }) => {
-  // The greeting fixture's default state has no facet (or execute) — no badge.
-  await expect(page.getByTestId("facet-badge")).toBeHidden();
+test("facet toggle shows dormant 'Plan' in the default (execute) state", async ({
+  page,
+}) => {
+  // The greeting fixture's default state has no facet (or execute) — the toggle
+  // renders as a subtle "Plan" button (always visible now, not hidden).
+  const badge = page.getByTestId("facet-badge");
+  await expect(badge).toBeVisible();
+  await expect(badge).toHaveText("Plan");
 });
 
 test("a timed-out plan card auto-dismisses to the cancel decision", async ({

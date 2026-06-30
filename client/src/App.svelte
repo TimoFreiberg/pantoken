@@ -151,6 +151,23 @@
       store.cycleSession(e.shiftKey ? -1 : 1);
       return;
     }
+    // Shift+Tab cycles facets (the TUI convention) — only when no form field is
+    // focused (so Shift+Tab still reverse-tabs through inputs). Must run before
+    // the modifier early-return below (Shift+Tab has no Cmd/Ctrl). This is the
+    // one non-modifier hotkey in onGlobalKeydown.
+    if (e.key === "Tab" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const ae = document.activeElement;
+      const inField =
+        ae instanceof HTMLInputElement ||
+        ae instanceof HTMLTextAreaElement ||
+        (ae instanceof HTMLElement && ae.isContentEditable);
+      if (!inField) {
+        e.preventDefault();
+        const next = store.session.facet === "plan" ? "execute" : "plan";
+        store.setFacet(next);
+        return;
+      }
+    }
     const mod = e.metaKey || e.ctrlKey;
     if (!mod || e.altKey || e.shiftKey) return;
     switch (e.key) {
