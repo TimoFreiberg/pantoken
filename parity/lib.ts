@@ -1,0 +1,370 @@
+// parity/lib.ts — shared core for the GUI ⇄ TUI parity harness.
+//
+// See docs/PARITY-TESTING.md for the architecture and docs/PLAN-parity-testing.md for
+// the design + the adversarial-review trail. The load-bearing facts this module encodes:
+//
+//  - polytoken writes THREE XDG roots: sessions+logs+tui_state under $XDG_DATA_HOME,
+//    config+auth under $XDG_CONFIG_HOME, provider-catalog cache under $XDG_CACHE_HOME.
+//    `--sessions-dir` redirects ONLY sessions/, so isolation is via the XDG env vars,
+//    exported into every harness-spawned process (pilot, tmux panes, daemons).
+//  - The whole footprint lives under one PARITY_ROOT so teardown is one rm -rf and it
+//    provably can't touch prod state (the live `~/.local/share/polytoken/sessions`).
+//  - SAFETY: a bare `polytoken sessions` (no --sessions-dir / no isolated XDG_DATA_HOME)
+//    lists PROD daemons — terminating those would kill the user's real sessions. Every
+//    call here goes through `polytokenSessions()`, which sets BOTH the isolated env and
+//    the --sessions-dir flag. Never shell out to `polytoken sessions` directly.
+
+import { createServer, type AddressInfo } from "node:net";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+export const POLYTOKEN_BIN = process.env.PILOT_POLYTOKEN_BIN ?? "polytoken";
+export const TMUX_BIN = process.env.PILOT_PARITY_TMUX_BIN ?? "tmux";
+
+/** Marker prefix for deterministic parity prompts (`Reply with exactly: PARITY-OK-<n>`),
+ *  so an assert needle survives a non-deterministic model. */
+export const MARKER = "PARITY-OK";
+
+/** The single isolation root. Everything the harness writes lives under here, so the
+ *  whole harness is one `rm -rf` from gone. Override with $PILOT_PARITY_ROOT. */
+export function parityRoot(): string {
+  const explicit = process.env.PILOT_PARITY_ROOT?.trim();
+  if (explicit) return explicit;
+  const stateHome =
+    process.env.XDG_STATE_HOME?.trim() || join(homedir(), ".local", "state");
+  return join(stateHome, "pilot-parity");
+}
+
+export interface Paths {
+  root: string;
+  /** The test project — the session cwd shared by both surfaces. */
+  project: string;
+  /** → XDG_DATA_HOME: polytoken sessions/, logs/, tui_state.json. */
+  xdgData: string;
+  /** → XDG_CACHE_HOME: provider-catalogs (regenerable). */
+  xdgCache: string;
+  /** → XDG_CONFIG_HOME, ONLY when isolating config ($PILOT_PARITY_CONFIG_DIR set);
+   *  otherwise null = share the real ~/.config/polytoken so models+auth work. */
+  xdgConfig: string | null;
+  /** The polytoken sessions registry (under xdgData). */
+  sessionsDir: string;
+  /** The global config dir a spawned daemon resolves to (real or isolated). Used for
+   *  the resume-daemon oracle's --global-config-dir. */
+  globalConfigDir: string;
+  /** pilot's PILOT_DATA_DIR (push keys, archive index) — under the root for clean teardown. */
+  pilotData: string;
+  /** run/ — per-launch tracking (pid, ports, GUI_URL). */
+  runDir: string;
+  envFile: string;
+  /** Dedicated tmux server socket name (`tmux -L <name>`) — never the user's default. */
+  tmuxSocket: string;
+}
+
+/** djb2 — a tiny stable hash so two PARITY_ROOTs get two tmux sockets without crypto. */
+function stableHash(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+
+export function paths(root = parityRoot()): Paths {
+  const xdgData = join(root, "xdg-data");
+  const isoConfig = process.env.PILOT_PARITY_CONFIG_DIR?.trim() || null;
+  // The global config dir polytoken resolves to: $XDG_CONFIG_HOME/polytoken, mirroring
+  // daemon-client.ts defaultGlobalConfigDir(). When sharing config, that's the real
+  // ~/.config/polytoken (or $XDG_CONFIG_HOME if the operator already set one).
+  const configHome = isoConfig
+    ? isoConfig
+    : process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config");
+  return {
+    root,
+    project: join(root, "project"),
+    xdgData,
+    xdgCache: join(root, "xdg-cache"),
+    xdgConfig: isoConfig,
+    sessionsDir: join(xdgData, "polytoken", "sessions"),
+    globalConfigDir: join(configHome, "polytoken"),
+    pilotData: join(root, "pilot-data"),
+    runDir: join(root, "run"),
+    envFile: join(root, "run", "env.json"),
+    tmuxSocket: `pilot-parity-${stableHash(root)}`,
+  };
+}
+
+/** The env every harness-spawned process must carry so its polytoken footprint lands
+ *  under PARITY_ROOT. Isolates the WRITABLE/stateful XDG roots (data, cache) plus config
+ *  iff isolating it; config is shared by default so models+auth work. */
+export function isolationEnv(p: Paths = paths()): Record<string, string> {
+  const env: Record<string, string> = {
+    XDG_DATA_HOME: p.xdgData,
+    XDG_CACHE_HOME: p.xdgCache,
+  };
+  if (p.xdgConfig) env.XDG_CONFIG_HOME = p.xdgConfig;
+  return env;
+}
+
+/** Create every dir the harness writes to (idempotent). */
+export function ensureDirs(p: Paths = paths()): void {
+  for (const d of [
+    p.root,
+    p.xdgData,
+    p.xdgCache,
+    p.sessionsDir,
+    p.pilotData,
+    p.runDir,
+    ...(p.xdgConfig ? [p.xdgConfig] : []),
+  ]) {
+    mkdirSync(d, { recursive: true });
+  }
+}
+
+/** Ask the OS for an unused TCP port (bind :0, read it back, release). */
+export function freePort(): Promise<number> {
+  return new Promise((res, rej) => {
+    const srv = createServer();
+    srv.on("error", rej);
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address() as AddressInfo;
+      srv.close(() => res(port));
+    });
+  });
+}
+
+// --- run-env tracking (what `up` launched; what `down` tears down) ---
+
+export interface RunEnv {
+  pilotPid?: number;
+  backendPort?: number;
+  vitePort?: number;
+  guiUrl?: string;
+  startedAt?: string;
+}
+
+export function writeRunEnv(env: RunEnv, p: Paths = paths()): void {
+  ensureDirs(p);
+  writeFileSync(p.envFile, JSON.stringify(env, null, 2));
+}
+
+export function readRunEnv(p: Paths = paths()): RunEnv | null {
+  if (!existsSync(p.envFile)) return null;
+  try {
+    return JSON.parse(readFileSync(p.envFile, "utf8")) as RunEnv;
+  } catch {
+    return null;
+  }
+}
+
+// --- polytoken session registry (always isolated) ---
+
+export interface LiveSession {
+  sessionId: string;
+  port: number;
+  pid: number;
+  startedAt: string;
+  projectPath: string;
+}
+
+/** Parse the `polytoken sessions` table: a header row then
+ *  `SESSION_ID  PORT  PID  STARTED_AT  PROJECT_PATH` rows. */
+export function parseSessionsTable(stdout: string): LiveSession[] {
+  const out: LiveSession[] = [];
+  const lines = stdout.split("\n");
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith("SESSION_ID")) continue;
+    // Split into at most 5 columns; the 5th (project path) may itself contain spaces.
+    const m = line.match(/^(\S+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/);
+    if (!m) continue;
+    out.push({
+      sessionId: m[1]!,
+      port: Number(m[2]),
+      pid: Number(m[3]),
+      startedAt: m[4]!,
+      projectPath: m[5]!.trim(),
+    });
+  }
+  return out;
+}
+
+/** SAFETY-CRITICAL: the ONLY way to list polytoken sessions in this harness. Always sets
+ *  the isolated XDG_DATA_HOME *and* --sessions-dir, so it can never see — and a caller can
+ *  never `/terminate` — a prod daemon. Do not call `polytoken sessions` any other way. */
+export async function polytokenSessions(
+  p: Paths = paths(),
+): Promise<LiveSession[]> {
+  const proc = Bun.spawn({
+    cmd: [POLYTOKEN_BIN, "sessions", "--sessions-dir", p.sessionsDir],
+    env: { ...process.env, ...isolationEnv(p) },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  await proc.exited;
+  const stdout = await new Response(proc.stdout).text();
+  return parseSessionsTable(stdout);
+}
+
+/** Read a session's on-disk session.json (for project_path / created_at). null if absent. */
+export function readSessionJson(
+  sessionId: string,
+  p: Paths = paths(),
+): { project_path?: string; created_at?: string } | null {
+  const file = join(p.sessionsDir, sessionId, "session.json");
+  if (!existsSync(file)) return null;
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+// --- the daemon oracle (ground truth: GET /history) ---
+
+interface StartupJson {
+  state?: string;
+  pid?: number;
+  port?: number;
+  message?: string;
+}
+
+function readStartupJson(sessionId: string, p: Paths): StartupJson | null {
+  const file = join(p.sessionsDir, sessionId, "startup.json");
+  if (!existsSync(file)) return null;
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as StartupJson;
+  } catch {
+    return null;
+  }
+}
+
+/** Fetch a daemon's full history snapshot (a big-limit GET /history). */
+export async function daemonHistory(port: number): Promise<unknown> {
+  const res = await fetch(
+    `http://127.0.0.1:${port}/history?offset=0&limit=100000`,
+  );
+  if (!res.ok) throw new Error(`GET /history → ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Run `fn(port)` against a daemon serving `sessionId`'s history, then clean up.
+ *
+ * If a daemon is already LIVE for the session (e.g. pilot has it warm, or the TUI is
+ * attached), use its running port read-only — do NOT spawn a second daemon (that
+ * violates one-daemon-per-session and aliases the registry; it is NOT merely a lease
+ * 409). Otherwise the session is cold: spawn a throwaway `daemon --resume`, wait for its
+ * startup.json, run fn, then /terminate it.
+ */
+export async function withDaemonHistory<T>(
+  sessionId: string,
+  fn: (port: number) => Promise<T>,
+  p: Paths = paths(),
+): Promise<T> {
+  const live = (await polytokenSessions(p)).find(
+    (s) => s.sessionId === sessionId,
+  );
+  if (live) return fn(live.port);
+
+  // Cold: spawn a throwaway resume daemon. Needs cwd + sessions-dir + global-config-dir.
+  const meta = readSessionJson(sessionId, p);
+  const cwd = meta?.project_path || p.project;
+  const proc = Bun.spawn({
+    cmd: [
+      POLYTOKEN_BIN,
+      "daemon",
+      "--project-dir",
+      cwd,
+      "--session-id",
+      sessionId,
+      "--resume",
+      "--sessions-dir",
+      p.sessionsDir,
+      "--global-config-dir",
+      p.globalConfigDir,
+    ],
+    env: { ...process.env, ...isolationEnv(p) },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  let port: number | null = null;
+  try {
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      const su = readStartupJson(sessionId, p);
+      if (
+        su?.state === "ready" &&
+        su.pid === proc.pid &&
+        typeof su.port === "number"
+      ) {
+        port = su.port;
+        break;
+      }
+      if (su?.state === "failed" && su.pid === proc.pid) {
+        throw new Error(`resume daemon failed: ${su.message ?? "no message"}`);
+      }
+      await Bun.sleep(100);
+    }
+    if (port == null) {
+      const err = await new Response(proc.stderr).text().catch(() => "");
+      throw new Error(
+        `resume daemon for ${sessionId} not ready in 20s${err ? `\nstderr: ${err.slice(0, 400)}` : ""}`,
+      );
+    }
+    return await fn(port);
+  } finally {
+    // Graceful terminate, hard-kill fallback.
+    await fetch(`http://127.0.0.1:${port ?? 0}/terminate`, {
+      method: "POST",
+    }).catch(() => {});
+    try {
+      proc.kill();
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+/** Does the session's daemon history contain `needle`? Robust to item-shape drift —
+ *  stringifies the whole snapshot and substring-matches. */
+export async function daemonHistoryContains(
+  sessionId: string,
+  needle: string,
+  p: Paths = paths(),
+): Promise<boolean> {
+  return withDaemonHistory(
+    sessionId,
+    async (port) => JSON.stringify(await daemonHistory(port)).includes(needle),
+    p,
+  );
+}
+
+/** Best-effort readable text projection of a session's history (for `parity oracle daemon`).
+ *  Collects string leaves under common text keys; falls back to the raw JSON. */
+export async function daemonHistoryText(
+  sessionId: string,
+  p: Paths = paths(),
+): Promise<string> {
+  return withDaemonHistory(
+    sessionId,
+    async (port) => {
+      const snap = (await daemonHistory(port)) as { items?: unknown[] };
+      const texts: string[] = [];
+      const walk = (v: unknown): void => {
+        if (typeof v === "string") {
+          if (v.trim()) texts.push(v);
+        } else if (Array.isArray(v)) {
+          for (const x of v) walk(x);
+        } else if (v && typeof v === "object") {
+          for (const [k, x] of Object.entries(v)) {
+            // Skip obviously non-display keys to keep the projection readable.
+            if (k === "signature" || k === "id" || k.endsWith("_id")) continue;
+            walk(x);
+          }
+        }
+      };
+      walk(snap.items ?? snap);
+      return texts.join("\n");
+    },
+    p,
+  );
+}
