@@ -20,6 +20,48 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       extensions plan, but it's noisy in the suite and should be diagnosed separately.
 - [ ] cmd+= / cmd+- (font size changes) aren't applied to the question widget, they should
 - [ ] hotkey for hiding/showing the question widget?
+- [ ] **Facet badge: show the current facet value, and reclaim Shift+Tab as a focus move.**
+      `StatusHeader.svelte:141` renders the badge as the literal strings `"Plan"` (when
+      execute/unknown) or `"Plan mode"` (when plan) — it never shows "Execute", so the control
+      reads as a static label, not state. Show the actual current facet ("Execute" / "Plan").
+      Separately, the facet-cycle hotkey is **Shift+Tab** (`App.svelte:155–171`, gated on no
+      form field focused) — but Shift+Tab is the browser's reverse-focus traversal and should
+      stay that way in a GUI. Replacement candidates (must fit macOS, Linux, and Windows):
+      `⌥/Alt+F` is clean on macOS but `Alt+F` opens the File menu on Win/Linux; `⌘/Ctrl+Shift+F`
+      is cross-platform and free in the installed PWA, but clashes with the near-universal
+      "Find in Files" muscle memory (VS Code et al.). Pick one and handle the Shift-modifier
+      special-case — the global keydown early-returns on `e.shiftKey` at `App.svelte:173`, so
+      any Shift combo must be matched *before* that line, like Ctrl+Tab already is. 2026-06-30.
+- [ ] **Show + edit the agent's permission level in the UI.** The polytoken daemon exposes
+      the runtime permission monitor — `GET/POST /permission-monitor`
+      (`server/src/polytoken/wire-types.ts:389`, `:1996–2021`), with `PermissionMonitorMode`
+      `standard` | `bypass` | `autonomous` (the autonomous variant carries a classifier model,
+      rules, and `max_consecutive_denials`), and emits a `permission_monitor_switch` event
+      (`from_monitor`→`to_monitor`, `wire-types.ts:1078–1082`) when it changes. None of this
+      reaches pilot today. Needs: a `PilotDriver` seam to read/switch the monitor, the hub to
+      relay state + switch event, `foldEvent` to land it on `SessionState` (overwrite-guarded
+      like `facet`), and a UI control (beside the facet badge in `StatusHeader.svelte` or in
+      Settings) to display the current mode and switch it. Mirror the `setFacet` wire shape
+      (`protocol/src/wire.ts:346`) for the change request. 2026-06-30.
+- [ ] **Drop the steer/follow-up toggle + investigate steer behavior (BUG).** The
+      composer exposes a `steer` ↔ `follow-up` SegmentedControl
+      (`client/src/components/Composer.svelte:30,37–48`) whose chosen `deliverAs` is passed
+      into `store.sendPrompt` → `PilotDriver.prompt(text, deliverAs, …)`. But polytoken's
+      daemon has **no steer/follow-up distinction**: the driver receives it as `_deliverAs`
+      (underscore-prefixed, unused — `server/src/polytoken/polytoken-driver.ts:686`) and
+      ALWAYS calls `POST /prompt` (`:707`); the queue endpoint `POST /turn/input` takes only
+      `{content}` ("no steer/followUp discriminator — that distinction is pilot-side UX only",
+      `server/src/polytoken/daemon-client.ts:699–700`). Every queued message is labelled
+      `mode: "steer"` regardless of what the user picked (`event-map.ts:318`,
+      `polytoken-driver.ts:373` "daemon doesn't distinguish steer/followUp"). So the toggle is
+      cosmetic noise today — remove the SegmentedControl + `deliverAs` state from the composer
+      (keep the Alt+Enter one-shot-queue hint if it's still meaningful). BUT: the user reports
+      steer messages are currently buggy and wants investigation — likely the toggle's
+      no-op-ness is masking a real mid-turn-queueing bug (the driver routes mid-turn sends to
+      `/prompt` instead of `/turn/input`, per `polytoken-driver.ts:705–707`). Investigate the
+      actual steer path end-to-end before deleting the toggle; confirm whether mid-turn sends
+      even reach the queue or wrongly start a new turn. Also check the "press Esc after send
+      submits the next message" behavior the user mentioned. 2026-06-30.
 
 ## 🟢 Polish / fast-follow
 
@@ -146,6 +188,42 @@ the trivial ones shipped inline this same day.
       Re-measure after N1 before revisiting.
 
 ## 🔵 Later
+
+- [ ] **Stop merging subsequent tool calls into "Worked for Ns" (keep the early-turn collapse).**
+      `client/src/lib/transcript-view.ts` `mergeTools` folds runs of "summarizable" tool calls
+      (`isSummarizedTool`, `:100–107`) into a single collapsible `MergedToolsItem` rendered as
+      "Worked for Ns" — today this applies across the whole turn (gated only by
+      `mergeTrailing=false` while a turn streams, `Transcript.svelte:86`). The user finds this
+      hurts readability now that polytoken enforces **≤4 tool calls before each agent text
+      output** — tool groups are already small and self-bounded, so the merge is over-collapsing
+      distinct steps into one opaque blob. Desired: keep the collapse for the early part of a
+      DONE turn (so a long finished turn still summarizes to "Worked 5m23s"), but render
+      post-boundary tool runs as individual cards. Concretely — only seal a run to prose when
+      it's followed by an assistant text bubble AND the turn is complete; unsealed runs (the
+      active/streaming tail, or runs between visible items) already render as a bare flat list,
+      so the change is about not folding the *settled* middle either. Touches `mergeTools`'s
+      `sealed` logic + the `mergeTrailing` call site. Update `transcript-view.test.ts`
+      `mergeTools` suite (the `:158` `mergeTrailing=true` case expects sealing). 2026-06-30.
+- [ ] **Right-side sidebar: flagged files, todos, async jobs (polytoken TUI parity).** The
+      polytoken TUI shows a right-hand sidebar with live session context the daemon already
+      exposes over HTTP but pilot never surfaces. Sources (all in
+      `server/src/polytoken/wire-types.ts`):
+      - **Flagged files** — `SessionStateSnapshot.flags: FlagEntry[]` (`:2354`), each
+        `{path, mode}` where `FlagMode = "included" | "referenced"` (`:1438`). Already carried
+        on every `/state` fetch; pilot just doesn't read it.
+      - **Todos** — `SessionStateSnapshot.todos: TodoSnapshot[]` (`:2364`), each with
+        `{description, dependencies[], …}` (`:2655`), and live `todo_create/update/complete/
+        deleted` + `todo_status_nudge` events (`:2457–2475,2587`).
+      - **Async jobs (subagents etc.)** — `JobStatus` (`:1588`, statuses `reserved/running/…`)
+        surfaced via the `top-level background jobs` field (`:3424`).
+      Also possibly **session diffs** (stretch goal — the user said "leave that as a maybe"):
+      `SourceControlSnapshot` (`:2363`) is on the session snapshot. Needs: read these off the
+      daemon's `/state` (and the live events), project them onto `SessionState` (overwrite-
+      guarded like `facet`/`queued`, `protocol/src/state.ts:235–245`), and a new right-drawer
+      component (mirror the left `Sidebar.svelte` scrim+dialog pattern). Flagged-files + todos
+      are the concrete ask; jobs + diffs are stretch. The `investigated and NOT changed` note
+      on the old `Bulletproof queued-message delivery` item covers the queue plumbing this
+      depends on. 2026-06-30.
 
 - [ ] **gondolin egress containment** (D10) — for the autonomous Mac Mini
       user account; preserves TS-embed via pi-gondolin extension
