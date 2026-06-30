@@ -5,6 +5,38 @@ and its resolution note. Latest completions first.
 
 ---
 
+- [x] **cmd+= / cmd+- (font size changes) aren't applied to the question widget, they should**
+      → Done 2026-06-30: the Q&A question widget (`QnaInline` → `QnaForm`) renders outside
+      the Transcript's scaled `.col` and used hardcoded px font sizes, so `--font-scale`
+      never reached it. Added a single scaled base `font-size: calc(15px * var(--font-scale,
+      1))` on `.qna-inline` (mirroring the Transcript's `.col` pattern) and converted
+      QnaForm's 8 text-bearing px rules to `em` relative to that base (`.q`, `.opt`,
+      `.field` → 1em; `h2` → 1.0667em; `.ctx` → 0.8667em; `.progress`/`.lbl-desc`/`.check`
+      → 0.8em). Controls stay unscaled per the "zoom what you read, not the controls"
+      convention (`.min` minimize, `.dot` marker, `.actions .btn` — Button.svelte keeps its
+      own `lg`=15px). At scale=1 every value resolves to the exact original px. New e2e
+      test verifies `.q` ≈ 15px at default, grows with the Settings stepper, and the Submit
+      button stays unchanged. Commit `zvurnour`.
+
+- [x] **e2e: dir-picker `.row.up` "go up" button times out (pre-existing flake).** Surfaced
+      during the Chunk 0.5 Settings-nav verification (2026-06-26): 5 `e2e/sessions.e2e.ts`
+      worktree/dir-picker tests (`started in a directory chosen via the browser`, `worktree
+      chip creates…`, `worktree session shows a path indicator`, `archiving a worktree session
+      reaps…`, `archiving a dirty worktree session…`) all fail with a 30s timeout waiting for
+      `dir-picker`'s `.row.up`. VERIFIED to fail at the clean base commit `b3c98cac` (no
+      Settings changes) — NOT a regression from the nav refactor. Likely environmental
+      (the `chooseProjectDir` helper's `.row.up` click never resolves). Not blocking the
+      extensions plan, but it's noisy in the suite and should be diagnosed separately.
+      → Done 2026-06-30: already fixed by commit `58b09695` ("Fix dir-picker nav race in
+      worktree e2e helper", 2026-06-26 — same day the flake was filed, an ancestor of HEAD).
+      That commit added a readiness wait to `chooseProjectDir` —
+      `await expect(picker.locator(".bc")).toContainText("src")` before pressing Backspace —
+      closing the race where `up()` read `showing.parent` before the opening `queryDir` reply
+      arrived (no-op → test hangs). The TODO description was stale in two ways: it referenced
+      a `.row.up` *click* the helper never performs (it presses Backspace on the filter
+      input), and no `.row.up` class exists in `DirPicker.svelte`. Verified green: ran the 5
+      named tests 3× in a row, all pass (5/5 each run, ~4.4s). No flake reproduces.
+
 - [x] **polytoken: plan-mode plan display overlay.**
       Surfaced 2026-06-29 (second dogfood): when running in the `plan` facet, there
       should be a plan display overlay in the Pilot UI — a persistent, visible
