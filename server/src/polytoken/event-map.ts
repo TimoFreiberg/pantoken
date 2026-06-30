@@ -24,6 +24,7 @@ import type {
   SessionSnapshot,
   SessionStatus,
   SessionUsage,
+  type PermissionMonitorMode,
   WorkspaceRef,
 } from "@pilot/protocol";
 import { defaultModelRef } from "./models.js";
@@ -149,6 +150,12 @@ export type DaemonEffect =
    *  (queued/dequeued/discarded) don't carry the FULL queue, only one item +
    *  revision; pilot's queueUpdated REPLACES the full queue, so we must fetch. */
   | { type: "refetchQueue" }
+  /** Update the cached permission-monitor mode (the permission_monitor_switch
+   *  event carries the authoritative new mode; the cache must track it so
+   *  subsequent ctx.snapshot() calls reflect it). Emitted alongside a
+   *  sessionUpdated snapshot that carries the new mode directly (the snapshot is
+   *  built from the event payload, not the still-stale cache). */
+  | { type: "setMonitorMode"; mode: PermissionMonitorMode }
   /** Register a pending interrogative in the driver's pending map (so respondUi
    *  can build the reverse InterrogativeResponse from a later HostUiResponse) AND
    *  emit the matching pilot hostUiRequest card. The effect carries the
@@ -210,6 +217,7 @@ export function snapshotFromState(
   workspace: WorkspaceRef,
   status: SessionStatus,
   now: string,
+  monitorMode?: PermissionMonitorMode,
 ): SessionSnapshot {
   const title = state?.session_title ?? ref.sessionId;
   // active_model is stored as the FULL `provider/id` registry name
@@ -234,6 +242,7 @@ export function snapshotFromState(
     config,
     usage: usageFromState(state),
     facet: state?.active_facet ?? undefined,
+    permissionMonitor: monitorMode,
     activePlan: state?.active_plan ?? undefined,
   };
 }
@@ -1038,25 +1047,23 @@ export function mapDaemonEvent(
     }
 
     case "permission_monitor_switch": {
-      // The permission MODE changed (standard/bypass/autonomous). Surface it as
-      // a notify so the operator sees the daemon's mode flipped (e.g. an
-      // autonomous classifier took over approvals). The mode SWITCHER UI (the
-      // POST /permission-monitor control) is a Chunk 5 Settings concern; this is
-      // just the ambient "the daemon's mode changed" signal.
-      const fromMode = ev.from_monitor.type;
+      // The permission MODE changed (standard/bypass/autonomous) — daemon-side
+      // (e.g. an autonomous classifier took over approvals) or echoing a
+      // user-initiated POST /permission-monitor. Update the cached mode + emit a
+      // sessionUpdated snapshot carrying the new mode so the composer-toolbar
+      // badge reflects it. (Replaces the old notify toast — the persistent badge
+      // is strictly better than a transient toast; the switcher UI has landed.)
       const toMode = ev.to_monitor.type;
-      return events([
-        {
-          ...meta,
-          type: "hostUiRequest",
-          request: {
-            kind: "notify",
-            requestId: `perm-mode-${meta.timestamp}`,
-            message: `Permission mode: ${fromMode} → ${toMode}`,
-            level: "info",
+      return events(
+        [
+          {
+            ...meta,
+            type: "sessionUpdated",
+            snapshot: { ...ctx.snapshot(ctx.liveStatus()), permissionMonitor: toMode },
           },
-        },
-      ]);
+        ],
+        [{ type: "setMonitorMode", mode: toMode }],
+      );
     }
 
     // ===== v1-ignored variants (return empty — the stream stays live) =====

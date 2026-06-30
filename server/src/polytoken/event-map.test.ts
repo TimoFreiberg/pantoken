@@ -735,7 +735,7 @@ describe("mapDaemonEvent", () => {
 
   // ===== Host UI + permissions (Chunk 3) =====
 
-  test("permission_monitor_switch -> notify (mode change)", () => {
+  test("permission_monitor_switch -> sessionUpdated carries the new mode + setMonitorMode effect", () => {
     const out = fold({
       type: "permission_monitor_switch",
       from_monitor: { type: "standard" },
@@ -743,14 +743,10 @@ describe("mapDaemonEvent", () => {
     });
     expect(out.events).toHaveLength(1);
     expect(out.events[0]).toMatchObject({
-      type: "hostUiRequest",
-      request: {
-        kind: "notify",
-        message: "Permission mode: standard → bypass",
-        level: "info",
-      },
+      type: "sessionUpdated",
+      snapshot: { permissionMonitor: "bypass" },
     });
-    expect(out.effects).toEqual([]);
+    expect(out.effects).toEqual([{ type: "setMonitorMode", mode: "bypass" }]);
   });
 
   test("interrogative (confirmation) -> confirm card + registerInterrogative", () => {

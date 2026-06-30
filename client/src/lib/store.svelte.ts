@@ -21,6 +21,7 @@ import {
   PILOT_OWNED_EXTENSION_NAMES,
   isPilotOwnedExtension,
   type ProviderInfo,
+  type PermissionMonitorMode,
   type ServerMessage,
   type SessionAttention,
   type SessionConfig,
@@ -2018,6 +2019,12 @@ class PilotStore {
    *  property of an active session, not a new-session draft setting. */
   setFacet(facet: string): void {
     send({ type: "setFacet", facet });
+  }
+
+  /** Switch the active permission-monitor mode (standard/bypass/autonomous).
+   *  Mid-session only — mirrors setFacet. */
+  setPermissionMonitor(mode: PermissionMonitorMode): void {
+    send({ type: "setPermissionMonitor", mode });
   }
 
   /** Models shown in the header picker: filtered to favorites when any are set, but the

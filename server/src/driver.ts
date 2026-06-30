@@ -15,6 +15,7 @@ import type {
   OAuthDeviceInfo,
   OAuthLoginPrompt,
   ProviderInfo,
+  PermissionMonitorMode,
   SessionDriverEvent,
   SessionId,
   SessionListEntry,
@@ -221,6 +222,12 @@ export interface PilotDriver {
   /** Switch a session's active facet (e.g. "execute" ↔ "plan"), emitting a
    *  `sessionUpdated` snapshot. */
   setFacet(facet: string, sessionId?: SessionId): void;
+  /** Switch the active permission-monitor mode, emitting a `sessionUpdated`
+   *  snapshot. Mirrors `setFacet` (per-session, both drivers implement it). */
+  setPermissionMonitor(
+    mode: PermissionMonitorMode,
+    sessionId?: SessionId,
+  ): void;
 
   // --- Global model/provider config (Settings panel). All optional: the mock and
   // polytoken driver implement them; a future bare driver may omit, and the hub guards with

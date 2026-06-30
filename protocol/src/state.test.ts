@@ -516,6 +516,59 @@ describe("foldEvent", () => {
     expect(s.facet).toBe("plan");
   });
 
+  test("snapshot.permissionMonitor propagates to state.permissionMonitor (the badge data path)", () => {
+    // Same overwrite-guarded semantics as facet: a snapshot that carries
+    // permissionMonitor overwrites; one that omits it must not blank a known mode.
+    const s = foldAll([
+      base({
+        type: "sessionUpdated",
+        snapshot: {
+          ref,
+          workspace: { workspaceId: "w", path: "/p" },
+          title: "t",
+          status: "idle",
+          updatedAt: "t",
+          permissionMonitor: "bypass",
+        },
+      }),
+    ]);
+    expect(s.permissionMonitor).toBe("bypass");
+  });
+
+  test("a snapshot without permissionMonitor leaves an existing state.permissionMonitor intact", () => {
+    const s = initialSessionState();
+    foldEvent(
+      s,
+      base({
+        type: "sessionUpdated",
+        snapshot: {
+          ref,
+          workspace: { workspaceId: "w", path: "/p" },
+          title: "t",
+          status: "idle",
+          updatedAt: "t1",
+          permissionMonitor: "autonomous",
+        },
+      }),
+    );
+    expect(s.permissionMonitor).toBe("autonomous");
+    // A later snapshot that omits permissionMonitor must not erase the known value.
+    foldEvent(
+      s,
+      base({
+        type: "sessionUpdated",
+        snapshot: {
+          ref,
+          workspace: { workspaceId: "w", path: "/p" },
+          title: "t",
+          status: "idle",
+          updatedAt: "t2",
+        },
+      }),
+    );
+    expect(s.permissionMonitor).toBe("autonomous");
+  });
+
   test("snapshot.activePlan propagates to state.activePlan (the overlay data path)", () => {
     const planText = "# Plan\n- Step 1\n- Step 2";
     const s = foldAll([

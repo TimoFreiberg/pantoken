@@ -17,6 +17,7 @@ import {
   type HostUiResponse,
   type ModelDefaults,
   type ModelOption,
+  type PermissionMonitorMode,
   type ProviderInfo,
   type QnaAnswer,
   type QnaQuestion,
@@ -923,6 +924,15 @@ export class MockDriver implements PilotDriver {
       timestamp: String(Date.now()),
       type: "sessionUpdated",
       snapshot: snapshot({ facet }),
+    });
+  }
+
+  setPermissionMonitor(mode: PermissionMonitorMode): void {
+    this.emit({
+      sessionRef: SESSION_REF,
+      timestamp: String(Date.now()),
+      type: "sessionUpdated",
+      snapshot: snapshot({ permissionMonitor: mode }),
     });
   }
 
