@@ -2008,6 +2008,11 @@ class PilotStore {
     }
     send({ type: "setThinking", level });
   }
+  /** Switch the active facet (execute ↔ plan). Mid-session only — the facet is a
+   *  property of an active session, not a new-session draft setting. */
+  setFacet(facet: string): void {
+    send({ type: "setFacet", facet });
+  }
 
   /** Models shown in the header picker: filtered to favorites when any are set, but the
    *  currently-active model is ALWAYS included — a running non-favorite model stays

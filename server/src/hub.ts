@@ -1424,6 +1424,12 @@ export class SessionHub {
           msg.sessionId ?? conn.focusedId ?? undefined,
         );
         return;
+      case "setFacet":
+        this.driver.setFacet(
+          msg.facet,
+          msg.sessionId ?? conn.focusedId ?? undefined,
+        );
+        return;
       case "openSession":
         void this.switchTo(conn, () => this.driver.openSession(msg.path));
         return;

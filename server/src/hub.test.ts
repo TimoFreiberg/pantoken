@@ -214,6 +214,10 @@ class FakeDriver implements PilotDriver {
   setThinking(level: string, sessionId?: string) {
     this.thinkingCalls.push({ level, sessionId });
   }
+  facetCalls: { facet: string; sessionId?: string }[] = [];
+  setFacet(facet: string, sessionId?: string) {
+    this.facetCalls.push({ facet, sessionId });
+  }
 
   // --- Global provider/model config ---
   readonly providerKeyCalls: { providerId: string; apiKey: string }[] = [];

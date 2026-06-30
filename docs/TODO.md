@@ -9,13 +9,6 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
 
 ## 🔴 Next (urgent / blocking)
 
-- [ ] **polytoken: facet switching has no GUI affordance.**
-      Surfaced 2026-06-29 (second dogfood): the TUI cycles facets with Shift+Tab,
-      but that doesn't map cleanly to a GUI. Pilot needs a hotkey (TBD) and/or a
-      visible UI control to switch facets (e.g. execute ↔ plan). Until this lands,
-      facet switching is TUI-only and inaccessible from the Pilot UI. Decide on a
-      hotkey (Shift+Tab is the TUI convention but may conflict with focus
-      traversal in a web context) and surface the active facet somewhere visible.
 - [ ] **polytoken: plan-mode plan display overlay.**
       Surfaced 2026-06-29 (second dogfood): when running in the `plan` facet, there
       should be a plan display overlay in the Pilot UI — a persistent, visible

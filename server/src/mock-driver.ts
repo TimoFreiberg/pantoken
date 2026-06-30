@@ -916,6 +916,15 @@ export class MockDriver implements PilotDriver {
     this.emitConfig();
   }
 
+  setFacet(facet: string): void {
+    this.emit({
+      sessionRef: SESSION_REF,
+      timestamp: String(Date.now()),
+      type: "sessionUpdated",
+      snapshot: snapshot({ facet }),
+    });
+  }
+
   async listProviders(): Promise<ProviderInfo[]> {
     return this.providers.map((p) => ({ ...p }));
   }
