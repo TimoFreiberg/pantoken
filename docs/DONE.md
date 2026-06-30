@@ -5,6 +5,31 @@ and its resolution note. Latest completions first.
 
 ---
 
+- [x] **Facet badge: show the current facet value, and reclaim Shift+Tab as a focus move.**
+      `StatusHeader.svelte:141` renders the badge as the literal strings `"Plan"` (when
+      execute/unknown) or `"Plan mode"` (when plan) — it never shows "Execute", so the control
+      reads as a static label, not state. Show the actual current facet ("Execute" / "Plan").
+      Separately, the facet-cycle hotkey is **Shift+Tab** (`App.svelte:155–171`, gated on no
+      form field focused) — but Shift+Tab is the browser's reverse-focus traversal and should
+      stay that way in a GUI. Replacement candidates (must fit macOS, Linux, and Windows):
+      `⌥/Alt+F` is clean on macOS but `Alt+F` opens the File menu on Win/Linux; `⌘/Ctrl+Shift+F`
+      is cross-platform and free in the installed PWA, but clashes with the near-universal
+      "Find in Files" muscle memory (VS Code et al.). Pick one and handle the Shift-modifier
+      special-case — the global keydown early-returns on `e.shiftKey` at `App.svelte:173`, so
+      any Shift combo must be matched *before* that line, like Ctrl+Tab already is. 2026-06-30.
+      i think the facet should be displayed at the bottom near model/effort
+      hotkey choice needs discussion
+      → Done 2026-06-30 (partial — value display + relocation only; hotkey replacement deferred):
+      extracted `FacetBadge.svelte` — a chip showing the ACTUAL current facet ("Execute" /
+      "Plan", accent-tinted when plan) — and mounted it in the composer's footer toolbar
+      (`.toolbar-right`, immediately left of `ModelPicker`), where model/effort already live.
+      Removed the old badge button + dead `.facet-toggle`/`.facet-badge`/`.facet-dormant` CSS
+      from `StatusHeader`. The badge is now a state readout (always visible), not an
+      affordance label. `Shift+Tab` toggling is UNCHANGED (the hotkey-replacement sub-part is
+      marked "needs discussion" and was skipped per the goal). Also fixed a stale pre-existing
+      mobile e2e failure (`toBeHidden()` → `toBeVisible()`, predating the always-visible
+      change). New DOM-order test guards the toolbar placement. Commit `5e0f2810`.
+
 - [x] **cmd+= / cmd+- (font size changes) aren't applied to the question widget, they should**
       → Done 2026-06-30: the Q&A question widget (`QnaInline` → `QnaForm`) renders outside
       the Transcript's scaled `.col` and used hardcoded px font sizes, so `--font-scale`
