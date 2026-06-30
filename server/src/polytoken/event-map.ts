@@ -131,8 +131,16 @@ export interface MapCtx {
 export type DaemonEffect =
   /** GET /state → refresh the cached state, then emit the named follow-up event
    *  via buildPostFetchEvent(). The mapper can't build these events itself because
-   *  they need the FRESH state (usage, title, config) that only the fetch provides. */
-  | { type: "fetchState"; emit: "runCompleted" | "sessionUpdated" }
+   *  they need the FRESH state (usage, title, config) that only the fetch provides.
+   *  `promptId` is the daemon's per-turn PromptId (carried by message_complete);
+   *  buildPostFetchEvent threads it onto runCompleted as the branch-handle entryIds
+   *  so the transcript's branch buttons work. Absent for sessionUpdated (no turn
+   *  completed) and on the sessionUpdated fetchState from turn_cancelled. */
+  | {
+      type: "fetchState";
+      emit: "runCompleted" | "sessionUpdated";
+      promptId?: string;
+    }
   /** GET /history + GET /state → full re-seed (spike §6: stream_discontinuity drops
    *  events; spike §7: session_rewound truncates history). Chunk 2 emits a
    *  sessionUpdated from the refreshed state; the full re-broadcast is Chunk 4. */
@@ -560,10 +568,29 @@ function buildAskUserQuestionMapping(
 export function buildPostFetchEvent(
   emit: "runCompleted" | "sessionUpdated",
   ctx: MapCtx,
+  /** The daemon's per-turn PromptId (from message_complete, threaded through the
+   *  fetchState effect). On runCompleted, becomes both userEntryId and
+   *  assistantEntryId — the branch handles the reducer stamps onto the turn's
+   *  last user + assistant items so the transcript's branch buttons resolve.
+   *  Absent on sessionUpdated (no turn completed). */
+  promptId?: string,
 ): SessionDriverEvent {
   const meta = { sessionRef: ctx.ref, timestamp: ctx.now() };
   if (emit === "runCompleted") {
-    return { ...meta, type: "runCompleted", snapshot: ctx.snapshot("idle") };
+    return {
+      ...meta,
+      type: "runCompleted",
+      snapshot: ctx.snapshot("idle"),
+      // The daemon assigns one PromptId per user turn; the user message and the
+      // assistant reply share it. Both branch buttons ("branch from this prompt"
+      // on the user item, "branch from here" on the assistant item) call
+      // branchFrom with this id → POST /rewind { to_prompt_id }. Absent
+      // (undefined) when the daemon omitted prompt_id — the buttons stay hidden,
+      // matching the pre-fix state, rather than sending a bad rewind target.
+      ...(promptId
+        ? { userEntryId: promptId, assistantEntryId: promptId }
+        : {}),
+    };
   }
   return {
     ...meta,
@@ -624,8 +651,13 @@ export function mapDaemonEvent(
       }
       // Usage is on GET /state, not on the event (spike §4 correction). Defer to
       // the driver's fetchState effect, which refreshes the cache and then calls
-      // buildPostFetchEvent("runCompleted", ctx) to produce the runCompleted event.
-      return events([], [{ type: "fetchState", emit: "runCompleted" }]);
+      // buildPostFetchEvent("runCompleted", ctx, promptId) to produce the
+      // runCompleted event. The prompt_id is the daemon's per-turn id — the same
+      // one the user message and assistant reply share — and becomes the branch
+      // handle (entryId) that the transcript's "branch from here" buttons name.
+      return events([], [
+        { type: "fetchState", emit: "runCompleted", promptId: ev.prompt_id },
+      ]);
     }
 
     case "turn_cancelled": {
