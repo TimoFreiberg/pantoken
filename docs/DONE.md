@@ -5,6 +5,27 @@ and its resolution note. Latest completions first.
 
 ---
 
+- [x] **polytoken: opening a session that's live in the TUI causes a 409 lease conflict.**
+      Surfaced 2026-06-29 (first dogfood): a session with an active TUI attachment rejects
+      pilot's lease claim with 409 (the lease is exclusive, spike §2). The error is now
+      readable (names the TUI holder + lease expiry), but the UX is still a hard failure —
+      the operator has to `/detach` in the TUI or wait ~30s. A clean fix would detect the
+      409 at `openSession` and surface a "this session is open in the TUI — force-attach?"
+      affordance, or retry-with-backoff until the lease lapses. The deeper product question:
+      should pilot preemptively detach (or refuse to open) a session the TUI is actively
+      driving? Related jank: opening the same session in pilot that the TUI is viewing makes
+      the TUI error briefly then detach (the TUI's own lease-loss handling) — need a clean
+      protocol for coexistence. (Readable error + connection-race fix landed in `69585952`.)
+      → Done 2026-06-30: `claimLeaseWithRetry` (daemon-client.ts) retries the claim up to 3×
+      with 3s backoff, parsing each 409's `expires_at` to stop early when the lease won't
+      lapse within the retry window (active TUI) — catching stale-lease cases transparently.
+      The final error message includes the computed time-to-lapse (replacing the hardcoded
+      "~30s"). `retryClaim` is a pure exported function (unit-tested with a mock claim fn).
+      The client (store.svelte.ts) detects lease-conflict messages via a regex pattern and
+      renders a sticky "Retry" toast that re-sends `openSession(path)`. A `failsession` mock
+      script exercises the full toast + retry path in e2e. Does NOT add a force-attach
+      mechanism (operator chose A — never kill the user's process).
+
 - [x] **polytoken: new-session draft doesn't default to the dynamic (umans) model.**
       Surfaced 2026-06-29: `polytoken models` lists `deepseek/deepseek-v4-*` (static config)
       + `umans/umans-*` (dynamic, discovered at runtime). The new-session draft's model

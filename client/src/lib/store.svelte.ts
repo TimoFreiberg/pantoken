@@ -116,6 +116,10 @@ class PilotStore {
   // If the disk entry disappears between list + open, the switch error clears the stale
   // preference and falls back to the normal $HOME draft instead of leaving a blank pane.
   private bootRestoreInFlight = false;
+  // The path of the last openSession request — captured so a lease-conflict
+  // toast can offer a Retry that re-sends the same openSession(path). Cleared
+  // on a successful session switch (snapshot lands → no retry needed).
+  private lastAttemptedSessionPath: string | null = null;
   // Reconnect focus recovery. A dropped socket (Tailscale flap on a phone) reconnects as a
   // brand-new connection, which the hub registers focused on the empty landing — so without
   // this you'd be reading a session, the link blips, and the view snaps to a blank pane.
@@ -784,7 +788,9 @@ class PilotStore {
         this.maybeFinishCreating();
         if (this.bootRestoreInFlight && msg.state.ref)
           this.bootRestoreInFlight = false;
-        // A snapshot lands after a successful switch — clear any stale switch error.
+        // A snapshot lands after a successful switch — clear the retry capture
+        // (no need to retry an openSession that landed) + any stale switch error.
+        this.lastAttemptedSessionPath = null;
         this.lastError = null;
         this.maybeOpenBootDraft();
         // Dev-only: time how long this full transcript render takes. The signal for
@@ -1002,7 +1008,29 @@ class PilotStore {
             if (this.serverId) clearLastSession(this.serverId);
             this.startDraft(this.defaultNewSessionCwd);
           }
-          this.toast(msg.message, { durationMs: 8000 });
+          // A lease conflict (409) is retryable: the operator /detach in the TUI
+          // or waits for the lease to lapse, then taps Retry to re-send openSession.
+          // The message comes from classifySwitchError (hub.ts) — either the full
+          // claimLease text ("another TUI is attached…") or the fallback ("…lease to
+          // lapse."). Both match the pattern. Sticky (no auto-dismiss) so it doesn't
+          // vanish while the operator is detaching in the TUI.
+          if (
+            LEASE_CONFLICT_RE.test(msg.message) &&
+            this.lastAttemptedSessionPath
+          ) {
+            const retryPath = this.lastAttemptedSessionPath;
+            this.toast(msg.message, {
+              action: {
+                label: "Retry",
+                run: () => this.openSession(retryPath),
+              },
+              durationMs: 0,
+            });
+          } else {
+            // Non-lease-conflict session-switch errors (daemon didn't start, port
+            // didn't bind) aren't blindly retryable — keep the existing 8s toast.
+            this.toast(msg.message, { durationMs: 8000 });
+          }
         } else {
           console.error("[server error]", msg.message);
           this.lastError = msg.message;
@@ -1483,6 +1511,7 @@ class PilotStore {
     // view is open across the switch, re-query for the session we're moving to.
     this.tree = null;
     if (this.treeOpen) send({ type: "queryTree" });
+    this.lastAttemptedSessionPath = path;
     send({ type: "openSession", path });
   }
   /** Focus a session named by cross-session attention/notification metadata. */
@@ -2193,6 +2222,12 @@ class PilotStore {
 }
 
 const SIDEBAR_KEY = "pilot.sidebarOpen";
+
+/** Matches a lease-conflict (409) error message from classifySwitchError. The
+ *  classified message is either the full claimLease text ("another TUI is
+ *  attached…") or the fallback ("…lease to lapse."). Both branches match, so the
+ *  client's Retry toast fires on either path without a wire-protocol change. */
+const LEASE_CONFLICT_RE = /another TUI is attached|lease to lapse/;
 
 /** Default the sidebar open on a desktop-width viewport, closed on a phone (where
  *  it's a drawer); a stored preference wins. Guarded for SSR/test environments. */

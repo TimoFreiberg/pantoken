@@ -393,7 +393,7 @@ export async function createPolytokenDriver(
     // The daemon may take a moment to bind its port after `new --no-attach` returns.
     try {
       await waitForHealth(client);
-      await client.claimLease("pilot");
+      await client.claimLeaseWithRetry("pilot");
     } catch (e) {
       // Lease claim failed (e.g. 409 stale lease from a prior crash) or the daemon
       // didn't become healthy. Terminate the spawned daemon to avoid a leak.
