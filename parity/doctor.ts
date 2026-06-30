@@ -9,6 +9,7 @@
 
 import { ensureProject } from "./project.ts";
 import {
+  commandOnPath as onPath,
   ensureEnv,
   isolationEnv,
   modelSpec,
@@ -22,15 +23,6 @@ interface Check {
   name: string;
   ok: boolean;
   detail: string;
-}
-
-async function onPath(bin: string): Promise<boolean> {
-  const proc = Bun.spawn({
-    cmd: ["sh", "-c", `command -v ${bin}`],
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  return (await proc.exited) === 0;
 }
 
 /** Run the full preflight. Returns checks + overall ok. Does NOT exit (the CLI wrapper does). */

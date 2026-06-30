@@ -14,10 +14,12 @@ import { down } from "./down.ts";
 import { preflight } from "./doctor.ts";
 import { launch } from "./launch.ts";
 import {
+  commandOnPath,
   daemonHistoryContains,
   daemonHistoryText,
   modelSpec,
   paths,
+  POLYTOKEN_BIN,
   TMUX_BIN,
 } from "./lib.ts";
 import { ensureProject, resetProject } from "./project.ts";
@@ -51,6 +53,13 @@ async function main(): Promise<number> {
       // so we DON'T gate launch on the key/model check — we just warn. Run `parity doctor`
       // for the full model round-trip before driving sessions.
       await ensureProject(p); // ensures the isolated env + generated config + project
+      if (!(await commandOnPath(POLYTOKEN_BIN))) {
+        console.error(
+          `[parity up] polytoken not on PATH (${POLYTOKEN_BIN}) — the GUI would boot but no ` +
+            `session could spawn a daemon. Install polytoken or set PILOT_POLYTOKEN_BIN.`,
+        );
+        return 1;
+      }
       const spec = modelSpec(p.model);
       if (p.generateConfig && !process.env[spec.keyEnv]?.trim()) {
         console.error(

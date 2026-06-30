@@ -239,6 +239,16 @@ export function freePort(): Promise<number> {
   });
 }
 
+/** Is `bin` resolvable on PATH? (`command -v`, exit 0 = found.) */
+export async function commandOnPath(bin: string): Promise<boolean> {
+  const proc = Bun.spawn({
+    cmd: ["sh", "-c", `command -v ${bin}`],
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  return (await proc.exited) === 0;
+}
+
 // --- run-env tracking (what `up` launched; what `down` tears down) ---
 
 export interface RunEnv {
@@ -303,17 +313,22 @@ export function readSessionJson(
   }
 }
 
+/** A polytoken session id, e.g. `04trdx-dance` — a short alphanumeric segment, a dash, then a
+ *  word. Used to distinguish a data row's first token from the header (`SESSION_ID`) and the
+ *  empty-list sentinel (`no live sessions`), so the parser is correct standalone (not only
+ *  because a downstream startup.json gate happens to filter phantoms). */
+const SESSION_ID_RE = /^[0-9a-z]+-[0-9a-z][0-9a-z-]*$/i;
+
 /** Extract live session IDs from `polytoken sessions` output. We take ONLY the first
- *  whitespace token of each non-header data row — the SESSION_ID column, which is column 1
- *  in every layout — so this is robust to the table's other columns changing (PORT present
- *  or not, absolute vs. relative timestamps). Port/pid are read from startup.json instead. */
+ *  whitespace token of each row — the SESSION_ID column, which is column 1 in every layout —
+ *  and keep it only if it's session-id-shaped. So this is robust to the table's other columns
+ *  changing (PORT present or not, absolute vs. relative timestamps) AND to the header /
+ *  `no live sessions` sentinel. Port/pid are read from startup.json instead. */
 export function parseLiveSessionIds(stdout: string): string[] {
   const ids: string[] = [];
   for (const raw of stdout.split("\n")) {
-    const line = raw.trim();
-    if (!line || line.startsWith("SESSION_ID")) continue;
-    const id = line.split(/\s+/)[0];
-    if (id) ids.push(id);
+    const id = raw.trim().split(/\s+/)[0];
+    if (id && SESSION_ID_RE.test(id)) ids.push(id);
   }
   return ids;
 }
