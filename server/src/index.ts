@@ -120,8 +120,16 @@ if (process.env.PILOT_DRIVER === "mock") {
     throw new Error(
       "pi driver removed on this branch — use 'mock' or 'polytoken' (default)",
     );
-  const { createPolytokenDriver } = await import("./polytoken/polytoken-driver.js");
-  driver = await createPolytokenDriver();
+  const { createPolytokenDriver } =
+    await import("./polytoken/polytoken-driver.js");
+  // Wire the warm-pool knobs from config (env-overridable). Previously called with no
+  // opts, so PILOT_WARM_CAP was read into config but never honored on this path and
+  // PILOT_IDLE_REAP_MS didn't exist — both default to the driver's prior values
+  // (8 / 10 min), so this is behavior-preserving unless the env overrides are set.
+  driver = await createPolytokenDriver({
+    warmCap: config.warmCap,
+    idleReapMs: config.idleReapMs,
+  });
 }
 const push = new PushService();
 // Arm the greeting as the landing fixture BEFORE the hub is built — the hub seeds its
@@ -317,8 +325,7 @@ const server = Bun.serve<WsData>({
 log.info("pilot server started", {
   url: `http://${config.host}:${server.port}`,
   dataDir: config.dataDir,
-  driver:
-    process.env.PILOT_DRIVER === "mock" ? "mock" : "polytoken",
+  driver: process.env.PILOT_DRIVER === "mock" ? "mock" : "polytoken",
   token: config.token ? "required" : "off",
   debug: config.debug,
 });

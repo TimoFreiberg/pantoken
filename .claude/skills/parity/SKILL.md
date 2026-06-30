@@ -1,0 +1,119 @@
+---
+name: parity
+description: >-
+  Drive the pilot→polytoken GUI and the polytoken TUI against one shared, isolated test
+  project to exercise GUI⇄TUI parity. Use when asked to test/compare pilot-vs-TUI
+  behavior, reproduce a dogfood discrepancy between the GUI and the TUI, drive a live
+  polytoken session from a browser and/or tmux, or run the parity harness. Spins pilot up
+  on FRESH ports with an isolated polytoken sessions registry, so it can never touch prod
+  or other pilot/daemon instances. Requires provider auth in the env (see preconditions).
+---
+
+# parity — GUI ⇄ TUI parity harness
+
+One test project, driven from two surfaces:
+- **GUI:** the pilot web app backed by the **real polytoken daemon driver**, on fresh ports.
+- **TUI:** the **polytoken TUI** inside a dedicated tmux server.
+
+Everything lives under one isolation root (`$PILOT_PARITY_ROOT`, default
+`~/.local/state/pilot-parity`) — fresh pilot ports, an isolated polytoken sessions
+registry (`XDG_DATA_HOME`), an isolated cache, and a dedicated `tmux -L` server. It
+**cannot** touch prod pilot/daemon state. Tear down with one command.
+
+One entry point: `bun parity/parity.ts <cmd>`. See `docs/PARITY-TESTING.md` for the why.
+
+## The model constraint that shapes everything (read this)
+
+A polytoken daemon serves ONE session on its own port. The **TUI-attach lease is
+exclusive** and the event stream is capped — so **the GUI and the TUI cannot both be
+live-attached to one daemon at once**. The daemon's `/history`+`/state` is the single
+source of truth; the GUI and TUI are *projections* of it. Parity = each live projection
+agrees with that ground truth. Clean handoff between surfaces goes **through session
+history**: fully release a session on side A before opening it on side B (there is no
+per-session "close" in pilot — see flow GUI→TUI below).
+
+## Preconditions (will bite — check first)
+
+`polytoken`'s config references provider keys via env vars (e.g. `$DEEPSEEK_API_KEY`,
+`$UMANS_API_KEY`). If unset, the **whole config fails to load** and NO model runs — not
+even the default. The live desktop app has these in its env; a bare shell may not.
+
+**Always run `bun parity/parity.ts doctor` first.** It spawns a real `polytoken exec` in
+the isolated env and fails loud with remediation if auth/model is broken (export the key,
+or set `$PILOT_PARITY_CONFIG_DIR` to an isolated config whose default model works here).
+
+## Commands
+
+```bash
+bun parity/parity.ts doctor            # PREFLIGHT — run first (real prompt round-trip)
+bun parity/parity.ts doctor --quick    # skip the model call (plumbing only)
+bun parity/parity.ts project reset     # recreate the isolated test project (git repo)
+
+# GUI (pilot → polytoken). Either:
+#   (a) preview_start("pilot-parity")   ← easiest; gives you preview_* tools (RECOMMENDED)
+#   (b) bun parity/parity.ts up         ← run BACKGROUNDED; writes run/env.json (GUI url + ports)
+
+bun parity/parity.ts tui new           # fresh TUI session in the test project → prints session id
+bun parity/parity.ts tui attach <id>   # attach TUI to a LIVE session
+bun parity/parity.ts tui continue <id> # resume a COLD session into the TUI
+bun parity/parity.ts tui prompt "..."  # type text + submit (Enter)
+bun parity/parity.ts tui keys Y Enter  # send raw chords (see chord table)
+bun parity/parity.ts tui capture       # print the rendered TUI pane
+bun parity/parity.ts tui detach        # Ctrl+D: release lease, leave daemon running
+bun parity/parity.ts tui end <id>      # Ctrl+C×2: terminate daemon, wait until gone
+bun parity/parity.ts tui ls            # list live ISOLATED sessions
+
+bun parity/parity.ts oracle daemon <id>  # ground-truth transcript text (live or via resume)
+bun parity/parity.ts assert <id> <needle># needle present in daemon history (+ TUI pane)?
+
+bun parity/parity.ts down              # SIGTERM pilot + /terminate isolated daemons + kill tmux
+bun parity/parity.ts down --purge      # + rm -rf the whole isolation root
+```
+
+## TUI chords (for `tui keys`; from `polytoken print-tui-command-actions`)
+
+`Enter` submit-prompt · `S-Enter` newline · `C-d` detach · `C-c` end (×2) · `/` slash
+palette · `Y`/`N` interrogative yes/no · `Up`/`Down` select · `Space` toggle · `Tab`
+edit-custom. `tui prompt`/`tui type`/`tui detach`/`tui end` wrap the common ones.
+
+## Canonical flows
+
+**0. Preflight + project (always):** `doctor` → `project reset`.
+
+**1. Drive the GUI:** `preview_start("pilot-parity")` → new session in the test project
+(approve the **trust** card on first use) → prompt → verify with `preview_snapshot`. The
+GUI oracle is the **rendered DOM** (preview_snapshot / Playwright) — NOT `/debug/state`,
+which only returns pilot's landing default, not the session you're driving.
+
+**2. Drive the TUI:** `tui new` (prints id) → if a trust prompt shows, `tui keys Y` →
+`tui prompt "..."` → `tui capture`.
+
+**3. Parity TUI→GUI (clean, recommended):**
+`tui new` → `tui prompt "Reply with exactly: PARITY-OK-1"` → wait → `tui end <id>`
+(daemon exits, session persisted) → open that session in the GUI → it should render the
+same transcript → `bun parity/parity.ts assert <id> PARITY-OK-1` (daemon ground truth)
+and confirm the GUI DOM via `preview_snapshot`.
+
+**4. Parity GUI→TUI:** new session in the GUI → prompt `PARITY-OK-2` → **free the GUI's
+daemon** with `down` (SIGTERM frees the exclusive lease; session goes cold) — *this is the
+robust path* — then `tui continue <id>` → `tui capture` shows `PARITY-OK-2`. (There is no
+GUI "close session" button; the harness sets a short `PILOT_IDLE_REAP_MS` so an *un-focused,
+idle* session also self-frees, but you must focus away first for the reaper to act — `down`
+is simpler.)
+
+**5. Coexistence / the 409 (reproduces TODO.md #1):** `tui new` (lease held) → open the
+SAME session in the GUI **without detaching** → observe pilot's 409 → `tui detach` → retry
+the GUI open → recovery (or wait ~30s for the lease to lapse).
+
+## Teardown (always, when done)
+
+`bun parity/parity.ts down` (add `--purge` to wipe the root). If you launched the GUI via
+`preview_start`, also `preview_stop`. `down` only ever touches the isolated registry +
+the dedicated tmux server + the pilot pid it recorded — it can't reach prod.
+
+## Gotchas
+
+- **One TUI session at a time** (the `tui new` "newest session" detection assumes it).
+- A daemon that fails to start leaves its error in the pane — `tui capture` shows it.
+- `tui` and `oracle`/`assert`/`down` ALWAYS scope `polytoken sessions` to the isolated
+  `--sessions-dir`; never run a bare `polytoken sessions` (it lists PROD daemons).

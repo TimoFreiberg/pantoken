@@ -38,6 +38,11 @@ export const config = {
   // Max kept-warm sessions before the least-recently-focused one is evicted
   // (its services disposed). ≤0 disables the cap. Only the polytoken driver honors it.
   warmCap: Number(process.env.PILOT_WARM_CAP ?? 8),
+  // Idle-reap timeout (ms): a warm polytoken session untouched (no prompt/switch) this
+  // long is disposed — its daemon process + port + exclusive TUI-attach lease freed.
+  // ≤0 disables reaping (sessions stay warm until the cap evicts them). Default 10 min.
+  // The parity test harness sets this short so a GUI→TUI handoff frees the lease promptly.
+  idleReapMs: Number(process.env.PILOT_IDLE_REAP_MS ?? 10 * 60 * 1000),
   // Cadence (ms) of the hub's live-refresh ticker, which re-pushes the session list +
   // the focused session's context usage while a turn runs (so the sidebar rows + the
   // composer's context meter climb live instead of freezing until the turn ends).
