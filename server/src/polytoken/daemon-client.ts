@@ -301,11 +301,22 @@ export async function spawnDaemon(
   return spawnNewDaemon(polytokenBin, { cwd: opts.cwd });
 }
 
-/** Parse a 409 lease-held error body into a readable holder description.
+/** The parsed 409 lease-held body — the holder label/pid + the expiry Date.
+ *  `expiresAt` is null when the body is missing or malformed (not a real lease
+ *  conflict), so the caller can fall back to the raw error. */
+interface LeaseHeldInfo {
+  /** `"label" pid N, lease expires <time>` — a readable holder summary, or the
+   *  daemon's own `message` field when the body lacks the structured `active`. */
+  summary: string;
+  /** The parsed `expires_at`, or null when absent/unparseable. */
+  expiresAt: Date | null;
+}
+
+/** Parse a 409 lease-held error body into a readable holder description + expiry.
  *  The body shape (observed): `{"active":{"active_pid":..., "active_terminal_label":"...",
  *  "last_seen_at":"...", "expires_at":"..."}, "message":"an interactive TUI is..."}`.
  *  Returns null if the body isn't the expected shape (caller falls back to raw). */
-function parseLeaseHeldError(error: string | null): string | null {
+function parseLeaseHeldError(error: string | null): LeaseHeldInfo | null {
   if (!error) return null;
   try {
     const body = JSON.parse(error) as {
@@ -317,16 +328,109 @@ function parseLeaseHeldError(error: string | null): string | null {
       message?: string;
     };
     const a = body.active;
-    if (!a) return body.message ?? null;
+    if (!a) return body.message ? { summary: body.message, expiresAt: null } : null;
     const label = a.active_terminal_label ?? "unknown TUI";
     const pid = a.active_pid ? ` pid ${a.active_pid}` : "";
-    const expires = a.expires_at
-      ? `, lease expires ${new Date(a.expires_at).toLocaleTimeString()}`
+    const expiresAt = a.expires_at ? new Date(a.expires_at) : null;
+    const expires = expiresAt
+      ? `, lease expires ${expiresAt.toLocaleTimeString()}`
       : "";
-    return `"${label}"${pid}${expires}`;
+    return { summary: `"${label}"${pid}${expires}`, expiresAt };
   } catch {
     return null;
   }
+}
+
+/** Build the lease-conflict error message with the computed time-to-lapse.
+ *  Replaces the old hardcoded "~30s" — when we know the expiry, the operator gets
+ *  an exact wait. `secondsToLapse` is null only when the body lacked an expiry
+ *  (a malformed 409), in which case we fall back to the raw holder summary. */
+function formatLeaseConflictMessage(
+  held: LeaseHeldInfo | null,
+  secondsToLapse: number | null,
+): string {
+  if (!held) return "lease claim failed (409): another TUI is attached";
+  const wait = secondsToLapse != null ? `${secondsToLapse}s` : "~30s";
+  return `another TUI is attached to this session (${held.summary}). Detach it there (/detach) or wait ${wait} for its lease to lapse.`;
+}
+
+/** Round up to whole seconds (a 1.2s wait reads as "2s", never under-promises). */
+function ceilSeconds(ms: number): number {
+  return Math.ceil(ms / 1000);
+}
+
+/** A 409 lease-conflict error carrying the parsed holder info + expiry. Thrown by
+ *  `claimLease` on a 409; `retryClaim` reads `.held` to decide whether the lease
+ *  will lapse within the retry window. `extends Error` so existing catch blocks
+ *  that read `.message` are unaffected. */
+export class LeaseConflictError extends Error {
+  readonly held: LeaseHeldInfo | null;
+  constructor(message: string, held: LeaseHeldInfo | null = null) {
+    super(message);
+    this.name = "LeaseConflictError";
+    this.held = held;
+  }
+}
+
+/** Retry a claim function on 409 lease-conflict errors, up to `maxRetries` times
+ *  with `delayMs` backoff between attempts. Pure — takes the claim function so
+ *  it's unit-testable without a live daemon. Throws on non-lease-conflict errors
+ *  immediately (no retry). On exhaustion (or an early exit when the lease won't
+ *  lapse within the remaining retry window), throws a LeaseConflictError whose
+ *  message includes the computed time-to-lapse. */
+export async function retryClaim<T>(
+  claim: () => Promise<T>,
+  opts: {
+    maxRetries?: number;
+    delayMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+  } = {},
+): Promise<T> {
+  const maxRetries = opts.maxRetries ?? 3;
+  const delayMs = opts.delayMs ?? 3000;
+  const sleep = opts.sleep ?? defaultSleep;
+  let lastConflict: LeaseConflictError | null = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await claim();
+    } catch (e) {
+      // Only retry LeaseConflictError (409). Other errors throw immediately.
+      if (!(e instanceof LeaseConflictError)) throw e;
+      lastConflict = e;
+      const expiry = e.held?.expiresAt ?? null;
+      if (expiry && attempt < maxRetries) {
+        const msUntilExpiry = expiry.getTime() - Date.now();
+        const remainingDelays = (maxRetries - attempt) * delayMs;
+        // The lease won't lapse within the retry window (active TUI heartbeating).
+        // Stop retrying — surface the manual Retry toast with the computed wait.
+        if (msUntilExpiry > remainingDelays) {
+          throw new LeaseConflictError(
+            formatLeaseConflictMessage(e.held, ceilSeconds(msUntilExpiry)),
+            e.held,
+          );
+        }
+      }
+      if (attempt < maxRetries) await sleep(delayMs);
+    }
+  }
+  // All retries exhausted. Build the final message with the computed time-to-lapse
+  // (or "~30s" when the body lacked an expiry).
+  const held = lastConflict?.held ?? null;
+  const expiry = held?.expiresAt ?? null;
+  const secondsToLapse = expiry ? ceilSeconds(expiry.getTime() - Date.now()) : null;
+  throw new LeaseConflictError(
+    formatLeaseConflictMessage(held, secondsToLapse),
+    held,
+  );
+}
+
+/** Default sleep: setTimeout with unref so a pending retry can't keep the process
+ *  alive on shutdown. Injectable for tests. */
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    t.unref?.();
+  });
 }
 
 /**
@@ -497,13 +601,16 @@ export class DaemonClient {
     if (status !== 200 || !data) {
       // 409 = an interactive TUI is already attached. Parse the structured body to
       // name the holder + when its lease expires, so the operator knows to either
-      // /detach in the TUI or wait ~30s for the lease to lapse.
+      // /detach in the TUI or wait for the lease to lapse. Throws LeaseConflictError
+      // (carries the parsed holder info + expiry) so claimLeaseWithRetry can decide
+      // whether the lease will lapse within the retry window.
       if (status === 409) {
         const held = parseLeaseHeldError(error);
-        throw new Error(
+        throw new LeaseConflictError(
           held
-            ? `another TUI is attached to this session (${held}). Detach it there (/detach) or wait ~30s for its lease to lapse.`
+            ? `another TUI is attached to this session (${held.summary}). Detach it there (/detach) or wait ~30s for its lease to lapse.`
             : `lease claim failed (409): ${error}`,
+          held,
         );
       }
       throw new Error(`lease claim failed (${status}): ${error}`);
@@ -522,6 +629,26 @@ export class DaemonClient {
       heartbeatTimer,
     };
     return data;
+  }
+
+  /**
+   * Claim the lease with auto-retry on 409 (stale-lease recovery). Retries up to
+   * `maxRetries` times (default 3) with `delayMs` backoff (default 3s). Each 409's
+   * `expires_at` is parsed to compute the time-to-lapse; if the lease won't lapse
+   * within the retry window (active TUI heartbeating), retrying is pointless — we
+   * stop early and throw a LeaseConflictError with the computed wait. On
+   * exhaustion, the final error message includes the computed time-to-lapse
+   * (replacing the old hardcoded "~30s"). Non-409 errors throw immediately.
+   *
+   * Catches STALE leases (TUI crashed, lease expiring soon) transparently — the
+   * session opens on a retry after the lease lapses. Does NOT add a force-kill
+   * mechanism; a live TUI session surfaces a manual Retry toast instead.
+   */
+  async claimLeaseWithRetry(
+    label = "pilot",
+    opts: { maxRetries?: number; delayMs?: number } = {},
+  ): Promise<TuiAttachClaimResponse> {
+    return retryClaim(() => this.claimLease(label), opts);
   }
 
   /** `POST /tui-attachment/heartbeat` — refresh the lease. 409 if the pid doesn't match. */

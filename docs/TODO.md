@@ -9,17 +9,6 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
 
 ## 🔴 Next (urgent / blocking)
 
-- [ ] **polytoken: opening a session that's live in the TUI causes a 409 lease conflict.**
-      Surfaced 2026-06-29 (first dogfood): a session with an active TUI attachment rejects
-      pilot's lease claim with 409 (the lease is exclusive, spike §2). The error is now
-      readable (names the TUI holder + lease expiry), but the UX is still a hard failure —
-      the operator has to `/detach` in the TUI or wait ~30s. A clean fix would detect the
-      409 at `openSession` and surface a "this session is open in the TUI — force-attach?"
-      affordance, or retry-with-backoff until the lease lapses. The deeper product question:
-      should pilot preemptively detach (or refuse to open) a session the TUI is actively
-      driving? Related jank: opening the same session in pilot that the TUI is viewing makes
-      the TUI error briefly then detach (the TUI's own lease-loss handling) — need a clean
-      protocol for coexistence. (Readable error + connection-race fix landed in `69585952`.)
 - [ ] **polytoken: retry button re-sends the last prompt instead of resuming.**
       Surfaced 2026-06-29 (second dogfood): the "retry" button re-sends the last
       user prompt verbatim. Mid-flow (e.g. after a tool was cancelled/denied) this

@@ -190,6 +190,12 @@ export class MockDriver implements PilotDriver {
   // One-shot: when set, the next newSession() rejects then clears (armed via
   // runScript("failnewsession")). Simulates a transient creation failure for e2e.
   private failNextNewSession = false;
+  // One-shot: when set, the next openSession() throws a 409 lease-conflict error
+  // then clears (armed via runScript("failsession")). Simulates a stale lease the
+  // TUI holds, so e2e can exercise the client's Retry toast path. The message
+  // matches the real claimLease 409 pattern so classifySwitchError + the client's
+  // lease-conflict detection both fire.
+  private failNextSession = false;
   // The most recently created session's id + seed snapshot, so the FIRST prompt that
   // follows (the deferred-creation first turn) streams under that session's own ref
   // instead of the demo session's. Consumed (cleared) by that first prompt. Without this
@@ -412,6 +418,7 @@ export class MockDriver implements PilotDriver {
     this.sessions = SESSION_LIST.map((s) => ({ ...s }));
     this.liveCountBumps.clear();
     this.failNextNewSession = false;
+    this.failNextSession = false;
     this.worktrees = seedWorktrees(SESSION_LIST);
     this.dirtyWorktrees = new Set<string>();
     this.reapedWorktrees = new Set<string>();
@@ -653,6 +660,18 @@ export class MockDriver implements PilotDriver {
   }
 
   async openSession(path: string): Promise<SessionDriverEvent[]> {
+    // One-shot failure injection (armed via runScript("failsession")): throw a
+    // 409 lease-conflict error before any state mutation, mirroring a real
+    // claimLease 409 when the TUI holds the lease. The message matches the real
+    // claimLease pattern so classifySwitchError + the client's lease-conflict
+    // detection both fire. The one-shot flag clears on the first attempt, so the
+    // e2e Retry → second openSession succeeds.
+    if (this.failNextSession) {
+      this.failNextSession = false;
+      throw new Error(
+        'another TUI is attached to this session ("tui" pid 99999, lease expires in 30s). Detach it there (/detach) or wait 30s for its lease to lapse.',
+      );
+    }
     const seed = mockSessionSeed(path);
     const sessionId = seed[0]?.sessionRef.sessionId;
     const queued = sessionId ? (this.queues.get(sessionId) ?? []) : [];
@@ -988,6 +1007,11 @@ export class MockDriver implements PilotDriver {
     if (name === "failnewsession") {
       // Arm a one-shot newSession() rejection (consumed by the next creation attempt).
       this.failNextNewSession = true;
+      return;
+    }
+    if (name === "failsession") {
+      // Arm a one-shot openSession() 409 lease-conflict (consumed by the next switch).
+      this.failNextSession = true;
       return;
     }
     if (name === "trust") {
