@@ -77,10 +77,12 @@ describe("mapDaemonEvent", () => {
     expect(acc.turnError).toBeNull();
   });
 
-  test("message_complete (no error) -> fetchState effect for runCompleted", () => {
+  test("message_complete (no error) -> fetchState effect for runCompleted with promptId", () => {
     const out = fold({ type: "message_complete", prompt_id: "p1" });
     expect(out.events).toEqual([]);
-    expect(out.effects).toEqual([{ type: "fetchState", emit: "runCompleted" }]);
+    expect(out.effects).toEqual([
+      { type: "fetchState", emit: "runCompleted", promptId: "p1" },
+    ]);
   });
 
   test("message_complete (with turn error) -> runFailed + clears error", () => {
@@ -98,7 +100,9 @@ describe("mapDaemonEvent", () => {
     acc.turnError = { message: "transient" };
     fold({ type: "message_start", prompt_id: "p2" }, acc); // clears the error
     const out = fold({ type: "message_complete", prompt_id: "p2" }, acc);
-    expect(out.effects).toEqual([{ type: "fetchState", emit: "runCompleted" }]);
+    expect(out.effects).toEqual([
+      { type: "fetchState", emit: "runCompleted", promptId: "p2" },
+    ]);
   });
 
   test("turn_cancelled -> fetchState effect for sessionUpdated", () => {
@@ -1316,6 +1320,23 @@ describe("buildPostFetchEvent", () => {
     });
   });
 
+  test("runCompleted with promptId -> stamps userEntryId + assistantEntryId", () => {
+    const out = buildPostFetchEvent("runCompleted", ctx, "p1");
+    expect(out).toMatchObject({
+      type: "runCompleted",
+      snapshot: { status: "idle" },
+      userEntryId: "p1",
+      assistantEntryId: "p1",
+    });
+  });
+
+  test("runCompleted without promptId -> no entryIds (pre-fix behavior preserved)", () => {
+    const out = buildPostFetchEvent("runCompleted", ctx);
+    expect(out).toMatchObject({ type: "runCompleted" });
+    expect(out).not.toHaveProperty("userEntryId");
+    expect(out).not.toHaveProperty("assistantEntryId");
+  });
+
   test("sessionUpdated -> sessionUpdated event with live status", () => {
     const running: MapCtx = { ...ctx, liveStatus: () => "running" };
     const out = buildPostFetchEvent("sessionUpdated", running);
@@ -1359,7 +1380,9 @@ describe("resetAccumulator", () => {
     // New turn completes successfully
     fold({ type: "message_start", prompt_id: "p2" }, acc);
     const out = fold({ type: "message_complete", prompt_id: "p2" }, acc);
-    expect(out.effects).toEqual([{ type: "fetchState", emit: "runCompleted" }]);
+    expect(out.effects).toEqual([
+      { type: "fetchState", emit: "runCompleted", promptId: "p2" },
+    ]);
     expect(out.events).toEqual([]); // NOT a runFailed
   });
 });
@@ -1413,11 +1436,14 @@ describe("streaming pipeline integration", () => {
     // message_complete
     out = fold({ type: "message_complete", prompt_id: "p1" }, acc);
     expect(out.events).toEqual([]);
-    expect(out.effects).toEqual([{ type: "fetchState", emit: "runCompleted" }]);
+    expect(out.effects).toEqual([
+      { type: "fetchState", emit: "runCompleted", promptId: "p1" },
+    ]);
 
-    // Driver would then call buildPostFetchEvent("runCompleted", ctx)
-    const finalEvent = buildPostFetchEvent("runCompleted", ctx);
+    // Driver would then call buildPostFetchEvent("runCompleted", ctx, promptId)
+    const finalEvent = buildPostFetchEvent("runCompleted", ctx, "p1");
     expect(finalEvent).toMatchObject({ type: "runCompleted", snapshot: { status: "idle" } });
+    expect(finalEvent).toMatchObject({ userEntryId: "p1", assistantEntryId: "p1" });
   });
 
   test("tool turn: message_start → tool_use block → tool_call → tool_result → message_complete", () => {
@@ -1482,7 +1508,9 @@ describe("streaming pipeline integration", () => {
 
     // message_complete
     out = fold({ type: "message_complete", prompt_id: "p1" }, acc);
-    expect(out.effects).toEqual([{ type: "fetchState", emit: "runCompleted" }]);
+    expect(out.effects).toEqual([
+      { type: "fetchState", emit: "runCompleted", promptId: "p1" },
+    ]);
   });
 
   test("error then retry: model_error → message_start (clears) → message_complete", () => {
@@ -1506,7 +1534,9 @@ describe("streaming pipeline integration", () => {
 
     // Turn completes successfully
     const out = fold({ type: "message_complete", prompt_id: "p1" }, acc);
-    expect(out.effects).toEqual([{ type: "fetchState", emit: "runCompleted" }]);
+    expect(out.effects).toEqual([
+      { type: "fetchState", emit: "runCompleted", promptId: "p1" },
+    ]);
   });
 
   test("unretried error: model_error → message_complete -> runFailed", () => {

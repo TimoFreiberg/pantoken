@@ -120,18 +120,32 @@ export function historyToSeedEvents(
     switch (item.type) {
       case "user": {
         const content = item.content;
+        const promptId =
+          typeof item.prompt_id === "string" ? item.prompt_id : undefined;
         out.push({
           sessionRef: ref,
           timestamp: ts(item, i),
           type: "userMessage",
-          id: `u-${seq++}`,
+          // The daemon's prompt_id IS the branch handle (POST /rewind's
+          // to_prompt_id). Thread it as both id (for client reconciliation) and
+          // entryId (the branch button's target). Falls back to a synthetic id
+          // only for malformed items lacking one (defensive — the wire schema
+          // guarantees prompt_id on `user` items).
+          id: promptId ?? `u-${seq++}`,
           text: typeof content === "string" ? content : "",
+          ...(promptId ? { entryId: promptId } : {}),
         });
         break;
       }
       case "assistant": {
         const blocks = item.blocks;
         if (!Array.isArray(blocks)) break;
+        // The assistant message's prompt_id: same per-turn id as the preceding
+        // `user` item (the daemon assigns one prompt_id per user turn, and the
+        // assistant reply carries it). Thread it as the branch handle for
+        // "branch from here" on the assistant turn.
+        const promptId =
+          typeof item.prompt_id === "string" ? item.prompt_id : undefined;
         for (const b of blocks) {
           const block = b as ContentBlock;
           if (!block || typeof block !== "object") continue;
@@ -142,6 +156,7 @@ export function historyToSeedEvents(
               type: "assistantDelta",
               text: block.text,
               channel: "text",
+              ...(promptId ? { entryId: promptId } : {}),
             });
           } else if (block.type === "thinking") {
             out.push({
@@ -150,6 +165,7 @@ export function historyToSeedEvents(
               type: "assistantDelta",
               text: block.text,
               channel: "thinking",
+              ...(promptId ? { entryId: promptId } : {}),
             });
           } else if (block.type === "tool_use") {
             out.push({

@@ -312,7 +312,11 @@ export async function createPolytokenDriver(
   function executeEffect(
     ws: WarmSession,
     effect:
-      | { type: "fetchState"; emit: "runCompleted" | "sessionUpdated" }
+      | {
+          type: "fetchState";
+          emit: "runCompleted" | "sessionUpdated";
+          promptId?: string;
+        }
       | { type: "reseed" }
       | { type: "refetchQueue" }
       | { type: "registerInterrogative"; pending: PendingInterrogative },
@@ -329,11 +333,13 @@ export async function createPolytokenDriver(
       }
       case "fetchState": {
         // Refresh the cached state, then build the follow-up event from the
-        // refreshed cache (buildPostFetchEvent is pure + tested).
+        // refreshed cache (buildPostFetchEvent is pure + tested). The promptId
+        // (from message_complete) is threaded through so runCompleted carries the
+        // branch-handle entryIds.
         void ws.client.state().then(({ data }) => {
           if (!data) return;
           ws.lastState = data;
-          emit(buildPostFetchEvent(effect.emit, ctx));
+          emit(buildPostFetchEvent(effect.emit, ctx, effect.promptId));
         });
         break;
       }

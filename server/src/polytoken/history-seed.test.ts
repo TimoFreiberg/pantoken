@@ -36,18 +36,29 @@ describe("historyToSeedEvents", () => {
     expect(historyToSeedEvents([], { ref })).toEqual([]);
   });
 
-  test("user item → userMessage", () => {
+  test("user item → userMessage with prompt_id as id + entryId", () => {
     const out = historyToSeedEvents([user("hello world")], { ref });
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({
       type: "userMessage",
       text: "hello world",
       sessionRef: ref,
+      id: "p1",
+      entryId: "p1",
     });
-    expect((out[0] as { id: string }).id).toMatch(/^u-/);
   });
 
-  test("assistant text block → assistantDelta(text channel)", () => {
+  test("user item without prompt_id → synthetic id, no entryId", () => {
+    const out = historyToSeedEvents(
+      [{ type: "user", content: "no id" } as unknown as HistoryItem],
+      { ref },
+    );
+    expect(out).toHaveLength(1);
+    expect((out[0] as { id: string }).id).toMatch(/^u-/);
+    expect(out[0]).not.toHaveProperty("entryId");
+  });
+
+  test("assistant text block → assistantDelta(text channel) with entryId", () => {
     const out = historyToSeedEvents(
       [assistant([{ type: "text", text: "hi there" }])],
       { ref },
@@ -57,10 +68,11 @@ describe("historyToSeedEvents", () => {
       type: "assistantDelta",
       text: "hi there",
       channel: "text",
+      entryId: "p1",
     });
   });
 
-  test("assistant thinking block → assistantDelta(thinking channel)", () => {
+  test("assistant thinking block → assistantDelta(thinking channel) with entryId", () => {
     const out = historyToSeedEvents(
       [assistant([{ type: "thinking", text: "reasoning...", signature: "sig" }])],
       { ref },
@@ -70,6 +82,7 @@ describe("historyToSeedEvents", () => {
       type: "assistantDelta",
       text: "reasoning...",
       channel: "thinking",
+      entryId: "p1",
     });
   });
 
@@ -215,12 +228,31 @@ describe("historyToSeedEvents", () => {
   });
 
   test("event ids are unique across items", () => {
+    // Distinct prompt_ids so each userMessage id is unique (the daemon assigns
+    // one prompt_id per user turn; reusing the same one would be a real collision).
     const out = historyToSeedEvents(
-      [user("a"), user("b"), user("c")],
+      [user("a", "p1"), user("b", "p2"), user("c", "p3")],
       { ref },
     );
     const ids = out.map((e) => (e as { id: string }).id);
     expect(new Set(ids).size).toBe(3);
+  });
+
+  test("malformed items without prompt_id get unique synthetic ids", () => {
+    // The u-${seq++} fallback must still produce unique ids for items lacking
+    // prompt_id (defensive — the wire schema guarantees it, but the fold must
+    // not collide if it's ever absent).
+    const out = historyToSeedEvents(
+      [
+        { type: "user", content: "a" } as unknown as HistoryItem,
+        { type: "user", content: "b" } as unknown as HistoryItem,
+        { type: "user", content: "c" } as unknown as HistoryItem,
+      ],
+      { ref },
+    );
+    const ids = out.map((e) => (e as { id: string }).id);
+    expect(new Set(ids).size).toBe(3);
+    for (const id of ids) expect(id).toMatch(/^u-/);
   });
 
   test("fallback timestamp is a valid ISO string (not h-N) when emitted_at absent", () => {
