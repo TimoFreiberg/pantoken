@@ -20,6 +20,7 @@
   import ImageLightbox from "./ImageLightbox.svelte";
   import ModelPicker from "./ModelPicker.svelte";
   import FacetBadge from "./FacetBadge.svelte";
+  import PermissionBadge from "./PermissionBadge.svelte";
   import ContextMeter from "./ContextMeter.svelte";
   import SegmentedControl from "./ui/SegmentedControl.svelte";
   import IconButton from "./ui/IconButton.svelte";
@@ -1001,6 +1002,7 @@
             </svg>
           </IconButton>
         {/if}
+        <PermissionBadge />
         <FacetBadge />
         <ModelPicker />
       </div>

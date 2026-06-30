@@ -1430,6 +1430,12 @@ export class SessionHub {
           msg.sessionId ?? conn.focusedId ?? undefined,
         );
         return;
+      case "setPermissionMonitor":
+        this.driver.setPermissionMonitor(
+          msg.mode,
+          msg.sessionId ?? conn.focusedId ?? undefined,
+        );
+        return;
       case "openSession":
         void this.switchTo(conn, () => this.driver.openSession(msg.path));
         return;

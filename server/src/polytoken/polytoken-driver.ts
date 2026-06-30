@@ -34,6 +34,7 @@ import type {
   ModelDefaults,
   ModelOption,
   PathStat,
+  PermissionMonitorMode,
   ProviderInfo,
   SessionDriverEvent,
   SessionId,
@@ -129,6 +130,11 @@ interface WarmSession {
    *  updated whenever the driver reads GET /state. Lets ctx.snapshot() be
    *  synchronous (the pure mapper never does I/O). */
   lastState: DaemonStateSnapshot | null;
+  /** Cached active permission-monitor mode ("standard"|"bypass"|"autonomous").
+   *  Seeded once at warm-up via GET /permission-monitor (the monitor isn't in
+   *  GET /state) + kept in sync by the permission_monitor_switch event. Lets
+   *  ctx.snapshot() be synchronous like lastState. */
+  monitorMode: PermissionMonitorMode | undefined;
   /** Pending host-UI interrogatives awaiting an operator response, keyed by the
    *  daemon's interrogative id. Populated by registerInterrogative effects;
    *  drained by respondUi. Lets the reverse builder (ui-bridge.ts) recover the
@@ -303,7 +309,14 @@ export async function createPolytokenDriver(
       workspace: workspaceFor(ws),
       now: () => ts,
       snapshot: (status: "idle" | "running" | "initializing" | "failed") =>
-        snapshotFromState(ws.lastState, ws.ref, workspaceFor(ws), status, ts),
+        snapshotFromState(
+          ws.lastState,
+          ws.ref,
+          workspaceFor(ws),
+          status,
+          ts,
+          ws.monitorMode,
+        ),
       liveStatus: () => statusFromState(ws.lastState),
     };
   }
@@ -319,6 +332,7 @@ export async function createPolytokenDriver(
         }
       | { type: "reseed" }
       | { type: "refetchQueue" }
+      | { type: "setMonitorMode"; mode: PermissionMonitorMode }
       | { type: "registerInterrogative"; pending: PendingInterrogative },
     ctx: ReturnType<typeof makeCtx>,
   ): void {
@@ -379,6 +393,14 @@ export async function createPolytokenDriver(
         });
         break;
       }
+      case "setMonitorMode": {
+        // The permission_monitor_switch event carried the authoritative new mode;
+        // update the cache so subsequent ctx.snapshot() calls reflect it. (The
+        // matching sessionUpdated snapshot was already emitted from the event
+        // payload, ahead of this effect.)
+        ws.monitorMode = effect.mode;
+        return;
+      }
     }
   }
 
@@ -409,6 +431,16 @@ export async function createPolytokenDriver(
 
     // Seed the state cache so ctx.snapshot() works on the very first event.
     const { data: initialState } = await client.state();
+    // Seed the permission-monitor mode once (it isn't in GET /state). Best-effort:
+    // a failure leaves monitorMode undefined until the first permission_monitor_switch
+    // event — the badge is empty but functional, not a hard failure.
+    let seedMode: PermissionMonitorMode | undefined;
+    try {
+      const resp = await client.getPermissionMonitor();
+      seedMode = resp.monitor.type;
+    } catch (e) {
+      console.error("[polytoken] getPermissionMonitor seed failed", e);
+    }
 
     const ref = {
       workspaceId: cwd,
@@ -421,6 +453,7 @@ export async function createPolytokenDriver(
       unsub: null,
       acc: createAccumulator(),
       lastState: initialState ?? null,
+      monitorMode: seedMode,
       pendingInterrogatives: new Map(),
       lastFocusedAt: Date.now(),
       lastSeed: [],
@@ -488,6 +521,7 @@ export async function createPolytokenDriver(
           workspaceFor(ws),
           statusFromState(ws.lastState),
           now(),
+          ws.monitorMode,
         ),
       });
     }
@@ -537,6 +571,7 @@ export async function createPolytokenDriver(
           workspaceFor(ws),
           statusFromState(ws.lastState),
           ts,
+          ws.monitorMode,
         ),
       });
     }
@@ -1105,6 +1140,7 @@ export async function createPolytokenDriver(
             workspaceFor(ws),
             statusFromState(ws.lastState),
             now(),
+            ws.monitorMode,
           ),
         },
         ...ws.lastSeed,
@@ -1273,6 +1309,16 @@ export async function createPolytokenDriver(
       if (!ws) return;
       void ws.client.setFacet(facet).catch((e) => {
         console.error("[polytoken] setFacet failed", e);
+      });
+    },
+    setPermissionMonitor(mode: PermissionMonitorMode, sessionId?: SessionId): void {
+      const ws = target(sessionId);
+      if (!ws) return;
+      // Optimistically set the cached mode so the badge updates immediately; the
+      // permission_monitor_switch event will confirm (or correct) it authoritatively.
+      ws.monitorMode = mode;
+      void ws.client.setPermissionMode(mode).catch((e) => {
+        console.error("[polytoken] setPermissionMonitor failed", e);
       });
     },
   };

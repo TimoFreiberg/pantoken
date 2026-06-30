@@ -16,6 +16,7 @@ import type {
   OAuthDeviceInfo,
   OAuthLoginPrompt,
   ProviderInfo,
+  PermissionMonitorMode,
   SessionDriverEvent,
   SessionId,
   SessionListEntry,
@@ -344,6 +345,9 @@ export type ClientMessage =
   /** Switch a session's active facet (e.g. "execute" ↔ "plan"). Omit sessionId to
    *  target the focused session. */
   | { type: "setFacet"; facet: string; sessionId?: SessionId }
+  /** Switch the active permission-monitor mode. Omit sessionId to target the
+   *  focused session. Mirrors `setFacet`. */
+  | { type: "setPermissionMonitor"; mode: PermissionMonitorMode; sessionId?: SessionId }
   /** Save an API key for a provider (writes the daemon's auth.json — shared with terminal
    *  agent). The server refreshes the model registry and re-broadcasts provider/model
    *  lists; a failure (unsupported provider / empty key) comes back as `error`. */

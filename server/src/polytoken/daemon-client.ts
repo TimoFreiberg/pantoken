@@ -37,6 +37,7 @@ export type RewindRequest = S["RewindRequest"];
 export type SessionTitleRequest = S["SessionTitleRequest"];
 export type InterrogativeResponse = S["InterrogativeResponse"];
 export type PermissionMonitorRequest = S["PermissionMonitorRequest"];
+export type PermissionMonitorResponse = S["PermissionMonitorResponse"];
 export type SessionHistorySnapshot = S["SessionHistorySnapshot"];
 export type FacetRequest = S["FacetRequest"];
 export type CompactRequest = S["CompactRequest"];
@@ -814,6 +815,18 @@ export class DaemonClient {
     const body: PermissionMonitorRequest = { mode };
     const { status, error } = await this.post("/permission-monitor", body);
     if (status !== 200) throw new Error(`POST /permission-monitor failed (${status}): ${error}`);
+  }
+
+  /** `GET /permission-monitor` — the live per-session monitor (+ global defaults).
+   *  Used once at session warm-up to seed the cached mode (the monitor isn't in
+   *  GET /state). Ongoing sync rides the `permission_monitor_switch` event. */
+  async getPermissionMonitor(): Promise<PermissionMonitorResponse> {
+    const { status, data, error } = await this.get<PermissionMonitorResponse>(
+      "/permission-monitor",
+    );
+    if (status !== 200 || !data)
+      throw new Error(`GET /permission-monitor failed (${status}): ${error}`);
+    return data;
   }
 
   /** `POST /clear` — reset context (also resets the shell env). */

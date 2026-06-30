@@ -6,6 +6,7 @@ import type {
   HostUiResponse,
   ModelDefaults,
   ModelOption,
+  PermissionMonitorMode,
   ProviderInfo,
   ServerMessage,
   SessionDriverEvent,
@@ -217,6 +218,10 @@ class FakeDriver implements PilotDriver {
   facetCalls: { facet: string; sessionId?: string }[] = [];
   setFacet(facet: string, sessionId?: string) {
     this.facetCalls.push({ facet, sessionId });
+  }
+  permissionMonitorCalls: { mode: string; sessionId?: string }[] = [];
+  setPermissionMonitor(mode: PermissionMonitorMode, sessionId?: string) {
+    this.permissionMonitorCalls.push({ mode, sessionId });
   }
 
   // --- Global provider/model config ---

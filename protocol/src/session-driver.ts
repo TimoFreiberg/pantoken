@@ -26,6 +26,11 @@ export interface SessionRef {
  *  - `idle`: settled, awaiting input.
  *  - `failed`: the last run errored. */
 export type SessionStatus = "idle" | "initializing" | "running" | "failed";
+/** The daemon's per-session permission-monitor mode. Mirrors the daemon's
+ *  OpenAPI-generated `PermissionMonitorMode` (server/src/polytoken/wire-types.ts)
+ *  — the single source of truth is the daemon spec; this copy is the shared
+ *  client/server import. Keep in sync if the daemon adds a mode. */
+export type PermissionMonitorMode = "standard" | "bypass" | "autonomous";
 export type SessionMessageDeliveryMode = "steer" | "followUp";
 
 /** An image attachment for a user message, as the daemon carries them. Base64-encoded
@@ -273,6 +278,10 @@ export interface SessionSnapshot {
   /** The active facet (e.g. "execute", "plan"). Undefined means unknown / default;
    *  the StatusHeader shows a badge only when this is set and not "execute". */
   readonly facet?: string;
+  /** The active permission-monitor mode ("standard" | "bypass" | "autonomous").
+   *  Undefined means unknown (not yet seeded). The daemon exposes only the live
+   *  per-session monitor, not the global config default. */
+  readonly permissionMonitor?: PermissionMonitorMode;
   /** The active plan document's markdown (set when the plan facet produces a
    *  plan). Undefined means no plan exists / the facet isn't "plan". */
   readonly activePlan?: string;
