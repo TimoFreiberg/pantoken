@@ -206,7 +206,7 @@ Already addressed from the same audit (kept as record):
 ## 🟢 Polish / fast-follow
 
 
-- [ ] **Remove `mergeTools` — every tool call renders as its own card (keep turn-level "Worked for Ns").**
+- [x] **Remove `mergeTools` — every tool call renders as its own card (keep turn-level "Worked for Ns").**
       `client/src/lib/transcript-view.ts` has two collapse layers: Pass-1 `mergeTools` folds runs
       of "summarizable" tools into a single `MergedToolsItem` (rendered as a prose `<ToolSummary>`
       card "Read 2 files, ran 3 commands"), and Pass-2 `groupTurns` folds a turn's early work behind
@@ -223,6 +223,10 @@ Already addressed from the same audit (kept as record):
       but must assert plain `ToolItem`s instead of `MergedToolsItem`s. 2026-07-01.
       **human comment:** this paragraph was written by an agent summarizing my short instructions.
       i think this might have been a misunderstanding - my intent was to _never_ merge single tool calls (e.g. 1 bash, 2 reads) into a single line, but keep merging the early part of a _turn_ into the "worked for <time>" summary.
+      **Already done:** `mergeTools`, `MergedToolsItem`, `ToolSummary`, and `isSummarizedTool` are
+      completely gone from the codebase. Only `groupTurns`/`WorkLane`/`isWorkTool` remain — exactly
+      the behavior the human comment describes (individual tool cards, turn-level "Worked for Ns"
+      summary preserved).
 - [ ] **Right-side sidebar: flagged files, todos, async jobs (polytoken TUI parity).** The
       polytoken TUI shows a right-hand sidebar with live session context the daemon already
       exposes over HTTP but pilot never surfaces. Sources (all in
