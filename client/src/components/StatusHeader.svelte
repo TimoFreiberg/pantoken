@@ -3,6 +3,7 @@
   import { sessionSubtitle } from "../lib/session-subtitle.js";
   import GoalBadge from "./GoalBadge.svelte";
   import IconButton from "./ui/IconButton.svelte";
+  import RightSidebar from "./RightSidebar.svelte";
 
   let hotkeyN = $state(0);
 
@@ -20,6 +21,10 @@
       // ⌘⇧T — the session tree (/tree).
       e.preventDefault();
       store.toggleTree();
+    } else if (e.key === "j" || e.key === "J") {
+      // ⌘⇧J — the right context panel (flagged files + todos).
+      e.preventDefault();
+      store.toggleRightSidebar();
     }
   }
 
@@ -179,6 +184,16 @@
         <circle cx="18" cy="9" r="2.2" />
         <path d="M6 7.2v9.6" />
         <path d="M18 11.2v.6a4 4 0 0 1-4 4H6" />
+      </svg>
+    </IconButton>
+    <IconButton
+      data-testid="context-toggle"
+      title="Context panel — flagged files & todos (⌘⇧J)"
+      aria-label="Toggle context panel"
+      onclick={() => store.toggleRightSidebar()}
+    >
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 6h18M3 12h18M3 18h18" />
       </svg>
     </IconButton>
     <IconButton

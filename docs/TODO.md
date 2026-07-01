@@ -227,7 +227,7 @@ Already addressed from the same audit (kept as record):
       completely gone from the codebase. Only `groupTurns`/`WorkLane`/`isWorkTool` remain — exactly
       the behavior the human comment describes (individual tool cards, turn-level "Worked for Ns"
       summary preserved).
-- [ ] **Right-side sidebar: flagged files, todos, async jobs (polytoken TUI parity).** The
+- [x] **Right-side sidebar: flagged files, todos, async jobs (polytoken TUI parity).** The
       polytoken TUI shows a right-hand sidebar with live session context the daemon already
       exposes over HTTP but pilot never surfaces. Sources (all in
       `server/src/polytoken/wire-types.ts`):
@@ -247,6 +247,13 @@ Already addressed from the same audit (kept as record):
       are the concrete ask; jobs + diffs are stretch. The `investigated and NOT changed` note
       on the old `Bulletproof queued-message delivery` item covers the queue plumbing this
       depends on. 2026-06-30.
+      **Implemented 2026-07-01 (flagged files + todos):** full data path wired —
+      `FlaggedFile`/`TodoItem` protocol types, `snapshotFromState` threading, overwrite-guarded
+      `foldEvent`, `RightSidebar.svelte` drawer component (desktop column + mobile slide-in),
+      `⌘⇧J` hotkey + StatusHeader toggle button, mock `context` script, 3 e2e tests. Jobs
+      (stretch) deferred — no `jobs` field on `SessionStateSnapshot` (needs `GET /jobs` or
+      event-fold). Live todo events (`StateDelta`, not `DaemonEvent`) also deferred — todos
+      update on snapshot refresh only. Session diffs (`SourceControlSnapshot`) deferred.
 
 
 - [~] **Provider OAuth login** → ~done (owner, 2026-06-22 — "i'll get back to it if there's

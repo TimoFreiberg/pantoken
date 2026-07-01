@@ -279,6 +279,9 @@ class PilotStore {
   // Sidebar open/collapsed. Default open on a roomy viewport, closed on a phone
   // (where it's an overlay drawer). Persisted per-device in localStorage.
   sidebarOpen = $state(initialSidebarOpen());
+  // Right sidebar (context panel: flagged files + todos). Default closed — it's
+  // contextual, not navigational, so it's opt-in. Not persisted (simpler v1).
+  rightSidebarOpen = $state(false);
   // Sidebar filter: false = active only (hide archived + sessions untouched >7d),
   // true = show everything. Per-device, persisted in localStorage; defaults to
   // active-only (the decluttering is the point).
@@ -1959,6 +1962,13 @@ class PilotStore {
   openSidebar(): void {
     this.sidebarOpen = true;
     persistSidebarOpen(true);
+  }
+  /** Toggle the right context panel (flagged files + todos). */
+  toggleRightSidebar(): void {
+    this.rightSidebarOpen = !this.rightSidebarOpen;
+  }
+  closeRightSidebar(): void {
+    this.rightSidebarOpen = false;
   }
   /** Flip the active-only ↔ all filter; persisted per-device. */
   toggleShowArchived(): void {

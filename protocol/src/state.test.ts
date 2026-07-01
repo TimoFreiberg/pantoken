@@ -722,4 +722,164 @@ describe("foldEvent", () => {
     );
     expect(s.goal).toBeUndefined();
   });
+
+  test("snapshot.flags propagates to state.flags (the sidebar data path)", () => {
+    const flags = [
+      { path: "src/app.ts", mode: "included" as const },
+      { path: "README.md", mode: "referenced" as const },
+    ];
+    const s = foldAll([
+      base({
+        type: "sessionUpdated",
+        snapshot: {
+          ref,
+          workspace: { workspaceId: "w", path: "/p" },
+          title: "t",
+          status: "idle",
+          updatedAt: "t",
+          flags,
+        },
+      }),
+    ]);
+    expect(s.flags).toEqual(flags);
+  });
+
+  test("a snapshot without flags leaves existing state.flags intact", () => {
+    const flags = [{ path: "src/app.ts", mode: "included" as const }];
+    const s = initialSessionState();
+    foldEvent(
+      s,
+      base({
+        type: "sessionUpdated",
+        snapshot: {
+          ref,
+          workspace: { workspaceId: "w", path: "/p" },
+          title: "t",
+          status: "idle",
+          updatedAt: "t1",
+          flags,
+        },
+      }),
+    );
+    expect(s.flags).toEqual(flags);
+    // A later snapshot that omits flags must not erase the known value.
+    foldEvent(
+      s,
+      base({
+        type: "sessionUpdated",
+        snapshot: {
+          ref,
+          workspace: { workspaceId: "w", path: "/p" },
+          title: "t",
+          status: "idle",
+          updatedAt: "t2",
+        },
+      }),
+    );
+    expect(s.flags).toEqual(flags);
+  });
+
+  test("snapshot.flags = [] clears state.flags to empty", () => {
+    const flags = [{ path: "src/app.ts", mode: "included" as const }];
+    const s = initialSessionState();
+    foldEvent(
+      s,
+      base({
+        type: "sessionUpdated",
+        snapshot: {
+          ref,
+          workspace: { workspaceId: "w", path: "/p" },
+          title: "t",
+          status: "idle",
+          updatedAt: "t1",
+          flags,
+        },
+      }),
+    );
+    expect(s.flags).toEqual(flags);
+    // A later snapshot carrying flags: [] clears it.
+    foldEvent(
+      s,
+      base({
+        type: "sessionUpdated",
+        snapshot: {
+          ref,
+          workspace: { workspaceId: "w", path: "/p" },
+          title: "t",
+          status: "idle",
+          updatedAt: "t2",
+          flags: [],
+        },
+      }),
+    );
+    expect(s.flags).toEqual([]);
+  });
+
+  test("snapshot.todos propagates to state.todos (the sidebar data path)", () => {
+    const todos = [
+      {
+        id: 1,
+        title: "Write tests",
+        description: "Add unit tests for the fold",
+        status: "in_progress" as const,
+        dependencies: [] as readonly number[],
+      },
+    ];
+    const s = foldAll([
+      base({
+        type: "sessionUpdated",
+        snapshot: {
+          ref,
+          workspace: { workspaceId: "w", path: "/p" },
+          title: "t",
+          status: "idle",
+          updatedAt: "t",
+          todos,
+        },
+      }),
+    ]);
+    expect(s.todos).toEqual(todos);
+  });
+
+  test("a snapshot without todos leaves existing state.todos intact", () => {
+    const todos = [
+      {
+        id: 1,
+        title: "Write tests",
+        description: "Add unit tests",
+        status: "pending" as const,
+        dependencies: [] as readonly number[],
+      },
+    ];
+    const s = initialSessionState();
+    foldEvent(
+      s,
+      base({
+        type: "sessionUpdated",
+        snapshot: {
+          ref,
+          workspace: { workspaceId: "w", path: "/p" },
+          title: "t",
+          status: "idle",
+          updatedAt: "t1",
+          todos,
+        },
+      }),
+    );
+    expect(s.todos).toEqual(todos);
+    foldEvent(
+      s,
+      base({
+        type: "sessionUpdated",
+        snapshot: {
+          ref,
+          workspace: { workspaceId: "w", path: "/p" },
+          title: "t",
+          status: "idle",
+          updatedAt: "t2",
+        },
+      }),
+    );
+    expect(s.todos).toEqual(todos);
+  });
 });

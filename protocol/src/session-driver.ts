@@ -271,6 +271,29 @@ export interface GoalInfo {
   readonly lifecycle: string;
 }
 
+/** A file the agent flagged as important for this session. JSON-safe projection
+ *  of the daemon's FlagEntry (`{path, mode}`). The path is relative to the
+ *  session's cwd. `mode` distinguishes files included in context vs referenced. */
+export interface FlaggedFile {
+  readonly path: string;
+  readonly mode: "included" | "referenced";
+}
+
+/** A todo item tracked by the agent. JSON-safe projection of the daemon's
+ *  TodoSnapshot — trimmed to the fields the UI needs (emitted_at omitted). */
+export interface TodoItem {
+  /** Stable integer ID (the daemon's todo id). */
+  readonly id: number;
+  /** Short title. */
+  readonly title: string;
+  /** Full description text. */
+  readonly description: string;
+  /** Lifecycle state: pending → in_progress → done, or blocked. */
+  readonly status: "pending" | "in_progress" | "done" | "blocked";
+  /** IDs of other todos this one depends on. */
+  readonly dependencies: readonly number[];
+}
+
 export interface SessionSnapshot {
   readonly ref: SessionRef;
   readonly workspace: WorkspaceRef;
@@ -302,6 +325,14 @@ export interface SessionSnapshot {
    *  `null | CurrentGoal | undefined`, unlike `active_facet` which is just
    *  present-or-absent). Drives the StatusHeader goal badge. */
   readonly goal?: GoalInfo | null;
+  /** Flagged files for this session. Undefined means the snapshot didn't carry
+   *  them (older daemon — preserve existing state); an array (including empty)
+   *  means the daemon reported the current set. Drives the RightSidebar. */
+  readonly flags?: readonly FlaggedFile[];
+  /** Todos for this session. Same overwrite-guarded semantics as `flags`.
+   *  Drives the RightSidebar. Updates on snapshot refresh only (live todo events
+   *  are StateDelta, not DaemonEvent — handled in a future iteration). */
+  readonly todos?: readonly TodoItem[];
 }
 
 /**

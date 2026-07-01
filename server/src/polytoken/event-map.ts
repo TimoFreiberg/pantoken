@@ -17,6 +17,7 @@
 
 import type { components } from "./wire-types.js";
 import type {
+  FlaggedFile,
   GoalInfo,
   ImageContent,
   SessionDriverEvent,
@@ -26,6 +27,7 @@ import type {
   SessionStatus,
   SessionUsage,
   PermissionMonitorMode,
+  TodoItem,
   WorkspaceRef,
 } from "@pilot/protocol";
 import { defaultModelRef } from "./models.js";
@@ -259,6 +261,25 @@ export function snapshotFromState(
     // fold clears state.goal so the badge hides); undefined (field absent, older
     // daemon) → undefined (the fold preserves a known goal).
     goal: projectGoal(state?.current_goal),
+    // Thread flags + todos from the daemon state. The daemon's schema requires
+    // these (FlagEntry[] / TodoSnapshot[]), so they're present on every snapshot.
+    // Project to pilot's trimmed types. Undefined when state is null (older daemon
+    // or cold path — the fold preserves the known list).
+    flags: state?.flags
+      ? state.flags.map((f) => ({
+          path: f.path,
+          mode: f.mode,
+        }))
+      : undefined,
+    todos: state?.todos
+      ? state.todos.map((t) => ({
+          id: t.id,
+          title: t.title,
+          description: t.description,
+          status: t.status,
+          dependencies: [...t.dependencies],
+        }))
+      : undefined,
   };
 }
 

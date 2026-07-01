@@ -3,6 +3,7 @@
   import { store } from "./lib/store.svelte.js";
   import StatusHeader from "./components/StatusHeader.svelte";
   import Sidebar from "./components/Sidebar.svelte";
+  import RightSidebar from "./components/RightSidebar.svelte";
   import ConnectionBanner from "./components/ConnectionBanner.svelte";
   import Transcript from "./components/Transcript.svelte";
   import WorkingIndicator from "./components/WorkingIndicator.svelte";
@@ -45,7 +46,7 @@
       typeof window !== "undefined" &&
       window.matchMedia(PHONE_MQ).matches,
   );
-  const scripts = ["reply", "markdown", "search", "thinkingtools", "skill", "confirm", "trust", "input", "qna", "answercard", "answerleadup", "ambient", "compat", "bgrun", "bgwait", "queue", "deliverqueue", "initializing", "editdiff", "images", "error", "idle", "streamhold", "staleidle", "pendinghold", "timeout", "yesno", "journalnudge", "contextfull", "longoutput", "selectmany", "planhandoff", "planhandofftimeout", "planfacet", "planview", "goalactive", "goalclear", "permission", "failnewsession", "failsession", "goal", "unknown"];
+  const scripts = ["reply", "markdown", "search", "thinkingtools", "skill", "confirm", "trust", "input", "qna", "answercard", "answerleadup", "ambient", "compat", "bgrun", "bgwait", "queue", "deliverqueue", "initializing", "editdiff", "images", "error", "idle", "streamhold", "staleidle", "pendinghold", "timeout", "yesno", "journalnudge", "contextfull", "longoutput", "selectmany", "planhandoff", "planhandofftimeout", "planfacet", "planview", "goalactive", "goalclear", "context", "permission", "failnewsession", "failsession", "goal", "unknown"];
 
   // The agent-driven attention surfaces currently active, in cycle order. The ⌘\
   // hotkey advances focus through these; each cycled-away-from surface collapses to
@@ -290,6 +291,7 @@
       <ApprovalLayer />
     </div>
   </div>
+  <RightSidebar />
 </div>
 <TrustCard />
 <Settings />
