@@ -145,11 +145,20 @@ elsewhere in this file are not duplicated here.
       `POST /interrogative/{id}/respond`), `setClientPresence` (trivial local callback —
       the hub passes a `() => boolean` predicate so the driver can deny-safe a trust prompt
       when nobody is connected), `clearQueue` (`DELETE /turn/input/newest`).
-- [ ] **⌘↑/⌘↓ prompt navigation should settle in ≤300ms.** The existing hotkeys that jump
+- [x] **⌘↑/⌘↓ prompt navigation should settle in ≤300ms.** The existing hotkeys that jump
       between user prompts in the transcript scroll too slowly — the target prompt should
       be visible and settled (no smooth-scroll animation still in flight) within 300ms.
       Likely needs swapping the smooth scroll for a faster animation duration or an instant
       jump with a brief highlight, rather than the default smooth-scroll behavior.
+      **Done 2026-07-01:** replaced the `scrollIntoView({behavior:"smooth"})` in
+      `stepPrompt` with an instant `scrollTo` computing the exact target scrollTop
+      (clamped to max scroll, mirroring `block:"start"` behavior) — lands within a single
+      frame. A brief accent-tinted flash animation (`nav-flash` class, ~600ms) on the
+      landed row confirms the jump so the instant scroll isn't disorienting. The flash
+      respects `prefers-reduced-motion`. The `progScrollUntil` window for prompt-stepping
+      shrank from 800ms→120ms (scrolls are instant now); `settleScroll`/`scrollToBottom`
+      keep their own longer windows. E2e polish suite (incl. the prompt-step + anchor
+      tests) all green.
 - [ ] **Visible prev/next-prompt nav element (discoverability).** The ⌘↑/⌘↓ prompt
       navigation is invisible to a new user. Add a small floating prev/next control (↑↓
       arrows or chevrons) that fades in when the cursor/scroll position is in the transcript
@@ -437,6 +446,34 @@ New parity/UX items from the owner, grounded against current source.
       (stretch) deferred — no `jobs` field on `SessionStateSnapshot` (needs `GET /jobs` or
       event-fold). Live todo events (`StateDelta`, not `DaemonEvent`) also deferred — todos
       update on snapshot refresh only. Session diffs (`SourceControlSnapshot`) deferred.
+
+- [ ] **Hotkey for permission mode selector.** The permission monitor mode UI
+      (`PermissionBadge.svelte`, mounted in the Composer toolbar) is clickable but
+      has no keyboard shortcut — every UI action needs a hotkey (repo rule). Add a
+      hotkey that cycles/cycles through permission modes, with a tooltip naming the
+      shortcut.
+
+- [ ] **Find out where the effort toggle has gone.** The effort/thinking-level toggle
+      (previously exposed in the pi driver era) is no longer visible in the UI.
+      Investigate whether the polytoken daemon exposes an effort/thinking-level
+      setting and whether pilot's UI surface for it was removed or just went missing.
+      If the daemon supports it, re-add the UI control; if not, confirm it's gone
+      for good and document why.
+
+- [ ] **Queued/follow-up prompts added to transcript immediately but not actually
+      submitted.** When a user sends a follow-up prompt mid-turn (while
+      `turn_in_flight` is true), pilot immediately renders it as a user message
+      bubble in the transcript — but the prompt may not actually be reaching the
+      agent successfully. The prompt should instead be displayed **separately**
+      (as a pending/queued indicator, the way the pi driver did it) and only
+      folded into the transcript history once the agent actually receives/processes
+      it. The polytoken TUI does exactly this: a queued prompt is held by the
+      daemon and delivered cleanly once the previous turn finishes (confirmed by
+      detach → reattach → prompt arrives after the turn completes). So the daemon
+      API supports it; pilot just needs to mirror the TUI's queue display
+      behavior. Fix: stop eagerly adding queued prompts to the transcript; show
+      them as a separate pending state and merge them into history on actual
+      delivery/acknowledgement by the daemon.
 
 
 ## ⚡ Performance & network efficiency (2026-06-26 audit)

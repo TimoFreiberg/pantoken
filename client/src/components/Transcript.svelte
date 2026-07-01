@@ -243,16 +243,19 @@
   //     `.row.user` list: null = not stepping (sitting at the live tail). ↑ walks toward
   //     older prompts, ↓ toward newer ones, and stepping past the newest returns to the
   //     live bottom. The CURSOR — not the scroll position — is the source of truth, so a
-  //     rapid burst of presses steps deterministically even while a smooth scroll from the
-  //     previous press is still animating (reading scrollTop mid-animation would stutter).
+  //     rapid burst of presses steps deterministically even while a scroll from the
+  //     previous press is still settling (reading scrollTop mid-jump would stutter).
   let navIndex: number | null = null;
-  // A smooth scroll fires `scroll` events of its own; treat scrolls within this window as
-  // ours and keep the cursor. Once it lapses, a genuine user scroll drops the cursor so
-  // the next ↑ re-anchors to the most recent prompt. A mis-timed window only costs that
-  // re-anchor, never breakage — so a too-long smooth scroll degrades gracefully.
+  // A programmatic scroll fires `scroll` events of its own; treat scrolls within this
+  // window as ours and keep the cursor. Once it lapses, a genuine user scroll drops the
+  // cursor so the next ↑ re-anchors to the most recent prompt. Prompt-stepping uses an
+  // INSTANT scroll (scrollTo, no animation), so it lands within a frame or two; the
+  // window is short (120ms) but still covers the async scroll-event dispatch + any rAF
+  // the browser defers to. settleScroll (switch/restore/send) keeps its own longer
+  // 500ms window since it chases late layout reflow.
   let progScrollUntil = 0;
-  function markProgScroll(): void {
-    progScrollUntil = Date.now() + 800;
+  function markProgScroll(ms = 120): void {
+    progScrollUntil = Date.now() + ms;
   }
 
   // Per-session reading position, persisted so switching back to a warmed session
@@ -528,8 +531,36 @@
       // ⌘↑: first press anchors to your reading spot; otherwise one older, clamped oldest.
       navIndex = navIndex === null ? firstUpAnchor(prompts) : Math.max(0, navIndex - 1);
     }
+    const target = prompts[navIndex];
+    if (!target) return;
+    // INSTANT jump (no smooth animation) so the prompt is visible + settled within a
+    // frame — well under the ≤300ms target. scrollIntoView({block:"start"}) clamps at
+    // the max scroll offset (a prompt near the tail can't reach the top), so we
+    // replicate that with Math.min. A brief flash on the row confirms the landing
+    // (see flashPromptRow) so the instant jump isn't disorienting.
+    const scTop = scroller.getBoundingClientRect().top;
+    const max = scroller.scrollHeight - scroller.clientHeight;
+    const top = Math.min(
+      target.getBoundingClientRect().top - scTop + scroller.scrollTop,
+      max,
+    );
     markProgScroll();
-    prompts[navIndex]?.scrollIntoView({ block: "start", behavior: "smooth" });
+    scroller.scrollTo({ top });
+    flashPromptRow(target);
+  }
+
+  // Brief highlight flash on a prompt row the user just jumped to, so an instant scroll
+  // isn't disorienting. Removes any prior flash class first so rapid bursts (↑↑↑) reset
+  // the animation cleanly rather than no-op'ing on an already-flashing row.
+  let flashTimer: ReturnType<typeof setTimeout> | undefined;
+  function flashPromptRow(row: HTMLElement): void {
+    row.classList.remove("nav-flash");
+    // Force a reflow so the class removal takes effect before re-adding — without this
+    // the browser coalesces the remove+add and the animation doesn't restart.
+    void row.offsetWidth;
+    row.classList.add("nav-flash");
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => row.classList.remove("nav-flash"), 700);
   }
 
   // Global hotkey. Cmd/Ctrl modifier keeps it clear of the composer's type-to-focus
@@ -973,6 +1004,9 @@
     .new-pill {
       animation: none;
     }
+    .row.user.nav-flash {
+      animation: none;
+    }
   }
   .col {
     /* Wide track so fenced code / tables can break out into the desktop gutter. Every
@@ -1059,6 +1093,20 @@
     max-width: 86%;
     white-space: pre-wrap;
     word-break: break-word;
+  }
+  /* Brief accent flash on a prompt row the user jumped to via ⌘↑/⌘↓, confirming the
+     landing target after an instant (non-animated) scroll. The flash is on the row, not
+     the bubble, so it reads as a location marker rather than a state change. */
+  .row.user.nav-flash {
+    animation: nav-flash 0.6s ease-out;
+  }
+  @keyframes nav-flash {
+    0% {
+      background: color-mix(in srgb, var(--accent) 14%, transparent);
+    }
+    100% {
+      background: transparent;
+    }
   }
   /* Echo of the image attachments the user sent with this prompt. Right-aligned
      thumbnails under the bubble (the row is flex-end); the same data-URL the
