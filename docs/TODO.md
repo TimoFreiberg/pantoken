@@ -493,16 +493,21 @@ mobile variant (remote-only, no local spawning) is already anticipated.
 
 **Current working plan:**
 
-- **Rust hub as a persistent standalone daemon** — the central coordination layer.
-  Spawns/monitors local polytoken daemon processes, opens SSH connections to
-  remote hosts (russh) to spawn daemons there, and exposes a single entry point
-  that gives any client uniform access to all sessions on the host. Launches as a
-  system service (launchd/systemd), independent of any UI — so it outlives the
-  desktop window and serves both desktop and mobile uniformly.
-- **Tauri desktop app** — Svelte frontend (kept as-is) in a system webview, with
-  Rust backend via Tauri IPC for native OS affordances (file pickers, menus,
-  tray, etc.). The Tauri app is just another client of the Rust hub, one that
-  *also* gets native desktop capabilities on top.
+- **Rust hub runs inside the Tauri app (tray-resident), not as a separate
+  launchd daemon.** Tauri's system-tray feature keeps the Rust backend (Tokio)
+  alive when the window is closed — the `.app` *is* the background service.
+  Close window → tray icon stays → hub keeps serving mobile clients over the
+  network; click tray → window reopens. This is the Claude/Codex model (desktop
+  app must keep running for remote control) and avoids asking users to install a
+  launchd/systemd service. Tauri's single-instance plugin prevents duplicate
+  launches. A headless launchd/systemd path remains a valid *option* for a
+  always-on Mac Mini that never opens a window, but it's not the default
+  distribution story.
+- **The Tauri app IS the hub + the desktop frontend** — the Rust backend serves
+  both the local webview (via Tauri IPC) and remote mobile clients (via
+  HTTP/WS), so there's one process, not two. Svelte frontend (kept as-is) in a
+  system webview, with native OS affordances (file pickers, menus, tray) via
+  Tauri IPC.
 - **Mobile app** — separate variant, remote-only. Talks to the same Rust hub
   over the network (Tailscale). Tech stack TBD (could be a PWA, a native
   wrapper, or whatever fits). No local spawning, no native OS integration
@@ -531,6 +536,23 @@ mobile variant (remote-only, no local spawning) is already anticipated.
 - The mobile variant is a separate concern and doesn't constrain the desktop
   choice. The phone-over-Tailscale property is preserved by the Rust hub being a
   persistent networked service.
+
+**Distribution & auto-update:**
+- Tauri ships a built-in updater (`tauri-plugin-updater`): each release produces
+  a signed bundle (`.dmg`/`.app`) + signature file + JSON manifest; the running
+  app fetches the manifest, downloads the bundle, verifies the signature, and
+  applies it in-place — no App Store, no git checkout on the user's machine.
+  This replaces the current "run from git checkout + `git fetch`" auto-update
+  model for the `.app` distribution.
+- **macOS notarization (Gatekeeper) is the $99/y Apple Developer Program
+  question, and it's orthogonal to Tauri's updater.** Without it: the `.app`
+  works and auto-updates, but first launch for *other* users shows "unidentified
+  developer" — they must right-click → Open or `xattr -cr` once, then updates are
+  smooth. With it: you submit each release to Apple's notary service, Gatekeeper
+  lets it through, everyone gets a clean double-click install. Verdict:
+  - Just you / technical friends → skip the $99/y, ad-hoc signing is fine.
+  - Sharing with non-technical users → $99/y + notarytool is the standard path
+    for dev tools distributed outside the App Store.
 
 ## 🧹 Code health & drift (2026-06-22 audit)
 
