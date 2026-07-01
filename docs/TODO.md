@@ -314,7 +314,7 @@ New parity/UX items from the owner, grounded against current source.
       both). _Replaces upstream ask #9 (withdrawn — the daemon persists these fine; the
       drop is ours). Fable, 2026-07-01._
 
-- [ ] **Thinking blocks: always collapsed-by-default + always expandable; re-scope
+- [x] **Thinking blocks: always collapsed-by-default + always expandable; re-scope
       `hideThinking` to control only superseded blocks.** Today `store.hideThinking`
       (default on) hides thinking blocks *entirely* — `Transcript.svelte:743` gates
       `{#if item.thinking && !store.hideThinking}`, and `filterHiddenThinking`
@@ -338,6 +338,16 @@ New parity/UX items from the owner, grounded against current source.
       can never expand a past thought process. The new default shows everything as
       collapsed stubs (low visual cost) with on-demand expansion, and the setting
       only trims the stale ones that have been superseded by later output.
+      **Done 2026-07-02:** `filterHiddenThinking` now only drops *superseded*
+      thinking-only items (not the most recent) when `hideThinking` is on — the most
+      recent thinking block always survives. The `Transcript.svelte` rendering gate now
+      uses a `visibleThinkingIds` derived (null when thinking is visible = show all;
+      otherwise a Set with the last thinking item's ID) instead of the blunt
+      `!store.hideThinking` check. The Settings label changed to "Hide older thinking
+      blocks" with updated tooltip/description. Unit tests updated (5 cases covering
+      superseded drop, keep-most-recent, keep-with-text, no-op, no-thinking). E2e tests
+      updated in `streaming.e2e.ts` (collapsed stub visible + expandable) and
+      `transcript.e2e.ts` (1 of 3 thinking-only blocks survives as collapsed stub).
 
 - [ ] **Compaction: context-meter hover popup + pass-through `/compact` + clear-context
       button (both click-twice confirmed).** `/compact` already passes through as a

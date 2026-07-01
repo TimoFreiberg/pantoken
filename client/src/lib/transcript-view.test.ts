@@ -56,7 +56,7 @@ const inject = (
 });
 
 describe("filterHiddenThinking", () => {
-  test("with thinking hidden, thinking-only items are dropped", () => {
+  test("with thinking hidden, superseded thinking-only items are dropped; the most recent is kept", () => {
     const out = filterHiddenThinking(
       [
         tool("b1", "bash"),
@@ -67,7 +67,9 @@ describe("filterHiddenThinking", () => {
       ],
       true,
     );
-    expect(out.map((i) => i.id)).toEqual(["b1", "b2", "b3"]);
+    // t1 is superseded (not the last with thinking) → dropped.
+    // t2 is the most recent thinking block → kept (rendered as a collapsed stub).
+    expect(out.map((i) => i.id)).toEqual(["b1", "b2", "t2", "b3"]);
   });
 
   test("an assistant item with user-facing text is kept even when thinking is hidden", () => {
@@ -79,10 +81,11 @@ describe("filterHiddenThinking", () => {
       ],
       true,
     );
+    // a1 has both text + thinking → never dropped (text is always visible).
     expect(out.map((i) => i.id)).toEqual(["b1", "a1", "b2"]);
   });
 
-  test("with thinking visible, thinking-only items are kept (no-op filter)", () => {
+  test("with thinking visible, all items pass through (no-op filter)", () => {
     const out = filterHiddenThinking(
       [
         tool("b1", "bash"),
@@ -92,6 +95,27 @@ describe("filterHiddenThinking", () => {
       false,
     );
     expect(out.map((i) => i.id)).toEqual(["b1", "t1", "b2"]);
+  });
+
+  test("with thinking hidden and only one thinking-only item, it is kept", () => {
+    const out = filterHiddenThinking(
+      [
+        tool("b1", "bash"),
+        asst("t1", { text: "", thinking: "pondering" }),
+        tool("b2", "bash"),
+      ],
+      true,
+    );
+    // t1 is the only (and thus most recent) thinking block → kept.
+    expect(out.map((i) => i.id)).toEqual(["b1", "t1", "b2"]);
+  });
+
+  test("with thinking hidden and no thinking items, all pass through", () => {
+    const out = filterHiddenThinking(
+      [tool("b1", "bash"), asst("a1", { text: "answer" }), tool("b2", "bash")],
+      true,
+    );
+    expect(out.map((i) => i.id)).toEqual(["b1", "a1", "b2"]);
   });
 });
 

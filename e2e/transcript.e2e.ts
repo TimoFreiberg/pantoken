@@ -89,13 +89,13 @@ test("composer is present and idle", async ({ page }) => {
   await expect(page.getByPlaceholder("Message pilot…")).toBeVisible();
 });
 
-test("with thinking hidden, thinking-only items are dropped — tools render as individual cards", async ({
+test("with thinking hidden, superseded thinking-only items are dropped; the most recent shows collapsed", async ({
   page,
 }) => {
   // Default is thinking-hidden. The thinkingtools fixture interleaves a thinking-only
   // bubble between every tool call (bash → think → bash → think → read → think → bash).
-  // Those thinking-only items render nothing, so they're filtered out — the four tool
-  // cards render directly, not merged into a summary.
+  // With the new semantics, superseded thinking-only items (not the most recent) are
+  // dropped, but the most recent thinking block shows as a collapsed stub.
   await drive(page, "thinkingtools");
   await waitForSettledWorkBlocks(page, 2);
   await expandWork(page);
@@ -103,8 +103,8 @@ test("with thinking hidden, thinking-only items are dropped — tools render as 
   // Four individual tool cards, no prose summary wrapping them.
   await expect(work.locator(":scope > .tool")).toHaveCount(4);
   await expect(work.locator(":scope > .tool.summary")).toHaveCount(0);
-  // Nothing thinking-shaped survives — the bubbles between tools were dropped.
-  await expect(work.getByText("Thought process")).toHaveCount(0);
+  // The most recent thinking-only block survives as a collapsed stub (1 of 3).
+  await expect(work.getByText("Thought process")).toHaveCount(1);
 });
 
 test("with thinking visible, thinking blocks sit between the tool cards", async ({
