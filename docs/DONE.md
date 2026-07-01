@@ -5,6 +5,17 @@ and its resolution note. Latest completions first.
 
 ---
 
+- [x] **Fix or gate the branch-durability gap.** A no-summary branch jump only moves the
+      in-memory leaf; it isn't durable until the next prompt appends a child, so a cold reopen
+      before prompting re-derives the pre-branch leaf — silent state loss in a shipped feature.
+      GLM suggested forcing a persist on `navigateTree` **or** disabling the branch gesture
+      until a child is appended. A follow-up fix run found force-persist isn't reachable through
+      pi's public API, so this collapsed to _gate the gesture_ or _document the limitation_.
+      → Resolved 2026-07-01: the click-twice confirm gate on "Rewind" (added 2026-07-01 — first
+      click arms with destructive-red styling + updated tooltip, second click within 3s fires)
+      already addresses this. Under polytoken, rewind is a destructive truncation (no in-memory
+      leaf to lose), so the original branch-durability concern is moot. No further action needed.
+
 - [x] **Set up a test environment for automated testing using the actual polytoken backend.**
       Set up a tmp dir as a test project + run agent sessions there + configure the dir
       to use umans-flash or deepseek-v4-flash as default agent + ensure all agent

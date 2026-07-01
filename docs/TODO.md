@@ -129,7 +129,7 @@ elsewhere in this file are not duplicated here.
       default-thinking selector. The Models tab now shows only the background-model
       spec (which stays — it's pilot-local settings, not daemon config). E2e tests
       rewritten to remove all provider/OAuth/extension/favorites/default-model tests.
-- [ ] *(needs-discussion)* **Remove tree view entirely (daemon history is linear).** The daemon has no branch
+- [ ] **Remove tree view entirely (daemon history is linear).** The daemon has no branch
       DAG — `POST /rewind` destructively truncates, it doesn't branch. The mock's `getTree`
       fakes a branching tree that can never exist live, so e2e tests exercise a fiction.
       Remove: `getTree` from the mock + `PilotDriver` interface, `TreeSnapshot`/`TreeNodeInfo`
@@ -138,6 +138,8 @@ elsewhere in this file are not duplicated here.
       `/tree` WS message path in the hub. The `branchFrom`/rewind flow stays (it's a linear
       rewind, already relabeled). Replace the tree view's navigational value with fast
       ⌘↑/⌘↓ prompt navigation (see next two todos).
+      **Decided 2026-07-01:** remove entirely — no bespoke linear-history navigator, just
+      delete the tree view. The ⌘↑/⌘↓ prompt navigation stays (it's separate from the tree).
 - [ ] **Implement the 4 ready polytoken driver methods.** These have daemon APIs and just
       need wiring: `subscribeTrust`/`respondTrust` (use existing interrogative SSE +
       `POST /interrogative/{id}/respond`), `setClientPresence` (trivial local callback —
@@ -307,17 +309,23 @@ New parity/UX items from the owner, grounded against current source.
       The popup replaces the need to type `/compact`; the slash command stays as a
       power-user path. Needs a tooltip (repo rule).
 
-- [ ] *(needs-discussion)* **Show all available facets** (`polytoken vfs ls polytoken://facets`). The session
+- [ ] **Show all available facets** (`polytoken vfs ls polytoken://facets`). The session
       snapshot exposes `available_skills` and `available_subagents`
       (`wire-types.ts:2635-2636`) but **no `available_facets`**. The current `FacetBadge`
       (`FacetBadge.svelte`) hardcodes execute ↔ plan (toggling via `Shift+Tab` /
-      `store.setFacet`). To show all available facets, either: (a) shell out to
-      `polytoken vfs ls polytoken://facets` during warm-up and expose the list, or
-      (b) advocate for a daemon `available_facets` field on the snapshot (mirroring
-      `available_skills`/`available_subagents`). The `FacetBadge` would then become a
-      picker (dropdown/menu) listing all facets rather than a two-state toggle. The
-      `setFacet` wire path (`store.svelte.ts:1924`) already passes an arbitrary string,
-      so no protocol change is needed for the send side.
+      `store.setFacet`). To show all available facets, shell out to
+      `polytoken vfs ls polytoken://facets` and expose the list. The `FacetBadge` would
+      then become a picker (dropdown/menu) listing all facets rather than a two-state
+      toggle. The `setFacet` wire path (`store.svelte.ts:1924`) already passes an arbitrary
+      string, so no protocol change is needed for the send side.
+      **Decided 2026-07-01:** approach (a) — shell out to `polytoken vfs ls`. Call it
+      once on each new session open (not just warm-up), and provide a daemon-reload
+      affordance (see the dedicated todo below).
+- [ ] **Facets list reload affordance.** When facets are added/removed on disk (e.g. the
+      operator edits a facet file while a session is open), the cached `available_facets`
+      list goes stale. Add a reload button or menu action that re-runs
+      `polytoken vfs ls polytoken://facets` and refreshes the FacetBadge picker. Pairs with
+      the "show all available facets" todo above.
 
 - [ ] **Ctrl+R prompt-history popup** (polytoken TUI parity — nice-to-have polish,
       bottom of parity work). The polytoken TUI offers a ctrl+r popup showing a few
@@ -375,6 +383,8 @@ New parity/UX items from the owner, grounded against current source.
       (`wire-types.ts:7`), `adventurous_handoff_active` is on the snapshot
       (`wire-types.ts:2626`), pilot never reads it. Niche — only surface if dogfooding
       shows a need. Track so it's not forgotten.
+      **human input**: yeah we need this. it allows plan mode to autonomously start implementing the plan, essential for hands-off work on tasks while still getting the benefits from organized plan->execute work
+
 
 ## 🟢 Polish / fast-follow
 
@@ -446,7 +456,7 @@ the trivial ones shipped inline this same day.
 
 ### 🟡 High-leverage — plan it (the headline)
 
-- [ ] *(needs-discussion)* **Server-side coalescing of streamed `assistantDelta`s (N1).** The highest-leverage
+- [ ] **Server-side coalescing of streamed `assistantDelta`s (N1).** The highest-leverage
       fix for both CPU and network. Today every pi `text_delta` becomes its own
       `assistantDelta` WS frame (`server/src/pi/event-map.ts`) and is forwarded one-by-one
       (`server/src/hub.ts` `onEvent`). One model response = hundreds of tiny frames, each
@@ -476,6 +486,8 @@ the trivial ones shipped inline this same day.
       Note: with `hideThinking` on (the default), thinking deltas never reach markstream,
       so coalescing the thinking channel buys only network, not CPU. Subsumes most of C1
       and C3 for free.
+      **Decided 2026-07-01:** defer. Need a live interactive session where the owner can
+      watch the chunkier reveal vs. token-smooth tradeoff before committing to the change.
 - [ ] **Client markdown re-parse is O(n²) per streamed message (C1).** `Markdown.svelte`
       feeds `content` into markstream's `NodeRenderer`, whose `parsedNodes = $derived.by`
       calls `parseMarkdownToStructure(FULL content)` on every content change
@@ -810,7 +822,7 @@ acting. (The two contained fixes from the same review — a runtime shape guard 
 pi-history boundary, and throttling the live-tick `listSessions` disk scan — were prototyped
 separately on branch `task/glm-fix-pilot`, not included here.)_
 
-- [ ] *(needs-discussion)* **Decompose the hub (god object).** `server/src/hub.ts` (~1439 lines) owns folded
+- [ ] **Decompose the hub (god object).** `server/src/hub.ts` (~1439 lines) owns folded
       session states, the running/initializing/attention maps, titles, the clients map, the
       live ticker, desktop-update state, the OAuth pending map + single-flight flag, and the
       prompt-results ledger; `handleClient` is one giant switch, and tests reach into privates
@@ -818,24 +830,19 @@ separately on branch `task/glm-fix-pilot`, not included here.)_
       `UpdateRelay`, `LiveTicker`, `PromptLedger` as collaborators the hub delegates to — the
       hub orchestrates rather than owning eight unrelated state machines, which would also drop
       the private-method test hacks. GLM ranked this the highest-leverage maintainability change.
-      _Discuss:_ worth the churn vs. living with a well-documented god object?
+      **Decided 2026-07-01:** defer (lower priority than the coalescing perf work).
 
-- [ ] *(needs-discussion)* **Replace `structuredClone` snapshots with structural sharing.** A full `SessionState`
+- [ ] **Replace `structuredClone` snapshots with structural sharing.** A full `SessionState`
       deep-clone fires on every snapshot send (`server/src/hub.ts`, fired on connect / switch /
       reconnect / branch re-seed) — O(n) per snapshot for long transcripts, broadcast to every
       viewer on a branch. Suggestion: structural sharing past a transcript-length threshold, or
       an incremental diff on branch re-seed instead of a full clone. Pairs with the
-      already-planned JS-windowing work. _Discuss:_ premature until transcripts actually get
-      long? (already flagged as a known future cliff, not unnoticed.)
+      already-planned JS-windowing work.
+      **Decided 2026-07-01:** defer. Priority sits between the coalescing perf work (higher)
+      and the hub decomposition (lower). Before revisiting, add a measurement that shows how
+      much time the clone actually takes on a realistic long session (connect/switch/reconnect)
+      so the cost is visible, not assumed.
 
-- [ ] *(needs-discussion)* **Fix or gate the branch-durability gap.** A no-summary branch jump only moves the
-      in-memory leaf; it isn't durable until the next prompt appends a child, so a cold reopen
-      before prompting re-derives the pre-branch leaf — silent state loss in a shipped feature
-      (`server/src/pi/pi-driver.ts`, `branchFrom`). GLM suggested forcing a persist on
-      `navigateTree` **or** disabling the branch gesture until a child is appended. **Note:** a
-      follow-up fix run found force-persist isn't reachable through pi's public API (the leaf id
-      is in-memory only; a durable leaf change requires an appended entry), so this collapses to
-      _gate the gesture_ or _document the limitation_. _Discuss:_ gate vs. document?
 
 ## 💡 Brainstorm (unfiltered — owner to triage into the lanes above)
 
@@ -856,11 +863,13 @@ the rest._
 - [ ] **One-off bash affordance** (DESIGN LATER) — a way to run a single shell command
       whose result lands in the transcript and enters next-turn context, without a full
       prompt. Useful for "what's the branch / git status" mid-session.
-- [ ] **"Keep going" / continue button** ⚠️ _questionable — discuss before building_ —
-      one-tap canned follow-up ("continue", "keep going") on an idle session, for the
-      common case of nudging a paused agent from your phone without typing. _(2026-06-21:
-      owner doesn't want this now and may never — don't pick it up on spec; revisit only
-      if dogfooding surfaces a concrete need.)_
+- [ ] **Retry-on-error with "continue" semantics.** Error cards in the transcript should
+      offer a retry button that sends "continue" (not a re-send of the last prompt) when
+      pilot can confirm the original prompt was delivered to the session. If delivery is
+      uncertain, fall back to re-sending the prompt. No dedicated "continue" button outside
+      of error cards. _(Replaces the deleted "Keep going" / continue button brainstorm item —
+      owner decision 2026-07-01: continue-button is only wanted on error cards, not as a
+      general idle-session affordance.)_
 
 ### Composer & input
 - [ ] **Voice dictation on mobile** — Web Speech API mic button in the composer; talking
