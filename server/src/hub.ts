@@ -877,9 +877,22 @@ export class SessionHub {
   /** Fetch + send ONE client its focused session's branch tree (the daemon's /tree) for the tree
    *  view. Per-connection (scoped to the requester's focus, like the command/file lists),
    *  so a client opening the tree view sees ITS session, not whatever another client is on.
-   *  No-op if the driver can't read a tree. */
+   *  If the driver can't read a tree (no getTree, or it returns undefined), sends an explicit
+   *  empty treeState so the client's loading state clears instead of hanging forever. */
   private async sendTree(conn: ClientConn): Promise<void> {
-    if (!this.driver.getTree) return;
+    if (!this.driver.getTree) {
+      // Defense-in-depth: the polytoken driver doesn't implement getTree yet (it
+      // needs a GET /history projection). Without this explicit empty treeState,
+      // the client's TreeView hangs on "Loading tree…" forever (it only clears
+      // its loading state on a treeState message).
+      conn.send({
+        type: "treeState",
+        sessionId: conn.focusedId,
+        nodes: [],
+        leafId: null,
+      });
+      return;
+    }
     try {
       const tree = await this.driver.getTree(conn.focusedId ?? undefined);
       if (!tree) return;
