@@ -269,8 +269,8 @@
         </div>
         <div class="row">
           <div class="rinfo">
-            <div class="rlabel">Hide thinking blocks</div>
-            <div class="rdesc">Replace thinking content with a subtle placeholder.</div>
+            <div class="rlabel">Hide older thinking blocks</div>
+            <div class="rdesc">Collapse superseded reasoning; the most recent thinking block always shows (collapsed, expandable).</div>
           </div>
           <button
             class="seg-btn"
@@ -278,7 +278,7 @@
             role="switch"
             aria-checked={store.hideThinking}
             data-testid="hide-thinking"
-            title={store.hideThinking ? "Show thinking blocks" : "Hide thinking blocks"}
+            title={store.hideThinking ? "Show all thinking blocks" : "Hide older thinking blocks (most recent always shows)"}
             onclick={() => store.setHideThinking(!store.hideThinking)}
           >
             {store.hideThinking ? "On" : "Off"}

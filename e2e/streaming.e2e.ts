@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { drive, expandWork, gotoFresh, openSettings } from "./helpers.js";
+import { drive, expandWork, gotoFresh, openSettings, waitForSettledWorkBlocks } from "./helpers.js";
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
@@ -61,21 +61,29 @@ test("streaming text reveals with a fade wrapper; settled history stays static",
   ).not.toHaveCount(0);
 });
 
-test("thinking stays hidden by default even inside an expanded working block", async ({
+test("with thinking hidden, the most recent thinking block shows collapsed", async ({
   page,
 }) => {
+  // The "reply" fixture has thinking → text → tool → text. The thinking is on
+  // the first assistant item (which also has text). With hideThinking on (default),
+  // only the most recent thinking block renders as a collapsed stub.
   await drive(page, "reply");
-  // The turn's final answer lands, proving it ran…
   await expect(
     page.getByText("That confirms it", { exact: false }),
   ).toBeVisible();
-  // …and even with the working block expanded, the thinking is gone entirely (hidden by
-  // the default-on Settings toggle): no collapsed head, no reasoning text.
+  await waitForSettledWorkBlocks(page, 2);
   await expandWork(page);
-  await expect(page.getByText("Thought process")).toHaveCount(0);
+  const thinkHeader = page.getByText("Thought process").first();
+  await expect(thinkHeader).toBeVisible();
+  // The reasoning text itself is hidden (collapsed) — not expanded.
   await expect(
     page.getByText("Let me think about the cleanest way", { exact: false }),
   ).toHaveCount(0);
+  // Clicking the header expands it.
+  await thinkHeader.click();
+  await expect(
+    page.getByText("Let me think about the cleanest way", { exact: false }),
+  ).toBeVisible();
 });
 
 test("disabling Hide thinking reveals the expandable thinking block", async ({

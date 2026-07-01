@@ -11,6 +11,7 @@
 //      "Worked for Ns" block: collapsed once the turn settles, the answer left showing.
 
 import type {
+  AssistantItem,
   InjectItem,
   ToolItem,
   TranscriptItem,
@@ -55,21 +56,36 @@ function splitLeadUp(run: TranscriptItem[]): [TranscriptItem[], TranscriptItem[]
   return [run.slice(0, j), run.slice(j)];
 }
 
-/** An assistant item with no user-facing text — its only content is reasoning. When the
- *  "hide thinking" toggle is on, such an item renders nothing at all, so it's an invisible
- *  gap between tool cards. The filter pass drops these so they don't create empty rows. */
-function isHiddenOnlyThinking(i: TranscriptItem): boolean {
-  return i.kind === "assistant" && i.text.trim() === "";
-}
-
-/** Filter out thinking-only assistant items when thinking is hidden. These render
- *  nothing (no text, and the thinking block is suppressed), so they'd be invisible
- *  gaps. When thinking is visible, the pass is a no-op (returns a shallow copy). */
+/** Filter out superseded thinking-only items when thinking is hidden. When the
+ *  "hide thinking" toggle is on, thinking-only assistant items (no text) that are
+ *  NOT the most recent thinking block are dropped — they'd render as invisible gaps.
+ *  The most recent thinking block is always kept (rendered as a collapsed stub).
+ *  Items with both thinking + text are never dropped (text is always visible).
+ *  When thinking is visible, the pass is a no-op (returns a shallow copy). */
 export function filterHiddenThinking(
   items: readonly TranscriptItem[],
   hideThinking: boolean,
 ): TranscriptItem[] {
-  return hideThinking ? items.filter((i) => !isHiddenOnlyThinking(i)) : [...items];
+  if (!hideThinking) return [...items];
+  // Find the last item with thinking content — it always stays.
+  let lastThinkingIdx = -1;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item && item.kind === "assistant" && (item as AssistantItem).thinking !== "") {
+      lastThinkingIdx = i;
+      break;
+    }
+  }
+  if (lastThinkingIdx < 0) return [...items]; // no thinking at all
+  return items.filter(
+    (i, idx) =>
+      !(
+        i.kind === "assistant" &&
+        i.text.trim() === "" &&
+        (i as AssistantItem).thinking !== "" &&
+        idx < lastThinkingIdx
+      ),
+  );
 }
 
 /** True for tool items — the "work" that the turn-level collapse treats as activity. */

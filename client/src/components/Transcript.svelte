@@ -11,7 +11,7 @@
     type TurnGroup,
     workedLabel,
   } from "../lib/transcript-view.js";
-  import type { TranscriptItem } from "@pilot/protocol";
+  import type { AssistantItem, TranscriptItem } from "@pilot/protocol";
   import Markdown from "./Markdown.svelte";
   import ToolCard from "./ToolCard.svelte";
   import ThinkingBlock from "./ThinkingBlock.svelte";
@@ -78,6 +78,19 @@
   //      portion (tools + intermediate narration) and the turn-final response that
   //      stays visible. That's the "Worked for Ns" block below.
   const displayItems = $derived(filterHiddenThinking(items, store.hideThinking));
+  // When hideThinking is on, only the most recent thinking block renders (collapsed).
+  // null = show all thinking blocks (hideThinking off); otherwise a Set of item IDs
+  // whose thinking should be visible.
+  const visibleThinkingIds = $derived.by<(Set<string> | null)>(() => {
+    if (!store.hideThinking) return null;
+    for (let i = displayItems.length - 1; i >= 0; i--) {
+      const it = displayItems[i];
+      if (it && it.kind === "assistant" && (it as AssistantItem).thinking !== "") {
+        return new Set([it.id]);
+      }
+    }
+    return new Set<string>(); // no thinking at all — nothing to show
+  });
   // While the last turn is active, its trailing text is only a candidate final
   // response — another tool can still follow. Keep the whole turn inline until the
   // lifecycle says it settled, then expose the collapse affordance.
@@ -783,10 +796,11 @@
         </div>
       {:else if item.kind === "assistant"}
         <div class="row assistant">
-          <!-- Thinking blocks are hidden entirely when the Settings toggle is on (the
-               default) — no collapsed stub, nothing. The composer's "Thinking…" indicator
-               carries the feedback instead. -->
-          {#if item.thinking && !store.hideThinking}
+          <!-- Thinking blocks: always render (collapsed by default, expandable via
+               ThinkingBlock's header button). The hideThinking setting controls only
+               superseded (older) blocks — the most recent one always shows as a
+               collapsed stub. -->
+          {#if item.thinking && (visibleThinkingIds === null || visibleThinkingIds.has(item.id))}
             <ThinkingBlock text={item.thinking} streaming={item.streaming && !item.text} />
           {/if}
           {#if item.text}
