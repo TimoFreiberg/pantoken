@@ -78,7 +78,7 @@ elsewhere in this file are not duplicated here.
       a confirm card → `goal_proposal_answer{accepted}`), and the `default:` arm emits a
       blocking confirm dialog (not a fire-and-forget notify) with a Dismiss that POSTs
       `{kind:"cancel"}`. E2e-tested in `e2e/goal-proposal.e2e.ts` (goal card + unknown type).
-- [ ] **Mock-only driver methods are dead against the live daemon.** The live
+- [~] **Mock-only driver methods are dead against the live daemon.** The live
       `polytoken-driver.ts` omits 14 methods that exist in `mock-driver.ts`, so they pass e2e
       (mock) but are dead live: `getTree` (tree view hangs), `listProviders`/
       `setProviderApiKey`/`removeProviderApiKey` (Providers tab empty), `oauthLogin`/
@@ -92,6 +92,15 @@ elsewhere in this file are not duplicated here.
       doc needs it to deny-safe when no client is connected. **Fix:** implement the 14 methods
       against the daemon (auth.json/global-settings for providers/OAuth/defaults, extension
       loader for extensions, GET /history projection for tree).
+      **Investigated 2026-07-01:** 5 of 14 are implementable now (no daemon changes needed):
+      `getTree` (project from GET /history), `listProviders` (parse from `polytoken models`),
+      `subscribeTrust`/`respondTrust` (use existing interrogative SSE + POST
+      /interrogative/{id}/respond), `setClientPresence` (trivial local callback). The other 9
+      are **blocked** on missing daemon features: `setProviderApiKey`/`removeProviderApiKey`/
+      `oauthLogin`/`oauthLogout` (no provider auth write API), `listExtensions`/
+      `setExtensionEnabled` (no extension enumeration/toggle API), `setDefaultModel`/
+      `setDefaultThinking`/`setFavoriteModels` (no global config write API, no favorites
+      concept). These need daemon-side endpoints or CLI subcommands to be added first.
 - [ ] **Session-tree view hangs on "Loading tree…" forever.** `getTree` unimplemented →
       `hub.ts:882` (`sendTree`) early-returns with no `treeState`; the client only clears its
       loading state on `treeState` (`TreeView.svelte:193`). Same guard disables the
