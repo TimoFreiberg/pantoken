@@ -101,6 +101,43 @@ elsewhere in this file are not duplicated here.
       `setExtensionEnabled` (no extension enumeration/toggle API), `setDefaultModel`/
       `setDefaultThinking`/`setFavoriteModels` (no global config write API, no favorites
       concept). These need daemon-side endpoints or CLI subcommands to be added first.
+      **Updated 2026-07-01:** broken into specific actionable todos below — remove
+      unsupported config methods, remove tree view, implement the 4 ready methods.
+- [ ] **Remove unsupported config methods from mock + UI.** The mock driver implements
+      9 methods that have no daemon API and never will (or not soon): `listProviders`,
+      `setProviderApiKey`, `removeProviderApiKey`, `oauthLogin`, `oauthLogout`,
+      `listExtensions`, `setExtensionEnabled`, `setDefaultModel`, `setDefaultThinking`,
+      `setFavoriteModels`. These fake features that pass e2e but are dead live (Providers
+      tab empty, Extensions tab empty, OAuth dead, can't write global defaults). Remove
+      them from `mock-driver.ts`, the `PilotDriver` interface (`driver.ts`), the hub call
+      sites (guard with `?.` — already done), and the corresponding UI surfaces (Settings
+      Providers/Extensions tabs, OAuth dialog, model-favorites editor). When the daemon
+      grows real APIs for any of these, re-add them properly.
+- [ ] **Remove tree view entirely (daemon history is linear).** The daemon has no branch
+      DAG — `POST /rewind` destructively truncates, it doesn't branch. The mock's `getTree`
+      fakes a branching tree that can never exist live, so e2e tests exercise a fiction.
+      Remove: `getTree` from the mock + `PilotDriver` interface, `TreeSnapshot`/`TreeNodeInfo`
+      protocol types, `tree-view.ts` + its tests, `TreeView.svelte` modal, the `treeState`
+      server message + `store.treeOpen` flag, the header IconButton + `⌘⇧T` hotkey, and the
+      `/tree` WS message path in the hub. The `branchFrom`/rewind flow stays (it's a linear
+      rewind, already relabeled). Replace the tree view's navigational value with fast
+      ⌘↑/⌘↓ prompt navigation (see next two todos).
+- [ ] **Implement the 4 ready polytoken driver methods.** These have daemon APIs and just
+      need wiring: `subscribeTrust`/`respondTrust` (use existing interrogative SSE +
+      `POST /interrogative/{id}/respond`), `setClientPresence` (trivial local callback —
+      the hub passes a `() => boolean` predicate so the driver can deny-safe a trust prompt
+      when nobody is connected), `clearQueue` (`DELETE /turn/input/newest`).
+- [ ] **⌘↑/⌘↓ prompt navigation should settle in ≤300ms.** The existing hotkeys that jump
+      between user prompts in the transcript scroll too slowly — the target prompt should
+      be visible and settled (no smooth-scroll animation still in flight) within 300ms.
+      Likely needs swapping the smooth scroll for a faster animation duration or an instant
+      jump with a brief highlight, rather than the default smooth-scroll behavior.
+- [ ] **Visible prev/next-prompt nav element (discoverability).** The ⌘↑/⌘↓ prompt
+      navigation is invisible to a new user. Add a small floating prev/next control (↑↓
+      arrows or chevrons) that fades in when the cursor/scroll position is in the transcript
+      area, giving a visible affordance for jumping between user prompts. Should not be
+      persistent (would clutter) — fade in on transcript focus/hover, fade out otherwise.
+      Needs a tooltip (repo rule).
 - [x] **Session-tree view hangs on "Loading tree…" forever.** `getTree` unimplemented →
       `hub.ts:882` (`sendTree`) early-returns with no `treeState`; the client only clears its
       loading state on `treeState` (`TreeView.svelte:193`). Same guard disables the
