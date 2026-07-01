@@ -10,30 +10,28 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("a mixed run including bash collapses into one tool-styled summary", async ({
+test("a mixed run of tools each renders as its own card (no prose summary)", async ({
   page,
 }) => {
   await drive(page, "search");
   // The search turn settles, so its working section collapses behind "Worked for Ns";
-  // reveal it to reach the merged card.
+  // reveal it to reach the tool cards.
   await expect(page.getByText("Reconnect lives in")).toBeVisible();
   await expandWork(page);
 
-  // 2 reads + 2 greps + 1 find + 1 bash, uninterrupted, fold into ONE subdued row. The
-  // label is a programmatic prose summary: tools grouped by category (grep+find both read
-  // as "searches") in first-appearance order, counted, with the sentence capitalized. A
-  // settled-ok run shows no status dot — it's meant to recede into ambient noise.
-  const summary = page.locator(".tool.summary");
-  const head = summary.locator(".head");
-  await expect(summary).toHaveClass(/ok/);
-  await expect(head).toHaveCount(1);
-  await expect(head.locator(".label")).toHaveText(
-    "Read 2 files, ran 3 searches, ran a command",
-  );
-  await expect(head.locator(".status")).toHaveCount(0);
+  // 2 reads + 2 greps + 1 find + 1 bash = 6 individual tool cards, each standalone.
+  // No prose summary row — each tool is its own expandable card.
+  const work = page.getByTestId("work-body").last();
+  const cards = work.locator(":scope > .tool");
+  await expect(cards).toHaveCount(6);
+  // Each card carries its own header + status (settled-ok shows no error dot).
+  const okCards = work.locator(":scope > .tool.ok");
+  await expect(okCards).toHaveCount(6);
+  // No summary rows exist anymore.
+  await expect(work.locator(":scope > .tool.summary")).toHaveCount(0);
 });
 
-test("a skill load (read of a SKILL.md) is labelled as such in the summary", async ({
+test("a skill load (read of a SKILL.md) renders as its own card, not a prose label", async ({
   page,
 }) => {
   await drive(page, "skill");
@@ -44,49 +42,36 @@ test("a skill load (read of a SKILL.md) is labelled as such in the summary", asy
   await waitForSettledWorkBlocks(page, 2);
   await expandWork(page);
 
-  // The skill-loading read + a normal read + a bash fold into one row whose prose names
-  // the loaded skill instead of counting it as a plain file read. Scope to THIS turn's
-  // work block: the greeting turn also renders a tool summary, so an unscoped
-  // `.tool.summary` could match both and trip strict mode.
-  const summary = page
+  // The skill-loading read is just another tool card — no prose "loaded skill" label.
+  // Scope to THIS turn's work block: the greeting turn also renders tool cards.
+  const work = page
     .locator(".turn-work")
     .last()
-    .getByTestId("work-body")
-    .locator(".tool.summary");
-  await expect(summary.locator(".head .label")).toHaveText(
-    "Loaded skill debug, read a file, ran a command",
-  );
+    .getByTestId("work-body");
+  const cards = work.locator(":scope > .tool");
+  await expect(cards).toHaveCount(3); // SKILL.md read + a normal read + a bash
+  await expect(work.locator(":scope > .tool.summary")).toHaveCount(0);
 });
 
-test("merged card expands in two steps: the list, then each call", async ({
+test("each tool card expands independently to show its output", async ({
   page,
 }) => {
   await drive(page, "search");
   await expect(page.getByText("Reconnect lives in")).toBeVisible();
   await expandWork(page);
-  const card = page.locator(".tool.summary");
+  const work = page.getByTestId("work-body").last();
+  const cards = work.locator(":scope > .tool");
 
-  // Step 0 — collapsed: no inner tool cards rendered yet.
-  await expect(card.locator(".body")).toHaveCount(0);
+  // Step 0 — all collapsed: no inner output visible yet.
+  await expect(cards.first().locator(":scope > .body")).toHaveCount(0);
 
-  // Step 1 — expand the card: the run shows as 6 collapsed ToolCards. Still no
-  // output visible (each ToolCard owns its own inner expand state).
-  await card.locator(":scope > .head").click();
-  const innerCards = card.locator(":scope > .body > .tool");
-  await expect(innerCards).toHaveCount(6);
-  await expect(card.locator(":scope > .body > .tool .out")).toHaveCount(0);
-
-  // The nested calls render FLAT (no per-card box) so successive calls read as a tight
-  // list, not a stack of bordered cards. Guard the chrome-removal so it can't regress.
-  await expect(innerCards.first()).toHaveClass(/\bflat\b/);
-  const borderTop = await innerCards
-    .first()
-    .evaluate((el) => getComputedStyle(el).borderTopWidth);
-  expect(borderTop).toBe("0px");
-
-  // Step 2 — expand one inner ToolCard: its output appears.
-  await innerCards.first().locator(".head").click();
+  // Step 1 — expand one ToolCard: its output appears.
+  await cards.first().locator(":scope > .head").click();
+  await expect(cards.first().locator(":scope > .body")).toBeVisible();
   await expect(
-    card.getByText("private reconnect()", { exact: false }),
+    cards.first().getByText("private reconnect()", { exact: false }),
   ).toBeVisible();
+
+  // Other cards stay collapsed.
+  await expect(cards.nth(1).locator(":scope > .body")).toHaveCount(0);
 });

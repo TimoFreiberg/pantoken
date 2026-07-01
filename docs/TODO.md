@@ -9,7 +9,23 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
 
 ## 🔴 Next (urgent / blocking)
 
-- [ ] hotkey for hiding/showing the question widget? hotkey choice needs discussion
+- [x] **`⌘\` cycle through active attention surfaces (with minimize-to-pill).** A unified
+      `⌘\` hotkey that cycles keyboard focus through agent-driven attention surfaces that are
+      currently active: transcript/composer → qna (inline questions) → approvals (floating
+      sheet) → trust card → back to transcript. Each surface gets a "minimize to pill" concept
+      so cycling away from it collapses it to a small indicator (e.g. "1 question pending",
+      "1 approval pending") rather than dismissing it — the user can always cycle back.
+      Rationale: qna already has a minimize toggle (`QnaInline.svelte` `collapsed` state), but
+      `ApprovalLayer` and `TrustCard` are modal scrim+sheets with no minimize — they need one
+      added. The cycle makes the right thing easy: from the phone you tap `⌘\` to glance at the
+      transcript behind a pending approval, then tap again to come back to the approval. Touches:
+      add minimize state to `ApprovalLayer.svelte` + `TrustCard.svelte` (mirror `QnaInline`'s
+      pattern), a new attention-cycle controller (tracks active surfaces, owns the cycle order +
+      which is currently focused/minimized), and a global `⌘\` handler in `App.svelte`
+      `onGlobalKeydown`. Every minimized pill needs a tooltip (repo rule). Phase 2 could extend
+      the cycle to user-driven modals (Settings, TreeView, PlanView) but those already have
+      dedicated hotkeys so they stay out of the cycle.
+- [ ] set up a test environment for automated testing using the actual polytoken backend, both interactive UI and tmux-driven tui polytoken (to compare features) - set up a tmp dir as a test project and run the agent sessions in there, configure the dir to either use umans-flash or deepseek-v4-flash as default agent and then ensure all agent features are testable by the dev agent in that dir
 - [ ] add UI support for `goal` (polytoken shows the text "(goal)" next to the facet in the sidebar, we can find a nicer place but we should also show it, if the protocol exposes it)
 - [ ] use the updated `polytoken models` that loads dynamic models (from catalog providers) now - remove obsolete fallbacks that emulated this behavior
 - [ ] use `polytoken validate {skill,facet,subagent}` for gui config stuff
@@ -134,21 +150,21 @@ Already addressed from the same audit (kept as record):
 ## 🟢 Polish / fast-follow
 
 
-- [ ] **Stop merging subsequent tool calls into "Worked for Ns" (keep the early-turn collapse).**
-      `client/src/lib/transcript-view.ts` `mergeTools` folds runs of "summarizable" tool calls
-      (`isSummarizedTool`, `:100–107`) into a single collapsible `MergedToolsItem` rendered as
-      "Worked for Ns" — today this applies across the whole turn (gated only by
-      `mergeTrailing=false` while a turn streams, `Transcript.svelte:86`). The user finds this
-      hurts readability now that polytoken enforces **≤4 tool calls before each agent text
-      output** — tool groups are already small and self-bounded, so the merge is over-collapsing
-      distinct steps into one opaque blob. Desired: keep the collapse for the early part of a
-      DONE turn (so a long finished turn still summarizes to "Worked 5m23s"), but render
-      post-boundary tool runs as individual cards. Concretely — only seal a run to prose when
-      it's followed by an assistant text bubble AND the turn is complete; unsealed runs (the
-      active/streaming tail, or runs between visible items) already render as a bare flat list,
-      so the change is about not folding the *settled* middle either. Touches `mergeTools`'s
-      `sealed` logic + the `mergeTrailing` call site. Update `transcript-view.test.ts`
-      `mergeTools` suite (the `:158` `mergeTrailing=true` case expects sealing). 2026-06-30.
+- [ ] **Remove `mergeTools` — every tool call renders as its own card (keep turn-level "Worked for Ns").**
+      `client/src/lib/transcript-view.ts` has two collapse layers: Pass-1 `mergeTools` folds runs
+      of "summarizable" tools into a single `MergedToolsItem` (rendered as a prose `<ToolSummary>`
+      card "Read 2 files, ran 3 commands"), and Pass-2 `groupTurns` folds a turn's early work behind
+      the "Worked for Ns" header. The inner `mergeTools` layer is the one to **delete entirely** —
+      no threshold, no special-casing. Each tool call stays as an individual `ToolItem`; polytoken's
+      ≤4-calls-per-text-boundary already keeps groups small and self-bounded, so the prose merge
+      just over-collapses distinct steps into one opaque line. The outer `groupTurns`/`WorkLane`
+      collapse ("Worked for Ns") is **kept as-is**: `isWorkTool` already matches plain `tool` cards,
+      so a finished turn's early work still folds behind the header and the final response stays
+      visible. Concretely: delete `mergeTools`, `MergedToolsItem`, `isSummarizedTool`, `sealed`,
+      `mergeTrailing`, `buildMerged`, and the `ToolSummary` rendering path; remove `mergeTools` from
+      the `Transcript.svelte` pipeline (it currently calls `mergeTools` then `groupTurns`). Update
+      `transcript-view.test.ts` — the `mergeTools` suite should be removed; `groupTurns` tests stay
+      but must assert plain `ToolItem`s instead of `MergedToolsItem`s. 2026-07-01.
       **human comment:** this paragraph was written by an agent summarizing my short instructions.
       i think this might have been a misunderstanding - my intent was to _never_ merge single tool calls (e.g. 1 bash, 2 reads) into a single line, but keep merging the early part of a _turn_ into the "worked for <time>" summary.
 - [ ] **Right-side sidebar: flagged files, todos, async jobs (polytoken TUI parity).** The
@@ -506,14 +522,6 @@ separately on branch `task/glm-fix-pilot`, not included here.)_
       follow-up fix run found force-persist isn't reachable through pi's public API (the leaf id
       is in-memory only; a durable leaf change requires an appended entry), so this collapses to
       _gate the gesture_ or _document the limitation_. _Discuss:_ gate vs. document?
-
-- [ ] **Track the `qna` unwrapped-bridge coupling with a pi-version canary.**
-      `server/src/pi/ui-bridge.ts` relies on pi handing extensions the raw, unwrapped bridge as
-      `ctx.ui`, so methods beyond the typed `ExtensionUIContext` stay callable — a dependency on
-      undocumented pi-internal behavior. If pi ever wraps `ctx.ui`, `qna` degrades silently (the
-      answer extension feature-detects and falls back, but a non-answer extension relying on it
-      would break invisibly). Suggestion: a pi-version canary test so a bump fails loud.
-      _Discuss:_ canary test vs. just a tracked-risk note?
 
 ## 💡 Brainstorm (unfiltered — owner to triage into the lanes above)
 

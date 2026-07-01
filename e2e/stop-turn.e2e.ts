@@ -51,11 +51,10 @@ test("the Stop pill survives a stray mid-turn idle snapshot (turn still in fligh
   await expect(
     page.getByText("kicking off a command", { exact: false }),
   ).toBeVisible();
-  // While the turn is still live, the run is unsealed — it renders as a bare flat tool
-  // card OUTSIDE any collapsible folder (no `.tool.summary` until it seals), so the user
-  // watches the call run before it's ever collapsed.
+  // While the turn is still live, the tool renders as a bare card OUTSIDE any
+  // collapsible folder — the user watches the call run before the turn settles.
   await expect(page.locator(".tool.summary")).toHaveCount(0);
-  const tool = page.locator(".tool.flat");
+  const tool = page.locator(".scroller > .tool, .work-body > .tool, .tool.running").first();
   await expect(tool.locator(":scope > .head .name")).toHaveText(
     "Run shell command",
   );

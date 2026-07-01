@@ -2,36 +2,19 @@
 // component so the grouping rules are unit-testable in isolation (no DOM, no store).
 //
 // Two passes, applied in order:
-//   1. mergeTools  — collapse uninterrupted runs of tools into one summary card,
-//      except for write/edit calls, which stay standalone for immediate visibility.
+//   1. filterHiddenThinking — drop thinking-only assistant items when the "hide
+//      thinking" toggle is on. These render nothing (no text, thinking suppressed),
+//      so they'd be invisible gaps between tool cards.
 //   2. groupTurns  — split the flat item list into turns (user → next user) and, within
 //      each, separate the collapsible "work" (tools + intermediate narration) from the
 //      turn-final assistant response that stays visible. This is the Codex-style
 //      "Worked for Ns" block: collapsed once the turn settles, the answer left showing.
 
 import type {
-  AssistantItem,
   InjectItem,
   ToolItem,
   TranscriptItem,
 } from "@pilot/protocol";
-
-// ── Pass 1: summarize sequential tools ───────────────────────────────────────
-// Every uninterrupted run of summarizable tools folds into ONE summary card,
-// including a one-tool run. Write/edit/answer/image tools stay standalone and
-// break the run (their side effects should be visible as separate cards).
-//
-// Each MergedToolsItem carries a `sealed` flag: true when a non-tool item
-// (assistant text, user message, inject) has closed the run, or when
-// mergeTrailing seals trailing tools at end-of-array. Rendering (in Transcript):
-// a sealed run folds into the collapsible prose-summary folder (ToolSummary); an
-// unsealed (still-streaming) run renders as a bare flat list of tool cards, NOT in
-// a folder, so the user watches each call land before it's ever collapsed.
-//
-// A thinking-only assistant item normally breaks the run too — but when the "hide
-// thinking" toggle is on it renders nothing, so `mergeTools(items, true)` skips it and
-// the tool runs on either side fold together (no fragmenting around an invisible gap).
-export const STANDALONE_TOOLS = new Set(["write", "edit"]);
 
 // Tools whose result the USER is meant to read, not the agent's scratch work. They
 // render as a visible, in-order block (see TurnGroup.visible) instead of collapsing
@@ -41,15 +24,15 @@ export const VISIBLE_TOOLS = new Set(["answer"]);
 
 /** A tool that returned image content — a screenshot, a rendered mockup, an image read.
  *  These are visual artifacts the user is meant to SEE, so they get the same treatment as
- *  VISIBLE_TOOLS: never merged into a summary run, and pulled out of the collapsible work
- *  into the always-visible slot so the picture doesn't vanish behind "Worked for Ns".
+ *  VISIBLE_TOOLS: never collapsed into the work block, and pulled out into the
+ *  always-visible slot so the picture doesn't vanish behind "Worked for Ns".
  *  Detected by the `images` field (populated at toolFinished), not by tool name, so ANY
  *  image-returning tool qualifies — `preview_screenshot`, a render tool, a read of a PNG. */
 function toolHasImages(t: ToolItem): boolean {
   return (t.images?.length ?? 0) > 0;
 }
 
-function isVisibleTool(i: DisplayItem): i is ToolItem {
+function isVisibleTool(i: TranscriptItem): i is ToolItem {
   return i.kind === "tool" && (VISIBLE_TOOLS.has(i.name) || toolHasImages(i));
 }
 
@@ -57,7 +40,7 @@ function isVisibleTool(i: DisplayItem): i is ToolItem {
  *  tools are pinned too, but they're not prompts, so their lead-up narration doesn't
  *  get the keep-visible treatment (see keepLeadUp below). HostUi dialogs (confirm/
  *  input/select/qna) don't flow through tools at all, so they're out of scope here. */
-function isAnswerTool(i: DisplayItem): i is ToolItem {
+function isAnswerTool(i: TranscriptItem): i is ToolItem {
   return i.kind === "tool" && i.name === "answer";
 }
 
@@ -66,261 +49,32 @@ function isAnswerTool(i: DisplayItem): i is ToolItem {
  *  card. These carry the question's context, so they must stay visible directly above
  *  the Q&A card and the user's answer instead of folding into "Worked for Ns". Returns
  *  the split: [collapsibleWork, visibleLeadUp]. */
-function splitLeadUp(run: DisplayItem[]): [DisplayItem[], DisplayItem[]] {
+function splitLeadUp(run: TranscriptItem[]): [TranscriptItem[], TranscriptItem[]] {
   let j = run.length;
   while (j > 0 && run[j - 1]!.kind === "assistant") j--;
   return [run.slice(0, j), run.slice(j)];
 }
 
-export interface MergedToolsItem {
-  readonly kind: "mergedTools";
-  id: string;
-  /** Distinct tool names in the run, in first-appearance order. */
-  names: string[];
-  tools: ToolItem[];
-  /** True when a non-tool item (text, user message, inject) has closed this run,
-   *  or when mergeTrailing sealed it at end-of-array. Sealed → the collapsible prose
-   *  summary folder; unsealed → a bare flat list of tool cards (no folder). */
-  sealed: boolean;
-}
-
-/** A transcript item after the merge pass — either an original item or a merged run. */
-export type DisplayItem = TranscriptItem | MergedToolsItem;
-
-function isToolItem(i: TranscriptItem): i is ToolItem {
-  return i.kind === "tool";
-}
 /** An assistant item with no user-facing text — its only content is reasoning. When the
  *  "hide thinking" toggle is on, such an item renders nothing at all, so it's an invisible
- *  gap between tool cards. `mergeTools` treats it as transparent so the runs on either side
- *  fold into ONE card instead of fragmenting around a gap the user can't even see. */
+ *  gap between tool cards. The filter pass drops these so they don't create empty rows. */
 function isHiddenOnlyThinking(i: TranscriptItem): boolean {
   return i.kind === "assistant" && i.text.trim() === "";
 }
-function isSummarizedTool(i: TranscriptItem): i is ToolItem {
-  return (
-    isToolItem(i) &&
-    !STANDALONE_TOOLS.has(i.name) &&
-    !VISIBLE_TOOLS.has(i.name) &&
-    !toolHasImages(i)
-  );
-}
 
-/** True for the two "work" item kinds the collapse treats as activity: tool cards and
- *  merged tool runs. (Used by both the merge boundary and the turn split.) */
-export function isWorkTool(i: DisplayItem): boolean {
-  return i.kind === "tool" || i.kind === "mergedTools";
-}
-
-export function mergeTools(
+/** Filter out thinking-only assistant items when thinking is hidden. These render
+ *  nothing (no text, and the thinking block is suppressed), so they'd be invisible
+ *  gaps. When thinking is visible, the pass is a no-op (returns a shallow copy). */
+export function filterHiddenThinking(
   items: readonly TranscriptItem[],
-  hideThinking = false,
-  /** When true (default), summarizable tools at the end of the array are sealed
-   *  into a prose summary — the right call for a settled turn. When false, the trailing
-   *  run stays unsealed so streaming renders it as a bare flat list (no folder) instead
-   *  of collapsing it to prose before the model's text arrives. */
-  mergeTrailing = true,
-): DisplayItem[] {
-  // ── Pass 1: group consecutive summarizable tools ──────────────────────────
-  // Standalone tools break runs; everything starts unsealed.
-  const result: DisplayItem[] = [];
-  let pending: ToolItem[] = [];
-  const buildMerged = (): MergedToolsItem => ({
-    kind: "mergedTools",
-    id: pending[0]!.id,
-    names: [...new Set(pending.map((t) => t.name))],
-    tools: pending,
-    sealed: false, // Pass 2 will promote to true where warranted
-  });
-  const flush = () => {
-    if (pending.length === 0) return;
-    result.push(buildMerged());
-    pending = [];
-  };
-
-  for (const item of items) {
-    if (isSummarizedTool(item)) {
-      pending.push(item);
-    } else if (hideThinking && isHiddenOnlyThinking(item)) {
-      continue;
-    } else {
-      // Any non-summarizable-tool item (standalone tool, or non-tool) breaks the
-      // run. Don't seal yet — Pass 2 decides that based on what follows.
-      flush();
-      result.push(item);
-    }
-  }
-  flush();
-
-  // ── Pass 2: seal runs that are followed by non-tool content ──────────────
-  // A merged run is "sealed" when a non-tool item (text, user message, inject)
-  // eventually follows it — the model emitted something after those tools. Standalone
-  // tool cards (write/edit/…) between the run and the text don't prevent sealing;
-  // they're more tools, not model prose.
-  for (let i = 0; i < result.length; i++) {
-    const item = result[i]!;
-    if (item.kind !== "mergedTools" || item.sealed) continue;
-    // Look ahead for a non-tool, non-mergedTools item. Skip past any standalone
-    // tools (write/edit/answer/images) and past other merged runs.
-    let seal = false;
-    for (let j = i + 1; j < result.length; j++) {
-      const next = result[j]!;
-      if (next.kind === "mergedTools") continue;
-      if (next.kind !== "tool") {
-        seal = true;
-        break;
-      }
-      // Standalone tool — keep looking
-    }
-    // mergeTrailing seals the very last run even if nothing follows.
-    if (!seal && mergeTrailing && i === lastMergedIndex(result)) {
-      seal = true;
-    }
-    if (seal) result[i] = { ...item, sealed: true };
-  }
-
-  return result;
+  hideThinking: boolean,
+): TranscriptItem[] {
+  return hideThinking ? items.filter((i) => !isHiddenOnlyThinking(i)) : [...items];
 }
 
-/** Index of the rightmost MergedToolsItem in the array, or -1. */
-function lastMergedIndex(result: DisplayItem[]): number {
-  for (let i = result.length - 1; i >= 0; i--) {
-    if (result[i]!.kind === "mergedTools") return i;
-  }
-  return -1;
-}
-
-// ── Skill-load detection ─────────────────────────────────────────────────────
-// The agent has no model-facing "skill" tool: its system prompt lists the available skills
-// with their `<location>` and instructs the model to *read the SKILL.md* when a task
-// matches. So a skill load surfaces as an ordinary `read` of a `SKILL.md`. We detect
-// that shape so the summary can say "loaded skill X" instead of "read a file".
-
-/** The file path a `read` tool targeted, or null if it isn't a path-bearing read. */
-function readPath(t: ToolItem): string | null {
-  if (t.name !== "read") return null;
-  const inp = t.input;
-  if (!inp || typeof inp !== "object") return null;
-  const o = inp as Record<string, unknown>;
-  if (typeof o.path === "string") return o.path;
-  if (typeof o.file_path === "string") return o.file_path;
-  return null;
-}
-
-/**
- * If a tool is a `read` of a `SKILL.md`, return the skill's name (its parent directory,
- * matching the agent's own `name = parentDirName` convention); otherwise null. Heuristic by
- * design: reading a SKILL.md you're *editing* also matches, an acceptable false positive
- * — the dominant meaning of "read a SKILL.md" is "load that skill". Only SKILL.md files
- * are detectable; root `.md` skills are indistinguishable from any other markdown read.
- */
-export function skillFromTool(t: ToolItem): string | null {
-  const p = readPath(t);
-  if (!p) return null;
-  const parts = p.split("/").filter(Boolean);
-  const base = parts[parts.length - 1];
-  if (!base || base.toLowerCase() !== "skill.md") return null;
-  return parts[parts.length - 2] ?? "skill";
-}
-
-// ── Programmatic prose summary for a merged tool run ──────────────────────────
-// Maps each tool to a friendly "category" with a count-aware phrase, groups the run by
-// category (first-appearance order), and joins into one sentence — e.g.
-// "Edited a file, read 2 files, ran 3 commands". This is the deterministic, no-LLM
-// stand-in for the intent prose Codex/Claude generate. Skill loads get their own
-// category so the prose can name the skill.
-
-interface ToolCategory {
-  key: string;
-  /** Builds the phrase from the bucket's count and (for skills) collected names. */
-  phrase: (count: number, names: string[]) => string;
-  /** Set only for skill loads; collected so a single-skill run can name it. */
-  skillName?: string;
-}
-
-function toolCategory(t: ToolItem): ToolCategory {
-  const skill = skillFromTool(t);
-  if (skill) {
-    return {
-      key: "skill",
-      skillName: skill,
-      phrase: (n, names) =>
-        n === 1 ? `loaded skill ${names[0]}` : `loaded ${n} skills`,
-    };
-  }
-  switch (t.name) {
-    case "read":
-      return {
-        key: "read",
-        phrase: (n) => (n === 1 ? "read a file" : `read ${n} files`),
-      };
-    case "edit":
-      return {
-        key: "edit",
-        phrase: (n) => (n === 1 ? "edited a file" : `edited ${n} files`),
-      };
-    case "write":
-      return {
-        key: "write",
-        phrase: (n) => (n === 1 ? "wrote a file" : `wrote ${n} files`),
-      };
-    case "bash":
-      return {
-        key: "bash",
-        phrase: (n) => (n === 1 ? "ran a command" : `ran ${n} commands`),
-      };
-    case "grep":
-    case "ripgrep":
-    case "find":
-      // grep (content) and find (filenames) both read as "searches" in a summary.
-      return {
-        key: "search",
-        phrase: (n) => (n === 1 ? "ran a search" : `ran ${n} searches`),
-      };
-    case "ls":
-      return {
-        key: "ls",
-        phrase: (n) =>
-          n === 1 ? "listed a directory" : `listed ${n} directories`,
-      };
-    default: {
-      // Unknown tool: fall back to its name as the verb-noun so nothing is silently dropped.
-      const label = t.name;
-      return {
-        key: `other:${label}`,
-        phrase: (n) => (n === 1 ? `used ${label}` : `used ${label} ${n}×`),
-      };
-    }
-  }
-}
-
-/** Prose summary of a run of tools: "Edited a file, read 2 files, ran 3 commands".
- *  Skill-aware (reads of SKILL.md become "loaded skill X"), grouped by category in
- *  first-appearance order, with only the first letter of the whole sentence capitalized. */
-export function summarizeToolRun(tools: readonly ToolItem[]): string {
-  const buckets = new Map<
-    string,
-    { count: number; names: string[]; phrase: ToolCategory["phrase"] }
-  >();
-  for (const t of tools) {
-    const cat = toolCategory(t);
-    let b = buckets.get(cat.key);
-    if (!b) {
-      b = { count: 0, names: [], phrase: cat.phrase };
-      buckets.set(cat.key, b);
-    }
-    b.count++;
-    if (cat.skillName) b.names.push(cat.skillName);
-  }
-  const joined = [...buckets.values()]
-    .map((b) => b.phrase(b.count, b.names))
-    .join(", ");
-  return joined ? joined.charAt(0).toUpperCase() + joined.slice(1) : "";
-}
-
-/** Human label for a merged card — the programmatic prose summary of its tools. */
-export function mergedSummary(item: MergedToolsItem): string {
-  return summarizeToolRun(item.tools);
+/** True for tool items — the "work" that the turn-level collapse treats as activity. */
+export function isWorkTool(i: TranscriptItem): boolean {
+  return i.kind === "tool";
 }
 
 // ── Pass 2: group into turns and split work vs. response ─────────────────────
@@ -333,7 +87,7 @@ export interface WorkLane {
   kind: "work";
   /** Stable key per work run within a turn (`${turnId}:w${runIndex}`). */
   id: string;
-  items: DisplayItem[];
+  items: TranscriptItem[];
   /** Offer the collapse affordance for THIS run: it holds a work tool and the turn has
    *  a trailing response to keep showing once collapsed. Forced false while the turn is
    *  still in flight (see groupTurns' lastTurnActive). */
@@ -345,7 +99,7 @@ export interface PinnedLane {
   kind: "pinned";
   /** The pinned item's own id. */
   id: string;
-  item: DisplayItem;
+  item: TranscriptItem;
 }
 export type TurnLane = WorkLane | PinnedLane;
 
@@ -356,16 +110,16 @@ export interface TurnGroup {
    *  message (a nudge) that triggered a fresh run. A leading run before the first such
    *  item — e.g. a snapshot mid-turn — yields a turn with no head. */
   user?: TranscriptItem;
-  /** The collapsible portion: tools, merged runs, thinking, and intermediate narration. */
-  work: DisplayItem[];
+  /** The collapsible portion: tools, thinking, and intermediate narration. */
+  work: TranscriptItem[];
   /** Always-visible items pulled out of `work` — the `answer` tool's Q&A result (see
    *  VISIBLE_TOOLS) and any image-bearing tool (see toolHasImages: a screenshot, a
    *  rendered mockup). Rendered between the collapsed work block and the final response
    *  so the user's own answers — and the pictures the agent surfaced — don't hide. */
-  visible: DisplayItem[];
+  visible: TranscriptItem[];
   /** The turn-final assistant message(s) — the trailing run of assistant items after the
    *  last tool. Rendered visibly; the work collapses behind the "Worked for Ns" header. */
-  response: DisplayItem[];
+  response: TranscriptItem[];
   /** The body in chronological order: collapsible work runs interleaved with pinned
    *  always-visible items. This is what the transcript renders (the work/visible split
    *  above is kept only for the turn-footer text scan and tests). */
@@ -380,27 +134,22 @@ export interface TurnGroup {
   endTs?: string;
 }
 
-function itemStart(i: DisplayItem): string | undefined {
+function itemStart(i: TranscriptItem): string | undefined {
   if (i.kind === "tool") return i.startedAt ?? i.finishedAt;
-  if (i.kind === "mergedTools") return i.tools[0]?.startedAt;
   if (i.kind === "user" || i.kind === "assistant" || i.kind === "inject")
     return i.ts;
   return undefined;
 }
-function itemEnd(i: DisplayItem): string | undefined {
+function itemEnd(i: TranscriptItem): string | undefined {
   if (i.kind === "assistant") return i.completedAt ?? i.ts;
   if (i.kind === "tool") return i.finishedAt ?? i.startedAt;
-  if (i.kind === "mergedTools") {
-    const last = i.tools[i.tools.length - 1];
-    return last?.finishedAt ?? last?.startedAt;
-  }
   if (i.kind === "user" || i.kind === "inject") return i.ts;
   return undefined;
 }
 
 function buildTurn(
   user: TranscriptItem | undefined,
-  body: DisplayItem[],
+  body: TranscriptItem[],
   index: number,
 ): TurnGroup {
   // The response is the maximal trailing run of assistant items at the very end of the
@@ -420,10 +169,10 @@ function buildTurn(
   const response = body.slice(k);
   const turnHasResponse = response.length > 0;
   const prePeelWork = workItems.filter((i) => !isVisibleTool(i));
-  // `DisplayItem[]` (not the narrower `ToolItem[]` the isVisibleTool guard yields) so the
+  // `TranscriptItem[]` (not the narrower `ToolItem[]` the isVisibleTool guard yields) so the
   // lead-up peel can push assistant paragraphs into `visible` too.
-  let work: DisplayItem[] = prePeelWork;
-  let visible: DisplayItem[] = workItems.filter(isVisibleTool);
+  let work: TranscriptItem[] = prePeelWork;
+  let visible: TranscriptItem[] = workItems.filter(isVisibleTool);
   const collapsible = turnHasResponse && work.some(isWorkTool);
 
   // Lanes preserve chronological order: a contiguous run of non-visible work folds into
@@ -436,7 +185,7 @@ function buildTurn(
   // hidden inside the collapsed "Worked for Ns" run. Scoped to `answer` only.
   const turnId = user?.id ?? body[0]?.id ?? `turn-${index}`;
   const lanes: TurnLane[] = [];
-  let run: DisplayItem[] = [];
+  let run: TranscriptItem[] = [];
   let runIndex = 0;
   const flushRun = () => {
     if (run.length === 0) return;
@@ -451,7 +200,7 @@ function buildTurn(
       endTs: itemEnd(items[items.length - 1]!),
     });
   };
-  const flushLeadUp = (leadUpItems: DisplayItem[]) => {
+  const flushLeadUp = (leadUpItems: TranscriptItem[]) => {
     for (const it of leadUpItems)
       lanes.push({ kind: "pinned", id: it.id, item: it });
   };
@@ -522,12 +271,12 @@ function buildTurn(
 }
 
 export function groupTurns(
-  items: readonly DisplayItem[],
+  items: readonly TranscriptItem[],
   lastTurnActive = false,
 ): TurnGroup[] {
   const turns: TurnGroup[] = [];
   let user: TranscriptItem | undefined;
-  let body: DisplayItem[] = [];
+  let body: TranscriptItem[] = [];
   let started = false;
   const flush = () => {
     if (!started) return;
@@ -567,7 +316,7 @@ export function groupTurns(
 }
 
 // ── Injected custom-message (nudge) rendering ────────────────────────────────
-export function isInjectItem(i: DisplayItem): i is InjectItem {
+export function isInjectItem(i: TranscriptItem): i is InjectItem {
   return i.kind === "inject";
 }
 

@@ -6,9 +6,8 @@
   import { imageViewer } from "../lib/image-viewer.svelte.js";
 
   // `flat` drops the card chrome (border/background/rounded box) so the call renders as a
-  // bare row. Used by ToolSummary for the successive calls inside a merged run — they read
-  // as a tight list under the group's thread-line instead of a stack of separate boxes
-  // (Codex-style). Standalone high-signal cards (write/edit in Transcript) keep flat=false.
+  // bare row. Currently unused (the merge layer that passed flat=true was removed), but
+  // kept for future use — the CSS is still wired. Standalone cards keep flat=false.
   let { item, flat = false }: { item: ToolItem; flat?: boolean } = $props();
   let open = $state(false);
 
