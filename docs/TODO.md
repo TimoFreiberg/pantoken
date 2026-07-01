@@ -322,6 +322,44 @@ New parity/UX items from the owner, grounded against current source.
       open-ended feature — defer until the rest of the parity work is done and the
       simpler per-domain surfaces (facets picker, skills/subagents views) have shipped.
 
+- [ ] **MCP server management UI.** The daemon has a full MCP API (`POST /mcp/{server}/
+      enable|disable|disconnect|reconnect`, OAuth start/callback; `wire-types.ts:295–340`)
+      and lifecycle events (`mcp_server_connected/disconnected/reconnecting/disabled`),
+      but all four events are swallowed (`event-map.ts:1199–1202` → `return EMPTY`) and
+      pilot has no Settings UI for MCP — only `/mcp` slash passthrough. The polytoken TUI
+      surfaces MCP server status + enable/disable/reconnect controls. Pilot should expose
+      these in a Settings tab (MCP servers) or a dedicated panel, wire the lifecycle events
+      to visible notices (connection lost, reconnecting, etc.), and surface server status
+      read-only in the UI. `pilot-feature-state.md` §9 already flags this 🔴.
+
+- [ ] **`eager_fallback_activated` event is swallowed — operator sees model change but
+      not why.** When the daemon auto-switches to a fallback model (e.g. the primary is
+      down/rate-limited), `model_switch` fires (so the picker updates), but the companion
+      `eager_fallback_activated` event (`wire-types.ts:3082`) has no case in `event-map.ts`
+      and hits the `default:` → `console.warn`. The operator sees the model silently change
+      with no explanation. Surface a notice ("⚠ Auto-switched to fallback model: …") so
+      the reason is visible. Quick fix: add a case in `event-map.ts` that emits a warning
+      `hostUiRequest{kind:"notify"}`.
+
+- [ ] **`agent_block_violation` event is swallowed.** If the agent violates a block
+      constraint, the operator gets no signal — the event (`event-map.ts:1209` in the
+      `return EMPTY` group) is silently dropped. Should surface as a visible warning
+      (notify card or transcript notice) so the operator knows a violation occurred.
+      Low frequency but a safety signal worth surfacing loudly (crash-don't-corrupt
+      philosophy).
+
+- [ ] **Notification autodrain toggle.** The daemon has `GET/POST /notification-autodrain`
+      (`wire-types.ts:437`) + `notification_autodrain_switch` / `notifications_drained`
+      events, all currently swallowed (`event-map.ts:1184–1185` → `EMPTY`). The TUI surfaces
+      this as a toggle (autodrain non-blocking notifications). Minor but a real feature
+      the daemon exposes that pilot doesn't surface — add a Settings toggle and wire the
+      events to update the cached state (mirror `permission_monitor_switch`'s pattern).
+
+- [ ] **Adventurous handoff (stretch).** `GET/POST /adventurous-handoff` exists
+      (`wire-types.ts:7`), `adventurous_handoff_active` is on the snapshot
+      (`wire-types.ts:2626`), pilot never reads it. Niche — only surface if dogfooding
+      shows a need. Track so it's not forgotten.
+
 ## 🟢 Polish / fast-follow
 
 
