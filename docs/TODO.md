@@ -174,12 +174,22 @@ elsewhere in this file are not duplicated here.
       shrank from 800ms→120ms (scrolls are instant now); `settleScroll`/`scrollToBottom`
       keep their own longer windows. E2e polish suite (incl. the prompt-step + anchor
       tests) all green.
-- [ ] **Visible prev/next-prompt nav element (discoverability).** The ⌘↑/⌘↓ prompt
+- [x] **Visible prev/next-prompt nav element (discoverability).** The ⌘↑/⌘↓ prompt
       navigation is invisible to a new user. Add a small floating prev/next control (↑↓
       arrows or chevrons) that fades in when the cursor/scroll position is in the transcript
       area, giving a visible affordance for jumping between user prompts. Should not be
       persistent (would clutter) — fade in on transcript focus/hover, fade out otherwise.
       Needs a tooltip (repo rule).
+      **Done 2026-07-02:** added a floating prev/next nav control inside `transcript-wrap`
+      in `Transcript.svelte` — two chevron buttons (↑ prev, ↓ next) positioned on the right
+      edge, vertically centered. Always mounted with an opacity toggle (not `{#if}`) so the
+      fade-out works symmetrically with the fade-in. Fades in on `transcript-wrap`
+      hover/focus-in, fades out on mouse leave/focus-out. Also stays visible while actively
+      stepping (`navIndex !== null`). On touch devices (`pointer: coarse`) the control is
+      always visible (hover doesn't apply) with 44px touch targets. Each button has a
+      tooltip naming the action + shortcut ("Previous prompt (⌘↑)" / "Next prompt (⌘↓)").
+      E2e test in `polish.e2e.ts` verifies the buttons exist with correct tooltips and
+      clicking them steps through prompts.
 - [x] **Session-tree view hangs on "Loading tree…" forever.** `getTree` unimplemented →
       `hub.ts:882` (`sendTree`) early-returns with no `treeState`; the client only clears its
       loading state on `treeState` (`TreeView.svelte:193`). Same guard disables the

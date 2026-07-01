@@ -246,6 +246,10 @@
   //     rapid burst of presses steps deterministically even while a scroll from the
   //     previous press is still settling (reading scrollTop mid-jump would stutter).
   let navIndex: number | null = null;
+  // Whether the transcript area is hovered or focused, so the floating prev/next
+  // prompt-nav control is visible. On touch (pointer: coarse) the control is always
+  // visible via CSS — hover/focus doesn't apply there.
+  let navHovered = $state(false);
   // A programmatic scroll fires `scroll` events of its own; treat scrolls within this
   // window as ours and keep the cursor. Once it lapses, a genuine user scroll drops the
   // cursor so the next ↑ re-anchors to the most recent prompt. Prompt-stepping uses an
@@ -602,7 +606,18 @@
   });
 </script>
 
-<div class="transcript-wrap">
+<div
+  class="transcript-wrap"
+  onmouseenter={() => (navHovered = true)}
+  onmouseleave={() => (navHovered = false)}
+  onfocusin={() => (navHovered = true)}
+  onfocusout={(e) => {
+    // Only hide if focus actually left the wrap (focusout bubbles from children).
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+      navHovered = false;
+    }
+  }}
+>
 <TranscriptSearch {scroller} />
 <PullIndicator snap={pull.snap} refreshing={pull.refreshing} testid="ptr-transcript" />
 <div
@@ -950,6 +965,55 @@
     New messages ↓
   </button>
 {/if}
+<div
+  class="prompt-nav"
+  class:visible={navHovered || navIndex !== null}
+  role="group"
+  aria-label="Prompt navigation"
+>
+  <button
+    class="prompt-nav-btn"
+    data-testid="prompt-nav-up"
+    type="button"
+    title="Previous prompt (⌘↑)"
+    aria-label="Previous prompt"
+    onclick={() => stepPrompt(-1)}
+  >
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      width="18"
+      height="18"
+    >
+      <path d="M12 19V5M5 12l7-7 7 7" />
+    </svg>
+  </button>
+  <button
+    class="prompt-nav-btn"
+    data-testid="prompt-nav-down"
+    type="button"
+    title="Next prompt (⌘↓)"
+    aria-label="Next prompt"
+    onclick={() => stepPrompt(1)}
+  >
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      width="18"
+      height="18"
+    >
+      <path d="M12 5v14M5 12l7 7 7-7" />
+    </svg>
+  </button>
+</div>
 </div>
 
 <style>
@@ -1006,6 +1070,62 @@
     }
     .row.user.nav-flash {
       animation: none;
+    }
+    .prompt-nav,
+    .prompt-nav-btn {
+      transition: none;
+    }
+  }
+  /* Floating prev/next-prompt nav — a discoverability affordance for the ⌘↑/⌘↓
+     prompt-stepping. Fades in on transcript hover/focus; always visible on touch
+     (pointer: coarse) where hover doesn't apply. Always mounted (opacity toggle)
+     so the fade-out works symmetrically with the fade-in. */
+  .prompt-nav {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.16s ease;
+  }
+  .prompt-nav.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .prompt-nav-btn {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    background: var(--surface);
+    color: var(--text-muted);
+    cursor: pointer;
+    box-shadow: var(--shadow-pop);
+    opacity: 0.75;
+    transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+  }
+  .prompt-nav-btn:hover {
+    opacity: 1;
+    color: var(--accent-text);
+    background: var(--accent);
+  }
+  /* Touch devices: always visible (no hover state) + 44px touch targets. */
+  @media (pointer: coarse) {
+    .prompt-nav {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .prompt-nav-btn {
+      min-width: 44px;
+      min-height: 44px;
     }
   }
   .col {
