@@ -18,16 +18,15 @@ test("a long tool output offers copy + an inline expand past the scrollbox cap",
   await waitForSettledWorkBlocks(page, 2);
   await expandWork(page, "last");
 
-  // Reveal the ToolCard from its summary wrapper, then open its body.
-  const summary = page.locator(".tool.summary").last();
-  await summary.locator(":scope > .head").click();
-  const innerHead = summary.locator(":scope > .body > .tool > .head");
-  await expect(innerHead).toBeVisible();
-  await innerHead.click();
+  // The ToolCard renders directly in the work body — open its body.
+  const head = page.getByTestId("work-body").last().locator(":scope > .tool > .head");
+  await expect(head).toBeVisible();
+  await head.click();
 
-  const pre = summary.locator(".tool .out");
+  const tool = page.getByTestId("work-body").last().locator(":scope > .tool");
+  const pre = tool.locator(".out");
   await expect(pre).toBeVisible();
-  const bar = summary.locator(".out-bar");
+  const bar = tool.locator(".out-bar");
 
   // The 40-line log overflows the 320px cap, so an Expand control appears; expanding
   // drops the cap (the .expanded class) and the toggle flips to Collapse.

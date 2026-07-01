@@ -6,16 +6,11 @@ import type {
 } from "@pilot/protocol";
 import { describe, expect, test } from "bun:test";
 import {
-  type DisplayItem,
-  type MergedToolsItem,
+  filterHiddenThinking,
   formatWorkedDuration,
   groupTurns,
   injectText,
-  mergeTools,
-  mergedSummary,
   parseQnaResult,
-  skillFromTool,
-  summarizeToolRun,
   workedLabel,
 } from "./transcript-view.js";
 
@@ -60,65 +55,9 @@ const inject = (
   ...over,
 });
 
-describe("mergeTools", () => {
-  test("collapses an uninterrupted run of tools, including bash, into one summary", () => {
-    const out = mergeTools([
-      tool("r1", "read"),
-      tool("g1", "grep"),
-      tool("b1", "bash"),
-      tool("f1", "find"),
-    ]);
-    expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({
-      kind: "mergedTools",
-      names: ["read", "grep", "bash", "find"],
-    });
-  });
-
-  test("a single non-write/edit tool still becomes a summary", () => {
-    const out = mergeTools([tool("b1", "bash")]);
-    expect(out[0]).toMatchObject({
-      kind: "mergedTools",
-      names: ["bash"],
-      tools: [{ id: "b1" }],
-    });
-  });
-
-  test("write and edit stay standalone and break surrounding summary runs", () => {
-    const out = mergeTools([
-      tool("r1", "read"),
-      tool("w1", "write"),
-      tool("b1", "bash"),
-      tool("e1", "edit"),
-      tool("g1", "grep"),
-    ]);
-    expect(out.map((i) => i.kind)).toEqual([
-      "mergedTools",
-      "tool",
-      "mergedTools",
-      "tool",
-      "mergedTools",
-    ]);
-    expect(out[1]).toMatchObject({ name: "write" });
-    expect(out[3]).toMatchObject({ name: "edit" });
-  });
-
-  test("thinking-only items break runs by default (thinking visible)", () => {
-    const out = mergeTools([
-      tool("b1", "bash"),
-      asst("t1", { text: "", thinking: "pondering" }),
-      tool("b2", "bash"),
-    ]);
-    // Visible thinking block sits between two cards: three items, no merge.
-    expect(out.map((i) => i.kind)).toEqual([
-      "mergedTools",
-      "assistant",
-      "mergedTools",
-    ]);
-  });
-
-  test("with thinking hidden, thinking-only items are dropped and runs merge across them", () => {
-    const out = mergeTools(
+describe("filterHiddenThinking", () => {
+  test("with thinking hidden, thinking-only items are dropped", () => {
+    const out = filterHiddenThinking(
       [
         tool("b1", "bash"),
         asst("t1", { text: "", thinking: "pondering" }),
@@ -128,16 +67,11 @@ describe("mergeTools", () => {
       ],
       true,
     );
-    expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({
-      kind: "mergedTools",
-      names: ["bash"],
-      tools: [{ id: "b1" }, { id: "b2" }, { id: "b3" }],
-    });
+    expect(out.map((i) => i.id)).toEqual(["b1", "b2", "b3"]);
   });
 
-  test("hidden thinking does not absorb an assistant item that has user-facing text", () => {
-    const out = mergeTools(
+  test("an assistant item with user-facing text is kept even when thinking is hidden", () => {
+    const out = filterHiddenThinking(
       [
         tool("b1", "bash"),
         asst("a1", { text: "here is the answer", thinking: "reasoned" }),
@@ -145,87 +79,19 @@ describe("mergeTools", () => {
       ],
       true,
     );
-    // Visible text still breaks the run even with thinking hidden.
-    expect(out.map((i) => i.kind)).toEqual([
-      "mergedTools",
-      "assistant",
-      "mergedTools",
-    ]);
+    expect(out.map((i) => i.id)).toEqual(["b1", "a1", "b2"]);
   });
 
-  // ── sealed flag ─────────────────────────────────────────────────────────
-
-  test("mergeTrailing=true (default): trailing tools are sealed", () => {
-    const out = mergeTools([tool("b1", "bash"), tool("r1", "read")]);
-    expect(out).toHaveLength(1);
-    expect((out[0] as MergedToolsItem).sealed).toBe(true);
-  });
-
-  test("mergeTrailing=false: trailing tools are unsealed", () => {
-    const out = mergeTools(
-      [tool("b1", "bash"), tool("r1", "read")],
-      false,
+  test("with thinking visible, thinking-only items are kept (no-op filter)", () => {
+    const out = filterHiddenThinking(
+      [
+        tool("b1", "bash"),
+        asst("t1", { text: "", thinking: "pondering" }),
+        tool("b2", "bash"),
+      ],
       false,
     );
-    expect(out).toHaveLength(1);
-    expect((out[0] as MergedToolsItem).sealed).toBe(false);
-  });
-
-  test("a non-tool item seals the preceding run", () => {
-    const out = mergeTools([
-      tool("r1", "read"),
-      tool("b1", "bash"),
-      asst("a1"),
-    ]);
-    expect(out.map((i) => i.kind)).toEqual(["mergedTools", "assistant"]);
-    expect((out[0] as MergedToolsItem).sealed).toBe(true);
-    expect((out[0] as MergedToolsItem).tools).toHaveLength(2);
-  });
-
-  test("a non-tool item seals the run even when standalone tools sit between them", () => {
-    // Timeline case: read+bash, then write, then text. Read+bash should be sealed
-    // because text eventually follows, even though write broke the run.
-    const out = mergeTools([
-      tool("r1", "read"),
-      tool("b1", "bash"),
-      tool("w1", "write"),
-      asst("a1"),
-    ]);
-    expect(out.map((i) => i.kind)).toEqual([
-      "mergedTools",
-      "tool",
-      "assistant",
-    ]);
-    expect((out[0] as MergedToolsItem).sealed).toBe(true);
-    expect((out[0] as MergedToolsItem).names).toEqual(["read", "bash"]);
-    expect((out[1] as ToolItem).name).toBe("write");
-  });
-
-  test("without a non-tool item and mergeTrailing=false, the run stays unsealed", () => {
-    // Streaming: read+bash then write, no text yet.
-    const out = mergeTools(
-      [tool("r1", "read"), tool("b1", "bash"), tool("w1", "write")],
-      false,
-      false,
-    );
-    expect(out.map((i) => i.kind)).toEqual(["mergedTools", "tool"]);
-    expect((out[0] as MergedToolsItem).sealed).toBe(false);
-  });
-
-  test("standalone tools stay standalone and don't seal adjacent runs", () => {
-    // answer between two summarizable runs — neither should seal the other.
-    const out = mergeTools(
-      [tool("r1", "read"), tool("a1", "answer"), tool("b1", "bash")],
-      false,
-      false,
-    );
-    expect(out.map((i) => i.kind)).toEqual([
-      "mergedTools",
-      "tool",
-      "mergedTools",
-    ]);
-    expect((out[0] as MergedToolsItem).sealed).toBe(false);
-    expect((out[2] as MergedToolsItem).sealed).toBe(false);
+    expect(out.map((i) => i.id)).toEqual(["b1", "t1", "b2"]);
   });
 });
 
@@ -285,14 +151,15 @@ describe("groupTurns", () => {
     expect(turns[0]!.response.map((i) => i.id)).toEqual(["a1"]);
   });
 
-  test("a merged-tools run counts as work and makes the turn collapsible", () => {
-    const items: DisplayItem[] = mergeTools([
+  test("a run of tool items counts as work and makes the turn collapsible", () => {
+    const turns = groupTurns([
+      user("u1"),
       tool("r1", "read"),
       tool("g1", "grep"),
+      asst("final"),
     ]);
-    const turns = groupTurns([user("u1"), ...items, asst("final")]);
     expect(turns[0]!.collapsible).toBe(true);
-    expect(turns[0]!.work[0]!.kind).toBe("mergedTools");
+    expect(turns[0]!.work[0]!.kind).toBe("tool");
   });
 
   test("a leading run before any user message becomes a turn with no user", () => {
@@ -504,11 +371,6 @@ describe("groupTurns: answer (visible) tools", () => {
     for (const l of lanes)
       if (l.kind === "work") expect(l.collapsible).toBe(false);
   });
-
-  test("answer stays standalone, not folded into a tool summary", () => {
-    const out = mergeTools([tool("a1", "answer"), tool("r1", "read")]);
-    expect(out.map((i) => i.kind)).toEqual(["tool", "mergedTools"]);
-  });
 });
 
 describe("groupTurns: image-bearing tools (visible)", () => {
@@ -532,30 +394,6 @@ describe("groupTurns: image-bearing tools (visible)", () => {
   test("detection is by the images field, not the tool name (a read of a PNG counts)", () => {
     const turns = groupTurns([user("u1"), shot("r1", "read"), asst("final")]);
     expect(turns[0]!.visible.map((i) => i.id)).toEqual(["r1"]);
-  });
-
-  test("an image tool stays standalone, not folded into a tool summary", () => {
-    const out = mergeTools([
-      tool("r1", "read"),
-      shot("s1"),
-      tool("r2", "read"),
-    ]);
-    // The screenshot breaks the run: read | screenshot | read, not one merged card.
-    expect(out.map((i) => i.kind)).toEqual([
-      "mergedTools",
-      "tool",
-      "mergedTools",
-    ]);
-  });
-
-  test("an image-less tool of the same name still merges normally", () => {
-    // A still-running screenshot has no images yet — it summarizes like any other tool
-    // until toolFinished lands the image and the next fold reclassifies it.
-    const out = mergeTools([
-      tool("r1", "read"),
-      tool("s1", "preview_screenshot"),
-    ]);
-    expect(out.map((i) => i.kind)).toEqual(["mergedTools"]);
   });
 });
 
@@ -696,96 +534,5 @@ describe("workedLabel", () => {
       asst("final", { ts: undefined }),
     ])[0]!;
     expect(workedLabel(t)).toBe("Worked");
-  });
-});
-
-describe("skillFromTool", () => {
-  const read = (input: unknown) => tool("r", "read", { input });
-
-  test("a read of a SKILL.md resolves to the parent-dir skill name", () => {
-    expect(skillFromTool(read({ path: ".pi/skills/debug/SKILL.md" }))).toBe(
-      "debug",
-    );
-  });
-  test("accepts the file_path alias and is case-insensitive on the basename", () => {
-    expect(
-      skillFromTool(read({ file_path: "/abs/agents/skills/jj/Skill.md" })),
-    ).toBe("jj");
-  });
-  test("a normal file read is not a skill load", () => {
-    expect(skillFromTool(read({ path: "protocol/src/state.ts" }))).toBeNull();
-  });
-  test("a non-read tool is never a skill load, even with a SKILL.md arg", () => {
-    expect(
-      skillFromTool(
-        tool("e", "edit", { input: { path: "skills/x/SKILL.md" } }),
-      ),
-    ).toBeNull();
-  });
-  test("a read without a path arg is not a skill load", () => {
-    expect(skillFromTool(read({ pattern: "x" }))).toBeNull();
-  });
-});
-
-describe("summarizeToolRun", () => {
-  const read = (id: string, path: string) =>
-    tool(id, "read", { input: { path } });
-
-  test("groups by category in first-appearance order, capitalizing the sentence", () => {
-    // searchBatch's shape: 2 reads, 2 greps, 1 find, 1 bash. grep+find fold into searches.
-    expect(
-      summarizeToolRun([
-        read("r1", "a.ts"),
-        read("r2", "b.ts"),
-        tool("g1", "grep"),
-        tool("g2", "grep"),
-        tool("f1", "find"),
-        tool("b1", "bash"),
-      ]),
-    ).toBe("Read 2 files, ran 3 searches, ran a command");
-  });
-
-  test("a single command reads in the singular", () => {
-    expect(summarizeToolRun([tool("b", "bash")])).toBe("Ran a command");
-  });
-
-  test("a SKILL.md read becomes 'loaded skill X', named", () => {
-    expect(summarizeToolRun([read("s", ".pi/skills/debug/SKILL.md")])).toBe(
-      "Loaded skill debug",
-    );
-  });
-
-  test("a skill load mixes with other tools, skill first in order", () => {
-    expect(
-      summarizeToolRun([
-        read("s", "skills/debug/SKILL.md"),
-        read("r", "state.ts"),
-        tool("b", "bash"),
-      ]),
-    ).toBe("Loaded skill debug, read a file, ran a command");
-  });
-
-  test("multiple skills collapse to a count rather than naming each", () => {
-    expect(
-      summarizeToolRun([
-        read("s1", "skills/debug/SKILL.md"),
-        read("s2", "skills/jj/SKILL.md"),
-      ]),
-    ).toBe("Loaded 2 skills");
-  });
-
-  test("an unknown tool falls back to its name as the verb", () => {
-    expect(summarizeToolRun([tool("x", "browser")])).toBe("Used browser");
-    expect(
-      summarizeToolRun([tool("x1", "browser"), tool("x2", "browser")]),
-    ).toBe("Used browser 2×");
-  });
-
-  test("mergedSummary delegates to the run summarizer", () => {
-    const merged = mergeTools([read("r1", "a.ts"), tool("b1", "bash")]);
-    expect(merged[0]!.kind).toBe("mergedTools");
-    expect(mergedSummary(merged[0] as never)).toBe(
-      "Read a file, ran a command",
-    );
   });
 });

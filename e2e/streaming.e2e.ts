@@ -26,15 +26,16 @@ test("a streamed reply renders user text, a working block, and the final answer"
   await expect(
     page.getByText("Here's the plan", { exact: false }),
   ).toBeVisible();
-  // Scope to THIS turn's work block: the greeting turn also renders a (collapsed) tool
-  // summary, so an unscoped `.tool.summary` could match both and trip strict mode.
-  const summary = page
+  // Scope to THIS turn's work block: the greeting turn also renders tool cards,
+  // so an unscoped `.tool` could match both and trip strict mode.
+  const work = page
     .locator(".turn-work")
     .last()
-    .getByTestId("work-body")
-    .locator(".tool.summary");
-  await expect(summary.locator(":scope > .head .label")).toHaveText(
-    "Read a file",
+    .getByTestId("work-body");
+  const toolCard = work.locator(":scope > .tool");
+  await expect(toolCard).toHaveCount(1);
+  await expect(toolCard.locator(":scope > .head .name")).toHaveText(
+    "Read file",
   );
 });
 

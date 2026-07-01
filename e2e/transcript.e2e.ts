@@ -36,14 +36,15 @@ test("renders the greeting conversation: user, collapsed work, final answer", as
   ).toHaveCount(0);
   await expect(page.getByText("Run shell command")).toHaveCount(0);
 
-  // Expanding reveals the narration and the one-tool bash summary.
+  // Expanding reveals the narration and the one-tool bash card.
   await expandWork(page);
   await expect(
     page.getByText("I'll add a lightweight health endpoint"),
   ).toBeVisible();
-  const summary = page.locator(".tool.summary");
-  await expect(summary.locator(":scope > .head .label")).toHaveText(
-    "Ran a command",
+  const tool = page.getByTestId("work-body").locator(":scope > .tool");
+  await expect(tool).toHaveCount(1);
+  await expect(tool.locator(":scope > .head .name")).toHaveText(
+    "Run shell command",
   );
 });
 
@@ -63,23 +64,18 @@ test("the composer footer shows the model; the header shows a live connection", 
 
 test("tool card expands to show output", async ({ page }) => {
   await expandWork(page);
-  const summary = page.locator(".tool.summary");
-  await summary.locator(":scope > .head").click();
-  const innerHead = summary.locator(":scope > .body > .tool > .head");
-  await expect(innerHead).toBeVisible();
-  await innerHead.click();
-  await expect(innerHead).toHaveAttribute("aria-expanded", "true");
+  const head = page.getByTestId("work-body").locator(":scope > .tool > .head");
+  await expect(head).toBeVisible();
+  await head.click();
+  await expect(head).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByText("server/src/index.ts:14")).toBeVisible();
 });
 
 test("tool card expands to show the full arguments", async ({ page }) => {
   await expandWork(page);
-  const summary = page.locator(".tool.summary");
-  await summary.locator(":scope > .head").click();
-  const innerHead = summary.locator(":scope > .body > .tool > .head");
-  await expect(innerHead).toBeVisible();
-  await innerHead.click();
-  await expect(innerHead).toHaveAttribute("aria-expanded", "true");
+  const head = page.getByTestId("work-body").locator(":scope > .tool > .head");
+  await head.click();
+  await expect(head).toHaveAttribute("aria-expanded", "true");
   // The args block labels each input key and shows its full value in a <pre> —
   // the collapsed header only renders a truncated single-line preview.
   const args = page.locator(".tool .args");
@@ -93,30 +89,29 @@ test("composer is present and idle", async ({ page }) => {
   await expect(page.getByPlaceholder("Message pilot…")).toBeVisible();
 });
 
-test("with thinking hidden, tools separated only by thinking merge into one card", async ({
+test("with thinking hidden, thinking-only items are dropped — tools render as individual cards", async ({
   page,
 }) => {
   // Default is thinking-hidden. The thinkingtools fixture interleaves a thinking-only
   // bubble between every tool call (bash → think → bash → think → read → think → bash).
-  // Those gaps render nothing, so the four tools fold into ONE summary card.
+  // Those thinking-only items render nothing, so they're filtered out — the four tool
+  // cards render directly, not merged into a summary.
   await drive(page, "thinkingtools");
   await waitForSettledWorkBlocks(page, 2);
   await expandWork(page);
   const work = page.getByTestId("work-body").last();
-  await expect(work.locator(".tool.summary")).toHaveCount(1);
-  await expect(work.locator(".tool.summary > .head .label")).toHaveText(
-    "Ran 3 commands, read a file",
-  );
+  // Four individual tool cards, no prose summary wrapping them.
+  await expect(work.locator(":scope > .tool")).toHaveCount(4);
+  await expect(work.locator(":scope > .tool.summary")).toHaveCount(0);
   // Nothing thinking-shaped survives — the bubbles between tools were dropped.
   await expect(work.getByText("Thought process")).toHaveCount(0);
 });
 
-test("with thinking visible, the same run fragments around the thinking blocks", async ({
+test("with thinking visible, thinking blocks sit between the tool cards", async ({
   page,
 }) => {
   // Reveal thinking, then run the same fixture. Now the thinking bubbles are visible
-  // content, so they legitimately break the run: four standalone tool cards with a
-  // "Thought process" block between each pair.
+  // content: four standalone tool cards with a "Thought process" block between each pair.
   await openSettings(page, "appearance");
   await page.getByTestId("hide-thinking").click();
   await page.getByRole("button", { name: "Close settings" }).click();
@@ -125,7 +120,7 @@ test("with thinking visible, the same run fragments around the thinking blocks",
   await waitForSettledWorkBlocks(page, 2);
   await expandWork(page);
   const work = page.getByTestId("work-body").last();
-  await expect(work.locator(".tool.summary")).toHaveCount(4);
+  await expect(work.locator(":scope > .tool")).toHaveCount(4);
   await expect(work.getByText("Thought process")).toHaveCount(3);
 });
 

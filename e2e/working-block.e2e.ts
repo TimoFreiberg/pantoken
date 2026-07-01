@@ -100,9 +100,10 @@ test("the working block toggles open and closed, with a descriptive tooltip", as
   await expect(
     page.getByText("I'll add a lightweight health endpoint"),
   ).toBeVisible();
-  const summary = page.locator(".tool.summary");
-  await expect(summary.locator(":scope > .head .label")).toHaveText(
-    "Ran a command",
+  const tool = page.getByTestId("work-body").locator(":scope > .tool");
+  await expect(tool).toHaveCount(1);
+  await expect(tool.locator(":scope > .head .name")).toHaveText(
+    "Run shell command",
   );
 
   // Collapse again: the body unmounts.

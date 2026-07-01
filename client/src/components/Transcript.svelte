@@ -5,16 +5,15 @@
   import Chevron from "./ui/Chevron.svelte";
   import { store } from "../lib/store.svelte.js";
   import {
-    type DisplayItem,
+    filterHiddenThinking,
     groupTurns,
     injectText,
-    mergeTools,
     type TurnGroup,
     workedLabel,
   } from "../lib/transcript-view.js";
+  import type { TranscriptItem } from "@pilot/protocol";
   import Markdown from "./Markdown.svelte";
   import ToolCard from "./ToolCard.svelte";
-  import ToolSummary from "./ToolSummary.svelte";
   import ThinkingBlock from "./ThinkingBlock.svelte";
   import QnaResult from "./QnaResult.svelte";
   import TranscriptSearch from "./TranscriptSearch.svelte";
@@ -72,18 +71,12 @@
     return undefined;
   });
   // Two view-model passes (pure, unit-tested in transcript-view.test.ts):
-  //   1. mergeTools — runs of summarizable tools fold into one summary card, but
-  //      only once a non-tool item (text) seals the run. During an active turn
-  //      (mergeTrailing=false) trailing tools stay as individual cards so each one
-  //      lands visibly; when the turn settles, the trailing seal collapses them.
-  //      Write/edit/answer/image tools stay standalone and don't seal runs.
+  //   1. filterHiddenThinking — drop thinking-only assistant items when the toggle is
+  //      on, so they don't create invisible gaps between tool cards.
   //   2. groupTurns — each turn (user → next user) splits into a collapsible "work"
   //      portion (tools + intermediate narration) and the turn-final response that
   //      stays visible. That's the "Worked for Ns" block below.
-  // mergeTrailing=false while a turn is active: trailing tools stay as individual
-  // cards so the user sees each one land rather than collapsing into a summary
-  // before the model's text arrives to seal the run.
-  const displayItems = $derived(mergeTools(items, store.hideThinking, !store.turnActive));
+  const displayItems = $derived(filterHiddenThinking(items, store.hideThinking));
   // While the last turn is active, its trailing text is only a candidate final
   // response — another tool can still follow. Keep the whole turn inline until the
   // lifecycle says it settled, then expose the collapse affordance.
@@ -132,14 +125,6 @@
     }
     return map;
   });
-
-  // Keep summary expansion outside ToolSummary so transcript refreshes cannot
-  // remount a live card and collapse it between the outer and inner clicks.
-  // The first call id is stable as more calls append to the same summarized run.
-  let mergedOpen = $state<Record<string, boolean>>({});
-  function toggleMerged(id: string) {
-    mergedOpen = { ...mergedOpen, [id]: !mergedOpen[id] };
-  }
 
   // Per-inject expand state — a nudge note renders as a tiny collapsed pill by
   // default; clicking reveals its text. Keyed by item id, default collapsed.
@@ -622,7 +607,7 @@
 
     <!-- One transcript item, rendered the same whether it sits in a turn's collapsible
          work block or as the visible final response. -->
-    {#snippet itemView(item: DisplayItem)}
+    {#snippet itemView(item: TranscriptItem)}
       {#if item.kind === "user"}
         <div class="row user" class:pending={item.delivery && item.delivery !== "rejected"} class:rejected={item.delivery === "rejected"}>
           {#if item.images && item.images.length > 0}
@@ -770,22 +755,6 @@
               {/if}
             </div>
           {/if}
-        </div>
-      {:else if item.kind === "mergedTools" && item.sealed}
-        <!-- A sealed run (the model narrated past it, or the turn settled) folds into the
-             collapsible "grep, read, bash"→prose summary folder — its first collapse. -->
-        <ToolSummary
-          {item}
-          open={mergedOpen[item.id] ?? false}
-          ontoggle={() => toggleMerged(item.id)}
-        />
-      {:else if item.kind === "mergedTools"}
-        <!-- A still-streaming run renders as a bare flat list — deliberately OUTSIDE the
-             collapsible folder. It only folds into <ToolSummary> once it seals (above). -->
-        <div class="tool-stream">
-          {#each item.tools as tool (tool.id)}
-            <ToolCard item={tool} flat />
-          {/each}
         </div>
       {:else if item.kind === "tool" && item.name === "answer"}
         <!-- The user's Q&A answers, surfaced visibly instead of buried in a tool card. -->
@@ -1416,14 +1385,6 @@
   }
   .work-head .work-label {
     font-weight: 550;
-  }
-  /* A still-streaming tool run: bare flat rows, no folder chrome (no header, no thread
-     line). The flat cards carry their own padding, so a tight 1px gap reads as one
-     compact list, while the run as a whole keeps the column's 18px gap to its neighbours. */
-  .tool-stream {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
   }
   /* When expanded, the work items indent under the header with a thread line. */
   .work-body {
