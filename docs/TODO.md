@@ -163,7 +163,7 @@ elsewhere in this file are not duplicated here.
       **Fixed:** `setModel` (`daemon-client.ts:792-798`) already treats 409 `no_change` as
       success, and `post()` (`daemon-client.ts:523-551`) already reads `data.code`/`data.message`
       from parsed JSON (not a nonexistent `error` field).
-- [ ] **Login-shell env not propagated to daemon at spawn (real bug).** The daemon is
+- [x] **Login-shell env not propagated to daemon at spawn (real bug).** The daemon is
       spawned via `Bun.spawn` with **no `env` option** (`daemon-client.ts:188` for new,
       `:235` for resume), so it inherits pilot's own `process.env` directly. When pilot is
       launched by the desktop `.app` bundle, that env is the GUI launchd context — typically
@@ -182,6 +182,11 @@ elsewhere in this file are not duplicated here.
       `getLoginEnvStatus` to reflect the captured state. The `backgroundModel` setting is
       separate (which model the daemon uses for background tasks) and also not forwarded —
       that one is closer to genuinely dead-by-design and can be labeled or wired separately.
+      **Fixed:** the full chain is implemented — `captureLoginEnv` runs at driver construction
+      (`polytoken-driver.ts:171`), `setLoginEnvStatus` updates the live status (line 174),
+      `loginEnv` is passed to `spawnDaemon` (line 428), and both `spawnNewDaemon`
+      (`daemon-client.ts:201-203`) + `spawnResumeDaemon` (`daemon-client.ts:253-255`) merge it
+      as `env: { ...process.env, ...opts.loginEnv }`.
 
 Already addressed from the same audit (kept as record):
 
