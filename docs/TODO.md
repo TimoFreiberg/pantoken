@@ -439,13 +439,6 @@ New parity/UX items from the owner, grounded against current source.
       update on snapshot refresh only. Session diffs (`SourceControlSnapshot`) deferred.
 
 
-- [~] **Provider OAuth login** → ~done (owner, 2026-06-22 — "i'll get back to it if there's
-      jank"). Sign-in / sign-out for OAuth-capable providers ships in the Settings panel via
-      the remote paste-the-code flow (open the auth page, paste the code/redirect back — no
-      Tailscale callback needed, which sidestepped the original cost). `oauth-dialog` +
-      `e2e/settings.e2e.ts` cover sign-in/cancel/sign-out. Left partial pending real-world use;
-      reopen if the flow shows jank.
-
 ## ⚡ Performance & network efficiency (2026-06-26 audit)
 
 Goals: snappy UI, battery/thermal-friendly, reliable on spotty wifi. The agent runs on
