@@ -117,19 +117,26 @@ elsewhere in this file are not duplicated here.
       is a silent no-op live. **Fix:** check whether the daemon protocol supports content
       blocks; if so, wire images through; if not, surface an "images not supported" hint
       instead of silently dropping.
-- [ ] **Plan-review signals are swallowed.** `plan_review_required`/`plan_mode_reinforcement`/
+- [x] **Plan-review signals are swallowed.** `plan_review_required`/`plan_mode_reinforcement`/
       `plan_verification` events (in `wire-types.ts:2590-2596`) have **no case** in
       `event-map.ts` — they hit the `default:` arm → `console.warn` + `EMPTY`. The operator
       gets no signal a review is required. The plan doc + `plan_handoff` approve are solid
       (tested). **Fix:** add visible cases for the plan-review slugs; consider a dedicated
       tool card for `write_plan`/`edit_plan` (currently generic).
-- [ ] **Spurious error on every new session.** `newSession` applies the model on create even
+      **Fixed:** the `system_reminder` case (`event-map.ts:1056-1073`) checks
+      `PLAN_REVIEW_LABELS` for the three plan-review slugs and surfaces them as visible
+      `customMessage` events (display:true) so the operator sees "Plan review required" /
+      "Plan mode reminder" / "Plan verification" in the transcript.
+- [x] **Spurious error on every new session.** `newSession` applies the model on create even
       when it equals the default → `POST /model` 409 `no_change` logged as error
       (`polytoken-driver.ts:993`). Fix in `daemon-client.ts` `setModel` (`:768-771`): treat
       409 whose body `code === "no_change"` as success — but note `post()` (`:525`) reads a
       nonexistent `error` field; must read parsed `data.code` (`ErrorBody` uses `code`/
       `message`). 409 also means `turn_in_flight`/`edit_format_locked`, so key on the **code**,
       not the status.
+      **Fixed:** `setModel` (`daemon-client.ts:792-798`) already treats 409 `no_change` as
+      success, and `post()` (`daemon-client.ts:523-551`) already reads `data.code`/`data.message`
+      from parsed JSON (not a nonexistent `error` field).
 - [ ] **Login-shell env not propagated to daemon at spawn (real bug).** The daemon is
       spawned via `Bun.spawn` with **no `env` option** (`daemon-client.ts:188` for new,
       `:235` for resume), so it inherits pilot's own `process.env` directly. When pilot is
