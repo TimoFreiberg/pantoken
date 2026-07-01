@@ -6,10 +6,11 @@ import {
   defaultModelRef,
   modelPostKey,
   parseModels,
-  synthesizeDefaultModels,
 } from "./models.js";
 
-// The actual observed output from `polytoken models` on the mini (2 models).
+// The actual observed output from `polytoken models` (polytoken 0.4.x). The
+// daemon now lists catalog models natively (marked `(dynamic)`) in the models:
+// section, so the old synthesizeDefaultModels fallback is no longer needed.
 const REAL_OUTPUT = `default_model: umans/umans-glm-5.2
 default_small_model: umans/umans-flash
 
@@ -20,26 +21,35 @@ models:
   tool_loading: eager
   reasoning: effort set=deepseek_v4; levels=high (default), max, none; can_disable=yes
   selectable: deepseek/deepseek-v4-pro, deepseek/deepseek-v4-pro(none), deepseek/deepseek-v4-pro(high), deepseek/deepseek-v4-pro(max)
-- deepseek/deepseek-v4-flash
-  provider: deepseek/deepseek-v4-flash
-  variant: claude
+- umans/umans-glm-5.2 (default, dynamic)
+  provider: umans/umans-glm-5.2
+  variant: other
   tool_loading: eager
-  reasoning: effort set=deepseek_v4; levels=high (default), max, none; can_disable=yes
-  selectable: deepseek/deepseek-v4-flash, deepseek/deepseek-v4-flash(none), deepseek/deepseek-v4-flash(high), deepseek/deepseek-v4-flash(max)
+  reasoning: effort set=custom; levels=high (default), max, none; can_disable=yes
+  selectable: umans/umans-glm-5.2, umans/umans-glm-5.2(none), umans/umans-glm-5.2(high), umans/umans-glm-5.2(max)
+- umans/umans-flash (small, dynamic)
+  provider: umans/umans-flash
+  variant: other
+  tool_loading: eager
+  reasoning: effort set=custom; levels=low, medium (default), high, none; can_disable=yes
+  selectable: umans/umans-flash, umans/umans-flash(none), umans/umans-flash(low), umans/umans-flash(medium), umans/umans-flash(high)
 `;
 
 test("parseModels > parses the real observed output", () => {
   const { models, defaultModel, defaultSmallModel } = parseModels(REAL_OUTPUT);
   expect(defaultModel).toBe("umans/umans-glm-5.2");
   expect(defaultSmallModel).toBe("umans/umans-flash");
-  expect(models).toHaveLength(2);
-  const [pro, flash] = models;
+  expect(models).toHaveLength(3);
+  const [pro, glm, flash] = models;
   expect(pro!.provider).toBe("deepseek/deepseek-v4-pro");
   expect(pro!.modelId).toBe("deepseek/deepseek-v4-pro");
   expect(pro!.label).toBe("deepseek/deepseek-v4-pro");
   expect(pro!.thinkingLevels).toEqual(["high", "max", "none"]);
-  expect(flash!.modelId).toBe("deepseek/deepseek-v4-flash");
-  expect(flash!.thinkingLevels).toEqual(["high", "max", "none"]);
+  // Catalog (dynamic) models now appear natively with their reasoning levels.
+  expect(glm!.modelId).toBe("umans/umans-glm-5.2");
+  expect(glm!.thinkingLevels).toEqual(["high", "max", "none"]);
+  expect(flash!.modelId).toBe("umans/umans-flash");
+  expect(flash!.thinkingLevels).toEqual(["low", "medium", "high", "none"]);
 });
 
 test("parseModels > splits provider from modelId on the first slash", () => {
@@ -89,7 +99,7 @@ test("parseModels > CRLF line endings are handled", () => {
   const crlf = REAL_OUTPUT.replace(/\n/g, "\r\n");
   const { models, defaultModel } = parseModels(crlf);
   expect(defaultModel).toBe("umans/umans-glm-5.2");
-  expect(models).toHaveLength(2);
+  expect(models).toHaveLength(3);
   expect(models[0]!.thinkingLevels).toEqual(["high", "max", "none"]);
 });
 
@@ -135,37 +145,4 @@ test("modelPostKey > is the identity (no provider/modelId join)", () => {
     "deepseek/deepseek-v4-pro",
   );
   expect(modelPostKey("local-model")).toBe("local-model");
-});
-
-test("synthesizeDefaultModels > emits entries for markers not in the models list", () => {
-  const parsed = parseModels(REAL_OUTPUT);
-  // Neither umans model appears in the models: section, so both are synthesized.
-  const synth = synthesizeDefaultModels(parsed);
-  expect(synth).toHaveLength(2);
-  expect(synth[0]!.provider).toBe("umans");
-  expect(synth[0]!.modelId).toBe("umans/umans-glm-5.2");
-  expect(synth[0]!.label).toBe("umans/umans-glm-5.2");
-  expect(synth[0]!.thinkingLevels).toBeUndefined();
-  expect(synth[1]!.provider).toBe("umans");
-  expect(synth[1]!.modelId).toBe("umans/umans-flash");
-  expect(synth[1]!.thinkingLevels).toBeUndefined();
-});
-
-test("synthesizeDefaultModels > does not duplicate a marker already in the models list", () => {
-  // AC.4: if polytoken later lists a default model natively as a models: block,
-  // the synthesis must skip it (no duplicate row in the picker).
-  const out = parseModels(
-    "default_model: deepseek/deepseek-v4-pro\ndefault_small_model: umans/umans-flash\n\nmodels:\n- deepseek/deepseek-v4-pro\n  provider: deepseek/deepseek-v4-pro\n  reasoning: levels=high; can_disable=yes\n",
-  );
-  const synth = synthesizeDefaultModels(out);
-  // Only the umans marker is absent from models: — it's the sole synthesized row.
-  expect(synth).toHaveLength(1);
-  expect(synth[0]!.modelId).toBe("umans/umans-flash");
-});
-
-test("synthesizeDefaultModels > null markers yield an empty array", () => {
-  const out = parseModels("models:\n- m1\n  provider: m1\n");
-  expect(out.defaultModel).toBeNull();
-  expect(out.defaultSmallModel).toBeNull();
-  expect(synthesizeDefaultModels(out)).toEqual([]);
 });

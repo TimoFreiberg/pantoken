@@ -151,18 +151,3 @@ export function defaultModelRef(marker: string): {
 export function modelPostKey(modelId: string): string {
   return modelId;
 }
-
-/** Synthesize ModelOption entries for default-marker models that aren't already
- *  in the parsed models list (catalog providers whose models appear only as
- *  default_model markers, not as models: blocks).
- *  Temporary: remove once polytoken models lists catalog models natively. */
-export function synthesizeDefaultModels(parsed: ParsedModels): ModelOption[] {
-  const existing = new Set(parsed.models.map((m) => m.modelId));
-  const out: ModelOption[] = [];
-  for (const marker of [parsed.defaultModel, parsed.defaultSmallModel]) {
-    if (!marker || existing.has(marker)) continue;
-    const { provider, modelId } = defaultModelRef(marker);
-    out.push({ provider, modelId, label: modelId, thinkingLevels: undefined });
-  }
-  return out;
-}
