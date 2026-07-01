@@ -240,6 +240,88 @@ Already addressed from the same audit (kept as record):
       seeded via `GET /permission-monitor` at warm-up (`polytoken-driver.ts:434`). Code-
       complete; not yet verified live by a human (the audit was done under `bypass_plus`).
 
+## 🟢 Polytoken parity — new todos (2026-07-01)
+
+New parity/UX items from the owner, grounded against current source.
+
+- [ ] **Thinking blocks: always collapsed-by-default + always expandable; re-scope
+      `hideThinking` to control only superseded blocks.** Today `store.hideThinking`
+      (default on) hides thinking blocks *entirely* — `Transcript.svelte:743` gates
+      `{#if item.thinking && !store.hideThinking}`, and `filterHiddenThinking`
+      (`transcript-view.ts:68-72`) drops thinking-only assistant items so they leave no
+      stub at all. The `ThinkingBlock.svelte` component itself already starts collapsed
+      (`open = $state(false)`) and is expandable via its header button — so the
+      collapsed-default + expandable behavior is already correct *when a block renders
+      at all*. The change is two-fold:
+      1. **Always render thinking blocks** (collapsed, expandable) — remove the
+         `&& !store.hideThinking` gate at `Transcript.svelte:743` and stop filtering
+         thinking-only items out in `filterHiddenThinking` (`transcript-view.ts:72`).
+         Every thinking block is visible as a collapsed stub by default; the user can
+         always expand it.
+      2. **Re-scope the setting's meaning.** `hideThinking` should control whether
+         *older* thinking blocks — those that have had other output happen since — are
+         displayed. The most recent / still-active thinking block always shows
+         (collapsed); older ones are hidden when the setting is on. This replaces the
+         current all-or-nothing hide. The setting label/tooltip in Settings.svelte
+         (`:281`) should reflect the new semantics ("Hide older thinking blocks").
+      Rationale: the current default silently discards all thinking, so the operator
+      can never expand a past thought process. The new default shows everything as
+      collapsed stubs (low visual cost) with on-demand expansion, and the setting
+      only trims the stale ones that have been superseded by later output.
+
+- [ ] **Compaction: context-meter hover popup + pass-through `/compact` + clear-context
+      button (both click-twice confirmed).** `/compact` already passes through as a
+      slash command and `POST /compact` is wired (`daemon-client.ts:865-868`), with
+      compaction events (`compaction_started/complete/cancelled/failed`) mapped to
+      notify + fetchState. The context meter (`ContextMeter.svelte` → `ContextRing.svelte`)
+      is display-only (`cursor: default`, `:74`) — a ring + % label with a tooltip
+      showing token counts. The composer also shows a `context-cue` banner above 85%
+      ("Context X% full — consider `/compact`", `Composer.svelte:752-759`). The ask:
+      a **hover popup on the context meter** that shows:
+      - More detail from whatever polytoken exposes (the `ContextUsageSnapshot` at
+        `wire-types.ts:963` carries `context_window`, `tokens`, `percent` — all already
+        projected to `SessionUsage` at `protocol/src/session-driver.ts:66-70`).
+      - A larger graphical progress bar (a scaled-up version of the `ContextRing` arc).
+      - A **Compact** button (`POST /compact`) and a **Clear context** button
+        (`POST /clear`, `wire-types.ts:23` → `context_cleared` event). Both are
+        destructive and can't be undone → **click-twice confirm gate** (mirror the
+        rewind gate in `Transcript.svelte`: first click arms with destructive styling +
+        updated tooltip, second click within ~3s fires, auto-disarms on timeout). No
+        confirmation popup — phone-first PWA.
+      The popup replaces the need to type `/compact`; the slash command stays as a
+      power-user path. Needs a tooltip (repo rule).
+
+- [ ] **Show all available facets** (`polytoken vfs ls polytoken://facets`). The session
+      snapshot exposes `available_skills` and `available_subagents`
+      (`wire-types.ts:2635-2636`) but **no `available_facets`**. The current `FacetBadge`
+      (`FacetBadge.svelte`) hardcodes execute ↔ plan (toggling via `Shift+Tab` /
+      `store.setFacet`). To show all available facets, either: (a) shell out to
+      `polytoken vfs ls polytoken://facets` during warm-up and expose the list, or
+      (b) advocate for a daemon `available_facets` field on the snapshot (mirroring
+      `available_skills`/`available_subagents`). The `FacetBadge` would then become a
+      picker (dropdown/menu) listing all facets rather than a two-state toggle. The
+      `setFacet` wire path (`store.svelte.ts:1924`) already passes an arbitrary string,
+      so no protocol change is needed for the send side.
+
+- [ ] **Ctrl+R prompt-history popup** (polytoken TUI parity — nice-to-have polish,
+      bottom of parity work). The polytoken TUI offers a ctrl+r popup showing a few
+      previous prompts above the text field; pressing enter fills the field with the
+      selected text. Add the same: a ctrl+r handler in the composer that opens a small
+      popup of recent prompts (from the transcript's user messages) above the textarea,
+      arrow-key navigate, enter fills the composer. **Stretch:** also use this to jump
+      to the selected prompt's position in the chat history (scroll the transcript to
+      it + highlight). Both the popup-fill and the jump-to-history are polish; this is
+      the lowest-priority item in the parity list — do it last.
+
+- [ ] **Full-featured config editor** (very late / stretch). `polytoken schemas
+      [app-config, agents-frontmatter, facet-frontmatter, subagent-frontmatter,
+      skill-frontmatter, permissions-config]` exposes the full JSON schema for each
+      config domain. A future Settings surface could shell out to `polytoken schemas`
+      to render a form-driven config editor with validation (pairing with `polytoken
+      validate` from the existing config-validation todo above). This is a large,
+      open-ended feature — defer until the rest of the parity work is done and the
+      simpler per-domain surfaces (facets picker, skills/subagents views) have shipped.
+
 ## 🟢 Polish / fast-follow
 
 
