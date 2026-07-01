@@ -54,7 +54,7 @@ From the source-verified parity audit (`NEXT-SESSION.md` §B, cross-checked agai
 source). Each item has exact fix sites + repro in the audit doc. Items already tracked
 elsewhere in this file are not duplicated here.
 
-- [ ] **`goal_proposal` interrogative wedges the session (worst bug).** Daemon 0.4.x emits
+- [x] **`goal_proposal` interrogative wedges the session (worst bug).** Daemon 0.4.x emits
       `interrogative{type:"goal_proposal"}` (from `/goal set` or an agent `propose_goal`).
       Pilot's vendored `InterrogativeType` (`wire-types.ts:1545`) is missing it, so it hits
       the `default:` arm in `buildInterrogativeMapping` (`event-map.ts:438-462`) — which emits
@@ -73,6 +73,11 @@ elsewhere in this file are not duplicated here.
       Then add the goal *display* (open TODO in 🔴 Next above: polytoken shows "(goal)" by the
       facet).
       **Repro:** live driver → `/goal set anything` → notify card + permanent "Working".
+      **Fixed 2026-07-01:** both parts implemented — `goal_proposal` is in the regenerated
+      `InterrogativeType` enum, has a dedicated case in `buildInterrogativeMapping` (renders
+      a confirm card → `goal_proposal_answer{accepted}`), and the `default:` arm emits a
+      blocking confirm dialog (not a fire-and-forget notify) with a Dismiss that POSTs
+      `{kind:"cancel"}`. E2e-tested in `e2e/goal-proposal.e2e.ts` (goal card + unknown type).
 - [ ] **Mock-only driver methods are dead against the live daemon.** The live
       `polytoken-driver.ts` omits 14 methods that exist in `mock-driver.ts`, so they pass e2e
       (mock) but are dead live: `getTree` (tree view hangs), `listProviders`/
