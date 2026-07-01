@@ -4,6 +4,7 @@
 // adopts wholesale, then resumes incremental folding.
 
 import {
+  type FlaggedFile,
   type GoalInfo,
   type HostUiRequest,
   type ImageContent,
@@ -15,6 +16,7 @@ import {
   type SessionRef,
   type SessionStatus,
   type SessionUsage,
+  type TodoItem,
 } from "./session-driver.js";
 
 export interface UserItem {
@@ -130,6 +132,14 @@ export interface SessionState {
    *  when explicitly cleared. Drives the StatusHeader goal badge. Same
    *  overwrite-guarded semantics as `facet`, extended with a null/cleared state. */
   goal?: GoalInfo | null;
+  /** Flagged files for this session. Unlike facet/goal (which default to
+   *  undefined), these default to [] — the daemon's schema requires flags on
+   *  every SessionStateSnapshot, so [] is the faithful projection of "no flags,"
+   *  and the RightSidebar always renders a list (just empty). Same overwrite-guard
+   *  as the others: a snapshot carrying flags replaces; one omitting preserves. */
+  flags: FlaggedFile[];
+  /** Todos for this session. Same [] default + overwrite-guard as flags. */
+  todos: TodoItem[];
   items: TranscriptItem[];
   /** Blocking dialogs awaiting a response, in arrival order. */
   pendingApprovals: HostUiRequest[];
@@ -151,6 +161,8 @@ export function initialSessionState(): SessionState {
     pendingApprovals: [],
     ambient: { statuses: {}, widgets: {} },
     queued: [],
+    flags: [],
+    todos: [],
   };
 }
 
@@ -257,6 +269,13 @@ export function foldEvent(
       // overwrites (including null = cleared); one that omits it must not blank a
       // known goal. null → undefined (badge hides), object → set, undefined → preserved.
       if (s.goal !== undefined) state.goal = s.goal ?? undefined;
+      // Overwrite-guarded: a snapshot that carries flags/todos replaces the
+      // list (including []); one that omits them preserves the known list.
+      // Unlike facet/goal, these default to [] (not undefined) because the
+      // daemon's schema requires them on every snapshot — [] is the faithful
+      // projection of "no flags/todos," and the UI always renders a list.
+      if (s.flags !== undefined) state.flags = [...s.flags];
+      if (s.todos !== undefined) state.todos = [...s.todos];
       // Queue changes have their own authoritative `queueUpdated` event. A snapshot that
       // carries the queue replaces it (including []); an older/partial snapshot that omits
       // the field must not erase live queue state.

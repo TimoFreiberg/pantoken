@@ -1905,4 +1905,60 @@ describe("snapshotFromState", () => {
     const nullSnap = snapshotFromState(null, ref, workspace, "idle", "t");
     expect(nullSnap.goal).toBeUndefined();
   });
+
+  test("threads flags onto the snapshot", () => {
+    const snap = snapshotFromState(
+      {
+        ...baseState,
+        flags: [
+          { path: "src/app.ts", mode: "included" },
+          { path: "README.md", mode: "referenced" },
+        ],
+      },
+      ref,
+      workspace,
+      "idle",
+      "t",
+    );
+    expect(snap.flags).toEqual([
+      { path: "src/app.ts", mode: "included" },
+      { path: "README.md", mode: "referenced" },
+    ]);
+  });
+
+  test("threads todos onto the snapshot", () => {
+    const snap = snapshotFromState(
+      {
+        ...baseState,
+        todos: [
+          {
+            id: 1,
+            title: "Write tests",
+            description: "Add unit tests",
+            status: "in_progress",
+            dependencies: [2],
+          },
+        ],
+      },
+      ref,
+      workspace,
+      "idle",
+      "t",
+    );
+    expect(snap.todos).toEqual([
+      {
+        id: 1,
+        title: "Write tests",
+        description: "Add unit tests",
+        status: "in_progress",
+        dependencies: [2],
+      },
+    ]);
+  });
+
+  test("defaults flags/todos to undefined when absent (null state)", () => {
+    const snap = snapshotFromState(null, ref, workspace, "idle", "t");
+    expect(snap.flags).toBeUndefined();
+    expect(snap.todos).toBeUndefined();
+  });
 });

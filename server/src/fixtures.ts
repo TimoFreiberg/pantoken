@@ -1858,6 +1858,52 @@ export function goalClear(): ScriptStep[] {
   ];
 }
 
+/** Drives the RightSidebar: emits a sessionUpdated snapshot carrying sample
+ *  flagged files + todos, so the right-sidebar panel shows live session context.
+ *  Exercises the full snapshot→foldEvent→state.flags/todos→UI path. */
+export function contextPanel(): ScriptStep[] {
+  return [
+    {
+      wait: 0,
+      event: {
+        ...base(),
+        type: "sessionUpdated",
+        snapshot: snapshot({
+          flags: [
+            { path: "src/app.ts", mode: "included" },
+            { path: "src/lib/store.svelte.ts", mode: "included" },
+            { path: "README.md", mode: "referenced" },
+          ],
+          todos: [
+            {
+              id: 1,
+              title: "Wire up the right sidebar",
+              description: "Add protocol types, event-map threading, and the drawer component",
+              status: "in_progress",
+              dependencies: [],
+            },
+            {
+              id: 2,
+              title: "Add e2e tests",
+              description: "Assert flagged files + todos render, toggle opens/closes",
+              status: "pending",
+              dependencies: [1],
+            },
+            {
+              id: 3,
+              title: "Review with subagent",
+              description: "Check type safety, overwrite-guard consistency, tooltips",
+              status: "pending",
+              dependencies: [2],
+            },
+          ],
+          status: "idle",
+        }),
+      },
+    },
+  ];
+}
+
 /** A short markdown plan used by the planView fixture. */
 const PLAN_VIEW_TEXT = `# Plan: Wire up the plan overlay
 
@@ -2252,6 +2298,7 @@ export const SCRIPTS: Record<string, () => ScriptStep[]> = {
   planview: planView,
   goalactive: goalActive,
   goalclear: goalClear,
+  context: contextPanel,
 };
 
 // --- Session listing + switching (Increment 2) ------------------------------
