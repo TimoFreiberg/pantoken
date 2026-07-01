@@ -198,6 +198,9 @@ export async function createPolytokenDriver(
   // Client-presence predicate, set by the hub at construction so the driver can
   // deny-safe an interactive prompt when nobody is connected. Defaults to true
   // (deny-safe = don't block on a prompt nobody can answer).
+  //
+  // TODO: no read site yet — a future trust/prompt auto-deny path should consult
+  // hasClients() before issuing a prompt that nobody can answer.
   let hasClients: () => boolean = () => true;
 
   /** Per-cwd cache of parsed slash commands. The set is cwd-scoped and re-broadcast
