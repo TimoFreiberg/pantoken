@@ -26,7 +26,7 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
       the cycle to user-driven modals (Settings, TreeView, PlanView) but those already have
       dedicated hotkeys so they stay out of the cycle.
 - [x] add UI support for `goal` (polytoken shows the text "(goal)" next to the facet in the sidebar, we can find a nicer place but we should also show it, if the protocol exposes it)
-- [ ] use the updated `polytoken models` that loads dynamic models (from catalog providers) now - remove obsolete fallbacks that emulated this behavior
+- [x] use the updated `polytoken models` that loads dynamic models (from catalog providers) now - remove obsolete fallbacks that emulated this behavior
 - [ ] use `polytoken validate {skill,facet,subagent}` for gui config stuff
 
 ## Full automated gui <-> tui parity testing via playwright + tmux

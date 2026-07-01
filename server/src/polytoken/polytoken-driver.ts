@@ -80,7 +80,6 @@ import {
   defaultModelRef,
   modelPostKey,
   parseModels,
-  synthesizeDefaultModels,
 } from "./models.js";
 import { parseSlashCommands } from "./commands.js";
 import { parseFileCatalog } from "./file-catalog.js";
@@ -1179,11 +1178,7 @@ export async function createPolytokenDriver(
       try {
         const { stdout } = await runPolytokenText(polytokenBin, ["models"]);
         const parsed = parseModels(stdout);
-        // TEMPORARY: catalog providers surface only as default markers, not as
-        // models: blocks. Synthesize pickable entries for them so the draft
-        // picker offers the configured default. Remove once polytoken models
-        // lists catalog models natively (feature request sent 2026-06-29).
-        return [...parsed.models, ...synthesizeDefaultModels(parsed)];
+        return parsed.models;
       } catch (e) {
         console.error("[polytoken] listModels failed", e);
         return [];
