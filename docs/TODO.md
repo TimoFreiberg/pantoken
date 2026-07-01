@@ -116,12 +116,19 @@ elsewhere in this file are not duplicated here.
       gate (first click arms with destructive-red styling + updated tooltip, second click
       within 3s fires, auto-disarms on timeout). The ⌘⇧↑ hotkey bypasses the gate (deliberate
       keyboard gesture). E2e tests updated + passing.
-- [ ] **Images are silently dropped by the live driver.** Client image pipeline is real
+- [x] **Images are silently dropped by the live driver.** Client image pipeline is real
       (compress/paste/drag-drop/heic), but `polytoken-driver.ts:723` drops the `_images`
       param and the daemon `/prompt`/`PromptRequest` has no image channel — so attaching images
       is a silent no-op live. **Fix:** check whether the daemon protocol supports content
       blocks; if so, wire images through; if not, surface an "images not supported" hint
       instead of silently dropping.
+      **Fixed 2026-07-01:** the daemon's `PromptRequest` still accepts only `content: string`
+      (no image channel), so images can't be sent to the model yet. The driver now (a) echoes
+      images into the `userMessage` event so the operator sees what they attached in the
+      transcript, and (b) emits a warning notice ("N images attached but the daemon doesn't
+      support images yet — only the text was sent") instead of silently dropping them. When
+      the daemon grows image support, the notice can be removed and images threaded to
+      `POST /prompt`.
 - [x] **Plan-review signals are swallowed.** `plan_review_required`/`plan_mode_reinforcement`/
       `plan_verification` events (in `wire-types.ts:2590-2596`) have **no case** in
       `event-map.ts` — they hit the `default:` arm → `console.warn` + `EMPTY`. The operator

@@ -732,7 +732,7 @@ export async function createPolytokenDriver(
       text: string,
       deliverAs?: "steer" | "followUp",
       sessionId?: string,
-      _images?: readonly ImageContent[],
+      images?: readonly ImageContent[],
       promptId?: string,
     ): Promise<void> {
       const ws = target(sessionId);
@@ -748,7 +748,27 @@ export async function createPolytokenDriver(
         type: "userMessage",
         id: promptId ?? `pt-${Date.now()}`,
         text,
+        // Echo images into the transcript so the client renders them (the mock does
+        // this too). The daemon's /prompt endpoint doesn't accept images yet, so they
+        // don't reach the model — but the operator sees what they attached.
+        images,
       });
+      // The daemon's POST /prompt (PromptRequest) accepts only `content: string` —
+      // no image channel. Surface a warning notice so the operator knows their images
+      // weren't sent to the model (rather than silently dropping them).
+      if (images && images.length > 0) {
+        emit({
+          sessionRef: ws.ref,
+          timestamp: now(),
+          type: "hostUiRequest",
+          request: {
+            kind: "notify",
+            requestId: `img-unsupported-${now()}`,
+            message: `⚠ ${images.length === 1 ? "1 image was" : `${images.length} images were`} attached but the daemon doesn't support images yet — only the text was sent.`,
+            level: "warning",
+          },
+        });
+      }
       // Mid-turn (a turn is in flight): queue as input the agent reads between
       // steps via POST /turn/input. Otherwise start a new turn via POST /prompt.
       // deliverAs is pilot-side UX only — the daemon's queue API has no
