@@ -9,6 +9,9 @@
   // a session's transcript exists. Dismissing (scrim) denies, deny-safe.
   const req = $derived(store.trustRequest);
   const minimized = $derived(attention.minimized.trust);
+  // When the approval pill is also showing (minimized), offset this pill upward
+  // so the two don't visually collide at the same bottom-center position.
+  const approvalAlsoMinimized = $derived(attention.minimized.approval);
 
   let sheetEl = $state<HTMLElement | null>(null);
 
@@ -98,6 +101,7 @@
         <button
           type="button"
           class="attention-pill"
+          class:offset={approvalAlsoMinimized}
           onclick={() => attention.restore("trust")}
           title="Trust decision pending — click or press ⌘\ to restore"
         >
@@ -236,6 +240,10 @@
       color 0.12s,
       border-color 0.12s,
       background 0.12s;
+  }
+  .attention-pill.offset {
+    /* When the approval pill is also minimized at bottom-center, stack above it. */
+    bottom: calc(60px + env(safe-area-inset-bottom));
   }
   .attention-pill:hover {
     color: var(--text);
