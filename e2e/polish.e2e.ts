@@ -425,6 +425,61 @@ test("sending a prompt while scrolled up jumps the transcript to the bottom", as
   await expect(page.getByTestId("new-messages-pill")).toHaveCount(0);
 });
 
+test("prev/next prompt-nav buttons are visible on hover and step through prompts", async ({
+  page,
+}) => {
+  // Build several turns so the oldest prompts have enough content below them to scroll to
+  // the top (a short final turn can't, which is fine — the stepper clamps there).
+  for (let i = 0; i < 5; i++) {
+    await drive(page, "reply");
+    await expect(
+      page.getByText("That confirms it", { exact: false }).last(),
+    ).toBeVisible();
+  }
+  await waitForSettledWorkBlocks(page, 6);
+
+  const count = await page.locator(".row.user").count(); // greeting + 5 replies
+  expect(count).toBeGreaterThanOrEqual(6);
+  const last = count - 1;
+
+  // True when the scroller sits at prompt `idx`'s block-start target.
+  const atPrompt = (idx: number) =>
+    page.evaluate((i) => {
+      const sc = document.querySelector(".scroller") as HTMLElement;
+      const row = document.querySelectorAll(".row.user")[i] as HTMLElement;
+      const within =
+        row.getBoundingClientRect().top -
+        sc.getBoundingClientRect().top +
+        sc.scrollTop;
+      const max = sc.scrollHeight - sc.clientHeight;
+      return Math.abs(sc.scrollTop - Math.min(within, max)) < 4;
+    }, idx);
+
+  // The nav control is always mounted but hidden (opacity 0) until the transcript is
+  // hovered. Hover the transcript-wrap to reveal it.
+  const upBtn = page.getByTestId("prompt-nav-up");
+  const downBtn = page.getByTestId("prompt-nav-down");
+
+  // Buttons have the right tooltips (repo rule: every action names itself + shortcut).
+  await expect(upBtn).toHaveAttribute("title", "Previous prompt (⌘↑)");
+  await expect(downBtn).toHaveAttribute("title", "Next prompt (⌘↓)");
+
+  // From the live tail, clicking ↑ steps one prompt older per click.
+  for (let i = last; i >= 0; i--) {
+    await upBtn.click();
+    await expect.poll(() => atPrompt(i)).toBe(true);
+  }
+  // Past the oldest, ↑ clamps.
+  await upBtn.click();
+  await expect.poll(() => atPrompt(0)).toBe(true);
+
+  // ↓ walks back toward newer prompts…
+  for (let i = 1; i <= last; i++) {
+    await downBtn.click();
+    await expect.poll(() => atPrompt(i)).toBe(true);
+  }
+});
+
 test("switching sessions restores the saved reading position", async ({
   page,
 }) => {
