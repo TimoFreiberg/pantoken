@@ -101,13 +101,18 @@ elsewhere in this file are not duplicated here.
       `setExtensionEnabled` (no extension enumeration/toggle API), `setDefaultModel`/
       `setDefaultThinking`/`setFavoriteModels` (no global config write API, no favorites
       concept). These need daemon-side endpoints or CLI subcommands to be added first.
-- [ ] **Session-tree view hangs on "Loading tree…" forever.** `getTree` unimplemented →
+- [x] **Session-tree view hangs on "Loading tree…" forever.** `getTree` unimplemented →
       `hub.ts:882` (`sendTree`) early-returns with no `treeState`; the client only clears its
       loading state on `treeState` (`TreeView.svelte:193`). Same guard disables the
       post-branch tree refresh (`hub.ts:901`). **Note:** the daemon has no `/tree` HTTP
       endpoint — build it from `GET /history`. Defense-in-depth: have `sendTree` emit an
       explicit empty/"unsupported" `treeState` (or the client time out) so it degrades
       instead of hanging.
+      **Fixed 2026-07-01 (defense-in-depth):** `sendTree` now emits an explicit empty
+      `treeState` (nodes: [], leafId: null) when `getTree` isn't implemented, so the TreeView
+      degrades to "No history in this session yet." instead of hanging on "Loading tree…".
+      The `getTree` implementation (projecting from GET /history) is tracked under the
+      mock-only-driver-methods TODO above — it's implementable but not yet done.
 - [x] **"Branch from this prompt" = irreversible history deletion, no guard.** `branchFrom` →
       `POST /rewind` (`polytoken-driver.ts:1051`: "NOT a branch — it's a destructive REWIND"),
       which drops the target prompt and everything after. The button says *Branch* and there
