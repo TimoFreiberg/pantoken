@@ -528,6 +528,15 @@ export function foldEvent(
       state.status = ev.reason === "failed" ? "failed" : "idle";
       return state;
     }
+
+    case "sessionReset": {
+      // The transcript was truncated/gapped. Clear the items so the fresh events
+      // that follow (emitted by the driver's reseed) fold into an empty state
+      // instead of duplicating on top of the stale transcript. Preserve metadata
+      // (ref, title, config) — only the transcript items are reset.
+      state.items = [];
+      return state;
+    }
   }
   return state;
 }

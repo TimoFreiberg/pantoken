@@ -382,13 +382,24 @@ export async function createPolytokenDriver(
       case "reseed": {
         // The history was truncated (session_rewound / context_cleared) or the SSE
         // stream gapped (stream_discontinuity). Re-broadcast the FULL transcript from
-        // GET /history so the hub's state matches the daemon's truth — exactly the
-        // openSession path, minus the sessionOpened (the session is already open).
-        // Reset the accumulator first: in-flight block + stale turnError are invalid.
+        // GET /history so the hub's state matches the daemon's truth. Emit a
+        // `sessionReset` first so the hub clears the stale folded state — the fold
+        // is additive, so emitting fresh events on top of stale ones would duplicate.
         resetAccumulator(ws.acc);
-        void reseedFromHistory(ws, /*emitOpened*/ false).catch((e) => {
-          console.error("[polytoken] reseed failed", e);
-        });
+        void (async () => {
+          try {
+            const events = await reseedFromHistory(ws, false);
+            // Clear the hub's stale state, then emit the fresh transcript.
+            emit({
+              sessionRef: ws.ref,
+              timestamp: now(),
+              type: "sessionReset",
+            });
+            for (const e of events) emit(e);
+          } catch (e) {
+            console.error("[polytoken] reseed failed", e);
+          }
+        })();
         break;
       }
       case "refetchQueue": {

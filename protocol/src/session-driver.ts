@@ -578,6 +578,14 @@ export interface SessionClosedEvent extends SessionEventBase {
   readonly reason: "manual" | "ended" | "failed";
 }
 
+/** The session's transcript was truncated or gapped (rewind, /clear,
+ *  stream_discontinuity). The hub must RESET the session state — clear the
+ *  folded transcript and re-seed from the driver's `defaultSeed()` — because
+ *  the fold is additive and naively emitting fresh events would duplicate. */
+export interface SessionResetEvent extends SessionEventBase {
+  readonly type: "sessionReset";
+}
+
 export type SessionDriverEvent =
   | SessionOpenedEvent
   | SessionUpdatedEvent
@@ -595,4 +603,5 @@ export type SessionDriverEvent =
   | HostUiRequestEvent
   | HostUiResolvedEvent
   | ExtensionCompatibilityIssueEvent
-  | SessionClosedEvent;
+  | SessionClosedEvent
+  | SessionResetEvent;
