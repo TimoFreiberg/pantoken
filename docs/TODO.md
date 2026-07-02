@@ -654,6 +654,136 @@ New parity/UX items from the owner, grounded against current source.
 
 
 
+## 🛡️ Solidity / jank / perf plan (2026-07-02 six-lens review, synthesized)
+
+Source: 42 findings from a six-lens review; 13 adversarially verified, 4 kept-unverified
+(verifier died at the usage limit — marked ⚠️), 1 refuted, 24 low-stakes. Full details with
+measurements live in the review artifact
+(`~/.claude/projects/-Users-timo-src-pilot/31915849-*/tool-results/solidity-review-findings.json`);
+titles below match its `findings[]` entries. Ranked by felt-quality-per-effort.
+
+### Top 10 (ranked)
+
+1. **Turn on WS compression for real — one line.** `perMessageDeflate: true` is negotiated
+   but Bun only compresses when the per-send flag is passed; measured 0/501 frames
+   compressed, 1,277KB shipped byte-identical (`index.ts:285-292`, rawSend `index.ts:154-155`).
+   Fix: `const s = JSON.stringify(msg); ws.send(s, s.length > 512)`; fix the stale comment;
+   consider explicit `maxBackpressure`. Measured 4x on synthetic, snapshots gzip 7-40x.
+   Effort: hours. Risk: minimal (browsers all negotiate deflate; Bun falls back per-client).
+2. **Make touch scrolling compositor-threaded again.** `edge-swipe.ts:154` and
+   `pull-to-refresh.ts:134` register permanent `{passive:false}` touchmove listeners on
+   `.app`, the transcript scroller, and the sidebar — every phone scroll flick waits on the
+   busy main thread (C1 parse) before moving. Fix: register touchstart passive; add the
+   non-passive touchmove only when the gesture engages (edge `clientX<=24` / `scrollTop<=0`),
+   remove on touchend/cancel/destroy — symmetric in both files. Test: existing tracker unit
+   tests + DevTools "Scrolling: threaded" check. Effort: hours. Risk: low (mechanical
+   listener-lifetime refactor).
+3. **Asset delivery: cache headers + gzip + SW cache** (merges two findings). `static.ts:7-18`
+   serves bare `Bun.file` — no Cache-Control/ETag, no gzip, and the SPA fallback serves
+   index.html for missing hashed assets (stale-deploy white-screen). Every launch re-downloads
+   ~860KB raw over Tailscale. Fix: (a) `/assets/*` → `max-age=31536000, immutable`;
+   index.html/sw.js → `no-cache` + ETag/304; (b) in-memory gzip cache (Bun.gzipSync, text
+   types); (c) sw.js: cache-first for `/assets/*`, network-first-with-fallback for
+   navigations (~30 lines, cap the cache); (d) 404 for missing `/assets/*` instead of SPA
+   fallback. Test: e2e asserting header presence; manual offline open. Effort: day. Risk:
+   low-medium (SW caching bugs are annoying — keep sw.js `no-cache` so it's always refetchable).
+4. **Warm-cap eviction kills running background turns.** `evictionPlan` is recency-only;
+   eviction disposes victims mid-turn and the synthetic `sessionClosed` clears the running
+   indicator + attention record, so the killed turn *looks finished*
+   (`polytoken-driver.ts:478-496`, `warm-cap.ts:7-21`; contrast the reaper's
+   `turn_in_flight` guard at `polytoken-driver.ts:645`). Fix: give `evictionPlan` an
+   `evictable(id)` predicate (stays pure, extend `warm-cap.test.ts`), pass
+   `!lastState?.turn_in_flight`, allow temporary over-cap with a loud log when all
+   candidates are running. Effort: hours. Risk: low.
+5. **Config setters + abort are fail-dangerous.** setModel/setThinking/setFacet/
+   setPermissionMonitor `.catch(console.error)` only; abort has no catch at all;
+   setPermissionMonitor poisons its cache optimistically so the badge can claim a safer
+   mode than the daemon is in (`polytoken-driver.ts:1320-1354, 781-785`). Fix: copy
+   respondUi's existing failure pattern (`polytoken-driver.ts:878-888`) — emit
+   `hostUiRequest{kind:'notify', level:'error'}` per catch; restore `prev` monitor mode on
+   failure; notify the silent `!data?.active_model` early-return. Test: fetch-mock unit
+   tests per setter. Effort: hours. Risk: low.
+6. **WS connect watchdog.** A blackholed handshake leaves the socket CONNECTING for
+   minutes with *no retry timer armed* — "Reconnecting…" lies (`ws.svelte.ts:51-60, 72-77,
+   110-114`). Fix: 8s watchdog after `new WebSocket(url)`: if still CONNECTING → detach
+   onclose, close, `scheduleReconnect()`; clear in onopen/onclose/cleanupSocket; don't
+   reset the backoff counter. Effort: hours. Risk: low (guard against firing after
+   forceReconnect swapped the socket).
+7. ⚠️ **Push notifications never fire in the real topology.** `maybeNotify` mutes Web Push
+   whenever ANY client is connected (`hub.ts:629`) — the desktop WKWebView is always
+   connected, so the phone never buzzes; half-open phone sockets extend the mute window.
+   Fix: drop the `clients.size > 0` gate (SW-side foreground suppression already exists,
+   `sw.js:55-67`); unify notification tags (`pilot-${phase}-${sid}`) between hub and
+   App.svelte so devices aren't double-buzzed. Needs a live push test. Effort: day.
+   Risk: medium (double-notification edge cases; verify on real iOS).
+8. **App updates never reach clients.** The only reload path is a new SW install, but
+   sw.js is byte-identical across builds — `updatefound` never fires; after desktop
+   auto-update every device keeps the old bundle (`sw.ts:12-23`, `store.svelte.ts:1742-1748`).
+   Fix: server sends build sha in `hello` (plumb like `serverId`; extend `wire.ts:136-141`),
+   client compares against `__BUILD_FULL_HASH__` (vite define) → existing
+   markUpdateReady toast. Effort: hours. Risk: low. (Pairs with #3's `no-cache` on
+   index.html.)
+9. ⚠️ **Morning pickup can't see finished-overnight runs.** `unread` is in-memory only;
+   'done ✓' requires observing the running→idle transition live, so iOS PWA eviction
+   erases it (`store.svelte.ts:135-139, 817-830, 1501-1502`). Fix: persist
+   `lastSeen: Record<sid, ISO>` in localStorage per server (mirror `pilot.lastSession.*`),
+   derive done/unread from `attention.updatedAt > lastSeen[sid]` with the
+   `lastUserMessageAt` fallback for server restarts. Test: e2e reload-then-assert-badge.
+   Effort: day. Risk: low.
+10. **Context meter frozen mid-turn + no-op 1s broadcast.** On the live driver `getUsage`
+    reads `lastState`, which only refreshes at turn boundaries — the meter shows
+    turn-start values all turn; meanwhile the 1s ticker folds+broadcasts identical values
+    to every viewer (`hub.ts:595-620`, `polytoken-driver.ts:1110-1117`). Fix: throttled
+    single-flight `GET /state` (3-5s) while `turn_in_flight` for viewed sessions;
+    change-gate `refreshUsage` (skip emit when tokens/contextWindow/percent unchanged);
+    align the mock so e2e stops asserting behavior prod doesn't have. Effort: day.
+    Risk: low.
+
+### Quick wins (hours-sized, low-risk checklist)
+
+- [ ] Delete `will-change: opacity` (`markstream-theme.css:236`) — layer-per-paragraph
+      explosion during streaming; browsers self-promote for one-shot animations.
+- [ ] ⚠️ Call `disableD2()` once at startup — every finalized markdown block currently fires
+      an unhandled rejection (missing optional `@terrastruct/d2`) that also aborts footnote/
+      tooltip enhancement. Also fix upstream in markstream: check for d2 blocks *before*
+      `getD2()`, catch enhancement rejections.
+- [ ] `snapshotOf` (`hub.ts:331-334`): return state directly / stringify once at send;
+      clone only in test capture. (Measured: micro — do NOT build server delta-coalescing.)
+- [ ] Fix the two committed perf scripts (broken under Bun isolated node_modules) so the
+      C1 measurements stay reproducible.
+- [ ] Right-sidebar tooltip advertises ⌘J but the hotkey is ⌘⇧J.
+- [ ] Surface clipboard-copy failures (three silent sites; the store's own copy path
+      already does it right).
+- [ ] Move the per-send `POST /push/subscribe` round-trip off the prompt-send hot path
+      (subscribe once per session/page instead).
+
+### Needs owner decision
+
+- **⌘⇧↑ in a focused composer fires an UNCONFIRMED destructive rewind** and clobbers the
+  typed draft (high-severity, unverified). Options: confirm dialog, require empty composer,
+  or drop the binding. Cheap to decide, ugly to hit.
+- **Queued-message granularity** (⚠️ unverified finding): per-item × on the newest row is
+  implementable today (`DELETE /turn/input/newest`); per-arbitrary-item delete needs a
+  daemon ask. Also: should Edit-all keep message boundaries (composer gets last item,
+  rest → prompt history) instead of join('\n\n')? Changes visible behavior.
+- **fileIndex pull vs push**: making the ~150KB index pull-based (first @-mention) halves
+  reconnect payload but adds first-keystroke latency. Alternatively just dedupe the
+  double-push on reconnect (`hub.ts:1057-1060, 1079-1127`) and keep push.
+- **Notification-tap routing** (`sw.js:80-96`): postMessage focus-session into an open
+  window instead of navigating every window (full reload each). Straightforward, but
+  changes tap behavior; pairs with #7.
+
+### Explicitly not worth it (dropped, with reasons)
+
+- Server-side send-path micro-optimizations beyond the `snapshotOf` clone (measured
+  0.1-0.5ms; the felt cost is client C1 markdown reparse at ~936ms/long answer).
+- "clearQueue is a dead affordance" — refuted; it landed 2026-07-02. (The narrower
+  partial-drain bug is tracked above under hand-backs.)
+- "Trunk typecheck gate is red" — already fixed (commit `mqmukvnp`).
+- ToolCard's duplicate isDark MutationObserver, find-in-transcript 110ms rescan,
+  scrollbar-gutter rewrap, composer double-autosize, `listColdSessions` double-parse —
+  real but low; batch opportunistically when touching those files.
+
 ## ⚡ Performance & network efficiency (2026-06-26 audit)
 
 Goals: snappy UI, battery/thermal-friendly, reliable on spotty wifi. The agent runs on
