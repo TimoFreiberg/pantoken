@@ -692,7 +692,7 @@ New parity/UX items from the owner, grounded against current source.
       untrusted dir against the real daemon; if the capability path covers it, *remove*
       the dead `TrustCard` + hub trust channel scaffolding rather than leaving it
       permanently dangling; if it doesn't, wire the trust methods after all.
-- [ ] **SSE liveness watcher reconnect-cycles every idle session (found reviewing the
+- [x] **SSE liveness watcher reconnect-cycles every idle session (found reviewing the
       2026-07-02 SSE-reconnect commit).** The daemon's SSE is push-only with no idle
       heartbeats (`daemon-client.ts:11-12`), so the 60s no-frame watchdog
       (`daemon-client.ts:1107-1113`) fires on every *idle* session every ~60-120s:
@@ -702,6 +702,15 @@ New parity/UX items from the owner, grounded against current source.
       reconnect when the probe fails/hangs. Also: allocate the `TextDecoder` per attempt
       (split multi-byte chars can corrupt the first frame after a retry). Full review +
       remaining robustness design: `docs/PLAN-driver-robustness.md`.
+      **Fixed 2026-07-02 (PLAN-driver-robustness A1):** the watcher now probes
+      `GET /health` (bounded by `livenessProbeTimeoutMs`, 5s) on expiry — an
+      answering daemon resets `lastFrameAt` and the stream is left alone; only a
+      failed/hung probe aborts + reconnects. A `probing` flag prevents stacked
+      probes. `TextDecoder` is now allocated per attempt. The windows are
+      public knobs (`livenessIntervalMs`/`livenessProbeTimeoutMs`) so the two new
+      unit tests run in milliseconds: idle+healthy → exactly 1 `/events` fetch
+      across 6 periods, zero discontinuities; idle+hung-probe → reconnect +
+      `stream_discontinuity` emitted.
 - [ ] **Minor: `hasClients` comment mislabels fail-open as deny-safe.** The default
       `() => true` (`polytoken-driver.ts:208`) means "assume someone can answer" — that is
       fail-open; the comment calls it "deny-safe = don't block". Reword when the first

@@ -38,6 +38,12 @@ reconnect even if the daemon someday honors `Last-Event-ID` — fine today (supp
 unconfirmed, upstream ask open); when it's confirmed, gate the discontinuity on the first
 resumed `seq` not being contiguous with `lastEventId`.
 
+> **Landed 2026-07-02:** the A1 defect fix + nit (1) shipped exactly as specced —
+> probe-before-kill (bounded `GET /health`, `probing` single-flight flag,
+> test-shrinkable `livenessIntervalMs`/`livenessProbeTimeoutMs` knobs) with both
+> prescribed unit tests, and the per-attempt `TextDecoder`. Nit (2) stays open
+> pending the upstream `Last-Event-ID` ask.
+
 ### A2. `sessionReset` channel — correct, but invisible to e2e
 
 Hub folds it (clears `items`, preserves meta — `state.ts:538-545`), driver emits reset +

@@ -488,6 +488,10 @@ export class DaemonClient {
   private daemonPid: number | null = null;
   private lease: AttachmentLease | null = null;
   private sseController: AbortController | null = null;
+  /** SSE liveness knobs (see subscribe()). Public + mutable so tests can shrink
+   *  the windows to milliseconds; production code leaves the defaults. */
+  livenessIntervalMs = 60_000;
+  livenessProbeTimeoutMs = 5_000;
 
   constructor(sessionId: string, port: number, pid: number) {
     this.sessionId = sessionId;
@@ -607,6 +611,24 @@ export class DaemonClient {
       this.daemonPid = result.data.pid;
     }
     return result;
+  }
+
+  /** Bounded `GET /health` for the SSE liveness watcher: true iff the daemon
+   *  answers OK within `timeoutMs`. Never throws — a hung or refused probe is
+   *  simply `false` (that's the signal to reconnect). */
+  private async probeHealth(timeoutMs: number): Promise<boolean> {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${this.baseUrl}/health`, {
+        signal: ctl.signal,
+      });
+      return res.ok;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(t);
+    }
   }
 
   /** `POST /terminate` — graceful drain + exit. */
@@ -1088,7 +1110,6 @@ export class DaemonClient {
     this.sseController = new AbortController();
     const { signal } = this.sseController;
 
-    const decoder = new TextDecoder();
     let buffer = "";
     let lastEventId: string | null = null;
     let lastFrameAt = Date.now();
@@ -1099,17 +1120,37 @@ export class DaemonClient {
     // this.sseController) to force a retry without signaling clean shutdown.
     let currentAttempt: AbortController | null = null;
 
-    // Liveness watcher: the daemon's SSE is push-only with no heartbeats on an
-    // idle daemon. If no frame arrives for LIVENESS_INTERVAL, abort the current
-    // fetch to trigger a reconnect. 60s balances false-positive cost (a reseed
-    // is 2 HTTP round-trips + transcript re-broadcast) against detection latency.
-    const LIVENESS_INTERVAL = 60_000;
+    // Liveness watcher: the daemon's SSE is push-only with no heartbeats, so a
+    // silent stream is AMBIGUOUS — an idle daemon looks identical to a dead one.
+    // Killing the stream on silence alone reconnect-cycles every idle session
+    // forever (each cycle = 2 HTTP round-trips + a sessionReset re-broadcast to
+    // every viewer + a protocol-v2 epoch bump that defeats resume). So on
+    // expiry, probe GET /health first: an answer means alive-and-idle → reset
+    // the clock and leave the stream alone; only a failed/hung probe forces the
+    // reconnect. `probing` keeps the interval from stacking probes while one is
+    // still in flight.
+    const LIVENESS_INTERVAL = this.livenessIntervalMs;
+    let probing = false;
     const livenessTimer = setInterval(() => {
-      if (stopped) return;
-      if (Date.now() - lastFrameAt > LIVENESS_INTERVAL) {
-        console.warn("[polytoken] SSE liveness timeout — forcing reconnect");
-        currentAttempt?.abort();
-      }
+      if (stopped || probing) return;
+      if (Date.now() - lastFrameAt <= LIVENESS_INTERVAL) return;
+      probing = true;
+      void (async () => {
+        try {
+          const alive = await this.probeHealth(this.livenessProbeTimeoutMs);
+          if (stopped) return;
+          if (alive) {
+            lastFrameAt = Date.now(); // alive-and-idle: quiet is fine
+          } else {
+            console.warn(
+              "[polytoken] SSE silent and /health probe failed — forcing reconnect",
+            );
+            currentAttempt?.abort();
+          }
+        } finally {
+          probing = false;
+        }
+      })();
     }, LIVENESS_INTERVAL);
 
     void (async () => {
@@ -1152,6 +1193,10 @@ export class DaemonClient {
 
           const reader = res.body.getReader();
           buffer = "";
+          // Per-attempt decoder: an abort can split a multi-byte char, and a
+          // shared decoder would leak that partial state into the next
+          // attempt's first frame.
+          const decoder = new TextDecoder();
           // SSE parsing: accumulate a buffer, split on frame boundaries (`\n\n`
           // or `\r\n\r\n`), extract `id:` and `data:` lines. Per the SSE spec,
           // multiple `data:` lines are concatenated with `\n` and a single
