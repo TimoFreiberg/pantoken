@@ -36,6 +36,13 @@ import { readPilotSettings, writePilotSettings } from "./settings-store.js";
 
 export type Send = (msg: ServerMessage) => void;
 
+/** Coerce a caught value into a human-readable string. Used everywhere a driver
+ *  call's `.catch` builds an `error`/`promptResult` message — keeps the
+ *  `e instanceof Error ? e.message : String(e)` dance in one place. */
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 /** The production opener: spawn the platform file manager on a directory (Finder on
  *  macOS, Explorer on Windows, xdg-open elsewhere). Fire-and-forget — a non-zero exit
  *  (e.g. no xdg-open installed on a headless host) surfaces nowhere, which is the
@@ -743,8 +750,11 @@ export class SessionHub {
     } else this.initializing.delete(sid);
   }
 
-  private broadcastSessionStatus(): void {
-    this.broadcast({
+  /** Build a `sessionStatus` message from the current running/initializing/attention
+   *  projections. Shared by `broadcastSessionStatus` and the hello handshake in
+   *  `addClient`, which both emit the same snapshot. */
+  private sessionStatusMsg(): Extract<ServerMessage, { type: "sessionStatus" }> {
+    return {
       type: "sessionStatus",
       runningIds: [...this.running],
       initializingIds: [...this.initializing],
@@ -752,7 +762,23 @@ export class SessionHub {
         const item = this.attentionFor(sid);
         return item ? [item] : [];
       }),
-    });
+    };
+  }
+
+  /** Build an `updateStatus` message from the current staged-update state. Shared by
+   *  `broadcastUpdateStatus` and the hello handshake in `addClient`. */
+  private updateStatusMsg(): Extract<ServerMessage, { type: "updateStatus" }> {
+    return {
+      type: "updateStatus",
+      available: this.updateSha !== null,
+      sha: this.updateSha ?? undefined,
+      applying: this.applying,
+      desktopStale: this.desktopStale,
+    };
+  }
+
+  private broadcastSessionStatus(): void {
+    this.broadcast(this.sessionStatusMsg());
     // Attention-only changes also travel through this method. Reconcile the live-refresh
     // ticker every time; syncLiveRefresh is idempotent and keys only off running/client sets.
     this.syncLiveRefresh();
@@ -888,10 +914,7 @@ export class SessionHub {
     // or deduplicate. Current clients always send promptId.
     if (!promptId) {
       void run().catch((e) =>
-        send({
-          type: "error",
-          message: e instanceof Error ? e.message : String(e),
-        }),
+        send({ type: "error", message: errMsg(e) }),
       );
       return;
     }
@@ -915,7 +938,7 @@ export class SessionHub {
             e && typeof e === "object" && "sessionId" in e
               ? (e.sessionId as SessionId | undefined)
               : undefined,
-          error: e instanceof Error ? e.message : String(e),
+          error: errMsg(e),
         }));
       this.promptResults.set(promptId, result);
       if (this.promptResults.size > SessionHub.PROMPT_RESULT_CAP) {
@@ -1092,10 +1115,7 @@ export class SessionHub {
     try {
       result = await this.driver.setArchived?.(path, archived);
     } catch (e) {
-      send({
-        type: "error",
-        message: e instanceof Error ? e.message : String(e),
-      });
+      send({ type: "error", message: errMsg(e) });
       return;
     }
     // A worktree-backed session whose worktree couldn't be reaped (dirty) is reported
@@ -1122,10 +1142,7 @@ export class SessionHub {
     try {
       await this.driver.renameSession?.(path, name.trim());
     } catch (e) {
-      send({
-        type: "error",
-        message: e instanceof Error ? e.message : String(e),
-      });
+      send({ type: "error", message: errMsg(e) });
       return;
     }
     await this.broadcastSessionList();
@@ -1151,10 +1168,7 @@ export class SessionHub {
           message: `worktree not removed: ${res.reason ?? "unknown reason"}`,
         });
     } catch (e) {
-      send({
-        type: "error",
-        message: e instanceof Error ? e.message : String(e),
-      });
+      send({ type: "error", message: errMsg(e) });
     }
     await this.broadcastSessionList();
   }
@@ -1373,24 +1387,10 @@ export class SessionHub {
       send(this.seedMsg(conn.focusedId));
     }
     // Tell the fresh client what's already running / warming up (in-memory, synchronous).
-    send({
-      type: "sessionStatus",
-      runningIds: [...this.running],
-      initializingIds: [...this.initializing],
-      attention: [...this.attention.keys()].flatMap((sid) => {
-        const item = this.attentionFor(sid);
-        return item ? [item] : [];
-      }),
-    });
+    send(this.sessionStatusMsg());
     // Current desktop-update state, so a connecting client immediately shows (or hides)
     // the sidebar update card without waiting for the watcher's next poll.
-    send({
-      type: "updateStatus",
-      available: this.updateSha !== null,
-      sha: this.updateSha ?? undefined,
-      applying: this.applying,
-      desktopStale: this.desktopStale,
-    });
+    send(this.updateStatusMsg());
     // Pilot-local settings + live login-env status (Settings "Environment" section).
     // Synchronous: both are in-memory / a small file read.
     send(this.pilotSettingsMsg());
@@ -1426,13 +1426,33 @@ export class SessionHub {
       switchInFlight: false,
       pendingSwitch: null,
     };
+    // Session id for a session-scoped message: the client's explicit target, else the
+    // connection's focus, else undefined. Appears in nearly every case below.
+    const target = (m: {
+      sessionId?: SessionId | null;
+    }): SessionId | undefined => m.sessionId ?? conn.focusedId ?? undefined;
+    // Dispatch an optional driver method: send "<label> isn't supported here" when the
+    // driver doesn't implement it, otherwise run the thunk (which performs the call with
+    // the right args) and surface any rejection as an error message. Used by the
+    // fire-and-forget optional cases (clearQueue, toggleAdventurousHandoff, etc.).
+    const callOptional = (
+      fn: unknown,
+      label: string,
+      run: () => Promise<unknown>,
+    ): void => {
+      if (!fn) {
+        send({ type: "error", message: `${label} isn't supported here` });
+        return;
+      }
+      void run().catch((e) => send({ type: "error", message: errMsg(e) }));
+    };
     switch (msg.type) {
       case "hello":
       case "ping":
         return;
       case "prompt":
         this.acceptPrompt(send, msg.promptId, async () => {
-          const sessionId = msg.sessionId ?? conn.focusedId ?? undefined;
+          const sessionId = target(msg);
           await this.driver.prompt(
             msg.text,
             msg.deliverAs,
@@ -1444,28 +1464,14 @@ export class SessionHub {
         });
         return;
       case "abort":
-        this.driver.abort(msg.sessionId ?? conn.focusedId ?? undefined);
+        this.driver.abort(target(msg));
         return;
       case "restoreQueue": {
-        if (!this.driver.clearQueue) {
-          send({
-            type: "error",
-            message: "queue restore isn't supported here",
-          });
-          return;
-        }
-        const clearQueue = this.driver.clearQueue.bind(this.driver);
-        void (async () => {
-          const restored = await clearQueue(
-            msg.sessionId ?? conn.focusedId ?? undefined,
-          );
+        const clearQueue = this.driver.clearQueue?.bind(this.driver);
+        callOptional(this.driver.clearQueue, "queue restore", async () => {
+          const restored = await clearQueue!(target(msg));
           send({ type: "queueRestored", ...restored });
-        })().catch((e) =>
-          send({
-            type: "error",
-            message: e instanceof Error ? e.message : String(e),
-          }),
-        );
+        });
         return;
       }
       case "respondUi": {
@@ -1473,7 +1479,7 @@ export class SessionHub {
         // reaches the driver. A second device (or co-viewer of the same session)
         // answering the same id is dropped, so the real daemon session never gets a double
         // resolution. The dialog lives in the targeted session's shared state.
-        const sid = msg.sessionId ?? conn.focusedId ?? undefined;
+        const sid = target(msg);
         const st = sid ? this.sessionStates.get(sid) : undefined;
         const id = msg.response.requestId;
         if (!st?.pendingApprovals.some((p) => p.requestId === id)) return;
@@ -1481,126 +1487,44 @@ export class SessionHub {
         return;
       }
       case "setModel":
-        this.driver.setModel(
-          msg.provider,
-          msg.modelId,
-          msg.sessionId ?? conn.focusedId ?? undefined,
-        );
+        this.driver.setModel(msg.provider, msg.modelId, target(msg));
         return;
       case "setThinking":
-        this.driver.setThinking(
-          msg.level,
-          msg.sessionId ?? conn.focusedId ?? undefined,
-        );
+        this.driver.setThinking(msg.level, target(msg));
         return;
       case "setFacet":
-        this.driver.setFacet(
-          msg.facet,
-          msg.sessionId ?? conn.focusedId ?? undefined,
-        );
+        this.driver.setFacet(msg.facet, target(msg));
         return;
       case "setPermissionMonitor":
-        this.driver.setPermissionMonitor(
-          msg.mode,
-          msg.sessionId ?? conn.focusedId ?? undefined,
+        this.driver.setPermissionMonitor(msg.mode, target(msg));
+        return;
+      case "toggleAdventurousHandoff":
+        callOptional(this.driver.toggleAdventurousHandoff, "adventurous handoff", () =>
+          this.driver.toggleAdventurousHandoff!(target(msg)),
         );
         return;
-      case "toggleAdventurousHandoff": {
-        if (!this.driver.toggleAdventurousHandoff) {
-          send({
-            type: "error",
-            message: "adventurous handoff isn't supported here",
-          });
-          return;
-        }
-        void this.driver
-          .toggleAdventurousHandoff(
-            msg.sessionId ?? conn.focusedId ?? undefined,
-          )
-          .catch((e) =>
-            send({
-              type: "error",
-              message: e instanceof Error ? e.message : String(e),
-            }),
-          );
+      case "setNotificationAutodrain":
+        callOptional(
+          this.driver.setNotificationAutodrain,
+          "notification autodrain",
+          () => this.driver.setNotificationAutodrain!(msg.enabled, target(msg)),
+        );
         return;
-      }
-      case "setNotificationAutodrain": {
-        if (!this.driver.setNotificationAutodrain) {
-          send({
-            type: "error",
-            message: "notification autodrain isn't supported here",
-          });
-          return;
-        }
-        void this.driver
-          .setNotificationAutodrain(
-            msg.enabled,
-            msg.sessionId ?? conn.focusedId ?? undefined,
-          )
-          .catch((e) =>
-            send({
-              type: "error",
-              message: e instanceof Error ? e.message : String(e),
-            }),
-          );
+      case "compact":
+        callOptional(this.driver.compact, "compaction", () =>
+          this.driver.compact!(target(msg)),
+        );
         return;
-      }
-      case "compact": {
-        if (!this.driver.compact) {
-          send({ type: "error", message: "compaction isn't supported here" });
-          return;
-        }
-        void this.driver
-          .compact(msg.sessionId ?? conn.focusedId ?? undefined)
-          .catch((e) =>
-            send({
-              type: "error",
-              message: e instanceof Error ? e.message : String(e),
-            }),
-          );
+      case "clearContext":
+        callOptional(this.driver.clearContext, "clearing context", () =>
+          this.driver.clearContext!(target(msg)),
+        );
         return;
-      }
-      case "clearContext": {
-        if (!this.driver.clearContext) {
-          send({
-            type: "error",
-            message: "clearing context isn't supported here",
-          });
-          return;
-        }
-        void this.driver
-          .clearContext(msg.sessionId ?? conn.focusedId ?? undefined)
-          .catch((e) =>
-            send({
-              type: "error",
-              message: e instanceof Error ? e.message : String(e),
-            }),
-          );
+      case "setMcpServer":
+        callOptional(this.driver.setMcpServer, "MCP server management", () =>
+          this.driver.setMcpServer!(msg.serverName, msg.action, target(msg)),
+        );
         return;
-      }
-      case "setMcpServer": {
-        if (!this.driver.setMcpServer) {
-          send({
-            type: "error",
-            message: "MCP server management isn't supported here",
-          });
-          return;
-        }
-        void this.driver
-          .setMcpServer(
-            msg.serverName,
-            msg.action,
-            msg.sessionId ?? conn.focusedId ?? undefined,
-          )
-          .catch((e) =>
-            send({
-              type: "error",
-              message: e instanceof Error ? e.message : String(e),
-            }),
-          );
-        return;
-      }
       case "openSession":
         void this.switchTo(conn, () => this.driver.openSession(msg.path), {
           retryOnRacedEvents: true,
@@ -1629,7 +1553,7 @@ export class SessionHub {
           send({ type: "error", message: "branching isn't supported here" });
           return;
         }
-        const targetId = msg.sessionId ?? conn.focusedId ?? undefined;
+        const targetId = target(msg);
         // A navigate mid-turn would interleave the in-flight run into the new branch.
         // Gate on the target session's status — the transcript this client is branching.
         const targetState = targetId
@@ -1710,10 +1634,7 @@ export class SessionHub {
           this.acceptPrompt(send, msg.promptId, createAndPrompt);
         } else {
           void createAndPrompt().catch((e) => {
-            send({
-              type: "error",
-              message: e instanceof Error ? e.message : String(e),
-            });
+            send({ type: "error", message: errMsg(e) });
           });
         }
         return;
@@ -1787,7 +1708,7 @@ export class SessionHub {
       case "requestSeed":
         // Client-detected desync (seq gap / dropped frame): re-seed rather than
         // let it fold a diverged stream. Cheap — one journal walk, no driver IO.
-        send(this.seedMsg(msg.sessionId ?? conn.focusedId ?? null));
+        send(this.seedMsg(target(msg) ?? null));
         return;
       case "mock":
         this.driver.runScript?.(msg.script);
@@ -1824,7 +1745,7 @@ export class SessionHub {
     } catch (e) {
       send({
         type: "error",
-        message: `couldn't open the data directory: ${e instanceof Error ? e.message : String(e)}`,
+        message: `couldn't open the data directory: ${errMsg(e)}`,
       });
     }
   }
@@ -1931,12 +1852,6 @@ export class SessionHub {
   }
 
   private broadcastUpdateStatus(): void {
-    this.broadcast({
-      type: "updateStatus",
-      available: this.updateSha !== null,
-      sha: this.updateSha ?? undefined,
-      applying: this.applying,
-      desktopStale: this.desktopStale,
-    });
+    this.broadcast(this.updateStatusMsg());
   }
 }
