@@ -27,6 +27,8 @@ import type {
   SessionRef,
 } from "@pilot/protocol";
 import type { components } from "./wire-types.js";
+import { defaultModelRef } from "./models.js";
+import { PLAN_REVIEW_LABELS } from "./event-map.js";
 
 type S = components["schemas"];
 /** A known history item (the discriminated union). Unknown variants (future
@@ -198,9 +200,114 @@ export function historyToSeedEvents(
         });
         break;
       }
-      // Non-transcript history kinds: skipped on the replay path. The live
-      // event-fold handles their ambient effects (state fetches, notifications);
-      // replaying them as transcript rows would duplicate or mis-render.
+      // Non-transcript history kinds: mapped to the same driver events the live
+      // path emits, so a reloaded transcript matches what a live session would show.
+      case "system_reminder": {
+        const reasonType = (
+          item.reason as { type?: string } | undefined
+        )?.type;
+        const label = reasonType
+          ? PLAN_REVIEW_LABELS[reasonType]
+          : undefined;
+        const visible = label !== undefined;
+        const slug = typeof item.slug === "string" ? item.slug : "reminder";
+        out.push({
+          sessionRef: ref,
+          timestamp: ts(item, i),
+          type: "customMessage",
+          id: `reminder-${slug}-${i}`,
+          customType: visible ? label : slug,
+          text: typeof item.body === "string" ? item.body : "",
+          display: visible,
+        });
+        break;
+      }
+      case "model_switch": {
+        // Thread the model config like the live model_switch event does.
+        const toModel = typeof item.to_model === "string" ? item.to_model : undefined;
+        if (toModel) {
+          const config = {
+            ...defaultModelRef(toModel),
+            thinkingLevel:
+              (item.to_reasoning_effort as string | null | undefined) ??
+              undefined,
+          };
+          out.push({
+            sessionRef: ref,
+            timestamp: ts(item, i),
+            type: "sessionUpdated",
+            snapshot: {
+              ref,
+              workspace: { workspaceId: ref.workspaceId, path: "" },
+              title: "",
+              status: "idle",
+              updatedAt: ts(item, i),
+              config,
+            },
+          });
+        }
+        break;
+      }
+      case "facet_switch": {
+        const toFacet = typeof item.to_facet === "string" ? item.to_facet : undefined;
+        if (toFacet) {
+          out.push({
+            sessionRef: ref,
+            timestamp: ts(item, i),
+            type: "sessionUpdated",
+            snapshot: {
+              ref,
+              workspace: { workspaceId: ref.workspaceId, path: "" },
+              title: "",
+              status: "idle",
+              updatedAt: ts(item, i),
+              facet: toFacet,
+            },
+          });
+        }
+        break;
+      }
+      case "compaction_fencepost": {
+        out.push({
+          sessionRef: ref,
+          timestamp: ts(item, i),
+          type: "customMessage",
+          id: `compaction-${item.compaction_id ?? seq}-${i}`,
+          customType: "compaction",
+          text: typeof item.summary === "string" ? item.summary : "Context compacted",
+          display: true,
+        });
+        break;
+      }
+      case "context_cleared": {
+        out.push({
+          sessionRef: ref,
+          timestamp: ts(item, i),
+          type: "customMessage",
+          id: `context-cleared-${i}`,
+          customType: "context-cleared",
+          text: "Context cleared",
+          display: true,
+        });
+        break;
+      }
+      case "session_lifecycle": {
+        // A lifecycle event (session started/ended etc). Surface as a non-display
+        // turn-boundary marker (same as the live path's customMessage with
+        // display:false — it splits the turn without rendering a visible row).
+        out.push({
+          sessionRef: ref,
+          timestamp: ts(item, i),
+          type: "customMessage",
+          id: `lifecycle-${i}`,
+          customType: "lifecycle",
+          text: typeof item.text === "string" ? item.text : "",
+          display: false,
+        });
+        break;
+      }
+      // state_update, classifier_decision, image_reference: no transcript
+      // representation in the live path either — skip (they're metadata-only).
       default:
         break;
     }

@@ -298,7 +298,7 @@ Already addressed from the same audit (kept as record):
 
 New parity/UX items from the owner, grounded against current source.
 
-- [ ] **history-seed drops 9 of 12 history item kinds — reloaded transcripts lose
+- [x] **history-seed drops 9 of 12 history item kinds — reloaded transcripts lose
       reminders, compaction rows, model/facet switches.** `history-seed.ts` replays only
       `user`/`assistant`/`tool_result`; the other persisted kinds (`system_reminder`,
       `compaction_fencepost`, `model_switch`, `facet_switch`, `context_cleared`,
@@ -313,6 +313,16 @@ New parity/UX items from the owner, grounded against current source.
       Verified against unstable.4 openapi + vendored wire-types:1922 (kinds identical in
       both). _Replaces upstream ask #9 (withdrawn — the daemon persists these fine; the
       drop is ours). Fable, 2026-07-01._
+      **Done 2026-07-02:** mapped 6 of 9 missing kinds in `history-seed.ts`:
+      `system_reminder`→`customMessage` (same as live path, with `PLAN_REVIEW_LABELS`
+      visibility), `model_switch`→`sessionUpdated` with `config` (using `defaultModelRef`),
+      `facet_switch`→`sessionUpdated` with `facet`, `compaction_fencepost`→visible
+      `customMessage`, `context_cleared`→visible `customMessage`, `session_lifecycle`→
+      non-display `customMessage` (turn-boundary marker). The remaining 3
+      (`state_update`, `classifier_decision`, `image_reference`) are metadata-only with no
+      transcript representation in the live path either — they stay skipped. `PLAN_REVIEW_LABELS`
+      exported from event-map for reuse. Test updated from "skipped" to "mapped to live
+      equivalents".
 
 - [x] **Thinking blocks: always collapsed-by-default + always expandable; re-scope
       `hideThinking` to control only superseded blocks.** Today `store.hideThinking`
