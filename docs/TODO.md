@@ -680,7 +680,7 @@ New parity/UX items from the owner, grounded against current source.
 
 ### Fix-chips converted to TODO entries (2026-07-02, owner request)
 
-- [ ] **`Alt+1..5 jump between section tabs` e2e fails on trunk.**
+- [x] **`Alt+1..5 jump between section tabs` e2e fails on trunk.**
       `e2e/settings.e2e.ts:216` fails with `expect(locator).toHaveAttribute` (repro:
       `bun run test:e2e settings`; 11 of 13 pass, this is the only failure). It's the
       last survivor of the 3-failure fix-chip from the 2026-07-02 batch — the two facet
@@ -690,6 +690,9 @@ New parity/UX items from the owner, grounded against current source.
       an Alt+6 binding), so the expected tab list/attribute is stale. Decide whether the
       UI or the test expectation is right, update the spec, and extend coverage to Alt+6
       if six tabs is the new reality.
+      **Fixed 2026-07-02:** the UI was right (six tabs: appearance, notifications,
+      models, environment, mcp, token) — the spec was stale. Renamed the test to
+      "Alt+1..6", asserts Alt+5 → MCP tab and Alt+6 → Access token. 12/12 green.
 - [ ] **Non-reactive `$state` warnings: Transcript `navIndex` + Composer
       `historyItems`.** svelte-check reports `non_reactive_update` for both
       (`Transcript.svelte:261`, `Composer.svelte:145`): plain `let` declarations that

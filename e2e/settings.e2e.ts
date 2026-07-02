@@ -213,7 +213,7 @@ test("the section rail deep-links to a section without scrolling", async ({
   ).toHaveCount(0);
 });
 
-test("Alt+1..5 jump between section tabs", async ({ page }) => {
+test("Alt+1..6 jump between section tabs", async ({ page }) => {
   await page.getByTestId("settings-toggle").click();
   const panel = page.getByTestId("settings-panel");
 
@@ -226,8 +226,15 @@ test("Alt+1..5 jump between section tabs", async ({ page }) => {
   await expect(panel.getByText("Push on this device")).toBeVisible();
   await expect(panel.getByTestId("theme-system")).toHaveCount(0);
 
-  // Alt+5 → Access token: its body appears too, proving the shortcut spans the rail.
+  // Alt+5 → MCP servers.
   await page.keyboard.press("Alt+5");
+  await expect(panel.getByTestId("settings-tab-mcp")).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+
+  // Alt+6 → Access token: its body appears too, proving the shortcut spans the rail.
+  await page.keyboard.press("Alt+6");
   await expect(panel.getByTestId("settings-tab-token")).toHaveAttribute(
     "aria-selected",
     "true",
