@@ -664,6 +664,13 @@ New parity/UX items from the owner, grounded against current source.
       construction and the reaper skips viewed sessions (reading a long transcript
       for >10min without prompting is normal). Hub unit test covers the predicate.
       6 issues remain open.
+      **Partial fix 2026-07-02 (4):** the ghost-row bug is gone — the driver's
+      `prompt()` now POSTs first and emits the `userMessage` echo only on success,
+      so a failed POST leaves no authoritative-looking row and the client's
+      rejected-prompt Retry/Edit affordance (its own optimistic pending row)
+      surfaces as designed. 5 issues remain open (cold-rename hijack, phone-wake
+      LED, ⌘F in collapsed bodies, "56y ago" timestamps (daemon gap), e2e-asserts-
+      mock-behaviors).
 
 ### Hand-backs from the 2026-07-02 overnight-batch review (verified against source 2026-07-02)
 
