@@ -584,6 +584,7 @@ class PilotStore {
         (prompt) =>
           prompt.kind === "prompt" &&
           prompt.sessionId === sessionId &&
+          !prompt.midTurn &&
           !existing.has(prompt.promptId),
       )
       .map((prompt): TranscriptItem => ({
@@ -1083,6 +1084,7 @@ class PilotStore {
       text: prompt.text,
       images: prompt.images,
       deliverAs: prompt.deliverAs,
+      midTurn: this.turnActive && prompt.kind === "prompt",
       sessionId: prompt.sessionId,
       newSession: prompt.newSession,
       promptId: createPromptId(),

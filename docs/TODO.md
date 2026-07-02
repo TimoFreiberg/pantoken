@@ -585,7 +585,7 @@ New parity/UX items from the owner, grounded against current source.
       — "⌘⇧E focuses the thinking menu"). The TODO's "no longer visible" observation
       was outdated — the thinking picker was re-added during the polytoken migration.
 
-- [ ] **Queued/follow-up prompts added to transcript immediately but not actually
+- [x] **Queued/follow-up prompts added to transcript immediately but not actually
       submitted.** When a user sends a follow-up prompt mid-turn (while
       `turn_in_flight` is true), pilot immediately renders it as a user message
       bubble in the transcript — but the prompt may not actually be reaching the
@@ -599,6 +599,13 @@ New parity/UX items from the owner, grounded against current source.
       behavior. Fix: stop eagerly adding queued prompts to the transcript; show
       them as a separate pending state and merge them into history on actual
       delivery/acknowledgement by the daemon.
+      **Done 2026-07-02:** added a `midTurn` flag to `PendingPrompt` — set when
+      `turnActive` is true at send time. `transcriptItems` now filters out mid-turn
+      prompts (they no longer render as transcript bubbles). The daemon's queue
+      (`QueueTray`) shows them as pending instead. When the daemon dequeues and
+      processes the prompt, the `userMessage` event arrives and the prompt joins the
+      transcript naturally (the `existing.has(promptId)` reconciliation removes the
+      optimistic placeholder). Queue e2e tests still pass.
 
 ## Bug reports (from claude fable, not human verified)
 

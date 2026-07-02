@@ -7,6 +7,11 @@ export interface PendingPrompt {
   text: string;
   images?: readonly ImageContent[];
   deliverAs?: "steer" | "followUp";
+  /** True when the prompt was sent while a turn was active (the daemon queues it
+   *  via queueTurnInput). These prompts should NOT render as transcript bubbles —
+   *  they show in the QueueTray instead, and join the transcript only when the
+   *  daemon actually processes them (userMessage event). */
+  midTurn?: boolean;
   sessionId?: string;
   newSession?: {
     cwd?: string;
