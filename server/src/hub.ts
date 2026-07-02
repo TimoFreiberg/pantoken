@@ -1283,6 +1283,20 @@ export class SessionHub {
         );
         return;
       }
+      case "setMcpServer": {
+        if (!this.driver.setMcpServer) {
+          send({ type: "error", message: "MCP server management isn't supported here" });
+          return;
+        }
+        void this.driver.setMcpServer(
+          msg.serverName,
+          msg.action,
+          msg.sessionId ?? conn.focusedId ?? undefined,
+        ).catch((e) =>
+          send({ type: "error", message: e instanceof Error ? e.message : String(e) }),
+        );
+        return;
+      }
       case "openSession":
         void this.switchTo(conn, () => this.driver.openSession(msg.path));
         return;

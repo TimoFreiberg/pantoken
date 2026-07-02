@@ -1411,50 +1411,82 @@ describe("mapDaemonEvent", () => {
     ).toEqual({ events: [], effects: [] });
   });
 
-  test("mcp_server_connected -> empty", () => {
-    expect(
-      fold({
-        type: "mcp_server_connected",
-        resource_count: 3,
-        server_name: "my-mcp",
-        tool_count: 5,
-        transport: "stdio",
-      }),
-    ).toEqual({ events: [], effects: [] });
+  test("mcp_server_connected -> info notice", () => {
+    const out = fold({
+      type: "mcp_server_connected",
+      resource_count: 3,
+      server_name: "my-mcp",
+      tool_count: 5,
+      transport: "stdio",
+    });
+    expect(out.effects).toEqual([]);
+    expect(out.events).toHaveLength(1);
+    expect(out.events[0]).toMatchObject({
+      type: "hostUiRequest",
+      request: {
+        kind: "notify",
+        level: "info",
+        message: expect.stringContaining("my-mcp"),
+      },
+    });
   });
 
-  test("mcp_server_disconnected -> empty", () => {
-    expect(
-      fold({
-        type: "mcp_server_disconnected",
-        reason: "error",
-        server_name: "my-mcp",
-        transport: "stdio",
-      }),
-    ).toEqual({ events: [], effects: [] });
+  test("mcp_server_disconnected -> warning notice", () => {
+    const out = fold({
+      type: "mcp_server_disconnected",
+      reason: "error",
+      server_name: "my-mcp",
+      transport: "stdio",
+    });
+    expect(out.effects).toEqual([]);
+    expect(out.events).toHaveLength(1);
+    expect(out.events[0]).toMatchObject({
+      type: "hostUiRequest",
+      request: {
+        kind: "notify",
+        level: "warning",
+        message: expect.stringContaining("my-mcp"),
+      },
+    });
   });
 
-  test("mcp_server_reconnecting -> empty", () => {
-    expect(
-      fold({
-        type: "mcp_server_reconnecting",
-        attempt: 1,
-        next_retry_in_ms: 1000,
-        server_name: "my-mcp",
-        transport: "stdio",
-      }),
-    ).toEqual({ events: [], effects: [] });
+  test("mcp_server_reconnecting -> info notice", () => {
+    const out = fold({
+      type: "mcp_server_reconnecting",
+      attempt: 1,
+      next_retry_in_ms: 1000,
+      server_name: "my-mcp",
+      transport: "stdio",
+    });
+    expect(out.effects).toEqual([]);
+    expect(out.events).toHaveLength(1);
+    expect(out.events[0]).toMatchObject({
+      type: "hostUiRequest",
+      request: {
+        kind: "notify",
+        level: "info",
+        message: expect.stringContaining("my-mcp"),
+      },
+    });
   });
 
-  test("mcp_server_disabled -> empty", () => {
-    expect(
-      fold({
-        type: "mcp_server_disabled",
-        reason: "config_error",
-        server_name: "my-mcp",
-        transport: "stdio",
-      }),
-    ).toEqual({ events: [], effects: [] });
+  test("mcp_server_disabled -> warning notice", () => {
+    const out = fold({
+      type: "mcp_server_disabled",
+      reason: "config_error",
+      server_name: "my-mcp",
+      transport: "stdio",
+    });
+    expect(out.effects).toEqual([]);
+    expect(out.events).toHaveLength(1);
+    expect(out.events[0]).toMatchObject({
+      type: "hostUiRequest",
+      request: {
+        kind: "notify",
+        level: "warning",
+        message: expect.stringContaining("my-mcp"),
+      },
+    });
   });
 
   test("image_reference_resolved -> empty", () => {

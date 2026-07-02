@@ -1945,6 +1945,14 @@ class PilotStore {
     send({ type: "clearContext" });
   }
 
+  /** Manage an MCP server (enable/disable/disconnect/reconnect). */
+  setMcpServer(
+    serverName: string,
+    action: "enable" | "disable" | "disconnect" | "reconnect",
+  ): void {
+    send({ type: "setMcpServer", serverName, action });
+  }
+
   /** Models shown in the header picker: filtered to favorites when any are set, but the
    *  currently-active model is ALWAYS included — a running non-favorite model stays
    *  visible/selectable (option a). Empty favorites = show every available model. */

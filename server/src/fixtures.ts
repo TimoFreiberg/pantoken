@@ -6,6 +6,7 @@ import type {
   CommandInfo,
   FileInfo,
   ImageContent,
+  McpServerInfo,
   ModelOption,
   SessionConfig,
   SessionDriverEvent,
@@ -158,6 +159,13 @@ export const MOCK_USAGE_FULL: SessionUsage = {
   percent: 91,
 };
 
+/** The mock's MCP server fixtures — one connected, one disconnected, so the
+ *  Settings "MCP" tab shows a realistic list with different statuses. */
+export const MOCK_MCP_SERVERS: readonly McpServerInfo[] = [
+  { serverName: "filesystem", status: "connected", toolCount: 11 },
+  { serverName: "github", status: "disconnected", toolCount: 0 },
+];
+
 /** The mock's starting model selection (matches the greeting snapshot). */
 export const MOCK_DEFAULT_CONFIG: SessionConfig = {
   provider: "anthropic",
@@ -218,6 +226,9 @@ export function snapshot(over: Partial<SessionSnapshot> = {}): SessionSnapshot {
     permissionMonitor: "standard",
     adventurousHandoff: false,
     notificationAutodrain: false,
+    // MCP server fixtures — one connected, one disconnected, so the Settings
+    // "MCP" tab shows a realistic list with different statuses.
+    mcpServers: MOCK_MCP_SERVERS,
     ...over,
   };
 }

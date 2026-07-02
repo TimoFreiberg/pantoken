@@ -227,6 +227,15 @@ export interface PilotDriver {
    *  to a reseed. Optional: a driver without clear support omits it. */
   clearContext?(sessionId?: SessionId): Promise<void>;
 
+  /** Manage an MCP server (enable/disable/disconnect/reconnect). Emits a
+   *  sessionUpdated snapshot with the new server status. Optional: a driver
+   *  without MCP support omits it. */
+  setMcpServer?(
+    serverName: string,
+    action: "enable" | "disable" | "disconnect" | "reconnect",
+    sessionId?: SessionId,
+  ): Promise<void>;
+
   /** The daemon's global default model/thinking for new sessions + the favorites subset. */
   getModelDefaults?(): Promise<ModelDefaults>;
 

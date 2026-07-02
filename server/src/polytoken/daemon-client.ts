@@ -1016,6 +1016,52 @@ export class DaemonClient {
       throw new Error(`POST /reload failed (${status}): ${error}`);
   }
 
+  // --- MCP server management ---
+
+  /** `POST /mcp/{server}/enable` — enable a disabled MCP server. */
+  async enableMcpServer(serverName: string): Promise<void> {
+    const { status, error } = await this.post(
+      `/mcp/${encodeURIComponent(serverName)}/enable`,
+    );
+    if (status !== 200)
+      throw new Error(
+        `POST /mcp/${serverName}/enable failed (${status}): ${error}`,
+      );
+  }
+
+  /** `POST /mcp/{server}/disable` — disable an MCP server. */
+  async disableMcpServer(serverName: string): Promise<void> {
+    const { status, error } = await this.post(
+      `/mcp/${encodeURIComponent(serverName)}/disable`,
+    );
+    if (status !== 200)
+      throw new Error(
+        `POST /mcp/${serverName}/disable failed (${status}): ${error}`,
+      );
+  }
+
+  /** `POST /mcp/{server}/disconnect` — disconnect an MCP server. */
+  async disconnectMcpServer(serverName: string): Promise<void> {
+    const { status, error } = await this.post(
+      `/mcp/${encodeURIComponent(serverName)}/disconnect`,
+    );
+    if (status !== 200)
+      throw new Error(
+        `POST /mcp/${serverName}/disconnect failed (${status}): ${error}`,
+      );
+  }
+
+  /** `POST /mcp/{server}/reconnect` — reconnect a disconnected MCP server. */
+  async reconnectMcpServer(serverName: string): Promise<void> {
+    const { status, error } = await this.post(
+      `/mcp/${encodeURIComponent(serverName)}/reconnect`,
+    );
+    if (status !== 200)
+      throw new Error(
+        `POST /mcp/${serverName}/reconnect failed (${status}): ${error}`,
+      );
+  }
+
   // --- SSE ---
 
   /**

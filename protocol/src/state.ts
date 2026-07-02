@@ -9,6 +9,7 @@ import {
   type HostUiRequest,
   type ImageContent,
   isDialogRequest,
+  type McpServerInfo,
   type PermissionMonitorMode,
   type SessionConfig,
   type SessionDriverEvent,
@@ -146,6 +147,8 @@ export interface SessionState {
   flags: FlaggedFile[];
   /** Todos for this session. Same [] default + overwrite-guard as flags. */
   todos: TodoItem[];
+  /** MCP servers for this session. Same overwrite-guard as flags/todos. */
+  mcpServers: McpServerInfo[];
   items: TranscriptItem[];
   /** Blocking dialogs awaiting a response, in arrival order. */
   pendingApprovals: HostUiRequest[];
@@ -169,6 +172,7 @@ export function initialSessionState(): SessionState {
     queued: [],
     flags: [],
     todos: [],
+    mcpServers: [],
   };
 }
 
@@ -289,6 +293,8 @@ export function foldEvent(
       // projection of "no flags/todos," and the UI always renders a list.
       if (s.flags !== undefined) state.flags = [...s.flags];
       if (s.todos !== undefined) state.todos = [...s.todos];
+      // MCP servers: same overwrite-guard as flags/todos.
+      if (s.mcpServers !== undefined) state.mcpServers = [...s.mcpServers];
       // Queue changes have their own authoritative `queueUpdated` event. A snapshot that
       // carries the queue replaces it (including []); an older/partial snapshot that omits
       // the field must not erase live queue state.

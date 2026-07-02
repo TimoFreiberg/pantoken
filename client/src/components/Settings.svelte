@@ -29,12 +29,14 @@
     | "notifications"
     | "models"
     | "environment"
+    | "mcp"
     | "token";
   const SECTIONS: { id: SectionId; label: string }[] = [
     { id: "appearance", label: "Appearance" },
     { id: "notifications", label: "Notifications" },
     { id: "models", label: "Models" },
     { id: "environment", label: "Environment" },
+    { id: "mcp", label: "MCP" },
     { id: "token", label: "Access token" },
   ];
   const ACTIVE_SECTION_KEY = "pilot.settingsSection";
@@ -138,18 +140,18 @@
       close();
       return;
     }
-    // Alt+1..5 — jump straight to a section tab (the rail order). Read e.code
-    // ("Digit1".."Digit5") rather than e.key: on macOS Option+digit composes a glyph
+    // Alt+1..6 — jump straight to a section tab (the rail order). Read e.code
+    // ("Digit1".."Digit6") rather than e.key: on macOS Option+digit composes a glyph
     // (Option+1 → "¡"), so Number(e.key) is NaN and the shortcut would silently no-op
     // on the project's primary platform. e.code is the physical key, layout/OS-
     // independent. Safe even while a settings field is focused (model/shell/token
     // fields): Option+digit would compose a glyph there, but we preventDefault() on
-    // the Digit1..5 match before it lands, swallowing the glyph and navigating
+    // the Digit1..6 match before it lands, swallowing the glyph and navigating
     // instead — so the shortcut never corrupts field text. noUncheckedIndexedAccess
     // makes SECTIONS[idx] `T | undefined`; the guard narrows it at runtime but not to
     // TS, so capture the element after the bound check.
     if (open && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-      const m = /^Digit([1-5])$/.exec(e.code);
+      const m = /^Digit([1-6])$/.exec(e.code);
       const target = m ? SECTIONS[Number(m[1]) - 1] : undefined;
       if (target) {
         e.preventDefault();
@@ -474,6 +476,69 @@
       </section>
       {/if}
 
+      <!-- MCP servers -->
+      {#if activeSection === "mcp"}
+      <section class="group" data-testid="mcp-section">
+        <div class="gtitle">MCP servers</div>
+        <div class="rdesc" style="margin-bottom: 12px">
+          Model Context Protocol servers extend the agent's tools. Status and controls
+          mirror the daemon's MCP API.
+        </div>
+        {#if store.session.mcpServers && store.session.mcpServers.length > 0}
+          {#each store.session.mcpServers as srv (srv.serverName)}
+            <div class="mcp-row" data-testid="mcp-server-{srv.serverName}">
+              <div class="mcp-info">
+                <span
+                  class="mcp-dot mcp-{srv.status}"
+                  aria-hidden="true"
+                  title={srv.status}
+                ></span>
+                <span class="mcp-name">{srv.serverName}</span>
+                <span class="mcp-status">{srv.status}</span>
+                {#if srv.toolCount > 0}
+                  <span class="mcp-tools">{srv.toolCount} tool{srv.toolCount === 1 ? "" : "s"}</span>
+                {/if}
+              </div>
+              <div class="mcp-actions">
+                {#if srv.status === "disabled"}
+                  <button
+                    class="mcp-btn"
+                    data-testid="mcp-enable-{srv.serverName}"
+                    title={`Enable ${srv.serverName}`}
+                    onclick={() => store.setMcpServer(srv.serverName, "enable")}
+                  >Enable</button>
+                {/if}
+                {#if srv.status === "connected"}
+                  <button
+                    class="mcp-btn"
+                    data-testid="mcp-disconnect-{srv.serverName}"
+                    title={`Disconnect ${srv.serverName}`}
+                    onclick={() => store.setMcpServer(srv.serverName, "disconnect")}
+                  >Disconnect</button>
+                  <button
+                    class="mcp-btn"
+                    data-testid="mcp-disable-{srv.serverName}"
+                    title={`Disable ${srv.serverName}`}
+                    onclick={() => store.setMcpServer(srv.serverName, "disable")}
+                  >Disable</button>
+                {/if}
+                {#if srv.status === "disconnected" || srv.status === "reconnecting"}
+                  <button
+                    class="mcp-btn"
+                    data-testid="mcp-reconnect-{srv.serverName}"
+                    title={`Reconnect ${srv.serverName}`}
+                    onclick={() => store.setMcpServer(srv.serverName, "reconnect")}
+                  >Reconnect</button>
+                {/if}
+              </div>
+            </div>
+          {/each}
+        {:else}
+          <div class="mcp-empty">No MCP servers configured.</div>
+        {/if}
+      </section>
+      {/if}
+
       <!-- Access token -->
       {#if activeSection === "token"}
       <section class="group">
@@ -687,6 +752,89 @@
     letter-spacing: 0.05em;
     color: var(--text-faint);
     margin-bottom: 10px;
+  }
+  /* MCP server list */
+  .mcp-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .mcp-row:last-child {
+    border-bottom: none;
+  }
+  .mcp-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .mcp-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .mcp-dot.mcp-connected {
+    background: var(--ok);
+  }
+  .mcp-dot.mcp-disconnected {
+    background: var(--text-faint);
+  }
+  .mcp-dot.mcp-reconnecting {
+    background: var(--warning);
+  }
+  .mcp-dot.mcp-disabled {
+    background: var(--danger);
+  }
+  .mcp-name {
+    font-weight: 500;
+    font-size: 13px;
+    color: var(--text);
+  }
+  .mcp-status {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: capitalize;
+  }
+  .mcp-tools {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .mcp-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .mcp-btn {
+    font: inherit;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: var(--radius-xs, 6px);
+    border: 1px solid var(--border);
+    background: var(--surface-sunken);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition:
+      color 0.12s,
+      border-color 0.12s;
+  }
+  .mcp-btn:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+  .mcp-btn:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+  .mcp-empty {
+    font-size: 13px;
+    color: var(--text-muted);
+    padding: 16px 0;
   }
   /* Static section header (Providers, Extensions) — each has its own tab now, so the
      list isn't collapsed behind a toggle. Carries the at-a-glance count (connected / on)
