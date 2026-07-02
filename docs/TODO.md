@@ -43,7 +43,7 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
       
       Hub handleClient (~100 lines). ~~Done: target(msg) (15 sites), errMsg(e) (7 sites), callOptional(fn, label, run) (5 fire-and-forget cases + restoreQueue), plus sessionStatusMsg() and updateStatusMsg() builders.~~
       
-      Daemon client (~70 lines). ~~Raw-fetch timeout bug fixed: dequeueNewestInput and toggleAdventurousHandoff now route through safeFetch (the abort guard).~~ Remaining: post and get (daemon-client.ts:544–596) are copy-pastes differing only in method/body — merge into one request(). The four MCP methods collapse to one mcpServerAction(name, action), which also collapses the driver-side switch in setMcpServer.
+      Daemon client (~70 lines). ~~Done: raw-fetch timeout bug fixed (safeFetch); post/get merged into request() core (delegating wrappers kept for readability + error-derivation difference); 4 MCP methods collapsed into mcpServerAction(name, action); driver-side switch collapsed.~~
       
       Trivial: ~~parseClientMessage/parseServerMessage in wire.ts are byte-identical — merged into one generic parseMessage.~~ openSession/reloadSession in the driver share their resolve-id→cwd→warm→seed skeleton.
       
