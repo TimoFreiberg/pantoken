@@ -309,6 +309,15 @@ export type ClientMessage =
   /** Set the notification auto-drain flag (autodrain non-blocking notifications).
    *  The updated state arrives via the next snapshot's `notificationAutodrain`. */
   | { type: "setNotificationAutodrain"; enabled: boolean; sessionId?: SessionId }
+  /** Trigger context compaction (the daemon's POST /compact). Compaction runs
+   *  asynchronously; the daemon emits compaction_started/complete/cancelled/failed
+   *  events (already mapped to notify + fetchState). Omit sessionId to target
+   *  the focused session. */
+  | { type: "compact"; sessionId?: SessionId }
+  /** Clear the session's context entirely (the daemon's POST /clear — resets
+   *  context + shell env). Emits a context_cleared event (already mapped to a
+   *  reseed). Omit sessionId to target the focused session. */
+  | { type: "clearContext"; sessionId?: SessionId }
   /** Set the explicit login shell pilot captures env from at startup (null = the
    *  `$SHELL` / OS-login-shell default). Persists server-side; the env is captured
    *  once at boot, so it applies on the next server restart. The server re-broadcasts

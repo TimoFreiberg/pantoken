@@ -1259,6 +1259,30 @@ export class SessionHub {
         );
         return;
       }
+      case "compact": {
+        if (!this.driver.compact) {
+          send({ type: "error", message: "compaction isn't supported here" });
+          return;
+        }
+        void this.driver.compact(
+          msg.sessionId ?? conn.focusedId ?? undefined,
+        ).catch((e) =>
+          send({ type: "error", message: e instanceof Error ? e.message : String(e) }),
+        );
+        return;
+      }
+      case "clearContext": {
+        if (!this.driver.clearContext) {
+          send({ type: "error", message: "clearing context isn't supported here" });
+          return;
+        }
+        void this.driver.clearContext(
+          msg.sessionId ?? conn.focusedId ?? undefined,
+        ).catch((e) =>
+          send({ type: "error", message: e instanceof Error ? e.message : String(e) }),
+        );
+        return;
+      }
       case "openSession":
         void this.switchTo(conn, () => this.driver.openSession(msg.path));
         return;

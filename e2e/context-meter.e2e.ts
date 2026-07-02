@@ -58,3 +58,51 @@ test("the attach button opens a file picker for image attachments", async ({
   await expect(attach).toBeEnabled();
   await expect(attach).toHaveAttribute("title", /Attach images/);
 });
+
+test("the context meter popup shows detail on click", async ({ page }) => {
+  const meter = page.getByTestId("context-meter");
+  await expect(meter).toBeVisible();
+  // Click the meter to pin the popup open.
+  await meter.click();
+  const popup = page.getByTestId("context-popup");
+  await expect(popup).toBeVisible();
+  await expect(popup).toContainText(/tokens/);
+  await expect(popup).toContainText(/of window/);
+  // The popup has Compact + Clear context action buttons.
+  await expect(page.getByTestId("compact-btn")).toBeVisible();
+  await expect(page.getByTestId("clear-context-btn")).toBeVisible();
+});
+
+test("the Compact button uses a click-twice confirm gate", async ({ page }) => {
+  await drive(page, "contextfull");
+  const meter = page.getByTestId("context-meter");
+  await meter.click();
+  const popup = page.getByTestId("context-popup");
+  await expect(popup).toBeVisible();
+  const compactBtn = page.getByTestId("compact-btn");
+  // First click arms.
+  await compactBtn.click();
+  await expect(compactBtn).toHaveText("Click again");
+  // Second click fires.
+  await compactBtn.click();
+  // The mock emits a usageUpdated — meter drops to 4%.
+  await expect(meter).toHaveText(/4%/);
+});
+
+test("the Clear context button uses a click-twice confirm gate", async ({
+  page,
+}) => {
+  await drive(page, "contextfull");
+  const meter = page.getByTestId("context-meter");
+  await meter.click();
+  const popup = page.getByTestId("context-popup");
+  await expect(popup).toBeVisible();
+  const clearBtn = page.getByTestId("clear-context-btn");
+  // First click arms.
+  await clearBtn.click();
+  await expect(clearBtn).toHaveText("Click again");
+  // Second click fires.
+  await clearBtn.click();
+  // The mock emits a usageUpdated — meter drops to 0%.
+  await expect(meter).toHaveText(/0%/);
+});

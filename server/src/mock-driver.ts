@@ -888,6 +888,59 @@ export class MockDriver implements PilotDriver {
     });
   }
 
+  async compact(): Promise<void> {
+    // Simulate compaction: drop usage to a small post-compaction residual (the
+    // daemon keeps a summary, so context isn't zero). The real driver emits
+    // compaction_started/complete events; the mock just updates usage + notifies.
+    this.emit({
+      sessionRef: SESSION_REF,
+      timestamp: String(Date.now()),
+      type: "usageUpdated",
+      usage: {
+        tokens: 8000,
+        contextWindow: MOCK_USAGE.contextWindow,
+        percent: 4,
+      },
+    });
+    this.emit({
+      sessionRef: SESSION_REF,
+      timestamp: String(Date.now()),
+      type: "hostUiRequest",
+      request: {
+        kind: "notify",
+        requestId: `compact-done-${Date.now()}`,
+        message: "Context compacted",
+        level: "info",
+      },
+    });
+  }
+
+  async clearContext(): Promise<void> {
+    // Simulate clear: usage drops to zero (shell env reset too, but that's
+    // not visible in the mock). percent: 0 so the ring renders "0%".
+    this.emit({
+      sessionRef: SESSION_REF,
+      timestamp: String(Date.now()),
+      type: "usageUpdated",
+      usage: {
+        tokens: 0,
+        contextWindow: MOCK_USAGE.contextWindow,
+        percent: 0,
+      },
+    });
+    this.emit({
+      sessionRef: SESSION_REF,
+      timestamp: String(Date.now()),
+      type: "hostUiRequest",
+      request: {
+        kind: "notify",
+        requestId: `clear-done-${Date.now()}`,
+        message: "Context cleared",
+        level: "info",
+      },
+    });
+  }
+
   async getModelDefaults(): Promise<ModelDefaults> {
     // Resolve the catalog default from the mock's fixture config (mirrors the polytoken
     // driver's getModelDefaults, which reads `polytoken models`). Returns the static

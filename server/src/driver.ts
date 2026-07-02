@@ -216,6 +216,17 @@ export interface PilotDriver {
    *  the new state. */
   setNotificationAutodrain?(enabled: boolean, sessionId?: SessionId): Promise<void>;
 
+  /** Trigger context compaction (the daemon's POST /compact). Emits a
+   *  sessionUpdated snapshot after the daemon's compaction_complete event
+   *  fires (the event-map already maps compaction events to notify +
+   *  fetchState). Optional: a driver without compaction support omits it. */
+  compact?(sessionId?: SessionId): Promise<void>;
+
+  /** Clear the session's context entirely (the daemon's POST /clear — resets
+   *  context + shell env). The daemon's context_cleared event is already mapped
+   *  to a reseed. Optional: a driver without clear support omits it. */
+  clearContext?(sessionId?: SessionId): Promise<void>;
+
   /** The daemon's global default model/thinking for new sessions + the favorites subset. */
   getModelDefaults?(): Promise<ModelDefaults>;
 
