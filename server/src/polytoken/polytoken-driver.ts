@@ -1744,20 +1744,7 @@ export async function createPolytokenDriver(
       // The daemon emits mcp_server_* lifecycle events (already mapped to
       // notify + fetchState). Emit a sessionUpdated as a safety net.
       await refreshAndEmit(ws, `setMcpServer ${action}`, async () => {
-        switch (action) {
-          case "enable":
-            await ws.client.enableMcpServer(serverName);
-            break;
-          case "disable":
-            await ws.client.disableMcpServer(serverName);
-            break;
-          case "disconnect":
-            await ws.client.disconnectMcpServer(serverName);
-            break;
-          case "reconnect":
-            await ws.client.reconnectMcpServer(serverName);
-            break;
-        }
+        await ws.client.mcpServerAction(serverName, action);
       });
     },
     setSessionViewers(fn: (sessionId: string) => boolean): void {
