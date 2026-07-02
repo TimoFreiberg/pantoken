@@ -69,6 +69,17 @@ export interface SessionUsage {
   readonly percent: number | null;
 }
 
+/** Connection status of an MCP server, mirroring the daemon's McpServerStatus. */
+export type McpServerStatus = "connected" | "disconnected" | "reconnecting" | "disabled";
+
+/** Status of a configured MCP server — a JSON-safe projection of the daemon's
+ *  `McpServerStatusEntry`. Drives the Settings "MCP" tab. */
+export interface McpServerInfo {
+  readonly serverName: string;
+  readonly status: McpServerStatus;
+  readonly toolCount: number;
+}
+
 /** One selectable model for the per-session model picker (the available set is
  *  broadcast separately from the per-session snapshot; see `modelList`). */
 export interface ModelOption {
@@ -203,6 +214,10 @@ export interface SessionSnapshot {
    *  Drives the RightSidebar. Updates on snapshot refresh only (live todo events
    *  are StateDelta, not DaemonEvent — handled in a future iteration). */
   readonly todos?: readonly TodoItem[];
+  /** MCP servers for this session. Same overwrite-guarded semantics as `flags`.
+   *  Drives the Settings "MCP" tab. Updates on snapshot refresh (lifecycle events
+   *  trigger fetchState → re-snapshot). */
+  readonly mcpServers?: readonly McpServerInfo[];
 }
 
 /**

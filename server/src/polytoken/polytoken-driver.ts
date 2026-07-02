@@ -1557,6 +1557,50 @@ export async function createPolytokenDriver(
         console.error("[polytoken] clearContext failed", e);
       }
     },
+    async setMcpServer(
+      serverName: string,
+      action: "enable" | "disable" | "disconnect" | "reconnect",
+      sessionId?: SessionId,
+    ): Promise<void> {
+      const ws = target(sessionId);
+      if (!ws) return;
+      try {
+        switch (action) {
+          case "enable":
+            await ws.client.enableMcpServer(serverName);
+            break;
+          case "disable":
+            await ws.client.disableMcpServer(serverName);
+            break;
+          case "disconnect":
+            await ws.client.disconnectMcpServer(serverName);
+            break;
+          case "reconnect":
+            await ws.client.reconnectMcpServer(serverName);
+            break;
+        }
+        // The daemon emits mcp_server_* lifecycle events (already mapped to
+        // notify + fetchState). Emit a sessionUpdated as a safety net.
+        const { data } = await ws.client.state();
+        if (data) ws.lastState = data;
+        emit({
+          sessionRef: ws.ref,
+          timestamp: now(),
+          type: "sessionUpdated",
+          snapshot: snapshotFromState(
+            ws.lastState,
+            ws.ref,
+            workspaceFor(ws),
+            statusFromState(ws.lastState),
+            now(),
+            ws.monitorMode,
+            ws.autodrainEnabled,
+          ),
+        });
+      } catch (e) {
+        console.error(`[polytoken] setMcpServer ${action} failed`, e);
+      }
+    },
     setClientPresence(fn: () => boolean): void {
       hasClients = fn;
     },

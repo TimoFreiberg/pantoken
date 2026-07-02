@@ -287,6 +287,15 @@ export function snapshotFromState(
           dependencies: [...t.dependencies],
         }))
       : undefined,
+    // Thread MCP server statuses from the daemon state. Same overwrite-guarded
+    // semantics as flags/todos.
+    mcpServers: state?.mcp_servers
+      ? state.mcp_servers.map((s) => ({
+          serverName: s.server_name,
+          status: s.status,
+          toolCount: s.tool_count,
+        }))
+      : undefined,
   };
 }
 
@@ -1264,10 +1273,6 @@ export function mapDaemonEvent(
     case "subsession_terminated":
     case "subsession_interrogative":
     case "subsession_message":
-    case "mcp_server_connected":
-    case "mcp_server_disconnected":
-    case "mcp_server_reconnecting":
-    case "mcp_server_disabled":
     case "image_reference_resolved":
     case "job_promoted":
     case "job_completed":
@@ -1276,6 +1281,68 @@ export function mapDaemonEvent(
     case "job_updated":
     case "usage_throttle":
       return EMPTY;
+
+    // ===== MCP server lifecycle =====
+
+    case "mcp_server_connected": {
+      return events([
+        {
+          ...meta,
+          type: "hostUiRequest",
+          request: {
+            kind: "notify",
+            requestId: `mcp-conn-${meta.timestamp}`,
+            message: `MCP server ${ev.server_name} connected`,
+            level: "info",
+          },
+        },
+      ]);
+    }
+
+    case "mcp_server_disconnected": {
+      return events([
+        {
+          ...meta,
+          type: "hostUiRequest",
+          request: {
+            kind: "notify",
+            requestId: `mcp-disc-${meta.timestamp}`,
+            message: `MCP server ${ev.server_name} disconnected (${ev.reason})`,
+            level: "warning",
+          },
+        },
+      ]);
+    }
+
+    case "mcp_server_reconnecting": {
+      return events([
+        {
+          ...meta,
+          type: "hostUiRequest",
+          request: {
+            kind: "notify",
+            requestId: `mcp-reconn-${meta.timestamp}`,
+            message: `MCP server ${ev.server_name} reconnecting (attempt ${ev.attempt})…`,
+            level: "info",
+          },
+        },
+      ]);
+    }
+
+    case "mcp_server_disabled": {
+      return events([
+        {
+          ...meta,
+          type: "hostUiRequest",
+          request: {
+            kind: "notify",
+            requestId: `mcp-disabled-${meta.timestamp}`,
+            message: `MCP server ${ev.server_name} disabled (${ev.reason})`,
+            level: "warning",
+          },
+        },
+      ]);
+    }
 
     default: {
       // Compile-time exhaustiveness check: if a new DaemonEvent variant is added

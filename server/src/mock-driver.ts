@@ -12,6 +12,7 @@ import {
   type FileInfo,
   type HostUiRequest,
   type HostUiResponse,
+  type McpServerStatus,
   type ModelDefaults,
   type ModelOption,
   type PermissionMonitorMode,
@@ -64,6 +65,7 @@ import {
   MOCK_DEFAULT_CONFIG,
   MOCK_MODELS,
   MOCK_BACKGROUND_MODEL,
+  MOCK_MCP_SERVERS,
   MOCK_USAGE,
   mockSessionSeed,
   mockTrustRequest,
@@ -938,6 +940,37 @@ export class MockDriver implements PilotDriver {
         message: "Context cleared",
         level: "info",
       },
+    });
+  }
+
+  private mcpServers: { serverName: string; status: McpServerStatus; toolCount: number }[] =
+    MOCK_MCP_SERVERS.map((s) => ({ ...s }));
+
+  async setMcpServer(
+    serverName: string,
+    action: "enable" | "disable" | "disconnect" | "reconnect",
+  ): Promise<void> {
+    const server = this.mcpServers.find((s) => s.serverName === serverName);
+    if (!server) return;
+    switch (action) {
+      case "enable":
+        server.status = "disconnected";
+        break;
+      case "disable":
+        server.status = "disabled";
+        break;
+      case "disconnect":
+        server.status = "disconnected";
+        break;
+      case "reconnect":
+        server.status = "connected";
+        break;
+    }
+    this.emit({
+      sessionRef: SESSION_REF,
+      timestamp: String(Date.now()),
+      type: "sessionUpdated",
+      snapshot: snapshot({ mcpServers: [...this.mcpServers] }),
     });
   }
 

@@ -318,6 +318,15 @@ export type ClientMessage =
    *  context + shell env). Emits a context_cleared event (already mapped to a
    *  reseed). Omit sessionId to target the focused session. */
   | { type: "clearContext"; sessionId?: SessionId }
+  /** Manage an MCP server (enable/disable/disconnect/reconnect). The daemon's
+   *  POST /mcp/{server}/{action} fires lifecycle events (already mapped to
+   *  notify + fetchState). Omit sessionId to target the focused session. */
+  | {
+      type: "setMcpServer";
+      serverName: string;
+      action: "enable" | "disable" | "disconnect" | "reconnect";
+      sessionId?: SessionId;
+    }
   /** Set the explicit login shell pilot captures env from at startup (null = the
    *  `$SHELL` / OS-login-shell default). Persists server-side; the env is captured
    *  once at boot, so it applies on the next server restart. The server re-broadcasts

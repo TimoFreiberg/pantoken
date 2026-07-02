@@ -432,15 +432,20 @@ New parity/UX items from the owner, grounded against current source.
       open-ended feature — defer until the rest of the parity work is done and the
       simpler per-domain surfaces (facets picker, skills/subagents views) have shipped.
 
-- [ ] **MCP server management UI.** The daemon has a full MCP API (`POST /mcp/{server}/
-      enable|disable|disconnect|reconnect`, OAuth start/callback; `wire-types.ts:295–340`)
-      and lifecycle events (`mcp_server_connected/disconnected/reconnecting/disabled`),
-      but all four events are swallowed (`event-map.ts:1199–1202` → `return EMPTY`) and
-      pilot has no Settings UI for MCP — only `/mcp` slash passthrough. The polytoken TUI
-      surfaces MCP server status + enable/disable/reconnect controls. Pilot should expose
-      these in a Settings tab (MCP servers) or a dedicated panel, wire the lifecycle events
-      to visible notices (connection lost, reconnecting, etc.), and surface server status
-      read-only in the UI. `pilot-feature-state.md` §9 already flags this 🔴.
+- [x] **MCP server management UI.** **Done 2026-07-02:** added a new "MCP" tab to
+      Settings (Alt+6) showing each server's name, status badge (colored dot),
+      and tool count. Action buttons — Enable (if disabled), Disable + Disconnect
+      (if connected), Reconnect (if disconnected/reconnecting) — are fire-and-forget
+      calls to the daemon's `POST /mcp/{server}/{action}`. Full stack wired:
+      `setMcpServer` wire message → `PilotDriver.setMcpServer?` → polytoken driver
+      (calls daemon POST + fetchState) + mock driver (updates local state) → hub
+      fire-and-forget dispatch → store method. The 4 lifecycle events
+      (`mcp_server_connected/disconnected/reconnecting/disabled`) are un-swallowed
+      from `return EMPTY` and mapped to `hostUiRequest{kind:"notify"}` notices
+      (info/warning). Server status is threaded from the daemon state's
+      `mcp_servers` into the snapshot via `snapshotFromState` and through the fold
+      reducer's overwrite-guard. OAuth start/callback is deferred — only
+      enable/disable/reconnect/disconnect are wired.
 
 - [x] **`eager_fallback_activated` event is swallowed — operator sees model change but
       not why.** When the daemon auto-switches to a fallback model (e.g. the primary is
