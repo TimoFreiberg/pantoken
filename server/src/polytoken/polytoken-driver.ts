@@ -154,7 +154,15 @@ interface WarmSession {
    *  (it must not do I/O). Mirrors the original driver's in-memory `ws.session.messages` —
    *  without this, a reconnecting client sees the header but an empty transcript. */
   lastSeed: SessionDriverEvent[];
+  /** Mid-turn usage polling (see getUsage): timestamp of the last kicked
+   *  GET /state + the in-flight poll, so the refresh is throttled and
+   *  single-flight per session. */
+  usagePolledAt?: number;
+  usagePoll?: Promise<void> | null;
 }
+
+/** Min gap between mid-turn GET /state usage polls per session (getUsage). */
+const USAGE_POLL_MS = 3000;
 
 export async function createPolytokenDriver(
   opts: PolytokenDriverOptions = {},
@@ -1242,6 +1250,30 @@ export async function createPolytokenDriver(
       // is the authoritative fill. Cold sessions return undefined (not loaded).
       const ws = target(sessionId);
       if (!ws) return undefined;
+      // Mid-turn the cached state goes stale (fetchState effects fire at turn
+      // boundaries), which froze the meter at turn-start values for the whole
+      // turn. Kick a throttled single-flight GET /state so the meter climbs
+      // during long turns; the sync return stays the cached value and the next
+      // ticker read picks up the refresh. Scope is naturally running+viewed —
+      // the hub only calls getUsage for those sessions.
+      if (
+        ws.lastState?.turn_in_flight &&
+        !ws.usagePoll &&
+        Date.now() - (ws.usagePolledAt ?? 0) > USAGE_POLL_MS
+      ) {
+        ws.usagePolledAt = Date.now();
+        ws.usagePoll = ws.client
+          .state()
+          .then(({ data }) => {
+            if (data) ws.lastState = data;
+          })
+          .catch(() => {
+            // Best-effort — the meter just stays at the cached value.
+          })
+          .finally(() => {
+            ws.usagePoll = null;
+          });
+      }
       return usageFromState(ws.lastState);
     },
 

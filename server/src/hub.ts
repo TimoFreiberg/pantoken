@@ -796,16 +796,25 @@ export class SessionHub {
     this.refreshUsage();
   }
 
+  /** The last usage payload emitted per session (JSON key), so the 1s ticker
+   *  doesn't re-broadcast (and re-journal) byte-identical values to every
+   *  viewer while nothing changed. Bounded by warm-session count. */
+  private lastUsageEmitted = new Map<string, string>();
+
   /** Emit each running, currently-viewed session's context usage as a `usageUpdated`
    *  event (folded into its shared state + routed to its viewers). A dedicated event
    *  (not a full re-seed) so a mid-turn refresh touches only `usage`, never the
    *  streaming transcript / queued / config. Sessions nobody is viewing are skipped —
-   *  there is no transcript to refresh. */
+   *  there is no transcript to refresh. Unchanged values are skipped entirely —
+   *  the tick is a poll, not a heartbeat. */
   private refreshUsage(): void {
     for (const [sid, st] of this.sessionStates) {
       if (!this.running.has(sid)) continue;
       const usage = this.driver.getUsage?.(sid);
       if (!usage) continue;
+      const key = JSON.stringify(usage);
+      if (this.lastUsageEmitted.get(sid) === key) continue;
+      this.lastUsageEmitted.set(sid, key);
       const ev: SessionDriverEvent = {
         type: "usageUpdated",
         sessionRef: st.ref ?? { workspaceId: sid, sessionId: sid },
