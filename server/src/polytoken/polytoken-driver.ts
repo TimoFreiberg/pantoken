@@ -80,6 +80,7 @@ import {
 } from "./models.js";
 import { parseSlashCommands } from "./commands.js";
 import { parseFileCatalog } from "./file-catalog.js";
+import { parseFacetName } from "./facets.js";
 import { errorNotify, withErrorNotify } from "./config-notify.js";
 import { listFilesWithFd, FILE_INDEX_CAP } from "../file-search.js";
 import {
@@ -1346,11 +1347,17 @@ export async function createPolytokenDriver(
     },
 
     async listFacets(_sessionId?: SessionId): Promise<string[]> {
-      // `polytoken vfs ls polytoken://facets` lists the available facet names (one
-      // per line). Not cached — called only on connect/switch/reload (not per
-      // keystroke), and the reload affordance needs a fresh read. Returns at
-      // minimum ["execute", "plan"] (the builtins) so the picker always has the
-      // two states it used to toggle between.
+      // `polytoken vfs ls polytoken://facets` lists facet FILE names (e.g.
+      // `execute.md`, `plan.md`), NOT facet names. The daemon's `POST /facet`
+      // API and `active_facet` state field use the frontmatter `name` value
+      // (e.g. `plan`), so we must read each file via `vfs cat` and extract the
+      // `name` from its YAML frontmatter. Falls back to the file stem (minus `.md`)
+      // when a file has no frontmatter or no `name` field.
+      //
+      // Not cached — called only on connect/switch/reload (not per keystroke),
+      // and the reload affordance needs a fresh read. Returns at minimum
+      // ["execute", "plan"] (the builtins) so the picker always has the two
+      // states it used to toggle between.
       const cwd = active()?.cwd;
       if (!cwd) return ["execute", "plan"];
       try {
@@ -1361,11 +1368,37 @@ export async function createPolytokenDriver(
           "ls",
           "polytoken://facets",
         ]);
-        const facets = stdout
+        const files = stdout
           .split("\n")
           .map((l) => l.trim())
           .filter((l) => l.length > 0);
-        return facets.length > 0 ? facets : ["execute", "plan"];
+        if (files.length === 0) return ["execute", "plan"];
+
+        // For each facet file, read its content via `vfs cat` and extract the
+        // `name` from the frontmatter. Falls back to the file stem (strip `.md`)
+        // when parsing fails. Each `vfs cat` is a separate subprocess; with a
+        // typical 2–5 facets this is acceptable given the 8s timeout per call
+        // and the no-per-keystroke call pattern.
+        const names: string[] = [];
+        for (const file of files) {
+          try {
+            const { stdout: content } = await runPolytokenText(polytokenBin, [
+              "--working-dir",
+              cwd,
+              "vfs",
+              "cat",
+              `polytoken://facets/${file}`,
+            ]);
+            const name = parseFacetName(content);
+            names.push(name ?? file.replace(/\.md$/, ""));
+          } catch (e) {
+            console.error(`[polytoken] vfs cat facet ${file} failed`, e);
+            // Fall back to the file stem so one unreadable file doesn't nuke
+            // the whole facet list.
+            names.push(file.replace(/\.md$/, ""));
+          }
+        }
+        return names.length > 0 ? names : ["execute", "plan"];
       } catch (e) {
         console.error("[polytoken] listFacets failed", e);
         return ["execute", "plan"];

@@ -1,18 +1,19 @@
 import { expect, test } from "@playwright/test";
 import { gotoFresh } from "./helpers.js";
 
-// The facet toggle (now in the composer toolbar) switches the active facet
-// (execute ↔ plan). Clicking it sends a setFacet wire message → the mock emits a
-// sessionUpdated snapshot with the new facet → foldEvent propagates → the badge
-// updates. The badge shows the ACTUAL current facet ("Execute"/"Plan"), not the
-// old affordance label. Shift+Tab (the TUI convention) also toggles, but only when
-// no form field is focused (preserving browser focus-traversal).
+// The facet picker (in the composer toolbar) switches the active facet. Clicking
+// it sends a setFacet wire message → the mock emits a sessionUpdated snapshot
+// with the new facet → foldEvent propagates → the badge updates. The badge shows
+// the ACTUAL current facet ("Execute"/"Plan"), not the old affordance label.
+// ⌘⇧C (Cmd+Shift+C) cycles through all available facets — it fires even when
+// the composer is focused (unlike the old Shift+Tab, which the browser consumed
+// for reverse-focus traversal in form fields).
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("clicking the facet toggle switches to plan mode and back", async ({
+test("clicking the facet badge opens a picker and switching works", async ({
   page,
 }) => {
   // The badge shows the actual facet: "Execute" in the default (execute) state.
@@ -20,13 +21,15 @@ test("clicking the facet toggle switches to plan mode and back", async ({
   await expect(badge).toBeVisible();
   await expect(badge).toHaveText("Execute");
 
-  // Click → switch to plan mode. The badge turns into the accent-tinted "Plan" pill.
+  // Click the badge → opens the dropdown picker. Click "Plan" to switch.
   await badge.click();
+  await page.getByRole("option", { name: "Plan" }).click();
   await expect(badge).toHaveText("Plan");
   await expect(badge).toHaveClass(/plan/);
 
-  // Click again → switch back to execute. The badge reverts to the subtle "Execute" chip.
+  // Click the badge → opens the picker again. Click "Execute" to switch back.
   await badge.click();
+  await page.getByRole("option", { name: "Execute" }).click();
   await expect(badge).toHaveText("Execute");
   await expect(badge).not.toHaveClass(/plan/);
 });
@@ -42,35 +45,39 @@ test("the facet badge sits in the composer toolbar, left of the model badge", as
   expect(order.indexOf("facet-badge")).toBeLessThan(order.indexOf("model-badge"));
 });
 
-test("Shift+Tab toggles facets when no form field is focused", async ({
+test("Cmd+Shift+C cycles facets even when the composer is focused", async ({
   page,
 }) => {
   const badge = page.getByTestId("facet-badge");
   await expect(badge).toHaveText("Execute");
 
-  // Click somewhere in the page body to ensure no form field is focused.
-  await page.locator("body").click();
+  // Focus the composer textarea — the key fix: the hotkey must fire even here.
+  await page.getByPlaceholder("Message pilot…").focus();
 
-  // Shift+Tab → switch to plan mode.
-  await page.keyboard.press("Shift+Tab");
+  // Cmd+Shift+C → switch to plan mode.
+  await page.keyboard.press("Meta+Shift+C");
+  await expect(badge).toHaveText("Plan");
+});
+
+test("Cmd+Shift+C cycles through all facets and wraps", async ({ page }) => {
+  const badge = page.getByTestId("facet-badge");
+  await expect(badge).toHaveText("Execute");
+
+  // The mock returns two facets: ["execute", "plan"]. Pressing the hotkey
+  // twice (N = facet count) should cycle execute → plan → execute (wrap).
+  await page.keyboard.press("Meta+Shift+C");
   await expect(badge).toHaveText("Plan");
 
-  // Shift+Tab again → switch back to execute.
-  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Meta+Shift+C");
   await expect(badge).toHaveText("Execute");
 });
 
-test("Shift+Tab does NOT toggle when the composer is focused", async ({
-  page,
-}) => {
+test("Shift+Tab does not toggle facets", async ({ page }) => {
   const badge = page.getByTestId("facet-badge");
   await expect(badge).toHaveText("Execute");
 
-  // Focus the composer textarea.
-  await page.getByPlaceholder("Message pilot…").focus();
-
-  // Shift+Tab while the composer is focused should NOT toggle the facet — it
-  // should reverse-tab through form fields instead (preserving browser behavior).
+  // Shift+Tab should perform normal browser reverse-focus traversal — it must
+  // NOT cycle facets anymore. Press it and confirm the badge is unchanged.
   await page.keyboard.press("Shift+Tab");
   await expect(badge).toHaveText("Execute");
 });
