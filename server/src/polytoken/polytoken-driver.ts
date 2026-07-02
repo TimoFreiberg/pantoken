@@ -290,6 +290,26 @@ export async function createPolytokenDriver(
     return state?.turn_in_flight ? "running" : "idle";
   }
 
+  /** Build a session snapshot for a warm session, defaulting the status to what the
+   *  cached daemon state implies. Collapses the 7-arg snapshotFromState incantation
+   *  repeated at every broadcast site in the driver. */
+  function snapshotFor(
+    ws: WarmSession,
+    status: "idle" | "running" | "initializing" | "failed" = statusFromState(
+      ws.lastState,
+    ),
+  ) {
+    return snapshotFromState(
+      ws.lastState,
+      ws.ref,
+      workspaceFor(ws),
+      status,
+      now(),
+      ws.monitorMode,
+      ws.autodrainEnabled,
+    );
+  }
+
   /**
    * The event-fold: feed a polytoken SSE envelope to the pure mapper, emit its
    * returned pilot events, then execute its returned effect descriptors (which
@@ -581,15 +601,7 @@ export async function createPolytokenDriver(
         sessionRef: ws.ref,
         timestamp: now(),
         type: "sessionOpened",
-        snapshot: snapshotFromState(
-          ws.lastState,
-          ws.ref,
-          workspaceFor(ws),
-          statusFromState(ws.lastState),
-          now(),
-          ws.monitorMode,
-          ws.autodrainEnabled,
-        ),
+        snapshot: snapshotFor(ws),
       });
     }
     const historyEvents = await reseedFromHistory(ws, false);
@@ -663,6 +675,9 @@ export async function createPolytokenDriver(
         sessionRef: ws.ref,
         timestamp: ts,
         type: "runCompleted",
+        // Kept inline (not snapshotFor) so the snapshot shares this captured ts as
+        // its updatedAt — snapshotFor would call now() a second time and the two
+        // could drift by microseconds.
         snapshot: snapshotFromState(
           ws.lastState,
           ws.ref,
@@ -1340,15 +1355,7 @@ export async function createPolytokenDriver(
           sessionRef: ws.ref,
           timestamp: now(),
           type: "sessionOpened",
-          snapshot: snapshotFromState(
-            ws.lastState,
-            ws.ref,
-            workspaceFor(ws),
-            statusFromState(ws.lastState),
-            now(),
-            ws.monitorMode,
-            ws.autodrainEnabled,
-          ),
+          snapshot: snapshotFor(ws),
         },
         ...ws.lastSeed,
       ];
@@ -1659,15 +1666,7 @@ export async function createPolytokenDriver(
           sessionRef: ws.ref,
           timestamp: now(),
           type: "sessionUpdated",
-          snapshot: snapshotFromState(
-            ws.lastState,
-            ws.ref,
-            workspaceFor(ws),
-            statusFromState(ws.lastState),
-            now(),
-            ws.monitorMode,
-            ws.autodrainEnabled,
-          ),
+          snapshot: snapshotFor(ws),
         });
       } catch (e) {
         console.error("[polytoken] toggleAdventurousHandoff failed", e);
@@ -1686,15 +1685,7 @@ export async function createPolytokenDriver(
           sessionRef: ws.ref,
           timestamp: now(),
           type: "sessionUpdated",
-          snapshot: snapshotFromState(
-            ws.lastState,
-            ws.ref,
-            workspaceFor(ws),
-            statusFromState(ws.lastState),
-            now(),
-            ws.monitorMode,
-            ws.autodrainEnabled,
-          ),
+          snapshot: snapshotFor(ws),
         });
       } catch (e) {
         console.error("[polytoken] setNotificationAutodrain failed", e);
@@ -1715,15 +1706,7 @@ export async function createPolytokenDriver(
           sessionRef: ws.ref,
           timestamp: now(),
           type: "sessionUpdated",
-          snapshot: snapshotFromState(
-            ws.lastState,
-            ws.ref,
-            workspaceFor(ws),
-            statusFromState(ws.lastState),
-            now(),
-            ws.monitorMode,
-            ws.autodrainEnabled,
-          ),
+          snapshot: snapshotFor(ws),
         });
       } catch (e) {
         console.error("[polytoken] compact failed", e);
@@ -1742,15 +1725,7 @@ export async function createPolytokenDriver(
           sessionRef: ws.ref,
           timestamp: now(),
           type: "sessionUpdated",
-          snapshot: snapshotFromState(
-            ws.lastState,
-            ws.ref,
-            workspaceFor(ws),
-            statusFromState(ws.lastState),
-            now(),
-            ws.monitorMode,
-            ws.autodrainEnabled,
-          ),
+          snapshot: snapshotFor(ws),
         });
       } catch (e) {
         console.error("[polytoken] clearContext failed", e);
@@ -1786,15 +1761,7 @@ export async function createPolytokenDriver(
           sessionRef: ws.ref,
           timestamp: now(),
           type: "sessionUpdated",
-          snapshot: snapshotFromState(
-            ws.lastState,
-            ws.ref,
-            workspaceFor(ws),
-            statusFromState(ws.lastState),
-            now(),
-            ws.monitorMode,
-            ws.autodrainEnabled,
-          ),
+          snapshot: snapshotFor(ws),
         });
       } catch (e) {
         console.error(`[polytoken] setMcpServer ${action} failed`, e);
