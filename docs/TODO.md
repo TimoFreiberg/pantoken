@@ -12,6 +12,7 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
 - [ ] plan popup is too narrow, it should be closer to full screen (maybe a tiny bit smaller to make it a tiny bit visible that there's something behind it). also, plan popup buttons go out of the plan box, they should be bounded and their text should wrap / the buttons should scroll within the container if absolutely necessary
 - [ ] user prompts longer than like 10 lines should be shown truncated to those 10 lines by default, with an expand / collapse back to the truncated view button
 - [ ] in the new session draft view, pressing the cycle facet hotkey tries to change the facet of the last focused active session instead
+- [ ] adventurous-handoff is per-session, the toggle should be in the per-session config (near the prompt text box) - maybe in the facet menu? it's kiiinda a modifier of plan mode (in spirit - it is an independent toggle right now aiui)
 
 - [x] **`⌘\` cycle through active attention surfaces (with minimize-to-pill).** A unified
       `⌘\` hotkey that cycles keyboard focus through agent-driven attention surfaces that are
@@ -676,6 +677,31 @@ New parity/UX items from the owner, grounded against current source.
       `() => true` (`polytoken-driver.ts:208`) means "assume someone can answer" — that is
       fail-open; the comment calls it "deny-safe = don't block". Reword when the first
       read site lands (the inline TODO already tracks that no read site exists).
+
+### Fix-chips converted to TODO entries (2026-07-02, owner request)
+
+- [ ] **`Alt+1..5 jump between section tabs` e2e fails on trunk.**
+      `e2e/settings.e2e.ts:216` fails with `expect(locator).toHaveAttribute` (repro:
+      `bun run test:e2e settings`; 11 of 13 pass, this is the only failure). It's the
+      last survivor of the 3-failure fix-chip from the 2026-07-02 batch — the two facet
+      ones (`facet-switch.e2e.ts:15`, `plan-handoff.e2e.ts:65`) were fixed by the
+      facet-picker commit `lopxtlxq`, verified green 2026-07-02. Probable cause: the
+      Settings section tabs changed since the test was written (the MCP tab landed with
+      an Alt+6 binding), so the expected tab list/attribute is stale. Decide whether the
+      UI or the test expectation is right, update the spec, and extend coverage to Alt+6
+      if six tabs is the new reality.
+- [ ] **Non-reactive `$state` warnings: Transcript `navIndex` + Composer
+      `historyItems`.** svelte-check reports `non_reactive_update` for both
+      (`Transcript.svelte:261`, `Composer.svelte:145`): plain `let` declarations that
+      templates read reactively — `class:visible={navHovered || navIndex !== null}`
+      (`Transcript.svelte:984`, the prompt-nav control's stays-visible-while-stepping
+      behavior) and the Ctrl+R prompt-history popup's items. In Svelte 5 runes mode a
+      plain `let` isn't reactive, so those bindings may silently not update. Verify the
+      actual misbehavior (mock preview or e2e), convert to `$state(...)` where the
+      reactive read is real, and add a regression assertion (`polish.e2e.ts` covers the
+      prompt-nav control; a Ctrl+R spec exists). Fixing both drops the svelte-check
+      warning count 12 → 10. Predates the 2026-07-02 facet/hotkey commits (verified via
+      `jj file show` at base `zwqsxmky`).
 
 
 
