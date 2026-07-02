@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   DaemonClient,
+  type DaemonSpawnOpts,
   _setSpawnForTesting,
   spawnDaemon,
   waitForDaemonStartup,
@@ -149,12 +150,19 @@ describe("DaemonClient.setModel 409 handling", () => {
 
   test("treats 409 no_change as success (resolves without throwing)", async () => {
     mockFetch(409, { code: "no_change", message: "model unchanged" });
-    await expect(client.setModel("anthropic/claude-sonnet-4")).resolves.toBeUndefined();
+    await expect(
+      client.setModel("anthropic/claude-sonnet-4"),
+    ).resolves.toBeUndefined();
   });
 
   test("throws on 409 turn_in_flight", async () => {
-    mockFetch(409, { code: "turn_in_flight", message: "A turn is currently running" });
-    await expect(client.setModel("anthropic/claude-sonnet-4")).rejects.toThrow();
+    mockFetch(409, {
+      code: "turn_in_flight",
+      message: "A turn is currently running",
+    });
+    await expect(
+      client.setModel("anthropic/claude-sonnet-4"),
+    ).rejects.toThrow();
   });
 
   test("throws on 409 edit_format_locked", async () => {
@@ -165,13 +173,17 @@ describe("DaemonClient.setModel 409 handling", () => {
       target_format: "diff",
       message: "edit format locked",
     });
-    await expect(client.setModel("anthropic/claude-sonnet-4")).rejects.toThrow();
+    await expect(
+      client.setModel("anthropic/claude-sonnet-4"),
+    ).rejects.toThrow();
   });
 
   test("thrown error includes the ErrorBody message (not raw JSON or a missing .error field)", async () => {
     const msg = "A turn is currently running";
     mockFetch(409, { code: "turn_in_flight", message: msg });
-    await expect(client.setModel("anthropic/claude-sonnet-4")).rejects.toThrow(msg);
+    await expect(client.setModel("anthropic/claude-sonnet-4")).rejects.toThrow(
+      msg,
+    );
   });
 });
 
@@ -184,7 +196,7 @@ describe("DaemonClient.setModel 409 handling", () => {
  * spawning a daemon.
  */
 describe("spawnDaemon loginEnv passthrough", () => {
-  let capturedOpts: Parameters<typeof Bun.spawn>[0] | null = null;
+  let capturedOpts: DaemonSpawnOpts | null = null;
 
   /** A fake proc that looks like a successful `new --no-attach` run.
    *  stdout/stderr must be ReadableStream — the real code wraps them with
@@ -204,7 +216,7 @@ describe("spawnDaemon loginEnv passthrough", () => {
     capturedOpts = null;
     _setSpawnForTesting((opts) => {
       capturedOpts = opts;
-      return fakeProc() as ReturnType<typeof Bun.spawn>;
+      return fakeProc() as unknown as Bun.Subprocess<"ignore", "pipe", "pipe">;
     });
   });
 
