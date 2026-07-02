@@ -1920,6 +1920,16 @@ class PilotStore {
     send({ type: "setNotificationAutodrain", enabled });
   }
 
+  /** Trigger context compaction (the daemon's POST /compact). */
+  compact(): void {
+    send({ type: "compact" });
+  }
+
+  /** Clear the session's context entirely (the daemon's POST /clear). */
+  clearContext(): void {
+    send({ type: "clearContext" });
+  }
+
   /** Models shown in the header picker: filtered to favorites when any are set, but the
    *  currently-active model is ALWAYS included — a running non-favorite model stays
    *  visible/selectable (option a). Empty favorites = show every available model. */

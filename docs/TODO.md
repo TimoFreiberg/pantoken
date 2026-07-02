@@ -359,27 +359,21 @@ New parity/UX items from the owner, grounded against current source.
       updated in `streaming.e2e.ts` (collapsed stub visible + expandable) and
       `transcript.e2e.ts` (1 of 3 thinking-only blocks survives as collapsed stub).
 
-- [ ] **Compaction: context-meter hover popup + pass-through `/compact` + clear-context
-      button (both click-twice confirmed).** `/compact` already passes through as a
-      slash command and `POST /compact` is wired (`daemon-client.ts:865-868`), with
-      compaction events (`compaction_started/complete/cancelled/failed`) mapped to
-      notify + fetchState. The context meter (`ContextMeter.svelte` → `ContextRing.svelte`)
-      is display-only (`cursor: default`, `:74`) — a ring + % label with a tooltip
-      showing token counts. The composer also shows a `context-cue` banner above 85%
-      ("Context X% full — consider `/compact`", `Composer.svelte:752-759`). The ask:
-      a **hover popup on the context meter** that shows:
-      - More detail from whatever polytoken exposes (the `ContextUsageSnapshot` at
-        `wire-types.ts:963` carries `context_window`, `tokens`, `percent` — all already
-        projected to `SessionUsage` at `protocol/src/session-driver.ts:66-70`).
-      - A larger graphical progress bar (a scaled-up version of the `ContextRing` arc).
-      - A **Compact** button (`POST /compact`) and a **Clear context** button
-        (`POST /clear`, `wire-types.ts:23` → `context_cleared` event). Both are
-        destructive and can't be undone → **click-twice confirm gate** (mirror the
-        rewind gate in `Transcript.svelte`: first click arms with destructive styling +
-        updated tooltip, second click within ~3s fires, auto-disarms on timeout). No
-        confirmation popup — phone-first PWA.
-      The popup replaces the need to type `/compact`; the slash command stays as a
-      power-user path. Needs a tooltip (repo rule).
+- [x] **Compaction: context-meter hover popup + pass-through `/compact` + clear-context
+      button (both click-twice confirmed).** **Done 2026-07-02:** `ContextMeter.svelte` is
+      now an interactive hover/tap popup (mirrors `TaskList.svelte`'s hover/pin pattern)
+      showing token counts, a progress bar, and two destructive buttons — **Compact**
+      (`POST /compact`) and **Clear context** (`POST /clear`) — each behind a
+      click-twice confirm gate (mirrors `Transcript.svelte`'s rewind gate: first click
+      arms with destructive red + "Click again" label, second click within 3s fires,
+      auto-disarms on timeout). Full stack wired: `compact`/`clearContext` wire messages
+      → `PilotDriver.compact?`/`clearContext?` → polytoken driver (calls daemon
+      `POST /compact`/`POST /clear` + fetchState) + mock driver (emits `usageUpdated`)
+      → hub fire-and-forget dispatch → store methods. The popup opens on hover (desktop)
+      or tap (touch, pinned open so buttons are reachable). The `/compact` slash command
+      stays as a power-user path. E2e tests cover popup content + both confirm gates.
+      The `data-testid="context-meter"` stays on the inner `ContextRing` so existing
+      meter tests remain green.
 
 - [x] **Show all available facets** (`polytoken vfs ls polytoken://facets`). The session
       snapshot exposes `available_skills` and `available_subagents`

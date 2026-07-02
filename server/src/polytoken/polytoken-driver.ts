@@ -1501,6 +1501,62 @@ export async function createPolytokenDriver(
         console.error("[polytoken] setNotificationAutodrain failed", e);
       }
     },
+    async compact(sessionId?: SessionId): Promise<void> {
+      const ws = target(sessionId);
+      if (!ws) return;
+      // compact() is called with no argument (matching the /compact slash-command
+      // behavior); CompactRequest is optional. The daemon's compaction_started/
+      // complete events are already mapped (notify + fetchState); this explicit
+      // fetchState + sessionUpdated is a safety net for the non-SSE path.
+      try {
+        await ws.client.compact();
+        const { data } = await ws.client.state();
+        if (data) ws.lastState = data;
+        emit({
+          sessionRef: ws.ref,
+          timestamp: now(),
+          type: "sessionUpdated",
+          snapshot: snapshotFromState(
+            ws.lastState,
+            ws.ref,
+            workspaceFor(ws),
+            statusFromState(ws.lastState),
+            now(),
+            ws.monitorMode,
+            ws.autodrainEnabled,
+          ),
+        });
+      } catch (e) {
+        console.error("[polytoken] compact failed", e);
+      }
+    },
+    async clearContext(sessionId?: SessionId): Promise<void> {
+      const ws = target(sessionId);
+      if (!ws) return;
+      // context_cleared is already mapped to a reseed effect; this explicit
+      // fetchState + sessionUpdated refreshes the usage meter.
+      try {
+        await ws.client.clear();
+        const { data } = await ws.client.state();
+        if (data) ws.lastState = data;
+        emit({
+          sessionRef: ws.ref,
+          timestamp: now(),
+          type: "sessionUpdated",
+          snapshot: snapshotFromState(
+            ws.lastState,
+            ws.ref,
+            workspaceFor(ws),
+            statusFromState(ws.lastState),
+            now(),
+            ws.monitorMode,
+            ws.autodrainEnabled,
+          ),
+        });
+      } catch (e) {
+        console.error("[polytoken] clearContext failed", e);
+      }
+    },
     setClientPresence(fn: () => boolean): void {
       hasClients = fn;
     },
