@@ -53,6 +53,10 @@ mock script (`fixtures.ts`) that emits `sessionReset` + a reseeded transcript, a
 button, and an e2e asserting the transcript is replaced, not duplicated. Cheap, and it's
 the regression net for the fold's one destructive case.
 
+> **Landed 2026-07-02:** `resetReplay` fixture (`sessionReset` → replayed
+> user/assistant turn), `reset` dev-bar script, and `e2e/session-reset.e2e.ts`
+> asserting old transcript gone + exactly one copy of the replayed prompt.
+
 ### A3. Pending-interrogative recovery — sound; one determinism check
 
 `recoverPendingInterrogatives` (`polytoken-driver.ts:591-607`) maps `pending_interrogatives`

@@ -979,6 +979,40 @@ export function contextFull(): ScriptStep[] {
   ];
 }
 
+/** Driver-initiated transcript reset: the live driver emits `sessionReset` +
+ *  the fresh transcript after /clear, rewind, or stream_discontinuity recovery
+ *  (the fold is additive, so the reset must clear items first or the re-emit
+ *  would duplicate). This is the fold's ONE destructive case — the script is
+ *  its regression net: e2e asserts the transcript is REPLACED, not duplicated,
+ *  and the dev bar can drive the state for eyeballing. */
+export function resetReplay(): ScriptStep[] {
+  const uId = `u-reset-${ts()}`;
+  return [
+    { wait: 0, event: { ...base(), type: "sessionReset" } },
+    {
+      wait: 20,
+      event: {
+        ...base(),
+        type: "userMessage",
+        id: uId,
+        text: "Replayed prompt after the reset.",
+        entryId: `e-${uId}`,
+      },
+    },
+    ...deltas("Transcript rebuilt from daemon history after a reset.", "text"),
+    {
+      wait: 40,
+      event: {
+        ...base(),
+        type: "runCompleted",
+        snapshot: snapshot({ status: "idle" }),
+        userEntryId: `e-${uId}`,
+        assistantEntryId: `e-a-${uId}`,
+      },
+    },
+  ];
+}
+
 /** An extension reaching for a terminal-only capability against pilot's non-tui
  *  host — folds into a warning notice. Mirrors what the real driver emits when
  *  an extension's `ui.custom()` call goes unhandled. */
