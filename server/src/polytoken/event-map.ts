@@ -187,7 +187,7 @@ function events(events: SessionDriverEvent[], effects: DaemonEffect[] = []): Fol
 /** System-reminder reason types that surface as visible inject pills instead of
  *  silent turn-boundary markers. Maps the daemon's `SystemReminderReason.type`
  *  to a human-readable pill label. */
-const PLAN_REVIEW_LABELS: Record<string, string> = {
+export const PLAN_REVIEW_LABELS: Record<string, string> = {
   plan_review_required: "Plan review required",
   plan_mode_reinforcement: "Plan mode reminder",
   plan_verification: "Plan verification",

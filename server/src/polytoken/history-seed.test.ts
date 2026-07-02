@@ -181,18 +181,21 @@ describe("historyToSeedEvents", () => {
     expect(out[0]).toMatchObject({ output: "part1part2" });
   });
 
-  test("non-transcript kinds (lifecycle, model_switch, state_update) are skipped", () => {
+  test("non-transcript kinds are mapped to the same events the live path emits", () => {
     const out = historyToSeedEvents(
       [
-        { type: "session_lifecycle", kind: "created", session_id: "s", text: "" } as unknown as HistoryItem,
-        { type: "model_switch", from_model: "a", to_model: "b" } as unknown as HistoryItem,
-        { type: "state_update", delta: {} } as unknown as HistoryItem,
+        { type: "session_lifecycle", kind: "created", session_id: "s", text: "session started" } as unknown as HistoryItem,
+        { type: "model_switch", from_model: "a", to_model: "anthropic/claude-sonnet-4", to_reasoning_effort: null, emitted_at: "2026-07-01T10:00:00Z" } as unknown as HistoryItem,
+        { type: "state_update", delta: {}, emitted_at: "2026-07-01T10:01:00Z" } as unknown as HistoryItem,
         user("only this counts"),
       ],
       { ref },
     );
-    expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ type: "userMessage", text: "only this counts" });
+    // lifecycle → customMessage (display:false), model_switch → sessionUpdated, state_update → skipped.
+    expect(out).toHaveLength(3);
+    expect(out[0]).toMatchObject({ type: "customMessage", customType: "lifecycle", display: false });
+    expect(out[1]).toMatchObject({ type: "sessionUpdated", snapshot: { config: { modelId: "anthropic/claude-sonnet-4" } } });
+    expect(out[2]).toMatchObject({ type: "userMessage", text: "only this counts" });
   });
 
   test("full turn: user → assistant(text+tool_use) → tool_result", () => {
