@@ -34,6 +34,8 @@ export interface NewSessionOpts {
   worktree?: boolean;
   model?: { provider: string; modelId: string };
   thinking?: string;
+  /** Facet to apply at creation (the draft's pick, e.g. start straight in plan). */
+  facet?: string;
 }
 
 export interface PilotDriver {
@@ -214,7 +216,10 @@ export interface PilotDriver {
 
   /** Set the notification auto-drain flag. Emits a sessionUpdated snapshot with
    *  the new state. */
-  setNotificationAutodrain?(enabled: boolean, sessionId?: SessionId): Promise<void>;
+  setNotificationAutodrain?(
+    enabled: boolean,
+    sessionId?: SessionId,
+  ): Promise<void>;
 
   /** Trigger context compaction (the daemon's POST /compact). Emits a
    *  sessionUpdated snapshot after the daemon's compaction_complete event

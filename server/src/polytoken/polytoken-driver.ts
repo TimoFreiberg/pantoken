@@ -1147,6 +1147,18 @@ export async function createPolytokenDriver(
           console.error("[polytoken] newSession: thinking apply failed", e);
         }
       }
+      // Apply the draft's facet pick (e.g. start straight in plan). Same
+      // pattern as the model apply: best-effort, refresh the cached state so
+      // the seed snapshot reflects it.
+      if (opts.facet && opts.facet !== ws.lastState?.active_facet) {
+        try {
+          await ws.client.setFacet(opts.facet);
+          const { data } = await ws.client.state();
+          if (data) ws.lastState = data;
+        } catch (e) {
+          console.error("[polytoken] newSession: facet apply failed", e);
+        }
+      }
       return seedFor(ws);
     },
 

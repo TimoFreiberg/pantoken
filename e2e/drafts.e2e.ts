@@ -186,3 +186,44 @@ test("a new-session draft hides the focused session's tasklist pill", async ({
   ).toBeVisible();
   await expect(pill).toBeHidden();
 });
+
+test("⌘⇧C in a new-session draft cycles the DRAFT's facet, not the session's", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await page.getByRole("button", { name: "New session…" }).click();
+  const badge = page.getByTestId("facet-badge");
+  await expect(badge).toContainText("Execute");
+
+  // Cycle in the draft: only the draft's pick moves.
+  await page.keyboard.press("Meta+Shift+C");
+  await expect(badge).toContainText("Plan");
+
+  // Exit the draft to a live session — its facet must be untouched.
+  await row(page, "Explore the fold reducer").click();
+  await expect(badge).toContainText("Execute");
+
+  // Reopen the draft — the plan pick survived (rides draftConfigMap).
+  await openSidebar(page);
+  await page.getByRole("button", { name: "New session…" }).click();
+  await expect(badge).toContainText("Plan");
+});
+
+test("submitting a draft carries its facet into the created session", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await page.getByRole("button", { name: "New session…" }).click();
+  const badge = page.getByTestId("facet-badge");
+  await expect(badge).toContainText("Execute");
+  await page.keyboard.press("Meta+Shift+C");
+  await expect(badge).toContainText("Plan");
+
+  const box = composer(page);
+  await box.fill("start in plan mode");
+  await box.press("Enter");
+  // The created session's seed snapshot carries the facet pick, so the badge
+  // still shows Plan once the real session swaps in (not the daemon default).
+  await expect(page.getByText("start in plan mode").first()).toBeVisible();
+  await expect(badge).toContainText("Plan");
+});

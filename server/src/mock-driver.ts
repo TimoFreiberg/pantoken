@@ -673,14 +673,12 @@ export class MockDriver implements PilotDriver {
     });
     const pending = [...this.pendingDialogs.values()]
       .filter((p) => p.sessionRef.sessionId === sessionId)
-      .map(
-        (p): SessionDriverEvent => ({
-          sessionRef: p.sessionRef,
-          timestamp: String(Date.now()),
-          type: "hostUiRequest",
-          request: p.request,
-        }),
-      );
+      .map((p): SessionDriverEvent => ({
+        sessionRef: p.sessionRef,
+        timestamp: String(Date.now()),
+        type: "hostUiRequest",
+        request: p.request,
+      }));
     return [...withQueue, ...pending];
   }
 
@@ -730,7 +728,7 @@ export class MockDriver implements PilotDriver {
       );
     }
     this.cancelTimers();
-    const { cwd, worktree, model, thinking } = opts;
+    const { cwd, worktree, model, thinking, facet } = opts;
     // Honor a typed cwd so the new row groups under that project in the sidebar
     // (deterministic: one synthetic "new" entry per distinct cwd). A worktree request
     // is simulated as a sibling "-worktree" dir so the isolated path is visible in e2e.
@@ -763,7 +761,7 @@ export class MockDriver implements PilotDriver {
       availableThinkingLevels:
         chosen?.thinkingLevels ?? MOCK_DEFAULT_CONFIG.availableThinkingLevels,
     };
-    const seed = newSessionSeed({ cwd: dir, config: this.config });
+    const seed = newSessionSeed({ cwd: dir, config: this.config, facet });
     // Remember the seed snapshot so the first prompt (delivered right after this swap)
     // streams its turn under the new session's own ref — see prompt().
     const opened = seed.find((e) => e.type === "sessionOpened");
@@ -943,8 +941,11 @@ export class MockDriver implements PilotDriver {
     });
   }
 
-  private mcpServers: { serverName: string; status: McpServerStatus; toolCount: number }[] =
-    MOCK_MCP_SERVERS.map((s) => ({ ...s }));
+  private mcpServers: {
+    serverName: string;
+    status: McpServerStatus;
+    toolCount: number;
+  }[] = MOCK_MCP_SERVERS.map((s) => ({ ...s }));
 
   async setMcpServer(
     serverName: string,

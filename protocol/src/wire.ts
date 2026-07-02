@@ -409,6 +409,8 @@ export type ClientMessage =
       worktree?: boolean;
       model?: { provider: string; modelId: string };
       thinking?: string;
+      /** Apply this facet at creation (draft-picked, e.g. start straight in plan). */
+      facet?: string;
       prompt?: string;
       /** Id of the optional first prompt; deduplicates a retried create+send request. */
       promptId?: string;

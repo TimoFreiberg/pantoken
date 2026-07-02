@@ -2,12 +2,14 @@
   import { store } from "../lib/store.svelte.js";
   import Chevron from "./ui/Chevron.svelte";
 
-  // Facet picker in the composer toolbar. Shows the ACTUAL current facet; clicking
+  // Facet picker in the composer toolbar. Shows the ACTUAL current facet — the
+  // draft's pick while drafting a new session, else the active session's live
+  // facet (composerFacet unifies the two, mirroring composerConfig); clicking
   // opens a dropdown listing all available facets (from `polytoken vfs ls
   // polytoken://facets`). The active facet gets an accent tint. ⌘⇧C cycles
   // through all facets (works even when the composer is focused) — the dropdown
   // is for discovering and switching to specific facets.
-  const facet = $derived(store.session.facet ?? "execute");
+  const facet = $derived(store.composerFacet);
   const isPlan = $derived(facet?.toLowerCase() === "plan");
   const label = $derived(isPlan ? "Plan" : facet.charAt(0).toUpperCase() + facet.slice(1));
 
