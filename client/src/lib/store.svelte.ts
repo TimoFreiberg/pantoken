@@ -1,6 +1,7 @@
-// The client store: holds a reactive SessionState, adopts server snapshots, and
-// folds incremental events with the SAME reducer the server runs. Per-client view
-// state (composer draft) lives here too and is intentionally never sent upstream.
+// The client store: holds a reactive SessionState built by folding server seeds
+// from zero and incremental stamped events with the SAME reducer the server runs.
+// Per-client view state (composer draft) lives here too and is intentionally
+// never sent upstream.
 
 import {
   type CommandInfo,
@@ -115,7 +116,7 @@ class PilotStore {
   private bootRestoreInFlight = false;
   // The path of the last openSession request — captured so a lease-conflict
   // toast can offer a Retry that re-sends the same openSession(path). Cleared
-  // on a successful session switch (snapshot lands → no retry needed).
+  // on a successful session switch (seed lands → no retry needed).
   private lastAttemptedSessionPath: string | null = null;
   // Reconnect focus recovery. A dropped socket (Tailscale flap on a phone) reconnects as a
   // brand-new connection, which the hub registers focused on the empty landing — so without
@@ -123,7 +124,7 @@ class PilotStore {
   // `booted` flips true after the first hello; every hello after that is a reconnect, and we
   // stash the session we were viewing in `reconnectFocusId` so the bootstrap session list can
   // re-assert it. (A new-session draft survives a reconnect on its own — it's client state
-  // rendered ahead of the snapshot — so it's deliberately not captured.)
+  // rendered ahead of the seed — so it's deliberately not captured.)
   private booted = false;
   private reconnectFocusId: string | null = null;
   // Fold watermark of the adopted transcript build (protocol v2): which session
@@ -254,11 +255,11 @@ class PilotStore {
     thinking?: string;
   } | null>(null);
   // A newSession prompt was just submitted and we're awaiting the new session's first
-  // authoritative snapshot from the server (session warm-up can take a beat). Holds the
+  // authoritative seed from the server (session warm-up can take a beat). Holds the
   // submitted prompt (id + content). While set, the transcript renders a fresh/empty
   // session seeded with this first-prompt row + a "Starting session…" indicator — instead
   // of flashing the previously focused session's transcript, which `this.session` still
-  // holds until the snapshot swaps it in. Cleared once that prompt's real userMessage
+  // holds until the seed swaps it in. Cleared once that prompt's real userMessage
   // lands in the focused transcript (maybeFinishCreating), or on navigation / failure.
   creatingSession = $state<{
     promptId: string;
@@ -758,7 +759,7 @@ class PilotStore {
   }
 
   /** Tear down the "creating new session" placeholder once its first prompt has actually
-   *  landed in the focused transcript. Tied to the real item (not the snapshot or the
+   *  landed in the focused transcript. Tied to the real item (not the seed or the
    *  ACK) so the optimistic first-prompt row hands off to the authoritative one without a
    *  gap — the overlay keeps showing it right up until `existing.has(promptId)` is true. */
   private maybeFinishCreating(): void {
@@ -888,7 +889,7 @@ class PilotStore {
         // A session leaving the running set = a turn just finished. If it's a
         // background session (not the one you're looking at), flag it unread.
         // Exclude the focused session two ways: `activeSessionId` (from the session
-        // list) AND the snapshot's `ref` (which always lands before live events) —
+        // list) AND the folded seed's `ref` (which always lands before live events) —
         // so a focused turn that completes before the list arrives never self-marks.
         const next = new Set(msg.runningIds);
         const viewing = this.session.ref?.sessionId;
@@ -940,7 +941,7 @@ class PilotStore {
       case "editorPrefill":
         // A branch landed on a user prompt — its text comes back to re-edit. Per-client
         // (only the requester), so it's handled here, not in the shared foldEvent. The
-        // transcript re-seed rides a separate `snapshot`; composerDraft is local state it
+        // transcript re-seed rides a separate `seed`; composerDraft is local state it
         // doesn't touch, so order between them doesn't matter.
         this.composerDraft = msg.text;
         this.focusComposer();
@@ -1515,8 +1516,8 @@ class PilotStore {
     const session = this.sessions.find((item) => item.sessionId === sessionId);
     if (session) this.openSession(session.path);
   }
-  /** Dev-only timing for a full transcript render (fires on every snapshot: session
-   *  open, switch, reconnect, mid-turn re-snapshot). Gated behind `?dev` — the same
+  /** Dev-only timing for a full transcript render (fires on every seed: session
+   *  open, switch, reconnect, mid-turn re-seed). Gated behind `?dev` — the same
    *  runtime URL flag that reveals the dev bar — so production stays silent until you
    *  add `?dev` to the URL in any deploy. Watch the trend: when `itemCount` climbs into
    *  the thousands AND the paint time grows past a perceptible pause, JS windowing
@@ -1620,9 +1621,9 @@ class PilotStore {
    *  focused session for the current Pilot server. If none survives, open a new-session
    *  draft at $HOME so the operator lands on a prompt page rather than a blank transcript.
    *  Fires at most once per store instance (reconnects don't re-open a dismissed
-   *  draft), and only when both the snapshot and the sessionList have arrived —
-   *  hello carries serverId, snapshot carries ref/ready, and sessionList carries the
-   *  available sessions + activeSessionId + $HOME. */
+   *  draft), and only when both the seed and the sessionList have arrived —
+   *  hello carries serverId, the folded seed carries ref/ready, and sessionList
+   *  carries the available sessions + activeSessionId + $HOME. */
   private maybeOpenBootDraft(): void {
     if (this.bootDraftHandled) return;
     if (!this.serverId || !this.ready || !this.defaultNewSessionCwd) return;
@@ -1678,7 +1679,7 @@ class PilotStore {
    *  link blips would otherwise land on a blank pane mid-session. `hello` stashed the viewed
    *  session id; re-open it unless we've since started a draft, or the server happened to
    *  keep us there (e.g. the landing IS that session, as in the mock). Idempotent: openSession
-   *  triggers another snapshot/list, but reconnectFocusId is already cleared so it no-ops. */
+   *  triggers another seed/list, but reconnectFocusId is already cleared so it no-ops. */
   private maybeRestoreFocus(): void {
     const want = this.reconnectFocusId;
     this.reconnectFocusId = null;
@@ -1805,10 +1806,10 @@ class PilotStore {
     this.composerImages = [];
     // Hand the transcript a clean slate immediately. Without this it keeps rendering the
     // PREVIOUSLY focused session (still held in `this.session`) for the whole session warm-up
-    // window, flashing that old transcript before the new session's snapshot lands. We
+    // window, flashing that old transcript before the new session's seed lands. We
     // reset to an empty state and mark the creation pending so the only thing shown is the
     // optimistic first-prompt row (transcriptItems) + the "Starting session…" indicator,
-    // both of which carry seamlessly into the real session once its snapshot arrives.
+    // both of which carry seamlessly into the real session once its seed arrives.
     this.session = initialSessionState();
     this.creatingSession = {
       promptId,

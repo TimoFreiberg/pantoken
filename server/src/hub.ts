@@ -1,6 +1,8 @@
-// The session hub: holds the authoritative folded SessionState, folds every
-// driver event into it, and fans events out to all connected WS clients. New
-// clients get hello + a full snapshot so they catch up without replaying history.
+// The session hub: owns the per-session seq/epoch-stamped event journal, folds
+// every driver event into the authoritative SessionState, and fans stamped events
+// out to all connected WS clients. New clients get hello + a seed of journal
+// events they fold from zero; a reconnect with a valid resume token gets just
+// the tail replayed instead.
 
 import { homedir } from "node:os";
 import {
@@ -465,12 +467,14 @@ export class SessionHub {
     const j = this.journals.get(sid);
     if (!j) {
       // Lifecycle invariant broken (journal must exist iff state exists).
-      // Don't route: an unstamped frame would just be discarded by every
-      // client's epoch gate — silently, since an epoch mismatch deliberately
-      // does NOT trigger requestSeed (it normally means a superseding seed is
-      // already in flight). Routing would be wire noise that *looks* like
-      // serving. Viewers stay stale until their next seed; this log is the
-      // honest signal that a dead-by-construction corner was reached.
+      // Don't route: a journal-seeded client's epoch gate would discard a
+      // zero-stamped frame silently (an epoch mismatch deliberately does NOT
+      // trigger requestSeed — it normally means a superseding seed is already
+      // in flight), and a client seeded through this same degraded path
+      // (epoch 0) would churn it into a requestSeed loop. Either way, wire
+      // noise that *looks* like serving. Viewers stay stale until their next
+      // seed; this log is the honest signal that a dead-by-construction
+      // corner was reached.
       console.error(
         `[hub] no journal for viewed session ${sid} — viewers stale until reseeded`,
       );
@@ -790,7 +794,7 @@ export class SessionHub {
 
   /** Emit each running, currently-viewed session's context usage as a `usageUpdated`
    *  event (folded into its shared state + routed to its viewers). A dedicated event
-   *  (not a full snapshot) so a mid-turn refresh touches only `usage`, never the
+   *  (not a full re-seed) so a mid-turn refresh touches only `usage`, never the
    *  streaming transcript / queued / config. Sessions nobody is viewing are skipped —
    *  there is no transcript to refresh. */
   private refreshUsage(): void {
@@ -1173,7 +1177,7 @@ export class SessionHub {
   /**
    * Switch ONE client's focus to the session a driver swap resolves to. The swap warms +
    * seeds the target; we fold that seed into the target's shared state (unless it's
-   * already live — see below), point this connection at it, and re-snapshot. Other
+   * already live — see below), point this connection at it, and re-seed it. Other
    * clients are untouched: focus is per-connection. Single-flight per connection (a swap
    * can block for seconds warming the session, or minutes on a trust card): a second request
    * arriving mid-swap is coalesced (queued, latest wins) and run when this one finishes,
@@ -1183,7 +1187,7 @@ export class SessionHub {
    * activeSessionId; commands are cwd-scoped, so only the switcher gets them.
    *
    * `reseed` (branch): rebuild the state even if the session is already live and
-   * re-snapshot EVERY viewer — navigateTree mutated the shared session, so the new
+   * re-seed EVERY viewer — navigateTree mutated the shared session, so the new
    * branch transcript is authoritative for everyone looking at it. Without it, opening
    * an already-viewed session reuses the live state (which may hold an in-flight
    * streaming bubble the seed's committed-history view would drop).
@@ -1287,7 +1291,7 @@ export class SessionHub {
         if (metaChanged) this.broadcastSessionStatus();
       }
       // A newer switch queued up while this one was warming (the boot-restore-vs-click
-      // race). Don't move focus or push this now-superseded snapshot — the queued switch,
+      // race). Don't move focus or push this now-superseded seed — the queued switch,
       // dispatched from `finally`, sends the authoritative view. The warm session is still
       // cached above, and skipping the send avoids a flash of the transcript being left.
       if (conn.pendingSwitch) return sid;
@@ -1384,7 +1388,7 @@ export class SessionHub {
     // Synchronous: both are in-memory / a small file read.
     send(this.pilotSettingsMsg());
     // Fire the session + model + provider lists asynchronously (driver disk/registry
-    // reads); they arrive as follow-up messages, keeping hello+snapshot synchronous +
+    // reads); they arrive as follow-up messages, keeping hello+seed synchronous +
     // first.
     void this.broadcastSessionList();
     void this.broadcastModelList();
@@ -1605,7 +1609,7 @@ export class SessionHub {
         }
         // Reseed: the reloaded session keeps its sessionId, so a client already viewing it
         // has a (now-wedged) shared state. Force-rebuild from the fresh seed instead of
-        // reusing it — and re-snapshot every viewer of it, not just the requester, so a
+        // reusing it — and re-seed every viewer of it, not just the requester, so a
         // second client looking at the broken session also recovers.
         void this.switchTo(conn, () => this.driver.reloadSession!(msg.path), {
           reseed: true,
@@ -1634,8 +1638,9 @@ export class SessionHub {
           });
           return;
         }
-        // navigateTree mutates the shared session's leaf, so reseed re-snapshots every
-        // viewer of it. The editorText (a user-prompt branch's re-editable text) is
+        // navigateTree mutates the shared session's leaf, so reseed pushes a fresh
+        // seed to every viewer of it. The editorText (a user-prompt branch's re-editable
+        // text) is
         // per-client, so it goes ONLY to the requester after the swap lands.
         let prefill: string | undefined;
         void this.switchTo(
@@ -1820,7 +1825,7 @@ export class SessionHub {
   }
 
   /** Dev/test-only: clear all session state, optionally re-seed the mock's landing
-   *  fixture, and re-point + re-snapshot every connected client. `bootstrap:false`
+   *  fixture, and re-point + re-seed every connected client. `bootstrap:false`
    *  exposes the production empty landing. */
   reset(opts: { bootstrap?: boolean } = {}): void {
     this.sessionStates.clear();
