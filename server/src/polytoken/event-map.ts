@@ -255,6 +255,7 @@ export function snapshotFromState(
     usage: usageFromState(state),
     facet: state?.active_facet ?? undefined,
     permissionMonitor: monitorMode,
+    adventurousHandoff: state?.adventurous_handoff_active ?? undefined,
     activePlan: state?.active_plan ?? undefined,
     // Thread current_goal → goal. Three cases: a CurrentGoal object → set (the
     // daemon carries summary + lifecycle); null (explicitly cleared) → null (the

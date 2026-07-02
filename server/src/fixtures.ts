@@ -216,6 +216,7 @@ export function snapshot(over: Partial<SessionSnapshot> = {}): SessionSnapshot {
     // Default permission-monitor mode — the mock has no daemon to GET, so seed
     // "standard" here so the composer-toolbar badge is non-empty on load.
     permissionMonitor: "standard",
+    adventurousHandoff: false,
     ...over,
   };
 }

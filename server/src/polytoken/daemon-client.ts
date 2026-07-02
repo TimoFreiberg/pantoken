@@ -748,6 +748,21 @@ export class DaemonClient {
     }
   }
 
+  /** `POST /adventurous-handoff` — toggle the adventurous auto-handoff flag.
+   *  Returns the new state so the driver can emit a snapshot immediately (the
+   *  daemon's computed `adventurous_handoff_active` on GET /state may lag by one
+   *  fetch — this returns the raw `enabled` flag, not the computed value). */
+  async toggleAdventurousHandoff(): Promise<boolean> {
+    const res = await fetch(`${this.baseUrl}/adventurous-handoff`, {
+      method: "POST",
+    });
+    if (!res.ok) {
+      throw new Error(`POST /adventurous-handoff failed (${res.status})`);
+    }
+    const body = await res.json() as { enabled?: boolean };
+    return body.enabled ?? false;
+  }
+
   /**
    * `POST /turn/cancel` — abort the active turn. The spec documents 409 when no turn
    * is in flight, but the live daemon was observed returning 202 with prompt_id:null

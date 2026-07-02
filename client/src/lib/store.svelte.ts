@@ -1895,6 +1895,12 @@ class PilotStore {
     send({ type: "setPermissionMonitor", mode });
   }
 
+  /** Toggle the adventurous auto-handoff flag (lets plan mode autonomously start
+   *  implementing). The updated state arrives via the next snapshot. */
+  toggleAdventurousHandoff(): void {
+    send({ type: "toggleAdventurousHandoff" });
+  }
+
   /** Models shown in the header picker: filtered to favorites when any are set, but the
    *  currently-active model is ALWAYS included — a running non-favorite model stays
    *  visible/selectable (option a). Empty favorites = show every available model. */

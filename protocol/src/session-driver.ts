@@ -178,6 +178,10 @@ export interface SessionSnapshot {
    *  Undefined means unknown (not yet seeded). The daemon exposes only the live
    *  per-session monitor, not the global config default. */
   readonly permissionMonitor?: PermissionMonitorMode;
+  /** Whether adventurous auto-handoff is active (the daemon computes: enabled
+   *  flag AND the active facet exposes handoff_plan). Undefined means the daemon
+   *  didn't carry it (older daemon — preserve existing state). */
+  readonly adventurousHandoff?: boolean;
   /** The active plan document's markdown (set when the plan facet produces a
    *  plan). Undefined means no plan exists / the facet isn't "plan". */
   readonly activePlan?: string;

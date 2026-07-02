@@ -1361,6 +1361,32 @@ export async function createPolytokenDriver(
         console.error("[polytoken] setPermissionMonitor failed", e);
       });
     },
+    async toggleAdventurousHandoff(sessionId?: SessionId): Promise<void> {
+      const ws = target(sessionId);
+      if (!ws) return;
+      // Toggle the flag, then fetch state so the snapshot carries the computed
+      // `adventurous_handoff_active` (which ANDs `enabled` with facet support).
+      try {
+        await ws.client.toggleAdventurousHandoff();
+        const { data } = await ws.client.state();
+        if (data) ws.lastState = data;
+        emit({
+          sessionRef: ws.ref,
+          timestamp: now(),
+          type: "sessionUpdated",
+          snapshot: snapshotFromState(
+            ws.lastState,
+            ws.ref,
+            workspaceFor(ws),
+            statusFromState(ws.lastState),
+            now(),
+            ws.monitorMode,
+          ),
+        });
+      } catch (e) {
+        console.error("[polytoken] toggleAdventurousHandoff failed", e);
+      }
+    },
     setClientPresence(fn: () => boolean): void {
       hasClients = fn;
     },

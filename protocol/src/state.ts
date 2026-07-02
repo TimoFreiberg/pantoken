@@ -125,6 +125,9 @@ export interface SessionState {
    *  polytoken driver seeds it at warm-up via GET /permission-monitor). Same
    *  overwrite-guarded semantics as `facet`. Drives the composer-toolbar badge. */
   permissionMonitor?: PermissionMonitorMode;
+  /** Whether adventurous auto-handoff is active (computed by the daemon). Same
+   *  overwrite-guarded semantics as `facet`. Drives the Settings toggle. */
+  adventurousHandoff?: boolean;
   /** The active plan document's markdown; undefined until a snapshot carries it.
    *  Drives the PlanView overlay. Same overwrite-guarded semantics as `facet`. */
   activePlan?: string;
@@ -262,6 +265,10 @@ export function foldEvent(
       // permissionMonitor overwrites; one that omits it must not blank a known mode.
       if (s.permissionMonitor !== undefined)
         state.permissionMonitor = s.permissionMonitor;
+      // Same overwrite-guarded semantics as facet: a snapshot that carries
+      // adventurousHandoff overwrites; one that omits it must not blank a known value.
+      if (s.adventurousHandoff !== undefined)
+        state.adventurousHandoff = s.adventurousHandoff;
       // Same overwrite-guarded semantics as facet: a snapshot that carries
       // activePlan overwrites; one that omits it must not blank a known plan.
       if (s.activePlan !== undefined) state.activePlan = s.activePlan;

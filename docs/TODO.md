@@ -453,11 +453,18 @@ New parity/UX items from the owner, grounded against current source.
       the daemon exposes that pilot doesn't surface — add a Settings toggle and wire the
       events to update the cached state (mirror `permission_monitor_switch`'s pattern).
 
-- [ ] **Adventurous handoff.** `GET/POST /adventurous-handoff` exists
+- [x] **Adventurous handoff.** `GET/POST /adventurous-handoff` exists
       (`wire-types.ts:7`), `adventurous_handoff_active` is on the snapshot
       (`wire-types.ts:2626`), pilot never reads it. Niche — only surface if dogfooding
       shows a need. Track so it's not forgotten.
       **human input**: yeah we need this. it allows plan mode to autonomously start implementing the plan, essential for hands-off work on tasks while still getting the benefits from organized plan->execute work
+      **Done 2026-07-02:** full stack wired — `toggleAdventurousHandoff` daemon-client
+      method (POST /adventurous-handoff), polytoken driver method (toggles then
+      fetches state for the computed `adventurous_handoff_active`), mock driver method,
+      `PilotDriver` interface, hub handler, `toggleAdventurousHandoff` wire message,
+      `adventurousHandoff` on `SessionSnapshot` + `SessionState` (overwrite-guarded
+      fold like `permissionMonitor`), `snapshotFromState` threading, Settings toggle in
+      the Appearance section, and an e2e test verifying on/off cycle.
 
 
 ## 🟢 Polish / fast-follow
