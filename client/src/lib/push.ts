@@ -85,9 +85,26 @@ export async function currentPushState(): Promise<PushState> {
 /**
  * Idempotent: ensure this device has a push subscription registered server-side,
  * prompting for permission if needed. Returns the outcome so the caller can show it.
- * Must run from a user gesture on iOS, and only works inside an installed PWA there.
+ * Must run from a user gesture on iOS, and only works inside an installed PWA there
+ * — which is why the prompt-send gesture calls it. One success is memoized for the
+ * page's lifetime (the registration is idempotent server-side and the subscription
+ * doesn't change under a live page), so subsequent sends skip the
+ * serviceWorker.ready + getSubscription + POST /push/subscribe round-trip that
+ * otherwise rides every prompt's hot path. Concurrent calls share one attempt.
  */
-export async function ensurePushSubscription(): Promise<PushState> {
+let subscribedThisPage = false;
+let ensureInFlight: Promise<PushState> | null = null;
+
+export function ensurePushSubscription(): Promise<PushState> {
+  if (subscribedThisPage) return Promise.resolve("subscribed");
+  if (ensureInFlight) return ensureInFlight;
+  ensureInFlight = ensurePushSubscriptionUncached().finally(() => {
+    ensureInFlight = null;
+  });
+  return ensureInFlight;
+}
+
+async function ensurePushSubscriptionUncached(): Promise<PushState> {
   if (!pushSupported()) return "unsupported";
   if (isIOS() && !isStandalone()) return "needs-install";
   try {
@@ -120,6 +137,7 @@ export async function ensurePushSubscription(): Promise<PushState> {
       headers: authHeaders({ "content-type": "application/json" }),
       body: JSON.stringify(sub),
     });
+    if (postRes.ok) subscribedThisPage = true;
     return postRes.ok ? "subscribed" : "error";
   } catch (e) {
     console.warn("[push] subscription failed", e);

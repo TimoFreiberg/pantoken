@@ -655,6 +655,9 @@ New parity/UX items from the owner, grounded against current source.
       **Completed 2026-07-02 (protocol v2):** the close-on-drop path now recovers via `hello.resume` (tail replay of exactly the dropped frames, not a full re-seed), with an explicit `backpressureLimit: 4MB`. The switchTo attach-window race is fixed hub-side: events racing a cold open/reload buffer as a signal and the swap re-runs once (the rebuilt seed contains them); a residual one-fetch-wide window needs the daemon `Last-Event-ID` watermark (upstream ask) — see PLAN-protocol-v2 "as-built deltas".
 - [ ] Medium-tier: optimistic userMessage before the POST leaves ghost rows on failure; renaming a cold session hijacks activeSessionId (and spawns a daemon); the idle reaper can kill a session another client is viewing; phone-wake half-open sockets show a green "live" LED over a dead link; ⌘F can't search collapsed "Worked for Ns" bodies (DOM-only search); PROTOCOL_VERSION is sent but never checked (stale cached PWA misfolds silently); /debug/reset is exposed in prod behind only the app token and wipes real settings; reloaded transcripts show "56y ago" (synthetic epoch timestamps — a daemon gap, see ask #1); and the e2e suite asserts mock behaviors the live driver never produces.
       **Partial fix 2026-07-02:** PROTOCOL_VERSION is now checked on `hello` — the client sets `protocolMismatch` and shows a full-screen "Update required" error directing a hard-refresh, instead of silently folding events from an incompatible server. The other 8 issues remain open.
+      **Partial fix 2026-07-02 (2):** `/debug/reset` is now mock-driver-only — against
+      the live driver it returns 403 instead of wiping real settings/session state
+      behind just the app token. 7 issues remain open.
 
 ### Hand-backs from the 2026-07-02 overnight-batch review (verified against source 2026-07-02)
 
@@ -915,8 +918,12 @@ titles below match its `findings[]` entries. Ranked by felt-quality-per-effort.
       code-block copy button all route through `store.copyToClipboard`, which
       sets `lastError` ("needs a secure context") on rejection — no more silent
       no-op copies.
-- [ ] Move the per-send `POST /push/subscribe` round-trip off the prompt-send hot path
+- [x] Move the per-send `POST /push/subscribe` round-trip off the prompt-send hot path
       (subscribe once per session/page instead).
+      **Done 2026-07-02:** `ensurePushSubscription` memoizes one success per page
+      (single-flight for concurrent calls); the prompt-send gesture call sites stay
+      (iOS needs the gesture) but sends after the first skip the SW-ready +
+      getSubscription + POST round-trip.
 
 ### Needs owner decision
 

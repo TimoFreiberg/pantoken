@@ -288,6 +288,13 @@ const server = Bun.serve<WsData>({
       if (url.pathname === "/debug/state")
         return Response.json(hub.snapshot(), { headers });
       if (url.pathname === "/debug/reset") {
+        // e2e/dev-bar hook: resets hub state + settings to the mock fixtures.
+        // Mock-only — against the live driver it would wipe REAL settings and
+        // session state behind nothing more than the app token.
+        if (!mock)
+          return new Response("debug reset is mock-driver-only", {
+            status: 403,
+          });
         hub.reset({
           bootstrap: url.searchParams.get("bootstrap") !== "0",
         });
