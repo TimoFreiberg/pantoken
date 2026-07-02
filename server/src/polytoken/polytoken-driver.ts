@@ -856,8 +856,23 @@ export async function createPolytokenDriver(
         throw new Error("no warm polytoken session to prompt");
       }
       focus(ws.ref.sessionId);
-      // Echo the user's message into the transcript immediately (optimistic, like the
-      // mock/polytoken drivers) so the client's row renders before the model streams.
+      // Mid-turn (a turn is in flight): queue as input the agent reads between
+      // steps via POST /turn/input. Otherwise start a new turn via POST /prompt.
+      // deliverAs is pilot-side UX only — the daemon's queue API has no
+      // steer/follow-up discriminator (every drained queued message is "steer").
+      // The param stays on the signature to avoid a wire/seam change.
+      //
+      // The POST comes FIRST, the transcript echo after: an echo emitted before
+      // the POST becomes a ghost row when the POST fails — an authoritative-
+      // looking userMessage the daemon never received, which also swallows the
+      // client's rejected-prompt Retry/Edit affordance (its optimistic pending
+      // row reconciles against this echo). The client's own pending row covers
+      // the instant render; the echo is confirmation, not the first paint.
+      if (ws.lastState?.turn_in_flight) {
+        await ws.client.queueTurnInput(text);
+      } else {
+        await ws.client.prompt(text);
+      }
       emit({
         sessionRef: ws.ref,
         timestamp: now(),
@@ -884,16 +899,6 @@ export async function createPolytokenDriver(
             level: "warning",
           },
         });
-      }
-      // Mid-turn (a turn is in flight): queue as input the agent reads between
-      // steps via POST /turn/input. Otherwise start a new turn via POST /prompt.
-      // deliverAs is pilot-side UX only — the daemon's queue API has no
-      // steer/follow-up discriminator (every drained queued message is "steer").
-      // The param stays on the signature to avoid a wire/seam change.
-      if (ws.lastState?.turn_in_flight) {
-        await ws.client.queueTurnInput(text);
-      } else {
-        await ws.client.prompt(text);
       }
     },
 
