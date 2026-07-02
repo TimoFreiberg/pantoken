@@ -218,6 +218,13 @@ export async function createPolytokenDriver(
   // hasClients() before issuing a prompt that nobody can answer.
   let hasClients: () => boolean = () => true;
 
+  // Viewed-session predicate, set by the hub at construction (per-client focus is
+  // hub state the driver can't see). Consulted by the idle reaper so a session an
+  // operator is currently reading is never disposed under them. Defaults to
+  // "nobody is viewing" — without a hub the reaper keeps its old timer-only
+  // behavior rather than never reaping at all.
+  let isViewed: (sessionId: string) => boolean = () => false;
+
   /** Per-cwd cache of parsed slash commands. The set is cwd-scoped and re-broadcast
    *  on every session switch; re-shelling-out to `polytoken print-slash-commands` on
    *  each switch would be wasteful when the set rarely changes. Cleared nowhere — a
@@ -745,6 +752,10 @@ export async function createPolytokenDriver(
               // authoritative signal (spike §7). A backgrounded running turn is the
               // headline feature of the warm pool; reaping it would defeat it.
               if (ws.lastState?.turn_in_flight) continue;
+              // Never reap a session a connected client is viewing — reading a
+              // long transcript for >idleReapMs without prompting is normal, and
+              // the driver-level activeSessionId can't see per-client focus.
+              if (isViewed(id)) continue;
               // Idle too long — reap. Emit sessionClosed first (mirrors LRU eviction)
               // so the hub clears the running indicator on an evicted mid-run session.
               emit({
@@ -1793,6 +1804,9 @@ export async function createPolytokenDriver(
     },
     setClientPresence(fn: () => boolean): void {
       hasClients = fn;
+    },
+    setSessionViewers(fn: (sessionId: string) => boolean): void {
+      isViewed = fn;
     },
     async clearQueue(
       sessionId?: SessionId,

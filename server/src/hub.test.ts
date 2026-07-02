@@ -48,6 +48,11 @@ class FakeDriver implements PilotDriver {
   private trustListener?: (e: TrustEvent) => void;
   readonly responded: HostUiResponse[] = [];
   readonly trustResponded: { requestId: string; choice: number | null }[] = [];
+  /** Captured viewed-session predicate (the hub wires it at construction). */
+  isViewed?: (sessionId: string) => boolean;
+  setSessionViewers(fn: (sessionId: string) => boolean): void {
+    this.isViewed = fn;
+  }
   subscribe(l: (e: SessionDriverEvent) => void) {
     this.listener = l;
     return () => {};
@@ -1286,6 +1291,21 @@ describe("SessionHub", () => {
     // The idle session's list isn't dirty either, so the scan is skipped (Rec #3).
     expect(d.listSessionsCalls).toBe(0);
     expect(a.received.some((m) => m.type === "sessionList")).toBe(false);
+  });
+
+  test("the viewed-session predicate reflects per-client focus (idle-reaper guard)", async () => {
+    const d = new FakeDriver();
+    const hub = new SessionHub(d);
+    expect(d.isViewed).toBeTruthy();
+    // No clients yet — nothing is viewed.
+    expect(d.isViewed!("s")).toBe(false);
+
+    const a = client();
+    hub.addClient(a.send);
+    d.emit(ev({ type: "sessionOpened", snapshot: snap("s") })); // focuses "s"
+    await flush();
+    expect(d.isViewed!("s")).toBe(true);
+    expect(d.isViewed!("other")).toBe(false);
   });
 
   test("the live ticker change-gates usage: identical values emit once, a change emits again", async () => {

@@ -257,6 +257,12 @@ export interface PilotDriver {
    *  and never unsubscribes, so its listener count is a constant, not a client count. The
    *  hub sets this at construction. Optional: a driver with no interactive prompts omits it. */
   setClientPresence?(hasClients: () => boolean): void;
+  /** Wire a live predicate the driver can poll to learn whether SOME connected client is
+   *  currently viewing a given session (per-client focus — the hub knows, the driver
+   *  doesn't). The polytoken driver's idle reaper consults it so a background session an
+   *  operator is reading (but not prompting) isn't disposed under them. The hub sets this
+   *  at construction. Optional: a driver with no session pool omits it. */
+  setSessionViewers?(isViewed: (sessionId: SessionId) => boolean): void;
   /** Answer a pending trust request. `choice` indexes the request's options; null
    *  denies (deny-safe). Settling also fires a `resolved` TrustEvent. */
   respondTrust?(requestId: string, choice: number | null): void;

@@ -658,6 +658,12 @@ New parity/UX items from the owner, grounded against current source.
       **Partial fix 2026-07-02 (2):** `/debug/reset` is now mock-driver-only — against
       the live driver it returns 403 instead of wiping real settings/session state
       behind just the app token. 7 issues remain open.
+      **Partial fix 2026-07-02 (3):** the idle reaper no longer kills a session a
+      connected client is viewing — new `setSessionViewers` driver seam (mirrors
+      `setClientPresence`): the hub wires a per-client-focus predicate at
+      construction and the reaper skips viewed sessions (reading a long transcript
+      for >10min without prompting is normal). Hub unit test covers the predicate.
+      6 issues remain open.
 
 ### Hand-backs from the 2026-07-02 overnight-batch review (verified against source 2026-07-02)
 
