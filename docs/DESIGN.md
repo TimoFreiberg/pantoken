@@ -16,7 +16,7 @@ from a browser/phone over Tailscale. Default look/feel mirrors the Claude app.
    │                          ┌───────────────────┐              │
    │  SERVER-AUTHORITATIVE ───┤ event → transcript│              │
    │  STATE                   │  reducer (shared) │              │
-   │  · transcript[] per session └───────────────────┘           │
+   │  · event journal per session└───────────────────┘           │
    │  · pendingApprovals: Map<id, HostUiRequest>                 │
    │  · ambient: statuses{}, widgets{}, title                     │
    │              │                                               │

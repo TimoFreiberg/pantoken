@@ -1,8 +1,8 @@
-// Protocol v2 commit 1: the journal runs dark alongside the legacy fold. These
-// tests pin the core invariant — at every instant, folding the journal's seed
-// from zero reproduces exactly the state a connected client has folded — across
-// every mock fixture script, the sessionReset epoch bump, the usage-ticker
-// side-door, and switch/reload journal rebuilds.
+// The journal is the hub's single per-session store — no folded copy runs
+// alongside it. These tests pin the core invariant — at every instant, folding
+// the journal's seed from zero reproduces exactly the state a connected client
+// has folded — across every mock fixture script, the sessionReset epoch bump,
+// the usage-ticker side-door, and switch/reload journal rebuilds.
 
 import { describe, expect, test } from "bun:test";
 import {
