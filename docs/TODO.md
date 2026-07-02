@@ -1011,6 +1011,11 @@ the trivial ones shipped inline this same day.
 _Direction note, not a commitment. Brainstormed 2026-07-01 while waiting for
 polytoken feature-parity work to complete. Revisit when that work is done._
 
+> **2026-07-02:** formalized as `docs/ADR-desktop-shell.md` (Tauri shell now, Bun hub as
+> Rust-supervised sidecar, Rust-hub port behind explicit go/no-go criteria) — the ADR
+> supersedes the shell parts of this note; the Rust-hub end-state below stays the gated
+> target. Companion designs: `docs/PLAN-protocol-v2.md`, `docs/PLAN-driver-robustness.md`.
+
 Pilot is moving away from the Bun WS hub: agent sessions now run as standalone
 polytoken daemon processes, and mid-term UX goals (native file pickers, local
 agent spawning, SSH-to-remote-host sessions in the same window) push the desktop
