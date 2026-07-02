@@ -62,6 +62,13 @@ export type CompactRequest = S["CompactRequest"];
 export type FileCatalogResponse = S["FileCatalogResponse"];
 export type ErrorBody = S["ErrorBody"];
 
+/** An MCP server lifecycle action exposed by the daemon. */
+export type McpServerAction =
+  | "enable"
+  | "disable"
+  | "disconnect"
+  | "reconnect";
+
 /** Result of spawning a daemon — parsed from `polytoken new --no-attach` stdout. */
 export interface SpawnedDaemon {
   sessionId: string;
@@ -541,15 +548,22 @@ export class DaemonClient {
     }
   }
 
-  private async post<T>(
+  /** Shared request core: run `safeFetch`, then normalize the response into the
+   *  `{status, data, error}` shape every caller wants — null/status-0 short-circuit,
+   *  JSON-parse the body, and derive an `error` string for ≥400 responses.
+   *
+   *  `errorForStatus` lets callers preserve their historically distinct error
+   *  derivation: `post` prefers a parsed `{message}` body, `get` reports the raw
+   *  text. Both fall back to `text.slice(0, 500)` when the body isn't JSON. */
+  private async request<T>(
     path: string,
-    body?: unknown,
+    init?: RequestInit,
+    errorForStatus?: (
+      data: T | null,
+      text: string,
+    ) => string | null,
   ): Promise<{ status: number; data: T | null; error: string | null }> {
-    const res = await this.safeFetch(`${this.baseUrl}${path}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    const res = await this.safeFetch(`${this.baseUrl}${path}`, init);
     if (!res) return { status: 0, data: null, error: "fetch returned null" };
     if (res.status === 0) return { status: 0, data: null, error: res.error };
     const text = res.data as string;
@@ -562,37 +576,37 @@ export class DaemonClient {
         return { status: res.status, data: null, error: text.slice(0, 500) };
       }
     }
-    return {
-      status: res.status,
-      data,
-      error:
-        res.status < 400
-          ? null
-          : ((data as { code?: string; message?: string } | null)?.message ??
-            text.slice(0, 200)),
-    };
+    const error =
+      res.status < 400
+        ? null
+        : (errorForStatus?.(data, text) ?? text.slice(0, 200));
+    return { status: res.status, data, error };
   }
 
+  /** `POST {path}` with a JSON body. On ≥400, prefer a parsed `{message}` body
+   *  over the raw text in the error string. */
+  private async post<T>(
+    path: string,
+    body?: unknown,
+  ): Promise<{ status: number; data: T | null; error: string | null }> {
+    return this.request<T>(
+      path,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      },
+      (data, text) =>
+        (data as { code?: string; message?: string } | null)?.message ??
+        text.slice(0, 200),
+    );
+  }
+
+  /** `GET {path}`. On ≥400, report the raw response text (no parsed message). */
   private async get<T>(
     path: string,
   ): Promise<{ status: number; data: T | null; error: string | null }> {
-    const res = await this.safeFetch(`${this.baseUrl}${path}`);
-    if (!res) return { status: 0, data: null, error: "fetch returned null" };
-    if (res.status === 0) return { status: 0, data: null, error: res.error };
-    const text = res.data as string;
-    let data: T | null = null;
-    if (text) {
-      try {
-        data = JSON.parse(text) as T;
-      } catch {
-        return { status: res.status, data: null, error: text.slice(0, 500) };
-      }
-    }
-    return {
-      status: res.status,
-      data,
-      error: res.status < 400 ? null : text.slice(0, 200),
-    };
+    return this.request<T>(path);
   }
 
   // --- Lifecycle ---
@@ -1046,47 +1060,19 @@ export class DaemonClient {
 
   // --- MCP server management ---
 
-  /** `POST /mcp/{server}/enable` — enable a disabled MCP server. */
-  async enableMcpServer(serverName: string): Promise<void> {
+  /** `POST /mcp/{server}/{action}` — apply an MCP server lifecycle action
+   *  (enable/disable/disconnect/reconnect). Throws on a non-200 response with a
+   *  message naming the server + action, matching the former per-action methods. */
+  async mcpServerAction(
+    serverName: string,
+    action: McpServerAction,
+  ): Promise<void> {
     const { status, error } = await this.post(
-      `/mcp/${encodeURIComponent(serverName)}/enable`,
+      `/mcp/${encodeURIComponent(serverName)}/${action}`,
     );
     if (status !== 200)
       throw new Error(
-        `POST /mcp/${serverName}/enable failed (${status}): ${error}`,
-      );
-  }
-
-  /** `POST /mcp/{server}/disable` — disable an MCP server. */
-  async disableMcpServer(serverName: string): Promise<void> {
-    const { status, error } = await this.post(
-      `/mcp/${encodeURIComponent(serverName)}/disable`,
-    );
-    if (status !== 200)
-      throw new Error(
-        `POST /mcp/${serverName}/disable failed (${status}): ${error}`,
-      );
-  }
-
-  /** `POST /mcp/{server}/disconnect` — disconnect an MCP server. */
-  async disconnectMcpServer(serverName: string): Promise<void> {
-    const { status, error } = await this.post(
-      `/mcp/${encodeURIComponent(serverName)}/disconnect`,
-    );
-    if (status !== 200)
-      throw new Error(
-        `POST /mcp/${serverName}/disconnect failed (${status}): ${error}`,
-      );
-  }
-
-  /** `POST /mcp/{server}/reconnect` — reconnect a disconnected MCP server. */
-  async reconnectMcpServer(serverName: string): Promise<void> {
-    const { status, error } = await this.post(
-      `/mcp/${encodeURIComponent(serverName)}/reconnect`,
-    );
-    if (status !== 200)
-      throw new Error(
-        `POST /mcp/${serverName}/reconnect failed (${status}): ${error}`,
+        `POST /mcp/${serverName}/${action} failed (${status}): ${error}`,
       );
   }
 
