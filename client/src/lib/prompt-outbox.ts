@@ -19,6 +19,7 @@ export interface PendingPrompt {
     model?: { provider: string; modelId: string };
     thinking?: string;
     facet?: string;
+    permissionMonitor?: import("@pilot/protocol").PermissionMonitorMode;
   };
   createdAt: string;
   state: "queued" | "sending" | "rejected";

@@ -7,8 +7,9 @@
   // model/effort). Shows the ACTUAL current mode; clicking opens a 4-item panel
   // (Standard/Bypass/Bypass+/Autonomous) to switch. Non-standard modes get an
   // accent tint to signal "you are not in the default safe mode". Mirrors
-  // ModelPicker's badge+panel-up pattern.
-  const mode = $derived(store.session.permissionMonitor ?? "standard");
+  // ModelPicker's badge+panel-up pattern. Reads the draft's pick while drafting
+  // (composerPermissionMonitor), else the active session's live mode.
+  const mode = $derived(store.composerPermissionMonitor);
   const MODES: { id: PermissionMonitorMode; label: string; desc: string }[] = [
     { id: "standard", label: "Standard", desc: "Prompt for each permission" },
     { id: "bypass", label: "Bypass", desc: "Auto-approve all permissions" },

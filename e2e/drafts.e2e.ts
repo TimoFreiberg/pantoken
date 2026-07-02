@@ -227,3 +227,79 @@ test("submitting a draft carries its facet into the created session", async ({
   await expect(page.getByText("start in plan mode").first()).toBeVisible();
   await expect(badge).toContainText("Plan");
 });
+
+// --- Facet + permission-monitor as draft settings (AC.4, AC.5, AC.6) ---
+// Facet and permission-monitor are first-class new-session draft settings (like
+// model/thinking). These tests prove: they persist across leave/reopen (AC.4), a
+// plan-facet draft produces a new session whose badge reads "Plan" (AC.5), and a
+// default (untouched) draft produces a session with "Execute"/"Standard" (AC.6).
+
+test("a draft's facet + permission-monitor survive leaving and reopening", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await page.getByRole("button", { name: "New session…" }).click();
+
+  // Pick non-defaults: Plan facet + Bypass permission.
+  await page.getByTestId("facet-badge").click();
+  await page.getByRole("option", { name: "Plan" }).click();
+  await expect(page.getByTestId("facet-badge")).toHaveText("Plan");
+
+  await page.getByTestId("permission-badge").click();
+  const panel = page.getByRole("listbox", { name: "Permission mode" });
+  await panel.getByRole("option", { name: /^Bypass[^+]/ }).click();
+  await expect(page.getByTestId("permission-badge")).toContainText("Bypass");
+
+  // Navigate to an existing session — exits the draft.
+  await row(page, "Explore the fold reducer").click();
+  await openSidebar(page);
+  await expect(composer(page)).toHaveValue("");
+
+  // Reopen the new-session view — the picks are still there.
+  await page.getByRole("button", { name: "New session…" }).click();
+  await expect(page.getByTestId("facet-badge")).toHaveText("Plan");
+  await expect(page.getByTestId("permission-badge")).toContainText("Bypass");
+});
+
+test("submitting a plan-facet draft creates a session whose badge reads Plan", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await page.getByRole("button", { name: "New session…" }).click();
+
+  // Set the draft facet to Plan.
+  await page.getByTestId("facet-badge").click();
+  await page.getByRole("option", { name: "Plan" }).click();
+  await expect(page.getByTestId("facet-badge")).toHaveText("Plan");
+
+  // Submit the draft.
+  const draftBox = page.getByPlaceholder("Describe a task or ask a question…");
+  await draftBox.fill("start in plan mode please");
+  await draftBox.press("Enter");
+
+  // The new session's first snapshot carries facet: "plan" (the mock seed
+  // threads it through newSessionSeed), so the badge reads "Plan" on first render.
+  await expect(page.getByText("On it — the session's up")).toBeVisible();
+  await expect(page.getByTestId("facet-badge")).toHaveText("Plan");
+});
+
+test("submitting a default draft creates a session with Execute + Standard badges", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await page.getByRole("button", { name: "New session…" }).click();
+
+  // An untouched draft: facet "Execute", permission "Standard" (the defaults).
+  await expect(page.getByTestId("facet-badge")).toHaveText("Execute");
+  await expect(page.getByTestId("permission-badge")).toContainText("Standard");
+
+  // Submit without changing anything.
+  const draftBox = page.getByPlaceholder("Describe a task or ask a question…");
+  await draftBox.fill("just a plain session");
+  await draftBox.press("Enter");
+
+  // The new session's badges reflect the defaults — no override was applied.
+  await expect(page.getByText("On it — the session's up")).toBeVisible();
+  await expect(page.getByTestId("facet-badge")).toHaveText("Execute");
+  await expect(page.getByTestId("permission-badge")).toContainText("Standard");
+});

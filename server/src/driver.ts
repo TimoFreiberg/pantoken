@@ -36,6 +36,8 @@ export interface NewSessionOpts {
   thinking?: string;
   /** Facet to apply at creation (the draft's pick, e.g. start straight in plan). */
   facet?: string;
+  /** Permission-monitor mode to apply at creation; omitted/"standard" = daemon default. */
+  permissionMonitor?: PermissionMonitorMode;
 }
 
 export interface PilotDriver {

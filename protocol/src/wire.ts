@@ -417,6 +417,8 @@ export type ClientMessage =
       thinking?: string;
       /** Apply this facet at creation (draft-picked, e.g. start straight in plan). */
       facet?: string;
+      /** Permission-monitor mode to apply at creation. Omitted/"standard" = daemon default. */
+      permissionMonitor?: PermissionMonitorMode;
       prompt?: string;
       /** Id of the optional first prompt; deduplicates a retried create+send request. */
       promptId?: string;

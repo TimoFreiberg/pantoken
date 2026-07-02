@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { gotoFresh } from "./helpers.js";
+import { gotoFresh, openSidebar } from "./helpers.js";
 
 // The permission-monitor badge (composer toolbar) shows the daemon's live
 // per-session permission mode (standard/bypass/bypass_plus/autonomous) and lets
@@ -116,4 +116,37 @@ test("permission badge round-trips all 4 modes via picker", async ({ page }) => 
   await badge.click();
   await panel.getByRole("option", { name: /^Standard/ }).click();
   await expect(badge).toContainText("Standard");
+});
+
+// --- Draft-mode test (AC.3) ---
+// While a new-session draft is open, clicking the permission badge must set the
+// DRAFT's permission-monitor, not the previously focused session's.
+
+test("clicking the permission badge in the draft view sets the draft's permission, not the old session's", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  // The greeting session is focused — its permission badge reads "Standard".
+  const liveBadge = page.getByTestId("permission-badge");
+  await expect(liveBadge).toContainText("Standard");
+
+  // Open a new-session draft.
+  await page.getByTestId("sidebar").getByText("New session…").click();
+  await expect(page.getByTestId("new-session")).toBeVisible();
+
+  // Open the panel + pick Bypass — this should write to the draft.
+  const draftBadge = page.getByTestId("permission-badge");
+  await draftBadge.click();
+  const panel = page.getByRole("listbox", { name: "Permission mode" });
+  await expect(panel).toBeVisible();
+  await panel.getByRole("option", { name: /^Bypass[^+]/ }).click();
+  await expect(draftBadge).toContainText("Bypass");
+
+  // Navigate back to the old session — its permission is unchanged ("Standard").
+  await openSidebar(page);
+  await page
+    .getByTestId("sidebar")
+    .locator(".row", { hasText: "Wire up the WebSocket bridge" })
+    .click();
+  await expect(page.getByTestId("permission-badge")).toContainText("Standard");
 });

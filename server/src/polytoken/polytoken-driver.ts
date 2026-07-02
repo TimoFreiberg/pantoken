@@ -1164,16 +1164,28 @@ export async function createPolytokenDriver(
           console.error("[polytoken] newSession: thinking apply failed", e);
         }
       }
-      // Apply the draft's facet pick (e.g. start straight in plan). Same
-      // pattern as the model apply: best-effort, refresh the cached state so
-      // the seed snapshot reflects it.
-      if (opts.facet && opts.facet !== ws.lastState?.active_facet) {
+      // Apply the draft's facet if it diverges from the daemon default ("execute").
+      // No state refresh needed here — seedFor does an unconditional client.state()
+      // and snapshotFromState reads facet from state.active_facet.
+      if (opts.facet && opts.facet !== "execute") {
         try {
           await ws.client.setFacet(opts.facet);
-          const { data } = await ws.client.state();
-          if (data) ws.lastState = data;
         } catch (e) {
           console.error("[polytoken] newSession: facet apply failed", e);
+        }
+      }
+      // Apply the draft's permission-monitor if it diverges from the daemon default
+      // ("standard"). Unlike facet/model/thinking, permissionMonitor does NOT round-trip
+      // through GET /state — snapshotFromState reads it from the ws.monitorMode arg. So
+      // set ws.monitorMode on the success path (before seedFor builds the snapshot) to
+      // avoid a stale-"standard" flicker on the live path. On failure, leave it at its
+      // seeded value so the badge reflects daemon reality.
+      if (opts.permissionMonitor && opts.permissionMonitor !== "standard") {
+        try {
+          await ws.client.setPermissionMode(opts.permissionMonitor);
+          ws.monitorMode = opts.permissionMonitor;
+        } catch (e) {
+          console.error("[polytoken] newSession: permission-monitor apply failed", e);
         }
       }
       return seedFor(ws);

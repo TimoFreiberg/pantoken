@@ -762,7 +762,12 @@ export class MockDriver implements PilotDriver {
       availableThinkingLevels:
         chosen?.thinkingLevels ?? MOCK_DEFAULT_CONFIG.availableThinkingLevels,
     };
-    const seed = newSessionSeed({ cwd: dir, config: this.config, facet });
+    const seed = newSessionSeed({
+      cwd: dir,
+      config: this.config,
+      facet: opts.facet,
+      permissionMonitor: opts.permissionMonitor,
+    });
     // Remember the seed snapshot so the first prompt (delivered right after this swap)
     // streams its turn under the new session's own ref — see prompt().
     const opened = seed.find((e) => e.type === "sessionOpened");
