@@ -43,7 +43,10 @@ describe("resolveLoginShell", () => {
 
 describe("parseEnvOutput", () => {
   test("parses KEY=value lines into a record", () => {
-    expect(parseEnvOutput("FOO=bar\nBAZ=qux")).toEqual({ FOO: "bar", BAZ: "qux" });
+    expect(parseEnvOutput("FOO=bar\nBAZ=qux")).toEqual({
+      FOO: "bar",
+      BAZ: "qux",
+    });
   });
 
   test("skips lines without = (motd/fortune pollution)", () => {
@@ -70,7 +73,9 @@ describe("parseEnvOutput", () => {
 
   test("skips lines that don't start with a valid env var name", () => {
     // Leading digit, dash, etc. are not valid env var name starts.
-    expect(parseEnvOutput("1FOO=bar\n-BAZ=qux\n_FOO=ok")).toEqual({ _FOO: "ok" });
+    expect(parseEnvOutput("1FOO=bar\n-BAZ=qux\n_FOO=ok")).toEqual({
+      _FOO: "ok",
+    });
   });
 
   test("empty input returns empty record", () => {
@@ -86,7 +91,7 @@ describe("captureLoginEnv", () => {
     expect(result.status.activeShell).toBe("/bin/sh");
     expect(result.env.PATH).toBeDefined();
     expect(typeof result.env.PATH).toBe("string");
-    expect(result.env.PATH.length).toBeGreaterThan(0);
+    expect(result.env.PATH!.length).toBeGreaterThan(0);
   });
 
   test("with a non-existent shell path, returns empty env and status.ok false", async () => {
