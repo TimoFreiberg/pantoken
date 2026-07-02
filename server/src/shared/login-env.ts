@@ -51,7 +51,7 @@ export function parseEnvOutput(text: string): Record<string, string> {
     const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
     if (!m) continue;
     const [, key, value] = m;
-    if (key) out[key] = value;
+    if (key !== undefined && value !== undefined) out[key] = value;
   }
   return out;
 }
@@ -76,7 +76,9 @@ export async function captureLoginEnv(
     };
   }
 
-  let proc: ReturnType<typeof Bun.spawn>;
+  // Explicit piped-subprocess type: `ReturnType<typeof Bun.spawn>` resolves to the
+  // array-form overload, which mistypes stdout/stderr as `number | ReadableStream`.
+  let proc: Bun.Subprocess<"ignore", "pipe", "pipe">;
   try {
     proc = Bun.spawn({
       cmd: [shell, "-l", "-c", "env"],

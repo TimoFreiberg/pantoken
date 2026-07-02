@@ -20,8 +20,19 @@ import type { components } from "./wire-types.js";
 
 // Test seam: allows tests to intercept Bun.spawn and assert call args.
 // Production code uses the real Bun.spawn; tests override via _setSpawnForTesting.
-let _spawn: typeof Bun.spawn = Bun.spawn;
-export function _setSpawnForTesting(fn: typeof Bun.spawn | null): void {
+// Typed by the exact object-form call this module makes — `Parameters<typeof
+// Bun.spawn>[0]` resolves to the array-form overload and mistypes everything.
+export type DaemonSpawnOpts = {
+  cmd: string[];
+  stdout: "pipe";
+  stderr: "pipe";
+  env?: Record<string, string | undefined>;
+};
+type SpawnFn = (
+  opts: DaemonSpawnOpts,
+) => Bun.Subprocess<"ignore", "pipe", "pipe">;
+let _spawn: SpawnFn = Bun.spawn;
+export function _setSpawnForTesting(fn: SpawnFn | null): void {
   _spawn = fn ?? Bun.spawn;
 }
 
@@ -193,7 +204,7 @@ async function spawnNewDaemon(
 ): Promise<SpawnedDaemon> {
   const globalArgs: string[] = [];
   if (opts.cwd) globalArgs.push("--working-dir", opts.cwd);
-  const spawnOpts: Parameters<typeof Bun.spawn>[0] = {
+  const spawnOpts: DaemonSpawnOpts = {
     cmd: [polytokenBin, ...globalArgs, "new", "--no-attach"],
     stdout: "pipe",
     stderr: "pipe",
@@ -245,7 +256,7 @@ async function spawnResumeDaemon(
     "--sessions-dir",
     opts.sessionsDir,
   ];
-  const spawnOpts: Parameters<typeof Bun.spawn>[0] = {
+  const spawnOpts: DaemonSpawnOpts = {
     cmd: [polytokenBin, ...args],
     stdout: "pipe",
     stderr: "pipe",
@@ -321,7 +332,10 @@ export async function spawnDaemon(
     });
   }
   // New session path.
-  return spawnNewDaemon(polytokenBin, { cwd: opts.cwd, loginEnv: opts.loginEnv });
+  return spawnNewDaemon(polytokenBin, {
+    cwd: opts.cwd,
+    loginEnv: opts.loginEnv,
+  });
 }
 
 /** The parsed 409 lease-held body — the holder label/pid + the expiry Date.
@@ -351,7 +365,8 @@ function parseLeaseHeldError(error: string | null): LeaseHeldInfo | null {
       message?: string;
     };
     const a = body.active;
-    if (!a) return body.message ? { summary: body.message, expiresAt: null } : null;
+    if (!a)
+      return body.message ? { summary: body.message, expiresAt: null } : null;
     const label = a.active_terminal_label ?? "unknown TUI";
     const pid = a.active_pid ? ` pid ${a.active_pid}` : "";
     const expiresAt = a.expires_at ? new Date(a.expires_at) : null;
@@ -440,7 +455,9 @@ export async function retryClaim<T>(
   // (or "~30s" when the body lacked an expiry).
   const held = lastConflict?.held ?? null;
   const expiry = held?.expiresAt ?? null;
-  const secondsToLapse = expiry ? ceilSeconds(expiry.getTime() - Date.now()) : null;
+  const secondsToLapse = expiry
+    ? ceilSeconds(expiry.getTime() - Date.now())
+    : null;
   throw new LeaseConflictError(
     formatLeaseConflictMessage(held, secondsToLapse),
     held,
@@ -544,9 +561,11 @@ export class DaemonClient {
     return {
       status: res.status,
       data,
-      error: res.status < 400
-        ? null
-        : (data as { code?: string; message?: string } | null)?.message ?? text.slice(0, 200),
+      error:
+        res.status < 400
+          ? null
+          : ((data as { code?: string; message?: string } | null)?.message ??
+            text.slice(0, 200)),
     };
   }
 
@@ -565,7 +584,11 @@ export class DaemonClient {
         return { status: res.status, data: null, error: text.slice(0, 500) };
       }
     }
-    return { status: res.status, data, error: res.status < 400 ? null : text.slice(0, 200) };
+    return {
+      status: res.status,
+      data,
+      error: res.status < 400 ? null : text.slice(0, 200),
+    };
   }
 
   // --- Lifecycle ---
@@ -574,7 +597,11 @@ export class DaemonClient {
    * `GET /health` — confirms the daemon is alive and echoes its session record.
    * Captures the daemon's own OS pid (for the kill() fallback) as a side effect.
    */
-  async health(): Promise<{ status: number; data: HealthResponse | null; error: string | null }> {
+  async health(): Promise<{
+    status: number;
+    data: HealthResponse | null;
+    error: string | null;
+  }> {
     const result = await this.get<HealthResponse>("/health");
     if (result.status === 200 && result.data) {
       this.daemonPid = result.data.pid;
@@ -643,7 +670,10 @@ export class DaemonClient {
     // Start the heartbeat timer. The spike confirmed heartbeat_interval_seconds: 5,
     // expires_after_seconds: 30 — heartbeat well before the expiry.
     const heartbeatMs = (data.heartbeat_interval_seconds ?? 5) * 1000;
-    const heartbeatTimer = setInterval(() => this.heartbeat(data.lease_id), heartbeatMs);
+    const heartbeatTimer = setInterval(
+      () => this.heartbeat(data.lease_id),
+      heartbeatMs,
+    );
     // unref so a missed cleanup path can't keep the process alive on shutdown —
     // mirrors the driver's reaper timer. clearLease() clears it on the normal path.
     heartbeatTimer.unref?.();
@@ -678,8 +708,14 @@ export class DaemonClient {
 
   /** `POST /tui-attachment/heartbeat` — refresh the lease. 409 if the pid doesn't match. */
   private async heartbeat(leaseId: string): Promise<void> {
-    const body: TuiAttachHeartbeatRequest = { lease_id: leaseId, pid: this.pid };
-    const { status, error } = await this.post("/tui-attachment/heartbeat", body);
+    const body: TuiAttachHeartbeatRequest = {
+      lease_id: leaseId,
+      pid: this.pid,
+    };
+    const { status, error } = await this.post(
+      "/tui-attachment/heartbeat",
+      body,
+    );
     if (status === 404 || status === 409) {
       // Lease expired or stolen — clear the timer; the SSE will gap and the driver
       // will re-seed. Log loudly (this shouldn't happen under normal operation).
@@ -698,9 +734,12 @@ export class DaemonClient {
     if (!this.lease) return;
     const leaseId = this.lease.leaseId;
     this.clearLease();
-    await fetch(`${this.baseUrl}/tui-attachment/${encodeURIComponent(leaseId)}`, {
-      method: "DELETE",
-    });
+    await fetch(
+      `${this.baseUrl}/tui-attachment/${encodeURIComponent(leaseId)}`,
+      {
+        method: "DELETE",
+      },
+    );
   }
 
   // --- Prompt + steering ---
@@ -710,9 +749,18 @@ export class DaemonClient {
    * 409 if a turn is already in flight (the queue does NOT auto-absorb a concurrent
    * prompt — it's rejected). 422 if a pre-user-prompt hook denied it.
    */
-  async prompt(content: string, maxToolTurns?: number): Promise<PromptAccepted> {
-    const body: PromptRequest = { content, max_tool_turns: maxToolTurns ?? null };
-    const { status, data, error } = await this.post<PromptAccepted>("/prompt", body);
+  async prompt(
+    content: string,
+    maxToolTurns?: number,
+  ): Promise<PromptAccepted> {
+    const body: PromptRequest = {
+      content,
+      max_tool_turns: maxToolTurns ?? null,
+    };
+    const { status, data, error } = await this.post<PromptAccepted>(
+      "/prompt",
+      body,
+    );
     if (status !== 202 || !data) {
       throw new Error(`POST /prompt failed (${status}): ${error}`);
     }
@@ -733,7 +781,11 @@ export class DaemonClient {
   }
 
   /** `GET /turn/input` — the pending queue snapshot. */
-  turnInputSnapshot(): Promise<{ status: number; data: PendingTurnInputSnapshot | null; error: string | null }> {
+  turnInputSnapshot(): Promise<{
+    status: number;
+    data: PendingTurnInputSnapshot | null;
+    error: string | null;
+  }> {
     return this.get<PendingTurnInputSnapshot>("/turn/input");
   }
 
@@ -759,7 +811,7 @@ export class DaemonClient {
     if (!res.ok) {
       throw new Error(`POST /adventurous-handoff failed (${res.status})`);
     }
-    const body = await res.json() as { enabled?: boolean };
+    const body = (await res.json()) as { enabled?: boolean };
     return body.enabled ?? false;
   }
 
@@ -778,12 +830,23 @@ export class DaemonClient {
   // --- State + history ---
 
   /** `GET /state` — the authoritative session state snapshot. */
-  state(): Promise<{ status: number; data: SessionStateSnapshot | null; error: string | null }> {
+  state(): Promise<{
+    status: number;
+    data: SessionStateSnapshot | null;
+    error: string | null;
+  }> {
     return this.get<SessionStateSnapshot>("/state");
   }
 
   /** `GET /history` — the projected session transcript (linear, no branch DAG). */
-  history(offset?: number, limit?: number): Promise<{ status: number; data: SessionHistorySnapshot | null; error: string | null }> {
+  history(
+    offset?: number,
+    limit?: number,
+  ): Promise<{
+    status: number;
+    data: SessionHistorySnapshot | null;
+    error: string | null;
+  }> {
     const params = new URLSearchParams();
     if (offset !== undefined) params.set("offset", String(offset));
     if (limit !== undefined) params.set("limit", String(limit));
@@ -796,7 +859,11 @@ export class DaemonClient {
    *  (dotfiles + the project private dir stay excluded). Returns `[]` when the project
    *  root is unavailable. The daemon owns this index natively — pilot doesn't run its
    *  own `fd` for the index under this driver (spike §8). */
-  files(opts?: { includeIgnored?: boolean }): Promise<{ status: number; data: FileCatalogResponse | null; error: string | null }> {
+  files(opts?: { includeIgnored?: boolean }): Promise<{
+    status: number;
+    data: FileCatalogResponse | null;
+    error: string | null;
+  }> {
     const qs = opts?.includeIgnored ? "?include_ignored=true" : "";
     return this.get<FileCatalogResponse>(`/files${qs}`);
   }
@@ -805,7 +872,10 @@ export class DaemonClient {
 
   /** `POST /model` — switch the session's model (+ reasoning effort). */
   async setModel(model: string, reasoningEffort?: string): Promise<void> {
-    const body: ModelRequest = { model, reasoning_effort: reasoningEffort ?? null };
+    const body: ModelRequest = {
+      model,
+      reasoning_effort: reasoningEffort ?? null,
+    };
     const { status, data, error } = await this.post<ErrorBody>("/model", body);
     if (status === 200) return;
     // 409 no_change: the model is already set to the requested value — benign.
@@ -817,7 +887,8 @@ export class DaemonClient {
   async setTitle(title: string): Promise<void> {
     const body: SessionTitleRequest = { title };
     const { status, error } = await this.post("/title", body);
-    if (status !== 200) throw new Error(`POST /title failed (${status}): ${error}`);
+    if (status !== 200)
+      throw new Error(`POST /title failed (${status}): ${error}`);
   }
 
   /** `POST /interrogative/{id}/respond` — answer a pending interrogative.
@@ -825,7 +896,10 @@ export class DaemonClient {
    *  responds would otherwise hang the caller's `hostUiResolved` deferred
    *  promise indefinitely, stranding the approval card. The timeout triggers the
    *  `.catch()` path so the driver can dismiss the card + surface an error. */
-  async respondInterrogative(id: string, response: InterrogativeResponse): Promise<void> {
+  async respondInterrogative(
+    id: string,
+    response: InterrogativeResponse,
+  ): Promise<void> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
     try {
@@ -840,11 +914,15 @@ export class DaemonClient {
       );
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        throw new Error(`POST /interrogative/respond failed (${res.status}): ${text.slice(0, 200)}`);
+        throw new Error(
+          `POST /interrogative/respond failed (${res.status}): ${text.slice(0, 200)}`,
+        );
       }
     } catch (e) {
       if (controller.signal.aborted) {
-        throw new Error(`POST /interrogative/respond timed out (10s) for ${id}`);
+        throw new Error(
+          `POST /interrogative/respond timed out (10s) for ${id}`,
+        );
       }
       throw e;
     } finally {
@@ -853,10 +931,13 @@ export class DaemonClient {
   }
 
   /** `POST /permission-monitor` — switch the permission mode. */
-  async setPermissionMode(mode: PermissionMonitorRequest["mode"]): Promise<void> {
+  async setPermissionMode(
+    mode: PermissionMonitorRequest["mode"],
+  ): Promise<void> {
     const body: PermissionMonitorRequest = { mode };
     const { status, error } = await this.post("/permission-monitor", body);
-    if (status !== 200) throw new Error(`POST /permission-monitor failed (${status}): ${error}`);
+    if (status !== 200)
+      throw new Error(`POST /permission-monitor failed (${status}): ${error}`);
   }
 
   /** `GET /permission-monitor` — the live per-session monitor (+ global defaults).
@@ -873,52 +954,66 @@ export class DaemonClient {
 
   /** `GET /notification-autodrain` — the autodrain flag (+ config default).
    *  Used once at warm-up to seed the cached state (it isn't on GET /state). */
-  async getNotificationAutodrain(): Promise<{ enabled: boolean; config_default: boolean }> {
+  async getNotificationAutodrain(): Promise<{
+    enabled: boolean;
+    config_default: boolean;
+  }> {
     const { status, data, error } = await this.get<{
       enabled: boolean;
       config_default: boolean;
     }>("/notification-autodrain");
     if (status !== 200 || !data)
-      throw new Error(`GET /notification-autodrain failed (${status}): ${error}`);
+      throw new Error(
+        `GET /notification-autodrain failed (${status}): ${error}`,
+      );
     return data;
   }
 
   /** `POST /notification-autodrain` — set the autodrain flag. */
   async setNotificationAutodrain(enabled: boolean): Promise<void> {
-    const { status, error } = await this.post("/notification-autodrain", { enabled });
+    const { status, error } = await this.post("/notification-autodrain", {
+      enabled,
+    });
     if (status !== 200)
-      throw new Error(`POST /notification-autodrain failed (${status}): ${error}`);
+      throw new Error(
+        `POST /notification-autodrain failed (${status}): ${error}`,
+      );
   }
 
   /** `POST /clear` — reset context (also resets the shell env). */
   async clear(): Promise<void> {
     const { status, error } = await this.post("/clear");
-    if (status !== 200) throw new Error(`POST /clear failed (${status}): ${error}`);
+    if (status !== 200)
+      throw new Error(`POST /clear failed (${status}): ${error}`);
   }
 
   /** `POST /compact` — trigger context compaction. */
   async compact(request?: CompactRequest): Promise<void> {
     const { status, error } = await this.post("/compact", request ?? null);
-    if (status !== 202) throw new Error(`POST /compact failed (${status}): ${error}`);
+    if (status !== 202)
+      throw new Error(`POST /compact failed (${status}): ${error}`);
   }
 
   /** `POST /rewind` — destructive: drops the target prompt + everything after it. */
   async rewind(request: RewindRequest): Promise<void> {
     const { status, error } = await this.post("/rewind", request);
-    if (status !== 202) throw new Error(`POST /rewind failed (${status}): ${error}`);
+    if (status !== 202)
+      throw new Error(`POST /rewind failed (${status}): ${error}`);
   }
 
   /** `POST /facet` — switch the active facet (mid-conversation persona switch). */
   async setFacet(facet: string): Promise<void> {
     const body: FacetRequest = { facet };
     const { status, error } = await this.post("/facet", body);
-    if (status !== 200) throw new Error(`POST /facet failed (${status}): ${error}`);
+    if (status !== 200)
+      throw new Error(`POST /facet failed (${status}): ${error}`);
   }
 
   /** `POST /reload` — reload the session from scratch (dispose + re-warm). */
   async reload(): Promise<void> {
     const { status, error } = await this.post("/reload");
-    if (status !== 200) throw new Error(`POST /reload failed (${status}): ${error}`);
+    if (status !== 200)
+      throw new Error(`POST /reload failed (${status}): ${error}`);
   }
 
   // --- SSE ---
