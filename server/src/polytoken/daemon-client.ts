@@ -813,9 +813,10 @@ export class DaemonClient {
 
   /** `DELETE /turn/input/newest` — dequeue the newest pending input. */
   async dequeueNewestInput(): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/turn/input/newest`, {
+    const res = await this.safeFetch(`${this.baseUrl}/turn/input/newest`, {
       method: "DELETE",
     });
+    if (!res) throw new Error("DELETE /turn/input/newest failed (fetch returned null)");
     // 200 = dequeued; 409 = no pending input (both are acceptable no-ops).
     if (res.status !== 200 && res.status !== 409) {
       throw new Error(`DELETE /turn/input/newest failed (${res.status})`);
@@ -827,13 +828,18 @@ export class DaemonClient {
    *  daemon's computed `adventurous_handoff_active` on GET /state may lag by one
    *  fetch — this returns the raw `enabled` flag, not the computed value). */
   async toggleAdventurousHandoff(): Promise<boolean> {
-    const res = await fetch(`${this.baseUrl}/adventurous-handoff`, {
+    const res = await this.safeFetch(`${this.baseUrl}/adventurous-handoff`, {
       method: "POST",
     });
-    if (!res.ok) {
+    if (!res || res.status === 0) {
+      throw new Error(
+        `POST /adventurous-handoff failed (${res?.error ?? "fetch returned null"})`,
+      );
+    }
+    if (res.status >= 400) {
       throw new Error(`POST /adventurous-handoff failed (${res.status})`);
     }
-    const body = (await res.json()) as { enabled?: boolean };
+    const body = JSON.parse(res.data as string) as { enabled?: boolean };
     return body.enabled ?? false;
   }
 
