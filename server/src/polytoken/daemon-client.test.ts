@@ -255,3 +255,119 @@ describe("spawnDaemon loginEnv passthrough", () => {
     expect(env).toBeUndefined();
   });
 });
+
+/**
+ * SSE liveness: the daemon's SSE is push-only with no idle heartbeats, so a
+ * silent stream is ambiguous (idle vs dead). The watcher must probe GET /health
+ * before killing the stream — an idle-but-healthy daemon must NOT be
+ * reconnect-cycled (each cycle is a full reseed + sessionReset re-broadcast),
+ * while a dead daemon (probe fails/hangs) must still force the reconnect.
+ */
+describe("DaemonClient.subscribe liveness probe", () => {
+  const realFetch = globalThis.fetch;
+  let client: DaemonClient;
+
+  beforeEach(() => {
+    client = new DaemonClient("liveness-test", 9999, 4242);
+    // Millisecond-scale windows so the test runs in real time.
+    client.livenessIntervalMs = 30;
+    client.livenessProbeTimeoutMs = 25;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  /** An SSE Response whose stream stays open, pushes nothing, and honors the
+   *  fetch abort signal (a hand-built Response isn't wired to it by default —
+   *  the real network fetch is). */
+  function idleSseResponse(signal: AbortSignal | null | undefined): Response {
+    const body = new ReadableStream({
+      start(controller) {
+        signal?.addEventListener(
+          "abort",
+          () => {
+            try {
+              controller.error(new DOMException("aborted", "AbortError"));
+            } catch {
+              // already errored/closed
+            }
+          },
+          { once: true },
+        );
+      },
+    });
+    return new Response(body, { status: 200 });
+  }
+
+  test("idle stream + healthy daemon: no reconnect across several liveness periods", async () => {
+    let eventsCalls = 0;
+    let healthCalls = 0;
+    globalThis.fetch = (async (
+      url: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const u = String(url);
+      if (u.endsWith("/events")) {
+        eventsCalls++;
+        return idleSseResponse(init?.signal);
+      }
+      if (u.endsWith("/health")) {
+        healthCalls++;
+        return new Response(JSON.stringify({ pid: 4242 }), { status: 200 });
+      }
+      throw new Error(`unexpected fetch: ${u}`);
+    }) as unknown as typeof globalThis.fetch;
+
+    const discontinuities: number[] = [];
+    const unsubscribe = client.subscribe((env) => {
+      if (env.event.type === "stream_discontinuity")
+        discontinuities.push(Date.now());
+    });
+
+    // ~6 liveness periods of silence.
+    await new Promise((r) => setTimeout(r, 200));
+    unsubscribe();
+
+    expect(eventsCalls).toBe(1); // never reconnected
+    expect(healthCalls).toBeGreaterThanOrEqual(2); // probed instead
+    expect(discontinuities.length).toBe(0);
+  });
+
+  test("idle stream + dead daemon (hung probe): forces reconnect + discontinuity", async () => {
+    let eventsCalls = 0;
+    globalThis.fetch = (async (
+      url: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const u = String(url);
+      if (u.endsWith("/events")) {
+        eventsCalls++;
+        return idleSseResponse(init?.signal);
+      }
+      if (u.endsWith("/health")) {
+        // Hang until the probe's own timeout aborts it.
+        return await new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      }
+      throw new Error(`unexpected fetch: ${u}`);
+    }) as unknown as typeof globalThis.fetch;
+
+    let discontinuities = 0;
+    const unsubscribe = client.subscribe((env) => {
+      if (env.event.type === "stream_discontinuity") discontinuities++;
+    });
+
+    // Enough time for: silence (30ms) → probe hang (25ms) → abort → reconnect.
+    await new Promise((r) => setTimeout(r, 300));
+    unsubscribe();
+
+    expect(eventsCalls).toBeGreaterThanOrEqual(2); // reconnected at least once
+    expect(discontinuities).toBeGreaterThanOrEqual(1); // driver told to reseed
+  });
+});
