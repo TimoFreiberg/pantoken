@@ -1,8 +1,12 @@
 # PLAN — Protocol v2: seed-events-on-connect + seq/epoch resume
 
-Status: **design, awaiting owner sign-off** (2026-07-02, from the design-dossier track;
-grounded against source at commit `rlntluvk`). Companion: `PLAN-driver-robustness.md`,
-the Rust-hub go/no-go criteria in `ADR-desktop-shell.md`.
+Status: **implemented** (2026-07-02, five commits: journal dark → seed flip /
+PROTOCOL_VERSION 2 → tail resume + requestSeed → backpressureLimit → attach-window
+buffering; owner signed off with the defaults: ring cap 1024 frames/256KB,
+`requestSeed` message, /debug/state fold-on-read — verified no high-frequency
+scraper exists). Companion: `PLAN-driver-robustness.md`, the Rust-hub go/no-go
+criteria in `ADR-desktop-shell.md`. **As-built deltas from this design are
+recorded at the bottom** — read them before citing section details.
 
 ## Decision
 
@@ -157,8 +161,47 @@ Steps 3-5 are independent of each other; 2 depends on 1.
 ## Owner decisions needed
 
 1. **Ring cap** 1024 frames / 256KB per session OK? (Bigger = longer resumable gap,
-   more RAM.)
+   more RAM.) — **Decided: defaults taken.**
 2. **`requestSeed` message vs re-`hello`** for client-detected desync — spec'd as a new
    tiny message; re-hello also re-triggers the meta pushes (wasteful but simpler).
+   — **Decided: `requestSeed`.**
 3. Commit 2 deletes `/debug/state`'s always-materialized shape (it becomes fold-on-read).
-   Any tooling of yours scraping it at high frequency?
+   Any tooling of yours scraping it at high frequency? — **Verified no: the only
+   consumers are one Playwright `expect.poll` (e2e/stop-turn) and ad-hoc agent
+   curls; the parity harness explicitly refuses it as an oracle.**
+
+## As-built deltas (2026-07-02, implementation)
+
+1. **sessionReset restarts the journal behind a synthetic meta prefix.** The design
+   said "compacted rebuilt from the fresh seed events", but at the moment a reset
+   folds there ARE no fresh events yet (the driver re-emits them afterwards), and
+   the fold *preserves* ref/title/config/queued/approvals/ambient across a reset.
+   `metaSeedEvents(state)` (server/src/journal.ts) synthesizes a minimal prefix —
+   one `sessionOpened` projection + ambient/approval `hostUiRequest`s — that
+   reproduces exactly the carried-over state, property-tested as
+   `foldAll(metaSeedEvents(s)) ≡ {...s, items: []}`. Viewers of a reset get a fresh
+   (tiny) **seed message instead of the routed reset event**: correct even for a
+   viewer that had silently missed a frame, and it hands them the new epoch base
+   in one message.
+2. **Commit 4 kept close-on-drop instead of the in-band re-seed.** `sendOrClose`
+   (landed independently, tested) closes on Bun's drop signal; with resume landed,
+   the reconnect costs a hello + tail replay of exactly the gap — the expensive
+   full re-snapshot that motivated in-band recovery no longer exists. In-band
+   re-seed also has a self-defeating failure mode: the recovery seed is the largest
+   message we send, pushed into a socket that just proved backpressured. As-built:
+   explicit `backpressureLimit: 4MB` (Bun's real option name; default 16MB),
+   `closeOnBackpressureLimit` left false so `sendOrClose` owns the close.
+3. **Commit 5 ships the rebuild-once fallback only; the SSE-id watermark is
+   deferred.** Buffered attach-window events are the *signal* to re-run the swap
+   once (the second fetch is strictly after the daemon accepted them), never folded
+   directly (no watermark exists to dedupe them against the seed). Retry is
+   restricted to idempotent swaps (openSession/reloadSession) — a raced
+   newSession would create a second session, so it logs loud instead. Residual: an
+   event racing the *second* fetch (one-fetch-wide, needs the daemon `Last-Event-ID`
+   /state watermark — upstream ask; revisit when confirmed).
+4. **Epochs are process-unique** (ms-seeded counter), so a resume token minted
+   against a previous hub process can never falsely tail-match a fresh journal —
+   a hub restart reads as an epoch bump everywhere, as intended.
+5. **Attach is hello-gated in both auth modes** (index.ts): the resume token rides
+   the client's hello, so `addClient` must not fire at socket-open even in
+   tokenless dev — the client always sends a hello immediately on open.
