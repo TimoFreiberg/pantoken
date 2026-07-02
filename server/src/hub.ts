@@ -1,8 +1,10 @@
-// The session hub: owns the per-session seq/epoch-stamped event journal, folds
-// every driver event into the authoritative SessionState, and fans stamped events
-// out to all connected WS clients. New clients get hello + a seed of journal
-// events they fold from zero; a reconnect with a valid resume token gets just
-// the tail replayed instead.
+// The session hub: owns the per-session seq/epoch-stamped event journal — the
+// single authoritative per-session store — and fans stamped events out to all
+// connected WS clients. New clients get hello + a seed of journal events they
+// fold from zero; a reconnect with a valid resume token gets just the tail
+// replayed instead. The hub keeps no folded SessionState of its own: the rare
+// paths that need one (respondUi's pending gate, branch's running gate,
+// /debug/state) fold the journal on demand.
 
 import { homedir } from "node:os";
 import {
@@ -187,7 +189,7 @@ function classifySwitchError(raw: unknown): {
 interface ClientConn {
   send: Send;
   // The session this connection is viewing (null = the empty landing). Points into
-  // `sessionStates`; null until the client adopts the default or opens a session.
+  // `journals`; null until the client adopts the default or opens a session.
   focusedId: SessionId | null;
   // Single-flight per connection: a swap can block (warming the session — model load,
   // history replay), so only one runs at a time on THIS connection (others are free). A
@@ -220,24 +222,22 @@ interface PendingSwitch {
 }
 
 export class SessionHub {
-  // Folded transcript state per session, for every session a client is viewing (plus
-  // the bootstrap landing default). Multiple clients on the same session share one
-  // entry. Background sessions nobody opened are tracked only via running/attention
-  // below — their transcript stays private to the driver until someone focuses them.
-  private sessionStates = new Map<SessionId, SessionState>();
-  // The per-session event journal (protocol v2): the seed source + resume ring.
-  // Lifecycle mirrors `sessionStates` 1:1 — created wherever a state is seeded,
-  // deleted wherever the state is dropped. Until the wire flips to seeds, the
-  // journal runs dark alongside the legacy fold (the property tests assert
-  // foldAll(seed) ≡ the folded state at every step).
+  // The per-session event journal (protocol v2): the seed source, the resume ring,
+  // and the hub's ONLY per-session transcript store — one entry for every session a
+  // client is viewing (plus the bootstrap landing default); multiple clients on the
+  // same session share it. Background sessions nobody opened are tracked only via
+  // running/attention below — their transcript stays private to the driver until
+  // someone focuses them. No folded copy is kept alongside: the streaming path is
+  // append-only, and the few readers that need a SessionState fold on demand
+  // (`foldedState`).
   private journals = new Map<SessionId, SessionJournal>();
   // The switchTo attach window: while a swap is off fetching a cold session's
   // seed (driver GET /state + /history), that session's live SSE events reach
-  // onEvent but have no state/journal to fold into — and the in-flight seed may
+  // onEvent but have no journal to enter — and the in-flight seed may
   // predate them. Events buffered here are the signal to re-run the swap once
   // (see switchTo); they are never folded directly (no watermark exists to
   // dedupe them against the seed). The swap's TARGET is unknowable until its
-  // seed folds, so this over-captures: any stateless session's events buffer
+  // seed folds, so this over-captures: any journal-less session's events buffer
   // while any swap is in flight. Consumption filters per-event timestamps
   // against the consuming swap's start, so pre-swap chatter (guaranteed to be
   // in that swap's fetch) never counts as raced. Bounded per session + TTL'd.
@@ -368,21 +368,18 @@ export class SessionHub {
     this.seedDefault();
   }
 
-  /** Establish the landing session a fresh client adopts: fold the driver's
-   *  defaultSeed() into a shared session state and record it as `defaultFocusId`.
+  /** Establish the landing session a fresh client adopts: journal the driver's
+   *  defaultSeed() and record it as `defaultFocusId`.
    *  No-op (empty landing) when the driver has no default — the daemon at boot, or the mock
    *  reset with bootstrap:false. Called on construction + after reset. */
   private seedDefault(): void {
     const seed = this.driver.defaultSeed?.();
     const sid = seed?.[0]?.sessionRef.sessionId;
     if (!seed || seed.length === 0 || !sid) return;
-    const st = initialSessionState();
     for (const e of seed) {
-      foldEvent(st, e);
       this.trackRunning(e.sessionRef.sessionId, e);
       this.trackAttention(e.sessionRef.sessionId, e);
     }
-    this.sessionStates.set(sid, st);
     this.journals.set(sid, createJournal(this.nextEpoch(), seed));
     this.defaultFocusId = sid;
   }
@@ -422,11 +419,11 @@ export class SessionHub {
       .map((f) => f.ev);
   }
 
-  /** Fold a swap's seed into a fresh state to learn the authoritative session
+  /** Fold a swap's seed into a scratch state to learn the authoritative session
    *  id (the seed's sessionOpened snapshot ref — what focus + the list
-   *  highlight key off), accumulating running/attention changes on the way. */
+   *  highlight key off), accumulating running/attention changes on the way.
+   *  The scratch fold is discarded — the journal is the store. */
   private foldSwapSeed(seed: SessionDriverEvent[]): {
-    built: SessionState;
     metaChanged: boolean;
     sid: SessionId | null;
   } {
@@ -439,7 +436,6 @@ export class SessionHub {
         this.trackAttention(e.sessionRef.sessionId, e) || metaChanged;
     }
     return {
-      built,
       metaChanged,
       sid: built.ref?.sessionId ?? seed[0]?.sessionRef.sessionId ?? null,
     };
@@ -448,8 +444,8 @@ export class SessionHub {
   /** The seed source for one session (protocol v2): the journal's events, delta-
    *  coalesced, plus the {epoch, seq} watermark of the last event folded into it.
    *  Wire-visible on connect/switch (the `seed` message); the fold-equivalence
-   *  tests also assert the journal↔state invariant through it. Null when the
-   *  session isn't seeded (nobody viewed it — background transcripts stay
+   *  tests also assert the journal↔client-fold invariant through it. Null when
+   *  the session isn't seeded (nobody viewed it — background transcripts stay
    *  private). */
   seedOf(
     sid: SessionId | null,
@@ -458,38 +454,36 @@ export class SessionHub {
     return j ? buildSeed(j) : null;
   }
 
-  /** The single append path: every event that reaches a viewed session's folded
-   *  state ALSO enters its journal here — `onEvent` and the usage ticker's
-   *  synthetic `usageUpdated` both come through, so seeds/resumes can never
-   *  diverge from what clients folded. Folds into the legacy state, stamps the
-   *  journal, routes to viewers. Background sessions (no state) are untouched. */
+  /** Fold one session's journal into its authoritative SessionState, on demand.
+   *  The hub keeps no folded copy (the journal is the single store), so the rare
+   *  read paths that need one — respondUi's first-responder gate, branch's
+   *  running gate — pay an O(transcript) fold on a user click; snapshot() does
+   *  the same for /debug/state. Null when the session isn't seeded. */
+  private foldedState(sid: SessionId | null | undefined): SessionState | null {
+    const seed = this.seedOf(sid ?? null);
+    return seed ? foldAll(seed.events) : null;
+  }
+
+  /** The single append path: every event a viewed session's clients fold enters
+   *  its journal here — `onEvent` and the usage ticker's synthetic
+   *  `usageUpdated` both come through, so seeds/resumes can never diverge from
+   *  what clients folded. Append-only: stamps the journal, routes to viewers.
+   *  Background sessions (no journal) are untouched. */
   private ingest(ev: SessionDriverEvent): void {
     const sid = ev.sessionRef.sessionId;
-    const st = this.sessionStates.get(sid);
-    if (!st) return;
-    foldEvent(st, ev);
     const j = this.journals.get(sid);
-    if (!j) {
-      // Lifecycle invariant broken (journal must exist iff state exists).
-      // Don't route: a journal-seeded client's epoch gate would discard a
-      // zero-stamped frame silently (an epoch mismatch deliberately does NOT
-      // trigger requestSeed — it normally means a superseding seed is already
-      // in flight), and a client seeded through this same degraded path
-      // (epoch 0) would churn it into a requestSeed loop. Either way, wire
-      // noise that *looks* like serving. Viewers stay stale until their next
-      // seed; this log is the honest signal that a dead-by-construction
-      // corner was reached.
-      console.error(
-        `[hub] no journal for viewed session ${sid} — viewers stale until reseeded`,
-      );
-      return;
-    }
+    if (!j) return;
     if (ev.type === "sessionReset") {
       // Transcript identity changed: restart the journal under a new epoch. The
       // synthetic meta prefix reproduces everything the fold carries across a
       // reset (ref/title/config/queued/approvals/ambient — items clear), so a
       // seed built between the reset and the driver's fresh re-emit is still
       // authoritative, and repeated /clears can't grow the journal unboundedly.
+      // The state the prefix must reproduce is the old journal + the reset
+      // itself, folded on demand — O(transcript), but only on a reset, never
+      // on the streaming path.
+      const st = foldAll(buildSeed(j).events);
+      foldEvent(st, ev);
       bumpEpoch(
         j,
         this.nextEpoch(),
@@ -559,16 +553,16 @@ export class SessionHub {
     )
       this.sessionListDirty = true;
     // Attach-window race (protocol v2): while a swap is off fetching a cold
-    // session's seed, that session's live events have no state to fold into and
+    // session's seed, that session's live events have no journal to enter and
     // the in-flight seed may predate them — buffer them as the rebuild signal.
-    if (this.swapsInFlight > 0 && !this.sessionStates.has(sid))
+    if (this.swapsInFlight > 0 && !this.journals.has(sid))
       this.bufferSwapEvent(sid, ev);
-    // Fold + journal + route only for a session someone is viewing (or the landing
+    // Journal + route only for a session someone is viewing (or the landing
     // default). Background sessions nobody opened are tracked above, but their
-    // transcript stays private — folded only once a client focuses them (switchTo
-    // seeds it then).
+    // transcript stays private — journaled only once a client focuses them
+    // (switchTo seeds it then).
     this.ingest(ev);
-    // A closed/evicted session drops its folded transcript once nobody is viewing it
+    // A closed/evicted session drops its journal once nobody is viewing it
     // (a current viewer keeps its last transcript rather than blanking mid-look). The
     // landing default is kept so a fresh connection still has something to adopt.
     if (
@@ -576,7 +570,6 @@ export class SessionHub {
       sid !== this.defaultFocusId &&
       !this.hasViewer(sid)
     ) {
-      this.sessionStates.delete(sid);
       this.journals.delete(sid);
     }
     this.maybeNotify(ev);
@@ -821,22 +814,26 @@ export class SessionHub {
   private lastUsageEmitted = new Map<string, string>();
 
   /** Emit each running, currently-viewed session's context usage as a `usageUpdated`
-   *  event (folded into its shared state + routed to its viewers). A dedicated event
+   *  event (journaled + routed to its viewers). A dedicated event
    *  (not a full re-seed) so a mid-turn refresh touches only `usage`, never the
    *  streaming transcript / queued / config. Sessions nobody is viewing are skipped —
    *  there is no transcript to refresh. Unchanged values are skipped entirely —
    *  the tick is a poll, not a heartbeat. */
   private refreshUsage(): void {
-    for (const [sid, st] of this.sessionStates) {
+    for (const [sid, j] of this.journals) {
       if (!this.running.has(sid)) continue;
       const usage = this.driver.getUsage?.(sid);
       if (!usage) continue;
       const key = JSON.stringify(usage);
       if (this.lastUsageEmitted.get(sid) === key) continue;
       this.lastUsageEmitted.set(sid, key);
+      // The ref off the journal's first event (a seed always starts with a
+      // sessionOpened): routing keys off sessionId only, so this beats an
+      // O(transcript) fold on the 1s ticker.
+      const first = j.compacted[0] ?? j.tail[0]?.ev;
       const ev: SessionDriverEvent = {
         type: "usageUpdated",
-        sessionRef: st.ref ?? { workspaceId: sid, sessionId: sid },
+        sessionRef: first?.sessionRef ?? { workspaceId: sid, sessionId: sid },
         timestamp: new Date().toISOString(),
         usage,
       };
@@ -1196,8 +1193,8 @@ export class SessionHub {
 
   /**
    * Switch ONE client's focus to the session a driver swap resolves to. The swap warms +
-   * seeds the target; we fold that seed into the target's shared state (unless it's
-   * already live — see below), point this connection at it, and re-seed it. Other
+   * seeds the target; that seed starts the target's shared journal (unless it's
+   * already live — see below), we point this connection at it and re-seed it. Other
    * clients are untouched: focus is per-connection. Single-flight per connection (a swap
    * can block for seconds warming the session, or minutes on a long warm-up): a second request
    * arriving mid-swap is coalesced (queued, latest wins) and run when this one finishes,
@@ -1206,10 +1203,10 @@ export class SessionHub {
    * to all (its content may have changed, e.g. a new session) but each keeps its own
    * activeSessionId; commands are cwd-scoped, so only the switcher gets them.
    *
-   * `reseed` (branch): rebuild the state even if the session is already live and
+   * `reseed` (branch): restart the journal even if the session is already live and
    * re-seed EVERY viewer — navigateTree mutated the shared session, so the new
    * branch transcript is authoritative for everyone looking at it. Without it, opening
-   * an already-viewed session reuses the live state (which may hold an in-flight
+   * an already-viewed session reuses the live journal (which may hold an in-flight
    * streaming bubble the seed's committed-history view would drop).
    */
   private async switchTo(
@@ -1297,16 +1294,15 @@ export class SessionHub {
           `[hub] ${raced.length} event(s) raced a non-retryable swap for ${sid} — dropped (seed presumed current)`,
         );
       }
-      const { built, metaChanged } = folded;
-      // (Re)build the shared state from this authoritative seed when the session isn't
+      const { metaChanged } = folded;
+      // Start the shared journal from this authoritative seed when the session isn't
       // already live, or always on a branch reseed. If another client is already viewing
-      // it, its shared state is current (and may hold an in-flight streaming bubble the
+      // it, its journal is current (and may hold an in-flight streaming bubble the
       // seed's committed-history view would drop) — reuse it rather than clobber.
-      if (opts.reseed || !this.sessionStates.has(sid)) {
-        this.sessionStates.set(sid, built);
-        // Fresh transcript identity: a first attach starts a journal, a reseed
-        // (reload/branch) restarts it — either way the swap's raw seed events
-        // are the new compacted prefix and any resume token goes stale.
+      // Fresh transcript identity either way: a first attach starts the journal, a
+      // reseed (reload/branch) restarts it — the swap's raw seed events are the
+      // new compacted prefix and any resume token goes stale.
+      if (opts.reseed || !this.journals.has(sid)) {
         this.journals.set(sid, createJournal(this.nextEpoch(), seed));
         if (metaChanged) this.broadcastSessionStatus();
       }
@@ -1478,9 +1474,10 @@ export class SessionHub {
         // First-responder-wins: only the first answer for a still-pending dialog
         // reaches the driver. A second device (or co-viewer of the same session)
         // answering the same id is dropped, so the real daemon session never gets a double
-        // resolution. The dialog lives in the targeted session's shared state.
+        // resolution. Pending dialogs live in the targeted session's journal,
+        // folded on demand — O(transcript), but only on a user click.
         const sid = target(msg);
-        const st = sid ? this.sessionStates.get(sid) : undefined;
+        const st = this.foldedState(sid);
         const id = msg.response.requestId;
         if (!st?.pendingApprovals.some((p) => p.requestId === id)) return;
         this.driver.respondUi(msg.response, sid);
@@ -1539,7 +1536,7 @@ export class SessionHub {
           return;
         }
         // Reseed: the reloaded session keeps its sessionId, so a client already viewing it
-        // has a (now-wedged) shared state. Force-rebuild from the fresh seed instead of
+        // has a (now-wedged) shared journal. Force-rebuild from the fresh seed instead of
         // reusing it — and re-seed every viewer of it, not just the requester, so a
         // second client looking at the broken session also recovers.
         void this.switchTo(conn, () => this.driver.reloadSession!(msg.path), {
@@ -1555,10 +1552,9 @@ export class SessionHub {
         }
         const targetId = target(msg);
         // A navigate mid-turn would interleave the in-flight run into the new branch.
-        // Gate on the target session's status — the transcript this client is branching.
-        const targetState = targetId
-          ? this.sessionStates.get(targetId)
-          : undefined;
+        // Gate on the target session's status — the transcript this client is
+        // branching, folded from its journal on demand (a click-rate path).
+        const targetState = this.foldedState(targetId);
         if (
           targetState?.status === "running" ||
           targetState?.status === "initializing"
@@ -1754,7 +1750,6 @@ export class SessionHub {
    *  fixture, and re-point + re-seed every connected client. `bootstrap:false`
    *  exposes the production empty landing. */
   reset(opts: { bootstrap?: boolean } = {}): void {
-    this.sessionStates.clear();
     this.journals.clear();
     this.defaultFocusId = null;
     this.running.clear();

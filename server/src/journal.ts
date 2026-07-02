@@ -1,12 +1,13 @@
 // Per-session append-only journal of seq-stamped driver events — the hub's
-// primary event structure for protocol v2. One structure is simultaneously the
+// single per-session store for protocol v2. One structure is simultaneously the
 // seed source for connecting clients (fold from zero), the resume ring for
 // reconnecting ones (tail replay), and the future Rust-hub core (a journaling
-// router needs no server-side fold). Pure data + pure functions; the hub owns
-// lifecycle (create on seed, bump on reset/reload, delete with the state).
+// router needs no steady-state server-side fold — the hub folds a state only on
+// demand). Pure data + pure functions; the hub owns lifecycle (create on seed,
+// bump on reset/reload, delete on close).
 //
 // Invariant (property-tested): at every instant,
-//   foldAll(buildSeed(journal).events) ≡ the hub's legacy folded SessionState.
+//   foldAll(buildSeed(journal).events) ≡ the state a connected client folded.
 
 import type {
   SessionDriverEvent,
@@ -173,7 +174,7 @@ export function coalesceEvents(
  *  an empty journal would seed reconnecting clients with a blank session.
  *  Property: foldAll(metaSeedEvents(state, …)) ≡ {...state, items: []}.
  *
- *  A reset arriving before any snapshot would leave the legacy state's `ref`
+ *  A reset arriving before any snapshot would leave the folded state's `ref`
  *  null while this prefix sets it — harmless, and unreachable in practice: every
  *  driver seed starts with `sessionOpened`, so `ref` is set before a reset can
  *  arrive. */

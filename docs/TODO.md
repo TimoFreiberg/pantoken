@@ -84,21 +84,25 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
 
 ## If fable doesn't do it first
 
-- [ ] 1. Architecture: the hub double-bookkeeps every session (biggest conceptual win)
-      The comment at hub.ts:222 says the journal "runs dark alongside the legacy fold" until the wire flips to seeds — but the wire flipped: seeds and resumes are already journal-built. So today ingest (hub.ts:473) does dual writes — folds every event into sessionStates and appends it to journals — and there's a "journal must exist iff state exists" lifecycle invariant with its own error-recovery path for when the two maps drift.
-      
-      The folded copy is only read in four rare places: the first-responder-wins check in respondUi (hub.ts:1491), the running-check in branch (hub.ts:1650), refreshUsage's ref lookup, and existence checks in switchTo. All of those can fold the journal on demand (foldAll(buildSeed(j).events) — exactly what snapshot() already does for /debug/state), or read the journal's first event for the ref. The property tests in hub-journal.test.ts already machine-check that the two representations are equivalent, which is precisely what de-risks deleting one.
-      
-      Payoff: the hot streaming path becomes append-only, the dual-write invariant and its error path disappear, and a whole class of drift bugs becomes unrepresentable. Cost: respondUi/branch pay an O(transcript) fold on a user click — negligible. This is medium-effort, medium-risk; everything else below is safer.
-      
-    ## 🏗️ Architecture
+- ~~[x]~~ **1. Architecture: the hub double-bookkeeps every session.** Done:
+      `sessionStates` is deleted; the journal is the hub's single per-session
+      store and `ingest` is append-only, so the "journal iff state" lifecycle
+      invariant (and its error-recovery path) is unrepresentable. The rare
+      folded-state readers — respondUi's first-responder gate, branch's running
+      gate, /debug/state — fold the journal on demand (`foldedState`);
+      refreshUsage reads the ref off the journal's first event; the sessionReset
+      meta prefix folds journal + reset on demand. hub-journal.test.ts now pins
+      journal ≡ client-fold directly (the dual-store equivalence it used to
+      guard is gone by construction).
+
+  ## 🏗️ Architecture
 
 - **ADR-desktop-shell.md** — Tauri v2 desktop shell proposal (proposed, awaiting
   owner sign-off). The "📐 Architecture direction" note that lived here
   (Rust hub end-state, distribution model) is superseded by that ADR; the
   Rust-hub target stays gated by the criteria in it.
-- [ ] **Decompose the hub (god object).** `server/src/hub.ts` owns folded session
-      states, running/attention maps, clients map, live ticker, OAuth pending,
+- [ ] **Decompose the hub (god object).** `server/src/hub.ts` owns the per-session
+      journals, running/attention maps, clients map, live ticker, OAuth pending,
       prompt-results ledger; `handleClient` is one giant switch. Extract
       collaborators the hub delegates to. Deferred — touches the app's central
       nervous system; wants its own change with the full e2e suite as the net.
