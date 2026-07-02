@@ -205,6 +205,10 @@ export interface PilotDriver {
     sessionId?: SessionId,
   ): void;
 
+  /** Toggle the adventurous auto-handoff flag (lets plan mode autonomously start
+   *  implementing). Emits a sessionUpdated snapshot with the new state. */
+  toggleAdventurousHandoff?(sessionId?: SessionId): Promise<void>;
+
   /** The daemon's global default model/thinking for new sessions + the favorites subset. */
   getModelDefaults?(): Promise<ModelDefaults>;
 

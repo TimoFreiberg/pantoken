@@ -862,6 +862,17 @@ export class MockDriver implements PilotDriver {
     });
   }
 
+  private adventurousHandoff = false;
+  async toggleAdventurousHandoff(): Promise<void> {
+    this.adventurousHandoff = !this.adventurousHandoff;
+    this.emit({
+      sessionRef: SESSION_REF,
+      timestamp: String(Date.now()),
+      type: "sessionUpdated",
+      snapshot: snapshot({ adventurousHandoff: this.adventurousHandoff }),
+    });
+  }
+
   async getModelDefaults(): Promise<ModelDefaults> {
     // Resolve the catalog default from the mock's fixture config (mirrors the polytoken
     // driver's getModelDefaults, which reads `polytoken models`). Returns the static

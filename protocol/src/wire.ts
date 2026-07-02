@@ -299,6 +299,10 @@ export type ClientMessage =
   /** Switch the active permission-monitor mode. Omit sessionId to target the
    *  focused session. Mirrors `setFacet`. */
   | { type: "setPermissionMonitor"; mode: PermissionMonitorMode; sessionId?: SessionId }
+  /** Toggle the adventurous auto-handoff flag (lets plan mode autonomously start
+   *  implementing). The daemon's POST /adventurous-handoff toggles; the updated
+   *  state arrives via the next snapshot's `adventurousHandoff`. */
+  | { type: "toggleAdventurousHandoff"; sessionId?: SessionId }
   /** Set the explicit login shell pilot captures env from at startup (null = the
    *  `$SHELL` / OS-login-shell default). Persists server-side; the env is captured
    *  once at boot, so it applies on the next server restart. The server re-broadcasts
