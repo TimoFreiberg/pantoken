@@ -365,6 +365,13 @@ export class SessionHub {
     // deny-safes a project-trust card immediately when this reads false rather than
     // hanging the swap for the prompt's full timeout.
     driver.setClientPresence?.(() => this.clients.size > 0);
+    // Per-client focus lives here, not in the driver — hand it a live predicate
+    // so the idle reaper never disposes a session someone is currently reading.
+    driver.setSessionViewers?.((sessionId) => {
+      for (const conn of this.clients.values())
+        if (conn.focusedId === sessionId) return true;
+      return false;
+    });
     this.seedDefault();
   }
 
