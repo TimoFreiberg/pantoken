@@ -665,6 +665,10 @@ export class SessionHub {
   }
 
   private broadcast(msg: ServerMessage): void {
+    // Backpressure drops are detected + handled in rawSend (index.ts), which
+    // closes the connection on a dropped send. This try/catch is a safety net
+    // for unexpected synchronous throws (e.g. JSON serialization of a malformed
+    // message) — it keeps one client's error from aborting the broadcast loop.
     for (const conn of this.clients.values()) {
       try {
         conn.send(msg);
