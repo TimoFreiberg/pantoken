@@ -253,6 +253,8 @@ class PilotStore {
     worktree: boolean;
     model?: { provider: string; modelId: string };
     thinking?: string;
+    /** Facet to start the session in (undefined = the daemon's default, execute). */
+    facet?: string;
   } | null>(null);
   // A newSession prompt was just submitted and we're awaiting the new session's first
   // authoritative seed from the server (session warm-up can take a beat). Holds the
@@ -542,7 +544,10 @@ class PilotStore {
       cfg.model = m;
     if (this.draft.thinking && this.draft.thinking !== def.thinkingLevel)
       cfg.thinking = this.draft.thinking;
-    if (cfg.worktree || cfg.model || cfg.thinking)
+    // "execute" is the daemon default — only a divergent pick is worth pinning.
+    if (this.draft.facet && this.draft.facet !== "execute")
+      cfg.facet = this.draft.facet;
+    if (cfg.worktree || cfg.model || cfg.thinking || cfg.facet)
       this.draftConfigMap[key] = cfg;
     else delete this.draftConfigMap[key];
     persistDraftConfigMap(this.draftConfigMap);
@@ -1120,6 +1125,7 @@ class PilotStore {
             worktree: prompt.newSession?.worktree,
             model: prompt.newSession?.model,
             thinking: prompt.newSession?.thinking,
+            facet: prompt.newSession?.facet,
             prompt: prompt.text,
             images: prompt.images,
           });
@@ -1280,6 +1286,7 @@ class PilotStore {
       worktree: ns?.worktree ?? false,
       model: ns?.model,
       thinking: ns?.thinking,
+      facet: ns?.facet,
     };
     this.composerDraft = prompt.text;
     this.composerImages = prompt.images ? [...prompt.images] : [];
@@ -1722,6 +1729,7 @@ class PilotStore {
         worktree: saved.worktree ?? this.draft.worktree,
         model: saved.model ?? this.draft.model,
         thinking: saved.thinking ?? this.draft.thinking,
+        facet: saved.facet ?? this.draft.facet,
       };
     // Record the draft view for ⌘[ / ⌘] history and remember its project for ⌘N.
     this.pushNav({ kind: "draft", cwd });
@@ -1793,6 +1801,7 @@ class PilotStore {
         worktree: d.worktree || undefined,
         model: d.model,
         thinking: d.thinking,
+        facet: d.facet,
       },
     });
     if (!promptId) return false;
@@ -1964,10 +1973,24 @@ class PilotStore {
     }
     send({ type: "setThinking", level });
   }
-  /** Switch the active facet (execute ↔ plan). Mid-session only — the facet is a
-   *  property of an active session, not a new-session draft setting. */
+  /** Switch the facet: the draft's pick while drafting a new session (applied at
+   *  creation), else the active session's live facet over the wire. */
   setFacet(facet: string): void {
+    if (this.draft) {
+      this.draft = { ...this.draft, facet };
+      this.persistDraftConfig();
+      return;
+    }
     send({ type: "setFacet", facet });
+  }
+
+  /** The facet the composer's facet badge (and ⌘⇧C cycle) reflects: the draft's
+   *  pick while drafting, else the active session's live facet. Mirrors
+   *  composerConfig. */
+  get composerFacet(): string {
+    const d = this.draft;
+    if (d) return d.facet ?? "execute";
+    return this.session.facet ?? "execute";
   }
 
   /** Ask the server to re-read the available facets (reload affordance for when
@@ -2344,6 +2367,7 @@ type StoredDraftConfig = {
   worktree?: boolean;
   model?: { provider: string; modelId: string };
   thinking?: string;
+  facet?: string;
 };
 
 /** Read per-new-session-draft config from localStorage. Tolerant of a missing / corrupt
@@ -2363,6 +2387,7 @@ function loadDraftConfigMap(): Record<string, StoredDraftConfig> {
         worktree?: unknown;
         model?: unknown;
         thinking?: unknown;
+        facet?: unknown;
       };
       const cfg: StoredDraftConfig = {};
       if (rec.worktree === true) cfg.worktree = true;
@@ -2370,7 +2395,8 @@ function loadDraftConfigMap(): Record<string, StoredDraftConfig> {
       if (m && typeof m.provider === "string" && typeof m.modelId === "string")
         cfg.model = { provider: m.provider, modelId: m.modelId };
       if (typeof rec.thinking === "string") cfg.thinking = rec.thinking;
-      if (cfg.worktree || cfg.model || cfg.thinking) out[k] = cfg;
+      if (typeof rec.facet === "string") cfg.facet = rec.facet;
+      if (cfg.worktree || cfg.model || cfg.thinking || cfg.facet) out[k] = cfg;
     }
     return out;
   } catch {

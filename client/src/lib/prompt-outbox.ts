@@ -18,6 +18,7 @@ export interface PendingPrompt {
     worktree?: boolean;
     model?: { provider: string; modelId: string };
     thinking?: string;
+    facet?: string;
   };
   createdAt: string;
   state: "queued" | "sending" | "rejected";

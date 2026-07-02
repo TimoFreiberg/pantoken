@@ -1676,6 +1676,7 @@ export class SessionHub {
               worktree: msg.worktree,
               model: msg.model,
               thinking: msg.thinking,
+              facet: msg.facet,
             }),
           );
           if (!sid) throw new Error("Could not create the new session");

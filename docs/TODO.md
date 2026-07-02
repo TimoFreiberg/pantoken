@@ -11,7 +11,14 @@ See `docs/` siblings for context: `DESIGN.md` (architecture + roadmap), `DECISIO
 
 - [ ] plan popup is too narrow, it should be closer to full screen (maybe a tiny bit smaller to make it a tiny bit visible that there's something behind it). also, plan popup buttons go out of the plan box, they should be bounded and their text should wrap / the buttons should scroll within the container if absolutely necessary
 - [ ] user prompts longer than like 10 lines should be shown truncated to those 10 lines by default, with an expand / collapse back to the truncated view button
-- [ ] in the new session draft view, pressing the cycle facet hotkey tries to change the facet of the last focused active session instead
+- [x] in the new session draft view, pressing the cycle facet hotkey tries to change the facet of the last focused active session instead
+      **Fixed 2026-07-02:** the draft now carries its own `facet` pick (mirroring the
+      draft's model/thinking pattern end to end): `setFacet`/`composerFacet` branch on
+      draft mode, the pick persists via draftConfigMap (D17), rides the `newSession`
+      wire message, and both drivers apply it at creation (polytoken: `POST /facet`
+      after warm-up; mock: seeds `snapshot.facet`). FacetBadge + ⌘⇧C now read/write
+      the draft's facet while drafting. E2e: hotkey-in-draft + submit-carries-facet
+      in `drafts.e2e.ts`.
 - [ ] adventurous-handoff is per-session, the toggle should be in the per-session config (near the prompt text box) - maybe in the facet menu? it's kiiinda a modifier of plan mode (in spirit - it is an independent toggle right now aiui)
 
 - [x] **`⌘\` cycle through active attention surfaces (with minimize-to-pill).** A unified

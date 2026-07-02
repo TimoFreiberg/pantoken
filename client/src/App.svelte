@@ -190,7 +190,9 @@
     // won't reach us in a plain tab, and the installed PWA / desktop app —
     // pilot's primary surface — deliberately gives it to the page (devtools
     // stay reachable via menu / ⌘⌥I there). Cycles through all available
-    // facets from the facet list, not just execute↔plan.
+    // facets from the facet list, not just execute↔plan. While drafting a
+    // new session, composerFacet/setFacet target the DRAFT's facet pick —
+    // not the last-focused live session.
     // Must run before the modifier early-return below (has Shift).
     if (
       (e.metaKey || e.ctrlKey) &&
@@ -201,7 +203,7 @@
       e.preventDefault();
       const facets = store.facets;
       if (facets.length === 0) return;
-      const current = store.session.facet ?? "execute";
+      const current = store.composerFacet;
       const idx = facets.indexOf(current);
       const next = facets[(idx + 1) % facets.length] ?? facets[0]!;
       store.setFacet(next);
