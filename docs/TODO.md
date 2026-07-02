@@ -39,7 +39,7 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
       3. Mechanical duplication (low-risk, ~600–700 lines)
       Polytoken driver (~150 lines). ~~Done: snapshotFor(ws, status?) closure collapses 7 call sites; refreshAndEmit(ws, label, action) collapses 5 daemon-action methods; usageFromState wrapper deleted; queueMsg(item, ts) helper collapses 2 of 3 queue mapping sites (the 3rd is in event-map.ts with a different shape).~~
       
-      Event map (~120 lines). Fourteen hostUiRequest{kind:"notify"} constructions of ~12 lines each (event-map.ts:896–1345). A notify(meta, idPrefix, message, level) builder — or reusing errorNotify from config-notify.ts generalized to take a level — turns each case into 2 lines. Pure and table-tested, so this is about as safe as refactors get.
+      Event map (~120 lines). ~~Done: notify(meta, requestId, message, level) builder collapses all 14 hostUiRequest{kind:"notify"} constructions into 2-liners.~~
       
       Hub handleClient (~100 lines). Seven cases repeat "if the optional driver method is missing → send X isn't supported here; else call it with msg.sessionId ?? conn.focusedId ?? undefined and .catch → send the error" (hub.ts:1522–1617). Three tiny helpers fix all of it: target(msg) (the ?? chain appears ~12×), errMsg(e) (e instanceof Error ? e.message : String(e) appears 13× in this file alone), and a callOptional(send, fn, label) dispatcher. The sessionStatus and updateStatus messages are also each built in two places — one builder each.
       
