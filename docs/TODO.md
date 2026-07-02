@@ -647,6 +647,16 @@ New parity/UX items from the owner, grounded against current source.
       untrusted dir against the real daemon; if the capability path covers it, *remove*
       the dead `TrustCard` + hub trust channel scaffolding rather than leaving it
       permanently dangling; if it doesn't, wire the trust methods after all.
+- [ ] **SSE liveness watcher reconnect-cycles every idle session (found reviewing the
+      2026-07-02 SSE-reconnect commit).** The daemon's SSE is push-only with no idle
+      heartbeats (`daemon-client.ts:11-12`), so the 60s no-frame watchdog
+      (`daemon-client.ts:1107-1113`) fires on every *idle* session every ~60-120s:
+      abort → reconnect → synthetic `stream_discontinuity` → full reseed + `sessionReset`
+      re-broadcast to all viewers, forever. Fix: on liveness expiry probe `GET /health`
+      (~5s timeout) first — if it answers, reset `lastFrameAt` and do nothing; only
+      reconnect when the probe fails/hangs. Also: allocate the `TextDecoder` per attempt
+      (split multi-byte chars can corrupt the first frame after a retry). Full review +
+      remaining robustness design: `docs/PLAN-driver-robustness.md`.
 - [ ] **Minor: `hasClients` comment mislabels fail-open as deny-safe.** The default
       `() => true` (`polytoken-driver.ts:208`) means "assume someone can answer" — that is
       fail-open; the comment calls it "deny-safe = don't block". Reword when the first
