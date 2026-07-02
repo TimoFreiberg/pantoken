@@ -8,6 +8,7 @@ import type {
   ImageContent,
   McpServerInfo,
   ModelOption,
+  PermissionMonitorMode,
   SessionConfig,
   SessionDriverEvent,
   SessionListEntry,
@@ -2314,7 +2315,7 @@ export const NEW_SESSION_ENTRY: SessionListEntry = {
  *  new-session draft's choices (workspace dir + model/thinking) so the mock mirrors
  *  what the real driver returns and e2e can assert the isolated worktree path. */
 export function newSessionSeed(
-  opts: { cwd?: string; config?: SessionConfig; facet?: string } = {},
+  opts: { cwd?: string; config?: SessionConfig; facet?: string; permissionMonitor?: PermissionMonitorMode } = {},
 ): SessionDriverEvent[] {
   const ref = sessionRefFor("new-session");
   const dir = opts.cwd ?? WORKSPACE.path;
@@ -2341,8 +2342,10 @@ export function newSessionSeed(
           provider: "anthropic",
           modelId: "claude-opus-4-8",
         },
-        // The draft's facet pick, applied at creation (mirrors the real driver).
-        ...(opts.facet ? { facet: opts.facet } : {}),
+        // Carry the draft's facet/permissionMonitor into the seed so the badge
+        // reflects them on the first snapshot (mirrors the real driver's apply-on-create).
+        facet: opts.facet,
+        permissionMonitor: opts.permissionMonitor ?? "standard",
       },
     },
   ];

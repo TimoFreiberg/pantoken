@@ -259,6 +259,7 @@ class PilotStore {
     thinking?: string;
     /** Facet to start the session in (undefined = the daemon's default, execute). */
     facet?: string;
+    permissionMonitor?: PermissionMonitorMode; // undefined/"standard" = default
   } | null>(null);
   // A newSession prompt was just submitted and we're awaiting the new session's first
   // authoritative seed from the server (session warm-up can take a beat). Holds the
@@ -549,9 +550,10 @@ class PilotStore {
     if (this.draft.thinking && this.draft.thinking !== def.thinkingLevel)
       cfg.thinking = this.draft.thinking;
     // "execute" is the daemon default — only a divergent pick is worth pinning.
-    if (this.draft.facet && this.draft.facet !== "execute")
-      cfg.facet = this.draft.facet;
-    if (cfg.worktree || cfg.model || cfg.thinking || cfg.facet)
+    if (this.draft.facet && this.draft.facet !== "execute") cfg.facet = this.draft.facet;
+    if (this.draft.permissionMonitor && this.draft.permissionMonitor !== "standard")
+      cfg.permissionMonitor = this.draft.permissionMonitor;
+    if (cfg.worktree || cfg.model || cfg.thinking || cfg.facet || cfg.permissionMonitor)
       this.draftConfigMap[key] = cfg;
     else delete this.draftConfigMap[key];
     persistDraftConfigMap(this.draftConfigMap);
@@ -1146,6 +1148,7 @@ class PilotStore {
             model: prompt.newSession?.model,
             thinking: prompt.newSession?.thinking,
             facet: prompt.newSession?.facet,
+            permissionMonitor: prompt.newSession?.permissionMonitor,
             prompt: prompt.text,
             images: prompt.images,
           });
@@ -1306,7 +1309,8 @@ class PilotStore {
       worktree: ns?.worktree ?? false,
       model: ns?.model,
       thinking: ns?.thinking,
-      facet: ns?.facet,
+      facet: ns?.facet ?? "execute",
+      permissionMonitor: ns?.permissionMonitor ?? "standard",
     };
     this.composerDraft = prompt.text;
     this.composerImages = prompt.images ? [...prompt.images] : [];
@@ -1736,6 +1740,8 @@ class PilotStore {
           ? { provider: d.provider, modelId: d.modelId }
           : undefined,
       thinking: d.thinkingLevel,
+      facet: "execute",
+      permissionMonitor: "standard",
     };
     // Restore this project's pending new-session draft, if any (key now resolves to n:cwd).
     this.loadDraft(this.composerDraftKey);
@@ -1750,6 +1756,7 @@ class PilotStore {
         model: saved.model ?? this.draft.model,
         thinking: saved.thinking ?? this.draft.thinking,
         facet: saved.facet ?? this.draft.facet,
+        permissionMonitor: saved.permissionMonitor ?? this.draft.permissionMonitor,
       };
     // Record the draft view for ⌘[ / ⌘] history and remember its project for ⌘N.
     this.pushNav({ kind: "draft", cwd });
@@ -1821,7 +1828,11 @@ class PilotStore {
         worktree: d.worktree || undefined,
         model: d.model,
         thinking: d.thinking,
-        facet: d.facet,
+        facet: d.facet && d.facet !== "execute" ? d.facet : undefined,
+        permissionMonitor:
+          d.permissionMonitor && d.permissionMonitor !== "standard"
+            ? d.permissionMonitor
+            : undefined,
       },
     });
     if (!promptId) return false;
@@ -1965,6 +1976,19 @@ class PilotStore {
       availableThinkingLevels: levels,
     };
   }
+  /** The facet the composer should advertise: the draft's while a draft is open,
+   *  else the active session's. Mirrors composerConfig's draft-awareness for the
+   *  FacetBadge and the Shift+Tab hotkey. */
+  get composerFacet(): string {
+    return this.draft ? (this.draft.facet ?? "execute") : (this.session.facet ?? "execute");
+  }
+  /** The permission-monitor mode the composer should advertise: the draft's while a
+   *  draft is open, else the active session's. Mirrors composerConfig's draft-awareness. */
+  get composerPermissionMonitor(): PermissionMonitorMode {
+    return this.draft
+      ? (this.draft.permissionMonitor ?? "standard")
+      : (this.session.permissionMonitor ?? "standard");
+  }
   setModel(provider: string, modelId: string): void {
     if (this.draft) {
       // Switching model can change supported thinking levels; clamp the draft's level
@@ -2004,25 +2028,21 @@ class PilotStore {
     send({ type: "setFacet", facet });
   }
 
-  /** The facet the composer's facet badge (and ⌘⇧C cycle) reflects: the draft's
-   *  pick while drafting, else the active session's live facet. Mirrors
-   *  composerConfig. */
-  get composerFacet(): string {
-    const d = this.draft;
-    if (d) return d.facet ?? "execute";
-    return this.session.facet ?? "execute";
-  }
-
   /** Ask the server to re-read the available facets (reload affordance for when
    *  facet files change on disk while a session is open). */
   refreshFacets(): void {
     send({ type: "listFacets" });
   }
 
-  /** Switch the active permission-monitor mode
-   *  (standard/bypass/bypass_plus/autonomous). Mid-session only — mirrors
-   *  setFacet. */
+  /** Switch the active permission-monitor mode (standard/bypass/autonomous). While a
+   *  new-session draft is open, writes to the draft; applied at creation via POST
+   *  /permission-monitor. Mid-session, sends the wire message as before. */
   setPermissionMonitor(mode: PermissionMonitorMode): void {
+    if (this.draft) {
+      this.draft = { ...this.draft, permissionMonitor: mode };
+      this.persistDraftConfig();
+      return;
+    }
     send({ type: "setPermissionMonitor", mode });
   }
 
@@ -2388,6 +2408,7 @@ type StoredDraftConfig = {
   model?: { provider: string; modelId: string };
   thinking?: string;
   facet?: string;
+  permissionMonitor?: PermissionMonitorMode;
 };
 
 /** Read per-new-session-draft config from localStorage. Tolerant of a missing / corrupt
@@ -2408,6 +2429,7 @@ function loadDraftConfigMap(): Record<string, StoredDraftConfig> {
         model?: unknown;
         thinking?: unknown;
         facet?: unknown;
+        permissionMonitor?: unknown;
       };
       const cfg: StoredDraftConfig = {};
       if (rec.worktree === true) cfg.worktree = true;
@@ -2415,8 +2437,13 @@ function loadDraftConfigMap(): Record<string, StoredDraftConfig> {
       if (m && typeof m.provider === "string" && typeof m.modelId === "string")
         cfg.model = { provider: m.provider, modelId: m.modelId };
       if (typeof rec.thinking === "string") cfg.thinking = rec.thinking;
-      if (typeof rec.facet === "string") cfg.facet = rec.facet;
-      if (cfg.worktree || cfg.model || cfg.thinking || cfg.facet) out[k] = cfg;
+      if (typeof rec.facet === "string" && (rec.facet === "execute" || rec.facet === "plan"))
+        cfg.facet = rec.facet;
+      const pm = rec.permissionMonitor as string | undefined;
+      if (pm && (pm === "standard" || pm === "bypass" || pm === "bypass_plus" || pm === "autonomous"))
+        cfg.permissionMonitor = pm;
+      if (cfg.worktree || cfg.model || cfg.thinking || cfg.facet || cfg.permissionMonitor)
+        out[k] = cfg;
     }
     return out;
   } catch {

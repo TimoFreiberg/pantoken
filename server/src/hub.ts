@@ -1698,6 +1698,7 @@ export class SessionHub {
               model: msg.model,
               thinking: msg.thinking,
               facet: msg.facet,
+              permissionMonitor: msg.permissionMonitor,
             }),
           );
           if (!sid) throw new Error("Could not create the new session");

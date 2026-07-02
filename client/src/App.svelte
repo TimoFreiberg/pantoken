@@ -225,7 +225,7 @@
         "bypass_plus",
         "autonomous",
       ];
-      const current = store.session.permissionMonitor ?? "standard";
+      const current = store.composerPermissionMonitor;
       const idx = modes.indexOf(current);
       const next = modes[(idx + 1) % modes.length]!;
       store.setPermissionMonitor(next);
