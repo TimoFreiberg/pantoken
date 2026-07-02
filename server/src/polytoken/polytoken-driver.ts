@@ -513,17 +513,21 @@ export async function createPolytokenDriver(
     warm.set(spawned.sessionId, ws);
     focus(spawned.sessionId);
     // Enforce the warm cap: evict the least-recently-focused sessions (never the
-    // one just warmed). Mirrors the original driver's evictionPlan.
+    // one just warmed). Sessions with a running turn (turn_in_flight) are never
+    // evicted — disposing one mid-turn kills it and the synthetic sessionClosed
+    // makes it look finished. If all candidates are running, we stay temporarily
+    // over-cap until a turn finishes (logged below).
     for (const id of evictionPlan(
       [...warm.keys()],
       spawned.sessionId,
       warmCap,
+      (id) => !warm.get(id)?.lastState?.turn_in_flight,
     )) {
       const victim = warm.get(id);
       if (!victim) continue;
       // Emit a synthetic sessionClosed BEFORE dispose so the hub clears the
-      // running indicator on an evicted mid-run session (dispose tears down SSE,
-      // so the abort's terminal event never arrives). Exactly the original driver's pattern.
+      // running indicator on an evicted session (dispose tears down SSE, so the
+      // abort's terminal event never arrives). Exactly the original driver's pattern.
       emit({
         sessionRef: victim.ref,
         timestamp: now(),
@@ -532,6 +536,12 @@ export async function createPolytokenDriver(
       });
       await disposeSession(victim).catch(() => {});
       console.log(`[polytoken] evicted LRU warm session ${id}; ${warm.size} warm`);
+    }
+    if (warmCap > 0 && warm.size > warmCap) {
+      console.warn(
+        `[polytoken] warm cap ${warmCap} exceeded (${warm.size} warm) — ` +
+          "not enough idle eviction candidates; deferring until running turns finish",
+      );
     }
     console.log(
       `[polytoken] warmed session ${spawned.sessionId} (${cwd}); ${warm.size} warm`,

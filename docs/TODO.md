@@ -698,7 +698,7 @@ titles below match its `findings[]` entries. Ranked by felt-quality-per-effort.
    navigations (~30 lines, cap the cache); (d) 404 for missing `/assets/*` instead of SPA
    fallback. Test: e2e asserting header presence; manual offline open. Effort: day. Risk:
    low-medium (SW caching bugs are annoying — keep sw.js `no-cache` so it's always refetchable).
-4. **Warm-cap eviction kills running background turns.** `evictionPlan` is recency-only;
+4. **[x] Warm-cap eviction kills running background turns.** `evictionPlan` is recency-only;
    eviction disposes victims mid-turn and the synthetic `sessionClosed` clears the running
    indicator + attention record, so the killed turn *looks finished*
    (`polytoken-driver.ts:478-496`, `warm-cap.ts:7-21`; contrast the reaper's
@@ -706,6 +706,14 @@ titles below match its `findings[]` entries. Ranked by felt-quality-per-effort.
    `evictable(id)` predicate (stays pure, extend `warm-cap.test.ts`), pass
    `!lastState?.turn_in_flight`, allow temporary over-cap with a loud log when all
    candidates are running. Effort: hours. Risk: low.
+   **Fixed 2026-07-02:** added an `evictable(id)` predicate (default `() => true`) to
+   `evictionPlan` in `warm-cap.ts` — sessions where `evictable` returns `false` are
+   skipped in the LRU loop. The polytoken driver passes
+   `(id) => !warm.get(id)?.lastState?.turn_in_flight` so mid-turn sessions are never
+   evicted. When not enough sessions are evictable (all candidates running), the
+   returned list is shorter than needed and the driver logs a `console.warn` about
+   being over-cap, deferring eviction until turns finish. 5 new unit tests cover skip,
+   multi-skip, all-running over-cap, partial over-cap, and backward-compat default.
 5. **Config setters + abort are fail-dangerous.** setModel/setThinking/setFacet/
    setPermissionMonitor `.catch(console.error)` only; abort has no catch at all;
    setPermissionMonitor poisons its cache optimistically so the badge can claim a safer
