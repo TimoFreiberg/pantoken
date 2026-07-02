@@ -890,7 +890,7 @@ titles below match its `findings[]` entries. Ranked by felt-quality-per-effort.
    derive done/unread from `attention.updatedAt > lastSeen[sid]` with the
    `lastUserMessageAt` fallback for server restarts. Test: e2e reload-then-assert-badge.
    Effort: day. Risk: low.
-10. **Context meter frozen mid-turn + no-op 1s broadcast.** On the live driver `getUsage`
+10. **[x] Context meter frozen mid-turn + no-op 1s broadcast.** On the live driver `getUsage`
     reads `lastState`, which only refreshes at turn boundaries — the meter shows
     turn-start values all turn; meanwhile the 1s ticker folds+broadcasts identical values
     to every viewer (`hub.ts:595-620`, `polytoken-driver.ts:1110-1117`). Fix: throttled
@@ -898,6 +898,14 @@ titles below match its `findings[]` entries. Ranked by felt-quality-per-effort.
     change-gate `refreshUsage` (skip emit when tokens/contextWindow/percent unchanged);
     align the mock so e2e stops asserting behavior prod doesn't have. Effort: day.
     Risk: low.
+    **Fixed 2026-07-02:** `getUsage` kicks a throttled (3s) single-flight
+    `GET /state` while `turn_in_flight` (scope is naturally running+viewed — the
+    hub only polls those), refreshing `ws.lastState` so the meter climbs during
+    long turns; the hub's `refreshUsage` change-gates on the JSON payload so
+    identical values never re-broadcast/re-journal ("a poll, not a heartbeat").
+    No mock change needed — with the driver now climbing mid-turn, the e2e's
+    climbing-meter assertions describe prod behavior. Hub unit test covers the
+    gate (3 ticks/1 value → 1 emit; value moves → 2nd emit).
 
 ### Quick wins (hours-sized, low-risk checklist)
 

@@ -1288,6 +1288,42 @@ describe("SessionHub", () => {
     expect(a.received.some((m) => m.type === "sessionList")).toBe(false);
   });
 
+  test("the live ticker change-gates usage: identical values emit once, a change emits again", async () => {
+    const d = new FakeDriver();
+    // Static usage across ticks (FakeDriver's default climbs per call).
+    let usage = { tokens: 5000, contextWindow: 200000, percent: 3 };
+    d.getUsage = () => usage;
+    const hub = new SessionHub(d);
+    const a = client();
+    hub.addClient(a.send);
+    d.emit(
+      ev({
+        type: "sessionOpened",
+        snapshot: { ...snap("s"), status: "running" },
+      }),
+    );
+    await flush();
+    a.received.length = 0;
+
+    const tick = () => (hub as unknown as { liveTick(): void }).liveTick();
+    tick();
+    tick();
+    tick();
+    await flush();
+    const usageEvents = () =>
+      a.received.filter(
+        (m) => m.type === "event" && m.event.type === "usageUpdated",
+      );
+    // Three ticks, one distinct value → exactly one broadcast (a poll, not a heartbeat).
+    expect(usageEvents().length).toBe(1);
+
+    // The value moves → the next tick emits again.
+    usage = { tokens: 6000, contextWindow: 200000, percent: 3 };
+    tick();
+    await flush();
+    expect(usageEvents().length).toBe(2);
+  });
+
   test("the live ticker re-scans the session list only when list content may have changed (Rec #3)", async () => {
     const d = new FakeDriver();
     const hub = new SessionHub(d);
