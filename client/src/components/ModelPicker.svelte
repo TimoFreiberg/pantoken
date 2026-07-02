@@ -4,6 +4,15 @@
   import { store } from "../lib/store.svelte.js";
   import Chevron from "./ui/Chevron.svelte";
 
+  // Not built on MenuBadge (unlike FacetBadge / PermissionBadge): ModelPicker has
+  // two menus (model + thinking) sharing one open/sel state, a filter-as-you-type
+  // search input, per-provider collapsible groups, wrapping (not clamped) arrow
+  // navigation with Ctrl-n/Ctrl-p, focus management (refocus the composer on
+  // close when opened via hotkey), hotkey integration via store.hotkeyAction,
+  // Space-to-select, scroll-into-view, an empty-match state, and a disabled badge.
+  // Forcing those into the shared primitive would need so many configuration
+  // props it would defeat the dedup. The simple badge+listbox pickers use
+  // MenuBadge; this one stays hand-rolled.
   type Open = "none" | "model" | "thinking";
   let open = $state<Open>("none");
 
