@@ -37,7 +37,7 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
       handling, TrustCard.svelte, fixture, dev-bar button, e2e) is deleted.
       polytoken handles project trust daemon-side; D12 updated.
       3. Mechanical duplication (low-risk, ~600–700 lines)
-      Polytoken driver (~150 lines). The 7-argument snapshotFromState(ws.lastState, ws.ref, workspaceFor(ws), statusFromState(ws.lastState), now(), ws.monitorMode, ws.autodrainEnabled) incantation appears 9 times — a snapshotFor(ws, status?) closure collapses each to one line. On top of that, toggleAdventurousHandoff, setNotificationAutodrain, compact, clearContext, and setMcpServer (polytoken-driver.ts:1668–1821) are the same ~25-line "call daemon → GET /state → emit sessionUpdated → log on failure" block five times; one refreshAndEmit(ws, label, action) helper makes each a 3-liner. Also: the local usageFromState wrapper just forwards to the pure import (delete it), and the queue-item→SessionQueuedMessage mapping is hand-rolled in three places (one queueMsg(item, ts) helper).
+      Polytoken driver (~150 lines). ~~Done: snapshotFor(ws, status?) closure collapses 7 call sites; refreshAndEmit(ws, label, action) collapses 5 daemon-action methods; usageFromState wrapper deleted; queueMsg(item, ts) helper collapses 2 of 3 queue mapping sites (the 3rd is in event-map.ts with a different shape).~~
       
       Event map (~120 lines). Fourteen hostUiRequest{kind:"notify"} constructions of ~12 lines each (event-map.ts:896–1345). A notify(meta, idPrefix, message, level) builder — or reusing errorNotify from config-notify.ts generalized to take a level — turns each case into 2 lines. Pure and table-tested, so this is about as safe as refactors get.
       
