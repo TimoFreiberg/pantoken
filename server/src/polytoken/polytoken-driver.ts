@@ -311,6 +311,38 @@ export async function createPolytokenDriver(
   }
 
   /**
+   * Shared "call a daemon action → refresh state → emit a sessionUpdated
+   * snapshot → log on failure" skeleton used by the simple mutating methods
+   * (compact, clearContext, toggleAdventurousHandoff, setMcpServer,
+   * setNotificationAutodrain). `action` runs the daemon call(s); on success we
+   * fetch fresh state (unless `fetchState` is false) and emit the rebuilt
+   * snapshot. `setNotificationAutodrain` passes false — it flips a local flag
+   * and emits the cached snapshot without a state round-trip.
+   */
+  async function refreshAndEmit(
+    ws: WarmSession,
+    label: string,
+    action: () => Promise<void>,
+    fetchState = true,
+  ): Promise<void> {
+    try {
+      await action();
+      if (fetchState) {
+        const { data } = await ws.client.state();
+        if (data) ws.lastState = data;
+      }
+      emit({
+        sessionRef: ws.ref,
+        timestamp: now(),
+        type: "sessionUpdated",
+        snapshot: snapshotFor(ws),
+      });
+    } catch (e) {
+      console.error(`[polytoken] ${label} failed`, e);
+    }
+  }
+
+  /**
    * The event-fold: feed a polytoken SSE envelope to the pure mapper, emit its
    * returned pilot events, then execute its returned effect descriptors (which
    * involve I/O the pure mapper can't do). The mapper is the testable heart
@@ -1658,19 +1690,9 @@ export async function createPolytokenDriver(
       if (!ws) return;
       // Toggle the flag, then fetch state so the snapshot carries the computed
       // `adventurous_handoff_active` (which ANDs `enabled` with facet support).
-      try {
-        await ws.client.toggleAdventurousHandoff();
-        const { data } = await ws.client.state();
-        if (data) ws.lastState = data;
-        emit({
-          sessionRef: ws.ref,
-          timestamp: now(),
-          type: "sessionUpdated",
-          snapshot: snapshotFor(ws),
-        });
-      } catch (e) {
-        console.error("[polytoken] toggleAdventurousHandoff failed", e);
-      }
+      await refreshAndEmit(ws, "toggleAdventurousHandoff", () =>
+        ws.client.toggleAdventurousHandoff(),
+      );
     },
     async setNotificationAutodrain(
       enabled: boolean,
@@ -1678,18 +1700,17 @@ export async function createPolytokenDriver(
     ): Promise<void> {
       const ws = target(sessionId);
       if (!ws) return;
-      try {
-        await ws.client.setNotificationAutodrain(enabled);
-        ws.autodrainEnabled = enabled;
-        emit({
-          sessionRef: ws.ref,
-          timestamp: now(),
-          type: "sessionUpdated",
-          snapshot: snapshotFor(ws),
-        });
-      } catch (e) {
-        console.error("[polytoken] setNotificationAutodrain failed", e);
-      }
+      // No state round-trip: flip the local flag and emit the cached snapshot
+      // (snapshotFor already folds ws.autodrainEnabled into the result).
+      await refreshAndEmit(
+        ws,
+        "setNotificationAutodrain",
+        async () => {
+          await ws.client.setNotificationAutodrain(enabled);
+          ws.autodrainEnabled = enabled;
+        },
+        false,
+      );
     },
     async compact(sessionId?: SessionId): Promise<void> {
       const ws = target(sessionId);
@@ -1698,38 +1719,14 @@ export async function createPolytokenDriver(
       // behavior); CompactRequest is optional. The daemon's compaction_started/
       // complete events are already mapped (notify + fetchState); this explicit
       // fetchState + sessionUpdated is a safety net for the non-SSE path.
-      try {
-        await ws.client.compact();
-        const { data } = await ws.client.state();
-        if (data) ws.lastState = data;
-        emit({
-          sessionRef: ws.ref,
-          timestamp: now(),
-          type: "sessionUpdated",
-          snapshot: snapshotFor(ws),
-        });
-      } catch (e) {
-        console.error("[polytoken] compact failed", e);
-      }
+      await refreshAndEmit(ws, "compact", () => ws.client.compact());
     },
     async clearContext(sessionId?: SessionId): Promise<void> {
       const ws = target(sessionId);
       if (!ws) return;
       // context_cleared is already mapped to a reseed effect; this explicit
       // fetchState + sessionUpdated refreshes the usage meter.
-      try {
-        await ws.client.clear();
-        const { data } = await ws.client.state();
-        if (data) ws.lastState = data;
-        emit({
-          sessionRef: ws.ref,
-          timestamp: now(),
-          type: "sessionUpdated",
-          snapshot: snapshotFor(ws),
-        });
-      } catch (e) {
-        console.error("[polytoken] clearContext failed", e);
-      }
+      await refreshAndEmit(ws, "clearContext", () => ws.client.clear());
     },
     async setMcpServer(
       serverName: string,
@@ -1738,7 +1735,9 @@ export async function createPolytokenDriver(
     ): Promise<void> {
       const ws = target(sessionId);
       if (!ws) return;
-      try {
+      // The daemon emits mcp_server_* lifecycle events (already mapped to
+      // notify + fetchState). Emit a sessionUpdated as a safety net.
+      await refreshAndEmit(ws, `setMcpServer ${action}`, async () => {
         switch (action) {
           case "enable":
             await ws.client.enableMcpServer(serverName);
@@ -1753,19 +1752,7 @@ export async function createPolytokenDriver(
             await ws.client.reconnectMcpServer(serverName);
             break;
         }
-        // The daemon emits mcp_server_* lifecycle events (already mapped to
-        // notify + fetchState). Emit a sessionUpdated as a safety net.
-        const { data } = await ws.client.state();
-        if (data) ws.lastState = data;
-        emit({
-          sessionRef: ws.ref,
-          timestamp: now(),
-          type: "sessionUpdated",
-          snapshot: snapshotFor(ws),
-        });
-      } catch (e) {
-        console.error(`[polytoken] setMcpServer ${action} failed`, e);
-      }
+      });
     },
     setSessionViewers(fn: (sessionId: string) => boolean): void {
       isViewed = fn;
