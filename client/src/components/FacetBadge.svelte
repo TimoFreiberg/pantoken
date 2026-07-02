@@ -4,12 +4,12 @@
 
   // Facet picker in the composer toolbar. Shows the ACTUAL current facet; clicking
   // opens a dropdown listing all available facets (from `polytoken vfs ls
-  // polytoken://facets`). The active facet gets an accent tint. Shift+Tab still
-  // toggles execute ↔ plan (the common case) — the dropdown is for discovering
-  // and switching to non-default facets.
+  // polytoken://facets`). The active facet gets an accent tint. ⌘⇧C cycles
+  // through all facets (works even when the composer is focused) — the dropdown
+  // is for discovering and switching to specific facets.
   const facet = $derived(store.session.facet ?? "execute");
-  const isPlan = $derived(facet === "plan");
-  const label = $derived(facet === "plan" ? "Plan" : facet.charAt(0).toUpperCase() + facet.slice(1));
+  const isPlan = $derived(facet?.toLowerCase() === "plan");
+  const label = $derived(isPlan ? "Plan" : facet.charAt(0).toUpperCase() + facet.slice(1));
 
   let open = $state(false);
   let panelEl: HTMLDivElement | undefined = $state();
@@ -55,7 +55,7 @@
       class="badge facet-badge"
       class:plan={isPlan}
       data-testid="facet-badge"
-      title={`Facet: ${facet} — click to switch (Shift+Tab toggles execute/plan)`}
+      title={`Facet: ${facet} — click to switch (⌘⇧C cycles facets)`}
       aria-haspopup="listbox"
       aria-expanded={open}
       onclick={toggle}

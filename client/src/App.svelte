@@ -164,10 +164,11 @@
 
   // App-global navigation hotkeys. The ⌘/Ctrl modifier keeps them clear of typing;
   // component-local handlers own the ⇧-modified combos (⌘⇧M/E/J) and arrow nav, so we
-  // take only the unshifted, alt-free set here — plus ⌘⇧P (permission monitor cycle),
-  // which is app-global. (⌘N is browser-reserved in a plain tab but free in the
-  // installed PWA / desktop app, pilot's primary surface; ⌘[ / ⌘] cancel the browser's
-  // history nav, which is unused since the app routes views client-side.)
+  // take only the unshifted, alt-free set here — plus ⌘⇧C (facet cycle) and ⌘⇧P
+  // (permission monitor cycle), which are app-global. (⌘N is browser-reserved in a
+  // plain tab but free in the installed PWA / desktop app, pilot's primary surface;
+  // ⌘[ / ⌘] cancel the browser's history nav, which is unused since the app routes
+  // views client-side.)
   function onGlobalKeydown(e: KeyboardEvent) {
     if (store.unauthorized) return;
     // Ctrl+Tab / Ctrl+Shift+Tab — cycle forward/back through sessions in sidebar order.
@@ -182,22 +183,25 @@
       store.cycleSession(e.shiftKey ? -1 : 1);
       return;
     }
-    // Shift+Tab cycles facets (the TUI convention) — only when no form field is
-    // focused (so Shift+Tab still reverse-tabs through inputs). Must run before
-    // the modifier early-return below (Shift+Tab has no Cmd/Ctrl). This is the
-    // one non-modifier hotkey in onGlobalKeydown.
-    if (e.key === "Tab" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      const ae = document.activeElement;
-      const inField =
-        ae instanceof HTMLInputElement ||
-        ae instanceof HTMLTextAreaElement ||
-        (ae instanceof HTMLElement && ae.isContentEditable);
-      if (!inField) {
-        e.preventDefault();
-        const next = store.session.facet === "plan" ? "execute" : "plan";
-        store.setFacet(next);
-        return;
-      }
+    // ⌘⇧C / Ctrl+Shift+C — cycle facets. A modifier combo so it fires even
+    // when the composer is focused (unlike Shift+Tab, which the browser
+    // consumes for reverse-focus traversal in form fields). Cycles through
+    // all available facets from the facet list, not just execute↔plan.
+    // Must run before the modifier early-return below (has Shift).
+    if (
+      (e.metaKey || e.ctrlKey) &&
+      e.shiftKey &&
+      !e.altKey &&
+      (e.key === "C" || e.key === "c")
+    ) {
+      e.preventDefault();
+      const facets = store.facets;
+      if (facets.length === 0) return;
+      const current = store.session.facet ?? "execute";
+      const idx = facets.indexOf(current);
+      const next = facets[(idx + 1) % facets.length] ?? facets[0]!;
+      store.setFacet(next);
+      return;
     }
     // ⌘Shift+P — cycle permission monitor mode
     // (Standard → Bypass → Bypass+ → Autonomous → Standard).
