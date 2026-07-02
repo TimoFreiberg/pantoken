@@ -551,12 +551,22 @@ New parity/UX items from the owner, grounded against current source.
       ("Permission mode: {mode} — click to switch (⌘⇧M)"). E2e test in
       `permission.e2e.ts` verifies the cycle wraps correctly.
 
-- [ ] **Find out where the effort toggle has gone.** The effort/thinking-level toggle
+- [x] **Find out where the effort toggle has gone.** The effort/thinking-level toggle
       (previously exposed in the pi driver era) is no longer visible in the UI.
       Investigate whether the polytoken daemon exposes an effort/thinking-level
       setting and whether pilot's UI surface for it was removed or just went missing.
       If the daemon supports it, re-add the UI control; if not, confirm it's gone
       for good and document why.
+      **Investigated 2026-07-02:** the effort/thinking-level toggle IS present and
+      working — it lives inside the ModelPicker component as a sub-picker (the
+      "medium"/"high" badge next to the model badge in the composer toolbar). The
+      daemon exposes `reasoning_effort` via `POST /model` (the `setModel` daemon-client
+      method accepts an optional `reasoningEffort` parameter) and the session snapshot
+      carries `active_reasoning_effort`. The `model_switch` event also carries
+      `to_reasoning_effort`. The thinking picker is exercised by e2e tests
+      (`models.e2e.ts:64` — "the thinking picker switches the level" + `models.e2e.ts:117`
+      — "⌘⇧E focuses the thinking menu"). The TODO's "no longer visible" observation
+      was outdated — the thinking picker was re-added during the polytoken migration.
 
 - [ ] **Queued/follow-up prompts added to transcript immediately but not actually
       submitted.** When a user sends a follow-up prompt mid-turn (while
