@@ -615,7 +615,8 @@ New parity/UX items from the owner, grounded against current source.
       **Fixed 2026-07-02:** `seedFor` now calls `recoverPendingInterrogatives(ws)` after seeding the transcript. This reads `pending_interrogatives` from the cached `lastState` (from `GET /state`), passes each through `mapDaemonEvent` to produce the `hostUiRequest` card, and executes the `registerInterrogative` effect so `respondUi` can build the reverse response. The cards appear in the seed events alongside the transcript, so a reconnecting client re-renders blocked approvals immediately.
 - [x] No SSE reconnect, no liveness, no daemon-exit watcher — the subscribe loop just ends on error; nobody re-subscribes or tells the hub. The id: SSE lines aren't even parsed. A warm session can die silently.
       **Fixed 2026-07-02:** rewrote `subscribe()` in `daemon-client.ts` with (1) automatic re-subscribe with exponential backoff (1s → 2s → 4s → … → 30s cap) on error or stream end, (2) a liveness watcher that aborts the current fetch if no SSE frame arrives for 60s (the daemon's SSE is push-only with no heartbeats on an idle daemon), (3) a synthetic `stream_discontinuity` envelope emitted on reconnect so the driver re-seeds via the existing event-map → reseed path, (4) `id:` line parsing for `Last-Event-ID` header on reconnect (daemon support unconfirmed — best-effort; the `stream_discontinuity` → reseed is the real recovery mechanism), and (5) abortable backoff sleep so unsubscribe exits within a microtask. The architecture uses a `stopped` flag + per-attempt AbortController (not controller-swapping) to cleanly separate "abort the current fetch to retry" from "stop the loop entirely."
-- [ ] N4 is worse than documented — rawSend discards ws.send()'s return and the hub's try/catch around broadcast is dead code (Bun signals drop by return code, not throw). Also: the switchTo window (two HTTP round-trips) loses deltas for a streaming background session you focus — an unlisted race.
+- [~] N4 is worse than documented — rawSend discards ws.send()'s return and the hub's try/catch around broadcast is dead code (Bun signals drop by return code, not throw). Also: the switchTo window (two HTTP round-trips) loses deltas for a streaming background session you focus — an unlisted race.
+      **Partial fix 2026-07-02:** `rawSend` now checks `ws.send()`'s return value via `sendOrClose()` (`server/src/ws-send.ts`) — on a `0` (dropped) it closes the socket (1011), forcing a reconnect + fresh snapshot. The hub's `broadcast` try/catch is kept as a safety net for unexpected synchronous throws, with a clarifying comment. The switchTo race (deltas lost during `seedFor`'s HTTP round-trips for a cold switch to a streaming background session) remains open — it needs N3 (sequence/resume protocol) to reconcile seed vs. live events without duplication.
 - [ ] Medium-tier: optimistic userMessage before the POST leaves ghost rows on failure; renaming a cold session hijacks activeSessionId (and spawns a daemon); the idle reaper can kill a session another client is viewing; phone-wake half-open sockets show a green "live" LED over a dead link; ⌘F can't search collapsed "Worked for Ns" bodies (DOM-only search); PROTOCOL_VERSION is sent but never checked (stale cached PWA misfolds silently); /debug/reset is exposed in prod behind only the app token and wipes real settings; reloaded transcripts show "56y ago" (synthetic epoch timestamps — a daemon gap, see ask #1); and the e2e suite asserts mock behaviors the live driver never produces.
       **Partial fix 2026-07-02:** PROTOCOL_VERSION is now checked on `hello` — the client sets `protocolMismatch` and shows a full-screen "Update required" error directing a hard-refresh, instead of silently folding events from an incompatible server. The other 8 issues remain open.
 
@@ -849,7 +850,7 @@ the trivial ones shipped inline this same day.
 
 ### 🟡 Correctness risk on spotty wifi — raise now, defer build
 
-- [ ] **Backpressure drops can silently desync the client fold (N4).** `server/src/index.ts`
+- [x] **Backpressure drops can silently desync the client fold (N4).** `server/src/index.ts`
       `rawSend` discards the return value of `ws.send()`. Past Bun's `maxBackpressure`
       (default ~16MB) a slow socket drops messages (`send` returns 0). A dropped
       *incremental event* silently desyncs the client's folded transcript from the server
@@ -858,6 +859,12 @@ the trivial ones shipped inline this same day.
       corruption path. **Fix:** check `ws.send()`; on a dropped *event* mark the connection
       desynced and force a re-snapshot (or close→reconnect). N1 (coalescing) reduces the
       frame count that can be dropped, but doesn't remove the drop path itself.
+      **Fixed 2026-07-02:** `rawSend` now delegates to `sendJson()` (`server/src/ws-send.ts`),
+      which calls `sendOrClose()` — on a `0` return (dropped) it closes the socket with
+      code 1011 and logs a warning. The client's existing reconnect machinery (exponential
+      backoff → `addClient` → fresh snapshot) handles recovery. The `switchTo` race
+      (deltas lost during `seedFor`'s HTTP round-trips) is **not** fixed — it needs N3
+      (sequence/resume protocol) and remains open.
 
 ### 🟢 Later / when it bites
 

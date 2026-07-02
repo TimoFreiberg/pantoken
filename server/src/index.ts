@@ -19,6 +19,7 @@ import {
 } from "./pidlock.js";
 import { PushService } from "./push.js";
 import { serveStatic } from "./static.js";
+import { sendJson } from "./ws-send.js";
 
 // Stable per-data-dir identity, minted once and reused across restarts. Used for
 // log attribution and the PID lock record. Done before anything else touches the
@@ -151,8 +152,14 @@ const hub = new SessionHub(
   openInFileManager,
 );
 
-const rawSend = (ws: ServerWebSocket<WsData>, msg: ServerMessage) =>
-  ws.send(JSON.stringify(msg));
+const rawSend = (ws: ServerWebSocket<WsData>, msg: ServerMessage) => {
+  sendJson(ws, msg, () =>
+    log.warn(
+      "ws message dropped (backpressure) — closing connection to force resync",
+      { msgType: msg.type },
+    ),
+  );
+};
 
 function authenticate(ws: ServerWebSocket<WsData>): void {
   ws.data.authed = true;
