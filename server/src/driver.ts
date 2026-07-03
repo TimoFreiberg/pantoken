@@ -245,6 +245,15 @@ export interface PilotDriver {
    *  at construction. Optional: a driver with no session pool omits it. */
   setSessionViewers?(isViewed: (sessionId: SessionId) => boolean): void;
 
+  /** Graceful teardown of driver-owned resources on a clean server exit: drain any
+   *  long-lived child daemons (HTTP /terminate), release their leases, and clear
+   *  driver-side timers (idle reaper). Called once by the server's signal path
+   *  (index.ts) — it awaits this before releasing the lock and exiting, so a driver
+   *  that spawns children (polytoken) gets a real drain instead of a bare SIGTERM.
+   *  The hub NEVER calls this; it's a process-lifecycle hook, not a session op. A
+   *  driver with no long-lived children (mock) omits it — the signal path guards with `?.`. */
+  shutdown?(): Promise<void>;
+
   /** Dev-only: jump the mock to a named scripted state. No-op for the real driver. */
   runScript?(name: string): void;
   /** Dev/test-only reset. Mock drivers may skip their bootstrap fixture so the empty
