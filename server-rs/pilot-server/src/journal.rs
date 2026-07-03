@@ -12,7 +12,7 @@ use pilot_protocol::session_driver::{
     AssistantDeltaChannel, HostUiRequest, SessionDriverEvent, SessionEventBase, SessionRef,
     SessionSnapshot, WorkspaceRef,
 };
-use pilot_protocol::state::{fold_all, SessionState};
+use pilot_protocol::state::SessionState;
 
 /// Tail ring caps: whichever trips first evicts oldest frames into `compacted`.
 /// Bigger = a longer resumable gap for reconnecting clients, more RAM. A resume
@@ -303,6 +303,7 @@ mod tests {
         AssistantDeltaChannel, SessionDriverEvent as E, SessionEventBase, SessionRef,
         SessionStatus, SessionUsage, WorkspaceRef, SessionSnapshot,
     };
+    use pilot_protocol::state::fold_all;
 
     fn sref() -> SessionRef {
         SessionRef {
