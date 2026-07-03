@@ -152,18 +152,35 @@ pointing a machine at alternative hosting (e.g. a tailnet static dir).
 
 ## Publishing a release
 
+The normal path is one command; CI does the heavy lifting:
+
 ```bash
-# after bumping "version" in tauri.conf.json (keep Cargo.toml in step):
-bun scripts/desktop/publish.ts --repo TimoFreiberg/polytoken-gui   # --dry-run to inspect
+bun scripts/desktop/release.ts            # --patch (default), --minor, --major, --version X.Y.Z
 ```
 
-The script builds signed (key from `TAURI_SIGNING_PRIVATE_KEY` or
-`~/.tauri/pilot-shell.key`), **derives `latest.json` from the built bundle's
-Info.plist** — a hand-typed manifest version over an older artifact makes every
-relaunch "update" again, an infinite install loop under the unattended policy — and
-publishes tar.gz + sig + manifest as a GitHub release via `gh` (refusing to reuse an
-existing tag). The releases repo is public so installed apps download without
-credentials; it does not have to be the code remote.
+It bumps the version (tauri.conf.json + Cargo.toml + lock), commits `Release vX.Y.Z`,
+tags it (via the colocated `.git` — jj can't create tags), moves `main`, and pushes.
+The tag triggers ci.yml's `release` job, which — only after the web + desktop test
+jobs pass — builds signed on a macOS runner and publishes via `publish.ts`. Running
+apps pick the release up within a minute. One-time setup: the minisign key as an
+Actions secret —
+
+```bash
+gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/pilot-shell.key
+```
+
+(Owner call, 2026-07-03: the key lives in Actions secrets. Fork PRs never see
+secrets, so the exposure is the GitHub account itself — accepted for a single-user
+tool, and it doubles as a key backup.)
+
+`publish.ts` also works standalone from this machine (`--repo
+TimoFreiberg/polytoken-gui`, `--dry-run` to inspect): it builds signed (key from
+`TAURI_SIGNING_PRIVATE_KEY` or `~/.tauri/pilot-shell.key`), **derives `latest.json`
+from the built bundle's Info.plist** — a hand-typed manifest version over an older
+artifact makes every relaunch "update" again, an infinite install loop under the
+unattended policy — and publishes tar.gz + sig + manifest as a GitHub release,
+refusing to reuse an existing tag. In CI it additionally gets `--tag-must-match` so a
+manifest can never disagree with the pushed tag.
 
 Plain-http endpoints are currently allowed (`dangerousInsecureTransportProtocol` in
 `tauri.conf.json`) — tolerable because update integrity comes from the minisign
