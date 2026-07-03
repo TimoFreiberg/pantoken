@@ -61,11 +61,13 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
         the shell's updater loop replaces the TS watcher there — same defer policy and
         sidebar card via `/update/state`, verified E2E against a local manifest
         server. Clone mode stays as the dev loop.
-  - [ ] Set up updater-artifact hosting (ADR "Owner decisions" #2; owner lean: a
-        separate public GitHub releases repo — note the artifact now contains the
-        whole app, hub+client included): create the repo, run the first
-        `bun scripts/desktop/publish.ts --repo <owner/releases-repo>`, configure the
-        endpoint on installed apps, then drop `dangerousInsecureTransportProtocol`.
+  - [x] **Updater hosting live (2026-07-03):** public releases repo
+        `TimoFreiberg/polytoken-gui`, v0.2.0 published; endpoint baked into the shell
+        as the default (env/file overrides remain, `PILOT_SHELL_UPDATE_URL=off`
+        disables), `dangerousInsecureTransportProtocol` dropped. First installs use
+        `curl … | tar xz -C /Applications` — browser downloads of ad-hoc apps hit
+        Gatekeeper's "damaged" refusal (see desktop-tauri/README.md "Installing a
+        release").
   - [ ] Then delete `desktop/` + its watcher desktop-sha plumbing, and point
         docs/DESIGN.md at the Tauri shell.
 - [ ] **Decompose the hub (god object).** `server/src/hub.ts` owns the per-session
