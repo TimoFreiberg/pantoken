@@ -1446,13 +1446,22 @@ export async function createPolytokenDriver(
       }
     },
 
-    async listCommands(_sessionId?: SessionId): Promise<CommandInfo[]> {
+    async listCommands(sessionId?: SessionId): Promise<CommandInfo[]> {
       // `polytoken print-slash-commands --format json` is the daemon's slash-menu
       // metadata (canonical, aliases, category, description). Cached per cwd because
       // the set is cwd-scoped (loaded from the workspace's config) and re-broadcast
       // on every session switch — re-shelling-out on each switch would be wasteful
       // when the set rarely changes. parseSlashCommands is the pure parser.
-      const cwd = active()?.cwd;
+      //
+      // cwd is resolved from the TARGETED session (per-client focus lives in the
+      // hub), not the driver-wide active one — otherwise client B typing `/` gets
+      // client A's cwd-scoped set. An EXPLICIT id that isn't warm returns the
+      // fallback rather than falling back to active()'s cwd (that would reintroduce
+      // the wrong-cwd bug in disguise); an omitted id means the active session. This
+      // is a normal read path (a client on the empty landing, a just-disposed
+      // session) so the miss is quiet — no target()'s loud console.error.
+      const ws = sessionId ? warm.get(sessionId) : active();
+      const cwd = ws?.cwd;
       if (!cwd) return [];
       const cached = commandsCache.get(cwd);
       if (cached) return cached;
@@ -1473,7 +1482,7 @@ export async function createPolytokenDriver(
       }
     },
 
-    async listFacets(_sessionId?: SessionId): Promise<string[]> {
+    async listFacets(sessionId?: SessionId): Promise<string[]> {
       // `polytoken vfs ls polytoken://facets` lists facet FILE names (e.g.
       // `execute.md`, `plan.md`), NOT facet names. The daemon's `POST /facet`
       // API and `active_facet` state field use the frontmatter `name` value
@@ -1485,7 +1494,14 @@ export async function createPolytokenDriver(
       // and the reload affordance needs a fresh read. Returns at minimum
       // ["execute", "plan"] (the builtins) so the picker always has the two
       // states it used to toggle between.
-      const cwd = active()?.cwd;
+      //
+      // cwd comes from the TARGETED session (like listCommands): an explicit id
+      // that isn't warm falls back to the builtins rather than active()'s cwd (a
+      // silent active fallback would resurface the wrong-cwd bug); an omitted id
+      // means the active session. The miss is quiet — this is a normal read path,
+      // not a target() action, so no loud console.error.
+      const ws = sessionId ? warm.get(sessionId) : active();
+      const cwd = ws?.cwd;
       if (!cwd) return ["execute", "plan"];
       try {
         const { stdout } = await runPolytokenText(polytokenBin, [
