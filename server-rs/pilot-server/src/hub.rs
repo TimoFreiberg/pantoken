@@ -22,17 +22,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
 use pilot_protocol::session_driver::{
-    HostUiRequest, ModelOption, SessionDriverEvent, SessionDriverEvent as E, SessionEventBase,
-    SessionId, SessionRef, SessionStatus,
+    HostUiRequest, HostUiResponse, ModelOption, SessionDriverEvent,
+    SessionDriverEvent as E, SessionEventBase, SessionId, SessionRef, SessionStatus,
 };
-use pilot_protocol::state::{fold_all, fold_event, SessionState};
+use pilot_protocol::state::{fold_all, fold_event, initial_session_state, SessionState};
 use pilot_protocol::wire::{
-    ClientMessage, ResumeToken, ServerMessage, SessionAttention, SessionAttentionPhase,
+    ClientMessage, PilotSettings, ResumeToken, ServerMessage, SessionAttention, SessionAttentionPhase,
 };
 use tokio::sync::mpsc;
 use tracing::error;
 
-use crate::driver::PilotDriver;
+use crate::driver::{NewSessionOptsData, PilotDriver};
 use crate::journal::{
     append_event, build_seed, bump_epoch, create_journal, meta_seed_events, tail_covers, try_merge,
     SessionJournal,
@@ -998,9 +998,6 @@ impl SessionHub {
                 let action = action.clone();
                 tokio::spawn(async move { driver.set_mcp_server(server_name, action, target).await; });
             }
-            ClientMessage::OpenSession { path: _ } => {
-                // TODO: switchTo — needs the atomic session-swap state machine
-            }
             ClientMessage::ListSessions => {
                 let driver = self.driver.clone();
                 let hub_clone = hub.clone();
@@ -1019,8 +1016,308 @@ impl SessionHub {
             ClientMessage::Mock { script } => {
                 self.driver.run_script(script.clone());
             }
+            ClientMessage::OpenSession { path } => {
+                let driver = self.driver.clone();
+                let hub_clone = hub.clone();
+                let path = path.clone();
+                tokio::spawn(async move {
+                    let seed = driver.open_session(path).await;
+                    switch_to(hub_clone, client_key, seed, false, true).await;
+                });
+            }
+            ClientMessage::ReloadSession { path } => {
+                let driver = self.driver.clone();
+                let hub_clone = hub.clone();
+                let path = path.clone();
+                tokio::spawn(async move {
+                    let seed = driver.reload_session(path).await;
+                    switch_to(hub_clone, client_key, seed, true, true).await;
+                });
+            }
+            ClientMessage::RespondUi { response, session_id } => {
+                let sid = session_id.clone().or(focused_id);
+                // First-responder-wins: only answer if the dialog is still pending.
+                let st = self.folded_state(sid.as_ref());
+                let response_rid = response_request_id(&response);
+                let should_respond = st
+                    .as_ref()
+                    .map(|s| {
+                        s.pending_approvals.iter().any(|p| p.request_id() == response_rid)
+                    })
+                    .unwrap_or(false);
+                if should_respond {
+                    self.driver.respond_ui(response.clone(), sid);
+                }
+            }
+            ClientMessage::RestoreQueue { session_id } => {
+                let target = session_id.clone().or(focused_id);
+                let driver = self.driver.clone();
+                let hub_clone = hub.clone();
+                tokio::spawn(async move {
+                    let restored = driver.clear_queue(target).await;
+                    let h = hub_clone.lock();
+                    h.send_to_client(client_key, ServerMessage::QueueRestored {
+                        steering: restored.steering,
+                        follow_up: restored.follow_up,
+                    });
+                });
+            }
+            ClientMessage::Branch { entry_id, summarize, session_id, .. } => {
+                let target_id = session_id.clone().or(focused_id);
+                // Gate: can't branch while a turn is running
+                let target_state = self.folded_state(target_id.as_ref());
+                if target_state.as_ref().map(|s| s.status == SessionStatus::Running || s.status == SessionStatus::Initializing).unwrap_or(false) {
+                    self.send_to_client(client_key, ServerMessage::Error {
+                        message: "Can't branch while a turn is running — stop it first.".into(),
+                        kind: None,
+                    });
+                    return;
+                }
+                let driver = self.driver.clone();
+                let hub_clone = hub.clone();
+                let entry_id = entry_id.clone();
+                let summarize = *summarize;
+                tokio::spawn(async move {
+                    let result = driver.branch_from(entry_id, summarize.unwrap_or(false), target_id).await;
+                    if !result.cancelled {
+                        let hub_clone2 = hub_clone.clone();
+                        switch_to(hub_clone, client_key, result.seed, true, false).await;
+                        if let Some(prefill) = result.editor_text {
+                            let h = hub_clone2.lock();
+                            h.send_to_client(client_key, ServerMessage::EditorPrefill { text: prefill });
+                        }
+                    }
+                });
+            }
+            ClientMessage::NewSession { cwd, worktree, model, thinking, facet, prompt, images, prompt_id, .. } => {
+                let first_prompt = prompt.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty());
+                let has_images = images.as_ref().map(|i| !i.is_empty()).unwrap_or(false);
+                let has_first_prompt = first_prompt.is_some() || has_images;
+                let driver = self.driver.clone();
+                let hub_clone = hub.clone();
+                let opts = NewSessionOptsData {
+                    cwd: cwd.clone(),
+                    worktree: *worktree,
+                    model: model.as_ref().map(|m| crate::driver::NewSessionModel {
+                        provider: m.provider.clone(),
+                        model_id: m.model_id.clone(),
+                    }),
+                    thinking: thinking.clone(),
+                    facet: facet.clone(),
+                    permission_monitor: None,
+                };
+                let prompt_text = first_prompt.map(|s| s.to_string());
+                let first_images = images.clone().unwrap_or_default();
+                let prompt_id_clone = prompt_id.clone();
+                tokio::spawn(async move {
+                    let seed = driver.new_session(opts).await;
+                    let sid = switch_to(hub_clone.clone(), client_key, seed, false, false).await;
+                    if let Some(sid) = sid {
+                        if has_first_prompt {
+                            let pid = prompt_id_clone.clone();
+                            let driver_clone = driver.clone();
+                            let prompt_text = prompt_text.clone();
+                            let images_clone = first_images.clone();
+                            let hub_clone2 = hub_clone.clone();
+                            tokio::spawn(async move {
+                                driver_clone.prompt(
+                                    prompt_text.unwrap_or_default(),
+                                    None,
+                                    Some(sid.clone()),
+                                    images_clone,
+                                    pid.clone(),
+                                ).await;
+                                let msg = ServerMessage::PromptResult {
+                                    prompt_id: pid.unwrap_or_default(),
+                                    accepted: true,
+                                    session_id: Some(sid),
+                                    error: None,
+                                };
+                                let h = hub_clone2.lock();
+                                h.send_to_client(client_key, msg);
+                            });
+                        }
+                    } else {
+                        let h = hub_clone.lock();
+                        h.send_to_client(client_key, ServerMessage::Error {
+                            message: "Could not create the new session".into(),
+                            kind: None,
+                        });
+                    }
+                });
+            }
+            ClientMessage::SetArchived { path, archived } => {
+                let driver = self.driver.clone();
+                let hub_clone = hub.clone();
+                let path = path.clone();
+                let archived = *archived;
+                tokio::spawn(async move {
+                    match driver.set_archived(path, archived).await {
+                        result if result.worktree_retained.is_some() => {
+                            let wr = result.worktree_retained.unwrap();
+                            let h = hub_clone.lock();
+                            h.send_to_client(client_key, ServerMessage::WorktreeRetained {
+                                path: wr.path,
+                                reason: wr.reason,
+                            });
+                        }
+                        _ => {
+                            // Re-broadcast the session list
+                            let sessions = driver.list_sessions().await;
+                            let default_cwd = std::env::var("HOME").unwrap_or_default();
+                            let mut h = hub_clone.lock();
+                            h.broadcast_session_list_with(sessions, default_cwd);
+                        }
+                    }
+                });
+            }
+            ClientMessage::RenameSession { path, name } => {
+                if name.trim().is_empty() {
+                    return;
+                }
+                let driver = self.driver.clone();
+                let hub_clone = hub.clone();
+                let path = path.clone();
+                let name = name.trim().to_string();
+                tokio::spawn(async move {
+                    driver.rename_session(path, name).await;
+                    // Re-broadcast the session list
+                    let sessions = driver.list_sessions().await;
+                    let default_cwd = std::env::var("HOME").unwrap_or_default();
+                    let mut h = hub_clone.lock();
+                    h.broadcast_session_list_with(sessions, default_cwd);
+                });
+            }
+            ClientMessage::CleanupWorktree { path, force } => {
+                let driver = self.driver.clone();
+                let hub_clone = hub.clone();
+                let path = path.clone();
+                let force = force.unwrap_or(false);
+                tokio::spawn(async move {
+                    let result = driver.cleanup_worktree(path, force).await;
+                    if !result.removed {
+                        let h = hub_clone.lock();
+                        h.send_to_client(client_key, ServerMessage::Error {
+                            message: format!("worktree not removed: {}", result.reason.unwrap_or("unknown reason".into())),
+                            kind: None,
+                        });
+                    }
+                    // Re-broadcast the session list either way
+                    let sessions = driver.list_sessions().await;
+                    let default_cwd = std::env::var("HOME").unwrap_or_default();
+                    let mut h = hub_clone.lock();
+                    h.broadcast_session_list_with(sessions, default_cwd);
+                });
+            }
+            ClientMessage::ListCommands => {
+                let driver = self.driver.clone();
+                let hub_clone = hub.clone();
+                let focused = focused_id.clone();
+                tokio::spawn(async move {
+                    let commands = driver.list_commands(focused).await;
+                    let h = hub_clone.lock();
+                    h.send_to_client(client_key, ServerMessage::CommandList { commands });
+                });
+            }
+            ClientMessage::ListFacets => {
+                let driver = self.driver.clone();
+                let hub_clone = hub.clone();
+                let focused = focused_id.clone();
+                tokio::spawn(async move {
+                    let facets = driver.list_facets(focused).await;
+                    let h = hub_clone.lock();
+                    h.send_to_client(client_key, ServerMessage::FacetList { facets });
+                });
+            }
+            ClientMessage::QueryFiles { query, cwd } => {
+                let driver = self.driver.clone();
+                let hub_clone = hub.clone();
+                let focused = focused_id.clone();
+                let query = query.clone();
+                let cwd = cwd.clone();
+                tokio::spawn(async move {
+                    let files = driver.list_files(query.clone(), focused, cwd).await;
+                    let h = hub_clone.lock();
+                    h.send_to_client(client_key, ServerMessage::FileList { query, files });
+                });
+            }
+            ClientMessage::QueryDir { path } => {
+                let driver = self.driver.clone();
+                let hub_clone = hub.clone();
+                let path = path.clone();
+                tokio::spawn(async move {
+                    let listing = driver.list_dir(path.clone()).await;
+                    let h = hub_clone.lock();
+                    h.send_to_client(client_key, ServerMessage::DirListing {
+                        listing,
+                    });
+                });
+            }
+            ClientMessage::StatPath { path } => {
+                let driver = self.driver.clone();
+                let hub_clone = hub.clone();
+                let path = path.clone();
+                tokio::spawn(async move {
+                    let stat = driver.stat_path(path.clone()).await;
+                    let h = hub_clone.lock();
+                    h.send_to_client(client_key, ServerMessage::PathStat {
+                        stat,
+                    });
+                });
+            }
+            ClientMessage::SetLoginShell { path } => {
+                let shell = path.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty()).map(|s| s.to_string());
+                if let Some(dir) = &self.data_dir {
+                    let _ = crate::settings_store::write_pilot_settings(dir, &PilotSettings {
+                        login_shell: shell,
+                        background_model: None,
+                        enabled_extensions: None,
+                    });
+                }
+                self.broadcast(self.pilot_settings_msg());
+            }
+            ClientMessage::SetBackgroundModel { spec } => {
+                let model_spec = spec.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty()).map(|s| s.to_string());
+                if let Some(dir) = &self.data_dir {
+                    let _ = crate::settings_store::write_pilot_settings(dir, &PilotSettings {
+                        login_shell: None,
+                        background_model: model_spec,
+                        enabled_extensions: None,
+                    });
+                }
+                self.broadcast(self.pilot_settings_msg());
+            }
+            ClientMessage::ApplyUpdate => {
+                if self.update_sha.is_some() && !self.applying {
+                    self.applying = true;
+                    self.broadcast(self.update_status_msg());
+                }
+            }
+            ClientMessage::ForceUpdate => {
+                self.force_requested = true;
+                if self.update_sha.is_some() && !self.applying {
+                    self.applying = true;
+                    self.broadcast(self.update_status_msg());
+                }
+            }
+            ClientMessage::OpenDataDir => {
+                if let Some(dir) = &self.data_dir {
+                    // Spawn the platform file manager (Finder/xdg-open/explorer)
+                    let dir_str = dir.display().to_string();
+                    #[cfg(unix)]
+                    {
+                        let cmd = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+                        let _ = std::process::Command::new(cmd).arg(&dir_str).spawn();
+                    }
+                } else {
+                    self.send_to_client(client_key, ServerMessage::Error {
+                        message: "data directory is not configured on this server".into(),
+                        kind: None,
+                    });
+                }
+            }
             _ => {
-                // Remaining cases — will be implemented as the port progresses.
+                // TrustResponse and any future variants — no-op for now.
             }
         }
     }
@@ -1193,6 +1490,143 @@ impl SessionHub {
     pub fn needs_live_refresh(&self) -> bool {
         !self.running.is_empty() && !self.clients.is_empty()
     }
+
+    /// Whether the hub has a journal for a session.
+    fn has_journal(&self, sid: &SessionId) -> bool {
+        self.journals.contains_key(sid)
+    }
+
+    /// Set/replace a journal for a session.
+    fn set_journal(&mut self, sid: SessionId, journal: SessionJournal) {
+        self.journals.insert(sid, journal);
+    }
+
+    /// Set a client's focused session.
+    fn set_client_focus(&mut self, client_key: u64, sid: SessionId) {
+        if let Some(conn) = self.clients.get_mut(&client_key) {
+            conn.focused_id = Some(sid);
+        }
+    }
+
+    /// Build the pilot-local-settings message: persisted settings + login-env
+    /// status + background-model warning.
+    fn pilot_settings_msg(&self) -> ServerMessage {
+        let settings = self.data_dir.as_ref()
+            .map(|dir| crate::settings_store::read_pilot_settings(dir))
+            .unwrap_or_default();
+        // Login env status is a stub for now — the real implementation needs
+        // the login-env shared module (Phase 5).
+        let env = pilot_protocol::wire::LoginEnvStatus {
+            active_shell: None,
+            ok: false,
+            detail: None,
+        };
+        ServerMessage::PilotSettings {
+            settings,
+            env,
+            pending_restart: false,
+            background_model_warning: None,
+        }
+    }
+
+    /// Fold a swap's seed into a scratch state to learn the authoritative session id,
+    /// accumulating running/attention changes on the way.
+    fn fold_swap_seed(&mut self, seed: &[SessionDriverEvent]) -> (bool, Option<SessionId>) {
+        let mut st = initial_session_state();
+        let mut meta_changed = false;
+        let sid: Option<SessionId>;
+        for e in seed {
+            fold_event(&mut st, e);
+            let e_sid = e.session_ref().session_id.clone();
+            meta_changed = self.track_running(&e_sid, e) || meta_changed;
+            meta_changed = self.track_attention(&e_sid, e) || meta_changed;
+        }
+        sid = st.session_ref.as_ref().map(|r| r.session_id.clone())
+            .or_else(|| seed.first().map(|e| e.session_ref().session_id.clone()));
+        (meta_changed, sid)
+    }
+}
+
+// ── switch_to free function ──────────────────────────────────────────────
+
+/// The atomic session-swap state machine. Runs as a spawned task.
+/// Locks the hub synchronously at each step; awaits the driver between steps.
+///
+/// `reseed`: restart the journal even if the session is already live.
+/// `retry_on_raced_events`: re-run the swap if live events raced the seed fetch.
+async fn switch_to(
+    hub: Arc<Mutex<SessionHub>>,
+    client_key: u64,
+    seed: Vec<SessionDriverEvent>,
+    reseed: bool,
+    retry_on_raced_events: bool,
+) -> Option<SessionId> {
+    let _ = retry_on_raced_events; // TODO: implement attach-window race detection
+
+    // Fold the seed to get the session id + track running/attention
+    let (meta_changed, sid) = {
+        let mut h = hub.lock();
+        if seed.is_empty() {
+            h.send_to_client(client_key, ServerMessage::Error {
+                message: "session switch returned no session".into(),
+                kind: None,
+            });
+            return None;
+        }
+        h.fold_swap_seed(&seed)
+    };
+
+    let Some(sid) = sid else {
+        let h = hub.lock();
+        h.send_to_client(client_key, ServerMessage::Error {
+            message: "session switch returned no session".into(),
+            kind: None,
+        });
+        return None;
+    };
+
+    // Start/restart the journal from the authoritative seed
+    {
+        let mut h = hub.lock();
+        if reseed || !h.has_journal(&sid) {
+            h.drop_pending(&sid);
+            let epoch = h.next_epoch();
+            h.set_journal(sid.clone(), create_journal(epoch, &seed));
+            if meta_changed {
+                h.broadcast_session_status();
+            }
+        }
+        // Move focus + re-seed the client
+        h.set_client_focus(client_key, sid.clone());
+        let msg = h.seed_msg(Some(&sid));
+        h.send_to_client(client_key, msg);
+    }
+
+    // Spawn async work: session list, commands, facets, file index
+    {
+        let h = hub.lock();
+        let driver = h.driver.clone();
+        let hub_clone = hub.clone();
+        tokio::spawn(async move {
+            let sessions = driver.list_sessions().await;
+            let default_cwd = std::env::var("HOME").unwrap_or_default();
+            let mut h = hub_clone.lock();
+            h.broadcast_session_list_with(sessions, default_cwd);
+        });
+    }
+    {
+        let h = hub.lock();
+        let driver = h.driver.clone();
+        let hub_clone = hub.clone();
+        let focused = Some(sid.clone());
+        tokio::spawn(async move {
+            let commands = driver.list_commands(focused).await;
+            let h = hub_clone.lock();
+            h.send_to_client(client_key, ServerMessage::CommandList { commands });
+        });
+    }
+
+    Some(sid)
 }
 
 // ── Free functions (port of hub.ts helpers) ─────────────────────────────
@@ -1302,6 +1736,16 @@ fn is_dialog_request(request: &HostUiRequest) -> bool {
         request.kind(),
         "confirm" | "select" | "input" | "editor" | "qna" | "permission"
     )
+}
+
+/// Extract the request_id from a HostUiResponse (all variants carry it).
+fn response_request_id(response: &HostUiResponse) -> &str {
+    match response {
+        HostUiResponse::Value { request_id, .. } => request_id,
+        HostUiResponse::Confirmed { request_id, .. } => request_id,
+        HostUiResponse::Answers { request_id, .. } => request_id,
+        HostUiResponse::Cancelled { request_id, .. } => request_id,
+    }
 }
 
 // ── Trait extensions for ergonomic access to SessionDriverEvent fields ───
