@@ -12,6 +12,7 @@ pub mod config_notify;
 pub mod event_map;
 pub mod facets;
 pub mod file_catalog;
+pub mod history_seed;
 pub mod models;
 pub mod sessions_registry;
 pub mod ui_bridge;
