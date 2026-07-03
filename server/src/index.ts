@@ -60,7 +60,8 @@ try {
 }
 
 // Release the lock on every clean exit path. The 'exit' handler is the backstop
-// (covers normal return + most signals); SIGINT/SIGTERM re-exit so 'exit' fires.
+// (covers normal return + the failsafe force-exit); the signal handler re-exits so
+// 'exit' fires. releaseLock is idempotent, so both paths releasing is safe.
 let released = false;
 function releaseLock(): void {
   if (released) return;
@@ -68,9 +69,25 @@ function releaseLock(): void {
   pidLock.release();
 }
 process.on("exit", releaseLock);
+
+// The signal path is a single orchestrator: it must drain driver-owned children (the
+// polytoken daemons) via driver.shutdown() BEFORE releasing the lock and exiting, or
+// every restart pays the stale-lease recovery path. But `driver` is assigned later via
+// a top-level await (daemon-driver construction), so a signal that lands during that
+// startup window can't reference it — a module-level `gracefulShutdown` bridges the gap.
+// It starts undefined; the listeners fall back to a bare lock-release-and-exit until the
+// driver is built and installs the real drain (below the driver construction). Registering
+// the listeners once, up front, means a Ctrl-C mid-startup still exits promptly instead of
+// being ignored until construction finishes.
+let gracefulShutdown: ((sig: string) => void) | undefined;
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {
-    log.info(`received ${sig} — shutting down`);
+    if (gracefulShutdown) {
+      gracefulShutdown(sig);
+      return;
+    }
+    // Pre-driver window: nothing to drain yet — release the lock and exit.
+    log.info(`received ${sig} during startup — shutting down`);
     releaseLock();
     process.exit(0);
   });
@@ -136,6 +153,35 @@ if (process.env.PILOT_DRIVER === "mock") {
     idleReapMs: config.idleReapMs,
   });
 }
+
+// Driver is now constructed — install the real signal orchestrator (the pre-driver
+// listeners above delegate to this). On SIGINT/SIGTERM: drain the driver's children
+// (polytoken /terminate + lease release), release the lock, then exit. A wedged drain
+// mustn't hang the kill, so a 3s force-exit failsafe is armed BEFORE we await — its
+// path still releases the lock (the 'exit' handler runs releaseLock, idempotent). A
+// second signal exits immediately rather than stacking drains.
+let shuttingDown = false;
+gracefulShutdown = (sig: string) => {
+  if (shuttingDown) {
+    log.info(`received ${sig} again — exiting now`);
+    process.exit(1);
+  }
+  shuttingDown = true;
+  log.info(`received ${sig} — shutting down`);
+  // Armed before the await so a hung driver.shutdown() can't wedge the process.
+  setTimeout(() => process.exit(1), 3000).unref();
+  void (async () => {
+    try {
+      await driver.shutdown?.();
+    } catch (e) {
+      log.error("driver shutdown failed during signal handling", {
+        error: e instanceof Error ? (e.stack ?? e.message) : e,
+      });
+    }
+    releaseLock();
+    process.exit(0);
+  })();
+};
 const push = new PushService();
 // Arm the greeting as the landing fixture BEFORE the hub is built — the hub seeds its
 // landing default from driver.defaultSeed() at construction.

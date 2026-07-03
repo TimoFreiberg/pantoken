@@ -1847,36 +1847,27 @@ export async function createPolytokenDriver(
     },
   };
 
-  // --- Driver shutdown: tear down all warm daemons on process exit. ---
+  // --- Driver shutdown: tear down all warm daemons. ---
   // (The harness turn-hygiene lesson: own the lifecycle of every child — a daemon
   // process is a long-lived child. Clear it on shutdown so no zombie daemons remain.)
-  // Three paths:
-  // - SIGTERM/SIGINT (the common kill paths for `bun run dev`): run the async shutdown
-  //   (HTTP /terminate + lease release), then exit.
-  // - process.on("exit") (synchronous backstop): can't await HTTP round-trips, so
-  //   hard-kill via killNow() (SIGTERM the daemon pid captured from /health).
+  // Two paths, and the driver does NOT register its own signal handlers — index.ts
+  // owns the single signal orchestrator so ordering is deterministic:
+  // - Signal (SIGTERM/SIGINT, the common kill paths for `bun run dev`): index.ts
+  //   AWAITS driver.shutdown() (below), which runs the async HTTP /terminate drain +
+  //   lease release for a clean daemon teardown, then releases the lock and exits.
+  //   disposeSession removes each drained session from `warm`, so the exit backstop
+  //   won't double-kill an already-drained daemon.
+  // - process.on("exit") (synchronous backstop): covers non-signal exits + the
+  //   failsafe force-exit path, where we can't await HTTP round-trips — hard-kill the
+  //   still-warm daemon pids directly via killNow() (plain SIGTERM to the pid).
   const shutdown = async () => {
     if (reaper) clearInterval(reaper);
     const all = [...warm.values()];
     warm.clear();
     await Promise.allSettled(all.map((ws) => disposeSession(ws)));
   };
+  driver.shutdown = shutdown;
 
-  // Async shutdown for signals — awaits HTTP /terminate for a clean daemon drain.
-  let shuttingDown = false;
-  const handleSignal = (sig: string) => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    console.error(`[polytoken] received ${sig} — shutting down daemons`);
-    void shutdown().then(() => process.exit(0));
-    // Force-exit after 3s if daemons don't drain (don't hang the kill).
-    setTimeout(() => process.exit(1), 3000).unref();
-  };
-  process.on("SIGTERM", () => handleSignal("SIGTERM"));
-  process.on("SIGINT", () => handleSignal("SIGINT"));
-
-  // Synchronous backstop for exit (covers normal return + signals that bypassed the
-  // async handler). Can't await — hard-kill the daemon pids directly.
   process.on("exit", () => {
     for (const ws of warm.values()) {
       ws.client.killNow();
