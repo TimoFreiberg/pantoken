@@ -79,8 +79,23 @@ TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
 bun run build
 ```
 
+### Installing a release
+
 The bundle is **ad-hoc signed, not notarized** (personal tool posture, same as the
-Swift shell): first launch on a new machine is right-click → Open once.
+Swift shell). That means a **browser-downloaded** copy carries the quarantine xattr
+and Gatekeeper refuses it outright — the misleading *"Pilot.app is damaged and can't
+be opened"* dialog, with no Open-Anyway path on current macOS (the right-click → Open
+bypass no longer applies to ad-hoc apps). Install without a browser instead:
+
+```bash
+curl -sSL https://github.com/TimoFreiberg/polytoken-gui/releases/latest/download/Pilot.app.tar.gz \
+  | tar xz -C /Applications
+```
+
+curl sets no quarantine attribute, so the app opens normally. Already downloaded a
+"damaged" copy? Un-quarantine it: `xattr -cr /path/to/Pilot.app`. After the first
+launch the app updates itself (self-applied updates never re-acquire quarantine —
+verified in the ADR spike).
 
 ### Test/dev launches
 
@@ -127,18 +142,19 @@ check (`PILOT_SHELL_UPDATE_AUTO=1` installs it unasked) + the tray item.
 
 **Endpoint** (both modes), resolved at runtime, re-checked every cycle:
 
-1. `PILOT_SHELL_UPDATE_URL` env var
+1. `PILOT_SHELL_UPDATE_URL` env var — the literal `off` disables checks (hermetic runs)
 2. a `shell-update-url` file in the data dir (one URL on a line)
-3. neither → checks stay dormant (the tray item explains how to enable)
+3. the baked-in default: the public releases repo,
+   `https://github.com/TimoFreiberg/polytoken-gui/releases/latest/download/latest.json`
 
-With a GitHub releases repo the stable endpoint is
-`https://github.com/<owner>/<releases-repo>/releases/latest/download/latest.json`.
+So installed apps update out of the box; the overrides exist for tests and for
+pointing a machine at alternative hosting (e.g. a tailnet static dir).
 
 ## Publishing a release
 
 ```bash
 # after bumping "version" in tauri.conf.json (keep Cargo.toml in step):
-bun scripts/desktop/publish.ts --repo <owner/releases-repo>   # --dry-run to inspect
+bun scripts/desktop/publish.ts --repo TimoFreiberg/polytoken-gui   # --dry-run to inspect
 ```
 
 The script builds signed (key from `TAURI_SIGNING_PRIVATE_KEY` or
@@ -184,14 +200,9 @@ and that shell declares a crash-loop after ~15s. Quit one first.
 
 ## Not done yet
 
-- Artifact hosting: create the public releases repo and publish the first release
-  (`scripts/desktop/publish.ts` is ready); then drop
-  `dangerousInsecureTransportProtocol` from tauri.conf.json (GitHub is https; the
-  https-only rule is release-builds-only, so local http updater testing keeps working).
 - Shell-stale awareness in clone mode: the Swift shell's `PILOT_APP_DESKTOP_SHA`
   stamp/notify path is deliberately not wired — in bundled mode the updater makes it
-  moot. Until the first release ships, a `desktop-tauri/` change on main means: build +
-  reinstall by hand.
+  moot.
 - Window frame persistence across launches (tauri-plugin-window-state, config'd to
   ignore visibility so close-to-tray doesn't restore hidden).
 - The early-overlay JS bridge (table above).

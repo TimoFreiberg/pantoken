@@ -239,6 +239,9 @@ if (import.meta.main) {
     manifestPath,
   ]);
   console.log(
-    `\npublished ${tag}. Running apps poll ${endpoint} and update within a minute.`,
+    `\npublished ${tag}. Running apps poll ${endpoint} and update within a minute.\n` +
+      `First install on a new machine (curl sets no quarantine xattr — a BROWSER\n` +
+      `download of an ad-hoc-signed app gets Gatekeeper's "damaged" refusal):\n` +
+      `  curl -sSL https://github.com/${repo}/releases/latest/download/Pilot.app.tar.gz | tar xz -C /Applications`,
   );
 }

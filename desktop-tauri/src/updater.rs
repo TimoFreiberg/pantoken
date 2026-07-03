@@ -14,14 +14,10 @@
 //!   mid-turn guarantee all carry over; only the payload changed (git pull+rebuild →
 //!   signed bundle swap + app relaunch).
 //!
-//! The endpoint is deliberately not hardcoded: artifact hosting is still an open owner
-//! decision (tangled remote → no GitHub releases; likely a Tailscale-served static dir).
-//! Resolution order:
-//!   1. PILOT_SHELL_UPDATE_URL env var
+//! Endpoint resolution order (re-resolved every cycle, so overrides apply live):
+//!   1. PILOT_SHELL_UPDATE_URL env var (`off` disables checks — hermetic test runs)
 //!   2. a `shell-update-url` file in the data dir (one URL, trimmed)
-//!   3. none → automatic checks stay dormant; the tray item says how to enable them.
-//!      (The periodic loop keeps re-resolving, so dropping the file into the data dir
-//!      enables updates without a relaunch.)
+//!   3. the baked-in default: the public releases repo (see DEFAULT_ENDPOINT).
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -38,16 +34,34 @@ use crate::state::AppState;
 /// and the periodic loop skips a cycle rather than racing a manual check's install.
 static CHECK_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
+/// Where releases live (ADR owner decision #2, answered 2026-07-03): the public
+/// releases repo — public so installed apps can download without credentials; it is
+/// not the code remote. `latest` always serves the newest release's manifest.
+const DEFAULT_ENDPOINT: &str =
+    "https://github.com/TimoFreiberg/polytoken-gui/releases/latest/download/latest.json";
+
+/// Endpoint resolution: PILOT_SHELL_UPDATE_URL env (the literal `off` disables checks
+/// entirely — hermetic test runs), then a `shell-update-url` file in the data dir
+/// (per-machine override), then the baked-in releases repo. None only via `off`.
 pub fn endpoint(app: &AppHandle) -> Option<String> {
     if let Ok(url) = std::env::var("PILOT_SHELL_UPDATE_URL") {
-        if !url.trim().is_empty() {
-            return Some(url.trim().to_string());
+        let url = url.trim();
+        if url == "off" {
+            return None;
+        }
+        if !url.is_empty() {
+            return Some(url.to_string());
         }
     }
     let state = app.state::<AppState>();
     let path = state.config.data_dir.join("shell-update-url");
-    let url = std::fs::read_to_string(path).ok()?.trim().to_string();
-    (!url.is_empty()).then_some(url)
+    if let Ok(contents) = std::fs::read_to_string(path) {
+        let url = contents.trim();
+        if !url.is_empty() {
+            return Some(url.to_string());
+        }
+    }
+    Some(DEFAULT_ENDPOINT.to_string())
 }
 
 /// Check for a shell update on a background thread. `manual` (tray click) surfaces every
@@ -65,15 +79,12 @@ pub fn spawn_check(app: AppHandle, manual: bool) {
 fn run_check(app: &AppHandle, manual: bool) {
     let Some(endpoint) = endpoint(app) else {
         if manual {
-            let state = app.state::<AppState>();
             app.dialog()
-                .message(format!(
-                    "No shell update endpoint is configured, so the app can't look for \
-                     new builds.\n\nSet PILOT_SHELL_UPDATE_URL, or put the manifest URL \
-                     in {}.",
-                    state.config.data_dir.join("shell-update-url").display()
-                ))
-                .title("Shell updates not configured")
+                .message(
+                    "Update checks are disabled (PILOT_SHELL_UPDATE_URL=off). Unset it \
+                     to check against the releases repo again.",
+                )
+                .title("Shell updates disabled")
                 .blocking_show();
         }
         return;

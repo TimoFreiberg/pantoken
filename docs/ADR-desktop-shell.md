@@ -207,19 +207,19 @@ replacement, and the Swift shell's simplicity (600 lines, zero deps) retired.
    loop replaces the TS watcher there (same defer policy, same sidebar card via
    `/update/state`) — verified end to end against a local manifest server (unattended
    0.1.0→0.1.1 in ~5s; deferred card→click→0.1.2). Clone mode remains the dev loop.
-2. Where do updater artifacts live — **still open; owner lean (2026-07-03): a separate
-   public GitHub releases repo** (code stays on tangled — release hosting doesn't have
-   to match the git remote). That's https, so `dangerousInsecureTransportProtocol`
-   gets REMOVED when it lands (the https-only rule is release-builds-only, so debug
-   updater testing is unaffected). Public is effectively required (a private repo
-   would bake an auth header into every install) — NOTE the recheck flagged earlier
-   now applies: bundled mode ships the whole client+hub inside the artifact, so a
-   public release repo publishes the app itself, not just the generic shell. The shell
-   keeps the endpoint runtime-configurable (`PILOT_SHELL_UPDATE_URL` env or a
-   `shell-update-url` file in the data dir; checks stay dormant until one exists), so
-   nothing is baked in. The publish script exists (`scripts/desktop/publish.ts`,
-   derives `latest.json` from the built bundle); only the repo creation + first
-   publish remain.
+2. ~~Where do updater artifacts live?~~ **Answered 2026-07-03: the public GitHub
+   releases repo `TimoFreiberg/polytoken-gui`** (code stays on tangled — release
+   hosting doesn't match the git remote; owner accepted that bundled artifacts ship
+   the whole app, hub+client included, in a public repo). First release v0.2.0
+   published via `scripts/desktop/publish.ts`. Consequences applied:
+   `dangerousInsecureTransportProtocol` removed (GitHub is https; the https-only rule
+   is release-builds-only, so local http updater testing on debug builds still works),
+   and the endpoint is baked in as the DEFAULT (`updater.rs`), overridable by
+   `PILOT_SHELL_UPDATE_URL` (literal `off` disables) or a data-dir `shell-update-url`
+   file. Distribution reality check: ad-hoc + notarization-skipped means a *browser*
+   download is Gatekeeper-"damaged" — first installs go through
+   `curl … | tar xz -C /Applications` (no quarantine xattr; self-updates never
+   re-acquire it), documented in desktop-tauri/README.md.
 3. Keep the headless launchd path (Mini with no window) documented as a supported
    variant of the sidecar-free hub, or fold the Mini onto the tray-resident app too?
    **Still open** (untouched by the spike).
