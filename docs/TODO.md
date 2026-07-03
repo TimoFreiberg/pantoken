@@ -13,47 +13,6 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
       "56y ago" (synthetic epoch timestamps — daemon gap, see
       `polytoken-upstream-feature-asks.md` #1); e2e suite asserts mock behaviors
       the live driver never produces.
-- [x] **Trust-wiring skip rests on an unverified rationale.** `subscribeTrust`/
-      `respondTrust` were skipped on the claim that the daemon's `capability`
-      interrogative covers untrusted-dir prompts via `respondUi`. Nobody has run
-      a live untrusted-dir test to confirm. Settle it: open a session in an
-      untrusted dir against the real daemon; if the capability path covers it,
-      *remove* the dead `TrustCard` + hub trust channel scaffolding rather than
-      leaving it permanently dangling; if it doesn't, wire the trust methods.
-      **human:** nah, polytoken doesn't have this. remove the TrustCard etc
-      **done:** removed — polytoken handles trust daemon-side; the mock-only
-      pipeline (TrustCard, wire messages, driver methods, fixtures, e2e) is
-      deleted.
-- [ ] the following findings by a fable agent:
-      2. Dead code (delete or consciously keep) — ~~[x] done~~
-      ~~PilotSettings.enabledExtensions is write-only.~~ Removed — was a pi-era
-      concept with no read site on this polytoken-only branch.
-      ~~setClientPresence/hasClients is dead by its own admission.~~ Removed —
-      the hub wiring, driver closure, and interface method are gone; trivial to
-      re-add when a real read site exists.
-      ~~The interactive trust pipeline can't fire in production.~~ Removed —
-      subscribeTrust/respondTrust were mock-only; the full chain (TrustEvent,
-      three PilotDriver methods, hub relay, three wire messages, client-store
-      handling, TrustCard.svelte, fixture, dev-bar button, e2e) is deleted.
-      polytoken handles project trust daemon-side; D12 updated.
-      3. Mechanical duplication (low-risk, ~600–700 lines)
-      Polytoken driver (~150 lines). ~~Done: snapshotFor(ws, status?) closure collapses 7 call sites; refreshAndEmit(ws, label, action) collapses 5 daemon-action methods; usageFromState wrapper deleted; queueMsg(item, ts) helper collapses 2 of 3 queue mapping sites (the 3rd is in event-map.ts with a different shape).~~
-      
-      Event map (~120 lines). ~~Done: notify(meta, requestId, message, level) builder collapses all 14 hostUiRequest{kind:"notify"} constructions into 2-liners.~~
-      
-      Hub handleClient (~100 lines). ~~Done: target(msg) (15 sites), errMsg(e) (7 sites), callOptional(fn, label, run) (5 fire-and-forget cases + restoreQueue), plus sessionStatusMsg() and updateStatusMsg() builders.~~
-      
-      Daemon client (~70 lines). ~~Done: raw-fetch timeout bug fixed (safeFetch); post/get merged into request() core (delegating wrappers kept for readability + error-derivation difference); 4 MCP methods collapsed into mcpServerAction(name, action); driver-side switch collapsed.~~
-      
-      Trivial: ~~parseClientMessage/parseServerMessage in wire.ts are byte-identical — merged into one generic parseMessage.~~ openSession/reloadSession in the driver share their resolve-id→cwd→warm→seed skeleton — consciously kept inline: the shared tail is 4 lines, and the two methods diverge meaningfully before it (openSession refocuses a warm session; reloadSession disposes first). Extracting a helper would obscure the control flow for negligible savings.
-      
-      4. Client: one dropdown primitive instead of four hand-rolled ones (~300–400 lines)
-      FacetBadge.svelte (267 lines) and PermissionBadge.svelte (215) are structurally identical: badge button + open/sel state + the same Escape/Arrow/Enter onKeydown + backdrop button + ~120 lines of near-identical panel CSS each; ModelPicker.svelte (506) is the bigger sibling. The repo already has the right convention for exactly this situation — Chevron and transition:reveal are mandated shared primitives — this is the same move one level up: a ui/MenuBadge.svelte owning the open/keyboard/backdrop/panel chrome, with items passed as snippets. Besides the LOC, it guarantees the pickers can't drift behaviorally (they already drift slightly: only some have the kbd-hint footer).
-      **done (partial):** ui/MenuBadge.svelte owns the badge button, open/close, Esc/↑↓/↵ keyboard nav, backdrop, and panel/group-title/kbd-hint CSS; FacetBadge (267→~120) and PermissionBadge (215→~90) now pass their items as a `{#snippet body({sel, close})}` snippet. ModelPicker.svelte (506) is intentionally left hand-rolled — it has two menus sharing one open/sel state, a filter-as-you-type search input, per-provider collapsible groups, wrapping (not clamped) arrow nav with Ctrl-n/Ctrl-p, composer-refocus-on-close-when-hotkey-opened, hotkey integration via store.hotkeyAction, Space-to-select, scroll-into-view, an empty-match state, and a disabled badge. Forcing those into the shared primitive would need so many config props it would defeat the dedup; the comment at the top of ModelPicker documents this. Net: ~220 lines removed, and the two simple pickers can no longer drift behaviorally.
-      
-      Related but softer: the big components are 40–55% scoped CSS (Settings 718/1305, Transcript 649/1724, Sidebar 598/1540). Most of that is legitimately component-specific; I'd only extract the genuinely repeated menu/panel/row classes into app.css as part of the primitive above, not chase CSS dedup broadly.
-      
-    
 
 ## ⚡ Performance
 
@@ -66,36 +25,15 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
       watch chunkier reveal vs token-smooth before committing. Subsumes C1/C3.
 - [ ] **Client markdown re-parse is O(n²) per streamed message (C1).**
       `Markdown.svelte` re-parses full content on every content change; the
-      parser has no incremental/prefix caching. Mostly fixed by N1. **Needs
-      doublechecking whether this changed with the polytoken migration.**
-- [ ] **Full-state resend on every reconnect (N3).** `addClient` sends a full
-      snapshot on every connect. No "I have up to event N" resume. Protocol v2
-      seeded seq/epoch + `requestSeed`, but full resume not built.
+      parser has no incremental/prefix caching. Was described as "mostly fixed
+      by N1" but N1 remains deferred and C1 was never independently verified.
+      Needs re-evaluation after N1 or standalone profiling.
 - [ ] **Virtualize the transcript + memoize per-turn grouping (C2).**
       `Transcript.svelte` recomputes grouping over the whole item list on every
       structural event. Memoize per-turn so only the active turn recomputes;
       real windowing after that.
-- [x] **Scope the copy-code `MutationObserver` (C4).** Observes
-      `{childList:true, subtree:true}` and runs `scan()` on every mutation batch
-      while streaming. Fix: only re-scan when an added node is/contains a `<pre>`.
-      **done:** the observer callback now inspects mutation records for added `<pre>`
-      nodes (or containers holding them) before calling `scan()`, skipping the
-      full-subtree `querySelectorAll` on text-delta batches that never add code blocks.
 
-## If fable doesn't do it first
-
-- ~~[x]~~ **1. Architecture: the hub double-bookkeeps every session.** Done:
-      `sessionStates` is deleted; the journal is the hub's single per-session
-      store and `ingest` is append-only, so the "journal iff state" lifecycle
-      invariant (and its error-recovery path) is unrepresentable. The rare
-      folded-state readers — respondUi's first-responder gate, branch's running
-      gate, /debug/state — fold the journal on demand (`foldedState`);
-      refreshUsage reads the ref off the journal's first event; the sessionReset
-      meta prefix folds journal + reset on demand. hub-journal.test.ts now pins
-      journal ≡ client-fold directly (the dual-store equivalence it used to
-      guard is gone by construction).
-
-  ## 🏗️ Architecture
+## 🏗️ Architecture
 
 - **ADR-desktop-shell.md** — Tauri v2 desktop shell proposal (proposed, awaiting
   owner sign-off). The "📐 Architecture direction" note that lived here
@@ -106,15 +44,9 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
       prompt-results ledger; `handleClient` is one giant switch. Extract
       collaborators the hub delegates to. Deferred — touches the app's central
       nervous system; wants its own change with the full e2e suite as the net.
-- [ ] **Replace `structuredClone` snapshots with structural sharing.** Full
-      deep-clone fires on every snapshot send (connect/switch/reconnect/branch
-      re-seed). Before revisiting, add a measurement of actual clone time on a
-      realistic long session.
 
 ## 🧹 Minor
 
-- [ ] `snapshotOf` (`hub.ts`): return state directly / stringify once at send;
-      clone only in test capture. (Measured: micro.)
 - [ ] Fix the two perf scripts (broken under Bun isolated `node_modules`) so the
       C1 measurements stay reproducible.
 
