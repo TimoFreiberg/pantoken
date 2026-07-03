@@ -3,6 +3,8 @@
 //! Axum-based WS bridge + HTTP routes + static serving.
 
 pub mod config;
+pub mod driver;
+pub mod hub;
 pub mod journal;
 pub mod pidlock;
 pub mod settings_store;
