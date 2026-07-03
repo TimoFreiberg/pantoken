@@ -58,11 +58,40 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
       prompt-results ledger; `handleClient` is one giant switch. Extract
       collaborators the hub delegates to. Deferred — touches the app's central
       nervous system; wants its own change with the full e2e suite as the net.
+- [ ] **Flatten the per-feature fan-out (the CAUSE of hub/driver growth).** A
+      simple daemon toggle costs six touches: wire variant → hub case →
+      `PilotDriver` method (~30 methods, half optional behind `?.`) → two driver
+      impls → store method → component. The pass-through class (compact,
+      clearContext, setMcpServer, toggleAdventurousHandoff,
+      setNotificationAutodrain, …) shares one shape — POST → refresh → snapshot;
+      the polytoken driver already unified them behind `refreshAndEmit` — so a
+      data-driven `sessionAction(kind, payload)` seam would collapse roughly a
+      third of the hub switch and driver interface. Do it before/with the hub
+      decomposition; it shrinks the thing being decomposed.
+- [ ] **Decompose the client store (the client-side god object).**
+      `client/src/lib/store.svelte.ts` (~2.5k lines) mixes protocol fold/resume
+      machinery, outbox durability, draft persistence, nav history, toasts,
+      theme/font, push, and settings. The seams are half-cut already
+      (prompt-outbox.ts, delivery.ts, session-filter.ts) — extract
+      connection/seed/resume, outbox, and drafts modules. Same caveat as the
+      hub: its own change, e2e as the net.
 
 ## 🧹 Minor
 
 - [ ] Fix the two perf scripts (broken under Bun isolated `node_modules`) so the
       C1 measurements stay reproducible.
+- [ ] `maybeNotify` (hub.ts) re-implements the blocking-dialog kind list by hand
+      instead of using `isDialogRequest` — the two drift when a new dialog kind
+      lands.
+- [ ] Journal epochs are `Date.now()`-seeded per process; a fast restart could in
+      principle re-mint an epoch a stale resume token still holds (needs more
+      epoch bumps than elapsed ms — effectively unreachable). Revisit only if
+      phantom-resume bugs ever show up.
+- [ ] `bun run check` has no enforcement — a red server typecheck sat on main
+      unnoticed (fixed in 204d3361) and the chain short-circuits, so everything
+      after it had stopped gating too. Decide: pre-push hook vs CI.
+- [ ] Settings.svelte carries ~10 unused CSS selectors (svelte-check warnings)
+      left behind by a refactor — sweep them.
 
 ## 💡 Brainstorm (unfiltered — triage into the lanes above)
 
