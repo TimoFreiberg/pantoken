@@ -1,8 +1,8 @@
 # Pilot — Design
 
-A personal, single-user remote-control web UI for a **polytoken** coding agent.
+A personal, single-user remote-control GUI for a **polytoken** coding agent.
 polytoken runs as out-of-process daemons (one per session); pilot drives it
-from a browser/phone over Tailscale. Default look/feel mirrors the Claude app.
+from a desktop GUI/browser/phone over Tailscale. Default look/feel mirrors Codex desktop/Claude app.
 
 ## Architecture
 
@@ -58,31 +58,6 @@ journal (clients fold from zero); `hello.resume` tail-replays the gap on
 reconnect; `requestSeed` covers client-detected gaps. No server-side fold is
 client-visible — a future Rust hub becomes a journaling router, no foldEvent
 port needed.
-
-## Feature status
-
-Built and green (`bun test` unit + `bun run test:e2e` Playwright across
-desktop + mobile):
-
-- **Transcript** — streaming text, collapsible thinking, tool cards
-  (running/ok/error, expandable), XSS-safe markdown, user bubbles, notices.
-- **Composer** — Enter-to-send, steer/follow-up queueing, slash-command
-  typeahead, `@`-file mention, image attach, model + thinking + facet pickers,
-  permission-mode + adventurous-handoff toggles, Ctrl+R prompt history.
-- **Approvals** — confirm/select/input/editor cards, goal proposals,
-  unknown-type dismiss, binary yes/no, generic JSON fallback.
-- **Sessions** — project-grouped sidebar (collapsible rail / mobile drawer),
-  create/open/rename/archive, arbitrary-cwd new sessions, ⌘↑/⌘↓ prompt nav,
-  rewind (click-twice confirmed), context meter with compact/clear.
-- **Right sidebar** — flagged files + todos (polytoken parity).
-- **Multi-client** — server-authoritative broadcast, snapshot-on-(re)connect,
-  first-responder-wins approvals.
-- **Notifications** — Web Push (SW + VAPID) for backgrounded phone; verified
-  on iPhone. Requires real `PILOT_VAPID_SUBJECT`.
-- **Remote infra** — single-process server serves the built client, app-level
-  auth token gate (WS + `/debug`), loopback bind, `tailscale serve` + deploy.
-- **PWA** — installable (manifest, SW), tab-title mirroring, build-sha
-  update prompt, WS compression, auto-port self-isolation for e2e/preview.
 
 Open work and backlog live in `TODO.md`. Architecture direction (Tauri
 desktop shell, Rust hub) lives in `ADR-desktop-shell.md`.

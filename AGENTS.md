@@ -1,9 +1,10 @@
 # AGENTS.md — working in the pilot repo
 
-Pilot is a personal, single-user remote-control web UI for a coding agent. The agent
-runs as an out-of-process daemon; pilot drives it from a browser/phone over Tailscale.
-The UI mirrors the Claude app. See `docs/DESIGN.md` for architecture + the feature
-roadmap, `docs/DECISIONS.md` for settled calls, `docs/TODO.md` for the backlog.
+Pilot is a personal, single-user remote-control GUI for a coding agent.
+The agent is a separate codebase, maintained by a separate author, we only build a GUI for an existing product here.
+Pilot is (/ aims to be) a desktop GUI and a mobile app.
+The UI/UX mirror the Claude app or Codex desktop, but with focused features.
+See `docs/DESIGN.md` for architecture, `docs/DECISIONS.md` for settled calls, `docs/TODO.md` for the backlog.
 
 > **This branch is polytoken-only.** The live driver is the **polytoken** daemon,
 > with a **mock** driver for dev/e2e. `PILOT_DRIVER=pi` is a hard error.
