@@ -1,5 +1,7 @@
 //! Pilot server binary (Rust port of `server/src/index.ts`).
 
+pub mod journal;
+
 use axum::{routing::get, Json, Router};
 use serde_json::json;
 use std::net::SocketAddr;
