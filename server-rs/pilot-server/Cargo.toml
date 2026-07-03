@@ -26,3 +26,4 @@ async-trait = { workspace = true }
 parking_lot = { workspace = true }
 flate2 = { workspace = true }
 futures-util = { workspace = true }
+urlencoding = { workspace = true }
