@@ -545,10 +545,20 @@ class PilotStore {
     if (this.draft.thinking && this.draft.thinking !== def.thinkingLevel)
       cfg.thinking = this.draft.thinking;
     // "execute" is the daemon default — only a divergent pick is worth pinning.
-    if (this.draft.facet && this.draft.facet !== "execute") cfg.facet = this.draft.facet;
-    if (this.draft.permissionMonitor && this.draft.permissionMonitor !== "standard")
+    if (this.draft.facet && this.draft.facet !== "execute")
+      cfg.facet = this.draft.facet;
+    if (
+      this.draft.permissionMonitor &&
+      this.draft.permissionMonitor !== "standard"
+    )
       cfg.permissionMonitor = this.draft.permissionMonitor;
-    if (cfg.worktree || cfg.model || cfg.thinking || cfg.facet || cfg.permissionMonitor)
+    if (
+      cfg.worktree ||
+      cfg.model ||
+      cfg.thinking ||
+      cfg.facet ||
+      cfg.permissionMonitor
+    )
       this.draftConfigMap[key] = cfg;
     else delete this.draftConfigMap[key];
     persistDraftConfigMap(this.draftConfigMap);
@@ -1731,7 +1741,8 @@ class PilotStore {
         model: saved.model ?? this.draft.model,
         thinking: saved.thinking ?? this.draft.thinking,
         facet: saved.facet ?? this.draft.facet,
-        permissionMonitor: saved.permissionMonitor ?? this.draft.permissionMonitor,
+        permissionMonitor:
+          saved.permissionMonitor ?? this.draft.permissionMonitor,
       };
     // Record the draft view for ⌘[ / ⌘] history and remember its project for ⌘N.
     this.pushNav({ kind: "draft", cwd });
@@ -1826,6 +1837,18 @@ class PilotStore {
     // optimistic first-prompt row (transcriptItems) + the "Starting session…" indicator,
     // both of which carry seamlessly into the real session once its seed arrives.
     this.session = initialSessionState();
+    // Invalidate the fold watermark alongside the blanked state. The hub keeps this
+    // connection focused on the OLD session until the newSession switch lands (a live
+    // daemon spawn takes seconds), so its events keep streaming. Left pointing at the old
+    // session, those frames would pass the epoch/seq gate in onServer's "event" case and
+    // fold into this blank creating state — the old transcript bleeding into "Starting
+    // session…". epoch 0 makes every stale frame hit the epoch-mismatch drop; it can't
+    // storm requestSeed (that fires only on a seq gap WITHIN a matching epoch). The new
+    // session's seed re-arms the watermark on arrival.
+    this.seedSessionId = null;
+    this.seedEpoch = 0;
+    this.seedSeq = 0;
+    this.seedRequested = false;
     this.creatingSession = {
       promptId,
       text: t,
@@ -1955,7 +1978,9 @@ class PilotStore {
    *  else the active session's. Mirrors composerConfig's draft-awareness for the
    *  FacetBadge and the Shift+Tab hotkey. */
   get composerFacet(): string {
-    return this.draft ? (this.draft.facet ?? "execute") : (this.session.facet ?? "execute");
+    return this.draft
+      ? (this.draft.facet ?? "execute")
+      : (this.session.facet ?? "execute");
   }
   /** The permission-monitor mode the composer should advertise: the draft's while a
    *  draft is open, else the active session's. Mirrors composerConfig's draft-awareness. */
@@ -2412,12 +2437,27 @@ function loadDraftConfigMap(): Record<string, StoredDraftConfig> {
       if (m && typeof m.provider === "string" && typeof m.modelId === "string")
         cfg.model = { provider: m.provider, modelId: m.modelId };
       if (typeof rec.thinking === "string") cfg.thinking = rec.thinking;
-      if (typeof rec.facet === "string" && (rec.facet === "execute" || rec.facet === "plan"))
+      if (
+        typeof rec.facet === "string" &&
+        (rec.facet === "execute" || rec.facet === "plan")
+      )
         cfg.facet = rec.facet;
       const pm = rec.permissionMonitor as string | undefined;
-      if (pm && (pm === "standard" || pm === "bypass" || pm === "bypass_plus" || pm === "autonomous"))
+      if (
+        pm &&
+        (pm === "standard" ||
+          pm === "bypass" ||
+          pm === "bypass_plus" ||
+          pm === "autonomous")
+      )
         cfg.permissionMonitor = pm;
-      if (cfg.worktree || cfg.model || cfg.thinking || cfg.facet || cfg.permissionMonitor)
+      if (
+        cfg.worktree ||
+        cfg.model ||
+        cfg.thinking ||
+        cfg.facet ||
+        cfg.permissionMonitor
+      )
         out[k] = cfg;
     }
     return out;
