@@ -9,6 +9,7 @@ use pilot_protocol::session_driver::{
     CommandInfo, DirListing, FileInfo, HostUiResponse, ImageContent, ModelDefaults, ModelOption,
     PermissionMonitorMode, SessionDriverEvent, SessionId, SessionListEntry, SessionUsage, PathStat,
 };
+use pilot_protocol::wire::{DeliveryMode, McpAction};
 
 /// Options for `PilotDriver::new_session`. All optional: a bare new session
 /// defaults to $HOME. The first `prompt` is delivered by the hub after
@@ -84,7 +85,7 @@ pub trait PilotDriver: Send + Sync {
     async fn prompt(
         &self,
         text: String,
-        deliver_as: Option<String>,
+        deliver_as: Option<DeliveryMode>,
         session_id: Option<SessionId>,
         images: Vec<ImageContent>,
         prompt_id: Option<String>,
@@ -214,7 +215,7 @@ pub trait PilotDriver: Send + Sync {
     async fn set_mcp_server(
         &self,
         _server_name: String,
-        _action: String,
+        _action: McpAction,
         _session_id: Option<SessionId>,
     ) {
     }
