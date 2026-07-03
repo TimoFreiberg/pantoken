@@ -121,6 +121,9 @@ if (import.meta.main) {
   );
 
   // ── commit + tag ──
+  // The subject "Release vX.Y.Z" is LOAD-BEARING: ci.yml skips the branch-push run
+  // for commits with this prefix (the tag push runs the full pipeline instead, so a
+  // release costs one CI run, not two). Change it there if you change it here.
   await capture([
     "jj",
     "commit",

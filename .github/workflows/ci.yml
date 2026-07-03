@@ -22,9 +22,16 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# A release lands as TWO push events for the same commit — refs/heads/main and the
+# refs/tags/v* that release.ts pushes right after. Running tests twice buys nothing:
+# the tag run is the one that gates the release job, so the test jobs skip the
+# branch-push twin. The marker is release.ts's commit subject ("Release vX.Y.Z") —
+# load-bearing coupling, noted on both sides. A hand-pushed release commit with a
+# different subject just runs twice (the old behavior), never skips the release.
 jobs:
   web:
     name: web — typecheck, unit, e2e
+    if: github.ref_type == 'tag' || github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Release v')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -57,6 +64,7 @@ jobs:
 
   desktop:
     name: desktop shell — fmt, clippy
+    if: github.ref_type == 'tag' || github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Release v')
     runs-on: macos-14
     timeout-minutes: 30
     steps:
