@@ -1687,7 +1687,10 @@ fn switch_to(
     hub.lock().swaps_in_flight += 1;
     let swap = swap.take().unwrap();
     let seed = swap(hub.clone()).await;
-    hub.lock().swaps_in_flight = hub.lock().swaps_in_flight.saturating_sub(1);
+    {
+        let mut h = hub.lock();
+        h.swaps_in_flight = h.swaps_in_flight.saturating_sub(1);
+    }
 
     // ── Fold the seed + set up journal/focus
     let sid = finish_switch(&hub, client_key, seed, reseed, retry_on_raced_events).await;
@@ -1749,7 +1752,7 @@ async fn finish_switch(
     };
 
     // Start/restart the journal from the authoritative seed
-    {
+    let superseded = {
         let mut h = hub.lock();
         if reseed || !h.has_journal(&sid) {
             h.drop_pending(&sid);
@@ -1759,23 +1762,46 @@ async fn finish_switch(
                 h.broadcast_session_status();
             }
         }
-        // Move focus + re-seed the requesting client
-        h.set_client_focus(client_key, sid.clone());
-        let msg = h.seed_msg(Some(&sid));
-        h.send_to_client(client_key, msg);
+        // S2 fix: if a newer switch queued up while this one was warming, skip
+        // the focus-move + seed-send — the queued switch will send the
+        // authoritative view. (Mirrors TS `if (conn.pendingSwitch) return sid;`)
+        let superseded = h
+            .clients
+            .get(&client_key)
+            .map(|c| c.pending_switch.is_some())
+            .unwrap_or(false);
+        if !superseded {
+            h.set_client_focus(client_key, sid.clone());
+            let msg = h.seed_msg(Some(&sid));
+            h.send_to_client(client_key, msg);
+        }
+        superseded
+    };
+
+    // S2: if superseded by a queued switch, skip co-viewer reseed + refresh
+    // (the queued switch will handle all of this when it runs)
+    if superseded {
+        return Some(sid);
     }
 
     // C6 fix: on a reseed (branch/reload), re-seed ALL viewers focused on this
-    // session — a second client viewing the same session needs the fresh seed
-    // to recover from its now-wedged journal.
+    // session EXCEPT the requester (who was already seeded above) — a second
+    // client viewing the same session needs the fresh seed to recover from its
+    // now-wedged journal.
     if reseed {
-        let viewers: Vec<mpsc::Sender<ServerMessage>> = {
-            let h = hub.lock();
-            h.clients_focused(&sid)
-        };
         let msg = {
             let h = hub.lock();
             h.seed_msg(Some(&sid))
+        };
+        // Re-seed co-viewers (excluding the requester, already seeded above)
+        let viewers: Vec<mpsc::Sender<ServerMessage>> = {
+            let h = hub.lock();
+            h.clients
+                .iter()
+                .filter(|(k, _)| **k != client_key)
+                .filter(|(_, c)| c.focused_id.as_ref() == Some(&sid))
+                .map(|(_, c)| c.send.clone())
+                .collect()
         };
         for send in viewers {
             let _ = send.try_send(msg.clone());
@@ -1818,16 +1844,16 @@ async fn finish_switch(
             h.send_to_client(client_key, ServerMessage::FacetList { facets });
         });
     }
-    // C7: file index
+    // C7: file index (session-scoped file tree, NOT the search variant)
     {
         let h = hub.lock();
         let driver = h.driver.clone();
         let hub_clone = hub.clone();
         let focused = Some(sid.clone());
         tokio::spawn(async move {
-            let files = driver.list_files(String::new(), focused, None).await;
+            let (files, truncated) = driver.list_file_index(focused).await;
             let h = hub_clone.lock();
-            h.send_to_client(client_key, ServerMessage::FileList { query: String::new(), files });
+            h.send_to_client(client_key, ServerMessage::FileIndex { files, truncated });
         });
     }
 
