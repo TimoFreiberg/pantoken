@@ -100,9 +100,10 @@ resolved at runtime, in order:
 
 Checks run at startup (asks before installing; set `PILOT_SHELL_UPDATE_AUTO=1` for the
 unattended install-and-relaunch posture) and on demand from the tray. Where the
-manifest + artifacts live is still an open decision (the git remote is tangled, so
-GitHub releases are out; a Tailscale-served static dir is the likely home —
-`docs/ADR-desktop-shell.md`, "Owner decisions needed").
+manifest + artifacts live is still an open decision; the current lean is a **separate
+public GitHub releases repo** (code stays on tangled; the stable endpoint would be
+`https://github.com/<owner>/<releases-repo>/releases/latest/download/latest.json`) —
+`docs/ADR-desktop-shell.md`, "Owner decisions needed".
 
 Publishing a shell release is manual for now:
 
@@ -120,10 +121,11 @@ you built) — a higher manifest version over an older artifact makes every rela
 "update" again, an infinite loop under `PILOT_SHELL_UPDATE_AUTO=1`. The future publish
 script should derive the manifest from the bundle rather than trust a hand-typed value.
 
-Plain-http endpoints are allowed (`dangerousInsecureTransportProtocol` in
-`tauri.conf.json`) — deliberate: update integrity comes from the minisign signature,
-not the transport, and the expected endpoint lives inside the tailnet. If the posture
-ever changes, `tailscale serve` provides https for free.
+Plain-http endpoints are currently allowed (`dangerousInsecureTransportProtocol` in
+`tauri.conf.json`) — tolerable because update integrity comes from the minisign
+signature, not the transport. **Remove the flag once hosting lands on https** (GitHub
+releases would do it): the plugin's https-only rule is release-builds-only, so local
+updater testing on debug builds keeps working either way.
 
 **Keys:** the minisign keypair lives at `~/.tauri/pilot-shell.key` (+`.pub`),
 passwordless — it never leaves this machine. The public key is baked into

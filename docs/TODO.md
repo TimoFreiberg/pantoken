@@ -56,9 +56,11 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
   in it. Remaining to fully retire `desktop/` (Swift):
   - [ ] Dogfood `desktop-tauri/` (tray, close-to-tray, titlebar/traffic-light fit,
         update overlay — the visual bits an agent can't eyeball).
-  - [ ] Decide updater-artifact hosting (ADR "Owner decisions" #2; likely a
-        Tailscale-served dir) + a publish script that derives `latest.json` from the
-        built bundle (a version-mismatched manifest loops under AUTO update).
+  - [ ] Set up updater-artifact hosting (ADR "Owner decisions" #2; owner lean: a
+        separate public GitHub releases repo — drop the
+        `dangerousInsecureTransportProtocol` flag when it lands) + a publish script
+        that derives `latest.json` from the built bundle (a version-mismatched
+        manifest loops under AUTO update).
   - [ ] Then delete `desktop/` + its watcher desktop-sha plumbing, and point
         docs/DESIGN.md at the Tauri shell.
 - [ ] **Decompose the hub (god object).** `server/src/hub.ts` owns the per-session
