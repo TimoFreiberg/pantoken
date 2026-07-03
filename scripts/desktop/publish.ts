@@ -91,6 +91,7 @@ function parseArgs(argv: string[]): {
   repo: string;
   dryRun: boolean;
   skipBuild: boolean;
+  mustMatchTag: string | undefined;
 } {
   const dryRun = argv.includes("--dry-run");
   const skipBuild = argv.includes("--skip-build");
@@ -105,7 +106,11 @@ function parseArgs(argv: string[]): {
         "public GitHub repo that hosts release artifacts (not necessarily the code remote).",
     );
   }
-  return { repo, dryRun, skipBuild };
+  const tagIdx = argv.indexOf("--tag-must-match");
+  const mustMatchTag = tagIdx >= 0 ? argv[tagIdx + 1] : undefined;
+  if (tagIdx >= 0 && !mustMatchTag)
+    fail("--tag-must-match needs a value (the pushed git tag, e.g. v0.2.1)");
+  return { repo, dryRun, skipBuild, mustMatchTag };
 }
 
 /** The signing key the build needs to produce updater artifacts. Env wins; falls back
@@ -122,7 +127,8 @@ function signingEnv(): Record<string, string> {
     fail(
       `no updater signing key: set TAURI_SIGNING_PRIVATE_KEY or create ${keyfile} ` +
         `(bunx tauri signer generate -w ${keyfile}) — without it the build can't ` +
-        `produce updater artifacts`,
+        `produce updater artifacts. In CI, add the key file's CONTENTS as an Actions ` +
+        `secret: gh secret set TAURI_SIGNING_PRIVATE_KEY < ${keyfile}`,
     );
   }
   return {
@@ -133,16 +139,38 @@ function signingEnv(): Record<string, string> {
 }
 
 if (import.meta.main) {
-  const { repo, dryRun, skipBuild } = parseArgs(process.argv.slice(2));
+  const { repo, dryRun, skipBuild, mustMatchTag } = parseArgs(
+    process.argv.slice(2),
+  );
 
   // ── preflight ──
-  const gh = await capture(["gh", "auth", "status"]);
-  if (gh.code !== 0 && !dryRun) {
-    fail(
-      `\`gh auth status\` failed — install GitHub CLI and run \`gh auth login\`.\n${gh.stderr}`,
-    );
+  // A token env (Actions sets GH_TOKEN/GITHUB_TOKEN) authenticates gh on its own;
+  // `gh auth status` only interrogates interactive logins, so skip it there.
+  if (!process.env.GH_TOKEN && !process.env.GITHUB_TOKEN) {
+    const gh = await capture(["gh", "auth", "status"]);
+    if (gh.code !== 0 && !dryRun) {
+      fail(
+        `\`gh auth status\` failed — install GitHub CLI and run \`gh auth login\`.\n${gh.stderr}`,
+      );
+    }
   }
   const sign = signingEnv();
+
+  // Fast tag guard before the multi-minute build: the pushed tag must match the
+  // version about to be built (tauri.conf.json). The authoritative check happens
+  // again below against the BUILT bundle. Skipped with --skip-build, where existing
+  // artifacts (not the config) are what's being published.
+  if (mustMatchTag && !skipBuild) {
+    const conf = (await Bun.file(
+      join(repoRoot, "desktop-tauri", "tauri.conf.json"),
+    ).json()) as { version?: string };
+    if (`v${conf.version}` !== mustMatchTag) {
+      fail(
+        `tag ${mustMatchTag} does not match tauri.conf.json version ${conf.version} — ` +
+          `tag the commit that bumps the version (scripts/desktop/release.ts does both).`,
+      );
+    }
+  }
 
   // ── build (signed, updater artifacts included) ──
   if (!skipBuild) {
@@ -176,6 +204,15 @@ if (import.meta.main) {
   if (!/^\d+\.\d+\.\d+/.test(version))
     fail(`implausible bundle version '${version}'`);
   const tag = `v${version}`;
+
+  // The authoritative tag guard: what was BUILT must be what the pushed tag names —
+  // a mismatched manifest is the infinite-update-loop failure mode.
+  if (mustMatchTag && tag !== mustMatchTag) {
+    fail(
+      `built bundle is ${tag} but the pushed tag is ${mustMatchTag} — refusing to ` +
+        `publish a manifest that disagrees with its artifact.`,
+    );
+  }
 
   // ── compose latest.json ──
   const signature = (await Bun.file(sig).text()).trim();
