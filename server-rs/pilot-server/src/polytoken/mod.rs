@@ -9,6 +9,7 @@
 
 pub mod commands;
 pub mod config_notify;
+pub mod event_map;
 pub mod facets;
 pub mod file_catalog;
 pub mod models;
