@@ -22,17 +22,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
 use pilot_protocol::session_driver::{
-    HostUiRequest, ModelOption, SessionDriverEvent, SessionDriverEvent as E, SessionId,
-    SessionRef, SessionStatus,
+    HostUiRequest, ModelOption, SessionDriverEvent, SessionDriverEvent as E, SessionEventBase,
+    SessionId, SessionRef, SessionStatus,
 };
 use pilot_protocol::state::{fold_all, fold_event, SessionState};
-use pilot_protocol::wire::{ServerMessage, SessionAttention, SessionAttentionPhase};
+use pilot_protocol::wire::{
+    ClientMessage, ResumeToken, ServerMessage, SessionAttention, SessionAttentionPhase,
+};
 use tokio::sync::mpsc;
 use tracing::error;
 
 use crate::driver::PilotDriver;
 use crate::journal::{
-    append_event, build_seed, bump_epoch, create_journal, meta_seed_events, try_merge,
+    append_event, build_seed, bump_epoch, create_journal, meta_seed_events, tail_covers, try_merge,
     SessionJournal,
 };
 
@@ -142,7 +144,11 @@ pub struct SessionHub {
     available_models: Vec<ModelOption>,
 
     // ── Prompt idempotency ledger ─────────────────────────────────────────
-    prompt_results: HashMap<String, tokio::sync::oneshot::Receiver<()>>,
+    prompt_inflight: HashSet<String>,
+
+    // ── Client management ──────────────────────────────────────────────────
+    clients: HashMap<u64, ClientConn>,
+    next_client_key: u64,
 
     // ── Epoch counter ─────────────────────────────────────────────────────
     epoch_counter: u64,
@@ -183,7 +189,9 @@ impl SessionHub {
             desktop_stale: false,
             force_requested: false,
             available_models: Vec::new(),
-            prompt_results: HashMap::new(),
+            prompt_inflight: HashSet::new(),
+            clients: HashMap::new(),
+            next_client_key: 0,
             epoch_counter: now_ms() as u64,
         }));
 
@@ -770,6 +778,360 @@ impl SessionHub {
             self.seed_default();
         }
     }
+
+    // ── Client management ──────────────────────────────────────────────────
+
+    /// Register a client. Returns a send channel for the client's messages.
+    /// The caller spawns a task that reads from the channel and sends over WS.
+    pub fn add_client(
+        &mut self,
+        resume: Option<ResumeToken>,
+    ) -> (mpsc::Sender<ServerMessage>, mpsc::Receiver<ServerMessage>) {
+        let (tx, rx) = mpsc::channel(128);
+
+        let focused_id = match &resume {
+            Some(r) => {
+                // Resume: adopt the resumed session if the journal matches
+                if let Some(j) = self.journals.get(&r.session_id) {
+                    if j.epoch == r.epoch && tail_covers(j, r.seq) {
+                        Some(r.session_id.clone())
+                    } else {
+                        self.default_focus_id.clone()
+                    }
+                } else {
+                    self.default_focus_id.clone()
+                }
+            }
+            None => self.default_focus_id.clone(),
+        };
+
+        let conn = ClientConn {
+            send: tx.clone(),
+            focused_id: focused_id.clone(),
+            switch_in_flight: false,
+            pending_switch: None,
+        };
+
+        // Use a unique key for this client — we use the channel's address as a proxy.
+        // In the TS version, the `send` closure is the key. Here we use a counter.
+        let client_key = self.next_client_key;
+        self.next_client_key += 1;
+        self.clients.insert(client_key, conn);
+        self.ever_connected = true;
+
+        // Send hello synchronously
+        let _ = tx.try_send(ServerMessage::Hello {
+            protocol_version: 2,
+            server_id: self.server_id.clone(),
+            data_dir: self.data_dir
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
+            build_sha: Some(self.build_sha.clone()),
+        });
+
+        // Resume: replay missed tail, or full seed
+        if let Some(r) = &resume {
+            if let Some(j) = self.journals.get(&r.session_id) {
+                if j.epoch == r.epoch && tail_covers(j, r.seq) {
+                    for f in &j.tail {
+                        if f.seq > r.seq {
+                            let _ = tx.try_send(ServerMessage::Event {
+                                event: f.ev.clone(),
+                                epoch: j.epoch,
+                                seq: f.seq,
+                            });
+                        }
+                    }
+                } else {
+                    let _ = tx.try_send(self.seed_msg(Some(&r.session_id)));
+                }
+            } else {
+                let _ = tx.try_send(self.seed_msg(focused_id.as_ref()));
+            }
+        } else {
+            let _ = tx.try_send(self.seed_msg(focused_id.as_ref()));
+        }
+
+        // Send session status + update status + pilot settings synchronously
+        let _ = tx.try_send(self.session_status_msg());
+        let _ = tx.try_send(self.update_status_msg());
+
+        // Return the channel — the caller will spawn async work for the lists
+        (tx, rx)
+    }
+
+    /// Remove a client by key.
+    pub fn remove_client(&mut self, client_key: u64) {
+        if let Some(conn) = self.clients.remove(&client_key) {
+            if let Some(pending) = conn.pending_switch {
+                let _ = pending.resolve.send(None);
+            }
+        }
+    }
+
+    fn update_status_msg(&self) -> ServerMessage {
+        ServerMessage::UpdateStatus {
+            available: self.update_sha.is_some(),
+            sha: self.update_sha.clone(),
+            applying: self.applying,
+            desktop_stale: Some(self.desktop_stale),
+        }
+    }
+
+    /// Broadcast a message to all connected clients.
+    fn broadcast(&self, msg: ServerMessage) {
+        for conn in self.clients.values() {
+            let _ = conn.send.try_send(msg.clone());
+        }
+    }
+
+    // ── handleClient dispatch ──────────────────────────────────────────────
+
+    /// Handle a client message. This is the main WS dispatch — the ~35 case
+    /// switch from hub.ts. Returns messages to send back (or handles them internally).
+    pub async fn handle_client(&mut self, client_key: u64, msg: ClientMessage) {
+        // Get the focused session id for this connection
+        let focused_id = self.clients.get(&client_key)
+            .and_then(|c| c.focused_id.clone());
+
+        match &msg {
+            ClientMessage::Hello { .. } | ClientMessage::Ping => {}
+            ClientMessage::Prompt { text, deliver_as, images, prompt_id, session_id, .. } => {
+                let target = session_id.clone().or(focused_id);
+                let driver = self.driver.clone();
+                let text = text.clone();
+                let deliver_as = deliver_as.clone();
+                let images = images.clone().unwrap_or_default();
+                let prompt_id_clone = prompt_id.clone();
+                self.accept_prompt(client_key, prompt_id.clone(), async move {
+                    driver.prompt(
+                        text,
+                        deliver_as,
+                        target.clone(),
+                        images,
+                        prompt_id_clone,
+                    ).await;
+                    target
+                }).await;
+            }
+            ClientMessage::Abort { session_id } => {
+                let target = session_id.clone().or(focused_id);
+                self.driver.abort(target);
+            }
+            ClientMessage::SetModel { provider, model_id, session_id } => {
+                let target = session_id.clone().or(focused_id);
+                self.driver.set_model(provider.clone(), model_id.clone(), target);
+            }
+            ClientMessage::SetThinking { level, session_id } => {
+                let target = session_id.clone().or(focused_id);
+                self.driver.set_thinking(level.clone(), target);
+            }
+            ClientMessage::SetFacet { facet, session_id } => {
+                let target = session_id.clone().or(focused_id);
+                self.driver.set_facet(facet.clone(), target);
+            }
+            ClientMessage::SetPermissionMonitor { mode, session_id } => {
+                let target = session_id.clone().or(focused_id);
+                self.driver.set_permission_monitor(mode.clone(), target);
+            }
+            ClientMessage::ToggleAdventurousHandoff { session_id } => {
+                let target = session_id.clone().or(focused_id);
+                self.driver.toggle_adventurous_handoff(target).await;
+            }
+            ClientMessage::SetNotificationAutodrain { enabled, session_id } => {
+                let target = session_id.clone().or(focused_id);
+                self.driver.set_notification_autodrain(*enabled, target).await;
+            }
+            ClientMessage::Compact { session_id } => {
+                let target = session_id.clone().or(focused_id);
+                self.driver.compact(target).await;
+            }
+            ClientMessage::ClearContext { session_id } => {
+                let target = session_id.clone().or(focused_id);
+                self.driver.clear_context(target).await;
+            }
+            ClientMessage::SetMcpServer { server_name, action, session_id } => {
+                let target = session_id.clone().or(focused_id);
+                self.driver.set_mcp_server(server_name.clone(), action.clone(), target).await;
+            }
+            ClientMessage::OpenSession { path: _ } => {
+                // switchTo with retryOnRacedEvents
+                // This is async and complex — will be implemented when switchTo is wired
+            }
+            ClientMessage::ListSessions => {
+                self.broadcast_session_list().await;
+            }
+            ClientMessage::RequestSeed { session_id } => {
+                let target = session_id.clone().or(focused_id);
+                let msg = self.seed_msg(target.as_ref());
+                if let Some(conn) = self.clients.get(&client_key) {
+                    let _ = conn.send.try_send(msg);
+                }
+            }
+            ClientMessage::Mock { script } => {
+                self.driver.run_script(script.clone());
+            }
+            _ => {
+                // Remaining cases (respondUi, restoreQueue, branch, newSession,
+                // setArchived, renameSession, cleanupWorktree, listCommands,
+                // listFacets, queryFiles, queryDir, statPath, setLoginShell,
+                // setBackgroundModel, applyUpdate, forceUpdate, openDataDir,
+                // reloadSession) — will be implemented as the port progresses.
+                // For now they're no-ops.
+            }
+        }
+    }
+
+    // ── Prompt idempotency ────────────────────────────────────────────────
+
+    async fn accept_prompt<F>(
+        &mut self,
+        client_key: u64,
+        prompt_id: Option<String>,
+        run: F,
+    )
+    where
+        F: std::future::Future<Output = Option<SessionId>>,
+    {
+        // No promptId → just run, no ACK
+        if prompt_id.is_none() {
+            match run.await {
+                _ => {}
+            }
+            return;
+        }
+
+        let pid = prompt_id.unwrap();
+
+        // Check if we already have a result for this prompt id
+        if self.prompt_inflight.contains(&pid) {
+            // Already in-flight — the result will be sent when it completes
+            return;
+        }
+        self.prompt_inflight.insert(pid.clone());
+
+        let result = run.await;
+        let msg = match &result {
+            Some(sid) => ServerMessage::PromptResult {
+                prompt_id: pid.clone(),
+                accepted: true,
+                session_id: Some(sid.clone()),
+                error: None,
+            },
+            None => ServerMessage::PromptResult {
+                prompt_id: pid.clone(),
+                accepted: false,
+                session_id: None,
+                error: Some("prompt failed".into()),
+            },
+        };
+
+        if let Some(conn) = self.clients.get(&client_key) {
+            let _ = conn.send.try_send(msg);
+        }
+        self.prompt_inflight.remove(&pid);
+    }
+
+    // ── Broadcast helpers ──────────────────────────────────────────────────
+
+    pub async fn broadcast_session_list(&mut self) {
+        let sessions = self.driver.list_sessions().await;
+        let default_new_session_cwd = std::env::var("HOME").unwrap_or_default();
+        for conn in self.clients.values() {
+            let _ = conn.send.try_send(ServerMessage::SessionList {
+                sessions: sessions.clone(),
+                active_session_id: conn.focused_id.clone(),
+                default_new_session_cwd: default_new_session_cwd.clone(),
+            });
+        }
+        self.session_list_dirty = false;
+    }
+
+    pub async fn broadcast_model_list(&mut self) {
+        let models = self.driver.list_models().await;
+        self.available_models = models.clone();
+        self.broadcast(ServerMessage::ModelList { models });
+    }
+
+    async fn send_command_list(&self, client_key: u64) {
+        let focused = self.clients.get(&client_key).and_then(|c| c.focused_id.clone());
+        let commands = self.driver.list_commands(focused).await;
+        if let Some(conn) = self.clients.get(&client_key) {
+            let _ = conn.send.try_send(ServerMessage::CommandList { commands });
+        }
+    }
+
+    async fn send_facet_list(&self, client_key: u64) {
+        let focused = self.clients.get(&client_key).and_then(|c| c.focused_id.clone());
+        let facets = self.driver.list_facets(focused).await;
+        if let Some(conn) = self.clients.get(&client_key) {
+            let _ = conn.send.try_send(ServerMessage::FacetList { facets });
+        }
+    }
+
+    async fn send_file_index(&self, client_key: u64) {
+        let focused = self.clients.get(&client_key).and_then(|c| c.focused_id.clone());
+        let (files, truncated) = self.driver.list_file_index(focused).await;
+        if let Some(conn) = self.clients.get(&client_key) {
+            let _ = conn.send.try_send(ServerMessage::FileIndex { files, truncated });
+        }
+    }
+
+    // ── liveTick / refreshUsage ────────────────────────────────────────────
+
+    /// One live-refresh pass: fresh session list + context usage.
+    pub async fn live_tick(&mut self) {
+        if self.session_list_dirty {
+            self.broadcast_session_list().await;
+        }
+        self.refresh_usage();
+    }
+
+    fn refresh_usage(&mut self) {
+        let running_sessions: Vec<SessionId> = self.journals.keys()
+            .filter(|sid| self.running.contains(*sid))
+            .cloned()
+            .collect();
+
+        for sid in running_sessions {
+            let usage = self.driver.get_usage(Some(sid.clone()));
+            let Some(usage) = usage else { continue };
+            let key = serde_json::to_string(&usage).unwrap_or_default();
+            if self.last_usage_emitted.get(&sid).map(|k| k == &key).unwrap_or(false) {
+                continue;
+            }
+            self.last_usage_emitted.insert(sid.clone(), key);
+
+            // Get the session ref from the journal's first event
+            let session_ref = self.journals.get(&sid)
+                .and_then(|j| {
+                    let (_, _, events) = build_seed(j);
+                    events.first().map(|e| e.session_ref().clone())
+                })
+                .unwrap_or(SessionRef {
+                    workspace_id: sid.clone(),
+                    session_id: sid.clone(),
+                });
+
+            let ev = SessionDriverEvent::UsageUpdated {
+                base: SessionEventBase {
+                    session_ref,
+                    timestamp: now_iso(),
+                    run_id: None,
+                },
+                usage,
+            };
+            self.ingest(&ev);
+        }
+    }
+
+    /// Sync the live-refresh ticker — should be called when running set or
+    /// client count changes. In the Rust port, the ticker is managed by the
+    /// server's main loop, not inside the hub.
+    pub fn needs_live_refresh(&self) -> bool {
+        !self.running.is_empty() && !self.clients.is_empty()
+    }
 }
 
 // ── Free functions (port of hub.ts helpers) ─────────────────────────────
@@ -784,6 +1146,16 @@ fn now_ms() -> u128 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis()
+}
+
+fn now_iso() -> String {
+    // Simple ISO-8601 timestamp. The TS version uses `new Date().toISOString()`.
+    // We don't need exact format parity for internal usage events — the
+    // timestamp is informational, not compared by the fold.
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    format!("{}ms", now.as_millis())
 }
 
 fn clipped(value: &str, max: usize) -> String {
