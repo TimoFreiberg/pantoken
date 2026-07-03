@@ -206,13 +206,13 @@ pub struct PathStat {
 
 // ── Goal / flags / todos ────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GoalInfo {
     pub summary: String,
     pub lifecycle: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FlaggedFile {
     pub path: String,
     pub mode: FlaggedFileMode,
@@ -224,7 +224,7 @@ pub enum FlaggedFileMode {
     Referenced,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TodoItem {
     pub id: i64,
     pub title: String,
@@ -274,7 +274,7 @@ pub struct SessionSnapshot {
     pub notification_autodrain: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none", default, rename = "activePlan")]
     pub active_plan: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", default, rename = "default")]
+    #[serde(skip_serializing_if = "Option::is_none", default, rename = "goal")]
     pub goal: Option<Option<GoalInfo>>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub flags: Option<Vec<FlaggedFile>>,
