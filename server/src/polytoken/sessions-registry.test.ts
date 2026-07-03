@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -12,14 +12,13 @@ import {
 } from "./sessions-registry.js";
 
 /** Make a temp sessions dir and populate it with the given session metadatas. */
-function makeSessionsDir(
-  sessions: Record<string, SessionJson | null>,
-): string {
+function makeSessionsDir(sessions: Record<string, SessionJson | null>): string {
   const dir = mkdtempSync(join(tmpdir(), "pt-sessions-"));
   for (const [id, meta] of Object.entries(sessions)) {
     const sessionDir = join(dir, id);
     mkdirSync(sessionDir, { recursive: true });
-    if (meta) writeFileSync(join(sessionDir, "session.json"), JSON.stringify(meta));
+    if (meta)
+      writeFileSync(join(sessionDir, "session.json"), JSON.stringify(meta));
     // A failed startup has no session.json — leave the dir empty to simulate.
   }
   return dir;
@@ -72,12 +71,20 @@ describe("sessions-registry", () => {
 
   test("listSessionIds returns session dirs sorted newest-first", () => {
     const dir = makeSessionsDir({
-      "older": baseMeta({ session_id: "older" }),
-      "newer": baseMeta({ session_id: "newer" }),
+      older: baseMeta({ session_id: "older" }),
+      newer: baseMeta({ session_id: "newer" }),
     });
+    // The sort key is the dir mtime. Back-to-back mkdirs land within one ms and
+    // TIE (bit on the Linux CI runner) — pin distinct mtimes, don't race the clock.
+    const now = Date.now();
+    utimesSync(
+      join(dir, "older"),
+      new Date(now - 60_000),
+      new Date(now - 60_000),
+    );
+    utimesSync(join(dir, "newer"), new Date(now), new Date(now));
     const ids = listSessionIds(dir);
     expect(ids).toHaveLength(2);
-    // "newer" was created after "older" (later mtime), so it sorts first.
     expect(ids[0]).toBe("newer");
   });
 
@@ -94,7 +101,7 @@ describe("sessions-registry", () => {
 
   test("coldSessionEntry builds a SessionListEntry from session.json", () => {
     const dir = makeSessionsDir({
-      "abc123": baseMeta({
+      abc123: baseMeta({
         session_id: "abc123",
         project_path: "/my/proj",
         last_user_message_preview: "do the thing",
@@ -115,8 +122,10 @@ describe("sessions-registry", () => {
   });
 
   test("coldSessionEntry returns null for a failed startup (no session.json)", () => {
-    const dir = makeSessionsDir({ "failed": null });
-    expect(coldSessionEntry(join(dir, "failed"), "failed", { archived: false })).toBeNull();
+    const dir = makeSessionsDir({ failed: null });
+    expect(
+      coldSessionEntry(join(dir, "failed"), "failed", { archived: false }),
+    ).toBeNull();
   });
 
   test("coldSessionEntry: lastUserMessageAt falls back to createdAt when no preview", () => {
@@ -138,7 +147,7 @@ describe("sessions-registry", () => {
 
   test("coldSessionEntry: local parent → parentSessionPath set", () => {
     const dir = makeSessionsDir({
-      "child": baseMeta({
+      child: baseMeta({
         session_id: "child",
         parent_session_id: { kind: "local", session_id: "parent-id" },
       }),
@@ -151,7 +160,10 @@ describe("sessions-registry", () => {
 
   test("coldSessionEntry: standalone parent → no parentSessionPath", () => {
     const dir = makeSessionsDir({
-      "solo": baseMeta({ session_id: "solo", parent_session_id: { kind: "standalone" } }),
+      solo: baseMeta({
+        session_id: "solo",
+        parent_session_id: { kind: "standalone" },
+      }),
     });
     const entry = coldSessionEntry(join(dir, "solo"), "solo", {
       archived: false,
@@ -161,21 +173,27 @@ describe("sessions-registry", () => {
 
   test("listColdSessions merges archive + worktree flags", () => {
     const dir = makeSessionsDir({
-      "s1": baseMeta({ session_id: "s1", project_path: "/p1" }),
-      "s2": baseMeta({ session_id: "s2", project_path: "/p2" }),
-      "failed": null,
+      s1: baseMeta({ session_id: "s1", project_path: "/p1" }),
+      s2: baseMeta({ session_id: "s2", project_path: "/p2" }),
+      failed: null,
     });
     const archivedPaths = new Set([join(dir, "s2", "session.json")]);
     const entries = listColdSessions(dir, {
       archivedFor: (p) => archivedPaths.has(p),
       worktreeFor: (cwd) =>
-        cwd === "/p1" ? { path: "/p1", base: "/repo", name: "wt-name" } : undefined,
+        cwd === "/p1"
+          ? { path: "/p1", base: "/repo", name: "wt-name" }
+          : undefined,
     });
     expect(entries).toHaveLength(2); // "failed" skipped
     const s1 = entries.find((e) => e.sessionId === "s1")!;
     const s2 = entries.find((e) => e.sessionId === "s2")!;
     expect(s1.archived).toBe(false);
-    expect(s1.worktree).toEqual({ path: "/p1", base: "/repo", name: "wt-name" });
+    expect(s1.worktree).toEqual({
+      path: "/p1",
+      base: "/repo",
+      name: "wt-name",
+    });
     expect(s2.archived).toBe(true);
     expect(s2.worktree).toBeUndefined();
   });
