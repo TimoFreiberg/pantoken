@@ -135,12 +135,20 @@ const backendEnv = {
 // still booting — a tool like Claude_Preview returns as soon as the port listens,
 // catching the client mid-reconnect-backoff with a stale "Offline" banner and an
 // empty session list. Gating on /health makes the first WS connect succeed.
-const server = Bun.spawn(["bun", "run", "--hot", "src/index.ts"], {
-  cwd: "server",
-  env: backendEnv,
-  stdout: "inherit",
-  stderr: "inherit",
-});
+const useRustBackend = process.env.PILOT_SERVER_IMPL === "rust";
+const server = useRustBackend
+  ? Bun.spawn(["cargo", "run"], {
+      cwd: "server-rs",
+      env: backendEnv,
+      stdout: "inherit",
+      stderr: "inherit",
+    })
+  : Bun.spawn(["bun", "run", "--hot", "src/index.ts"], {
+      cwd: "server",
+      env: backendEnv,
+      stdout: "inherit",
+      stderr: "inherit",
+    });
 
 async function waitForHealth(base: string, timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;

@@ -94,12 +94,20 @@ export async function launch(p: Paths = paths()): Promise<void> {
     PORT: undefined,
   };
 
-  const server = Bun.spawn(["bun", "run", "--hot", "src/index.ts"], {
-    cwd: join(REPO_ROOT, "server"),
-    env: backendEnv,
-    stdout: "inherit",
-    stderr: "inherit",
-  });
+  const useRustBackend = process.env.PILOT_SERVER_IMPL === "rust";
+  const server = useRustBackend
+    ? Bun.spawn(["cargo", "run"], {
+        cwd: join(REPO_ROOT, "server-rs"),
+        env: backendEnv,
+        stdout: "inherit",
+        stderr: "inherit",
+      })
+    : Bun.spawn(["bun", "run", "--hot", "src/index.ts"], {
+        cwd: join(REPO_ROOT, "server"),
+        env: backendEnv,
+        stdout: "inherit",
+        stderr: "inherit",
+      });
 
   let shuttingDown = false;
   const procs = [server];
