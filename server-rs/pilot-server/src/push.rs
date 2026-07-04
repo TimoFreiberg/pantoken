@@ -10,8 +10,6 @@
 //! state logic; the crypto/HTTP shell is thin. Full delivery is validated manually
 //! on-device (same as the TS implementation).
 
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -56,13 +54,20 @@ impl PushSubscriptionStore {
         if let Some(parent) = file.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        let mut store = Self { subs: HashMap::new(), file };
+        let mut store = Self {
+            subs: HashMap::new(),
+            file,
+        };
         store.load();
         store
     }
 
-    pub fn count(&self) -> usize { self.subs.len() }
-    pub fn values(&self) -> Vec<PushSubscription> { self.subs.values().cloned().collect() }
+    pub fn count(&self) -> usize {
+        self.subs.len()
+    }
+    pub fn values(&self) -> Vec<PushSubscription> {
+        self.subs.values().cloned().collect()
+    }
 
     pub fn add(&mut self, sub: PushSubscription) {
         self.subs.insert(sub.endpoint.clone(), sub);
@@ -70,20 +75,32 @@ impl PushSubscriptionStore {
     }
 
     pub fn remove(&mut self, endpoint: &str) {
-        if self.subs.remove(endpoint).is_some() { self.persist(); }
+        if self.subs.remove(endpoint).is_some() {
+            self.persist();
+        }
     }
 
     pub fn prune(&mut self, dead: &[String]) {
-        if dead.is_empty() { return; }
-        for ep in dead { self.subs.remove(ep); }
+        if dead.is_empty() {
+            return;
+        }
+        for ep in dead {
+            self.subs.remove(ep);
+        }
         self.persist();
     }
 
     fn load(&mut self) {
-        if !self.file.exists() { return; }
+        if !self.file.exists() {
+            return;
+        }
         if let Ok(raw) = fs::read_to_string(&self.file) {
             match serde_json::from_str::<Vec<PushSubscription>>(&raw) {
-                Ok(arr) => { for s in arr { self.subs.insert(s.endpoint.clone(), s); } }
+                Ok(arr) => {
+                    for s in arr {
+                        self.subs.insert(s.endpoint.clone(), s);
+                    }
+                }
                 Err(e) => eprintln!("[push] failed to parse {}: {}", self.file.display(), e),
             }
         }
@@ -100,6 +117,10 @@ impl PushSubscriptionStore {
 pub struct PushService {
     store: PushSubscriptionStore,
     vapid: VapidKeys,
+    #[expect(
+        dead_code,
+        reason = "push delivery is unwired until Phase 3; subject is needed when web-push send is connected"
+    )]
     vapid_subject: String,
 }
 
@@ -110,24 +131,44 @@ impl PushService {
         let store = PushSubscriptionStore::new(data_dir.join("push-subscriptions.json"));
 
         if vapid_subject.contains("localhost") || vapid_subject.contains("example.com") {
-            eprintln!("[push] VAPID subject is a placeholder ({vapid_subject}). iOS push will fail.");
+            eprintln!(
+                "[push] VAPID subject is a placeholder ({vapid_subject}). iOS push will fail."
+            );
         }
 
-        Self { store, vapid, vapid_subject }
+        Self {
+            store,
+            vapid,
+            vapid_subject,
+        }
     }
 
-    pub fn public_key(&self) -> &str { &self.vapid.public_key }
-    pub fn count(&self) -> usize { self.store.count() }
-    pub fn add(&mut self, sub: PushSubscription) { self.store.add(sub); }
-    pub fn remove(&mut self, endpoint: &str) { self.store.remove(endpoint); }
+    pub fn public_key(&self) -> &str {
+        &self.vapid.public_key
+    }
+    pub fn count(&self) -> usize {
+        self.store.count()
+    }
+    pub fn add(&mut self, sub: PushSubscription) {
+        self.store.add(sub);
+    }
+    pub fn remove(&mut self, endpoint: &str) {
+        self.store.remove(endpoint);
+    }
 
     /// Send to every stored subscription; prune the ones the push service reports gone.
     /// TODO: wire the web-push crate's send API (needs VAPID keypair format alignment).
     pub async fn send_to_all(&mut self, n: &PushNotification) -> usize {
         let subs = self.store.values();
-        if subs.is_empty() { return 0; }
+        if subs.is_empty() {
+            return 0;
+        }
+        #[expect(
+            unused_variables,
+            reason = "BUG: VAPID/web-push delivery is unwired until Phase 3"
+        )]
         let payload = serde_json::to_string(n).unwrap_or_default();
-        let mut dead = Vec::new();
+        let dead = Vec::new();
         let mut sent = 0;
 
         for sub in &subs {
@@ -173,12 +214,18 @@ mod tests {
         assert_eq!(store.count(), 0);
         store.add(PushSubscription {
             endpoint: "https://push.example.com/123".into(),
-            keys: SubscriptionKeys { p256dh: "key1".into(), auth: "auth1".into() },
+            keys: SubscriptionKeys {
+                p256dh: "key1".into(),
+                auth: "auth1".into(),
+            },
         });
         assert_eq!(store.count(), 1);
         store.add(PushSubscription {
             endpoint: "https://push.example.com/123".into(),
-            keys: SubscriptionKeys { p256dh: "key1".into(), auth: "auth1".into() },
+            keys: SubscriptionKeys {
+                p256dh: "key1".into(),
+                auth: "auth1".into(),
+            },
         });
         assert_eq!(store.count(), 1);
         store.remove("https://push.example.com/123");
@@ -192,7 +239,10 @@ mod tests {
         let mut store1 = PushSubscriptionStore::new(path.clone());
         store1.add(PushSubscription {
             endpoint: "https://push.example.com/abc".into(),
-            keys: SubscriptionKeys { p256dh: "k".into(), auth: "a".into() },
+            keys: SubscriptionKeys {
+                p256dh: "k".into(),
+                auth: "a".into(),
+            },
         });
         let store2 = PushSubscriptionStore::new(path);
         assert_eq!(store2.count(), 1);
@@ -205,11 +255,17 @@ mod tests {
         for i in 0..3 {
             store.add(PushSubscription {
                 endpoint: format!("https://push.example.com/{i}"),
-                keys: SubscriptionKeys { p256dh: "k".into(), auth: "a".into() },
+                keys: SubscriptionKeys {
+                    p256dh: "k".into(),
+                    auth: "a".into(),
+                },
             });
         }
         assert_eq!(store.count(), 3);
-        store.prune(&["https://push.example.com/0".into(), "https://push.example.com/2".into()]);
+        store.prune(&[
+            "https://push.example.com/0".into(),
+            "https://push.example.com/2".into(),
+        ]);
         assert_eq!(store.count(), 1);
     }
 }

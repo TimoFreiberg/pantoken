@@ -4,11 +4,9 @@
 //! The mock emits SessionDriverEvent[] directly (no daemon, no wire protocol).
 //! This is what the e2e suite tests against.
 
-#![allow(dead_code)]
-
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use parking_lot::Mutex;
@@ -17,8 +15,11 @@ use pilot_protocol::wire::DeliveryMode;
 use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
 
+use crate::driver::{
+    ArchiveResult, BranchResult, NewSessionOptsData, PilotDriver, WorktreeCleanupResult,
+    WorktreeRetained,
+};
 use async_trait::async_trait;
-use crate::driver::{ArchiveResult, BranchResult, NewSessionOptsData, PilotDriver, WorktreeCleanupResult, WorktreeRetained};
 
 /// Whether a HostUiRequest is a dialog (awaiting a response), mirroring the TS
 /// `isDialogRequest`. Notify/Status/Widget are fire-and-forget ambient UI.
@@ -120,56 +121,183 @@ fn mock_workspace() -> WorkspaceRef {
 
 fn mock_models() -> Vec<ModelOption> {
     vec![
-        ModelOption { provider: "anthropic".into(), model_id: "claude-opus-4-8".into(), label: "Claude Opus 4.8".into(), thinking_levels: Some(vec!["off".into(),"low".into(),"medium".into(),"high".into()]) },
-        ModelOption { provider: "anthropic".into(), model_id: "claude-sonnet-4-6".into(), label: "Claude Sonnet 4.6".into(), thinking_levels: Some(vec!["off".into(),"low".into(),"medium".into(),"high".into()]) },
-        ModelOption { provider: "deepseek".into(), model_id: "deepseek-v4-flash".into(), label: "DeepSeek V4 Flash".into(), thinking_levels: Some(vec!["off".into()]) },
-        ModelOption { provider: "openai".into(), model_id: "gpt-5".into(), label: "GPT-5".into(), thinking_levels: Some(vec!["minimal".into(),"low".into(),"medium".into(),"high".into()]) },
+        ModelOption {
+            provider: "anthropic".into(),
+            model_id: "claude-opus-4-8".into(),
+            label: "Claude Opus 4.8".into(),
+            thinking_levels: Some(vec![
+                "off".into(),
+                "low".into(),
+                "medium".into(),
+                "high".into(),
+            ]),
+        },
+        ModelOption {
+            provider: "anthropic".into(),
+            model_id: "claude-sonnet-4-6".into(),
+            label: "Claude Sonnet 4.6".into(),
+            thinking_levels: Some(vec![
+                "off".into(),
+                "low".into(),
+                "medium".into(),
+                "high".into(),
+            ]),
+        },
+        ModelOption {
+            provider: "deepseek".into(),
+            model_id: "deepseek-v4-flash".into(),
+            label: "DeepSeek V4 Flash".into(),
+            thinking_levels: Some(vec!["off".into()]),
+        },
+        ModelOption {
+            provider: "openai".into(),
+            model_id: "gpt-5".into(),
+            label: "GPT-5".into(),
+            thinking_levels: Some(vec![
+                "minimal".into(),
+                "low".into(),
+                "medium".into(),
+                "high".into(),
+            ]),
+        },
     ]
 }
 
 fn mock_commands() -> Vec<CommandInfo> {
     vec![
-        CommandInfo { name: "review".into(), description: Some("Review the working-copy diff for bugs".into()), source: CommandSource::Prompt, argument_hint: Some("[path]".into()) },
-        CommandInfo { name: "plan".into(), description: Some("Draft an implementation plan before coding".into()), source: CommandSource::Prompt, argument_hint: None },
-        CommandInfo { name: "commit".into(), description: Some("Stage changes and commit with a generated message".into()), source: CommandSource::Extension, argument_hint: None },
-        CommandInfo { name: "pr".into(), description: Some("Open a pull request for the current branch".into()), source: CommandSource::Extension, argument_hint: None },
-        CommandInfo { name: "skill:debug".into(), description: Some("Trace a bug end-to-end before forming a hypothesis".into()), source: CommandSource::Skill, argument_hint: None },
-        CommandInfo { name: "skill:polish".into(), description: Some("Analyze a codebase for improvements".into()), source: CommandSource::Skill, argument_hint: None },
+        CommandInfo {
+            name: "review".into(),
+            description: Some("Review the working-copy diff for bugs".into()),
+            source: CommandSource::Prompt,
+            argument_hint: Some("[path]".into()),
+        },
+        CommandInfo {
+            name: "plan".into(),
+            description: Some("Draft an implementation plan before coding".into()),
+            source: CommandSource::Prompt,
+            argument_hint: None,
+        },
+        CommandInfo {
+            name: "commit".into(),
+            description: Some("Stage changes and commit with a generated message".into()),
+            source: CommandSource::Extension,
+            argument_hint: None,
+        },
+        CommandInfo {
+            name: "pr".into(),
+            description: Some("Open a pull request for the current branch".into()),
+            source: CommandSource::Extension,
+            argument_hint: None,
+        },
+        CommandInfo {
+            name: "skill:debug".into(),
+            description: Some("Trace a bug end-to-end before forming a hypothesis".into()),
+            source: CommandSource::Skill,
+            argument_hint: None,
+        },
+        CommandInfo {
+            name: "skill:polish".into(),
+            description: Some("Analyze a codebase for improvements".into()),
+            source: CommandSource::Skill,
+            argument_hint: None,
+        },
     ]
 }
 
 fn mock_files() -> Vec<FileInfo> {
     vec![
-        FileInfo { path: "README.md".into(), is_directory: false },
-        FileInfo { path: "AGENTS.md".into(), is_directory: false },
-        FileInfo { path: "docs".into(), is_directory: true },
-        FileInfo { path: "docs/DESIGN.md".into(), is_directory: false },
-        FileInfo { path: "docs/DECISIONS.md".into(), is_directory: false },
-        FileInfo { path: "docs/TODO.md".into(), is_directory: false },
-        FileInfo { path: "docs/ADR-desktop-shell.md".into(), is_directory: false },
-        FileInfo { path: "server".into(), is_directory: true },
-        FileInfo { path: "server/src/index.ts".into(), is_directory: false },
-        FileInfo { path: "server/src/hub.ts".into(), is_directory: false },
-        FileInfo { path: "server/src/driver.ts".into(), is_directory: false },
-        FileInfo { path: "server/src/mock-driver.ts".into(), is_directory: false },
-        FileInfo { path: "server/src/fixtures.ts".into(), is_directory: false },
-        FileInfo { path: "client".into(), is_directory: true },
-        FileInfo { path: "client/src/app.css".into(), is_directory: false },
-        FileInfo { path: "protocol".into(), is_directory: true },
-        FileInfo { path: "package.json".into(), is_directory: false },
+        FileInfo {
+            path: "README.md".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "AGENTS.md".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "docs".into(),
+            is_directory: true,
+        },
+        FileInfo {
+            path: "docs/DESIGN.md".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "docs/DECISIONS.md".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "docs/TODO.md".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "docs/ADR-desktop-shell.md".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "server".into(),
+            is_directory: true,
+        },
+        FileInfo {
+            path: "server/src/index.ts".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "server/src/hub.ts".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "server/src/driver.ts".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "server/src/mock-driver.ts".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "server/src/fixtures.ts".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "client".into(),
+            is_directory: true,
+        },
+        FileInfo {
+            path: "client/src/app.css".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "protocol".into(),
+            is_directory: true,
+        },
+        FileInfo {
+            path: "package.json".into(),
+            is_directory: false,
+        },
     ]
 }
 
 fn mock_usage() -> SessionUsage {
-    SessionUsage { tokens: Some(47200), context_window: 200000, percent: Some(23.6) }
+    SessionUsage {
+        tokens: Some(47200),
+        context_window: 200000,
+        percent: Some(23.6),
+    }
 }
 
 fn mock_usage_full() -> SessionUsage {
-    SessionUsage { tokens: Some(182000), context_window: 200000, percent: Some(91.0) }
+    SessionUsage {
+        tokens: Some(182000),
+        context_window: 200000,
+        percent: Some(91.0),
+    }
 }
 
 fn session_ref_for(session_id: &str) -> SessionRef {
-    SessionRef { workspace_id: WORKSPACE_ID.into(), session_id: session_id.into() }
+    SessionRef {
+        workspace_id: WORKSPACE_ID.into(),
+        session_id: session_id.into(),
+    }
 }
 
 /// Build a snapshot with optional overrides, matching the TS `snapshot(over)` pattern.
@@ -211,8 +339,16 @@ fn mock_snapshot(status: SessionStatus) -> SessionSnapshot {
 
 fn mock_mcp_servers() -> Vec<McpServerInfo> {
     vec![
-        McpServerInfo { server_name: "filesystem".into(), status: McpServerStatus::Connected, tool_count: 11 },
-        McpServerInfo { server_name: "github".into(), status: McpServerStatus::Disconnected, tool_count: 0 },
+        McpServerInfo {
+            server_name: "filesystem".into(),
+            status: McpServerStatus::Connected,
+            tool_count: 11,
+        },
+        McpServerInfo {
+            server_name: "github".into(),
+            status: McpServerStatus::Disconnected,
+            tool_count: 0,
+        },
     ]
 }
 
@@ -221,7 +357,12 @@ fn mock_default_config() -> SessionConfig {
         provider: Some("anthropic".into()),
         model_id: Some("claude-opus-4-8".into()),
         thinking_level: Some("medium".into()),
-        available_thinking_levels: Some(vec!["off".into(),"low".into(),"medium".into(),"high".into()]),
+        available_thinking_levels: Some(vec![
+            "off".into(),
+            "low".into(),
+            "medium".into(),
+            "high".into(),
+        ]),
     }
 }
 
@@ -240,49 +381,83 @@ fn mock_session_list() -> Vec<SessionListEntry> {
     let day = 24 * 60 * 60 * 1000;
     vec![
         SessionListEntry {
-            session_id: "demo-session".into(), path: "/sessions/demo-session.jsonl".into(),
-            cwd: WORKSPACE_PATH.into(), display_name: Some("Wire up the WebSocket bridge".into()),
+            session_id: "demo-session".into(),
+            path: "/sessions/demo-session.jsonl".into(),
+            cwd: WORKSPACE_PATH.into(),
+            display_name: Some("Wire up the WebSocket bridge".into()),
             preview: "Add a /health route to the server and a smoke test for it.".into(),
-            user_message_count: 3, usage: Some(mock_usage()),
-            updated_at: iso_ago(5 * 60_000), created_at: iso_ago(2 * day),
+            user_message_count: 3,
+            usage: Some(mock_usage()),
+            updated_at: iso_ago(5 * 60_000),
+            created_at: iso_ago(2 * day),
             last_user_message_at: iso_ago(6 * 60_000),
-            parent_session_path: None, archived: false, worktree: None,
+            parent_session_path: None,
+            archived: false,
+            worktree: None,
         },
         SessionListEntry {
-            session_id: "older-session".into(), path: "/sessions/older-session.jsonl".into(),
-            cwd: WORKSPACE_PATH.into(), display_name: Some("Explore the fold reducer".into()),
+            session_id: "older-session".into(),
+            path: "/sessions/older-session.jsonl".into(),
+            cwd: WORKSPACE_PATH.into(),
+            display_name: Some("Explore the fold reducer".into()),
             preview: "How does foldEvent assemble the transcript?".into(),
-            user_message_count: 5, usage: Some(SessionUsage { tokens: Some(164000), context_window: 200000, percent: Some(82.0) }),
-            updated_at: iso_ago(2 * 60 * 60 * 1000), created_at: iso_ago(3 * day),
+            user_message_count: 5,
+            usage: Some(SessionUsage {
+                tokens: Some(164000),
+                context_window: 200000,
+                percent: Some(82.0),
+            }),
+            updated_at: iso_ago(2 * 60 * 60 * 1000),
+            created_at: iso_ago(3 * day),
             last_user_message_at: iso_ago(2 * 60 * 60 * 1000 + 60_000),
-            parent_session_path: None, archived: false, worktree: None,
+            parent_session_path: None,
+            archived: false,
+            worktree: None,
         },
         SessionListEntry {
-            session_id: "scratch-session".into(), path: "/sessions/scratch-session.jsonl".into(),
-            cwd: "/Users/timo/src/scratch".into(), display_name: None,
+            session_id: "scratch-session".into(),
+            path: "/sessions/scratch-session.jsonl".into(),
+            cwd: "/Users/timo/src/scratch".into(),
+            display_name: None,
             preview: "quick scratch session".into(),
-            user_message_count: 1, usage: None,
-            updated_at: iso_ago(6 * 60 * 60 * 1000), created_at: iso_ago(4 * day),
+            user_message_count: 1,
+            usage: None,
+            updated_at: iso_ago(6 * 60 * 60 * 1000),
+            created_at: iso_ago(4 * day),
             last_user_message_at: iso_ago(6 * 60 * 60 * 1000 - 60_000),
-            parent_session_path: None, archived: false, worktree: None,
+            parent_session_path: None,
+            archived: false,
+            worktree: None,
         },
         SessionListEntry {
-            session_id: "archived-session".into(), path: "/sessions/archived-session.jsonl".into(),
-            cwd: WORKSPACE_PATH.into(), display_name: Some("Archived experiment".into()),
+            session_id: "archived-session".into(),
+            path: "/sessions/archived-session.jsonl".into(),
+            cwd: WORKSPACE_PATH.into(),
+            display_name: Some("Archived experiment".into()),
             preview: "An old experiment I tucked away.".into(),
-            user_message_count: 4, usage: None,
-            updated_at: iso_ago(5 * day), created_at: iso_ago(8 * day),
+            user_message_count: 4,
+            usage: None,
+            updated_at: iso_ago(5 * day),
+            created_at: iso_ago(8 * day),
             last_user_message_at: iso_ago(5 * day),
-            parent_session_path: None, archived: true, worktree: None,
+            parent_session_path: None,
+            archived: true,
+            worktree: None,
         },
         SessionListEntry {
-            session_id: "stale-session".into(), path: "/sessions/stale-session.jsonl".into(),
-            cwd: "/Users/timo/src/stale-proj".into(), display_name: Some("Old spike".into()),
+            session_id: "stale-session".into(),
+            path: "/sessions/stale-session.jsonl".into(),
+            cwd: "/Users/timo/src/stale-proj".into(),
+            display_name: Some("Old spike".into()),
             preview: "A spike from a couple of weeks ago.".into(),
-            user_message_count: 2, usage: None,
-            updated_at: iso_ago(10 * day), created_at: iso_ago(12 * day),
+            user_message_count: 2,
+            usage: None,
+            updated_at: iso_ago(10 * day),
+            created_at: iso_ago(12 * day),
             last_user_message_at: iso_ago(10 * day),
-            parent_session_path: None, archived: false, worktree: None,
+            parent_session_path: None,
+            archived: false,
+            worktree: None,
         },
     ]
 }
@@ -292,14 +467,19 @@ fn mock_session_list() -> Vec<SessionListEntry> {
 /// `{ base, name }` keyed by its cwd. The static `mock_session_list()` baseline
 /// carries no worktree rows, so this yields an empty map (as in TS where SESSION_LIST
 /// has no worktree entries either); `new_session(worktree: true)` populates it.
-fn seed_worktrees(sessions: &[SessionListEntry]) -> std::collections::HashMap<String, WorktreeMeta> {
+fn seed_worktrees(
+    sessions: &[SessionListEntry],
+) -> std::collections::HashMap<String, WorktreeMeta> {
     sessions
         .iter()
         .filter_map(|s| {
             s.worktree.as_ref().map(|w| {
                 (
                     s.cwd.clone(),
-                    WorktreeMeta { base: w.base.clone(), name: w.name.clone() },
+                    WorktreeMeta {
+                        base: w.base.clone(),
+                        name: w.name.clone(),
+                    },
                 )
             })
         })
@@ -353,21 +533,41 @@ fn mock_dir_tree() -> &'static std::collections::HashMap<String, Vec<String>> {
     TREE.get_or_init(|| {
         // rel-path → child names (TS MOCK_DIR_LAYOUT). "" is the root ($HOME).
         let layout: &[(&str, &[&str])] = &[
-            ("", &["src", "Documents", "Downloads", "Projects", ".config"]),
-            ("src", &["pilot", "pi", "pi-gui", "kellercomm", "scratch", "demo", "elsewhere", "dirty"]),
-            ("src/pilot", &["client", "server", "protocol", "e2e", "docs"]),
+            (
+                "",
+                &["src", "Documents", "Downloads", "Projects", ".config"],
+            ),
+            (
+                "src",
+                &[
+                    "pilot",
+                    "pi",
+                    "pi-gui",
+                    "kellercomm",
+                    "scratch",
+                    "demo",
+                    "elsewhere",
+                    "dirty",
+                ],
+            ),
+            (
+                "src/pilot",
+                &["client", "server", "protocol", "e2e", "docs"],
+            ),
             ("src/pi", &["src", "docs", "examples"]),
             ("Documents", &["notes", "receipts"]),
             ("Projects", &["website"]),
             (".config", &["pi", "fish"]),
         ];
-        let roots: Vec<String> = std::iter::once(std::env::var("HOME").unwrap_or_else(|_| String::new()))
-            .chain(std::iter::once("/Users/timo".to_string()))
-            .filter(|r| !r.is_empty())
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect();
-        let mut tree: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+        let roots: Vec<String> =
+            std::iter::once(std::env::var("HOME").unwrap_or_else(|_| String::new()))
+                .chain(std::iter::once("/Users/timo".to_string()))
+                .filter(|r| !r.is_empty())
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .collect();
+        let mut tree: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
         for root in &roots {
             for (rel, kids) in layout {
                 let key = if rel.is_empty() {
@@ -408,35 +608,86 @@ fn base_with_ref(session_ref: SessionRef) -> SessionEventBase {
 /// per session so switching to "older-session" shows its own transcript, not
 /// the greeting's.
 fn mock_session_seed(path: &str) -> Vec<SessionDriverEvent> {
-    fn session_seed(session_id: &str, title: &str, user_text: &str, assistant_text: &str) -> Vec<SessionDriverEvent> {
+    fn session_seed(
+        session_id: &str,
+        title: &str,
+        user_text: &str,
+        assistant_text: &str,
+    ) -> Vec<SessionDriverEvent> {
         let ref_id = session_ref_for(session_id);
-        let b = || SessionEventBase { session_ref: ref_id.clone(), timestamp: ts(), run_id: None };
+        let b = || SessionEventBase {
+            session_ref: ref_id.clone(),
+            timestamp: ts(),
+            run_id: None,
+        };
         let snap = |status: SessionStatus| SessionSnapshot {
-            r#ref: ref_id.clone(), workspace: mock_workspace(), title: title.into(),
-            status, updated_at: ts(), archived_at: None, preview: None,
-            config: Some(mock_default_config()), usage: None, running_run_id: None,
-            queued_messages: None, facet: None, permission_monitor: None,
-            adventurous_handoff: None, notification_autodrain: None, active_plan: None,
-            goal: None, flags: None, todos: None, mcp_servers: None,
+            r#ref: ref_id.clone(),
+            workspace: mock_workspace(),
+            title: title.into(),
+            status,
+            updated_at: ts(),
+            archived_at: None,
+            preview: None,
+            config: Some(mock_default_config()),
+            usage: None,
+            running_run_id: None,
+            queued_messages: None,
+            facet: None,
+            permission_monitor: None,
+            adventurous_handoff: None,
+            notification_autodrain: None,
+            active_plan: None,
+            goal: None,
+            flags: None,
+            todos: None,
+            mcp_servers: None,
         };
         vec![
-            SessionDriverEvent::SessionOpened { base: b(), snapshot: snap(SessionStatus::Idle) },
-            SessionDriverEvent::UserMessage { base: b(), id: format!("u-{session_id}"), text: user_text.into(), images: None, entry_id: None },
-            SessionDriverEvent::AssistantDelta { base: b(), text: assistant_text.into(), channel: Some(AssistantDeltaChannel::Text), entry_id: None },
-            SessionDriverEvent::RunCompleted { base: b(), snapshot: snap(SessionStatus::Idle), user_entry_id: None, assistant_entry_id: None },
+            SessionDriverEvent::SessionOpened {
+                base: b(),
+                snapshot: snap(SessionStatus::Idle),
+            },
+            SessionDriverEvent::UserMessage {
+                base: b(),
+                id: format!("u-{session_id}"),
+                text: user_text.into(),
+                images: None,
+                entry_id: None,
+            },
+            SessionDriverEvent::AssistantDelta {
+                base: b(),
+                text: assistant_text.into(),
+                channel: Some(AssistantDeltaChannel::Text),
+                entry_id: None,
+            },
+            SessionDriverEvent::RunCompleted {
+                base: b(),
+                snapshot: snap(SessionStatus::Idle),
+                user_entry_id: None,
+                assistant_entry_id: None,
+            },
         ]
     }
     match path {
         "/sessions/demo-session.jsonl" => greeting_seed(),
         "/sessions/older-session.jsonl" => session_seed(
-            "older-session", "Explore the fold reducer",
+            "older-session",
+            "Explore the fold reducer",
             "How does foldEvent assemble the transcript?",
             "It folds each driver event into render-ready items — assistant deltas accumulate into one bubble, tool cards key off callId, and ambient UI lives in keyed maps.",
         ),
         "/sessions/scratch-session.jsonl" => session_seed(
-            "scratch-session", "scratch", "quick scratch session", "Noted — nothing else here.",
+            "scratch-session",
+            "scratch",
+            "quick scratch session",
+            "Noted — nothing else here.",
         ),
-        _ => session_seed("unknown", "Session", "(opened)", "No fixture for this session."),
+        _ => session_seed(
+            "unknown",
+            "Session",
+            "(opened)",
+            "No fixture for this session.",
+        ),
     }
 }
 
@@ -451,8 +702,17 @@ fn branched_seed() -> Vec<SessionDriverEvent> {
 
 fn greeting_seed() -> Vec<SessionDriverEvent> {
     let mut events = vec![
-        SessionDriverEvent::SessionOpened { base: base(), snapshot: mock_snapshot(SessionStatus::Idle) },
-        SessionDriverEvent::UserMessage { base: base(), id: "u1".into(), text: GREETING_PROMPT.into(), entry_id: Some("e-u1".into()), images: None },
+        SessionDriverEvent::SessionOpened {
+            base: base(),
+            snapshot: mock_snapshot(SessionStatus::Idle),
+        },
+        SessionDriverEvent::UserMessage {
+            base: base(),
+            id: "u1".into(),
+            text: GREETING_PROMPT.into(),
+            entry_id: Some("e-u1".into()),
+            images: None,
+        },
     ];
 
     // Simulate ~37s of working wall-clock between the prompt and the settled reply,
@@ -462,12 +722,19 @@ fn greeting_seed() -> Vec<SessionDriverEvent> {
     // Assistant deltas (text channel, chunked)
     let text = "I'll add a lightweight health endpoint and a test that hits it. Let me look at how routes are currently registered.";
     for chunk in deltas(text, 3) {
-        events.push(SessionDriverEvent::AssistantDelta { base: base(), text: chunk, channel: Some(AssistantDeltaChannel::Text), entry_id: None });
+        events.push(SessionDriverEvent::AssistantDelta {
+            base: base(),
+            text: chunk,
+            channel: Some(AssistantDeltaChannel::Text),
+            entry_id: None,
+        });
     }
 
     // Tool span: bash (rg) — bump the clock by durationMs between start and finish.
     events.push(SessionDriverEvent::ToolStarted {
-        base: base(), call_id: "t1".into(), tool_name: "bash".into(),
+        base: base(),
+        call_id: "t1".into(),
+        tool_name: "bash".into(),
         label: Some("Run shell command".into()),
         description: Some("Execute a command in the workspace shell".into()),
         input: Some(serde_json::json!({"command": "rg -n \"app.get\\(\" server/src"})),
@@ -482,7 +749,12 @@ fn greeting_seed() -> Vec<SessionDriverEvent> {
     // More assistant deltas
     let text2 = "Routes live in `server/src/index.ts`. I'll register `/health` next to the others and add a Bun test.";
     for chunk in deltas(text2, 3) {
-        events.push(SessionDriverEvent::AssistantDelta { base: base(), text: chunk, channel: Some(AssistantDeltaChannel::Text), entry_id: None });
+        events.push(SessionDriverEvent::AssistantDelta {
+            base: base(),
+            text: chunk,
+            channel: Some(AssistantDeltaChannel::Text),
+            entry_id: None,
+        });
     }
 
     // Run completed
@@ -540,7 +812,11 @@ fn format_qna_text(questions: &[QnaQuestion], answers: &[QnaAnswer]) -> String {
                 .unwrap_or_default();
             parts.push("Options:".into());
             for (j, opt) in opts.iter().enumerate() {
-                let mark = if picked.contains(&(j as i64)) { "[x]" } else { "[ ]" };
+                let mark = if picked.contains(&(j as i64)) {
+                    "[x]"
+                } else {
+                    "[ ]"
+                };
                 parts.push(format!("  {mark} {}", opt.label));
             }
         }
@@ -622,10 +898,29 @@ fn tool_span(
 }
 
 /// Build the greeting script (with delays for streaming).
+#[expect(
+    dead_code,
+    reason = "fixture kept for mock parity; current default seed uses a prebuilt greeting session"
+)]
 fn greeting_script() -> Vec<ScriptStep> {
     let mut steps = vec![
-        ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionOpened { base: base(), snapshot: mock_snapshot(SessionStatus::Idle) } },
-        ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: "u1".into(), text: GREETING_PROMPT.into(), entry_id: Some("e-u1".into()), images: None } },
+        ScriptStep {
+            wait_ms: 0,
+            event: SessionDriverEvent::SessionOpened {
+                base: base(),
+                snapshot: mock_snapshot(SessionStatus::Idle),
+            },
+        },
+        ScriptStep {
+            wait_ms: 0,
+            event: SessionDriverEvent::UserMessage {
+                base: base(),
+                id: "u1".into(),
+                text: GREETING_PROMPT.into(),
+                entry_id: Some("e-u1".into()),
+                images: None,
+            },
+        },
     ];
 
     advance_ts(36_600);
@@ -633,16 +928,29 @@ fn greeting_script() -> Vec<ScriptStep> {
     // Assistant deltas with delays
     let text = "I'll add a lightweight health endpoint and a test that hits it. Let me look at how routes are currently registered.";
     for chunk in deltas(text, 3) {
-        steps.push(ScriptStep { wait_ms: 28, event: SessionDriverEvent::AssistantDelta { base: base(), text: chunk, channel: Some(AssistantDeltaChannel::Text), entry_id: None } });
+        steps.push(ScriptStep {
+            wait_ms: 28,
+            event: SessionDriverEvent::AssistantDelta {
+                base: base(),
+                text: chunk,
+                channel: Some(AssistantDeltaChannel::Text),
+                entry_id: None,
+            },
+        });
     }
 
     // Tool span
-    steps.push(ScriptStep { wait_ms: 120, event: SessionDriverEvent::ToolStarted {
-        base: base(), call_id: "t1".into(), tool_name: "bash".into(),
-        label: Some("Run shell command".into()),
-        description: Some("Execute a command in the workspace shell".into()),
-        input: Some(serde_json::json!({"command": "rg -n \"app.get\\(\" server/src"})),
-    }});
+    steps.push(ScriptStep {
+        wait_ms: 120,
+        event: SessionDriverEvent::ToolStarted {
+            base: base(),
+            call_id: "t1".into(),
+            tool_name: "bash".into(),
+            label: Some("Run shell command".into()),
+            description: Some("Execute a command in the workspace shell".into()),
+            input: Some(serde_json::json!({"command": "rg -n \"app.get\\(\" server/src"})),
+        },
+    });
     advance_ts(340);
     steps.push(ScriptStep { wait_ms: 220, event: SessionDriverEvent::ToolFinished {
         base: base(), call_id: "t1".into(), success: true,
@@ -653,16 +961,27 @@ fn greeting_script() -> Vec<ScriptStep> {
     // More deltas
     let text2 = "Routes live in `server/src/index.ts`. I'll register `/health` next to the others and add a Bun test.";
     for chunk in deltas(text2, 3) {
-        steps.push(ScriptStep { wait_ms: 28, event: SessionDriverEvent::AssistantDelta { base: base(), text: chunk, channel: Some(AssistantDeltaChannel::Text), entry_id: None } });
+        steps.push(ScriptStep {
+            wait_ms: 28,
+            event: SessionDriverEvent::AssistantDelta {
+                base: base(),
+                text: chunk,
+                channel: Some(AssistantDeltaChannel::Text),
+                entry_id: None,
+            },
+        });
     }
 
     // Run completed
-    steps.push(ScriptStep { wait_ms: 60, event: SessionDriverEvent::RunCompleted {
-        base: base(),
-        snapshot: mock_snapshot(SessionStatus::Idle),
-        user_entry_id: Some("e-u1".into()),
-        assistant_entry_id: Some("e-a1".into()),
-    }});
+    steps.push(ScriptStep {
+        wait_ms: 60,
+        event: SessionDriverEvent::RunCompleted {
+            base: base(),
+            snapshot: mock_snapshot(SessionStatus::Idle),
+            user_entry_id: Some("e-u1".into()),
+            assistant_entry_id: Some("e-a1".into()),
+        },
+    });
 
     steps
 }
@@ -680,51 +999,93 @@ fn prompt_reply_script(text: &str, prompt_id: Option<&str>) -> Vec<ScriptStep> {
     let call_id = format!("t-{}", ts());
 
     let mut steps = vec![
-        ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage {
-            base: base(), id: u_id.clone(), text: text.into(), images: None,
-            entry_id: Some(format!("e-{u_id}")),
-        }},
-        ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated {
-            base: base(), snapshot: mock_snapshot(SessionStatus::Running),
-        }},
+        ScriptStep {
+            wait_ms: 0,
+            event: SessionDriverEvent::UserMessage {
+                base: base(),
+                id: u_id.clone(),
+                text: text.into(),
+                images: None,
+                entry_id: Some(format!("e-{u_id}")),
+            },
+        },
+        ScriptStep {
+            wait_ms: 0,
+            event: SessionDriverEvent::SessionUpdated {
+                base: base(),
+                snapshot: mock_snapshot(SessionStatus::Running),
+            },
+        },
     ];
 
     // Thinking deltas (rendered under a "Thought process" collapsed block).
     for chunk in deltas("Let me think about the cleanest way to do that.", 3) {
-        steps.push(ScriptStep { wait_ms: 28, event: SessionDriverEvent::AssistantDelta {
-            base: base(), text: chunk, channel: Some(AssistantDeltaChannel::Thinking), entry_id: None,
-        }});
+        steps.push(ScriptStep {
+            wait_ms: 28,
+            event: SessionDriverEvent::AssistantDelta {
+                base: base(),
+                text: chunk,
+                channel: Some(AssistantDeltaChannel::Thinking),
+                entry_id: None,
+            },
+        });
     }
 
     // Text deltas — the visible narration.
-    for chunk in deltas("Good question. Here's the plan: I'll start by checking the existing structure, then make the change incrementally so each step is verifiable.", 3) {
-        steps.push(ScriptStep { wait_ms: 28, event: SessionDriverEvent::AssistantDelta {
-            base: base(), text: chunk, channel: Some(AssistantDeltaChannel::Text), entry_id: None,
-        }});
+    for chunk in deltas(
+        "Good question. Here's the plan: I'll start by checking the existing structure, then make the change incrementally so each step is verifiable.",
+        3,
+    ) {
+        steps.push(ScriptStep {
+            wait_ms: 28,
+            event: SessionDriverEvent::AssistantDelta {
+                base: base(),
+                text: chunk,
+                channel: Some(AssistantDeltaChannel::Text),
+                entry_id: None,
+            },
+        });
     }
 
     // Read tool span — ~1.2s (a file read that touches disk).
     steps.extend(tool_span(
-        &call_id, "read", "Read file", Some("Read a file from the workspace"),
+        &call_id,
+        "read",
+        "Read file",
+        Some("Read a file from the workspace"),
         serde_json::json!({"path": "server/src/index.ts"}),
         true,
         serde_json::json!("// 42 lines — Bun.serve with WS + /debug/state"),
-        140, 260, 1200,
+        140,
+        260,
+        1200,
     ));
 
     // Final text deltas.
-    for chunk in deltas("That confirms it. Making the change now and then I'll verify it builds.", 3) {
-        steps.push(ScriptStep { wait_ms: 28, event: SessionDriverEvent::AssistantDelta {
-            base: base(), text: chunk, channel: Some(AssistantDeltaChannel::Text), entry_id: None,
-        }});
+    for chunk in deltas(
+        "That confirms it. Making the change now and then I'll verify it builds.",
+        3,
+    ) {
+        steps.push(ScriptStep {
+            wait_ms: 28,
+            event: SessionDriverEvent::AssistantDelta {
+                base: base(),
+                text: chunk,
+                channel: Some(AssistantDeltaChannel::Text),
+                entry_id: None,
+            },
+        });
     }
 
-    steps.push(ScriptStep { wait_ms: 80, event: SessionDriverEvent::RunCompleted {
-        base: base(),
-        snapshot: mock_snapshot(SessionStatus::Idle),
-        user_entry_id: Some(format!("e-{u_id}")),
-        assistant_entry_id: Some(format!("e-a-{u_id}")),
-    }});
+    steps.push(ScriptStep {
+        wait_ms: 80,
+        event: SessionDriverEvent::RunCompleted {
+            base: base(),
+            snapshot: mock_snapshot(SessionStatus::Idle),
+            user_entry_id: Some(format!("e-{u_id}")),
+            assistant_entry_id: Some(format!("e-a-{u_id}")),
+        },
+    });
 
     steps
 }
@@ -807,9 +1168,14 @@ fn new_session_seed(
         todos: None,
         mcp_servers: None,
     };
-    let events = vec![
-        SessionDriverEvent::SessionOpened { base: SessionEventBase { session_ref: ref_id, timestamp: ts(), run_id: None }, snapshot: snapshot.clone() },
-    ];
+    let events = vec![SessionDriverEvent::SessionOpened {
+        base: SessionEventBase {
+            session_ref: ref_id,
+            timestamp: ts(),
+            run_id: None,
+        },
+        snapshot: snapshot.clone(),
+    }];
     (events, snapshot)
 }
 
@@ -817,9 +1183,18 @@ fn new_session_seed(
 /// ref — faithful port of TS `newSessionReply`. The deferred-creation flow
 /// delivers the first prompt only after the new session is focused, so its turn
 /// must land in the new session's transcript. Streams "On it — the session's up."
-fn new_session_reply(template: &SessionSnapshot, user_text: &str, user_id: &str, images: &[ImageContent]) -> Vec<ScriptStep> {
+fn new_session_reply(
+    template: &SessionSnapshot,
+    user_text: &str,
+    user_id: &str,
+    images: &[ImageContent],
+) -> Vec<ScriptStep> {
     let ref_id = template.r#ref.clone();
-    let b = || SessionEventBase { session_ref: ref_id.clone(), timestamp: ts(), run_id: None };
+    let b = || SessionEventBase {
+        session_ref: ref_id.clone(),
+        timestamp: ts(),
+        run_id: None,
+    };
     let snap = |status: SessionStatus| SessionSnapshot {
         status,
         updated_at: ts(),
@@ -827,26 +1202,50 @@ fn new_session_reply(template: &SessionSnapshot, user_text: &str, user_id: &str,
     };
     let reply = "On it — the session's up. Let me take a first look at what you asked for.";
     let mut steps = vec![
-        ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage {
-            base: b(), id: user_id.into(), text: user_text.into(),
-            images: if images.is_empty() { None } else { Some(images.to_vec()) },
-            entry_id: Some(format!("e-{user_id}")),
-        }},
-        ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated { base: b(), snapshot: snap(SessionStatus::Running) } },
+        ScriptStep {
+            wait_ms: 0,
+            event: SessionDriverEvent::UserMessage {
+                base: b(),
+                id: user_id.into(),
+                text: user_text.into(),
+                images: if images.is_empty() {
+                    None
+                } else {
+                    Some(images.to_vec())
+                },
+                entry_id: Some(format!("e-{user_id}")),
+            },
+        },
+        ScriptStep {
+            wait_ms: 0,
+            event: SessionDriverEvent::SessionUpdated {
+                base: b(),
+                snapshot: snap(SessionStatus::Running),
+            },
+        },
     ];
     // Stream the reply in ~3-word chunks (same cadence as deltas, inlined so the
     // events carry the new session's ref instead of base()'s demo ref).
     for chunk in deltas(reply, 3) {
-        steps.push(ScriptStep { wait_ms: 32, event: SessionDriverEvent::AssistantDelta {
-            base: b(), text: chunk, channel: Some(AssistantDeltaChannel::Text), entry_id: None,
-        }});
+        steps.push(ScriptStep {
+            wait_ms: 32,
+            event: SessionDriverEvent::AssistantDelta {
+                base: b(),
+                text: chunk,
+                channel: Some(AssistantDeltaChannel::Text),
+                entry_id: None,
+            },
+        });
     }
-    steps.push(ScriptStep { wait_ms: 80, event: SessionDriverEvent::RunCompleted {
-        base: b(),
-        snapshot: snap(SessionStatus::Idle),
-        user_entry_id: Some(format!("e-{user_id}")),
-        assistant_entry_id: Some(format!("e-a-{user_id}")),
-    }});
+    steps.push(ScriptStep {
+        wait_ms: 80,
+        event: SessionDriverEvent::RunCompleted {
+            base: b(),
+            snapshot: snap(SessionStatus::Idle),
+            user_entry_id: Some(format!("e-{user_id}")),
+            assistant_entry_id: Some(format!("e-a-{user_id}")),
+        },
+    });
     steps
 }
 
@@ -1138,7 +1537,10 @@ fn fire_step(
         if is_dialog_request(request) {
             pending.lock().insert(
                 request_id_of(request).to_string(),
-                PendingDialog { request: request.clone(), session_ref: base.session_ref.clone() },
+                PendingDialog {
+                    request: request.clone(),
+                    session_ref: base.session_ref.clone(),
+                },
             );
         }
     }
@@ -1149,7 +1551,9 @@ fn fire_step(
 }
 
 impl Default for MockDriver {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[async_trait]
@@ -1164,7 +1568,9 @@ impl PilotDriver for MockDriver {
         let (tx, mut rx) = mpsc::channel(256);
         self.listeners.lock().push((id, tx));
         tokio::spawn(async move {
-            while let Some(ev) = rx.recv().await { listener(ev); }
+            while let Some(ev) = rx.recv().await {
+                listener(ev);
+            }
         });
         id
     }
@@ -1173,7 +1579,14 @@ impl PilotDriver for MockDriver {
         self.listeners.lock().retain(|(sid, _)| *sid != id);
     }
 
-    async fn prompt(&self, text: String, _deliver_as: Option<DeliveryMode>, session_id: Option<SessionId>, images: Vec<ImageContent>, prompt_id: Option<String>) {
+    async fn prompt(
+        &self,
+        text: String,
+        _deliver_as: Option<DeliveryMode>,
+        session_id: Option<SessionId>,
+        images: Vec<ImageContent>,
+        prompt_id: Option<String>,
+    ) {
         // Deferred-creation first turn: this prompt targets the session we JUST
         // created, so stream it under that session's own ref (not the demo
         // session's) and consume the one-shot marker. Subsequent prompts fall
@@ -1182,7 +1595,11 @@ impl PilotDriver for MockDriver {
         if let Some(session_id) = session_id {
             let taken = {
                 let mut lc = self.last_created.lock();
-                if lc.as_ref().map(|c| c.session_id == session_id).unwrap_or(false) {
+                if lc
+                    .as_ref()
+                    .map(|c| c.session_id == session_id)
+                    .unwrap_or(false)
+                {
                     lc.take()
                 } else {
                     None
@@ -1299,18 +1716,26 @@ impl PilotDriver for MockDriver {
         // this fix's scope, so it's omitted here to avoid changing get_usage behavior.)
         let worktrees = self.worktrees.lock();
         let reaped = self.reaped_worktrees.lock();
-        self.sessions.lock().iter().map(|s| {
-            let mut s = s.clone();
-            if let Some(meta) = worktrees.get(&s.cwd) {
-                s.worktree = Some(WorktreeInfo {
-                    path: s.cwd.clone(),
-                    base: meta.base.clone(),
-                    name: meta.name.clone(),
-                    reaped: if reaped.contains(&s.cwd) { Some(true) } else { None },
-                });
-            }
-            s
-        }).collect()
+        self.sessions
+            .lock()
+            .iter()
+            .map(|s| {
+                let mut s = s.clone();
+                if let Some(meta) = worktrees.get(&s.cwd) {
+                    s.worktree = Some(WorktreeInfo {
+                        path: s.cwd.clone(),
+                        base: meta.base.clone(),
+                        name: meta.name.clone(),
+                        reaped: if reaped.contains(&s.cwd) {
+                            Some(true)
+                        } else {
+                            None
+                        },
+                    });
+                }
+                s
+            })
+            .collect()
     }
 
     async fn open_session(&self, path: String) -> Vec<SessionDriverEvent> {
@@ -1337,7 +1762,12 @@ impl PilotDriver for MockDriver {
         seed
     }
 
-    async fn branch_from(&self, entry_id: String, _summarize: bool, _session_id: Option<SessionId>) -> BranchResult {
+    async fn branch_from(
+        &self,
+        entry_id: String,
+        _summarize: bool,
+        _session_id: Option<SessionId>,
+    ) -> BranchResult {
         self.cancel_timers();
         let is_user = entry_id == "e-u1" || entry_id == "e-u2";
         if is_user {
@@ -1352,7 +1782,12 @@ impl PilotDriver for MockDriver {
                 aborted: None,
             };
         }
-        BranchResult { seed: greeting_seed(), editor_text: None, cancelled: false, aborted: None }
+        BranchResult {
+            seed: greeting_seed(),
+            editor_text: None,
+            cancelled: false,
+            aborted: None,
+        }
     }
 
     async fn new_session(&self, opts: NewSessionOptsData) -> Vec<SessionDriverEvent> {
@@ -1365,9 +1800,21 @@ impl PilotDriver for MockDriver {
         // apply-on-create. Also records the worktree (so listSessions flags it) and
         // prepends a synthetic "new" row to the mutable session list (so the new
         // session appears in the sidebar immediately) — both faithful to TS.
-        let NewSessionOptsData { cwd, worktree, model, thinking, facet, permission_monitor } = opts;
+        let NewSessionOptsData {
+            cwd,
+            worktree,
+            model,
+            thinking,
+            facet,
+            permission_monitor,
+        } = opts;
         // base = cwd?.trim() || NEW_SESSION_ENTRY.cwd  (== WORKSPACE_PATH)
-        let base = cwd.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()).map(|s| s.to_string()).unwrap_or_else(|| WORKSPACE_PATH.to_string());
+        let base = cwd
+            .as_deref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| WORKSPACE_PATH.to_string());
         // dir = worktree ? `${base.replace(/\/+$/, "")}-worktree` : base
         // (clone in the non-worktree arm so `base` stays live for the worktree record below.)
         let dir = if worktree.unwrap_or(false) {
@@ -1383,9 +1830,18 @@ impl PilotDriver for MockDriver {
         if worktree.unwrap_or(false) {
             self.worktrees.lock().insert(
                 dir.clone(),
-                WorktreeMeta { base: base.clone(), name: format!("pilot-mock-{dir}") },
+                WorktreeMeta {
+                    base: base.clone(),
+                    name: format!("pilot-mock-{dir}"),
+                },
             );
-            if base.rsplit('/').next().map(|seg| seg == "dirty").unwrap_or(false) || base == "dirty" {
+            if base
+                .rsplit('/')
+                .next()
+                .map(|seg| seg == "dirty")
+                .unwrap_or(false)
+                || base == "dirty"
+            {
                 self.dirty_worktrees.lock().insert(dir.clone());
             }
         }
@@ -1409,20 +1865,39 @@ impl PilotDriver for MockDriver {
         // from the chosen model's entry in MOCK_MODELS (or the default).
         let default = mock_default_config();
         let chosen = model.as_ref().and_then(|m| {
-            mock_models().into_iter().find(|opt| opt.provider == m.provider && opt.model_id == m.model_id)
+            mock_models()
+                .into_iter()
+                .find(|opt| opt.provider == m.provider && opt.model_id == m.model_id)
         });
         let config = SessionConfig {
-            provider: Some(model.as_ref().map(|m| m.provider.clone()).unwrap_or_else(|| default.provider.clone().unwrap())),
-            model_id: Some(model.as_ref().map(|m| m.model_id.clone()).unwrap_or_else(|| default.model_id.clone().unwrap())),
-            thinking_level: Some(thinking.unwrap_or_else(|| default.thinking_level.clone().unwrap())),
+            provider: Some(
+                model
+                    .as_ref()
+                    .map(|m| m.provider.clone())
+                    .unwrap_or_else(|| default.provider.clone().unwrap()),
+            ),
+            model_id: Some(
+                model
+                    .as_ref()
+                    .map(|m| m.model_id.clone())
+                    .unwrap_or_else(|| default.model_id.clone().unwrap()),
+            ),
+            thinking_level: Some(
+                thinking.unwrap_or_else(|| default.thinking_level.clone().unwrap()),
+            ),
             available_thinking_levels: Some(
-                chosen.and_then(|m| m.thinking_levels).unwrap_or_else(|| default.available_thinking_levels.clone().unwrap()),
+                chosen
+                    .and_then(|m| m.thinking_levels)
+                    .unwrap_or_else(|| default.available_thinking_levels.clone().unwrap()),
             ),
         };
         let permission_monitor = permission_monitor.unwrap_or(PermissionMonitorMode::Standard);
         let (events, snapshot) = new_session_seed(&dir, config, facet, permission_monitor);
         let session_id = snapshot.r#ref.session_id.clone();
-        *self.last_created.lock() = Some(LastCreated { session_id, snapshot });
+        *self.last_created.lock() = Some(LastCreated {
+            session_id,
+            snapshot,
+        });
         events
     }
 
@@ -1440,7 +1915,12 @@ impl PilotDriver for MockDriver {
             }
         }
         if archived {
-            let cwd = self.sessions.lock().iter().find(|s| s.path == path).map(|s| s.cwd.clone());
+            let cwd = self
+                .sessions
+                .lock()
+                .iter()
+                .find(|s| s.path == path)
+                .map(|s| s.cwd.clone());
             if let Some(cwd) = cwd {
                 let has_wt = self.worktrees.lock().contains_key(&cwd);
                 let already_reaped = self.reaped_worktrees.lock().contains(&cwd);
@@ -1468,10 +1948,16 @@ impl PilotDriver for MockDriver {
         let has_wt = self.worktrees.lock().contains_key(&path);
         let already_reaped = self.reaped_worktrees.lock().contains(&path);
         if !has_wt || already_reaped {
-            return WorktreeCleanupResult { removed: false, reason: Some("no pilot worktree at this path".into()) };
+            return WorktreeCleanupResult {
+                removed: false,
+                reason: Some("no pilot worktree at this path".into()),
+            };
         }
         self.reaped_worktrees.lock().insert(path);
-        WorktreeCleanupResult { removed: true, reason: None }
+        WorktreeCleanupResult {
+            removed: true,
+            reason: None,
+        }
     }
 
     async fn rename_session(&self, path: String, name: String) {
@@ -1489,7 +1975,9 @@ impl PilotDriver for MockDriver {
         }
     }
 
-    async fn list_models(&self) -> Vec<ModelOption> { mock_models() }
+    async fn list_models(&self) -> Vec<ModelOption> {
+        mock_models()
+    }
     async fn get_model_defaults(&self) -> ModelDefaults {
         let default = mock_default_config();
         ModelDefaults {
@@ -1499,12 +1987,27 @@ impl PilotDriver for MockDriver {
             favorites: Vec::new(),
         }
     }
-    async fn list_commands(&self, _session_id: Option<SessionId>) -> Vec<CommandInfo> { mock_commands() }
-    async fn list_facets(&self, _session_id: Option<SessionId>) -> Vec<String> { vec!["execute".into(), "plan".into(), "research".into()] }
-    async fn list_file_index(&self, _session_id: Option<SessionId>) -> (Vec<FileInfo>, bool) { (mock_files(), false) }
-    async fn list_files(&self, query: String, _session_id: Option<SessionId>, _cwd: Option<String>) -> Vec<FileInfo> {
+    async fn list_commands(&self, _session_id: Option<SessionId>) -> Vec<CommandInfo> {
+        mock_commands()
+    }
+    async fn list_facets(&self, _session_id: Option<SessionId>) -> Vec<String> {
+        vec!["execute".into(), "plan".into(), "research".into()]
+    }
+    async fn list_file_index(&self, _session_id: Option<SessionId>) -> (Vec<FileInfo>, bool) {
+        (mock_files(), false)
+    }
+    async fn list_files(
+        &self,
+        query: String,
+        _session_id: Option<SessionId>,
+        _cwd: Option<String>,
+    ) -> Vec<FileInfo> {
         let q = query.to_lowercase();
-        mock_files().into_iter().filter(|f| f.path.to_lowercase().contains(&q)).take(20).collect()
+        mock_files()
+            .into_iter()
+            .filter(|f| f.path.to_lowercase().contains(&q))
+            .take(20)
+            .collect()
     }
     async fn list_dir(&self, path: Option<String>) -> DirListing {
         // Faithful port of TS `listDir()`: resolve the (possibly-empty) path, look
@@ -1518,7 +2021,12 @@ impl PilotDriver for MockDriver {
             .map(|p| p.to_string_lossy().into_owned())
             .filter(|p| p != &dir);
         let entries = mock_dir_tree().get(&dir).cloned().unwrap_or_default();
-        DirListing { path: dir, parent, entries, error: None }
+        DirListing {
+            path: dir,
+            parent,
+            entries,
+            error: None,
+        }
     }
     async fn stat_path(&self, path: String) -> PathStat {
         // Faithful port of TS `statPath()`: existence comes from the synthetic
@@ -1526,10 +2034,14 @@ impl PilotDriver for MockDriver {
         // /Users/timo/src/demo reports as existing on a dev host where it doesn't.
         let abs = mock_resolve(Some(&path));
         let exists = mock_dir_tree().contains_key(&abs);
-        PathStat { path: abs, exists, is_dir: exists }
+        PathStat {
+            path: abs,
+            exists,
+            is_dir: exists,
+        }
     }
 
-    fn set_model(&self, provider: String, model_id: String, _session_id: Option<SessionId>) {
+    fn set_model(&self, _provider: String, _model_id: String, _session_id: Option<SessionId>) {
         self.emit(SessionDriverEvent::SessionUpdated {
             base: base(),
             snapshot: snap(SessionStatus::Idle, None, None, None, None, None),
@@ -1545,7 +2057,10 @@ impl PilotDriver for MockDriver {
     fn set_permission_monitor(&self, mode: PermissionMonitorMode, _session_id: Option<SessionId>) {
         let mut s = snap(SessionStatus::Idle, None, None, None, None, None);
         s.permission_monitor = Some(mode);
-        self.emit(SessionDriverEvent::SessionUpdated { base: base(), snapshot: s });
+        self.emit(SessionDriverEvent::SessionUpdated {
+            base: base(),
+            snapshot: s,
+        });
     }
 
     async fn toggle_adventurous_handoff(&self, _session_id: Option<SessionId>) {
@@ -1558,17 +2073,26 @@ impl PilotDriver for MockDriver {
         };
         let mut s = snap(SessionStatus::Idle, None, None, None, None, None);
         s.adventurous_handoff = Some(flipped);
-        self.emit(SessionDriverEvent::SessionUpdated { base: base(), snapshot: s });
+        self.emit(SessionDriverEvent::SessionUpdated {
+            base: base(),
+            snapshot: s,
+        });
     }
 
     fn get_usage(&self, _session_id: Option<SessionId>) -> Option<SessionUsage> {
         let tokens = LIVE_USAGE_TOKENS.fetch_add(2800, Ordering::Relaxed) + 2800;
         let tokens = tokens.min(200000) as i64;
         let percent = ((tokens as f64 / 200000.0) * 1000.0).round() / 10.0;
-        Some(SessionUsage { tokens: Some(tokens), context_window: 200000, percent: Some(percent) })
+        Some(SessionUsage {
+            tokens: Some(tokens),
+            context_window: 200000,
+            percent: Some(percent),
+        })
     }
 
-    fn default_seed(&self) -> Option<Vec<SessionDriverEvent>> { Some(greeting_seed()) }
+    fn default_seed(&self) -> Option<Vec<SessionDriverEvent>> {
+        Some(greeting_seed())
+    }
 
     fn run_script(&self, name: String) {
         let steps: Vec<ScriptStep> = match name.as_str() {

@@ -6,8 +6,8 @@ pub mod config;
 pub mod driver;
 pub mod hub;
 pub mod journal;
-pub mod pidlock;
 pub mod mock_driver;
+pub mod pidlock;
 pub mod polytoken;
 pub mod push;
 pub mod settings_store;
@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -32,7 +32,6 @@ use tracing::{error, info, warn};
 
 use crate::driver::PilotDriver;
 use crate::hub::SessionHub;
-use crate::stub_driver::StubDriver;
 
 /// Shared app state.
 #[derive(Clone)]
@@ -127,10 +126,12 @@ async fn main() {
     // to the driver; each emitted SessionDriverEvent is folded + broadcast to WS clients.
     {
         let hub = state.hub.clone();
-        let _sub_id = driver_for_sub.subscribe(Box::new(move |ev: pilot_protocol::session_driver::SessionDriverEvent| {
-            let mut h = hub.lock();
-            h.on_event(ev);
-        }));
+        let _sub_id = driver_for_sub.subscribe(Box::new(
+            move |ev: pilot_protocol::session_driver::SessionDriverEvent| {
+                let mut h = hub.lock();
+                h.on_event(ev);
+            },
+        ));
     }
 
     let addr = format!("{}:{}", cfg.host, cfg.port);
@@ -143,7 +144,11 @@ async fn main() {
         "data dir: {}, driver: {}, token: {}, debug: {}",
         cfg.data_dir.display(),
         driver_mode,
-        if cfg.token.is_some() { "required" } else { "off" },
+        if cfg.token.is_some() {
+            "required"
+        } else {
+            "off"
+        },
         cfg.debug,
     );
 
@@ -296,16 +301,14 @@ async fn handle_ws_connection(ws: WebSocket, state: AppState) {
                 }
 
                 // Parse as ClientMessage and dispatch to hub
-                let client_msg = match serde_json::from_value::<
-                    pilot_protocol::wire::ClientMessage,
-                >(parsed)
-                {
-                    Ok(m) => m,
-                    Err(e) => {
-                        warn!("failed to parse client message: {e}");
-                        continue;
-                    }
-                };
+                let client_msg =
+                    match serde_json::from_value::<pilot_protocol::wire::ClientMessage>(parsed) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            warn!("failed to parse client message: {e}");
+                            continue;
+                        }
+                    };
 
                 // Dispatch to the hub (lock briefly — handle_client is sync,
                 // driver calls are spawned as separate tasks)
@@ -331,7 +334,9 @@ async fn handle_ws_connection(ws: WebSocket, state: AppState) {
 // ── /push/* ─────────────────────────────────────────────────────────────
 
 fn check_token(state: &AppState, headers: &HeaderMap, query: &PushQuery) -> bool {
-    let auth_header = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok());
+    let auth_header = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok());
     let provided = config::token_from_request(auth_header, query.token.as_deref());
     config::token_ok(provided.as_deref(), &state.config)
 }
@@ -369,10 +374,7 @@ async fn push_test(State(state): State<AppState>, Query(q): Query<PushQuery>) ->
 
 // ── /update/state ────────────────────────────────────────────────────────
 
-async fn update_state(
-    State(state): State<AppState>,
-    Query(q): Query<PushQuery>,
-) -> Response {
+async fn update_state(State(state): State<AppState>, Query(q): Query<PushQuery>) -> Response {
     if !check_token(&state, &HeaderMap::new(), &q) {
         return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
     }
@@ -394,10 +396,7 @@ async fn debug_state(State(state): State<AppState>, Query(q): Query<PushQuery>) 
     Json(hub.snapshot()).into_response()
 }
 
-async fn debug_reset(
-    State(state): State<AppState>,
-    Query(q): Query<PushQuery>,
-) -> Response {
+async fn debug_reset(State(state): State<AppState>, Query(q): Query<PushQuery>) -> Response {
     if !state.config.debug {
         return (StatusCode::NOT_FOUND, "debug disabled").into_response();
     }
@@ -422,7 +421,10 @@ async fn static_fallback(
 ) -> Response {
     match state.static_server.serve(uri.path(), &headers).await {
         Ok(resp) => resp,
-        Err(()) => (StatusCode::OK, "pilot server — no client build (run `bun run dev`)")
+        Err(()) => (
+            StatusCode::OK,
+            "pilot server — no client build (run `bun run dev`)",
+        )
             .into_response(),
     }
 }

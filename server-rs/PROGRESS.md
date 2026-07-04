@@ -207,10 +207,20 @@ server = the daemon owns everything it can. Known as of 2026-07-04:
       --all-targets -- -D warnings`, `cargo test`, rust-cache with
       `workspaces: server-rs`, like the existing `desktop/` job. Consider a
       `check:rs` script.
-- [ ] Remove the blanket `#![allow(dead_code)]` / `#![allow(unused_variables)]`;
+- [x] Remove the blanket `#![allow(dead_code)]` / `#![allow(unused_variables)]`;
       convert survivors to item-level `#[expect(dead_code, reason = "...")]`
       so the compiler enumerates remaining gaps and complains when they're
-      done. Expect this to surface every ignored parameter listed above.
+      done. **DONE (2026-07-05):** all hand-written module-level allows removed
+      (`hub`, `mock_driver`, `daemon_client`, `driver`, `event_map`,
+      `history_seed`, `polytoken/mod`, `push`); 47 surfaced warnings → 0.
+      32 item-level `#[expect]`s added, 16 tagged `reason = "BUG: … (Phase N)"`
+      and grep-able via `grep -rn 'BUG:' server-rs/`. The generated
+      `pilot-daemon-types` keeps a justified crate-level `#![allow(dead_code)]`
+      (exhaustive wire vocabulary), documented in the codegen header. Logic-silent
+      gaps (`/health` zeros, `build_sha` empty, `/update/state` body discarded,
+      error parity ~17 vs ~6) can't be `#[expect]`-annotated (no lint) — they're
+      listed in "Wrong turns to undo" #2/#3 and remain Phase 1/3 work. Reviewer
+      (Opus) verified zero behavior change + 0 warnings on a clean rebuild.
 - [ ] Keep progress claims reproducible: commit the full-suite line-reporter
       output (or a per-spec table) instead of prose percentages.
 
