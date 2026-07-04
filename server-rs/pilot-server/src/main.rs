@@ -79,8 +79,8 @@ async fn main() {
             }
         };
 
-    // Driver selection: PILOT_DRIVER=mock uses the fake daemon (in-process axum
-    // router); PILOT_DRIVER=polytoken uses the real polytoken daemon driver.
+    // Driver selection: PILOT_DRIVER=mock uses MockDriver (direct fixture port,
+    // like the TS server); PILOT_DRIVER=polytoken uses the real daemon driver.
     let driver: Arc<dyn PilotDriver> = {
         let driver_mode = std::env::var("PILOT_DRIVER").unwrap_or_else(|_| "polytoken".into());
         match driver_mode.as_str() {

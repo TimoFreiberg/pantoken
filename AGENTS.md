@@ -31,9 +31,11 @@ Monorepo, Bun workspaces.
 - `server-rs/` — Rust port of the server (in progress). Same WS protocol, HTTP
   endpoints, and driver behavior. Three crates: `pilot-protocol` (WS types + fold),
   `pilot-daemon-types` (auto-generated from OpenAPI), `pilot-server` (the binary).
-  The fake daemon (`fake_daemon.rs`) replaces the mock driver — it's an in-process
-  axum router speaking the daemon wire protocol. Set `PILOT_SERVER_IMPL=rust` to
-  launch the Rust binary instead of the Bun server.
+  Mock mode uses `mock_driver.rs`, a direct port of the TS MockDriver
+  (`fake_daemon.rs` is an abandoned earlier approach, currently dead code — see
+  `server-rs/PROGRESS.md`). Set `PILOT_SERVER_IMPL=rust` to launch the Rust
+  binary instead of the Bun server. **Not yet at parity — the live-daemon path
+  is unvalidated; see `server-rs/PROGRESS.md` before building on it.**
 - `client/` — Svelte 5 + Vite PWA. Reconnecting WS singleton, the same fold reducer,
   Claude-app theming in `src/app.css` (warm paper, light + dark).
 - `server/src/shared/` — agent-agnostic utilities both drivers + the hub use
