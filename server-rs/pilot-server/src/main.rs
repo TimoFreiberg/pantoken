@@ -8,6 +8,7 @@ pub mod fake_daemon;
 pub mod hub;
 pub mod journal;
 pub mod pidlock;
+pub mod mock_driver;
 pub mod polytoken;
 pub mod push;
 pub mod settings_store;
@@ -83,28 +84,9 @@ async fn main() {
         let driver_mode = std::env::var("PILOT_DRIVER").unwrap_or_else(|_| "polytoken".into());
         match driver_mode.as_str() {
             "mock" => {
-                // Start the in-process fake daemon on a random port
-                let fake_router = crate::fake_daemon::fake_daemon_router();
-                let fake_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-                    .await
-                    .expect("failed to bind fake daemon");
-                let fake_port = fake_listener.local_addr()
-                    .expect("failed to get fake daemon port")
-                    .port();
-                tokio::spawn(async move {
-                    axum::serve(fake_listener, fake_router)
-                        .await
-                        .expect("fake daemon server error");
-                });
-                let fake_url = format!("http://127.0.0.1:{fake_port}");
-                info!("fake daemon listening on {fake_url}");
-
-                // The PolytokenDriver connects to the fake daemon
-                Arc::new(crate::polytoken::driver::PolytokenDriver::new(
-                    cfg.data_dir.join("sessions"),
-                    std::env::var("PILOT_POLYTOKEN_BIN").unwrap_or_else(|_| "polytoken".into()),
-                    true, // is_fake
-                ).with_fake_daemon_url(fake_url))
+                // Use the MockDriver directly — it serves fixture data as SessionDriverEvent[],
+                // matching the TS MockDriver for e2e parity.
+                Arc::new(crate::mock_driver::MockDriver::new())
             }
             _ => {
                 Arc::new(crate::polytoken::driver::PolytokenDriver::new(
