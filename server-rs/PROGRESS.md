@@ -5,8 +5,9 @@ progress report, which overstated verification. Plan revised same day after
 design discussion: fake-daemon e2e tier reinstated as Phase 2.5, hub
 completion queue made deliberate in Phase 1.)
 
-Chunk A (mock fixture text/lifecycle parity) is complete and reviewer-approved,
-cutting e2e failures 72 → 33 (~90% passing).
+Chunk A (mock fixture text/lifecycle parity) is complete and reviewer-approved
+(32/32 e2e specs pass, 1 flake confirmed), cutting failures 72 → 33 (~90%).
+Chunk F (polish/prompt-nav + scroll) resolved (0 failures, no action needed).
 
 ## Goal (unchanged)
 
@@ -282,6 +283,7 @@ fail-loud philosophy applied to tests — not noise to be waited away.
   discipline (Phase 1) is the chosen middle ground.
 - Don't chase individual e2e specs with special-cased fixes; every fix lands
   with its ported unit tests.
+
 
 ## How to verify current state
 
