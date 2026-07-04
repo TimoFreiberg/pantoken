@@ -28,6 +28,12 @@ Monorepo, Bun workspaces.
 - `server/` — Bun (`Bun.serve`) WS bridge + `/debug/state`. Embeds a `PilotDriver`
   (the seam). `MockDriver` is the deterministic fixture driver for dev/e2e;
   `polytoken-driver.ts` is the live daemon driver. The hub never changes between them.
+- `server-rs/` — Rust port of the server (in progress). Same WS protocol, HTTP
+  endpoints, and driver behavior. Three crates: `pilot-protocol` (WS types + fold),
+  `pilot-daemon-types` (auto-generated from OpenAPI), `pilot-server` (the binary).
+  The fake daemon (`fake_daemon.rs`) replaces the mock driver — it's an in-process
+  axum router speaking the daemon wire protocol. Set `PILOT_SERVER_IMPL=rust` to
+  launch the Rust binary instead of the Bun server.
 - `client/` — Svelte 5 + Vite PWA. Reconnecting WS singleton, the same fold reducer,
   Claude-app theming in `src/app.css` (warm paper, light + dark).
 - `server/src/shared/` — agent-agnostic utilities both drivers + the hub use
@@ -46,11 +52,23 @@ bunx tsc --noEmit -p tsconfig.scripts.json   # typecheck scripts/ (dev tooling)
 bunx tsc --noEmit -p tsconfig.e2e.json       # typecheck e2e/ (Playwright doesn't, by default)
 bun run --cwd client check                    # svelte-check
 bun run --cwd client build                    # prod bundle
+# Rust server (in progress — port to parity, then cut over):
+cd server-rs && cargo build       # build the Rust server
+cd server-rs && cargo test        # run all Rust tests (143 tests)
+cd server-rs && cargo run         # run the Rust server (reads PILOT_PORT, PILOT_DATA_DIR, etc.)
+PILOT_SERVER_IMPL=rust bun run dev   # launch the Rust server instead of Bun
 ```
 
 `bun run check` runs protocol + server + scripts + e2e + client typechecks end to end.
 `tsconfig.scripts.json` and `tsconfig.e2e.json` close the typecheck gap for the
 dev-tooling and Playwright trees. Keep it green.
+
+**Rust server note:** The Rust port is in progress. Set `PILOT_SERVER_IMPL=rust`
+to spawn the Rust binary (`cargo run` in `server-rs/`) instead of the Bun server
+(`bun run src/index.ts` in `server/`). The Rust server reads the same env vars
+(`PILOT_PORT`, `PILOT_DATA_DIR`, `PILOT_TOKEN`, `PILOT_DRIVER`, etc.). Run
+`cargo test` in `server-rs/` for the Rust unit tests. The daemon types are
+auto-generated: `bun run scripts/codegen-polytoken-rs.ts`.
 
 **Driver note:** the server defaults to the polytoken daemon driver. Set
 `PILOT_DRIVER=mock` to use the deterministic mock instead — you want this for UI dev
