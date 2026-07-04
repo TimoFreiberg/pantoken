@@ -5,6 +5,9 @@ progress report, which overstated verification. Plan revised same day after
 design discussion: fake-daemon e2e tier reinstated as Phase 2.5, hub
 completion queue made deliberate in Phase 1.)
 
+Chunk A (mock fixture text/lifecycle parity) is complete and reviewer-approved,
+cutting e2e failures 72 → 33 (~90% passing).
+
 ## Goal (unchanged)
 
 Replace the Bun/TS server (`server/`) with a Rust server implementing the same
@@ -19,22 +22,21 @@ validation legs are green plus a live-daemon smoke test.
 - `cargo test`: 143/143 pass (5 daemon-types, 64 protocol, 74 server).
 - `bun test` (TS side): 760/760 pass.
 - e2e vs Bun server (control): **321/321 pass** (3.6 min).
-- e2e vs Rust server (`PILOT_SERVER_IMPL=rust`): **250/321 pass, 71 fail**
-  (~78%, not the previously claimed 85%; the run takes ~30 min because each
+- e2e vs Rust server (`PILOT_SERVER_IMPL=rust`): **288/321 pass, 33 fail**
+  (~90%, was 250/71 before Chunk A; the run takes ~30 min because each
   failure burns 30 s timeouts × retries).
 - server-rs is in **no CI job** (the cargo steps in ci.yml are for `desktop/`)
   and not in `bun run check`. Nothing enforces fmt/clippy/test for the port.
 
-Observed failure clusters (from artifacts; a mid-run wipe made per-spec counts
-approximate — re-run for exact numbers): sessions (~9, list/switching),
-drafts + dir-picker (~10, the new-session flow: QueryDir/StatPath semantics),
-models (~4, incl. missing `modelDefaults` broadcast), streaming, branch,
-archive, lease-conflict, context-meter (liveTick/refreshUsage), reload-session,
-new-session-failure (error propagation), update-card, transcript, slash
-(command list content), status-indicators (background-run status), settings,
-sidebar-*, rename, scroll-follow, resume-reconnect, images, file-mention,
-adventurous-handoff, active-unread, notification-autodrain,
-new-session-transition, cross-session-attention.
+Observed failure clusters (post-Chunk-A): sessions (~3, worktree create
+via browser dir, dirty-worktree archive path), dir-picker (~4, chooseProjectDir
+hang — list_dir/stat_path/MOCK_DIR_TREE ported but picker→create flow still
+hangs), models (~4, incl. missing `modelDefaults` broadcast, picker badge
+render), branch (3), drafts (2), queue (3), context-meter (2, liveCountBumps
+overlay not ported to mock), new-session-failure (2, error propagation),
+update-card (2), reload-session (2), lease-conflict (2), prompt-delivery (1),
+notification-autodrain (1), sidebar-row (1), slash (1), images (1),
+file-mention (1).
 
 **What is genuinely done and trustworthy:**
 
@@ -49,7 +51,8 @@ new-session-transition, cross-session-attention.
 - `event_map.rs` — structured port of the accumulator model. **Untested.**
 - `hub.rs` — all 35 ClientMessage types have handlers. **Untested.**
 - `mock_driver.rs` — direct port of the TS MockDriver; all fixture scripts
-  present; e2e wiring via `scripts/dev.ts` works end to end.
+  present; Chunk A byte-matches TS mock replies; e2e wiring via
+  `scripts/dev.ts` works end to end.
 
 **The load-bearing caveat:** test-porting stopped exactly where the code became
 I/O-shaped. TS has ~285 test cases with no Rust counterpart, concentrated on
@@ -174,7 +177,8 @@ proves hub+protocol+client — it never touches the live driver stack.
 ### Phase 1 — mock-mode e2e to green, test-first (hub semantics)
 
 Stay on `MockDriver` for this phase — the thin deterministic stack plus the
-Bun control is what makes each of the 71 failures attributable in minutes.
+Bun control is what makes each of the 33 remaining failures attributable in
+minutes.
 
 - [ ] **Land the hub completion queue first** (decided, not wait-for-pain):
       all fire-and-forget `tokio::spawn` driver completions funnel through
@@ -285,5 +289,5 @@ fail-loud philosophy applied to tests — not noise to be waited away.
 cd server-rs && cargo test                      # 143 tests, green
 bun test                                        # 760 tests, green
 bun run test:e2e                                # control vs Bun server: green
-PILOT_SERVER_IMPL=rust bun run test:e2e         # vs Rust server: 71 failures
+PILOT_SERVER_IMPL=rust bun run test:e2e         # vs Rust server: 33 failures (post-Chunk-A)
 ```
