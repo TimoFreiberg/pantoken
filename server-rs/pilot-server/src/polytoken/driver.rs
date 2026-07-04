@@ -20,8 +20,9 @@ use parking_lot::{Mutex, RwLock};
 use pilot_daemon_types::*;
 use pilot_protocol::session_driver::{
     CommandInfo, DirListing, FileInfo, HostUiResponse, ImageContent,
-    ModelDefaults, ModelOption, PathStat, PermissionMonitorMode, SessionDriverEvent, SessionId,
-    SessionListEntry, SessionRef, WorkspaceId, WorkspaceRef,
+    ModelDefaults, ModelOption, PathStat, PermissionMonitorMode, SessionConfig,
+    SessionDriverEvent, SessionId, SessionListEntry, SessionRef, SessionSnapshot,
+    SessionStatus, WorkspaceId, WorkspaceRef,
 };
 use pilot_protocol::wire::{DeliveryMode, McpAction};
 use tokio::sync::mpsc;
@@ -36,7 +37,7 @@ use crate::polytoken::daemon_client::{
     DaemonClient, DaemonResponse, SpawnDaemonOpts, SpawnedDaemon, SseSubscription,
 };
 use crate::polytoken::event_map::{
-    self, DaemonEffect, FoldAccumulator,
+    self, DaemonEffect, FoldAccumulator, FoldResult, MapCtx,
 };
 use crate::polytoken::history_seed::{self, HistoryMapCtx};
 use crate::polytoken::models::parse_models;
@@ -75,6 +76,57 @@ pub struct PolytokenDriver {
     next_sub_id: Mutex<usize>,
     is_viewed: RwLock<Option<Box<dyn Fn(SessionId) -> bool + Send + Sync>>>,
     command_cache: Mutex<HashMap<String, Vec<CommandInfo>>>,
+}
+
+/// A MapCtx implementation backed by a WarmSession's cached state.
+/// The mapper never does I/O — it reads this cached state.
+struct DriverMapCtx {
+    session_ref: SessionRef,
+    workspace: WorkspaceRef,
+    last_state: Option<SessionStateSnapshot>,
+    monitor_mode: Option<PermissionMonitorMode>,
+    autodrain_enabled: Option<bool>,
+}
+
+impl MapCtx for DriverMapCtx {
+    fn r#ref(&self) -> &SessionRef {
+        &self.session_ref
+    }
+
+    fn workspace(&self) -> &WorkspaceRef {
+        &self.workspace
+    }
+
+    fn now(&self) -> String {
+        // ISO 8601 timestamp (simplified — matches the daemon's date-time format)
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        format!("2025-01-01T00:00:{:02}Z", secs % 60)
+    }
+
+    fn snapshot(&self, status: SessionStatus) -> SessionSnapshot {
+        event_map::snapshot_from_state(
+            self.last_state.as_ref(),
+            &self.session_ref,
+            &self.workspace,
+            status,
+            &self.now(),
+            self.monitor_mode,
+            self.autodrain_enabled,
+        )
+    }
+
+    fn live_status(&self) -> SessionStatus {
+        // If the cached state says a turn is in flight, report Running
+        if let Some(state) = &self.last_state {
+            if state.turn_in_flight.unwrap_or(false) {
+                return SessionStatus::Running;
+            }
+        }
+        SessionStatus::Idle
+    }
 }
 
 impl PolytokenDriver {
@@ -200,10 +252,30 @@ impl PolytokenDriver {
     async fn handle_sse_event(self: &Arc<Self>, ws: Arc<WarmSession>, envelope: SseEnvelope) {
         let ev = envelope.event;
 
+        // Build the MapCtx from the warm session's cached state
+        let ctx = DriverMapCtx {
+            session_ref: ws.session_ref.clone(),
+            workspace: ws.workspace.clone(),
+            last_state: ws.last_state.read().clone(),
+            monitor_mode: *ws.monitor_mode.lock(),
+            autodrain_enabled: *ws.autodrain_enabled.lock(),
+        };
+
         // Map through the event_map accumulator
-        // TODO: implement MapCtx for WarmSession to pass to map_daemon_event
-        // For now, this is a simplified path that emits the raw daemon event
-        // The full implementation needs the MapCtx trait impl
+        let result: FoldResult = {
+            let mut acc = ws.accumulator.lock();
+            event_map::map_daemon_event(&ev, &mut acc, &ctx)
+        };
+
+        // Emit all resulting pilot events to subscribers
+        for ev in &result.events {
+            self.emit(ev.clone());
+        }
+
+        // Execute all resulting effects (HTTP calls) AFTER emitting
+        for effect in result.effects {
+            self.execute_effect(&ws, effect).await;
+        }
     }
 
     /// Execute a daemon effect.
