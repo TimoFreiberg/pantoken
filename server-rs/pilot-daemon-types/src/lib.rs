@@ -5,6 +5,14 @@
 
 #![allow(dead_code)]
 
+// The fake daemon emits a `passthrough` event that carries a fully-formed
+// pilot `SessionDriverEvent` so the fixture scripts (ported 1:1 from the TS
+// mock) can be replayed without re-expressing them as daemon event sequences.
+// The driver's event_map recognizes this variant and emits the pilot event
+// directly, bypassing the accumulator. See `fake_daemon.rs` + the `Passthrough`
+// arm in `event_map.rs`.
+use pilot_protocol::session_driver::SessionDriverEvent;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AskUserQuestionMode {
@@ -820,6 +828,14 @@ pub enum DaemonEvent {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         subagent_handle: Option<String>,
         tool_name: String,
+    },
+    /// A passthrough envelope for the fake daemon: carries a fully-formed
+    /// pilot `SessionDriverEvent` that the driver emits directly, bypassing the
+    /// event_map accumulator. Only emitted by the fake daemon (`PILOT_DRIVER=mock`);
+    /// a real daemon never sends this. See `fake_daemon.rs`.
+    Passthrough {
+        #[serde(rename = "pilot_event")]
+        pilot_event: SessionDriverEvent,
     },
 }
 
