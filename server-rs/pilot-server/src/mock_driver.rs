@@ -487,5 +487,9 @@ impl PilotDriver for MockDriver {
         self.play_script(steps);
     }
 
-    fn reset(&self, _bootstrap: bool) {}
+    fn reset(&self, _bootstrap: bool) {
+        // The TS mock resets its internal state (sessions, queues, timers, etc.).
+        // Our simplified version just needs to be callable without panicking.
+        // The greeting seed is regenerated on each default_seed() call.
+    }
 }
