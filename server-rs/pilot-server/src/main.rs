@@ -77,9 +77,44 @@ async fn main() {
             }
         };
 
-    // Driver selection: PILOT_DRIVER=mock uses the stub driver for now.
-    // The real fake daemon (Phase 5) and polytoken driver (Phase 4) replace this.
-    let driver: Arc<dyn PilotDriver> = Arc::new(StubDriver::new());
+    // Driver selection: PILOT_DRIVER=mock uses the fake daemon (in-process axum
+    // router); PILOT_DRIVER=polytoken uses the real polytoken daemon driver.
+    let driver: Arc<dyn PilotDriver> = {
+        let driver_mode = std::env::var("PILOT_DRIVER").unwrap_or_else(|_| "polytoken".into());
+        match driver_mode.as_str() {
+            "mock" => {
+                // Start the in-process fake daemon on a random port
+                let fake_router = crate::fake_daemon::fake_daemon_router();
+                let fake_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                    .await
+                    .expect("failed to bind fake daemon");
+                let fake_port = fake_listener.local_addr()
+                    .expect("failed to get fake daemon port")
+                    .port();
+                tokio::spawn(async move {
+                    axum::serve(fake_listener, fake_router)
+                        .await
+                        .expect("fake daemon server error");
+                });
+                let fake_url = format!("http://127.0.0.1:{fake_port}");
+                info!("fake daemon listening on {fake_url}");
+
+                // The PolytokenDriver connects to the fake daemon
+                Arc::new(crate::polytoken::driver::PolytokenDriver::new(
+                    cfg.data_dir.join("sessions"),
+                    std::env::var("PILOT_POLYTOKEN_BIN").unwrap_or_else(|_| "polytoken".into()),
+                    true, // is_fake
+                ).with_fake_daemon_url(fake_url))
+            }
+            _ => {
+                Arc::new(crate::polytoken::driver::PolytokenDriver::new(
+                    cfg.data_dir.join("sessions"),
+                    std::env::var("PILOT_POLYTOKEN_BIN").unwrap_or_else(|_| "polytoken".into()),
+                    false, // not fake — real daemon
+                ))
+            }
+        }
+    };
 
     let hub = SessionHub::new(
         driver,
