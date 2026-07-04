@@ -1572,8 +1572,17 @@ impl SessionHub {
         let hub_clone = hub.clone();
         tokio::spawn(async move {
             let models = driver.list_models().await;
-            let h = hub_clone.lock();
+            let mut h = hub_clone.lock();
+            h.available_models = models.clone();
             h.broadcast(ServerMessage::ModelList { models });
+        });
+
+        let driver = self.driver.clone();
+        let hub_clone = hub.clone();
+        tokio::spawn(async move {
+            let defaults = driver.get_model_defaults().await;
+            let h = hub_clone.lock();
+            h.broadcast(ServerMessage::ModelDefaults { defaults });
         });
 
         let driver = self.driver.clone();

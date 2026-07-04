@@ -18,7 +18,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
 
 use async_trait::async_trait;
-use crate::driver::{ArchiveResult, NewSessionOptsData, PilotDriver, WorktreeCleanupResult, WorktreeRetained};
+use crate::driver::{ArchiveResult, BranchResult, NewSessionOptsData, PilotDriver, WorktreeCleanupResult, WorktreeRetained};
 
 /// Whether a HostUiRequest is a dialog (awaiting a response), mirroring the TS
 /// `isDialogRequest`. Notify/Status/Widget are fire-and-forget ambient UI.
@@ -442,6 +442,13 @@ fn mock_session_seed(path: &str) -> Vec<SessionDriverEvent> {
 
 /// Build the greeting fixture: sessionOpened + userMessage + assistant deltas + tool spans + runCompleted.
 /// This is the seed every fresh client sees.
+fn branched_seed() -> Vec<SessionDriverEvent> {
+    vec![SessionDriverEvent::SessionOpened {
+        base: base(),
+        snapshot: mock_snapshot(SessionStatus::Idle),
+    }]
+}
+
 fn greeting_seed() -> Vec<SessionDriverEvent> {
     let mut events = vec![
         SessionDriverEvent::SessionOpened { base: base(), snapshot: mock_snapshot(SessionStatus::Idle) },
@@ -966,6 +973,12 @@ impl MockDriver {
         }
     }
 
+    fn cancel_timers(&self) {
+        self.generation.fetch_add(1, Ordering::Relaxed);
+        *self.in_flight.lock() = None;
+        self.pending_dialogs.lock().clear();
+    }
+
     fn play_script(&self, steps: Vec<ScriptStep>) {
         // Serialize replays: instantly settle any in-flight script before starting a
         // new one — faithful port of TS `play()` → `flushScheduled()`. Two concurrent
@@ -1323,6 +1336,25 @@ impl PilotDriver for MockDriver {
         }
         seed
     }
+
+    async fn branch_from(&self, entry_id: String, _summarize: bool, _session_id: Option<SessionId>) -> BranchResult {
+        self.cancel_timers();
+        let is_user = entry_id == "e-u1" || entry_id == "e-u2";
+        if is_user {
+            return BranchResult {
+                seed: branched_seed(),
+                editor_text: Some(if entry_id == "e-u1" {
+                    GREETING_PROMPT.into()
+                } else {
+                    "actually, put it in a separate health-router module".into()
+                }),
+                cancelled: false,
+                aborted: None,
+            };
+        }
+        BranchResult { seed: greeting_seed(), editor_text: None, cancelled: false, aborted: None }
+    }
+
     async fn new_session(&self, opts: NewSessionOptsData) -> Vec<SessionDriverEvent> {
         // Faithful port of TS `newSession()`: resolve the cwd (applying a
         // `-worktree` suffix when the draft asked for an isolated worktree) and
@@ -1458,6 +1490,15 @@ impl PilotDriver for MockDriver {
     }
 
     async fn list_models(&self) -> Vec<ModelOption> { mock_models() }
+    async fn get_model_defaults(&self) -> ModelDefaults {
+        let default = mock_default_config();
+        ModelDefaults {
+            provider: default.provider,
+            model_id: default.model_id,
+            thinking_level: default.thinking_level,
+            favorites: Vec::new(),
+        }
+    }
     async fn list_commands(&self, _session_id: Option<SessionId>) -> Vec<CommandInfo> { mock_commands() }
     async fn list_facets(&self, _session_id: Option<SessionId>) -> Vec<String> { vec!["execute".into(), "plan".into(), "research".into()] }
     async fn list_file_index(&self, _session_id: Option<SessionId>) -> (Vec<FileInfo>, bool) { (mock_files(), false) }
@@ -2114,17 +2155,9 @@ impl PilotDriver for MockDriver {
     }
 
     fn reset(&self, _bootstrap: bool) {
-        // Cancel all pending script tasks + reset the mock clock so fixture
+        // Cancel all pending script tasks/dialogs + reset the mock clock so fixture
         // timestamps are deterministic across resets.
-        self.generation.fetch_add(1, Ordering::Relaxed);
-        // Clear the in-flight handle so the next play_script doesn't flush a
-        // stale (already-generation-aborted) task — mirrors TS cancelTimers()
-        // clearing `this.scheduled`.
-        *self.in_flight.lock() = None;
-        // Clear pending host-UI dialogs — mirrors TS `cancelTimers()` calling
-        // `this.pendingDialogs.clear()`. Without this, an un-responded dialog
-        // survives `/debug/reset` and `open_session` replays it next test.
-        self.pending_dialogs.lock().clear();
+        self.cancel_timers();
         reset_ts();
         *self.last_created.lock() = None;
         *self.adventurous_handoff.lock().unwrap() = false;

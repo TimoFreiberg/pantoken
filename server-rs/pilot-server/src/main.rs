@@ -41,6 +41,7 @@ pub struct AppState {
     pub config: Arc<config::Config>,
     pub static_server: Arc<static_serve::StaticServer>,
     pub hub: Arc<Mutex<SessionHub>>,
+    pub is_mock_driver: bool,
 }
 
 #[tokio::main]
@@ -79,10 +80,11 @@ async fn main() {
             }
         };
 
-    // Driver selection: PILOT_DRIVER=mock uses MockDriver (direct fixture port,
-    // like the TS server); PILOT_DRIVER=polytoken uses the real daemon driver.
+    // Driver selection: PILOT_DRIVER=mock uses the fake daemon (in-process axum
+    // router); PILOT_DRIVER=polytoken uses the real polytoken daemon driver.
+    let driver_mode = std::env::var("PILOT_DRIVER").unwrap_or_else(|_| "polytoken".into());
+    let is_mock_driver = driver_mode == "mock";
     let driver: Arc<dyn PilotDriver> = {
-        let driver_mode = std::env::var("PILOT_DRIVER").unwrap_or_else(|_| "polytoken".into());
         match driver_mode.as_str() {
             "mock" => {
                 // Use the MockDriver directly — it serves fixture data as SessionDriverEvent[],
@@ -117,6 +119,7 @@ async fn main() {
         config: Arc::new(cfg.clone()),
         static_server,
         hub,
+        is_mock_driver,
     };
 
     let app = build_router(state.clone());
@@ -140,7 +143,7 @@ async fn main() {
     info!(
         "data dir: {}, driver: {}, token: {}, debug: {}",
         cfg.data_dir.display(),
-        std::env::var("PILOT_DRIVER").unwrap_or_else(|_| "polytoken".into()),
+        driver_mode,
         if cfg.token.is_some() { "required" } else { "off" },
         cfg.debug,
     );
@@ -337,6 +340,7 @@ fn check_token(state: &AppState, headers: &HeaderMap, query: &PushQuery) -> bool
 #[derive(Deserialize)]
 struct PushQuery {
     token: Option<String>,
+    bootstrap: Option<String>,
 }
 
 async fn push_vapid(State(_state): State<AppState>, Query(_q): Query<PushQuery>) -> Response {
@@ -401,8 +405,12 @@ async fn debug_reset(
     if !check_token(&state, &HeaderMap::new(), &q) {
         return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
     }
+    if !state.is_mock_driver {
+        return (StatusCode::FORBIDDEN, "debug reset is mock-driver-only").into_response();
+    }
+    let bootstrap = q.bootstrap.as_deref() != Some("0");
     let mut hub = state.hub.lock();
-    hub.reset(true);
+    hub.reset(bootstrap);
     Json(json!({ "ok": true })).into_response()
 }
 
