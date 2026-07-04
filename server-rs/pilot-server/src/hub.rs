@@ -905,6 +905,7 @@ impl SessionHub {
         // Send session status + update status + pilot settings synchronously
         let _ = tx.try_send(self.session_status_msg());
         let _ = tx.try_send(self.update_status_msg());
+        let _ = tx.try_send(self.pilot_settings_msg());
 
         // Return the channel — the caller will spawn async work for the lists
         (client_key, tx, rx)
