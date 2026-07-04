@@ -53,7 +53,7 @@ file-mention (1).
   "Daemon-owned first" below. Don't extend it; also remember the known TS bug
   that only 3 of 12 history kinds are replayed.)
 - `pilot-daemon-types` codegen from `polytoken openapi` (161 types) — real
-  pipeline, minus one landmine (see Passthrough below).
+  pipeline; the old hand-edited `Passthrough` landmine has been removed.
 - `daemon_client.rs` — 1:1 method-surface port of daemon-client.ts including
   lease retry; compiles, looks careful. **Untested.** (REVISIT before testing:
   the ported silence-vs-dead `/health`-probe dance predates unstable.5's SSE
@@ -88,21 +88,14 @@ validated" — it validates hub + protocol + mock.
 
 ## Wrong turns to undo (ranked)
 
-1. **The fake-daemon architecture was abandoned but not buried.**
+1. **The fake-daemon architecture is now buried.**
    Phase 5 built `fake_daemon.rs` (mock = in-process daemon behind the real
    driver). The e2e work then pivoted to a direct `MockDriver` port ("simpler,
-   matches TS architecture" — a defensible call). But the corpse remained:
-   - `fake_daemon.rs` (281 lines) is dead code — `fake_daemon_router()` is
-     mounted nowhere; most handlers are stubs.
-   - `DaemonEvent::Passthrough` was **hand-inserted into the auto-generated**
-     `pilot-daemon-types/src/lib.rs` (marked DO NOT EDIT). Re-running the
-     codegen deletes it and breaks the build.
-   - Passthrough tunnels pre-mapped pilot events, bypassing the event_map
-     accumulator — so even revived, it validates nothing about the real
-     mapping layer.
-   - Docs described the dead design as live (AGENTS.md, this file's old goal,
-     server-rs/README.md, main.rs's driver-selection comment — all fixed
-     2026-07-04).
+   matches TS architecture" — a defensible call). Phase 0.1 removed the stale
+   skeleton and regen landmine: `fake_daemon.rs`, `DaemonEvent::Passthrough`,
+   the `Passthrough` event_map arm, and fake-daemon driver plumbing are gone;
+   codegen is clean again. The fake-daemon *concept* can return in Phase 2.5,
+   rebuilt to speak real `DaemonEvent`s end to end.
 
 2. **Live-path bugs visible by inspection** (no test exists to catch them —
    that's the point):
@@ -204,15 +197,12 @@ server = the daemon owns everything it can. Known as of 2026-07-04:
 
 ### Phase 0 — truth & guardrails (small, do first)
 
-- [ ] Delete the as-built mock-mode remnants: `fake_daemon.rs`, the
+- [x] Delete the as-built mock-mode remnants: `fake_daemon.rs`, the
       `Passthrough` variant in `pilot-daemon-types`, the `Passthrough` arm in
       `event_map.rs`, and the `with_fake_daemon_url`/`fake_daemon_url`
-      plumbing in `driver.rs`. Re-run
-      `bun run scripts/codegen-polytoken-rs.ts` and commit clean generated
-      output. (The fake-daemon *concept* returns in Phase 2.5, rebuilt to
-      speak real `DaemonEvent`s — the current skeleton validates nothing
-      (Passthrough bypasses event_map) and the hand-edited generated file is
-      a regen landmine. jj history keeps the old skeleton for reference.)
+      plumbing in `driver.rs`. Codegen has been re-run cleanly; jj history
+      keeps the old skeleton for reference. (The fake-daemon *concept* returns
+      in Phase 2.5, rebuilt to speak real `DaemonEvent`s.)
 - [ ] Add server-rs to CI: `cargo fmt --check`, `cargo clippy --locked
       --all-targets -- -D warnings`, `cargo test`, rust-cache with
       `workspaces: server-rs`, like the existing `desktop/` job. Consider a

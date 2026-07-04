@@ -33,9 +33,7 @@ use async_trait::async_trait;
 use crate::driver::{
     BranchResult, ClearQueueResult, NewSessionOptsData, PilotDriver,
 };
-use crate::polytoken::daemon_client::{
-    DaemonClient, DaemonResponse, SpawnDaemonOpts, SpawnedDaemon, SseSubscription,
-};
+use crate::polytoken::daemon_client::{DaemonClient, SpawnDaemonOpts, SseSubscription};
 use crate::polytoken::event_map::{
     self, DaemonEffect, FoldAccumulator, FoldResult, MapCtx,
 };
@@ -71,8 +69,6 @@ pub struct PolytokenDriver {
     sessions_dir: PathBuf,
     bin_path: String,
     is_fake: bool,
-    /// When set (mock mode), the driver connects to this URL instead of spawning a daemon.
-    fake_daemon_url: Option<String>,
     warm: RwLock<HashMap<SessionId, Arc<WarmSession>>>,
     subscribers: Mutex<Vec<(usize, mpsc::Sender<SessionDriverEvent>)>>,
     next_sub_id: Mutex<usize>,
@@ -137,20 +133,12 @@ impl PolytokenDriver {
             sessions_dir,
             bin_path,
             is_fake,
-            fake_daemon_url: None,
             warm: RwLock::new(HashMap::new()),
             subscribers: Mutex::new(Vec::new()),
             next_sub_id: Mutex::new(0),
             is_viewed: RwLock::new(None),
             command_cache: Mutex::new(HashMap::new()),
         }
-    }
-
-    /// Set the fake daemon URL (for mock mode — connect to an in-process fake daemon
-    /// instead of spawning a real daemon process).
-    pub fn with_fake_daemon_url(mut self, url: String) -> Self {
-        self.fake_daemon_url = Some(url);
-        self
     }
 
     fn emit(&self, ev: SessionDriverEvent) {
@@ -175,81 +163,50 @@ impl PolytokenDriver {
             return Ok(ws);
         }
 
-        // Connect to the daemon: either the fake daemon URL (mock mode) or spawn a real one
-        let client: Arc<DaemonClient> = if let Some(url) = &self.fake_daemon_url {
-            // Mock mode: the fake daemon is already running — just connect
-            let port = url.rsplit(':').next()
-                .and_then(|s| s.parse::<u16>().ok())
-                .unwrap_or(0);
-            let client = Arc::new(DaemonClient::new(session_id.clone(), port, std::process::id() as i32));
-
-            // Wait for health
-            let healthy = tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                async {
-                    loop {
-                        if client.health().await.status == 200 { return true; }
-                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                    }
-                },
-            ).await.unwrap_or(false);
-            if !healthy { return Err("fake daemon health probe timed out".into()); }
-
-            // Claim lease
-            match client.claim_lease("pilot").await {
-                Ok(_) => {}
-                Err(e) => return Err(format!("lease claim failed: {e}")),
-            }
-
-            client
-        } else {
-            // Real daemon: spawn or resume
-            let opts = SpawnDaemonOpts {
-                cwd: Some(workspace.path.clone()),
-                session_id: Some(session_id.clone()),
-                sessions_dir: Some(self.sessions_dir.to_string_lossy().to_string()),
-                global_config_dir: Some(
-                    crate::polytoken::daemon_client::default_global_config_dir()
-                        .to_string_lossy()
-                        .to_string(),
-                ),
-                login_env: None,
-            };
-
-            let (spawned, _child) =
-                crate::polytoken::daemon_client::spawn_daemon(&self.bin_path, opts).await?;
-
-            let port = spawned.port;
-            let client = Arc::new(DaemonClient::new(session_id.clone(), port, std::process::id() as i32));
-
-            // Wait for health (poll up to 10s)
-            let healthy = tokio::time::timeout(
-                std::time::Duration::from_secs(10),
-                async {
-                    loop {
-                        let res = client.health().await;
-                        if res.status == 200 {
-                            return true;
-                        }
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    }
-                },
-            )
-            .await
-            .unwrap_or(false);
-
-            if !healthy {
-                return Err("daemon health probe timed out".into());
-            }
-
-            // Claim lease
-            match client.claim_lease("pilot").await {
-                Ok(_) => {}
-                Err(e) => return Err(format!("lease claim failed: {e}")),
-            }
-
-            client
+        // Real daemon: spawn or resume
+        let opts = SpawnDaemonOpts {
+            cwd: Some(workspace.path.clone()),
+            session_id: Some(session_id.clone()),
+            sessions_dir: Some(self.sessions_dir.to_string_lossy().to_string()),
+            global_config_dir: Some(
+                crate::polytoken::daemon_client::default_global_config_dir()
+                    .to_string_lossy()
+                    .to_string(),
+            ),
+            login_env: None,
         };
+
+        let (spawned, _child) =
+            crate::polytoken::daemon_client::spawn_daemon(&self.bin_path, opts).await?;
+
+        let port = spawned.port;
+        let client = Arc::new(DaemonClient::new(session_id.clone(), port, std::process::id() as i32));
+
+        // Wait for health (poll up to 10s)
+        let healthy = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            async {
+                loop {
+                    let res = client.health().await;
+                    if res.status == 200 {
+                        return true;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            },
+        )
+        .await
+        .unwrap_or(false);
+
+        if !healthy {
+            return Err("daemon health probe timed out".into());
+        }
+
+        // Claim lease
+        match client.claim_lease("pilot").await {
+            Ok(_) => {}
+            Err(e) => return Err(format!("lease claim failed: {e}")),
+        }
 
         // Fetch initial state
         let state_res = client.state().await;

@@ -23,7 +23,6 @@ server-rs/
         ├── config.rs         # env-based config
         ├── hub.rs            # SessionHub (WS fan-out + journal + handleClient)
         ├── journal.rs        # per-session append-only event journal
-        ├── fake_daemon.rs    # in-process fake daemon (replaces mock-driver)
         ├── push.rs           # Web Push (VAPID, subscription store)
         ├── pidlock.rs        # PID lock + server identity
         ├── settings_store.rs # pilot-settings.json read/write
@@ -73,7 +72,4 @@ PILOT_SERVER_IMPL=rust bun run test:e2e
 
 Mock mode (`PILOT_DRIVER=mock`) uses `mock_driver.rs` — a direct Rust port of
 the TS MockDriver serving fixture data as `SessionDriverEvent`s, matching the
-TS server's architecture. Note: `fake_daemon.rs` (an in-process daemon-protocol
-router, the abandoned earlier approach to mock mode) is dead code and slated
-for removal along with the hand-added `DaemonEvent::Passthrough` variant in the
-generated types — see `PROGRESS.md`.
+TS server's architecture.

@@ -4,7 +4,6 @@
 
 pub mod config;
 pub mod driver;
-pub mod fake_daemon;
 pub mod hub;
 pub mod journal;
 pub mod pidlock;
