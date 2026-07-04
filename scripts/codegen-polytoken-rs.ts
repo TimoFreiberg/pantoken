@@ -329,8 +329,6 @@ async function main() {
 //! DO NOT EDIT MANUALLY.
 
 #![allow(dead_code)]
-
-use serde::{Serialize, Deserialize};
 `,
   ];
 

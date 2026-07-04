@@ -1077,7 +1077,6 @@ fn subagent_handle(ev: &DaemonEvent) -> Option<&str> {
         | DaemonEvent::McpServerDisconnected { .. }
         | DaemonEvent::McpServerReconnecting { .. }
         | DaemonEvent::McpServerDisabled { .. } => None,
-        DaemonEvent::Passthrough { .. } => None,
     }
 }
 
@@ -1871,11 +1870,6 @@ pub fn map_daemon_event(ev: &DaemonEvent, acc: &mut FoldAccumulator, ctx: &dyn M
                 vec![],
             )
         }
-
-        // The fake daemon's passthrough: emit the carried pilot event directly,
-        // bypassing the accumulator. The event already carries its own
-        // sessionRef + timestamp (built by the fixture), so we don't re-stamp it.
-        DaemonEvent::Passthrough { pilot_event } => fold_result(vec![pilot_event.clone()], vec![]),
 
         // NOTE: The TS has a `default` arm that emits a runtime warn for unknown
         // variants (a newer daemon sent a type the codegen hasn't caught). Rust's
