@@ -186,14 +186,17 @@ fn mock_default_config() -> SessionConfig {
 // mock_snapshot is defined above ( delegates to snap() with no overrides).
 
 fn mock_session_list() -> Vec<SessionListEntry> {
+    let now = chrono::Utc::now();
+    let iso_ago = |ms: i64| (now - chrono::Duration::milliseconds(ms)).to_rfc3339();
+    let day = 24 * 60 * 60 * 1000;
     vec![
         SessionListEntry {
             session_id: "demo-session".into(), path: "/sessions/demo-session.jsonl".into(),
             cwd: WORKSPACE_PATH.into(), display_name: Some("Wire up the WebSocket bridge".into()),
             preview: "Add a /health route to the server and a smoke test for it.".into(),
             user_message_count: 3, usage: Some(mock_usage()),
-            updated_at: "2025-01-01T00:05:00Z".into(), created_at: "2024-12-30T00:00:00Z".into(),
-            last_user_message_at: "2025-01-01T00:04:00Z".into(),
+            updated_at: iso_ago(5 * 60_000), created_at: iso_ago(2 * day),
+            last_user_message_at: iso_ago(6 * 60_000),
             parent_session_path: None, archived: false, worktree: None,
         },
         SessionListEntry {
@@ -201,8 +204,8 @@ fn mock_session_list() -> Vec<SessionListEntry> {
             cwd: WORKSPACE_PATH.into(), display_name: Some("Explore the fold reducer".into()),
             preview: "How does foldEvent assemble the transcript?".into(),
             user_message_count: 5, usage: Some(SessionUsage { tokens: Some(164000), context_window: 200000, percent: Some(82.0) }),
-            updated_at: "2024-12-31T22:00:00Z".into(), created_at: "2024-12-29T00:00:00Z".into(),
-            last_user_message_at: "2024-12-31T21:59:00Z".into(),
+            updated_at: iso_ago(2 * 60 * 60 * 1000), created_at: iso_ago(3 * day),
+            last_user_message_at: iso_ago(2 * 60 * 60 * 1000 + 60_000),
             parent_session_path: None, archived: false, worktree: None,
         },
         SessionListEntry {
@@ -210,8 +213,8 @@ fn mock_session_list() -> Vec<SessionListEntry> {
             cwd: "/Users/timo/src/scratch".into(), display_name: None,
             preview: "quick scratch session".into(),
             user_message_count: 1, usage: None,
-            updated_at: "2024-12-31T18:00:00Z".into(), created_at: "2024-12-28T00:00:00Z".into(),
-            last_user_message_at: "2024-12-31T17:59:00Z".into(),
+            updated_at: iso_ago(6 * 60 * 60 * 1000), created_at: iso_ago(4 * day),
+            last_user_message_at: iso_ago(6 * 60 * 60 * 1000 - 60_000),
             parent_session_path: None, archived: false, worktree: None,
         },
         SessionListEntry {
@@ -219,8 +222,8 @@ fn mock_session_list() -> Vec<SessionListEntry> {
             cwd: WORKSPACE_PATH.into(), display_name: Some("Archived experiment".into()),
             preview: "An old experiment I tucked away.".into(),
             user_message_count: 4, usage: None,
-            updated_at: "2024-12-31T23:00:00Z".into(), created_at: "2024-12-27T00:00:00Z".into(),
-            last_user_message_at: "2024-12-31T22:59:00Z".into(),
+            updated_at: iso_ago(5 * day), created_at: iso_ago(8 * day),
+            last_user_message_at: iso_ago(5 * day),
             parent_session_path: None, archived: true, worktree: None,
         },
         SessionListEntry {
@@ -228,8 +231,8 @@ fn mock_session_list() -> Vec<SessionListEntry> {
             cwd: "/Users/timo/src/stale-proj".into(), display_name: Some("Old spike".into()),
             preview: "A spike from a couple of weeks ago.".into(),
             user_message_count: 2, usage: None,
-            updated_at: "2024-06-24T00:00:00Z".into(), created_at: "2024-06-22T00:00:00Z".into(),
-            last_user_message_at: "2024-06-24T00:00:00Z".into(),
+            updated_at: iso_ago(10 * day), created_at: iso_ago(12 * day),
+            last_user_message_at: iso_ago(10 * day),
             parent_session_path: None, archived: false, worktree: None,
         },
     ]
