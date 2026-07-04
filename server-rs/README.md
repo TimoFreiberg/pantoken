@@ -71,7 +71,9 @@ PILOT_SERVER_IMPL=rust PILOT_DRIVER=mock bun run dev
 PILOT_SERVER_IMPL=rust bun run test:e2e
 ```
 
-The fake daemon (`fake_daemon.rs`) is an in-process axum router that implements
-the daemon wire protocol using fixture data. It uses the "passthrough" approach:
-emits `DaemonEvent::Passthrough` carrying a pre-mapped `SessionDriverEvent`, which
-the event_map recognizes and emits directly.
+Mock mode (`PILOT_DRIVER=mock`) uses `mock_driver.rs` — a direct Rust port of
+the TS MockDriver serving fixture data as `SessionDriverEvent`s, matching the
+TS server's architecture. Note: `fake_daemon.rs` (an in-process daemon-protocol
+router, the abandoned earlier approach to mock mode) is dead code and slated
+for removal along with the hand-added `DaemonEvent::Passthrough` variant in the
+generated types — see `PROGRESS.md`.
