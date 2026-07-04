@@ -394,7 +394,18 @@ impl PilotDriver for MockDriver {
         self.play_script(steps);
     }
 
-    fn abort(&self, _session_id: Option<SessionId>) {}
+    fn abort(&self, _session_id: Option<SessionId>) {
+        // Clear pending scheduled events + settle open tools + emit runCompleted.
+        // The TS mock tracks openTools and scheduled timers; our simplified version
+        // just emits a runCompleted to settle the turn.
+        let b = base();
+        self.emit(SessionDriverEvent::RunCompleted {
+            base: b,
+            snapshot: mock_snapshot(SessionStatus::Idle),
+            user_entry_id: None,
+            assistant_entry_id: None,
+        });
+    }
     fn respond_ui(&self, _response: HostUiResponse, _session_id: Option<SessionId>) {}
 
     async fn list_sessions(&self) -> Vec<SessionListEntry> { mock_session_list() }
