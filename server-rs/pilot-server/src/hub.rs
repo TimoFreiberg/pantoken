@@ -8,14 +8,6 @@
 //!
 //! Port of `server/src/hub.ts` (1967 lines).
 //!
-//! NOTE: The core event-handling, tracking, journal management, handleClient
-//! switch, switchTo state machine, and client management are ported. The
-//! `#![allow(dead_code)]` suppresses warnings for fields used by not-yet-ported
-//! paths (e.g. swap_buffer consumed by the attach-window race fix which is
-//! stubbed pending Phase 4's daemon-client port).
-
-#![allow(dead_code)]
-
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -23,10 +15,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
 use pilot_protocol::session_driver::{
-    HostUiRequest, HostUiResponse, ModelOption, SessionDriverEvent,
-    SessionDriverEvent as E, SessionEventBase, SessionId, SessionRef, SessionStatus,
+    HostUiRequest, HostUiResponse, ModelOption, SessionDriverEvent, SessionDriverEvent as E,
+    SessionEventBase, SessionId, SessionRef, SessionStatus,
 };
-use pilot_protocol::state::{fold_all, fold_event, initial_session_state, SessionState};
+use pilot_protocol::state::{SessionState, fold_all, fold_event, initial_session_state};
 use pilot_protocol::wire::{
     ClientMessage, ResumeToken, ServerMessage, SessionAttention, SessionAttentionPhase,
 };
@@ -35,12 +27,13 @@ use tracing::error;
 
 use crate::driver::{NewSessionOptsData, PilotDriver};
 use crate::journal::{
-    append_event, build_seed, bump_epoch, create_journal, meta_seed_events, tail_covers, try_merge,
-    SessionJournal,
+    SessionJournal, append_event, build_seed, bump_epoch, create_journal, meta_seed_events,
+    tail_covers, try_merge,
 };
 
 /// A boxed, pinned, Send future — the return type of swap closures.
-type SwapFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Vec<SessionDriverEvent>> + Send + 'static>>;
+type SwapFuture =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Vec<SessionDriverEvent>> + Send + 'static>>;
 
 /// What the hub hands to a notifier (e.g. the Web Push sender) for notable events.
 #[derive(Debug, Clone)]
@@ -69,6 +62,10 @@ enum AttentionPhase {
 }
 
 impl AttentionPhase {
+    #[expect(
+        dead_code,
+        reason = "attention notification formatting is unwired until Phase 3 push/notify integration"
+    )]
     fn as_str(&self) -> &'static str {
         match self {
             AttentionPhase::Running => "running",
@@ -122,6 +119,10 @@ const SWAP_BUFFER_TTL_MS: u128 = 5000;
 pub struct SessionHub {
     driver: Arc<dyn PilotDriver>,
     notify: Option<Arc<dyn Fn(HubNotification) + Send + Sync>>,
+    #[expect(
+        dead_code,
+        reason = "live refresh timer is not wired until Phase 1 hub parity"
+    )]
     live_refresh_ms: u64,
     server_id: String,
     data_dir: Option<PathBuf>,
@@ -237,7 +238,8 @@ impl SessionHub {
                     self.track_attention(&sid, e);
                 }
                 let epoch = self.next_epoch();
-                self.journals.insert(sid.clone(), create_journal(epoch, &seed));
+                self.journals
+                    .insert(sid.clone(), create_journal(epoch, &seed));
                 self.default_focus_id = Some(sid);
             }
         }
@@ -459,6 +461,10 @@ impl SessionHub {
     }
 
     /// Consume (and clear) the attach-window buffer for one session.
+    #[expect(
+        dead_code,
+        reason = "attach-window race replay is not wired until Phase 1 hub parity"
+    )]
     fn take_swap_buffer(&mut self, sid: &SessionId, since: u128) -> Vec<SessionDriverEvent> {
         let Some(list) = self.swap_buffer.remove(sid) else {
             return Vec::new();
@@ -483,7 +489,10 @@ impl SessionHub {
                 self.set_running(sid, status == Some(SessionStatus::Running));
                 self.set_initializing(sid, status == Some(SessionStatus::Initializing));
             }
-            "assistantDelta" | "toolStarted" | "toolUpdated" | "userMessage"
+            "assistantDelta"
+            | "toolStarted"
+            | "toolUpdated"
+            | "userMessage"
             | "queuedMessageStarted" => {
                 self.set_running(sid, true);
             }
@@ -558,14 +567,36 @@ impl SessionHub {
                 }
                 let status = ev.snapshot_status();
                 match status {
-                    Some(SessionStatus::Running) => self.set_attention_base(sid, AttentionPhase::Running, Some("Working"), &timestamp),
-                    Some(SessionStatus::Initializing) => self.set_attention_base(sid, AttentionPhase::Running, Some("Starting session"), &timestamp),
-                    Some(SessionStatus::Failed) => self.set_attention_base(sid, AttentionPhase::Failed, Some("Run failed"), &timestamp),
+                    Some(SessionStatus::Running) => self.set_attention_base(
+                        sid,
+                        AttentionPhase::Running,
+                        Some("Working"),
+                        &timestamp,
+                    ),
+                    Some(SessionStatus::Initializing) => self.set_attention_base(
+                        sid,
+                        AttentionPhase::Running,
+                        Some("Starting session"),
+                        &timestamp,
+                    ),
+                    Some(SessionStatus::Failed) => self.set_attention_base(
+                        sid,
+                        AttentionPhase::Failed,
+                        Some("Run failed"),
+                        &timestamp,
+                    ),
                     _ => {}
                 }
             }
-            "userMessage" => self.set_attention_base(sid, AttentionPhase::Running, Some("Starting"), &timestamp),
-            "queuedMessageStarted" => self.set_attention_base(sid, AttentionPhase::Running, Some("Queued a follow-up"), &timestamp),
+            "userMessage" => {
+                self.set_attention_base(sid, AttentionPhase::Running, Some("Starting"), &timestamp)
+            }
+            "queuedMessageStarted" => self.set_attention_base(
+                sid,
+                AttentionPhase::Running,
+                Some("Queued a follow-up"),
+                &timestamp,
+            ),
             "assistantDelta" => {
                 let channel = ev.assistant_delta_channel();
                 let activity = if channel.as_deref() == Some("thinking") {
@@ -580,8 +611,18 @@ impl SessionHub {
                 self.set_attention_base(sid, AttentionPhase::Running, Some(&activity), &timestamp);
             }
             "toolFinished" => {
-                if self.attention.get(sid).map(|r| r.phase == AttentionPhase::Running).unwrap_or(false) {
-                    self.set_attention_base(sid, AttentionPhase::Running, Some("Working"), &timestamp);
+                if self
+                    .attention
+                    .get(sid)
+                    .map(|r| r.phase == AttentionPhase::Running)
+                    .unwrap_or(false)
+                {
+                    self.set_attention_base(
+                        sid,
+                        AttentionPhase::Running,
+                        Some("Working"),
+                        &timestamp,
+                    );
                 }
             }
             "runCompleted" => {
@@ -596,7 +637,12 @@ impl SessionHub {
                     record.pending.clear();
                 }
                 let msg = ev.error_message().unwrap_or_default();
-                self.set_attention_base(sid, AttentionPhase::Failed, Some(&clipped(&msg, 72)), &timestamp);
+                self.set_attention_base(
+                    sid,
+                    AttentionPhase::Failed,
+                    Some(&clipped(&msg, 72)),
+                    &timestamp,
+                );
             }
             "hostUiRequest" => {
                 if let E::HostUiRequest { request, .. } = ev {
@@ -604,13 +650,25 @@ impl SessionHub {
                         let title = request_title(request);
                         self.ensure_attention(sid, &timestamp);
                         if let Some(record) = self.attention.get_mut(sid) {
-                            record.pending.insert(request.request_id().to_string(), title);
+                            record
+                                .pending
+                                .insert(request.request_id().to_string(), title);
                             record.updated_at = timestamp.clone();
                         }
                     } else if let HostUiRequest::Status { text, .. } = request {
                         if let Some(t) = text {
-                            if self.attention.get(sid).map(|r| r.phase == AttentionPhase::Running).unwrap_or(false) {
-                                self.set_attention_base(sid, AttentionPhase::Running, Some(&clipped(t, 72)), &timestamp);
+                            if self
+                                .attention
+                                .get(sid)
+                                .map(|r| r.phase == AttentionPhase::Running)
+                                .unwrap_or(false)
+                            {
+                                self.set_attention_base(
+                                    sid,
+                                    AttentionPhase::Running,
+                                    Some(&clipped(t, 72)),
+                                    &timestamp,
+                                );
                             }
                         }
                     } else if let HostUiRequest::Title { title, .. } = request {
@@ -654,7 +712,13 @@ impl SessionHub {
         }
     }
 
-    fn set_attention_base(&mut self, sid: &SessionId, phase: AttentionPhase, activity: Option<&str>, timestamp: &str) {
+    fn set_attention_base(
+        &mut self,
+        sid: &SessionId,
+        phase: AttentionPhase,
+        activity: Option<&str>,
+        timestamp: &str,
+    ) {
         self.ensure_attention(sid, timestamp);
         if let Some(record) = self.attention.get_mut(sid) {
             let changed = record.phase != phase || record.activity.as_deref() != activity;
@@ -697,7 +761,11 @@ impl SessionHub {
         // Push only when someone has been here and then left
         if self.ever_connected && self.client_count() == 0 {
             let sid = ev.session_ref().session_id.clone();
-            let session = self.session_titles.get(&sid).cloned().unwrap_or_else(|| sid.clone());
+            let session = self
+                .session_titles
+                .get(&sid)
+                .cloned()
+                .unwrap_or_else(|| sid.clone());
             let url = format!("/?session={}", urlencoding::encode(&sid));
             let disc = ev.type_discriminator();
             if disc == "runCompleted" {
@@ -838,7 +906,11 @@ impl SessionHub {
     pub fn add_client(
         &mut self,
         resume: Option<ResumeToken>,
-    ) -> (u64, mpsc::Sender<ServerMessage>, mpsc::Receiver<ServerMessage>) {
+    ) -> (
+        u64,
+        mpsc::Sender<ServerMessage>,
+        mpsc::Receiver<ServerMessage>,
+    ) {
         let (tx, rx) = mpsc::channel(128);
 
         let focused_id = match &resume {
@@ -875,7 +947,8 @@ impl SessionHub {
         let _ = tx.try_send(ServerMessage::Hello {
             protocol_version: 2,
             server_id: self.server_id.clone(),
-            data_dir: self.data_dir
+            data_dir: self
+                .data_dir
                 .as_ref()
                 .map(|p| p.display().to_string())
                 .unwrap_or_default(),
@@ -957,12 +1030,21 @@ impl SessionHub {
         hub: Arc<Mutex<SessionHub>>,
     ) {
         // Get the focused session id for this connection
-        let focused_id = self.clients.get(&client_key)
+        let focused_id = self
+            .clients
+            .get(&client_key)
             .and_then(|c| c.focused_id.clone());
 
         match &msg {
             ClientMessage::Hello { .. } | ClientMessage::Ping => {}
-            ClientMessage::Prompt { text, deliver_as, images, prompt_id, session_id, .. } => {
+            ClientMessage::Prompt {
+                text,
+                deliver_as,
+                images,
+                prompt_id,
+                session_id,
+                ..
+            } => {
                 // C3 fix: check the prompt idempotency ledger before running.
                 // A retried promptId replays the cached result instead of re-running.
                 if let Some(cached) = self.check_prompt_idempotency(prompt_id) {
@@ -980,15 +1062,12 @@ impl SessionHub {
                 let pid = prompt_id.clone();
                 tokio::spawn(async move {
                     let result = async {
-                        driver.prompt(
-                            text,
-                            deliver_as,
-                            target.clone(),
-                            images,
-                            prompt_id_clone,
-                        ).await;
+                        driver
+                            .prompt(text, deliver_as, target.clone(), images, prompt_id_clone)
+                            .await;
                         target
-                    }.await;
+                    }
+                    .await;
 
                     let msg = match &result {
                         Some(sid) => ServerMessage::PromptResult {
@@ -1016,9 +1095,14 @@ impl SessionHub {
                 let target = session_id.clone().or(focused_id);
                 self.driver.abort(target);
             }
-            ClientMessage::SetModel { provider, model_id, session_id } => {
+            ClientMessage::SetModel {
+                provider,
+                model_id,
+                session_id,
+            } => {
                 let target = session_id.clone().or(focused_id);
-                self.driver.set_model(provider.clone(), model_id.clone(), target);
+                self.driver
+                    .set_model(provider.clone(), model_id.clone(), target);
             }
             ClientMessage::SetThinking { level, session_id } => {
                 let target = session_id.clone().or(focused_id);
@@ -1035,30 +1119,47 @@ impl SessionHub {
             ClientMessage::ToggleAdventurousHandoff { session_id } => {
                 let target = session_id.clone().or(focused_id);
                 let driver = self.driver.clone();
-                tokio::spawn(async move { driver.toggle_adventurous_handoff(target).await; });
+                tokio::spawn(async move {
+                    driver.toggle_adventurous_handoff(target).await;
+                });
             }
-            ClientMessage::SetNotificationAutodrain { enabled, session_id } => {
+            ClientMessage::SetNotificationAutodrain {
+                enabled,
+                session_id,
+            } => {
                 let target = session_id.clone().or(focused_id);
                 let driver = self.driver.clone();
                 let enabled = *enabled;
-                tokio::spawn(async move { driver.set_notification_autodrain(enabled, target).await; });
+                tokio::spawn(async move {
+                    driver.set_notification_autodrain(enabled, target).await;
+                });
             }
             ClientMessage::Compact { session_id } => {
                 let target = session_id.clone().or(focused_id);
                 let driver = self.driver.clone();
-                tokio::spawn(async move { driver.compact(target).await; });
+                tokio::spawn(async move {
+                    driver.compact(target).await;
+                });
             }
             ClientMessage::ClearContext { session_id } => {
                 let target = session_id.clone().or(focused_id);
                 let driver = self.driver.clone();
-                tokio::spawn(async move { driver.clear_context(target).await; });
+                tokio::spawn(async move {
+                    driver.clear_context(target).await;
+                });
             }
-            ClientMessage::SetMcpServer { server_name, action, session_id } => {
+            ClientMessage::SetMcpServer {
+                server_name,
+                action,
+                session_id,
+            } => {
                 let target = session_id.clone().or(focused_id);
                 let driver = self.driver.clone();
                 let server_name = server_name.clone();
                 let action = action.clone();
-                tokio::spawn(async move { driver.set_mcp_server(server_name, action, target).await; });
+                tokio::spawn(async move {
+                    driver.set_mcp_server(server_name, action, target).await;
+                });
             }
             ClientMessage::ListSessions => {
                 let driver = self.driver.clone();
@@ -1086,8 +1187,7 @@ impl SessionHub {
                     let swap = Box::new(move |_hub: Arc<Mutex<SessionHub>>| {
                         let driver = driver.clone();
                         let path = path.clone();
-                        Box::pin(async move { driver.open_session(path).await })
-                            as SwapFuture
+                        Box::pin(async move { driver.open_session(path).await }) as SwapFuture
                     });
                     switch_to(hub_clone, client_key, swap, false, true).await;
                 });
@@ -1100,13 +1200,15 @@ impl SessionHub {
                     let swap = Box::new(move |_hub: Arc<Mutex<SessionHub>>| {
                         let driver = driver.clone();
                         let path = path.clone();
-                        Box::pin(async move { driver.reload_session(path).await })
-                            as SwapFuture
+                        Box::pin(async move { driver.reload_session(path).await }) as SwapFuture
                     });
                     switch_to(hub_clone, client_key, swap, true, true).await;
                 });
             }
-            ClientMessage::RespondUi { response, session_id } => {
+            ClientMessage::RespondUi {
+                response,
+                session_id,
+            } => {
                 let sid = session_id.clone().or(focused_id);
                 // First-responder-wins: only answer if the dialog is still pending.
                 let st = self.folded_state(sid.as_ref());
@@ -1114,7 +1216,9 @@ impl SessionHub {
                 let should_respond = st
                     .as_ref()
                     .map(|s| {
-                        s.pending_approvals.iter().any(|p| p.request_id() == response_rid)
+                        s.pending_approvals
+                            .iter()
+                            .any(|p| p.request_id() == response_rid)
                     })
                     .unwrap_or(false);
                 if should_respond {
@@ -1128,21 +1232,39 @@ impl SessionHub {
                 tokio::spawn(async move {
                     let restored = driver.clear_queue(target).await;
                     let h = hub_clone.lock();
-                    h.send_to_client(client_key, ServerMessage::QueueRestored {
-                        steering: restored.steering,
-                        follow_up: restored.follow_up,
-                    });
+                    h.send_to_client(
+                        client_key,
+                        ServerMessage::QueueRestored {
+                            steering: restored.steering,
+                            follow_up: restored.follow_up,
+                        },
+                    );
                 });
             }
-            ClientMessage::Branch { entry_id, summarize, session_id, .. } => {
+            ClientMessage::Branch {
+                entry_id,
+                summarize,
+                session_id,
+                ..
+            } => {
                 let target_id = session_id.clone().or(focused_id);
                 // Gate: can't branch while a turn is running
                 let target_state = self.folded_state(target_id.as_ref());
-                if target_state.as_ref().map(|s| s.status == SessionStatus::Running || s.status == SessionStatus::Initializing).unwrap_or(false) {
-                    self.send_to_client(client_key, ServerMessage::Error {
-                        message: "Can't branch while a turn is running — stop it first.".into(),
-                        kind: None,
-                    });
+                if target_state
+                    .as_ref()
+                    .map(|s| {
+                        s.status == SessionStatus::Running
+                            || s.status == SessionStatus::Initializing
+                    })
+                    .unwrap_or(false)
+                {
+                    self.send_to_client(
+                        client_key,
+                        ServerMessage::Error {
+                            message: "Can't branch while a turn is running — stop it first.".into(),
+                            kind: None,
+                        },
+                    );
                     return;
                 }
                 let driver = self.driver.clone();
@@ -1159,11 +1281,9 @@ impl SessionHub {
                         let entry_id = entry_id.clone();
                         let prefill_clone = prefill_clone.clone();
                         Box::pin(async move {
-                            let result = driver.branch_from(
-                                entry_id,
-                                summarize.unwrap_or(false),
-                                target_id,
-                            ).await;
+                            let result = driver
+                                .branch_from(entry_id, summarize.unwrap_or(false), target_id)
+                                .await;
                             if let Some(text) = result.editor_text {
                                 *prefill_clone.lock() = Some(text);
                             }
@@ -1179,7 +1299,18 @@ impl SessionHub {
                     }
                 });
             }
-            ClientMessage::NewSession { cwd, worktree, model, thinking, facet, permission_monitor, prompt, images, prompt_id, .. } => {
+            ClientMessage::NewSession {
+                cwd,
+                worktree,
+                model,
+                thinking,
+                facet,
+                permission_monitor,
+                prompt,
+                images,
+                prompt_id,
+                ..
+            } => {
                 // C3 fix: check the prompt idempotency ledger before running.
                 if let Some(cached) = self.check_prompt_idempotency(prompt_id) {
                     self.send_to_client(client_key, cached);
@@ -1209,8 +1340,7 @@ impl SessionHub {
                     let swap = Box::new(move |_hub: Arc<Mutex<SessionHub>>| {
                         let driver = driver.clone();
                         let opts = opts.clone();
-                        Box::pin(async move { driver.new_session(opts).await })
-                            as SwapFuture
+                        Box::pin(async move { driver.new_session(opts).await }) as SwapFuture
                     });
                     let sid = switch_to(hub_clone.clone(), client_key, swap, false, false).await;
                     if let Some(sid) = sid {
@@ -1222,13 +1352,15 @@ impl SessionHub {
                             let images_clone = first_images.clone();
                             let hub_clone2 = hub_clone.clone();
                             tokio::spawn(async move {
-                                driver_clone.prompt(
-                                    prompt_text.unwrap_or_default(),
-                                    None,
-                                    Some(sid.clone()),
-                                    images_clone,
-                                    pid.clone(),
-                                ).await;
+                                driver_clone
+                                    .prompt(
+                                        prompt_text.unwrap_or_default(),
+                                        None,
+                                        Some(sid.clone()),
+                                        images_clone,
+                                        pid.clone(),
+                                    )
+                                    .await;
                                 let msg = ServerMessage::PromptResult {
                                     prompt_id: pid.unwrap_or_default(),
                                     accepted: true,
@@ -1261,10 +1393,13 @@ impl SessionHub {
                             }
                             h.send_to_client(client_key, msg);
                         } else {
-                            h.send_to_client(client_key, ServerMessage::Error {
-                                message: "Could not create the new session".into(),
-                                kind: None,
-                            });
+                            h.send_to_client(
+                                client_key,
+                                ServerMessage::Error {
+                                    message: "Could not create the new session".into(),
+                                    kind: None,
+                                },
+                            );
                         }
                     }
                 });
@@ -1279,10 +1414,13 @@ impl SessionHub {
                         result if result.worktree_retained.is_some() => {
                             let wr = result.worktree_retained.unwrap();
                             let h = hub_clone.lock();
-                            h.send_to_client(client_key, ServerMessage::WorktreeRetained {
-                                path: wr.path,
-                                reason: wr.reason,
-                            });
+                            h.send_to_client(
+                                client_key,
+                                ServerMessage::WorktreeRetained {
+                                    path: wr.path,
+                                    reason: wr.reason,
+                                },
+                            );
                         }
                         _ => {
                             // Re-broadcast the session list
@@ -1320,10 +1458,16 @@ impl SessionHub {
                     let result = driver.cleanup_worktree(path, force).await;
                     if !result.removed {
                         let h = hub_clone.lock();
-                        h.send_to_client(client_key, ServerMessage::Error {
-                            message: format!("worktree not removed: {}", result.reason.unwrap_or("unknown reason".into())),
-                            kind: None,
-                        });
+                        h.send_to_client(
+                            client_key,
+                            ServerMessage::Error {
+                                message: format!(
+                                    "worktree not removed: {}",
+                                    result.reason.unwrap_or("unknown reason".into())
+                                ),
+                                kind: None,
+                            },
+                        );
                     }
                     // Re-broadcast the session list either way
                     let sessions = driver.list_sessions().await;
@@ -1371,9 +1515,7 @@ impl SessionHub {
                 tokio::spawn(async move {
                     let listing = driver.list_dir(path.clone()).await;
                     let h = hub_clone.lock();
-                    h.send_to_client(client_key, ServerMessage::DirListing {
-                        listing,
-                    });
+                    h.send_to_client(client_key, ServerMessage::DirListing { listing });
                 });
             }
             ClientMessage::StatPath { path } => {
@@ -1383,30 +1525,42 @@ impl SessionHub {
                 tokio::spawn(async move {
                     let stat = driver.stat_path(path.clone()).await;
                     let h = hub_clone.lock();
-                    h.send_to_client(client_key, ServerMessage::PathStat {
-                        stat,
-                    });
+                    h.send_to_client(client_key, ServerMessage::PathStat { stat });
                 });
             }
             ClientMessage::SetLoginShell { path } => {
-                let shell = path.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty()).map(|s| s.to_string());
+                let shell = path
+                    .as_ref()
+                    .map(|p| p.trim())
+                    .filter(|p| !p.is_empty())
+                    .map(|s| s.to_string());
                 if let Some(dir) = &self.data_dir {
-                    let _ = crate::settings_store::write_pilot_settings(dir, &crate::settings_store::PartialSettings {
-                        login_shell: Some(shell),
-                        background_model: None,
-                        enabled_extensions: None,
-                    });
+                    let _ = crate::settings_store::write_pilot_settings(
+                        dir,
+                        &crate::settings_store::PartialSettings {
+                            login_shell: Some(shell),
+                            background_model: None,
+                            enabled_extensions: None,
+                        },
+                    );
                 }
                 self.broadcast(self.pilot_settings_msg());
             }
             ClientMessage::SetBackgroundModel { spec } => {
-                let model_spec = spec.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty()).map(|s| s.to_string());
+                let model_spec = spec
+                    .as_ref()
+                    .map(|p| p.trim())
+                    .filter(|p| !p.is_empty())
+                    .map(|s| s.to_string());
                 if let Some(dir) = &self.data_dir {
-                    let _ = crate::settings_store::write_pilot_settings(dir, &crate::settings_store::PartialSettings {
-                        login_shell: None,
-                        background_model: Some(model_spec),
-                        enabled_extensions: None,
-                    });
+                    let _ = crate::settings_store::write_pilot_settings(
+                        dir,
+                        &crate::settings_store::PartialSettings {
+                            login_shell: None,
+                            background_model: Some(model_spec),
+                            enabled_extensions: None,
+                        },
+                    );
                 }
                 self.broadcast(self.pilot_settings_msg());
             }
@@ -1429,14 +1583,21 @@ impl SessionHub {
                     let dir_str = dir.display().to_string();
                     #[cfg(unix)]
                     {
-                        let cmd = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+                        let cmd = if cfg!(target_os = "macos") {
+                            "open"
+                        } else {
+                            "xdg-open"
+                        };
                         let _ = std::process::Command::new(cmd).arg(&dir_str).spawn();
                     }
                 } else {
-                    self.send_to_client(client_key, ServerMessage::Error {
-                        message: "data directory is not configured on this server".into(),
-                        kind: None,
-                    });
+                    self.send_to_client(
+                        client_key,
+                        ServerMessage::Error {
+                            message: "data directory is not configured on this server".into(),
+                            kind: None,
+                        },
+                    );
                 }
             }
             _ => {
@@ -1454,7 +1615,11 @@ impl SessionHub {
     }
 
     /// Broadcast a session list with pre-fetched data (avoids re-locking).
-    fn broadcast_session_list_with(&mut self, sessions: Vec<pilot_protocol::session_driver::SessionListEntry>, default_cwd: String) {
+    fn broadcast_session_list_with(
+        &mut self,
+        sessions: Vec<pilot_protocol::session_driver::SessionListEntry>,
+        default_cwd: String,
+    ) {
         for conn in self.clients.values() {
             let _ = conn.send.try_send(ServerMessage::SessionList {
                 sessions: sessions.clone(),
@@ -1515,27 +1680,50 @@ impl SessionHub {
         self.broadcast(ServerMessage::ModelList { models });
     }
 
+    #[expect(
+        dead_code,
+        reason = "connect-time command list fan-out is incomplete until Phase 1 hub parity"
+    )]
     async fn send_command_list(&self, client_key: u64) {
-        let focused = self.clients.get(&client_key).and_then(|c| c.focused_id.clone());
+        let focused = self
+            .clients
+            .get(&client_key)
+            .and_then(|c| c.focused_id.clone());
         let commands = self.driver.list_commands(focused).await;
         if let Some(conn) = self.clients.get(&client_key) {
             let _ = conn.send.try_send(ServerMessage::CommandList { commands });
         }
     }
 
+    #[expect(
+        dead_code,
+        reason = "connect-time facet list fan-out is incomplete until Phase 1 hub parity"
+    )]
     async fn send_facet_list(&self, client_key: u64) {
-        let focused = self.clients.get(&client_key).and_then(|c| c.focused_id.clone());
+        let focused = self
+            .clients
+            .get(&client_key)
+            .and_then(|c| c.focused_id.clone());
         let facets = self.driver.list_facets(focused).await;
         if let Some(conn) = self.clients.get(&client_key) {
             let _ = conn.send.try_send(ServerMessage::FacetList { facets });
         }
     }
 
+    #[expect(
+        dead_code,
+        reason = "connect-time file index fan-out is incomplete until Phase 1 hub parity"
+    )]
     async fn send_file_index(&self, client_key: u64) {
-        let focused = self.clients.get(&client_key).and_then(|c| c.focused_id.clone());
+        let focused = self
+            .clients
+            .get(&client_key)
+            .and_then(|c| c.focused_id.clone());
         let (files, truncated) = self.driver.list_file_index(focused).await;
         if let Some(conn) = self.clients.get(&client_key) {
-            let _ = conn.send.try_send(ServerMessage::FileIndex { files, truncated });
+            let _ = conn
+                .send
+                .try_send(ServerMessage::FileIndex { files, truncated });
         }
     }
 
@@ -1556,16 +1744,22 @@ impl SessionHub {
     pub fn spawn_connect_lists(&self, client_key: u64, hub: Arc<Mutex<Self>>) {
         let driver = self.driver.clone();
         let hub_clone = hub.clone();
-        let focused = self.clients.get(&client_key).and_then(|c| c.focused_id.clone());
+        let focused = self
+            .clients
+            .get(&client_key)
+            .and_then(|c| c.focused_id.clone());
         tokio::spawn(async move {
             let sessions = driver.list_sessions().await;
             let default_new_session_cwd = std::env::var("HOME").unwrap_or_default();
             let h = hub_clone.lock();
-            h.send_to_client(client_key, ServerMessage::SessionList {
-                sessions,
-                active_session_id: focused.clone(),
-                default_new_session_cwd,
-            });
+            h.send_to_client(
+                client_key,
+                ServerMessage::SessionList {
+                    sessions,
+                    active_session_id: focused.clone(),
+                    default_new_session_cwd,
+                },
+            );
         });
 
         let driver = self.driver.clone();
@@ -1587,7 +1781,10 @@ impl SessionHub {
 
         let driver = self.driver.clone();
         let hub_clone = hub.clone();
-        let focused = self.clients.get(&client_key).and_then(|c| c.focused_id.clone());
+        let focused = self
+            .clients
+            .get(&client_key)
+            .and_then(|c| c.focused_id.clone());
         tokio::spawn(async move {
             let commands = driver.list_commands(focused).await;
             let h = hub_clone.lock();
@@ -1596,7 +1793,10 @@ impl SessionHub {
 
         let driver = self.driver.clone();
         let hub_clone = hub.clone();
-        let focused = self.clients.get(&client_key).and_then(|c| c.focused_id.clone());
+        let focused = self
+            .clients
+            .get(&client_key)
+            .and_then(|c| c.focused_id.clone());
         tokio::spawn(async move {
             let facets = driver.list_facets(focused).await;
             let h = hub_clone.lock();
@@ -1605,7 +1805,10 @@ impl SessionHub {
 
         let driver = self.driver.clone();
         let hub_clone = hub.clone();
-        let focused = self.clients.get(&client_key).and_then(|c| c.focused_id.clone());
+        let focused = self
+            .clients
+            .get(&client_key)
+            .and_then(|c| c.focused_id.clone());
         tokio::spawn(async move {
             let (files, truncated) = driver.list_file_index(focused).await;
             let h = hub_clone.lock();
@@ -1622,7 +1825,9 @@ impl SessionHub {
     }
 
     pub fn refresh_usage(&mut self) {
-        let running_sessions: Vec<SessionId> = self.journals.keys()
+        let running_sessions: Vec<SessionId> = self
+            .journals
+            .keys()
             .filter(|sid| self.running.contains(*sid))
             .cloned()
             .collect();
@@ -1631,13 +1836,20 @@ impl SessionHub {
             let usage = self.driver.get_usage(Some(sid.clone()));
             let Some(usage) = usage else { continue };
             let key = serde_json::to_string(&usage).unwrap_or_default();
-            if self.last_usage_emitted.get(&sid).map(|k| k == &key).unwrap_or(false) {
+            if self
+                .last_usage_emitted
+                .get(&sid)
+                .map(|k| k == &key)
+                .unwrap_or(false)
+            {
                 continue;
             }
             self.last_usage_emitted.insert(sid.clone(), key);
 
             // Get the session ref from the journal's first event
-            let session_ref = self.journals.get(&sid)
+            let session_ref = self
+                .journals
+                .get(&sid)
                 .and_then(|j| {
                     let (_, _, events) = build_seed(j);
                     events.first().map(|e| e.session_ref().clone())
@@ -1686,7 +1898,9 @@ impl SessionHub {
     /// Build the pilot-local-settings message: persisted settings + login-env
     /// status + background-model warning.
     fn pilot_settings_msg(&self) -> ServerMessage {
-        let settings = self.data_dir.as_ref()
+        let settings = self
+            .data_dir
+            .as_ref()
             .map(|dir| crate::settings_store::read_pilot_settings(dir))
             .unwrap_or_default();
         // Login env status is a stub for now — the real implementation needs
@@ -1716,7 +1930,10 @@ impl SessionHub {
             meta_changed = self.track_running(&e_sid, e) || meta_changed;
             meta_changed = self.track_attention(&e_sid, e) || meta_changed;
         }
-        sid = st.session_ref.as_ref().map(|r| r.session_id.clone())
+        sid = st
+            .session_ref
+            .as_ref()
+            .map(|r| r.session_id.clone())
             .or_else(|| seed.first().map(|e| e.session_ref().session_id.clone()));
         (meta_changed, sid)
     }
@@ -1725,7 +1942,8 @@ impl SessionHub {
 // ── switch_to free function ──────────────────────────────────────────────
 
 /// A boxed, pinned, Send future — the return type of switch_to.
-type SwitchFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Option<SessionId>> + Send + 'static>>;
+type SwitchFuture =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Option<SessionId>> + Send + 'static>>;
 
 /// The atomic session-swap state machine. Implements single-flight per connection:
 /// if a swap is already in-flight on this connection, the latest request coalesces
@@ -1743,73 +1961,85 @@ fn switch_to(
     retry_on_raced_events: bool,
 ) -> SwitchFuture {
     Box::pin(async move {
-    // ── Single-flight check: if a swap is already in-flight on this connection,
-    // coalesce this one as the latest pending (depth 1, latest wins). Resolve
-    // any previously-queued request with None so its awaiter unblocks.
-    let mut swap = Some(swap);
-    let pending_rx: Option<tokio::sync::oneshot::Receiver<Option<SessionId>>> = {
-        let mut h = hub.lock();
-        let conn = h.clients.get_mut(&client_key);
-        if let Some(conn) = conn {
-            if conn.switch_in_flight {
-                // Supersede a previously-queued request
-                if let Some(prev) = conn.pending_switch.take() {
-                    let _ = prev.resolve.send(None);
+        // ── Single-flight check: if a swap is already in-flight on this connection,
+        // coalesce this one as the latest pending (depth 1, latest wins). Resolve
+        // any previously-queued request with None so its awaiter unblocks.
+        let mut swap = Some(swap);
+        let pending_rx: Option<tokio::sync::oneshot::Receiver<Option<SessionId>>> = {
+            let mut h = hub.lock();
+            let conn = h.clients.get_mut(&client_key);
+            if let Some(conn) = conn {
+                if conn.switch_in_flight {
+                    // Supersede a previously-queued request
+                    if let Some(prev) = conn.pending_switch.take() {
+                        let _ = prev.resolve.send(None);
+                    }
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    conn.pending_switch = Some(PendingSwitch {
+                        swap: swap.take().unwrap(),
+                        reseed,
+                        retry_on_raced_events,
+                        resolve: tx,
+                    });
+                    Some(rx)
+                } else {
+                    conn.switch_in_flight = true;
+                    None
                 }
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                conn.pending_switch = Some(PendingSwitch {
-                    swap: swap.take().unwrap(),
-                    reseed,
-                    retry_on_raced_events,
-                    resolve: tx,
-                });
-                Some(rx)
             } else {
-                conn.switch_in_flight = true;
                 None
             }
-        } else {
-            None
+        }; // guard dropped here
+        if let Some(rx) = pending_rx {
+            return rx.await.ok().flatten();
         }
-    }; // guard dropped here
-    if let Some(rx) = pending_rx {
-        return rx.await.ok().flatten();
-    }
 
-    // ── Run the swap. We wrap the fetch in swaps_in_flight++/-- so on_event
-    // buffers live events for journal-less sessions during the fetch.
-    hub.lock().swaps_in_flight += 1;
-    let swap = swap.take().unwrap();
-    let seed = swap(hub.clone()).await;
-    {
-        let mut h = hub.lock();
-        h.swaps_in_flight = h.swaps_in_flight.saturating_sub(1);
-    }
-
-    // ── Fold the seed + set up journal/focus
-    let sid = finish_switch(&hub, client_key, seed, reseed, retry_on_raced_events).await;
-
-    // ── Finally: clear switch_in_flight and dispatch any queued swap.
-    let queued = {
-        let mut h = hub.lock();
-        let conn = h.clients.get_mut(&client_key);
-        if let Some(conn) = conn {
-            conn.switch_in_flight = false;
-            conn.pending_switch.take()
-        } else {
-            None
+        // ── Run the swap. We wrap the fetch in swaps_in_flight++/-- so on_event
+        // buffers live events for journal-less sessions during the fetch.
+        hub.lock().swaps_in_flight += 1;
+        let swap = swap.take().unwrap();
+        let seed = swap(hub.clone()).await;
+        {
+            let mut h = hub.lock();
+            h.swaps_in_flight = h.swaps_in_flight.saturating_sub(1);
         }
-    };
-    if let Some(next) = queued {
-        let PendingSwitch { swap, reseed, retry_on_raced_events, resolve } = next;
-        let hub_clone = hub.clone();
-        tokio::spawn(async move {
-            let sid = switch_to(hub_clone.clone(), client_key, swap, reseed, retry_on_raced_events).await;
-            let _ = resolve.send(sid);
-        });
-    }
 
-    sid
+        // ── Fold the seed + set up journal/focus
+        let sid = finish_switch(&hub, client_key, seed, reseed, retry_on_raced_events).await;
+
+        // ── Finally: clear switch_in_flight and dispatch any queued swap.
+        let queued = {
+            let mut h = hub.lock();
+            let conn = h.clients.get_mut(&client_key);
+            if let Some(conn) = conn {
+                conn.switch_in_flight = false;
+                conn.pending_switch.take()
+            } else {
+                None
+            }
+        };
+        if let Some(next) = queued {
+            let PendingSwitch {
+                swap,
+                reseed,
+                retry_on_raced_events,
+                resolve,
+            } = next;
+            let hub_clone = hub.clone();
+            tokio::spawn(async move {
+                let sid = switch_to(
+                    hub_clone.clone(),
+                    client_key,
+                    swap,
+                    reseed,
+                    retry_on_raced_events,
+                )
+                .await;
+                let _ = resolve.send(sid);
+            });
+        }
+
+        sid
     })
 }
 
@@ -1827,10 +2057,13 @@ async fn finish_switch(
     let (meta_changed, sid) = {
         let mut h = hub.lock();
         if seed.is_empty() {
-            h.send_to_client(client_key, ServerMessage::Error {
-                message: "session switch returned no session".into(),
-                kind: None,
-            });
+            h.send_to_client(
+                client_key,
+                ServerMessage::Error {
+                    message: "session switch returned no session".into(),
+                    kind: None,
+                },
+            );
             return None;
         }
         h.fold_swap_seed(&seed)
@@ -1838,10 +2071,13 @@ async fn finish_switch(
 
     let Some(sid) = sid else {
         let h = hub.lock();
-        h.send_to_client(client_key, ServerMessage::Error {
-            message: "session switch returned no session".into(),
-            kind: None,
-        });
+        h.send_to_client(
+            client_key,
+            ServerMessage::Error {
+                message: "session switch returned no session".into(),
+                kind: None,
+            },
+        );
         return None;
     };
 
@@ -2000,17 +2236,23 @@ fn tool_activity(ev: &SessionDriverEvent) -> String {
         let name = tool_name.to_lowercase();
         let path = input_string(input, &["path", "filePath", "file_path"]);
         if name.contains("read") {
-            return path.map(|p| format!("Reading {p}")).unwrap_or_else(|| "Reading files".into());
+            return path
+                .map(|p| format!("Reading {p}"))
+                .unwrap_or_else(|| "Reading files".into());
         }
         if name.contains("edit") || name.contains("write") {
-            return path.map(|p| format!("Editing {p}")).unwrap_or_else(|| "Editing files".into());
+            return path
+                .map(|p| format!("Editing {p}"))
+                .unwrap_or_else(|| "Editing files".into());
         }
         if name.contains("search") || name.contains("grep") || name == "rg" {
             return "Searching the workspace".into();
         }
         if name == "bash" || name == "shell" || name == "exec" {
             let command = input_string(input, &["command", "cmd"]);
-            return command.map(|c| format!("Running {c}")).unwrap_or_else(|| "Running a command".into());
+            return command
+                .map(|c| format!("Running {c}"))
+                .unwrap_or_else(|| "Running a command".into());
         }
         return clipped(
             &label
@@ -2078,7 +2320,15 @@ fn response_request_id(response: &HostUiResponse) -> &str {
 /// Helper trait to access common fields on SessionDriverEvent without
 /// destructuring every variant.
 trait SessionDriverEventExt {
+    #[expect(
+        dead_code,
+        reason = "extension helpers are retained for parity with TS event access patterns during Phase 1 hub work"
+    )]
     fn session_ref(&self) -> &SessionRef;
+    #[expect(
+        dead_code,
+        reason = "extension helpers are retained for parity with TS event access patterns during Phase 1 hub work"
+    )]
     fn timestamp(&self) -> &str;
     fn type_discriminator(&self) -> String;
     fn snapshot_status(&self) -> Option<SessionStatus>;
@@ -2137,27 +2387,40 @@ impl SessionDriverEventExt for SessionDriverEvent {
     fn type_discriminator(&self) -> String {
         serde_json::to_value(self)
             .ok()
-            .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(|s| s.to_string()))
+            .and_then(|v| {
+                v.get("type")
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string())
+            })
             .unwrap_or_default()
     }
 
     fn snapshot_status(&self) -> Option<SessionStatus> {
         match self {
-            E::SessionOpened { snapshot, .. } | E::SessionUpdated { snapshot, .. } | E::RunCompleted { snapshot, .. } => Some(snapshot.status),
+            E::SessionOpened { snapshot, .. }
+            | E::SessionUpdated { snapshot, .. }
+            | E::RunCompleted { snapshot, .. } => Some(snapshot.status),
             _ => None,
         }
     }
 
     fn snapshot_title(&self) -> Option<String> {
         match self {
-            E::SessionOpened { snapshot, .. } | E::SessionUpdated { snapshot, .. } | E::RunCompleted { snapshot, .. } => Some(snapshot.title.clone()),
+            E::SessionOpened { snapshot, .. }
+            | E::SessionUpdated { snapshot, .. }
+            | E::RunCompleted { snapshot, .. } => Some(snapshot.title.clone()),
             _ => None,
         }
     }
 
     fn assistant_delta_channel(&self) -> Option<String> {
         match self {
-            E::AssistantDelta { channel, .. } => channel.as_ref().map(|c| serde_json::to_value(c).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_default()),
+            E::AssistantDelta { channel, .. } => channel.as_ref().map(|c| {
+                serde_json::to_value(c)
+                    .ok()
+                    .and_then(|v| v.as_str().map(String::from))
+                    .unwrap_or_default()
+            }),
             _ => None,
         }
     }

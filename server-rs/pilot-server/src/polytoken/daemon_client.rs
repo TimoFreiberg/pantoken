@@ -13,9 +13,6 @@
 //! - `Last-Event-ID` resume is supported by the `id:` field (== `seq`); not yet wired.
 //! - All endpoints are flat (no `/session/{id}/…`) — the daemon IS the session.
 
-#![allow(dead_code)]
-#![allow(unused_assignments)]
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -25,7 +22,7 @@ use pilot_daemon_types::*;
 use reqwest::Client;
 use serde::Deserialize;
 use tokio::process::Command;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{Mutex, oneshot};
 use tracing::{error, info, warn};
 
 /// An MCP server lifecycle action exposed by the daemon.
@@ -73,9 +70,7 @@ fn extract_kv_value(line: &str, key: &str) -> Option<String> {
     let idx = line.find(key)?;
     let rest = &line[idx + key.len()..];
     // Take up to the next whitespace.
-    let end = rest
-        .find(|c: char| c.is_whitespace())
-        .unwrap_or(rest.len());
+    let end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
     let val = &rest[..end];
     if val.is_empty() {
         None
@@ -107,7 +102,9 @@ pub fn parse_spawn_output(stdout: &str) -> Result<SpawnedDaemon, String> {
                 .map_err(|_| format!("polytoken new --no-attach line unparseable: {line:?}"))?;
             Ok(SpawnedDaemon { session_id, port })
         }
-        _ => Err(format!("polytoken new --no-attach line unparseable: {line:?}")),
+        _ => Err(format!(
+            "polytoken new --no-attach line unparseable: {line:?}"
+        )),
     }
 }
 
@@ -201,9 +198,7 @@ pub async fn wait_for_daemon_startup(
                 if let Some(port) = json.port {
                     // Stale startup.json from a prior (now-dead) daemon: its pid won't match
                     // the process we just spawned. Keep polling for OUR daemon's file.
-                    let pid_matches = expect_pid
-                        .map(|ep| json.pid == Some(ep))
-                        .unwrap_or(true);
+                    let pid_matches = expect_pid.map(|ep| json.pid == Some(ep)).unwrap_or(true);
                     if pid_matches {
                         return Ok(port as u16);
                     }
@@ -213,9 +208,7 @@ pub async fn wait_for_daemon_startup(
             if json.state == "failed" {
                 // A failed file from a prior run (wrong pid) must not abort our wait —
                 // only a failure from our own daemon is terminal.
-                let is_ours = expect_pid
-                    .map(|ep| json.pid == Some(ep))
-                    .unwrap_or(true);
+                let is_ours = expect_pid.map(|ep| json.pid == Some(ep)).unwrap_or(true);
                 if is_ours {
                     return Err(format!(
                         "polytoken daemon failed to start: {}",
@@ -469,9 +462,10 @@ pub fn parse_lease_held_error(error: Option<&str>) -> Option<LeaseHeldInfo> {
                 expires_at: a.expires_at,
             })
         }
-        None => body
-            .message
-            .map(|m| LeaseHeldInfo { summary: m, expires_at: None }),
+        None => body.message.map(|m| LeaseHeldInfo {
+            summary: m,
+            expires_at: None,
+        }),
     }
 }
 
@@ -502,11 +496,7 @@ pub fn format_lease_conflict_message(
 pub fn ceil_seconds(ms: i64) -> i64 {
     // Equivalent to Math.ceil(ms / 1000).
     let s = ms.div_euclid(1000);
-    if ms.rem_euclid(1000) != 0 {
-        s + 1
-    } else {
-        s
-    }
+    if ms.rem_euclid(1000) != 0 { s + 1 } else { s }
 }
 
 /// A 409 lease-conflict error carrying the parsed holder info + expiry. Thrown by
@@ -637,8 +627,8 @@ fn parse_rfc3339_millis(s: &str) -> Option<u128> {
         (h, m, sec, millis)
     };
     let days = days_from_civil(year, month, day)?;
-    let total_seconds =
-        days as i64 * 86400 + h as i64 * 3600 + m as i64 * 60 + sec as i64 - tz_offset_minutes as i64 * 60;
+    let total_seconds = days as i64 * 86400 + h as i64 * 3600 + m as i64 * 60 + sec as i64
+        - tz_offset_minutes as i64 * 60;
     let total_millis = total_seconds as i128 * 1000 + millis as i128;
     Some(total_millis as u128)
 }
@@ -770,7 +760,9 @@ impl DaemonClient {
             reqwest::Method::POST => {
                 let mut r = self.http.post(url);
                 if let Some(b) = body {
-                    r = r.header("content-type", "application/json").body(b.to_string());
+                    r = r
+                        .header("content-type", "application/json")
+                        .body(b.to_string());
                 }
                 r
             }
@@ -779,7 +771,7 @@ impl DaemonClient {
             _ => self.http.request(method, url),
         };
         match tokio::time::timeout(Duration::from_millis(timeout_ms), req.send()).await {
-            Err(_) => Err(()), // timed out
+            Err(_) => Err(()),      // timed out
             Ok(Err(_e)) => Err(()), // connection error
             Ok(Ok(res)) => {
                 let status = res.status().as_u16();
@@ -794,6 +786,10 @@ impl DaemonClient {
     /// Shared request core: run `safe_fetch`, then normalize the response into the
     /// `{status, data, error}` shape every caller wants — null/status-0 short-circuit,
     /// JSON-parse the body, and derive an `error` string for ≥400 responses.
+    #[expect(
+        dead_code,
+        reason = "ported daemon-client shared request helper is retained for live-path test parity in Phase 2"
+    )]
     async fn request<T: serde::de::DeserializeOwned>(
         &self,
         path: &str,
@@ -841,7 +837,11 @@ impl DaemonClient {
                         .and_then(|f| f(data.as_ref(), &text))
                         .or_else(|| Some(text[..text.len().min(200)].to_string()))
                 };
-                DaemonResponse { status, data, error }
+                DaemonResponse {
+                    status,
+                    data,
+                    error,
+                }
             }
         }
     }
@@ -857,7 +857,10 @@ impl DaemonClient {
         // We can't easily type the closure to match `Option<&T>` with message field,
         // so we capture the raw text via a two-phase approach: parse for message.
         let url = format!("{}{}", self.base_url, path);
-        match self.safe_fetch(&url, reqwest::Method::POST, body, 10_000).await {
+        match self
+            .safe_fetch(&url, reqwest::Method::POST, body, 10_000)
+            .await
+        {
             Err(_) => DaemonResponse {
                 status: 0,
                 data: None,
@@ -886,7 +889,11 @@ impl DaemonClient {
                         .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(String::from));
                     Some(parsed_msg.unwrap_or_else(|| text[..text.len().min(200)].to_string()))
                 };
-                DaemonResponse { status, data, error }
+                DaemonResponse {
+                    status,
+                    data,
+                    error,
+                }
             }
         }
     }
@@ -894,7 +901,10 @@ impl DaemonClient {
     /// `GET {path}`. On ≥400, report the raw response text (no parsed message).
     async fn get<T: serde::de::DeserializeOwned>(&self, path: &str) -> DaemonResponse<T> {
         let url = format!("{}{}", self.base_url, path);
-        match self.safe_fetch(&url, reqwest::Method::GET, None, 10_000).await {
+        match self
+            .safe_fetch(&url, reqwest::Method::GET, None, 10_000)
+            .await
+        {
             Err(_) => DaemonResponse {
                 status: 0,
                 data: None,
@@ -922,7 +932,11 @@ impl DaemonClient {
                 } else {
                     None
                 };
-                DaemonResponse { status, data, error }
+                DaemonResponse {
+                    status,
+                    data,
+                    error,
+                }
             }
         }
     }
@@ -1022,7 +1036,10 @@ impl DaemonClient {
                         "another TUI is attached to this session ({}). Detach it there (/detach) or wait ~30s for its lease to lapse.",
                         h.summary
                     ),
-                    None => format!("lease claim failed (409): {}", res.error.as_deref().unwrap_or("")),
+                    None => format!(
+                        "lease claim failed (409): {}",
+                        res.error.as_deref().unwrap_or("")
+                    ),
                 };
                 return Err(LeaseConflictError { message, held });
             }
@@ -1045,8 +1062,7 @@ impl DaemonClient {
         let base_url = self.base_url.clone();
         let pid = self.pid;
         let heartbeat_handle = tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(Duration::from_millis(heartbeat_ms));
+            let mut interval = tokio::time::interval(Duration::from_millis(heartbeat_ms));
             interval.tick().await; // first tick is immediate
             loop {
                 tokio::select! {
@@ -1159,6 +1175,10 @@ impl DaemonClient {
 
     /// `POST /tui-attachment/heartbeat` — refresh the lease. 404/409 means the
     /// lease expired or was stolen — clears the timer.
+    #[expect(
+        dead_code,
+        reason = "explicit heartbeat endpoint helper is bypassed by inline timer until daemon-client tests land in Phase 2"
+    )]
     async fn heartbeat(&self, lease_id: &str) {
         let body = TuiAttachHeartbeatRequest {
             lease_id: lease_id.to_string(),
@@ -1253,7 +1273,9 @@ impl DaemonClient {
             content: content.to_string(),
         };
         let body_str = serde_json::to_string(&body).unwrap_or_default();
-        let res = self.post::<serde_json::Value>("/turn/input", Some(&body_str)).await;
+        let res = self
+            .post::<serde_json::Value>("/turn/input", Some(&body_str))
+            .await;
         if res.status != 202 {
             return Err(format!(
                 "POST /turn/input failed ({}): {}",
@@ -1273,7 +1295,10 @@ impl DaemonClient {
     /// 200 = dequeued; 409 = no pending input (both are acceptable no-ops).
     pub async fn dequeue_newest_input(&self) -> Result<(), String> {
         let url = format!("{}/turn/input/newest", self.base_url);
-        match self.safe_fetch(&url, reqwest::Method::DELETE, None, 10_000).await {
+        match self
+            .safe_fetch(&url, reqwest::Method::DELETE, None, 10_000)
+            .await
+        {
             Err(_) => Err("DELETE /turn/input/newest failed (connection error)".into()),
             Ok((status, _, _)) => {
                 if status != 200 && status != 409 {
@@ -1288,7 +1313,10 @@ impl DaemonClient {
     /// Returns the new state so the driver can emit a snapshot immediately.
     pub async fn toggle_adventurous_handoff(&self) -> Result<bool, String> {
         let url = format!("{}/adventurous-handoff", self.base_url);
-        match self.safe_fetch(&url, reqwest::Method::POST, None, 10_000).await {
+        match self
+            .safe_fetch(&url, reqwest::Method::POST, None, 10_000)
+            .await
+        {
             Err(_) => Err("POST /adventurous-handoff failed (connection error)".into()),
             Ok((status, text, err)) => {
                 if status == 0 {
@@ -1421,7 +1449,9 @@ impl DaemonClient {
             title: title.to_string(),
         };
         let body_str = serde_json::to_string(&body).unwrap_or_default();
-        let res = self.post::<serde_json::Value>("/title", Some(&body_str)).await;
+        let res = self
+            .post::<serde_json::Value>("/title", Some(&body_str))
+            .await;
         if res.status != 200 {
             return Err(format!(
                 "POST /title failed ({}): {}",
@@ -1458,7 +1488,9 @@ impl DaemonClient {
         )
         .await;
         match result {
-            Err(_) => Err(format!("POST /interrogative/respond timed out (10s) for {id}")),
+            Err(_) => Err(format!(
+                "POST /interrogative/respond timed out (10s) for {id}"
+            )),
             Ok(Err(e)) => Err(format!("POST /interrogative/respond failed: {e}")),
             Ok(Ok(res)) => {
                 if !res.status().is_success() {
@@ -1476,10 +1508,7 @@ impl DaemonClient {
     }
 
     /// `POST /permission-monitor` — switch the permission mode.
-    pub async fn set_permission_mode(
-        &self,
-        mode: PermissionMonitorMode,
-    ) -> Result<(), String> {
+    pub async fn set_permission_mode(&self, mode: PermissionMonitorMode) -> Result<(), String> {
         let body = PermissionMonitorRequest { mode };
         let body_str = serde_json::to_string(&body).unwrap_or_default();
         let res = self
@@ -1569,7 +1598,9 @@ impl DaemonClient {
             Some(r) => serde_json::to_string(r).unwrap_or_default(),
             None => "null".to_string(),
         };
-        let res = self.post::<serde_json::Value>("/compact", Some(&body_str)).await;
+        let res = self
+            .post::<serde_json::Value>("/compact", Some(&body_str))
+            .await;
         if res.status != 202 {
             return Err(format!(
                 "POST /compact failed ({}): {}",
@@ -1583,7 +1614,9 @@ impl DaemonClient {
     /// `POST /rewind` — destructive: drops the target prompt + everything after it.
     pub async fn rewind(&self, request: &RewindRequest) -> Result<(), String> {
         let body_str = serde_json::to_string(request).unwrap_or_default();
-        let res = self.post::<serde_json::Value>("/rewind", Some(&body_str)).await;
+        let res = self
+            .post::<serde_json::Value>("/rewind", Some(&body_str))
+            .await;
         if res.status != 202 {
             return Err(format!(
                 "POST /rewind failed ({}): {}",
@@ -1600,7 +1633,9 @@ impl DaemonClient {
             facet: facet.to_string(),
         };
         let body_str = serde_json::to_string(&body).unwrap_or_default();
-        let res = self.post::<serde_json::Value>("/facet", Some(&body_str)).await;
+        let res = self
+            .post::<serde_json::Value>("/facet", Some(&body_str))
+            .await;
         if res.status != 200 {
             return Err(format!(
                 "POST /facet failed ({}): {}",
@@ -1703,7 +1738,13 @@ impl DaemonClient {
         let notify_for_loop = notify.clone();
         let join_handle = tokio::spawn(async move {
             client
-                .sse_loop(on_event, notify_for_loop, cancel_rx, liveness_interval, liveness_probe_timeout)
+                .sse_loop(
+                    on_event,
+                    notify_for_loop,
+                    cancel_rx,
+                    liveness_interval,
+                    liveness_probe_timeout,
+                )
                 .await;
         });
 
@@ -1714,6 +1755,10 @@ impl DaemonClient {
         }
     }
 
+    #[expect(
+        unused_assignments,
+        reason = "SSE cancellation branches assign stopped immediately before breaking; simplify liveness/cancellation in Phase 2 after daemon heartbeat update"
+    )]
     async fn sse_loop<F>(
         self: Arc<Self>,
         on_event: F,
@@ -1721,8 +1766,7 @@ impl DaemonClient {
         mut cancel_rx: oneshot::Receiver<()>,
         liveness_interval: u64,
         liveness_probe_timeout: u64,
-    )
-    where
+    ) where
         F: Fn(SseEnvelope) + Send + Sync + 'static,
     {
         let mut backoff: u64 = 1000;
@@ -1740,8 +1784,7 @@ impl DaemonClient {
         let client_liveness = self.clone();
         let last_frame_for_watcher = last_frame_at_arc.clone();
         let liveness_handle = tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(Duration::from_millis(liveness_interval));
+            let mut interval = tokio::time::interval(Duration::from_millis(liveness_interval));
             interval.tick().await;
             loop {
                 if *liveness_stop_clone.lock().await {

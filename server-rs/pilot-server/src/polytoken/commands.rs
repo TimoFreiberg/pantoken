@@ -36,8 +36,16 @@ use serde::Deserialize;
 struct RawCommand {
     canonical: String,
     #[serde(default)]
+    #[expect(
+        dead_code,
+        reason = "daemon slash-command aliases are parsed but not surfaced until command-menu parity work"
+    )]
     aliases: Option<Vec<String>>,
     #[serde(default)]
+    #[expect(
+        dead_code,
+        reason = "daemon slash-command categories are parsed but not surfaced until command-menu parity work"
+    )]
     category: Option<String>,
     #[serde(default)]
     description: Option<String>,
@@ -47,6 +55,10 @@ struct RawCommand {
 #[derive(Debug, Clone, Deserialize)]
 struct RawSlashCommands {
     #[serde(default)]
+    #[expect(
+        dead_code,
+        reason = "daemon command categories are parsed but not displayed until command-menu parity work"
+    )]
     categories: Option<Vec<RawCategory>>,
     #[serde(default)]
     commands: Option<Vec<RawCommand>>,
@@ -54,7 +66,15 @@ struct RawSlashCommands {
 
 #[derive(Debug, Clone, Deserialize)]
 struct RawCategory {
+    #[expect(
+        dead_code,
+        reason = "daemon command category metadata is parsed but not displayed until command-menu parity work"
+    )]
     id: String,
+    #[expect(
+        dead_code,
+        reason = "daemon command category metadata is parsed but not displayed until command-menu parity work"
+    )]
     title: String,
 }
 

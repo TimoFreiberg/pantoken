@@ -15,12 +15,10 @@
 //! Shapes grounded in the binary's own self-describing schemas (`polytoken openapi` /
 //! `polytoken event-schema`).
 
-#![allow(dead_code)]
-
 use pilot_daemon_types::{
-    BlockDeltaPayload, ContentBlockKind, CurrentGoal, DaemonEvent,
-    PermissionCandidateRuleContext, PermissionMonitor,
-    ProviderError, SessionStateSnapshot, SystemReminderReason, ToolLiveDisplayContent,
+    BlockDeltaPayload, ContentBlockKind, CurrentGoal, DaemonEvent, PermissionCandidateRuleContext,
+    PermissionMonitor, ProviderError, SessionStateSnapshot, SystemReminderReason,
+    ToolLiveDisplayContent,
 };
 use pilot_protocol::session_driver::{
     AssistantDeltaChannel, FlaggedFile, FlaggedFileMode, GoalInfo, HostUiRequest, ImageContent,
@@ -30,10 +28,10 @@ use pilot_protocol::session_driver::{
     TodoStatus as PilotTodoStatus, WorkspaceRef,
 };
 
-use crate::polytoken::models::{default_model_ref, ModelRef};
+use crate::polytoken::models::{ModelRef, default_model_ref};
 use crate::polytoken::ui_bridge::{
-    prune_approval_options, PendingInterrogative, PendingInterrogativeType,
-    PendingQuestion, PERMISSION_APPROVAL_CHOICES, PERMISSION_APPROVAL_LABELS,
+    PERMISSION_APPROVAL_CHOICES, PERMISSION_APPROVAL_LABELS, PendingInterrogative,
+    PendingInterrogativeType, PendingQuestion, prune_approval_options,
 };
 
 // ---------------------------------------------------------------------------
@@ -266,7 +264,9 @@ fn plan_review_label(reason: &SystemReminderReason) -> Option<&'static str> {
 /// Extract a human-readable message from a ProviderError (the model_error payload).
 fn provider_error_message(error: &ProviderError) -> String {
     match error {
-        ProviderError::RateLimited { retry_after_seconds } => match retry_after_seconds {
+        ProviderError::RateLimited {
+            retry_after_seconds,
+        } => match retry_after_seconds {
             Some(secs) => format!("Rate limited (retry in {}s)", secs),
             None => "Rate limited".to_string(),
         },
@@ -737,9 +737,7 @@ fn build_interrogative_mapping(
                     title: ph
                         .map(|p| p.title.clone())
                         .unwrap_or_else(|| "Plan handoff".to_string()),
-                    plan_text: ph
-                        .map(|p| p.plan_text.clone())
-                        .unwrap_or_default(),
+                    plan_text: ph.map(|p| p.plan_text.clone()).unwrap_or_default(),
                     display_path: ph.map(|p| p.display_path.clone()),
                     target_facet: ph.map(|p| p.target_facet.clone()),
                     action_labels: labels,
@@ -772,9 +770,7 @@ fn build_interrogative_mapping(
             let title = gp
                 .map(|g| g.title.clone())
                 .unwrap_or_else(|| "Goal proposal".to_string());
-            let summary = gp
-                .map(|g| g.proposed_summary.clone())
-                .unwrap_or_default();
+            let summary = gp.map(|g| g.proposed_summary.clone()).unwrap_or_default();
             let message = if summary.is_empty() {
                 title.clone()
             } else {
@@ -881,7 +877,13 @@ fn build_ask_user_question_mapping(
         .iter()
         .map(|q| PendingQuestion {
             question_id: q.id.clone(),
-            option_ids: q.options.as_deref().unwrap_or(&[]).iter().map(|o| o.id.clone()).collect(),
+            option_ids: q
+                .options
+                .as_deref()
+                .unwrap_or(&[])
+                .iter()
+                .map(|o| o.id.clone())
+                .collect(),
             option_labels: Some(
                 q.options
                     .as_deref()
@@ -1011,59 +1013,151 @@ fn monitor_to_mode(monitor: &PermissionMonitor) -> PermissionMonitorMode {
 /// — for variants without the field, `subHandle` is `undefined` so they pass).
 fn subagent_handle(ev: &DaemonEvent) -> Option<&str> {
     match ev {
-        DaemonEvent::Heartbeat { subagent_handle, .. }
-        | DaemonEvent::ContentBlockStart { subagent_handle, .. }
-        | DaemonEvent::ContentBlockDelta { subagent_handle, .. }
-        | DaemonEvent::ContentBlockStop { subagent_handle, .. }
-        | DaemonEvent::MessageStart { subagent_handle, .. }
-        | DaemonEvent::MessageComplete { subagent_handle, .. }
-        | DaemonEvent::PendingTurnInputQueued { subagent_handle, .. }
-        | DaemonEvent::PendingTurnInputDequeued { subagent_handle, .. }
-        | DaemonEvent::PendingTurnInputDrained { subagent_handle, .. }
-        | DaemonEvent::PendingTurnInputDiscarded { subagent_handle, .. }
-        | DaemonEvent::TurnCancelled { subagent_handle, .. }
-        | DaemonEvent::ModelError { subagent_handle, .. }
-        | DaemonEvent::StreamDiscontinuity { subagent_handle, .. }
-        | DaemonEvent::ToolCall { subagent_handle, .. }
-        | DaemonEvent::ToolResult { subagent_handle, .. }
-        | DaemonEvent::JobPromoted { subagent_handle, .. }
-        | DaemonEvent::JobCompleted { subagent_handle, .. }
-        | DaemonEvent::JobExpiring { subagent_handle, .. }
-        | DaemonEvent::JobCancelled { subagent_handle, .. }
-        | DaemonEvent::JobUpdated { subagent_handle, .. }
-        | DaemonEvent::SessionRewound { subagent_handle, .. }
+        DaemonEvent::Heartbeat {
+            subagent_handle, ..
+        }
+        | DaemonEvent::ContentBlockStart {
+            subagent_handle, ..
+        }
+        | DaemonEvent::ContentBlockDelta {
+            subagent_handle, ..
+        }
+        | DaemonEvent::ContentBlockStop {
+            subagent_handle, ..
+        }
+        | DaemonEvent::MessageStart {
+            subagent_handle, ..
+        }
+        | DaemonEvent::MessageComplete {
+            subagent_handle, ..
+        }
+        | DaemonEvent::PendingTurnInputQueued {
+            subagent_handle, ..
+        }
+        | DaemonEvent::PendingTurnInputDequeued {
+            subagent_handle, ..
+        }
+        | DaemonEvent::PendingTurnInputDrained {
+            subagent_handle, ..
+        }
+        | DaemonEvent::PendingTurnInputDiscarded {
+            subagent_handle, ..
+        }
+        | DaemonEvent::TurnCancelled {
+            subagent_handle, ..
+        }
+        | DaemonEvent::ModelError {
+            subagent_handle, ..
+        }
+        | DaemonEvent::StreamDiscontinuity {
+            subagent_handle, ..
+        }
+        | DaemonEvent::ToolCall {
+            subagent_handle, ..
+        }
+        | DaemonEvent::ToolResult {
+            subagent_handle, ..
+        }
+        | DaemonEvent::JobPromoted {
+            subagent_handle, ..
+        }
+        | DaemonEvent::JobCompleted {
+            subagent_handle, ..
+        }
+        | DaemonEvent::JobExpiring {
+            subagent_handle, ..
+        }
+        | DaemonEvent::JobCancelled {
+            subagent_handle, ..
+        }
+        | DaemonEvent::JobUpdated {
+            subagent_handle, ..
+        }
+        | DaemonEvent::SessionRewound {
+            subagent_handle, ..
+        }
         | DaemonEvent::SessionStateChanged {
             source_subagent_handle: subagent_handle,
             ..
         }
-        | DaemonEvent::SessionTitleChanged { subagent_handle, .. }
-        | DaemonEvent::FacetSwitch { subagent_handle, .. }
-        | DaemonEvent::ContextCleared { subagent_handle, .. }
-        | DaemonEvent::ModelSwitch { subagent_handle, .. }
-        | DaemonEvent::PermissionMonitorSwitch { subagent_handle, .. }
-        | DaemonEvent::Interrogative { subagent_handle, .. }
-        | DaemonEvent::AskUserQuestion { subagent_handle, .. }
-        | DaemonEvent::HookFired { subagent_handle, .. }
-        | DaemonEvent::ContextLoaded { subagent_handle, .. }
-        | DaemonEvent::CompactionStarted { subagent_handle, .. }
-        | DaemonEvent::CompactionComplete { subagent_handle, .. }
-        | DaemonEvent::CompactionCancelled { subagent_handle, .. }
-        | DaemonEvent::CompactionFailed { subagent_handle, .. }
-        | DaemonEvent::SubagentCompactionNotice { subagent_handle, .. }
-        | DaemonEvent::NotificationQueued { subagent_handle, .. }
-        | DaemonEvent::NotificationsDrained { subagent_handle, .. }
-        | DaemonEvent::SystemReminder { subagent_handle, .. }
-        | DaemonEvent::ToolReveal { subagent_handle, .. }
-        | DaemonEvent::ToolExposureChanged { subagent_handle, .. }
-        | DaemonEvent::GoalDriverUpdate { subagent_handle, .. }
-        | DaemonEvent::ClassifierDecision { subagent_handle, .. }
-        | DaemonEvent::ExtensionRegistered { subagent_handle, .. }
-        | DaemonEvent::ImageReferenceResolved { subagent_handle, .. }
-        | DaemonEvent::UsageThrottle { subagent_handle, .. }
-        | DaemonEvent::RetryWait { subagent_handle, .. }
-        | DaemonEvent::AgentBlockViolation { subagent_handle, .. } => {
-            subagent_handle.as_deref()
+        | DaemonEvent::SessionTitleChanged {
+            subagent_handle, ..
         }
+        | DaemonEvent::FacetSwitch {
+            subagent_handle, ..
+        }
+        | DaemonEvent::ContextCleared {
+            subagent_handle, ..
+        }
+        | DaemonEvent::ModelSwitch {
+            subagent_handle, ..
+        }
+        | DaemonEvent::PermissionMonitorSwitch {
+            subagent_handle, ..
+        }
+        | DaemonEvent::Interrogative {
+            subagent_handle, ..
+        }
+        | DaemonEvent::AskUserQuestion {
+            subagent_handle, ..
+        }
+        | DaemonEvent::HookFired {
+            subagent_handle, ..
+        }
+        | DaemonEvent::ContextLoaded {
+            subagent_handle, ..
+        }
+        | DaemonEvent::CompactionStarted {
+            subagent_handle, ..
+        }
+        | DaemonEvent::CompactionComplete {
+            subagent_handle, ..
+        }
+        | DaemonEvent::CompactionCancelled {
+            subagent_handle, ..
+        }
+        | DaemonEvent::CompactionFailed {
+            subagent_handle, ..
+        }
+        | DaemonEvent::SubagentCompactionNotice {
+            subagent_handle, ..
+        }
+        | DaemonEvent::NotificationQueued {
+            subagent_handle, ..
+        }
+        | DaemonEvent::NotificationsDrained {
+            subagent_handle, ..
+        }
+        | DaemonEvent::SystemReminder {
+            subagent_handle, ..
+        }
+        | DaemonEvent::ToolReveal {
+            subagent_handle, ..
+        }
+        | DaemonEvent::ToolExposureChanged {
+            subagent_handle, ..
+        }
+        | DaemonEvent::GoalDriverUpdate {
+            subagent_handle, ..
+        }
+        | DaemonEvent::ClassifierDecision {
+            subagent_handle, ..
+        }
+        | DaemonEvent::ExtensionRegistered {
+            subagent_handle, ..
+        }
+        | DaemonEvent::ImageReferenceResolved {
+            subagent_handle, ..
+        }
+        | DaemonEvent::UsageThrottle {
+            subagent_handle, ..
+        }
+        | DaemonEvent::RetryWait {
+            subagent_handle, ..
+        }
+        | DaemonEvent::AgentBlockViolation {
+            subagent_handle, ..
+        } => subagent_handle.as_deref(),
         // Variants that DON'T carry subagent_handle — always pass the filter.
         DaemonEvent::NotificationAutodrainSwitch { .. }
         | DaemonEvent::SubagentStarted { .. }
@@ -1113,7 +1207,11 @@ fn block_kind_from_content(kind: &ContentBlockKind) -> BlockKind {
 /// an accumulator that tracks streaming block state. The driver calls this for
 /// each SSE event, emits the returned `events`, then executes the returned
 /// `effects` (HTTP calls).
-pub fn map_daemon_event(ev: &DaemonEvent, acc: &mut FoldAccumulator, ctx: &dyn MapCtx) -> FoldResult {
+pub fn map_daemon_event(
+    ev: &DaemonEvent,
+    acc: &mut FoldAccumulator,
+    ctx: &dyn MapCtx,
+) -> FoldResult {
     // Subagent routing: skip frames from nested subagent turns.
     if subagent_handle(ev).is_some() {
         return FoldResult::default();
@@ -1123,7 +1221,6 @@ pub fn map_daemon_event(ev: &DaemonEvent, acc: &mut FoldAccumulator, ctx: &dyn M
 
     match ev {
         // ===== Turn boundaries =====
-
         DaemonEvent::MessageStart { .. } => {
             // A turn began — the turn-start signal (like the original driver's agent_start). Also clears
             // any transient error state: if the daemon retries after a model_error, this
@@ -1184,7 +1281,6 @@ pub fn map_daemon_event(ev: &DaemonEvent, acc: &mut FoldAccumulator, ctx: &dyn M
         }
 
         // ===== Content block streaming (the accumulator) =====
-
         DaemonEvent::ContentBlockStart { block_type, .. } => {
             // Set the current block kind so deltas know which channel to route to.
             acc.block_kind = Some(block_kind_from_content(block_type));
@@ -1275,7 +1371,6 @@ pub fn map_daemon_event(ev: &DaemonEvent, acc: &mut FoldAccumulator, ctx: &dyn M
         }
 
         // ===== Tool plumbing =====
-
         DaemonEvent::ToolCall {
             input,
             name,
@@ -1337,7 +1432,6 @@ pub fn map_daemon_event(ev: &DaemonEvent, acc: &mut FoldAccumulator, ctx: &dyn M
         }
 
         // ===== Queue (steering / follow-up) =====
-
         DaemonEvent::PendingTurnInputQueued { .. }
         | DaemonEvent::PendingTurnInputDequeued { .. }
         | DaemonEvent::PendingTurnInputDiscarded { .. } => {
@@ -1347,9 +1441,7 @@ pub fn map_daemon_event(ev: &DaemonEvent, acc: &mut FoldAccumulator, ctx: &dyn M
         }
 
         DaemonEvent::PendingTurnInputDrained {
-            content,
-            item_ids,
-            ..
+            content, item_ids, ..
         } => {
             // A queued message is being delivered (admitted into the active turn).
             // Emit queuedMessageStarted (with the content). The spike (§3) only observed
@@ -1377,7 +1469,6 @@ pub fn map_daemon_event(ev: &DaemonEvent, acc: &mut FoldAccumulator, ctx: &dyn M
         }
 
         // ===== Errors + retries =====
-
         DaemonEvent::ModelError { error, .. } => {
             // A provider error occurred. Don't fail the run yet — the daemon may retry
             // (retry_wait → message_start clears the error). Defer the failure decision
@@ -1426,7 +1517,6 @@ pub fn map_daemon_event(ev: &DaemonEvent, acc: &mut FoldAccumulator, ctx: &dyn M
         }
 
         // ===== Session metadata =====
-
         DaemonEvent::SessionTitleChanged { title, .. } => {
             // The event carries the title + source (operator|inferred). Build a snapshot
             // at the live status (a rename can land mid-turn; don't force idle).
@@ -1543,7 +1633,6 @@ pub fn map_daemon_event(ev: &DaemonEvent, acc: &mut FoldAccumulator, ctx: &dyn M
         }
 
         // ===== Compaction =====
-
         DaemonEvent::CompactionStarted { .. } => {
             let ts = base.timestamp.clone();
             fold_result(
@@ -1614,21 +1703,17 @@ pub fn map_daemon_event(ev: &DaemonEvent, acc: &mut FoldAccumulator, ctx: &dyn M
         }
 
         // ===== Notifications =====
-
-        DaemonEvent::NotificationQueued { notification, .. } => {
-            fold_result(
-                vec![notify(
-                    base,
-                    format!("notif-{}", notification.id),
-                    notification.summary.clone(),
-                    NotifyLevel::Info,
-                )],
-                vec![],
-            )
-        }
+        DaemonEvent::NotificationQueued { notification, .. } => fold_result(
+            vec![notify(
+                base,
+                format!("notif-{}", notification.id),
+                notification.summary.clone(),
+                NotifyLevel::Info,
+            )],
+            vec![],
+        ),
 
         // ===== System reminders =====
-
         DaemonEvent::SystemReminder {
             reason, slug, body, ..
         } => {
@@ -1663,7 +1748,6 @@ pub fn map_daemon_event(ev: &DaemonEvent, acc: &mut FoldAccumulator, ctx: &dyn M
         // effect so the driver can build the reverse response. The third is an
         // ambient mode-change notify (the mode SWITCHER UI itself is a later concern;
         // the approval CARDS surface via interrogative{type:"permission"}).
-
         DaemonEvent::Interrogative {
             interrogative_id,
             interrogative_type,
@@ -1705,11 +1789,8 @@ pub fn map_daemon_event(ev: &DaemonEvent, acc: &mut FoldAccumulator, ctx: &dyn M
             // A separate DaemonEvent (not an interrogative_type), but responds via the
             // same /interrogative/{id}/respond endpoint with kind:"ask_user_question_answers".
             // Maps to pilot's qna card (purpose-built multi-question form).
-            let mapping = build_ask_user_question_mapping(
-                interrogative_id,
-                &payload.questions,
-                base,
-            );
+            let mapping =
+                build_ask_user_question_mapping(interrogative_id, &payload.questions, base);
             fold_result(
                 vec![mapping.event],
                 vec![DaemonEffect::RegisterInterrogative {
@@ -1774,7 +1855,6 @@ pub fn map_daemon_event(ev: &DaemonEvent, acc: &mut FoldAccumulator, ctx: &dyn M
         //
         // These are ambient metadata, new concepts not yet surfaced, or host-UI
         // concerns. Each returns empty.
-
         DaemonEvent::NotificationAutodrainSwitch { enabled, .. } => {
             // The autodrain flag changed — daemon-side or echoing a user-initiated
             // POST. Update the cached flag + emit a sessionUpdated snapshot.
@@ -1809,7 +1889,6 @@ pub fn map_daemon_event(ev: &DaemonEvent, acc: &mut FoldAccumulator, ctx: &dyn M
         | DaemonEvent::UsageThrottle { .. } => FoldResult::default(),
 
         // ===== MCP server lifecycle =====
-
         DaemonEvent::McpServerConnected { server_name, .. } => {
             let ts = base.timestamp.clone();
             fold_result(
@@ -1824,7 +1903,9 @@ pub fn map_daemon_event(ev: &DaemonEvent, acc: &mut FoldAccumulator, ctx: &dyn M
         }
 
         DaemonEvent::McpServerDisconnected {
-            server_name, reason, ..
+            server_name,
+            reason,
+            ..
         } => {
             let ts = base.timestamp.clone();
             fold_result(
@@ -1839,7 +1920,9 @@ pub fn map_daemon_event(ev: &DaemonEvent, acc: &mut FoldAccumulator, ctx: &dyn M
         }
 
         DaemonEvent::McpServerReconnecting {
-            server_name, attempt, ..
+            server_name,
+            attempt,
+            ..
         } => {
             let ts = base.timestamp.clone();
             fold_result(
@@ -1857,7 +1940,9 @@ pub fn map_daemon_event(ev: &DaemonEvent, acc: &mut FoldAccumulator, ctx: &dyn M
         }
 
         DaemonEvent::McpServerDisabled {
-            server_name, reason, ..
+            server_name,
+            reason,
+            ..
         } => {
             let ts = base.timestamp.clone();
             fold_result(
@@ -1869,13 +1954,11 @@ pub fn map_daemon_event(ev: &DaemonEvent, acc: &mut FoldAccumulator, ctx: &dyn M
                 )],
                 vec![],
             )
-        }
-
-        // NOTE: The TS has a `default` arm that emits a runtime warn for unknown
-        // variants (a newer daemon sent a type the codegen hasn't caught). Rust's
-        // exhaustive match makes this a compile error instead — if a new DaemonEvent
-        // variant is added to the generated schema, this match won't compile until
-        // it's handled. That's the desired behavior (the codegen regen is the
-        // catching mechanism, not a runtime warn).
+        } // NOTE: The TS has a `default` arm that emits a runtime warn for unknown
+          // variants (a newer daemon sent a type the codegen hasn't caught). Rust's
+          // exhaustive match makes this a compile error instead — if a new DaemonEvent
+          // variant is added to the generated schema, this match won't compile until
+          // it's handled. That's the desired behavior (the codegen regen is the
+          // catching mechanism, not a runtime warn).
     }
 }

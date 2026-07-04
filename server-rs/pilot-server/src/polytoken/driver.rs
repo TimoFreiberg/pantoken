@@ -4,13 +4,6 @@
 //!
 //! Port of `server/src/polytoken/polytoken-driver.ts` (1953 LOC).
 //!
-//! NOTE: Work-in-progress. The warm session pool and key PilotDriver methods
-//! are ported. The SSE event loop wiring and some effect dispatch paths are
-//! simplified. `#![allow(dead_code)]` suppresses unused warnings until the
-//! full event-loop integration lands.
-
-#![allow(dead_code)]
-#![allow(unused_variables)]
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -19,10 +12,9 @@ use std::sync::Arc;
 use parking_lot::{Mutex, RwLock};
 use pilot_daemon_types::*;
 use pilot_protocol::session_driver::{
-    CommandInfo, DirListing, FileInfo, HostUiResponse, ImageContent,
-    ModelDefaults, ModelOption, PathStat, PermissionMonitorMode, SessionConfig,
-    SessionDriverEvent, SessionId, SessionListEntry, SessionRef, SessionSnapshot,
-    SessionStatus, WorkspaceId, WorkspaceRef,
+    CommandInfo, DirListing, FileInfo, HostUiResponse, ImageContent, ModelDefaults, ModelOption,
+    PathStat, PermissionMonitorMode, SessionDriverEvent, SessionId, SessionListEntry, SessionRef,
+    SessionSnapshot, SessionStatus, WorkspaceId, WorkspaceRef,
 };
 use pilot_protocol::wire::{DeliveryMode, McpAction};
 use tokio::sync::mpsc;
@@ -30,13 +22,9 @@ use tracing::{error, warn};
 
 use async_trait::async_trait;
 
-use crate::driver::{
-    BranchResult, ClearQueueResult, NewSessionOptsData, PilotDriver,
-};
+use crate::driver::{BranchResult, ClearQueueResult, NewSessionOptsData, PilotDriver};
 use crate::polytoken::daemon_client::{DaemonClient, SpawnDaemonOpts, SseSubscription};
-use crate::polytoken::event_map::{
-    self, DaemonEffect, FoldAccumulator, FoldResult, MapCtx,
-};
+use crate::polytoken::event_map::{self, DaemonEffect, FoldAccumulator, FoldResult, MapCtx};
 use crate::polytoken::history_seed::{self, HistoryMapCtx};
 use crate::polytoken::models::parse_models;
 use crate::polytoken::sessions_registry;
@@ -53,11 +41,19 @@ struct WarmSession {
     sse_subscription: Mutex<Option<SseSubscription>>,
     monitor_mode: Mutex<Option<PermissionMonitorMode>>,
     autodrain_enabled: Mutex<Option<bool>>,
+    #[expect(
+        dead_code,
+        reason = "BUG: spawned daemon child is not retained/enforced until warm session lifecycle is fixed in Phase 2"
+    )]
     owned_process: Mutex<Option<tokio::process::Child>>,
 }
 
 impl WarmSession {
     /// Check if the daemon is healthy.
+    #[expect(
+        dead_code,
+        reason = "warm-session health checks are unused until warm_cap/lifecycle enforcement is wired in Phase 2"
+    )]
     async fn is_healthy(&self) -> bool {
         let res = self.client.health().await;
         res.status == 200
@@ -153,6 +149,10 @@ impl PolytokenDriver {
     }
 
     /// Warm up a session by spawning/resuming the daemon and subscribing to SSE.
+    #[expect(
+        dead_code,
+        reason = "BUG: live sessions bypass warm_session today; warm_cap/lifecycle/SSE wiring lands in Phase 2"
+    )]
     async fn warm_session(
         self: &Arc<Self>,
         session_id: SessionId,
@@ -180,21 +180,22 @@ impl PolytokenDriver {
             crate::polytoken::daemon_client::spawn_daemon(&self.bin_path, opts).await?;
 
         let port = spawned.port;
-        let client = Arc::new(DaemonClient::new(session_id.clone(), port, std::process::id() as i32));
+        let client = Arc::new(DaemonClient::new(
+            session_id.clone(),
+            port,
+            std::process::id() as i32,
+        ));
 
         // Wait for health (poll up to 10s)
-        let healthy = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            async {
-                loop {
-                    let res = client.health().await;
-                    if res.status == 200 {
-                        return true;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let healthy = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let res = client.health().await;
+                if res.status == 200 {
+                    return true;
                 }
-            },
-        )
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        })
         .await
         .unwrap_or(false);
 
@@ -279,6 +280,10 @@ impl PolytokenDriver {
     /// Execute a daemon effect.
     async fn execute_effect(self: &Arc<Self>, ws: &Arc<WarmSession>, effect: DaemonEffect) {
         match effect {
+            #[expect(
+                unused_variables,
+                reason = "BUG: FetchState emit/prompt_id ignored; post-fetch event emission is Phase 2"
+            )]
             DaemonEffect::FetchState { emit, prompt_id } => {
                 let res = ws.client.state().await;
                 if let Some(state) = res.data {
@@ -290,7 +295,9 @@ impl PolytokenDriver {
                 if let Some(history) = res.data {
                     let seed = history_seed::history_to_seed_events(
                         &history.items,
-                        &HistoryMapCtx { r#ref: ws.session_ref.clone() },
+                        &HistoryMapCtx {
+                            r#ref: ws.session_ref.clone(),
+                        },
                     );
                     for ev in &seed {
                         self.emit(ev.clone());
@@ -298,8 +305,8 @@ impl PolytokenDriver {
                 }
             }
             DaemonEffect::RefetchQueue => {
-                let res = ws.client.turn_input_snapshot().await;
-                // TODO: map snapshot to queueUpdated event
+                let _res = ws.client.turn_input_snapshot().await;
+                // TODO: map snapshot to queueUpdated event (Phase 2)
             }
             DaemonEffect::SetMonitorMode { mode } => {
                 *ws.monitor_mode.lock() = Some(mode);
@@ -339,6 +346,10 @@ impl PilotDriver for PolytokenDriver {
         self.subscribers.lock().retain(|(sid, _)| *sid != id);
     }
 
+    #[expect(
+        unused_variables,
+        reason = "BUG: deliver_as/images/prompt_id ignored; prompt routing parity is Phase 2"
+    )]
     async fn prompt(
         &self,
         text: String,
@@ -384,10 +395,18 @@ impl PilotDriver for PolytokenDriver {
         if let Some(ws) = self.get_warm(&sid) {
             // Extract request_id from the HostUiResponse
             let request_id = match &response {
-                pilot_protocol::session_driver::HostUiResponse::Value { request_id, .. } => request_id,
-                pilot_protocol::session_driver::HostUiResponse::Confirmed { request_id, .. } => request_id,
-                pilot_protocol::session_driver::HostUiResponse::Answers { request_id, .. } => request_id,
-                pilot_protocol::session_driver::HostUiResponse::Cancelled { request_id, .. } => request_id,
+                pilot_protocol::session_driver::HostUiResponse::Value { request_id, .. } => {
+                    request_id
+                }
+                pilot_protocol::session_driver::HostUiResponse::Confirmed {
+                    request_id, ..
+                } => request_id,
+                pilot_protocol::session_driver::HostUiResponse::Answers { request_id, .. } => {
+                    request_id
+                }
+                pilot_protocol::session_driver::HostUiResponse::Cancelled {
+                    request_id, ..
+                } => request_id,
             };
             let pending = ws.pending_interrogatives.lock().get(request_id).cloned();
             if let Some(pending) = pending {
@@ -406,8 +425,20 @@ impl PilotDriver for PolytokenDriver {
         sessions_registry::list_cold_sessions(
             &self.sessions_dir,
             sessions_registry::ListColdSessionsOpts {
-                archived_for: Box::new(|_| false),
-                worktree_for: Some(Box::new(|_| None)),
+                archived_for: Box::new(
+                    #[expect(
+                        unused_variables,
+                        reason = "BUG: archive store unported; list_sessions hardcodes archived=false until Phase 2"
+                    )]
+                    |session_id| false,
+                ),
+                worktree_for: Some(Box::new(
+                    #[expect(
+                        unused_variables,
+                        reason = "BUG: worktree store unported; list_sessions hardcodes worktree=None until Phase 2"
+                    )]
+                    |session_id| None,
+                )),
             },
         )
     }
@@ -422,13 +453,29 @@ impl PilotDriver for PolytokenDriver {
             workspace_id: WorkspaceId::default(),
             session_id: session_id.clone(),
         };
-        let workspace = WorkspaceRef {
-            workspace_id: WorkspaceId::default(),
-            path: std::env::var("HOME").unwrap_or_default(),
-            display_name: None,
+        #[expect(
+            unused_variables,
+            reason = "BUG: open_session workspace still fabricated from HOME until session-registry/worktree path is ported in Phase 2"
+        )]
+        let workspace = {
+            #[expect(
+                unused_variables,
+                reason = "BUG: open_session ignores session registry/worktree workspace path and fabricates HOME until Phase 2"
+            )]
+            let ignored_registry_workspace_path = ();
+            let fabricated_home = std::env::var("HOME").unwrap_or_default();
+            WorkspaceRef {
+                workspace_id: WorkspaceId::default(),
+                path: fabricated_home,
+                display_name: None,
+            }
         };
 
         // Try to warm the session
+        #[expect(
+            unused_variables,
+            reason = "BUG: spawned daemon child is not retained/enforced until warm-session lifecycle is ported in Phase 2"
+        )]
         let self_arc = Arc::new(PolytokenDriver::new(
             self.sessions_dir.clone(),
             self.bin_path.clone(),
@@ -445,12 +492,17 @@ impl PilotDriver for PolytokenDriver {
             if let Ok(raw) = std::fs::read_to_string(&startup_path) {
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) {
                     json.get("port").and_then(|v| v.as_u64()).map(|p| p as u16)
-                } else { None }
-            } else { None }
-        } else { None };
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         if let Some(port) = port {
-            let base_url = format!("http://127.0.0.1:{port}");
             let client = DaemonClient::new(session_id.clone(), port, std::process::id() as i32);
             let history_res = client.history(None, None).await;
             if let Some(history) = history_res.data {
@@ -483,9 +535,15 @@ impl PilotDriver for PolytokenDriver {
     }
 
     async fn new_session(&self, opts: NewSessionOptsData) -> Vec<SessionDriverEvent> {
-        let cwd = opts.cwd.clone().unwrap_or_else(|| {
-            std::env::var("HOME").unwrap_or_default()
-        });
+        #[expect(
+            unused_variables,
+            reason = "BUG: opts.worktree ignored; worktree module unported until Phase 2"
+        )]
+        let ignored_worktree = &opts.worktree;
+        let cwd = opts
+            .cwd
+            .clone()
+            .unwrap_or_else(|| std::env::var("HOME").unwrap_or_default());
 
         // Spawn a new daemon
         let spawn_opts = SpawnDaemonOpts {
@@ -493,28 +551,37 @@ impl PilotDriver for PolytokenDriver {
             session_id: None,
             sessions_dir: None,
             global_config_dir: None,
-            login_env: None,
+            login_env: {
+                #[expect(
+                    unused_variables,
+                    reason = "BUG: login_env forced None; login-env module unported until Phase 2"
+                )]
+                let ignored_login_env = ();
+                None
+            },
         };
 
         match crate::polytoken::daemon_client::spawn_daemon(&self.bin_path, spawn_opts).await {
-            Ok((spawned, child)) => {
+            Ok((spawned, _child)) => {
                 let session_id = spawned.session_id;
                 let port = spawned.port;
-                let base_url = format!("http://127.0.0.1:{port}");
-                let client = Arc::new(DaemonClient::new(session_id.clone(), port, std::process::id() as i32));
+                let client = Arc::new(DaemonClient::new(
+                    session_id.clone(),
+                    port,
+                    std::process::id() as i32,
+                ));
 
                 // Wait for health
-                let healthy = tokio::time::timeout(
-                    std::time::Duration::from_secs(10),
-                    async {
-                        loop {
-                            if client.health().await.status == 200 {
-                                return true;
-                            }
-                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                let healthy = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                    loop {
+                        if client.health().await.status == 200 {
+                            return true;
                         }
-                    },
-                ).await.unwrap_or(false);
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    }
+                })
+                .await
+                .unwrap_or(false);
 
                 if !healthy {
                     error!("new_session: daemon health probe timed out");
@@ -534,14 +601,18 @@ impl PilotDriver for PolytokenDriver {
                 }
                 if let Some(mode) = opts.permission_monitor {
                     let daemon_mode = match mode {
-                        pilot_protocol::session_driver::PermissionMonitorMode::Standard =>
-                            pilot_daemon_types::PermissionMonitorMode::Standard,
-                        pilot_protocol::session_driver::PermissionMonitorMode::Bypass =>
-                            pilot_daemon_types::PermissionMonitorMode::Bypass,
-                        pilot_protocol::session_driver::PermissionMonitorMode::BypassPlus =>
-                            pilot_daemon_types::PermissionMonitorMode::BypassPlus,
-                        pilot_protocol::session_driver::PermissionMonitorMode::Autonomous =>
-                            pilot_daemon_types::PermissionMonitorMode::Autonomous,
+                        pilot_protocol::session_driver::PermissionMonitorMode::Standard => {
+                            pilot_daemon_types::PermissionMonitorMode::Standard
+                        }
+                        pilot_protocol::session_driver::PermissionMonitorMode::Bypass => {
+                            pilot_daemon_types::PermissionMonitorMode::Bypass
+                        }
+                        pilot_protocol::session_driver::PermissionMonitorMode::BypassPlus => {
+                            pilot_daemon_types::PermissionMonitorMode::BypassPlus
+                        }
+                        pilot_protocol::session_driver::PermissionMonitorMode::Autonomous => {
+                            pilot_daemon_types::PermissionMonitorMode::Autonomous
+                        }
                     };
                     let _ = client.set_permission_mode(daemon_mode).await;
                 }
@@ -552,7 +623,7 @@ impl PilotDriver for PolytokenDriver {
                     workspace_id: WorkspaceId::default(),
                     session_id: session_id.clone(),
                 };
-                let workspace = WorkspaceRef {
+                let _workspace = WorkspaceRef {
                     workspace_id: WorkspaceId::default(),
                     path: cwd,
                     display_name: None,
@@ -573,6 +644,10 @@ impl PilotDriver for PolytokenDriver {
         }
     }
 
+    #[expect(
+        unused_variables,
+        reason = "BUG: branch summarize option ignored; branch parity is Phase 2"
+    )]
     async fn branch_from(
         &self,
         entry_id: String,
@@ -595,7 +670,9 @@ impl PilotDriver for PolytokenDriver {
                     return BranchResult {
                         seed: history_seed::history_to_seed_events(
                             &history.items,
-                            &HistoryMapCtx { r#ref: ws.session_ref.clone() },
+                            &HistoryMapCtx {
+                                r#ref: ws.session_ref.clone(),
+                            },
                         ),
                         editor_text: None,
                         cancelled: false,
@@ -634,9 +711,10 @@ impl PilotDriver for PolytokenDriver {
                 let stdout = String::from_utf8_lossy(&out.stdout).to_string();
                 let parsed = parse_models(&stdout);
                 ModelDefaults {
-                    provider: parsed.default_model.as_ref().and_then(|m| {
-                        m.split('/').next().map(|s| s.to_string())
-                    }),
+                    provider: parsed
+                        .default_model
+                        .as_ref()
+                        .and_then(|m| m.split('/').next().map(|s| s.to_string())),
                     model_id: parsed.default_model.clone(),
                     thinking_level: None,
                     favorites: Vec::new(),
@@ -646,6 +724,10 @@ impl PilotDriver for PolytokenDriver {
         }
     }
 
+    #[expect(
+        unused_variables,
+        reason = "BUG: session-scoped command discovery ignored; live command parity is Phase 2"
+    )]
     async fn list_commands(&self, session_id: Option<SessionId>) -> Vec<CommandInfo> {
         let cache_key = std::env::var("HOME").unwrap_or_default();
         if let Some(cached) = self.command_cache.lock().get(&cache_key) {
@@ -659,7 +741,9 @@ impl PilotDriver for PolytokenDriver {
             Ok(out) => {
                 let stdout = String::from_utf8_lossy(&out.stdout).to_string();
                 let commands = crate::polytoken::commands::parse_slash_commands(&stdout);
-                self.command_cache.lock().insert(cache_key, commands.clone());
+                self.command_cache
+                    .lock()
+                    .insert(cache_key, commands.clone());
                 commands
             }
             Err(e) => {
@@ -669,6 +753,10 @@ impl PilotDriver for PolytokenDriver {
         }
     }
 
+    #[expect(
+        unused_variables,
+        reason = "BUG: session-scoped facet discovery ignored; live facet parity is Phase 2"
+    )]
     async fn list_facets(&self, session_id: Option<SessionId>) -> Vec<String> {
         let output = tokio::process::Command::new(&self.bin_path)
             .args(["vfs", "ls", "polytoken://facets"])
@@ -706,6 +794,10 @@ impl PilotDriver for PolytokenDriver {
         (Vec::new(), false)
     }
 
+    #[expect(
+        unused_variables,
+        reason = "BUG: session_id ignored for live file lookup; file index parity is Phase 2"
+    )]
     async fn list_files(
         &self,
         query: String,
@@ -809,14 +901,18 @@ impl PilotDriver for PolytokenDriver {
             if let Some(ws) = self.get_warm(sid) {
                 let ws = ws.clone();
                 let daemon_mode = match mode {
-                    PermissionMonitorMode::Standard =>
-                        pilot_daemon_types::PermissionMonitorMode::Standard,
-                    PermissionMonitorMode::Bypass =>
-                        pilot_daemon_types::PermissionMonitorMode::Bypass,
-                    PermissionMonitorMode::BypassPlus =>
-                        pilot_daemon_types::PermissionMonitorMode::BypassPlus,
-                    PermissionMonitorMode::Autonomous =>
-                        pilot_daemon_types::PermissionMonitorMode::Autonomous,
+                    PermissionMonitorMode::Standard => {
+                        pilot_daemon_types::PermissionMonitorMode::Standard
+                    }
+                    PermissionMonitorMode::Bypass => {
+                        pilot_daemon_types::PermissionMonitorMode::Bypass
+                    }
+                    PermissionMonitorMode::BypassPlus => {
+                        pilot_daemon_types::PermissionMonitorMode::BypassPlus
+                    }
+                    PermissionMonitorMode::Autonomous => {
+                        pilot_daemon_types::PermissionMonitorMode::Autonomous
+                    }
                 };
                 tokio::spawn(async move {
                     let _ = ws.client.set_permission_mode(daemon_mode).await;
@@ -857,16 +953,28 @@ impl PilotDriver for PolytokenDriver {
         }
     }
 
-    async fn set_mcp_server(&self, server_name: String, action: McpAction, session_id: Option<SessionId>) {
+    async fn set_mcp_server(
+        &self,
+        server_name: String,
+        action: McpAction,
+        session_id: Option<SessionId>,
+    ) {
         if let Some(sid) = &session_id {
             if let Some(ws) = self.get_warm(sid) {
                 let daemon_action = match action {
                     McpAction::Enable => crate::polytoken::daemon_client::McpServerAction::Enable,
                     McpAction::Disable => crate::polytoken::daemon_client::McpServerAction::Disable,
-                    McpAction::Disconnect => crate::polytoken::daemon_client::McpServerAction::Disconnect,
-                    McpAction::Reconnect => crate::polytoken::daemon_client::McpServerAction::Reconnect,
+                    McpAction::Disconnect => {
+                        crate::polytoken::daemon_client::McpServerAction::Disconnect
+                    }
+                    McpAction::Reconnect => {
+                        crate::polytoken::daemon_client::McpServerAction::Reconnect
+                    }
                 };
-                let _ = ws.client.mcp_server_action(&server_name, daemon_action).await;
+                let _ = ws
+                    .client
+                    .mcp_server_action(&server_name, daemon_action)
+                    .await;
             }
         }
     }

@@ -29,8 +29,6 @@
 //! fields defensively by key. Unknown variants (future daemon kinds) are skipped,
 //! never crashing the seed.
 
-#![allow(dead_code)]
-
 use pilot_daemon_types::SessionHistoryItem;
 use pilot_protocol::session_driver::{
     AssistantDeltaChannel, ImageContent, SessionConfig, SessionDriverEvent, SessionEventBase,
@@ -160,7 +158,10 @@ pub struct HistoryMapCtx {
 /// mapped to the same driver events the live path emits.
 ///
 /// Mirrors `historyToSeedEvents` in history-seed.ts.
-pub fn history_to_seed_events(items: &[SessionHistoryItem], ctx: &HistoryMapCtx) -> Vec<SessionDriverEvent> {
+pub fn history_to_seed_events(
+    items: &[SessionHistoryItem],
+    ctx: &HistoryMapCtx,
+) -> Vec<SessionDriverEvent> {
     if items.is_empty() {
         return Vec::new();
     }
@@ -266,7 +267,11 @@ pub fn history_to_seed_events(items: &[SessionHistoryItem], ctx: &HistoryMapCtx)
                             });
                         }
                         "tool_use" => {
-                            let id = b.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let id = b
+                                .get("id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
                             let name = b
                                 .get("name")
                                 .and_then(|v| v.as_str())
@@ -579,10 +584,7 @@ mod tests {
         assert_eq!(out.len(), 1);
         match &out[0] {
             SessionDriverEvent::UserMessage {
-                id,
-                text,
-                entry_id,
-                ..
+                id, text, entry_id, ..
             } => {
                 assert_eq!(id, "p1");
                 assert_eq!(text, "hello");
@@ -619,7 +621,12 @@ mod tests {
         let out = history_to_seed_events(&items, &ctx());
         assert_eq!(out.len(), 2);
         match &out[0] {
-            SessionDriverEvent::AssistantDelta { text, channel, entry_id, .. } => {
+            SessionDriverEvent::AssistantDelta {
+                text,
+                channel,
+                entry_id,
+                ..
+            } => {
                 assert_eq!(text, "thinking...");
                 assert_eq!(*channel.as_ref().unwrap(), AssistantDeltaChannel::Text);
                 assert_eq!(entry_id.as_deref(), Some("p1"));
@@ -627,7 +634,12 @@ mod tests {
             other => panic!("expected AssistantDelta, got {:?}", other),
         }
         match &out[1] {
-            SessionDriverEvent::ToolStarted { call_id, tool_name, input, .. } => {
+            SessionDriverEvent::ToolStarted {
+                call_id,
+                tool_name,
+                input,
+                ..
+            } => {
                 assert_eq!(call_id, "call_1");
                 assert_eq!(tool_name, "Bash");
                 assert_eq!(input.as_ref().unwrap(), &json!({ "cmd": "ls" }));
@@ -664,7 +676,13 @@ mod tests {
         let out = history_to_seed_events(&items, &ctx());
         assert_eq!(out.len(), 1);
         match &out[0] {
-            SessionDriverEvent::ToolFinished { call_id, success, output, images, .. } => {
+            SessionDriverEvent::ToolFinished {
+                call_id,
+                success,
+                output,
+                images,
+                ..
+            } => {
                 assert_eq!(call_id, "c1");
                 assert!(*success);
                 assert_eq!(output.as_ref().unwrap(), &json!("ok"));
@@ -684,7 +702,12 @@ mod tests {
         })];
         let out = history_to_seed_events(&items, &ctx());
         match &out[0] {
-            SessionDriverEvent::ToolFinished { success, output, images, .. } => {
+            SessionDriverEvent::ToolFinished {
+                success,
+                output,
+                images,
+                ..
+            } => {
                 assert!(!*success);
                 assert_eq!(output.as_ref().unwrap(), &json!("alt"));
                 let imgs = images.as_ref().unwrap();
@@ -725,7 +748,12 @@ mod tests {
         })];
         let out = history_to_seed_events(&items, &ctx());
         match &out[0] {
-            SessionDriverEvent::CustomMessage { custom_type, text, display, .. } => {
+            SessionDriverEvent::CustomMessage {
+                custom_type,
+                text,
+                display,
+                ..
+            } => {
                 assert_eq!(*custom_type, "Plan review required");
                 assert_eq!(text, "review needed");
                 assert!(*display);
@@ -743,7 +771,11 @@ mod tests {
         })];
         let out = history_to_seed_events(&items, &ctx());
         match &out[0] {
-            SessionDriverEvent::CustomMessage { custom_type, display, .. } => {
+            SessionDriverEvent::CustomMessage {
+                custom_type,
+                display,
+                ..
+            } => {
                 assert_eq!(*custom_type, "reminder"); // slug defaults to "reminder"
                 assert!(!*display);
             }
@@ -804,7 +836,13 @@ mod tests {
         })];
         let out = history_to_seed_events(&items, &ctx());
         match &out[0] {
-            SessionDriverEvent::CustomMessage { id, custom_type, text, display, .. } => {
+            SessionDriverEvent::CustomMessage {
+                id,
+                custom_type,
+                text,
+                display,
+                ..
+            } => {
                 assert_eq!(id, "compaction-c9-0");
                 assert_eq!(*custom_type, "compaction");
                 assert_eq!(text, "compacted!");
@@ -838,7 +876,13 @@ mod tests {
         })];
         let out = history_to_seed_events(&items, &ctx());
         match &out[0] {
-            SessionDriverEvent::CustomMessage { id, custom_type, text, display, .. } => {
+            SessionDriverEvent::CustomMessage {
+                id,
+                custom_type,
+                text,
+                display,
+                ..
+            } => {
                 assert_eq!(id, "context-cleared-0");
                 assert_eq!(*custom_type, "context-cleared");
                 assert_eq!(text, "Context cleared");
@@ -857,7 +901,13 @@ mod tests {
         })];
         let out = history_to_seed_events(&items, &ctx());
         match &out[0] {
-            SessionDriverEvent::CustomMessage { id, custom_type, text, display, .. } => {
+            SessionDriverEvent::CustomMessage {
+                id,
+                custom_type,
+                text,
+                display,
+                ..
+            } => {
                 assert_eq!(id, "lifecycle-0");
                 assert_eq!(*custom_type, "lifecycle");
                 assert_eq!(text, "started");
@@ -869,7 +919,10 @@ mod tests {
 
     #[test]
     fn unknown_type_is_skipped() {
-        let items = vec![json!({ "type": "classifier_decision" }), json!({ "type": "state_update" })];
+        let items = vec![
+            json!({ "type": "classifier_decision" }),
+            json!({ "type": "state_update" }),
+        ];
         assert!(history_to_seed_events(&items, &ctx()).is_empty());
     }
 
