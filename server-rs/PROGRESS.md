@@ -3,7 +3,10 @@
 Last updated: 2026-07-04 (full review of the port; supersedes the previous
 progress report, which overstated verification. Plan revised same day after
 design discussion: fake-daemon e2e tier reinstated as Phase 2.5, hub
-completion queue made deliberate in Phase 1.)
+completion queue made deliberate in Phase 1. Later the same day: folded in
+daemon-owned items from the polytoken changelog (unstable.6) + live-daemon
+probe results, added the "Daemon-owned first" standing section, the Phase-2
+event-vocabulary gate, and the Phase-3 daemon-bump step.)
 
 Chunk A (mock fixture text/lifecycle parity) is complete and reviewer-approved
 (32/32 e2e specs pass, 1 flake confirmed), cutting failures 72 → 33 (~90%).
@@ -45,11 +48,19 @@ file-mention (1).
   *with* tests (36 vs TS's 38) and survived a parity review pass.
 - `journal.rs` (17 tests), `pidlock.rs` (18), `history_seed.rs` (21 vs TS 18),
   `settings_store`, `static_serve`, `config` — ported with tests.
+  (REVISIT `history_seed`: unstable.6 ships `emitted_at` on `/history` items —
+  the ported timestamp-fabrication behavior becomes deletable, see
+  "Daemon-owned first" below. Don't extend it; also remember the known TS bug
+  that only 3 of 12 history kinds are replayed.)
 - `pilot-daemon-types` codegen from `polytoken openapi` (161 types) — real
   pipeline, minus one landmine (see Passthrough below).
 - `daemon_client.rs` — 1:1 method-surface port of daemon-client.ts including
-  lease retry; compiles, looks careful. **Untested.**
+  lease retry; compiles, looks careful. **Untested.** (REVISIT before testing:
+  the ported silence-vs-dead `/health`-probe dance predates unstable.5's SSE
+  heartbeats — see "Daemon-owned first". Simplify first, then test.)
 - `event_map.rs` — structured port of the accumulator model. **Untested.**
+  (Behind the Phase-2 vocabulary gate — don't invest here until that call is
+  made.)
 - `hub.rs` — all 35 ClientMessage types have handlers. **Untested.**
 - `mock_driver.rs` — direct port of the TS MockDriver; all fixture scripts
   present; Chunk A byte-matches TS mock replies; e2e wiring via
@@ -140,7 +151,7 @@ validated" — it validates hub + protocol + mock.
 
 ## Resumption plan
 
-For the implementer: work the phases top-down; each gates the next. Two
+For the implementer: work the phases top-down; each gates the next. Three
 standing invariants while you work:
 
 1. **The Bun control must stay green.** `bun run test:e2e` (against the TS
@@ -148,10 +159,48 @@ standing invariants while you work:
    goes red, stop and fix that first.
 2. **jj discipline**: review with `jj diff --git`, commit per completed task,
    imperative subject ≤72 chars, only the files you touched.
+3. **Pin the daemon.** All parity work runs against one pinned polytoken
+   version (currently the installed 0.4.0-unstable.5). Upstream bumps are a
+   deliberate, separate step (Phase 3) — never a mid-phase side effect. On
+   every bump: re-run codegen, replay the golden corpus (Phase 2) as the
+   drift canary, and re-check the changelog against the plan.
 
 The cutover gate is **four legs**, not one: ported unit tests green, mock e2e
 green, fake-daemon e2e green (Phase 2.5), live smoke (Phase 3). Mock-e2e alone
 proves hub+protocol+client — it never touches the live driver stack.
+
+### Daemon-owned first — check the changelog (standing)
+
+Polytoken is moving underneath this plan (installed here: 0.4.0-unstable.5;
+**unstable.6 is already released**). Before porting, fixing, or testing any
+daemon-facing workaround, check <https://docs.polytoken.dev/changelog/> and
+diff a fresh `polytoken openapi` dump — prefer deleting a workaround the
+daemon now owns over porting it faithfully. Shortest path to a clean Rust
+server = the daemon owns everything it can. Known as of 2026-07-04:
+
+- **unstable.6: `/history` items now carry `emitted_at`** (upstream ask #1 —
+  shipped). The TS timestamp fabrication ("56y ago" rows) and its ported
+  twin in `history_seed.rs` become deletable on the bump. Don't extend
+  either in the meantime.
+- **unstable.6, BREAKING: `POST /prompt` auto-queues when a turn is in
+  flight** (supersedes upstream ask #6 / the prompt-or-queue TOCTOU). The
+  prompt-vs-queue routing on a cached `turn_in_flight` — in the TS driver
+  and its Rust port — is affected; verify the exact semantics on the bump.
+  Phase-1 queue work is hub/mock-level and unaffected, but do not harden
+  live-driver queue routing before the bump lands.
+- **unstable.5: the daemon SSE emits `heartbeat` events** (~10s cadence
+  observed on an idle session, 2026-07-04). The daemon-client's
+  silence-vs-dead `/health`-probe machinery — and its "SSE is push-only
+  with no heartbeats" comment — predate this. Simplify liveness to a
+  heartbeat timeout *before* porting `daemon-client.test.ts`; porting the
+  probe tests as-is would cement an obsolete design.
+- **Confirmed still daemon-gaps** (probed live on unstable.5, 2026-07-04):
+  SSE resume is a silent no-op — connecting with `Last-Event-ID: 100`
+  (~8,900 events behind) replays nothing. Reconnect recovery stays
+  reseed-on-`stream_discontinuity` until upstream implements resume
+  (ask #4, reframed in `docs/polytoken-upstream-feature-asks.md`). Also
+  observed: `GET /events` streams with **no TUI lease claimed** — read-only
+  observing may already exist (ask #12).
 
 ### Phase 0 — truth & guardrails (small, do first)
 
@@ -202,14 +251,30 @@ wants.
 
 ### Phase 2 — live-path validation, part 1: units + integration harness
 
+- [ ] **Gate — decide the event vocabulary before the two porting items
+      below.** A from-scratch design exercise (2026-07-04, blind-draft
+      comparison) found the daemon now owns most of what the pilot event
+      vocabulary was built for in the pi-driver era: `/state` carries
+      pending_interrogatives/turn_in_flight/title/todos, `/history` is
+      projected + revisioned (+ `emitted_at` in .6), and client types are
+      codegen-able from `polytoken event-schema`. If the protocol goes
+      daemon-native ("v3": hub journals/forwards raw daemon envelopes, the
+      accumulator moves client-side), then `event_map.rs` + `ui_bridge` are
+      never ported — their 129+38 TS tests keep running where the logic
+      lands (client TS). Porting those tests to Rust first would be the
+      longest path. Until the call is made, skip the two bullets below and
+      work everything else in this phase (it survives either outcome).
 - [ ] Port `event-map.test.ts` (129 cases; pure functions, mechanical,
       highest bug-yield per hour) and `ui-bridge.test.ts` (38).
+      **(Behind the gate above — do not start before the vocabulary call.)**
 - [ ] Fix the SSE ordering bug with the Phase-1 idiom: per-warm-session
       `mpsc` + one consumer task. Never per-event `tokio::spawn` — that's the
       current bug (two streaming deltas can fold out of order).
 - [ ] Implement `DaemonEffect::FetchState`'s emit path (`emit`/`prompt_id`
       are currently ignored) and `RefetchQueue` → `queueUpdated`; port the
-      TS tests that cover them.
+      TS tests that cover them. (Vocabulary-coupled — behind the gate above.
+      Note `RefetchQueue` also interacts with unstable.6's `/prompt`
+      auto-queue breaking change; see "Daemon-owned first".)
 - [ ] Build the **daemon-fixture corpus**: hand-translate the mock fixture
       scripts into real daemon wire sequences (`DaemonEvent`s over SSE plus
       the matching HTTP responses). Ground it with **golden recordings**:
@@ -217,14 +282,19 @@ wants.
       (streaming turn, tool call + approval, interrogative, abort) and commit
       them, so the corpus can't drift from what the daemon actually sends.
       This corpus is also the protocol-change canary for every polytoken
-      bump / codegen regen.
+      bump / codegen regen. (Survives the vocabulary gate either way — the
+      corpus speaks raw `DaemonEvent`s, which is exactly what a daemon-native
+      protocol would forward. Build it regardless of the gate's outcome.)
 - [ ] Integration tests: rebuild the fake daemon as a test axum router
       speaking the **real** wire protocol, driven by the corpus; bind an
       ephemeral port, point `PolytokenDriver` at it, assert emitted
       `SessionDriverEvent`s and the effect HTTP calls. This covers the
       composition MockDriver e2e can never see: SSE loop → accumulator →
       effects → HTTP back.
-- [ ] Port `daemon-client.test.ts` + `lease-retry.test.ts` (25). Introduce a
+- [ ] Port `daemon-client.test.ts` + `lease-retry.test.ts` (25) — but first
+      simplify liveness against unstable.5's SSE heartbeats ("Daemon-owned
+      first") so the ported tests pin the new design, not the probe dance.
+      Introduce a
       spawn seam equivalent to TS's `_setSpawnForTesting` — needed regardless
       of the fake daemon: spawn failure / process death can't be expressed on
       the wire (in fake mode nothing spawns). Lease conflicts and
@@ -257,6 +327,12 @@ fail-loud philosophy applied to tests — not noise to be waited away.
 
 ### Phase 3 — cutover mechanics
 
+- [ ] **Bump polytoken to current (≥0.4.0-unstable.6) as an explicit step**
+      before the live smoke: re-run codegen, replay the golden corpus
+      (drift canary), adopt `emitted_at` (delete timestamp fabrication in
+      history seeding, TS and Rust), and adapt prompt-vs-queue routing to
+      the `/prompt` auto-queue breaking change. The TS server needs the
+      same adaptation while it remains the escape hatch.
 - [ ] Live smoke as the final gate: drive a real daemon session through the
       GUI via the parity harness (new session, prompt, stream, approve a
       tool, switch model/facet, abort, archive); diff `/debug/state` against

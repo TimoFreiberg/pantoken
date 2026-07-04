@@ -1,3 +1,13 @@
+> **Standing rule: check <https://docs.polytoken.dev/changelog/> before
+> filing, verifying, or building a workaround for any ask.** The daemon
+> releases ahead of the installed binary (installed here: 0.4.0-unstable.5;
+> unstable.6 is out). Asks are getting shipped — e.g. unstable.6: "The
+> /history response now includes emitted_at timestamps on each item"
+> (ask #1 → SHIPPED) and a breaking "/prompt auto-queues submissions when
+> turn in progress" (supersedes ask #6). Re-verify against a fresh
+> `polytoken openapi` dump on every bump. Dated status: see "Changelog
+> check" at the bottom of this file.
+
 +-------+--------------------------------------+------------------------------------------------+----------------+
 | #     | Ask                                  | Why | Effort         |
 +-------+--------------------------------------+------------------------------------------------+----------------+
@@ -136,3 +146,30 @@ If you want to be extra sure: title a session, `/quit` its daemon, check
 unchanged in unstable.4 (no image field, `/events` param-less, `PendingTurnInputRequest`
 still `{content}`-only, still only `DELETE /turn/input/newest`). All stand as written.
 +-------+--------------------------------------+------------------------------------------------+----------------+
+
+---
+
+## Changelog check (2026-07-04, vs docs.polytoken.dev/changelog + live probes on unstable.5)
+
+- **#1 emitted_at — SHIPPED in 0.4.0-unstable.6** ("The /history response now
+  includes emitted_at timestamps on each item"). Adopt on the bump; delete the
+  timestamp fabrication in history seeding (TS `history-seed.ts` and the Rust
+  port) instead of maintaining it.
+- **#6 queue_if_busy — superseded by unstable.6's breaking change**: `/prompt`
+  now auto-queues submissions when a turn is in progress. On the bump, verify
+  the semantics are the atomic prompt-or-queue this ask wanted, and adapt the
+  drivers' prompt-vs-queue routing (it's flagged breaking upstream).
+- **#4 SSE resume — still missing, and now confirmed a silent no-op** (probed
+  live on unstable.5: connect with `Last-Event-ID: 100`, ~8,900 events behind
+  → zero replay, only the live tail). Reframe the ask from "document resume"
+  to "implement resume, or document that `/events` is tail-only". Related
+  correction: unstable.5 DOES emit `heartbeat` SSE events (~10s cadence
+  observed idle) — daemon-client.ts's "SSE is push-only with no heartbeats"
+  comment and its silence-vs-dead `/health` probe design are stale.
+- **#12 read-only observer — may partially exist already**: `GET /events`
+  streams fine with no TUI lease claimed (observed on unstable.5). The open
+  question shrinks to: what does the lease actually gate on mutating
+  endpoints? Worth checking before filing the "large, speculative" version.
+- Changelog gives no news on **#2 (images), #5 (turn/cancel semantics),
+  #7 (bulk drain), #8 (usage), #10 (title persistence), #11
+  (available_facets)** — those stand as written.
