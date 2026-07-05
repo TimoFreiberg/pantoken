@@ -14,6 +14,32 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
       `polytoken-upstream-feature-asks.md` #1); e2e suite asserts mock behaviors
       the live driver never produces.
 
+## 🔵 Corpus capture follow-ups (from the 2026-07-06 live-capture session)
+
+Full detail in `server-rs/PROGRESS.md` → "Live corpus capture (2026-07-06)". The
+4 committed captures (streaming-turn, queue-while-in-flight, abort, ask-user-question)
+are REAL but **provisional** — they embed local `/Users/timo/...` paths from the
+`/state` body. Ordered by value:
+
+- [ ] **Canon "before freezing" pass (zero model spend — canon is re-appliable):**
+      (a) rewrite inner event `emitted_at` (not just `timestamp`) in
+      `canonicalize_frame`; (b) DECIDE the `/state` redaction scope (recommend
+      `env`→`{}`, `used_tokens`→`0`, absolute paths normalized) in `canonicalize_http`.
+      Mirror BOTH `server-rs/pilot-server/tests/corpus.rs` AND
+      `scripts/capture-daemon-corpus.ts`, then re-canonicalize the committed captures
+      and re-run `cargo test --test corpus`. THEN the captures are freezable.
+- [ ] **Capture `tool-call-approval`:** regenerate the isolated parity config with
+      `default_permission_matcher: standard` (runtime `/permission-monitor` switch does
+      NOT gate execution — verified). The driver is already written + ready in
+      `capture-daemon-corpus.ts`; it fails loud until the config prompts.
+- [ ] **Verify the accumulator handles the real event types** the seeds lacked:
+      `notification_autodrain_switch`, `permission_monitor_switch`, `system_reminder`,
+      thinking blocks + `signature_delta`, `session_state_changed{domains}` (Phase 2.1).
+- [ ] **`/state` has no top-level `turn_in_flight` in unstable.7** — verify nothing in
+      the reseed path depends on it.
+- [ ] (lower) Script + capture `reconnect-stream-discontinuity` (needs forcing a
+      `stream_discontinuity`; SSE resume is a documented upstream no-op).
+
 ## ⚡ Performance
 
 - ~~[x]~~ **Server-side coalescing of streamed `assistantDelta`s (N1).** Done.
