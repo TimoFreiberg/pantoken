@@ -781,9 +781,12 @@ export class DaemonClient {
   // --- Prompt + steering ---
 
   /**
-   * `POST /prompt` — the happy-path turn starter. Returns 202 + {prompt_id, session_id}.
-   * 409 if a turn is already in flight (the queue does NOT auto-absorb a concurrent
-   * prompt — it's rejected). 422 if a pre-user-prompt hook denied it.
+   * `POST /prompt` — the happy-path turn starter. Returns 202 + {prompt_id, session_id,
+   * queued_item?}. As of daemon 0.4.0-unstable.6 (BREAKING), a prompt sent while a turn
+   * holds the turn slot is AUTO-QUEUED (202 with queued_item, a PendingTurnInputItem —
+   * the same queue POST /turn/input feeds), NOT rejected. 409 now only fires for a
+   * slash-command while busy (unsupported_busy_command) or a full input queue
+   * (turn_input_queue_full). 422 if a pre-user-prompt hook denied it.
    */
   async prompt(
     content: string,
