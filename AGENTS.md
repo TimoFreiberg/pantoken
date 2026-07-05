@@ -31,11 +31,12 @@ Monorepo, Bun workspaces.
 - `server-rs/` — Rust port of the server (in progress). Same WS protocol, HTTP
   endpoints, and driver behavior. Three crates: `pilot-protocol` (WS types + fold),
   `pilot-daemon-types` (auto-generated from OpenAPI), `pilot-server` (the binary).
-  Mock mode uses `mock_driver.rs`, a direct port of the TS MockDriver
-  (`fake_daemon.rs` is an abandoned earlier approach, currently dead code — see
-  `server-rs/PROGRESS.md`). Set `PILOT_SERVER_IMPL=rust` to launch the Rust
-  binary instead of the Bun server. **Not yet at parity — the live-daemon path
-  is unvalidated; see `server-rs/PROGRESS.md` before building on it.**
+  Mock mode uses `mock_driver.rs`, a direct port of the TS MockDriver. Set
+  `PILOT_SERVER_IMPL=rust` to launch the Rust binary instead of the Bun server.
+  **Not yet at parity — the live-daemon path is unvalidated; see
+  `server-rs/PROGRESS.md` before building on it.** Mock-mode e2e is at
+  ~283/298 passing (15 failures, down from 33); the live path
+  (`daemon_client` → `event_map` → `driver`) has zero coverage.
 - `client/` — Svelte 5 + Vite PWA. Reconnecting WS singleton, the same fold reducer,
   Claude-app theming in `src/app.css` (warm paper, light + dark).
 - `server/src/shared/` — agent-agnostic utilities both drivers + the hub use
@@ -56,14 +57,17 @@ bun run --cwd client check                    # svelte-check
 bun run --cwd client build                    # prod bundle
 # Rust server (in progress — port to parity, then cut over):
 cd server-rs && cargo build       # build the Rust server
-cd server-rs && cargo test        # run all Rust tests (143 tests)
+cd server-rs && cargo test        # run all Rust tests (148 tests)
 cd server-rs && cargo run         # run the Rust server (reads PILOT_PORT, PILOT_DATA_DIR, etc.)
 PILOT_SERVER_IMPL=rust bun run dev   # launch the Rust server instead of Bun
 ```
 
 `bun run check` runs protocol + server + scripts + e2e + client typechecks end to end.
 `tsconfig.scripts.json` and `tsconfig.e2e.json` close the typecheck gap for the
-dev-tooling and Playwright trees. Keep it green.
+dev-tooling and Playwright trees. Keep it green. **server-rs has its own CI
+gate** (`rust-server` job in `.github/workflows/ci.yml`: `cargo fmt --check` +
+`cargo clippy --locked --all-targets -- -D warnings` + `cargo test`); run
+`bun run check:rs` locally for the same three checks.
 
 **Rust server note:** The Rust port is in progress. Set `PILOT_SERVER_IMPL=rust`
 to spawn the Rust binary (`cargo run` in `server-rs/`) instead of the Bun server
