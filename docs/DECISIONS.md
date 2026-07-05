@@ -59,3 +59,25 @@ our key, no Apple involvement — ad-hoc self-update verified quarantine- and
 TCC-prompt-free, even in /Applications). The Rust-hub rewrite remains a
 separate, criteria-gated decision. Full rationale, spike results, and the open
 artifact-hosting decision: `docs/ADR-desktop-shell.md`.
+
+## D19. Daemon→pilot accumulator stays server-side in Rust (A′)
+The event accumulator (`event_map` + `ui_bridge`: `DaemonEvent` → `SessionDriverEvent`)
+stays server-side, ported to Rust — it is NOT moved client-side. The client is
+Svelte/TS and stays thin on the stable pilot WS wire. Moving the accumulator
+client-side would relocate logic out of Rust into TS and duplicate it across
+desktop + the imminent mobile app, losing the server's version-shield against
+daemon churn (polytoken moves ~daily). The daemon owning more state
+(`/history.emitted_at`, `/prompt` auto-queue) *shrinks* the accumulator but does
+not change where it lives. Single authority = one place to adapt on a daemon bump,
+which is decisive now that mobile is the next build target after desktop.
+
+## D20. Pin the golden corpus, not the daemon binary
+The live path runs against the ambient `polytoken` binary (daemon head, upgraded
+~daily); there is no pin mechanism. Deterministic tests instead replay a committed
+golden SSE corpus captured from a tagged version
+(`server-rs/tests/corpus/<version>/`), canonicalized for stable ids/timestamps. A
+daily daemon bump that breaks behavior turns a corpus test red with a precise diff
+instead of silently corrupting the GUI. Re-capturing the corpus
+(`scripts/capture-daemon-corpus.ts`) is a deliberate, separate step taken on
+conscious adoption. Supersedes the earlier "pin the daemon version" standing
+invariant (PROGRESS.md #3).
