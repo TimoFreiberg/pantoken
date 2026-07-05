@@ -68,7 +68,10 @@ function schemaToRustType(schema: JsonSchema, schemas: Record<string, JsonSchema
     const nonNull = schema.oneOf.filter((s) => !(s.type === "null"));
     const hasNull = schema.oneOf.some((s) => s.type === "null");
     if (nonNull.length === 1 && hasNull) {
-      return `Option<${schemaToRustType(nonNull[0], schemas)}>`;
+      const only = nonNull[0];
+      if (only) {
+        return `Option<${schemaToRustType(only, schemas)}>`;
+      }
     }
     // Multiple non-null oneOf variants — use serde_json::Value for now
     // (these are rare and usually discriminated unions handled separately)
@@ -80,7 +83,10 @@ function schemaToRustType(schema: JsonSchema, schemas: Record<string, JsonSchema
     const nonNull = schema.anyOf.filter((s) => !(s.type === "null"));
     const hasNull = schema.anyOf.some((s) => s.type === "null");
     if (nonNull.length === 1 && hasNull) {
-      return `Option<${schemaToRustType(nonNull[0], schemas)}>`;
+      const only = nonNull[0];
+      if (only) {
+        return `Option<${schemaToRustType(only, schemas)}>`;
+      }
     }
     return "serde_json::Value";
   }
@@ -206,6 +212,7 @@ function generateDiscriminatedEnum(
 
     if (discriminantProp && discriminantProp.enum && discriminantProp.enum.length === 1) {
       const tag = discriminantProp.enum[0];
+      if (tag === undefined) continue;
       const variantName = toPascalCase(tag);
       const required = new Set(variant.required || []);
 
@@ -353,8 +360,10 @@ async function main() {
 
   // Generate enums first
   for (const name of sortedKeys(schemas)) {
+    const schema = schemas[name];
+    if (!schema) continue;
     if (enumSchemas.has(name)) {
-      parts.push(generateStringEnum(name, schemas[name]));
+      parts.push(generateStringEnum(name, schema));
       parts.push("");
     }
   }
@@ -364,6 +373,7 @@ async function main() {
     if (enumSchemas.has(name)) continue;
 
     const schema = schemas[name];
+    if (!schema) continue;
 
     // Skip type aliases (simple $ref schemas)
     if (schema.$ref) {
