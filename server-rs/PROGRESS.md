@@ -29,24 +29,40 @@ validation legs are green plus a live-daemon smoke test.
 - `cargo clippy --all-targets -- -D warnings`: 0 warnings (Phase 0.2).
 - `bun test` (TS side): 760/760 pass.
 - e2e vs Bun server (control): **321/321 pass** (3.6 min).
-- e2e vs Rust server (`PILOT_SERVER_IMPL=rust`): **283 passed / 15 failed / 0
-  flaky-flagged** (4.8 min, `--project=desktop`). Was 279/19 (18 det + 1 flake)
-  after the queue cluster; the new-session-failure cluster fix (Phase 1.4) cut
-  2 real failures, and a lease-conflict test also flipped green → 15
-  deterministic failures (the dir-picker flake did not recur this run). The
-  per-spec failure table is below (reproducible: `PILOT_SERVER_IMPL=rust
-  bunx playwright test --project=desktop --reporter=json`).
+- e2e vs Rust server (`PILOT_SERVER_IMPL=rust`): **284 passed / 14 failed / 0
+  flaky-flagged** (4.7 min, `--project=desktop`). 13 deterministic failures +
+  one known `dir-picker` flake ("the go-to-path input jumps to a typed
+  directory") that recurred this run (it did not recur in the prior Phase-1.4
+  capture; unrelated to Phase 1.5). Was 283/15 (all 15 deterministic — the
+  dir-picker flake did not recur in the prior Phase-1.4 capture) pre-Phase-1.5;
+  the context-meter cluster fix (Phase 1.5) cut the 2 deterministic
+  context-meter failures → 13 deterministic, while the dir-picker flake
+  recurred this run (+1) → 14 raw. The per-spec failure table is below (reproducible:
+  `PILOT_SERVER_IMPL=rust bunx playwright test --project=desktop
+  --reporter=json`).
 - server-rs is now in CI (Phase 0.2): the `rust-server` job runs
   `cargo fmt --check` + `cargo clippy --locked --all-targets -- -D warnings` +
   `cargo test` on ubuntu-latest. `bun run check:rs` runs the same locally.
 
-### Rust-server e2e failure table (2026-07-05, 15 failures)
+### Rust-server e2e failure table (2026-07-05, 13 failures)
+
+context-meter cluster cleared (Phase 1.5): the Rust `MockDriver` did not override
+`compact`/`clear_context` (inherited no-op trait defaults), so the click-twice
+confirm-gate tests stalled at 91%. Ported the TS overrides
+(`server/src/mock-driver.ts:860-911`) — `usageUpdated` (compact→4%, clear→0%)
+plus a `notify` hostUiRequest — +1 hub routing unit test. Reviewer-approved
+(Opus + gpt-5.5, no critical/high). 151 Rust tests, all context-meter e2e green.
+
+Note on the 2026-07-05 full-suite re-run after Phase 1.5: raw capture was
+**284 passed / 14 failed** — the 13 deterministic failures below plus the
+known `dir-picker` flake ("the go-to-path input jumps to a typed directory"),
+which recurred this run (it did not recur in the prior Phase-1.4 capture).
+Unrelated to Phase 1.5 (touches no path/file-listing code). Deterministic
+count: 15 → 13.
 
 | spec file | failing test | status |
 |-----------|--------------|--------|
 | abort-restore | Escape while typing a follow-up aborts but does not clobber the draft | failed |
-| context-meter | the Clear context button uses a click-twice confirm gate | failed |
-| context-meter | the Compact button uses a click-twice confirm gate | failed |
 | file-mention | a draft's @-mention searches the draft cwd via the server; a real session doesn't | failed |
 | images | pasting a screenshot attaches it and image-only send stays visible | failed |
 | lease-conflict | a lease conflict surfaces a sticky Retry toast; retrying opens the session | failed |
@@ -60,19 +76,20 @@ validation legs are green plus a live-daemon smoke test.
 | update-card | clears when the update is no longer available | failed |
 | update-card | shows when an update is staged and reflects applying on click | failed |
 
-Cluster view: context-meter (2), reload-session (2), update-card (2),
+Cluster view: reload-session (2), update-card (2),
 abort-restore (1), file-mention (1), images (1), lease-conflict (1),
 notification-autodrain (1), prompt-delivery (1), settings (1), sidebar-row (1),
-slash (1). The new-session-failure (2), queue (3), models (4), sessions,
-drafts, branch, archive clusters are now green (Chunks B+C + Phase 1.2/1.3/1.4).
+slash (1). The context-meter (2), new-session-failure (2), queue (3), models (4),
+sessions, drafts, branch, archive clusters are now green
+(Chunks B+C + Phase 1.2/1.3/1.4/1.5).
 Note: `abort-restore` has TWO failing tests in isolation ("Escape aborts a
 pending turn…" and "Escape while typing a follow-up…"); the full-suite run
 records one per spec — both are pre-existing, not a regression from Phase 1.4.
 
-Observed failure clusters: see the per-spec table above (2026-07-05, 15
-failures). The new-session-failure / queue / models / sessions / drafts /
-branch / archive clusters are green (Chunks B+C + Phase 1.2/1.3/1.4).
-Remaining clusters: context-meter (2), reload-session (2), update-card (2),
+Observed failure clusters: see the per-spec table above (2026-07-05, 13
+failures). The context-meter, new-session-failure / queue / models / sessions /
+drafts / branch / archive clusters are green (Chunks B+C + Phase 1.2/1.3/1.4/1.5).
+Remaining clusters: reload-session (2), update-card (2),
 plus 9 singletons.
 
 **What is genuinely done and trustworthy:**
@@ -308,10 +325,11 @@ minutes. (Down from 33 at phase start; see the per-spec failure table above.)
       **IN PROGRESS (2026-07-05):** 4 clusters done, test-first, each
       review-clean (Opus) + committed: models (Phase 1.2, 4→0, +2 tests),
       queue (Phase 1.3, 3→0, +3 tests), new-session-failure (Phase 1.4, 2→0,
-      +2 tests). Failures 33 → 15. Next: context-meter (2), reload-session
-      (2), update-card (2), then the singletons. ~11 ported hub tests added
-      so far (target 64+14 by phase end). The standing rule is "fix by
-      porting TS semantics, never by teaching the mock" — held across all 4.
+      +2 tests), context-meter (Phase 1.5, 2→0, +1 test). Failures 33 → 13.
+      Next: reload-session (2), update-card (2), then the singletons.
+      ~12 ported hub tests added so far (target 64+14 by phase end). The
+      standing rule is "fix by porting TS semantics, never by teaching the
+      mock" — held across all 5.
 - [ ] Restore error-message parity: audit all TS `{type:"error"}` sends
       (~17 sites) and mirror them; driver failures must be client-visible —
       the `new-session-failure` cluster is this bug.
@@ -439,5 +457,5 @@ cd server-rs && cargo clippy --all-targets -- -D warnings   # 0 warnings (Phase 
 bun run check:rs                                # fmt + clippy + test locally (CI gate)
 bun test                                        # 760 tests, green
 bun run test:e2e                                # control vs Bun server: green
-PILOT_SERVER_IMPL=rust bun run test:e2e         # vs Rust server: 15 failures (post-Phase-1.4)
+PILOT_SERVER_IMPL=rust bun run test:e2e         # vs Rust server: 13 det failures + 1 known flake (post-Phase-1.5)
 ```
