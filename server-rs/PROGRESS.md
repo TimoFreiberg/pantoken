@@ -1,12 +1,13 @@
 # Rust Server Port — Status & Resumption Plan
 
-Last updated: 2026-07-04 (full review of the port; supersedes the previous
-progress report, which overstated verification. Plan revised same day after
-design discussion: fake-daemon e2e tier reinstated as Phase 2.5, hub
-completion queue made deliberate in Phase 1. Later the same day: folded in
-daemon-owned items from the polytoken changelog (unstable.6) + live-daemon
-probe results, added the "Daemon-owned first" standing section, the Phase-2
-event-vocabulary gate, and the Phase-3 daemon-bump step.)
+Last updated: 2026-07-05 (Phase 1 mock-e2e burn-down COMPLETE + review-approved:
+0 deterministic Rust e2e failures; 176 Rust tests green). The 2026-07-04 full
+review + plan revision stands (fake-daemon e2e tier reinstated as Phase 2.5, hub
+completion queue made deliberate in Phase 1, daemon-owned items folded in from
+the polytoken changelog (unstable.6), the "Daemon-owned first" standing section,
+the Phase-2 event-vocabulary gate, and the Phase-3 daemon-bump step). This update
+reflects the Phase 1.5–1.8 cluster burn-down that cleared failures 13 → 0
+deterministic.
 
 Chunk A (mock fixture text/lifecycle parity) is complete and reviewer-approved
 (32/32 e2e specs pass, 1 flake confirmed), cutting failures 72 → 33 (~90%).
@@ -21,30 +22,27 @@ validation legs are green plus a live-daemon smoke test.
 
 ## Where the port actually stands
 
-**Ground truth (2026-07-05, full suite, one machine, commit uttrmxvs
-"Rust server: mock failnewsession parity (new-session-failure cluster, Phase
-1.4)" — new-session-failure cluster green):**
+**Ground truth (2026-07-05, full suite, one machine, post-Phase-1.8 —
+mock-e2e burn-down COMPLETE):**
 
-- `cargo test`: 150/150 pass (5 daemon-types, 64 protocol, 81 server).
+- `cargo test`: **176/176 pass** (5 daemon-types, 64 protocol, 107 server).
 - `cargo clippy --all-targets -- -D warnings`: 0 warnings (Phase 0.2).
 - `bun test` (TS side): 760/760 pass.
-- e2e vs Bun server (control): **321/321 pass** (3.6 min).
-- e2e vs Rust server (`PILOT_SERVER_IMPL=rust`): **284 passed / 14 failed / 0
-  flaky-flagged** (4.7 min, `--project=desktop`). 13 deterministic failures +
-  one known `dir-picker` flake ("the go-to-path input jumps to a typed
-  directory") that recurred this run (it did not recur in the prior Phase-1.4
-  capture; unrelated to Phase 1.5). Was 283/15 (all 15 deterministic — the
-  dir-picker flake did not recur in the prior Phase-1.4 capture) pre-Phase-1.5;
-  the context-meter cluster fix (Phase 1.5) cut the 2 deterministic
-  context-meter failures → 13 deterministic, while the dir-picker flake
-  recurred this run (+1) → 14 raw. The per-spec failure table is below (reproducible:
-  `PILOT_SERVER_IMPL=rust bunx playwright test --project=desktop
-  --reporter=json`).
+- e2e vs Bun server (control): **320/321 pass** (the 1 is `sidebar-drafts` "retargeting
+  a draft" — a load-induced flake that passes in isolation; confirmed suite-level,
+  not Rust-port: it flakes identically vs the Bun server).
+- e2e vs Rust server (`PILOT_SERVER_IMPL=rust`): **298 passed / 2 failed / 0
+  deterministic** (4.5 min, `--project=desktop`). The 2 are load-induced flakes
+  that pass in isolation: `dir-picker` "Escape clears the filter" (known since
+  Phase 1.4) + `sidebar-drafts` "retargeting a draft" (same flake that hits the
+  Bun control). **Phase 1 (mock-e2e cluster burn-down) is COMPLETE and
+  review-approved: failures 33 → 0 deterministic.** Reproduce:
+  `PILOT_SERVER_IMPL=rust bunx playwright test --project=desktop`.
 - server-rs is now in CI (Phase 0.2): the `rust-server` job runs
   `cargo fmt --check` + `cargo clippy --locked --all-targets -- -D warnings` +
   `cargo test` on ubuntu-latest. `bun run check:rs` runs the same locally.
 
-### Rust-server e2e failure table (2026-07-05, 11 failures)
+### Rust-server e2e failure table (2026-07-05, 0 deterministic failures)
 
 context-meter cluster cleared (Phase 1.5): the Rust `MockDriver` did not override
 `compact`/`clear_context` (inherited no-op trait defaults), so the click-twice
@@ -83,14 +81,21 @@ e2e green.
 
 ### Rust-server e2e failure table (2026-07-05, 0 deterministic failures)
 
-**Phase 1.8 singletons batch — COMPLETE (2026-07-05): all 9 singletons cleared.**
+**Phase 1.8 singletons batch — COMPLETE + REVIEW-APPROVED (2026-07-05): all 9
+singletons cleared.** Dual review (Opus + gpt-5.5): 0 critical/high on the code;
+the two medium test-coverage gaps (classify_switch_error + background-model
+alias/dated logic had no Rust units) were addressed with +9 table tests
+(`vvtxoryr`).
 The remaining full-suite failures are two load-induced flakes (both pass in
 isolation), not deterministic:
 - `dir-picker` "Escape clears the filter without closing the browser" — known
   flake (documented since Phase 1.4; passes in isolation).
 - `sidebar-drafts` "retargeting a draft moves its row…" — 30s timeout under
-  full-suite concurrent load; passes in isolation. New observation this run;
-  unrelated to the singletons (touches draft-retarget, not the cleared paths).
+  full-suite concurrent load; passes in isolation. Confirmed suite-level, NOT
+  Rust-port: it flakes identically against the **Bun (TS) control** too (Bun
+  control: 320/321, the 1 being this same test; passes in isolation vs Bun).
+  New observation this run; unrelated to the singletons (touches draft-retarget,
+  not the cleared paths).
 
 The 9 singletons + their fixes (each a faithful TS-semantics port):
 - **slash** — `mock_commands()` had `skill:polish`; TS has `skill:journal`. Fixed
@@ -131,14 +136,12 @@ The 9 singletons + their fixes (each a faithful TS-semantics port):
   so the echo carries them (TS `promptReply`, fixtures.ts:486).
 
 Reviewer-approved pattern held across sub-batches (Opus + gpt-5.5, no
-critical/high on the committed chunks). 167 Rust tests green, clippy/fmt clean.
+critical/high on the committed chunks). 176 Rust tests green, clippy/fmt clean.
 
-Note on the 2026-07-05 full-suite re-run after Phase 1.5: raw capture was
-**284 passed / 14 failed** — the 13 deterministic failures below plus the
-known `dir-picker` flake ("the go-to-path input jumps to a typed directory"),
-which recurred this run (it did not recur in the prior Phase-1.4 capture).
-Unrelated to Phase 1.5 (touches no path/file-listing code). Deterministic
-count: 15 → 13.
+Note: the historical Phase 1.5 re-run captured 284/14 (13 deterministic + the
+dir-picker flake); the burn-down has since cleared all 13 → 0 deterministic
+post-Phase-1.8 (298 passed, 2 load-induced flakes). See the ground-truth block
+above for the current numbers.
 
 | spec file | failing test | status |
 |-----------|--------------|--------|
@@ -179,7 +182,18 @@ flakes (dir-picker, sidebar-drafts) that pass in isolation — not deterministic
 - `event_map.rs` — structured port of the accumulator model. **Untested.**
   (Behind the Phase-2 vocabulary gate — don't invest here until that call is
   made.)
-- `hub.rs` — all 35 ClientMessage types have handlers. **Untested.**
+- `hub.rs` — all 35 ClientMessage types have handlers. **Mock-e2e-validated +
+  ~28 ported unit tests** (Phase 1.2–1.8: models, queue, new-session-failure,
+  context-meter, reload-session, update-card/desktop-update-relay,
+  background-model resolution, classify_switch_error, singletons). The
+  I/O-shaped live-path handlers (SSE, daemon effects) remain untested — see
+  the load-bearing caveat below + Phase 2/3.
+- `background_model.rs` — port of `shared/background-model.ts`
+  `resolveBackgroundModel`; the `script:` path is a fail-loud stub (returns a
+  "not yet ported" warning, never silently accepts). 10 unit tests. The
+  resolved `model`/`thinking_level` are computed but only `.warning` is wired
+  into `pilot_settings_msg` (the singleton asserts the warning channel;
+  background-model *application* to turns is separate follow-up).
 - `mock_driver.rs` — direct port of the TS MockDriver; all fixture scripts
   present; Chunk A byte-matches TS mock replies; e2e wiring via
   `scripts/dev.ts` works end to end.
@@ -357,11 +371,12 @@ server = the daemon owns everything it can. Known as of 2026-07-04:
       --reporter=json`) instead of prose percentages. Re-capture after each
       chunk that moves the failure count.
 
-### Phase 1 — mock-mode e2e to green, test-first (hub semantics)
+### Phase 1 — mock-mode e2e to green, test-first (hub semantics) — COMPLETE
 
-Stay on `MockDriver` for this phase — the thin deterministic stack plus the
-Bun control is what makes each of the 15 remaining failures attributable in
-minutes. (Down from 33 at phase start; see the per-spec failure table above.)
+Stayed on `MockDriver` for this phase — the thin deterministic stack plus the
+Bun control is what made each failure attributable in minutes. **DONE
+(2026-07-05): failures 33 → 0 deterministic; all 7 clusters cleared +
+review-approved.** See the per-spec failure table + ground-truth block above.
 
 - [x] **Land the hub completion queue first** (decided, not wait-for-pain):
       all fire-and-forget `tokio::spawn` driver completions funnel through
@@ -386,20 +401,21 @@ minutes. (Down from 33 at phase start; see the per-spec failure table above.)
       behavior change (e2e stayed 273/25). Note: the single-flight/pending-
       switch coalescing machinery is now dormant under the single applier
       (cheap TS-mirroring insurance; noted in `switch_to`).
-- [~] Work the failure clusters largest-first (see ground truth above). For
+- [x] Work the failure clusters largest-first (see ground truth above). For
       each cluster, port the relevant `hub.test.ts` / `hub-journal.test.ts`
       cases *before* fixing, so hub coverage back-fills as the burn-down
       proceeds (target: all 64+14 cases ported by the end of this phase).
-      **IN PROGRESS (2026-07-05):** 7 clusters done, test-first, each
-      review-clean (Opus) + committed: models (Phase 1.2, 4→0, +2 tests),
-      queue (Phase 1.3, 3→0, +3 tests), new-session-failure (Phase 1.4, 2→0,
-      +2 tests), context-meter (Phase 1.5, 2→0, +1 test), reload-session
-      (Phase 1.6, 2→0, +2 tests), update-card (Phase 1.7, 2→0, +6 tests),
-      singletons (Phase 1.8, 9→0, +8 background-model tests). Failures 33 → 0
-      deterministic. ~28 ported hub/module tests added so far (target 64+14 by
-      phase end). The
-      standing rule is "fix by porting TS semantics, never by teaching the
-      mock" — held across all 5.
+      **DONE (2026-07-05):** all 7 clusters cleared, test-first, each
+      review-clean (Opus + gpt-5.5, no critical/high) + committed: models
+      (Phase 1.2, 4→0, +2 tests), queue (Phase 1.3, 3→0, +3 tests),
+      new-session-failure (Phase 1.4, 2→0, +2 tests), context-meter (Phase 1.5,
+      2→0, +1 test), reload-session (Phase 1.6, 2→0, +2 tests), update-card
+      (Phase 1.7, 2→0, +6 tests), singletons (Phase 1.8, 9→0, +8 background-model
+      + 7 classify_switch_error + 2 alias/dated tests). Failures 33 → 0
+      deterministic. ~37 ported hub/module tests added (target 64+14 by phase
+      end — the remaining gap is the I/O-shaped live-path tests behind Phase 2/3).
+      The standing rule "fix by porting TS semantics, never by teaching the
+      mock" held across all 7.
 - [ ] Restore error-message parity: audit all TS `{type:"error"}` sends
       (~17 sites) and mirror them; driver failures must be client-visible —
       the `new-session-failure` cluster is this bug.
@@ -522,10 +538,10 @@ fail-loud philosophy applied to tests — not noise to be waited away.
 ## How to verify current state
 
 ```bash
-cd server-rs && cargo test                      # 167 tests, green
+cd server-rs && cargo test                      # 176 tests, green
 cd server-rs && cargo clippy --all-targets -- -D warnings   # 0 warnings (Phase 0.2)
 bun run check:rs                                # fmt + clippy + test locally (CI gate)
 bun test                                        # 760 tests, green
-bun run test:e2e                                # control vs Bun server: green
+bun run test:e2e                                # control vs Bun server: deterministic-core green (320/321; the 1 is the suite-level sidebar-drafts flake, passes in isolation)
 PILOT_SERVER_IMPL=rust bun run test:e2e         # vs Rust server: 0 det failures + 2 load-induced flakes (post-Phase-1.8)
 ```
