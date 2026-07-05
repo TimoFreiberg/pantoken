@@ -21,26 +21,63 @@ validation legs are green plus a live-daemon smoke test.
 
 ## Where the port actually stands
 
-**Ground truth (2026-07-04, full suite, one machine, same commit):**
+**Ground truth (2026-07-05, full suite, one machine, commit mzwoqyrt
+"Rust server: add CI gate + clippy-clean (Phase 0.2)"):**
 
 - `cargo test`: 143/143 pass (5 daemon-types, 64 protocol, 74 server).
+- `cargo clippy --all-targets -- -D warnings`: 0 warnings (Phase 0.2).
 - `bun test` (TS side): 760/760 pass.
 - e2e vs Bun server (control): **321/321 pass** (3.6 min).
-- e2e vs Rust server (`PILOT_SERVER_IMPL=rust`): **288/321 pass, 33 fail**
-  (~90%, was 250/71 before Chunk A; the run takes ~30 min because each
-  failure burns 30 s timeouts × retries).
-- server-rs is in **no CI job** (the cargo steps in ci.yml are for `desktop/`)
-  and not in `bun run check`. Nothing enforces fmt/clippy/test for the port.
+- e2e vs Rust server (`PILOT_SERVER_IMPL=rust`): **273 passed / 25 failed / 0
+  flaky** (6.0 min, `--project=desktop`). Was 288/33 at the 2026-07-04
+  baseline; Chunks B+C (sessions/drafts/branch/dir-picker parity) cut it to
+  25. The per-spec failure table is below (reproducible: `PILOT_SERVER_IMPL=rust
+  bunx playwright test --project=desktop --reporter=json`).
+- server-rs is now in CI (Phase 0.2): the `rust-server` job runs
+  `cargo fmt --check` + `cargo clippy --locked --all-targets -- -D warnings` +
+  `cargo test` on ubuntu-latest. `bun run check:rs` runs the same locally.
 
-Observed failure clusters (post-Chunk-A): sessions (~3, worktree create
-via browser dir, dirty-worktree archive path), dir-picker (~4, chooseProjectDir
-hang — list_dir/stat_path/MOCK_DIR_TREE ported but picker→create flow still
-hangs), models (~4, incl. missing `modelDefaults` broadcast, picker badge
-render), branch (3), drafts (2), queue (3), context-meter (2, liveCountBumps
-overlay not ported to mock), new-session-failure (2, error propagation),
-update-card (2), reload-session (2), lease-conflict (2), prompt-delivery (1),
-notification-autodrain (1), sidebar-row (1), slash (1), images (1),
-file-mention (1).
+### Rust-server e2e failure table (2026-07-05, 25 failures)
+
+| spec file | failing test | status |
+|-----------|--------------|--------|
+| abort-restore | Escape aborts a pending turn and restores the sent prompt to the composer | failed |
+| context-meter | the Clear context button uses a click-twice confirm gate | failed |
+| context-meter | the Compact button uses a click-twice confirm gate | failed |
+| file-mention | a draft's @-mention searches the draft cwd via the server; a real session doesn't | failed |
+| images | pasting a screenshot attaches it and image-only send stays visible | failed |
+| lease-conflict | a lease conflict surfaces a sticky Retry toast; retrying opens the session | failed |
+| lease-conflict | a non-lease session-switch error does NOT get a Retry button | failed |
+| models | the model picker lists models and switches the active one | failed |
+| models | the thinking picker switches the level | failed |
+| models | ⌘⇧E focuses the thinking menu; arrow+enter selects and returns focus | failed |
+| models | ⌘⇧M focuses the model search; keyboard select returns focus to composer | failed |
+| new-session-failure | a failed new session offers a restore toast when another draft is in progress | failed |
+| new-session-failure | a failed new session overwrites an empty competing draft without a toast | failed |
+| notification-autodrain | notification autodrain toggle flips in Settings | failed |
+| prompt-delivery | a rejected prompt stays visible and can be returned to the composer | failed |
+| queue | Alt+Up restores all text to one editor and clears every client | failed |
+| queue | delivery removes one queued row and starts its user turn | failed |
+| queue | queued modes survive reconnect and session refocus | failed |
+| reload-session | the L hotkey reloads the menu's targeted session | failed |
+| reload-session | the overflow menu reloads a session, reseeding its transcript | failed |
+| settings | the background-model spec round-trips and warns loud on a bad spec | failed |
+| sidebar-row | an unread session marks the left gutter and keeps its timestamp on the right | failed |
+| slash | clicking a command inserts it | timedOut |
+| update-card | clears when the update is no longer available | failed |
+| update-card | shows when an update is staged and reflects applying on click | failed |
+
+Cluster view: models (4), queue (3), new-session-failure (2), context-meter
+(2), lease-conflict (2), reload-session (2), update-card (2), abort-restore
+(1), file-mention (1), images (1), notification-autodrain (1), prompt-delivery
+(1), settings (1), sidebar-row (1), slash (1). The dir-picker / sessions /
+drafts / branch / archive clusters are now green (Chunks B+C).
+
+Observed failure clusters: see the per-spec table above (2026-07-05, 25
+failures). The dir-picker / sessions / drafts / branch / archive clusters
+are green (Chunks B+C). Remaining clusters: models (4), queue (3),
+new-session-failure (2), context-meter (2), lease-conflict (2),
+reload-session (2), update-card (2), plus 7 singletons.
 
 **What is genuinely done and trustworthy:**
 
@@ -231,8 +268,13 @@ server = the daemon owns everything it can. Known as of 2026-07-04:
       error parity ~17 vs ~6) can't be `#[expect]`-annotated (no lint) — they're
       listed in "Wrong turns to undo" #2/#3 and remain Phase 1/3 work. Reviewer
       (Opus) verified zero behavior change + 0 warnings on a clean rebuild.
-- [ ] Keep progress claims reproducible: commit the full-suite line-reporter
-      output (or a per-spec table) instead of prose percentages.
+- [x] Keep progress claims reproducible: commit the full-suite line-reporter
+      output (or a per-spec table) instead of prose percentages. **DONE
+      (2026-07-05):** the "Where the port actually stands" section now carries
+      a dated per-spec failure table (25 failures, reproducible via
+      `PILOT_SERVER_IMPL=rust bunx playwright test --project=desktop
+      --reporter=json`) instead of prose percentages. Re-capture after each
+      chunk that moves the failure count.
 
 ### Phase 1 — mock-mode e2e to green, test-first (hub semantics)
 
