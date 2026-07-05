@@ -124,8 +124,13 @@ pub async fn run_hub_op_applier(hub: Arc<Mutex<SessionHub>>, mut receiver: HubOp
     error!("hub completion queue applier exited because all senders were dropped");
 }
 
-/// A boxed, pinned, Send future — the return type of swap closures.
-type SwapFuture = Pin<Box<dyn Future<Output = Vec<SessionDriverEvent>> + Send + 'static>>;
+/// A boxed, pinned, Send future — the return type of swap closures. `Err(message)`
+/// surfaces a swap failure (e.g. the mock's one-shot `failsession` 409 lease
+/// conflict) so `switch_to` can classify + send a client-visible `Error` rather
+/// than an empty-seed "no session" — ports the TS `switchTo` try/catch +
+/// `classifySwitchError` (hub.ts:1333).
+type SwapFuture =
+    Pin<Box<dyn Future<Output = Result<Vec<SessionDriverEvent>, String>> + Send + 'static>>;
 
 /// What the hub hands to a notifier (e.g. the Web Push sender) for notable events.
 #[derive(Debug, Clone)]
@@ -1473,7 +1478,7 @@ impl SessionHub {
                                     if let Some(text) = result.editor_text {
                                         *prefill_clone.lock() = Some(text);
                                     }
-                                    result.seed
+                                    Ok(result.seed)
                                 }) as SwapFuture
                             });
                             let sid = switch_to(hub.clone(), client_key, swap, true, false).await;
@@ -1533,7 +1538,7 @@ impl SessionHub {
                             let swap = Box::new(move |_hub: Arc<Mutex<SessionHub>>| {
                                 let driver = driver.clone();
                                 let opts = opts.clone();
-                                Box::pin(async move { driver.new_session(opts).await })
+                                Box::pin(async move { Ok(driver.new_session(opts).await) })
                                     as SwapFuture
                             });
                             let sid = switch_to(hub.clone(), client_key, swap, false, false).await;
@@ -2204,6 +2209,64 @@ impl SessionHub {
 type SwitchFuture =
     std::pin::Pin<Box<dyn std::future::Future<Output = Option<SessionId>> + Send + 'static>>;
 
+/// Classify a raw session-switch error into a client-facing `{message, kind}`.
+/// Ports TS `classifySwitchError` (`server/src/hub.ts:129-184`): recognizes the
+/// daemon-failed, startup-timeout, lease-conflict (409), connection-refused, and
+/// unresolved-path patterns, prettifying each with `kind: "session-switch"`; an
+/// unrecognized error falls back to a generic banner with no `kind`.
+fn classify_switch_error(raw: &str) -> (String, Option<String>) {
+    let session_switch = || Some("session-switch".to_string());
+    // Daemon failed to start (startup.json state:"failed") — the message already
+    // names the config/parse error; surface it plainly (TS captures the tail).
+    if let Some((_, tail)) = raw.split_once("polytoken daemon failed to start:") {
+        let detail = tail.trim().split(['\n', '\r']).next().unwrap_or("").trim();
+        return (
+            format!(
+                "Couldn't open this session — the daemon failed to start ({}). Try again, or open it in the TUI to diagnose.",
+                detail
+            ),
+            session_switch(),
+        );
+    }
+    // Daemon didn't bind its port in time (spawn or health timeout).
+    if raw.contains("did not become ready within") || raw.contains("did not become healthy within")
+    {
+        return (
+            "Couldn't open this session — the daemon took too long to start. Try again.".into(),
+            session_switch(),
+        );
+    }
+    // Lease conflict (409) — claimLease already formatted a readable message.
+    if raw.contains("another TUI is attached") || raw.contains("lease claim failed (409)") {
+        let message = if raw.contains("another TUI is attached") {
+            raw.to_string()
+        } else {
+            "This session is open in the TUI. Detach it there (/detach) or wait ~30s for its lease to lapse.".into()
+        };
+        return (message, session_switch());
+    }
+    // Connection refused / timed out reaching the daemon.
+    if raw.contains("lease claim failed (0)")
+        || raw.contains("request timed out")
+        || raw.contains("fetch failed")
+        || raw.contains("ECONNREFUSED")
+    {
+        return (
+            "Couldn't reach the session daemon. Try again — if it persists, the daemon may be wedged.".into(),
+            session_switch(),
+        );
+    }
+    // Could not resolve session id from path.
+    if raw.contains("could not resolve session id from path") {
+        return (
+            "Couldn't open this session — its path wasn't recognized.".into(),
+            session_switch(),
+        );
+    }
+    // Fallback: unknown error → keep the generic banner.
+    (format!("session switch failed: {raw}"), None)
+}
+
 /// The atomic session-swap state machine. Implements single-flight per connection:
 /// if a swap is already in-flight on this connection, the latest request coalesces
 /// into `pending_switch` (depth 1, latest wins) and runs when the in-flight one
@@ -2259,14 +2322,44 @@ fn switch_to(
         // buffers live events for journal-less sessions during the fetch.
         hub.lock().swaps_in_flight += 1;
         let swap = swap.take().unwrap();
-        let seed = swap(hub.clone()).await;
+        let seed_result = swap(hub.clone()).await;
         {
             let mut h = hub.lock();
             h.swaps_in_flight = h.swaps_in_flight.saturating_sub(1);
         }
 
-        // ── Fold the seed + set up journal/focus
-        let sid = finish_switch(&hub, client_key, seed, reseed, retry_on_raced_events).await;
+        // A swap failure (e.g. the mock's one-shot `failsession` 409 lease
+        // conflict) surfaces as a client-visible `Error` — ports TS `switchTo`'s
+        // catch → `classifySwitchError` (hub.ts:1333-1341). A newer switch queued
+        // while this one was warming suppresses the error (the operator already
+        // moved on) — mirrors TS `if (!conn.pendingSwitch)`.
+        let seed: Option<Vec<SessionDriverEvent>> = match seed_result {
+            Ok(seed) => Some(seed),
+            Err(raw) => {
+                let pending = {
+                    let h = hub.lock();
+                    h.clients
+                        .get(&client_key)
+                        .map(|c| c.pending_switch.is_some())
+                        .unwrap_or(false)
+                };
+                if !pending {
+                    let (message, kind) = classify_switch_error(&raw);
+                    let h = hub.lock();
+                    h.send_to_client(client_key, ServerMessage::Error { message, kind });
+                }
+                None
+            }
+        };
+
+        // ── Fold the seed + set up journal/focus. On swap failure, fall through
+        // to the cleanup below so queued switches are never stranded; this mirrors
+        // TS `switchTo`'s `try/finally`.
+        let sid = if let Some(seed) = seed {
+            finish_switch(&hub, client_key, seed, reseed, retry_on_raced_events).await
+        } else {
+            None
+        };
 
         // ── Finally: clear switch_in_flight and dispatch any queued swap.
         let queued = {
@@ -3055,7 +3148,8 @@ mod hub_models_tests {
 
         let seed = driver
             .open_session("/sessions/demo-session.jsonl".into())
-            .await;
+            .await
+            .expect("open_session should succeed in the mock");
         let opened_queue = seed.iter().find_map(|event| match event {
             SessionDriverEvent::SessionOpened { snapshot, .. } => snapshot.queued_messages.clone(),
             _ => None,

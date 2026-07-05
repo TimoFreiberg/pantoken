@@ -451,7 +451,7 @@ impl PilotDriver for PolytokenDriver {
         )
     }
 
-    async fn open_session(&self, path: String) -> Vec<SessionDriverEvent> {
+    async fn open_session(&self, path: String) -> Result<Vec<SessionDriverEvent>, String> {
         let session_id = std::path::Path::new(&path)
             .file_stem()
             .and_then(|s| s.to_str())
@@ -514,17 +514,17 @@ impl PilotDriver for PolytokenDriver {
             let client = DaemonClient::new(session_id.clone(), port, std::process::id() as i32);
             let history_res = client.history(None, None).await;
             if let Some(history) = history_res.data {
-                return history_seed::history_to_seed_events(
+                return Ok(history_seed::history_to_seed_events(
                     &history.items,
                     &HistoryMapCtx { r#ref: session_ref },
-                );
+                ));
             }
         }
 
-        Vec::new()
+        Ok(Vec::new())
     }
 
-    async fn reload_session(&self, path: String) -> Vec<SessionDriverEvent> {
+    async fn reload_session(&self, path: String) -> Result<Vec<SessionDriverEvent>, String> {
         let session_id = std::path::Path::new(&path)
             .file_stem()
             .and_then(|s| s.to_str())

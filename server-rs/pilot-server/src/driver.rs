@@ -123,12 +123,16 @@ pub trait PilotDriver: Send + Sync {
     async fn rename_session(&self, _path: String, _name: String) {}
 
     /// Switch the active session to the given .jsonl path. Resolves with the SEED
-    /// events for the now-active session.
-    async fn open_session(&self, path: String) -> Vec<SessionDriverEvent>;
+    /// events for the now-active session, or `Err(message)` on a failure (e.g.
+    /// the mock's one-shot `failsession` 409 lease conflict, or a real
+    /// claim-lease 409) so `switch_to` can classify + surface a client-visible
+    /// `Error`. Ports the TS `Promise<SessionDriverEvent[]>` that throws.
+    async fn open_session(&self, path: String) -> Result<Vec<SessionDriverEvent>, String>;
 
     /// Reload a session from scratch by its .jsonl path.
-    async fn reload_session(&self, _path: String) -> Vec<SessionDriverEvent> {
-        Vec::new()
+    async fn reload_session(&self, path: String) -> Result<Vec<SessionDriverEvent>, String> {
+        // Default: same as open_session (the mock's reload delegates to open).
+        self.open_session(path).await
     }
 
     /// The landing session a freshly-connecting client adopts.

@@ -81,8 +81,8 @@ impl PilotDriver for StubDriver {
         Vec::new()
     }
 
-    async fn open_session(&self, _path: String) -> Vec<SessionDriverEvent> {
-        Vec::new()
+    async fn open_session(&self, _path: String) -> Result<Vec<SessionDriverEvent>, String> {
+        Ok(Vec::new())
     }
 
     async fn new_session(

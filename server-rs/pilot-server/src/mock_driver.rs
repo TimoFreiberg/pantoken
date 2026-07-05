@@ -1055,7 +1055,11 @@ fn greeting_script() -> Vec<ScriptStep> {
 /// Build a prompt reply script — faithful port of TS `promptReply()`.
 /// Emits: userMessage (with stable branch handles) → sessionUpdated(running) →
 /// thinking deltas → text deltas → read tool span → text deltas → runCompleted.
-fn prompt_reply_script(text: &str, prompt_id: Option<&str>) -> Vec<ScriptStep> {
+fn prompt_reply_script(
+    text: &str,
+    prompt_id: Option<&str>,
+    images: &[ImageContent],
+) -> Vec<ScriptStep> {
     // Stable branch handles for this turn, derived from the user message id so the
     // turn-final assistant offers "branch from here" and the prompt offers "branch
     // from this prompt" — mirroring the real daemon. (See TS promptReply.)
@@ -1064,6 +1068,14 @@ fn prompt_reply_script(text: &str, prompt_id: Option<&str>) -> Vec<ScriptStep> {
         .unwrap_or_else(|| format!("u-{}", ts()));
     let call_id = format!("t-{}", ts());
 
+    // Echo the user's images into the transcript userMessage (so the client renders
+    // them as `att-img`/`sent-image`), mirroring TS `promptReply` (fixtures.ts:486).
+    let user_images = if images.is_empty() {
+        None
+    } else {
+        Some(images.to_vec())
+    };
+
     let mut steps = vec![
         ScriptStep {
             wait_ms: 0,
@@ -1071,7 +1083,7 @@ fn prompt_reply_script(text: &str, prompt_id: Option<&str>) -> Vec<ScriptStep> {
                 base: base(),
                 id: u_id.clone(),
                 text: text.into(),
-                images: None,
+                images: user_images,
                 entry_id: Some(format!("e-{u_id}")),
             },
         },
@@ -1333,6 +1345,13 @@ pub struct MockDriver {
     /// One-shot: when set, the next `new_session()` returns no seed events then clears
     /// (armed via `run_script("failnewsession")`). Mirrors TS `failNextNewSession`.
     fail_next_new_session: Arc<AtomicBool>,
+    /// One-shot openSession() 409 lease-conflict injector (armed via
+    /// `run_script("failsession")`). Mirrors TS `failNextSession`. The next
+    /// `open_session` throws the lease-conflict message (matching the real
+    /// claimLease 409 pattern so `classifySwitchError` + the client's
+    /// lease-conflict detection both fire), then the flag clears so a Retry
+    /// succeeds.
+    fail_next_session: Arc<AtomicBool>,
     /// Pending host-UI dialogs (keyed by requestId), so respondUi can look up the
     /// original request (e.g. a Q&A's questions) when forming the tool result.
     /// Mirrors the TS MockDriver's `pendingDialogs`.
@@ -1433,6 +1452,7 @@ impl MockDriver {
             generation: Arc::new(AtomicU64::new(0)),
             last_created: Mutex::new(None),
             fail_next_new_session: Arc::new(AtomicBool::new(false)),
+            fail_next_session: Arc::new(AtomicBool::new(false)),
             pending_dialogs: Arc::new(Mutex::new(std::collections::HashMap::new())),
             adventurous_handoff: Arc::new(std::sync::Mutex::new(false)),
             in_flight: Arc::new(Mutex::new(None)),
@@ -1716,7 +1736,7 @@ impl PilotDriver for MockDriver {
                 return Ok(());
             }
         }
-        let steps = prompt_reply_script(&text, Some(&pid));
+        let steps = prompt_reply_script(&text, Some(&pid), &images);
         self.play_script(steps);
         Ok(())
     }
@@ -1873,7 +1893,19 @@ impl PilotDriver for MockDriver {
             .collect()
     }
 
-    async fn open_session(&self, path: String) -> Vec<SessionDriverEvent> {
+    async fn open_session(&self, path: String) -> Result<Vec<SessionDriverEvent>, String> {
+        // One-shot failure injection (armed via run_script("failsession")):
+        // throw a 409 lease-conflict error before any state mutation, mirroring
+        // a real claimLease 409 when the TUI holds the lease. The message matches
+        // the real claimLease pattern so classifySwitchError + the client's
+        // lease-conflict detection both fire. The one-shot flag clears on the
+        // first attempt, so a Retry → second openSession succeeds. (Faithful port
+        // of TS `MockDriver.openSession`, mock-driver.ts:614-619.)
+        if self.fail_next_session.swap(false, Ordering::SeqCst) {
+            return Err(
+                "another TUI is attached to this session (\"tui\" pid 99999, lease expires in 30s). Detach it there (/detach) or wait 30s for its lease to lapse.".into()
+            );
+        }
         // Faithful port of TS MockDriver.openSession(): the base seed, then any
         // pending host-UI dialogs for this session appended to the end so opening
         // a background session blocked on an approval replays that dialog.
@@ -1906,14 +1938,14 @@ impl PilotDriver for MockDriver {
                 }
             }
         }
-        seed
+        Ok(seed)
     }
 
     /// Deterministic stand-in for the driver's dispose-and-re-warm. The mock has no
     /// warm AgentSession to throw away, so a reload is just a fresh seed of the same
     /// session — enough to exercise the hub's reseed path and the client wiring.
     /// (Faithful port of TS `MockDriver.reloadSession`, mock-driver.ts:649-651.)
-    async fn reload_session(&self, path: String) -> Vec<SessionDriverEvent> {
+    async fn reload_session(&self, path: String) -> Result<Vec<SessionDriverEvent>, String> {
         self.open_session(path).await
     }
 
@@ -2555,7 +2587,7 @@ impl PilotDriver for MockDriver {
                 s.push(ScriptStep { wait_ms: 120, event: SessionDriverEvent::RunFailed { base: base(), error: SessionErrorInfo { message: "Provider request failed: 529 overloaded (will not auto-retry)".into(), code: None, details: None } } });
                 s
             }
-            "reply" => prompt_reply_script("Show me the streamed reply script.", None),
+            "reply" => prompt_reply_script("Show me the streamed reply script.", None, &[]),
             // ── Background session scripts ────────────────────────────────
             "bgrun" => {
                 let ref_id = session_ref_for("older-session");
@@ -2971,7 +3003,10 @@ impl PilotDriver for MockDriver {
                 return;
             }
             "failsession" => {
-                warn!("[mock] run_script: {name} (not yet implemented — non-script control)");
+                // Arm a one-shot openSession() 409 lease-conflict (consumed by the
+                // next switch). Faithful port of TS `runScript("failsession")`
+                // (mock-driver.ts:982-985).
+                self.fail_next_session.store(true, Ordering::SeqCst);
                 return;
             }
             _ => {
@@ -2989,6 +3024,7 @@ impl PilotDriver for MockDriver {
         reset_ts();
         *self.last_created.lock() = None;
         self.fail_next_new_session.store(false, Ordering::SeqCst);
+        self.fail_next_session.store(false, Ordering::SeqCst);
         *self.adventurous_handoff.lock().unwrap() = false;
         // Restore the mutable session/worktree state to the fixture baseline —
         // faithful port of TS `reset()`: `this.sessions = SESSION_LIST.map(...)`,
