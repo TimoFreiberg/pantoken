@@ -1,5 +1,17 @@
 # Rust Server Port — Status & Resumption Plan
 
+**Phase 2.0 COMPLETE (2026-07-05):** daemon truth + drift guardrails landed
+(6 commits, pending dual review). Codegen re-synced to 0.4.0-unstable.7;
+`emitted_at` adopted schema-driven across all 12 history kinds (Rust + TS);
+`/prompt` TOCTOU collapsed onto the daemon auto-queue; SSE liveness rewritten to
+a heartbeat timeout (health-probe machinery deleted); golden corpus + Rust loader
+(2 tests, AC.5) + capture harness added. Phase-2 vocabulary gate resolved as A′
+(accumulator stays server-side Rust; DECISIONS.md D19); version discipline now
+"pin the corpus, not the binary" (D20, supersedes standing invariant #3). 180
+Rust tests green, fmt+clippy clean. NEXT: Phase 2.1 (port event_map/ui_bridge +
+their unit tests, shrunk). DEFERRED (operator call): live corpus capture (real
+model turns) — infra is built, capture is the separate billed step.
+
 Last updated: 2026-07-05 (Phase 1 mock-e2e burn-down COMPLETE + review-approved:
 0 deterministic Rust e2e failures; 176 Rust tests green). The 2026-07-04 full
 review + plan revision stands (fake-daemon e2e tier reinstated as Phase 2.5, hub
@@ -284,11 +296,15 @@ standing invariants while you work:
    goes red, stop and fix that first.
 2. **jj discipline**: review with `jj diff --git`, commit per completed task,
    imperative subject ≤72 chars, only the files you touched.
-3. **Pin the daemon.** All parity work runs against one pinned polytoken
-   version (currently the installed 0.4.0-unstable.5). Upstream bumps are a
-   deliberate, separate step (Phase 3) — never a mid-phase side effect. On
-   every bump: re-run codegen, replay the golden corpus (Phase 2) as the
-   drift canary, and re-check the changelog against the plan.
+3. **Pin the corpus, not the daemon** (SUPERSEDES the old "pin the daemon"
+   invariant; see docs/DECISIONS.md D20). The live path runs the ambient
+   `polytoken` binary = daemon head (operator upgrades ~daily; installed here
+   0.4.0-unstable.7). Determinism comes from a committed golden SSE corpus
+   (`server-rs/tests/corpus/<version>/`), captured from a tagged version and
+   canonicalized. On a bump: re-run codegen, replay the corpus as the drift
+   canary, adopt newly daemon-owned fields, and re-capture only on conscious
+   adoption (`scripts/capture-daemon-corpus.ts`). A bump that breaks behavior
+   turns a corpus test red with a precise diff, not a silent GUI corruption.
 
 The cutover gate is **four legs**, not one: ported unit tests green, mock e2e
 green, fake-daemon e2e green (Phase 2.5), live smoke (Phase 3). Mock-e2e alone
@@ -425,19 +441,16 @@ wants.
 
 ### Phase 2 — live-path validation, part 1: units + integration harness
 
-- [ ] **Gate — decide the event vocabulary before the two porting items
-      below.** A from-scratch design exercise (2026-07-04, blind-draft
-      comparison) found the daemon now owns most of what the pilot event
-      vocabulary was built for in the pi-driver era: `/state` carries
-      pending_interrogatives/turn_in_flight/title/todos, `/history` is
-      projected + revisioned (+ `emitted_at` in .6), and client types are
-      codegen-able from `polytoken event-schema`. If the protocol goes
-      daemon-native ("v3": hub journals/forwards raw daemon envelopes, the
-      accumulator moves client-side), then `event_map.rs` + `ui_bridge` are
-      never ported — their 129+38 TS tests keep running where the logic
-      lands (client TS). Porting those tests to Rust first would be the
-      longest path. Until the call is made, skip the two bullets below and
-      work everything else in this phase (it survives either outcome).
+- [x] **Gate — RESOLVED as A′ (2026-07-05, operator-approved; see
+      docs/DECISIONS.md D19).** The accumulator (`event_map` + `ui_bridge`)
+      stays server-side, ported to Rust — NOT moved client-side. Rationale:
+      the client is Svelte/TS and stays thin on the stable pilot wire; moving
+      the accumulator client-side would relocate logic out of Rust into TS and
+      duplicate it across desktop + the imminent mobile app, losing the
+      server's version-shield against daemon churn. The daemon owning more
+      state (`emitted_at`, `/prompt` auto-queue) shrinks the accumulator but
+      doesn't change where it lives. So: proceed with the two porting items
+      below (Phase 2.1), shrinking first against daemon-owned state.
 - [ ] Port `event-map.test.ts` (129 cases; pure functions, mechanical,
       highest bug-yield per hour) and `ui-bridge.test.ts` (38).
       **(Behind the gate above — do not start before the vocabulary call.)**
