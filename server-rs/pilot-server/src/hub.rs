@@ -2129,10 +2129,19 @@ impl SessionHub {
             detail: None,
         };
         ServerMessage::PilotSettings {
+            // Resolve the background-model warning from the cached model list
+            // (ports TS `pilotSettingsMsg` → `resolveBackgroundModel`,
+            // hub.ts:1176). An empty pre-list cache suppresses the warning until
+            // the next modelList broadcast (the TS hub re-broadcasts settings
+            // after listModels for exactly this reason — see broadcastModelList).
+            background_model_warning: crate::background_model::resolve_background_model(
+                settings.background_model.as_deref(),
+                &self.available_models,
+            )
+            .warning,
             settings,
             env,
             pending_restart: false,
-            background_model_warning: None,
         }
     }
 

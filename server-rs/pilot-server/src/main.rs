@@ -2,6 +2,7 @@
 //!
 //! Axum-based WS bridge + HTTP routes + static serving.
 
+pub mod background_model;
 pub mod config;
 pub mod driver;
 pub mod hub;
