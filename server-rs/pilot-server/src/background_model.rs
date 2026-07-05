@@ -363,9 +363,9 @@ mod tests {
     fn bare_id_ambiguous_at_exact_level_falls_back_to_substring() {
         // The exact-match path rejects an ambiguous bare id, but try_match_model
         // then falls back to substring matching (TS does the same), which may
-        // still resolve one. This just confirms the resolver doesn't panic and
-        // returns a deterministic pick — the ambiguity rejection lives in the
-        // exact-match path, exercised by canonical_provider_id tests above.
+        // still resolve one. The ambiguity rejection lives in the exact-match
+        // path — assert it produced a deterministic outcome (resolves OR warns),
+        // never a panic.
         let mut models = reg();
         models.push(ModelOption {
             provider: "other".into(),
@@ -374,8 +374,59 @@ mod tests {
             thinking_levels: None,
         });
         let r = resolve_background_model(Some("gpt-5"), &models);
-        // No warning regardless of whether it resolved — the point is it doesn't
-        // panic and the exact-match ambiguity path returned None first.
-        let _ = r;
+        assert!(r.model.is_some() || r.warning.is_some());
+    }
+
+    #[test]
+    fn substring_match_prefers_alias_over_dated_version() {
+        // Ports the trickiest logic in TS tryMatchModel: when a pattern matches
+        // several ids by substring, aliases (no trailing YYYYMMDD / not -latest)
+        // are preferred over dated versions. Without this guard a buggy
+        // has_trailing_date (e.g. off-by-one on the 9-char tail) would pick the
+        // dated version. (background-model.ts:124-130.)
+        let models = vec![
+            ModelOption {
+                provider: "anthropic".into(),
+                model_id: "claude-x-4-5-20250101".into(),
+                label: "Claude X 4.5 (dated)".into(),
+                thinking_levels: None,
+            },
+            ModelOption {
+                provider: "anthropic".into(),
+                model_id: "claude-x-4-5".into(),
+                label: "Claude X 4.5 (alias)".into(),
+                thinking_levels: None,
+            },
+        ];
+        let r = resolve_background_model(Some("claude-x-4-5"), &models);
+        assert!(r.warning.is_none(), "alias should resolve cleanly");
+        assert_eq!(
+            r.model.as_ref().unwrap().model_id,
+            "claude-x-4-5",
+            "alias must win over the dated version"
+        );
+    }
+
+    #[test]
+    fn latest_suffix_is_treated_as_an_alias() {
+        // `-latest` is an alias too (is_alias short-circuits before the date
+        // check), so a `-latest` id wins over a dated sibling.
+        let models = vec![
+            ModelOption {
+                provider: "anthropic".into(),
+                model_id: "claude-x-4-5-20250101".into(),
+                label: "dated".into(),
+                thinking_levels: None,
+            },
+            ModelOption {
+                provider: "anthropic".into(),
+                model_id: "claude-x-4-5-latest".into(),
+                label: "latest".into(),
+                thinking_levels: None,
+            },
+        ];
+        let r = resolve_background_model(Some("claude-x-4-5-latest"), &models);
+        assert!(r.warning.is_none());
+        assert_eq!(r.model.as_ref().unwrap().model_id, "claude-x-4-5-latest");
     }
 }

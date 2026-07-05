@@ -3678,4 +3678,67 @@ mod hub_models_tests {
             other => panic!("expected UpdateStatus after applyFailed, got {other:?}"),
         }
     }
+
+    // ── classify_switch_error table tests (Phase 1.8 lease-conflict) ────────
+    // Ports the six branches of TS `classifySwitchError` (hub.ts:129-184).
+    // `classify_switch_error` is a pure function — the cheapest, highest-value
+    // guard for the lease-conflict routing the e2e singleton exercises.
+
+    #[test]
+    fn classify_lease_conflict_passes_message_and_session_switch_kind() {
+        let (message, kind) = classify_switch_error(
+            "another TUI is attached to this session (\"tui\" pid 99999, lease expires in 30s). Detach it there (/detach) or wait 30s for its lease to lapse.",
+        );
+        assert_eq!(kind.as_deref(), Some("session-switch"));
+        assert!(message.contains("another TUI is attached"));
+    }
+
+    #[test]
+    fn classify_lease_claim_409_falls_back_to_detach_message() {
+        let (message, kind) = classify_switch_error("lease claim failed (409): held by other");
+        assert_eq!(kind.as_deref(), Some("session-switch"));
+        assert!(message.contains("Detach it there"));
+    }
+
+    #[test]
+    fn classify_daemon_failed_to_start_surfaces_detail() {
+        let (message, kind) = classify_switch_error(
+            "polytoken daemon failed to start: config parse error near line 12",
+        );
+        assert_eq!(kind.as_deref(), Some("session-switch"));
+        assert!(message.contains("config parse error near line 12"));
+        assert!(message.contains("daemon failed to start"));
+    }
+
+    #[test]
+    fn classify_daemon_timeout_to_start() {
+        let (message, kind) = classify_switch_error("daemon did not become healthy within 10s");
+        assert_eq!(kind.as_deref(), Some("session-switch"));
+        assert!(message.contains("took too long to start"));
+    }
+
+    #[test]
+    fn classify_connection_refused() {
+        let (message, kind) = classify_switch_error("request timed out reaching daemon");
+        assert_eq!(kind.as_deref(), Some("session-switch"));
+        assert!(message.contains("Couldn't reach the session daemon"));
+    }
+
+    #[test]
+    fn classify_unresolved_path() {
+        let (message, kind) =
+            classify_switch_error("could not resolve session id from path /x.jsonl");
+        assert_eq!(kind.as_deref(), Some("session-switch"));
+        assert!(message.contains("path wasn't recognized"));
+    }
+
+    #[test]
+    fn classify_unknown_error_falls_back_to_generic_no_kind() {
+        let (message, kind) = classify_switch_error("something totally unexpected");
+        assert!(
+            kind.is_none(),
+            "unknown errors must not get a session-switch kind"
+        );
+        assert!(message.contains("session switch failed: something totally unexpected"));
+    }
 }
