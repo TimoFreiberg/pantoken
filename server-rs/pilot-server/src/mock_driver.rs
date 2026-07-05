@@ -2184,6 +2184,50 @@ impl PilotDriver for MockDriver {
         })
     }
 
+    // Faithful port of TS `MockDriver.compact()` (`server/src/mock-driver.ts:860`):
+    // drop usage to a small post-compaction residual (the daemon keeps a summary,
+    // so context isn't zero), then notify "Context compacted". Does not reset
+    // `liveUsageTokens`, mirroring the TS override exactly.
+    async fn compact(&self, _session_id: Option<SessionId>) {
+        self.emit(SessionDriverEvent::UsageUpdated {
+            base: base(),
+            usage: SessionUsage {
+                tokens: Some(8000),
+                context_window: 200000,
+                percent: Some(4.0),
+            },
+        });
+        self.emit(SessionDriverEvent::HostUiRequest {
+            base: base(),
+            request: HostUiRequest::Notify {
+                request_id: format!("compact-done-{}", ts()),
+                message: "Context compacted".into(),
+                level: Some(NotifyLevel::Info),
+            },
+        });
+    }
+
+    // Faithful port of TS `MockDriver.clearContext()` (`server/src/mock-driver.ts:887`):
+    // usage drops to zero so the ring renders "0%", then notify "Context cleared".
+    async fn clear_context(&self, _session_id: Option<SessionId>) {
+        self.emit(SessionDriverEvent::UsageUpdated {
+            base: base(),
+            usage: SessionUsage {
+                tokens: Some(0),
+                context_window: 200000,
+                percent: Some(0.0),
+            },
+        });
+        self.emit(SessionDriverEvent::HostUiRequest {
+            base: base(),
+            request: HostUiRequest::Notify {
+                request_id: format!("clear-done-{}", ts()),
+                message: "Context cleared".into(),
+                level: Some(NotifyLevel::Info),
+            },
+        });
+    }
+
     fn default_seed(&self) -> Option<Vec<SessionDriverEvent>> {
         Some(greeting_seed())
     }

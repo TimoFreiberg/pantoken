@@ -3095,4 +3095,78 @@ mod hub_models_tests {
         assert_eq!(config.model_id.as_deref(), Some("deepseek-v4-flash"));
         assert_eq!(config.thinking_level.as_deref(), Some("high"));
     }
+
+    #[tokio::test]
+    async fn compact_and_clear_context_route_to_driver() {
+        // There is no TS hub test asserting that a `compact`/`clearContext`
+        // ClientMessage reaches `driver.compact`/`driver.clear_context` (the TS
+        // hub tests cover unrelated attention/ring paths). This is the test-first
+        // net for the routing path in `hub.rs:handle_client`: the hub enqueues a
+        // `compact`/`clear_context` hub op that calls the driver method, and the
+        // MockDriver overrides emit a `usageUpdated` we can observe on the wire.
+        // (The mock-override behavior itself is covered by the e2e suite; this is
+        // only the routing assertion.)
+        let (_driver, hub, mut hub_ops) = test_hub();
+        let (client_key, _tx, mut rx) = hub.lock().add_client(None);
+
+        // compact → driver.compact → usageUpdated { tokens: 8000, percent: 4 }
+        hub.lock().handle_client(
+            client_key,
+            ClientMessage::Compact {
+                session_id: Some("demo-session".into()),
+            },
+        );
+        apply_one(hub.clone(), &mut hub_ops).await;
+        let usage = drain_until(&mut rx, |msg| {
+            matches!(
+                msg,
+                ServerMessage::Event {
+                    event: SessionDriverEvent::UsageUpdated { .. },
+                    ..
+                }
+            )
+        })
+        .await;
+        match usage {
+            ServerMessage::Event {
+                event: SessionDriverEvent::UsageUpdated { usage, .. },
+                ..
+            } => {
+                assert_eq!(usage.tokens, Some(8000));
+                assert_eq!(usage.context_window, 200000);
+                assert_eq!(usage.percent, Some(4.0));
+            }
+            other => panic!("expected usageUpdated from compact, got {other:?}"),
+        }
+
+        // clearContext → driver.clear_context → usageUpdated { tokens: 0, percent: 0 }
+        hub.lock().handle_client(
+            client_key,
+            ClientMessage::ClearContext {
+                session_id: Some("demo-session".into()),
+            },
+        );
+        apply_one(hub.clone(), &mut hub_ops).await;
+        let usage = drain_until(&mut rx, |msg| {
+            matches!(
+                msg,
+                ServerMessage::Event {
+                    event: SessionDriverEvent::UsageUpdated { .. },
+                    ..
+                }
+            )
+        })
+        .await;
+        match usage {
+            ServerMessage::Event {
+                event: SessionDriverEvent::UsageUpdated { usage, .. },
+                ..
+            } => {
+                assert_eq!(usage.tokens, Some(0));
+                assert_eq!(usage.context_window, 200000);
+                assert_eq!(usage.percent, Some(0.0));
+            }
+            other => panic!("expected usageUpdated from clearContext, got {other:?}"),
+        }
+    }
 }
