@@ -1,10 +1,12 @@
 {
   "scenario": "streaming-turn",
   "version": "0.4.0-unstable.7",
-  "description": "A complete assistant turn: heartbeat → message_start → a text content block streamed via content_block_start + text deltas + content_block_stop → message_complete. The baseline happy-path streaming sequence the accumulator turns into a run bubble + transcript deltas.",
+  "description": "A complete assistant turn: prompt → streamed text deltas → message_complete. The baseline happy-path streaming sequence.",
   "canonicalization": {
     "session_id": "SESSION",
-    "prompt_ids": { "11111111-1111-1111-1111-111111111111": "PROMPT_0" },
+    "prompt_ids": {
+      "019f347b-60f1-7763-9398-21e4b6c00545": "PROMPT_0"
+    },
     "timestamps": "monotonic-from-T0"
   },
   "http": [
@@ -14,19 +16,81 @@
       "request_body": null,
       "status": 200,
       "response_body": {
-        "active_facet": "default",
-        "env": {},
-        "flags": [],
-        "plugin_config": {},
+        "session_title": "main",
         "todos": [],
-        "turn_in_flight": true,
-        "session_id": "SESSION"
+        "flags": [],
+        "env": {
+          "HOME": "/Users/timo",
+          "LOGNAME": "timo",
+          "PATH": "/Users/timo/src/pilot-polytoken/node_modules/.bin:/Users/timo/src/pilot-polytoken/node_modules/.bin:/Users/timo/src/node_modules/.bin:/Users/timo/node_modules/.bin:/Users/node_modules/.bin:/node_modules/.bin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Users/timo/dotfiles/bin:/Users/timo/.bun/bin:/Users/timo/.local/bin:/Users/timo/.cargo/bin:/opt/homebrew/bin:/Users/timo/bin:/Users/timo/.orbstack/bin:/Users/timo/Library/pnpm:/Users/timo/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/a8f458e5-e9fc-4c72-8abc-0677eabc1fbd/40da3e81-612b-485a-8344-6fda9b414659/bin",
+          "SHELL": "/bin/zsh",
+          "TMPDIR": "/var/folders/0f/p0vjgtr15693rxhyw1ljybvr0000gn/T/",
+          "USER": "timo",
+          "XDG_CACHE_HOME": "/Users/timo/.local/state/pilot-parity/xdg-cache",
+          "XDG_CONFIG_HOME": "/Users/timo/.local/state/pilot-parity/xdg-config",
+          "XDG_DATA_HOME": "/Users/timo/.local/state/pilot-parity/xdg-data"
+        },
+        "available_subagents": [
+          "general-purpose",
+          "general-purpose-mini",
+          "plan-reviewer",
+          "researcher"
+        ],
+        "available_skills": [
+          "polytoken:investigating-a-codebase",
+          "polytoken:modifying-polytoken",
+          "polytoken:researching-on-the-internet"
+        ],
+        "active_facet": "execute",
+        "active_model": "deepseek/deepseek-v4-pro",
+        "active_reasoning_effort": "high",
+        "project_cwd": "/Users/timo/.local/state/pilot-parity/project",
+        "source_control": {
+          "kind": "git",
+          "label": "main",
+          "dirty": false
+        },
+        "adventurous_handoff_active": false,
+        "available_models": [
+          {
+            "name": "deepseek/deepseek-v4-pro",
+            "label": "deepseek/deepseek-v4-pro",
+            "reasoning": {
+              "type": "effort",
+              "effort_set": "deepseek_v4",
+              "can_disable": true,
+              "levels": [
+                "high",
+                "max"
+              ],
+              "default_level": "high"
+            }
+          },
+          {
+            "name": "deepseek/deepseek-v4-flash",
+            "label": "deepseek/deepseek-v4-flash",
+            "reasoning": {
+              "type": "effort",
+              "effort_set": "deepseek_v4",
+              "can_disable": true,
+              "levels": [
+                "high",
+                "max"
+              ],
+              "default_level": "high"
+            }
+          }
+        ],
+        "plugin_config": null
       }
     },
     {
       "method": "POST",
       "path": "/prompt",
-      "request_body": { "content": "say hello", "max_tool_turns": null },
+      "request_body": {
+        "content": "Reply with exactly: Hello!",
+        "max_tool_turns": null
+      },
       "status": 202,
       "response_body": {
         "prompt_id": "PROMPT_0",
@@ -39,85 +103,363 @@
       "request_body": null,
       "status": 200,
       "response_body": {
-        "active_facet": "default",
-        "env": {},
-        "flags": [],
-        "plugin_config": {},
+        "session_title": "main",
         "todos": [],
-        "turn_in_flight": false,
-        "session_id": "SESSION"
+        "flags": [],
+        "env": {
+          "HOME": "/Users/timo",
+          "LOGNAME": "timo",
+          "PATH": "/Users/timo/src/pilot-polytoken/node_modules/.bin:/Users/timo/src/pilot-polytoken/node_modules/.bin:/Users/timo/src/node_modules/.bin:/Users/timo/node_modules/.bin:/Users/node_modules/.bin:/node_modules/.bin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Users/timo/dotfiles/bin:/Users/timo/.bun/bin:/Users/timo/.local/bin:/Users/timo/.cargo/bin:/opt/homebrew/bin:/Users/timo/bin:/Users/timo/.orbstack/bin:/Users/timo/Library/pnpm:/Users/timo/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/a8f458e5-e9fc-4c72-8abc-0677eabc1fbd/40da3e81-612b-485a-8344-6fda9b414659/bin",
+          "SHELL": "/bin/zsh",
+          "TMPDIR": "/var/folders/0f/p0vjgtr15693rxhyw1ljybvr0000gn/T/",
+          "USER": "timo",
+          "XDG_CACHE_HOME": "/Users/timo/.local/state/pilot-parity/xdg-cache",
+          "XDG_CONFIG_HOME": "/Users/timo/.local/state/pilot-parity/xdg-config",
+          "XDG_DATA_HOME": "/Users/timo/.local/state/pilot-parity/xdg-data"
+        },
+        "available_subagents": [
+          "general-purpose",
+          "general-purpose-mini",
+          "plan-reviewer",
+          "researcher"
+        ],
+        "available_skills": [
+          "polytoken:investigating-a-codebase",
+          "polytoken:modifying-polytoken",
+          "polytoken:researching-on-the-internet"
+        ],
+        "active_facet": "execute",
+        "active_model": "deepseek/deepseek-v4-pro",
+        "active_reasoning_effort": "high",
+        "project_cwd": "/Users/timo/.local/state/pilot-parity/project",
+        "source_control": {
+          "kind": "git",
+          "label": "main",
+          "dirty": false
+        },
+        "context_usage": {
+          "used_tokens": 10567,
+          "limit_tokens": 1000000
+        },
+        "most_recent_assistant_text": "Hello!",
+        "adventurous_handoff_active": false,
+        "available_models": [
+          {
+            "name": "deepseek/deepseek-v4-pro",
+            "label": "deepseek/deepseek-v4-pro",
+            "reasoning": {
+              "type": "effort",
+              "effort_set": "deepseek_v4",
+              "can_disable": true,
+              "levels": [
+                "high",
+                "max"
+              ],
+              "default_level": "high"
+            }
+          },
+          {
+            "name": "deepseek/deepseek-v4-flash",
+            "label": "deepseek/deepseek-v4-flash",
+            "reasoning": {
+              "type": "effort",
+              "effort_set": "deepseek_v4",
+              "can_disable": true,
+              "levels": [
+                "high",
+                "max"
+              ],
+              "default_level": "high"
+            }
+          }
+        ],
+        "plugin_config": null
       }
     }
   ],
   "sse": [
     {
-      "seq": 0,
+      "seq": 1,
       "emitted_at": "1970-01-01T00:00:00.000Z",
       "session_id": "SESSION",
-      "event": { "type": "heartbeat", "timestamp": "1970-01-01T00:00:00.000Z" }
-    },
-    {
-      "seq": 1,
-      "emitted_at": "1970-01-01T00:00:01.000Z",
-      "session_id": "SESSION",
-      "event": { "type": "message_start", "prompt_id": "PROMPT_0" }
+      "event": {
+        "type": "notification_autodrain_switch",
+        "enabled": true
+      }
     },
     {
       "seq": 2,
-      "emitted_at": "1970-01-01T00:00:02.000Z",
+      "emitted_at": "1970-01-01T00:00:01.000Z",
       "session_id": "SESSION",
       "event": {
-        "type": "content_block_start",
-        "block_index": 0,
-        "block_type": { "type": "text" },
-        "prompt_id": "PROMPT_0"
+        "type": "system_reminder",
+        "slug": "repository-status",
+        "display_name": "Repository status",
+        "body": "Reminder: repository-status (Repository status)\n\nRepository status captured at session start.\n\nSource control: git\nRepository root: .\nCurrent branch: main\nDefault branch: main\nWorking tree: clean\n\nThis is a snapshot. Do not run source-control status or diff commands solely to rediscover this information. Run source-control commands when the user's request asks for them, when you need file-level details not shown here, or when the repository may have changed since this snapshot.",
+        "reason": {
+          "type": "session_start"
+        },
+        "emitted_at": "2026-07-05T22:52:08.886513Z"
       }
     },
     {
       "seq": 3,
-      "emitted_at": "1970-01-01T00:00:03.000Z",
+      "emitted_at": "1970-01-01T00:00:02.000Z",
       "session_id": "SESSION",
       "event": {
-        "type": "content_block_delta",
-        "block_index": 0,
-        "delta": { "type": "text", "text": "Hello" },
+        "type": "message_start",
         "prompt_id": "PROMPT_0"
       }
     },
     {
       "seq": 4,
-      "emitted_at": "1970-01-01T00:00:04.000Z",
+      "emitted_at": "1970-01-01T00:00:03.000Z",
       "session_id": "SESSION",
       "event": {
-        "type": "content_block_delta",
+        "type": "content_block_start",
+        "prompt_id": "PROMPT_0",
         "block_index": 0,
-        "delta": { "type": "text", "text": "!" },
-        "prompt_id": "PROMPT_0"
+        "block_type": {
+          "type": "thinking"
+        }
       }
     },
     {
       "seq": 5,
-      "emitted_at": "1970-01-01T00:00:05.000Z",
+      "emitted_at": "1970-01-01T00:00:04.000Z",
       "session_id": "SESSION",
       "event": {
-        "type": "content_block_stop",
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
         "block_index": 0,
-        "prompt_id": "PROMPT_0"
+        "delta": {
+          "type": "thinking",
+          "text": "The"
+        }
       }
     },
     {
       "seq": 6,
-      "emitted_at": "1970-01-01T00:00:06.000Z",
+      "emitted_at": "1970-01-01T00:00:05.000Z",
       "session_id": "SESSION",
-      "event": { "type": "message_complete", "prompt_id": "PROMPT_0" }
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " user"
+        }
+      }
     },
     {
       "seq": 7,
+      "emitted_at": "1970-01-01T00:00:06.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " wants"
+        }
+      }
+    },
+    {
+      "seq": 8,
       "emitted_at": "1970-01-01T00:00:07.000Z",
       "session_id": "SESSION",
       "event": {
-        "type": "session_state_changed",
-        "domains": ["todos", "flags"]
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " me"
+        }
+      }
+    },
+    {
+      "seq": 9,
+      "emitted_at": "1970-01-01T00:00:08.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " to"
+        }
+      }
+    },
+    {
+      "seq": 10,
+      "emitted_at": "1970-01-01T00:00:09.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " reply"
+        }
+      }
+    },
+    {
+      "seq": 11,
+      "emitted_at": "1970-01-01T00:00:10.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " with"
+        }
+      }
+    },
+    {
+      "seq": 12,
+      "emitted_at": "1970-01-01T00:00:11.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " exactly"
+        }
+      }
+    },
+    {
+      "seq": 13,
+      "emitted_at": "1970-01-01T00:00:12.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " \""
+        }
+      }
+    },
+    {
+      "seq": 14,
+      "emitted_at": "1970-01-01T00:00:13.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "Hello"
+        }
+      }
+    },
+    {
+      "seq": 15,
+      "emitted_at": "1970-01-01T00:00:14.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "!\""
+        }
+      }
+    },
+    {
+      "seq": 16,
+      "emitted_at": "1970-01-01T00:00:15.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "signature_delta",
+          "signature": "1d83514c-e45d-41b2-8e99-c13dd2fdcf6e"
+        }
+      }
+    },
+    {
+      "seq": 17,
+      "emitted_at": "1970-01-01T00:00:16.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_stop",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0
+      }
+    },
+    {
+      "seq": 18,
+      "emitted_at": "1970-01-01T00:00:17.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_start",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "block_type": {
+          "type": "text"
+        }
+      }
+    },
+    {
+      "seq": 19,
+      "emitted_at": "1970-01-01T00:00:18.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "text",
+          "text": "Hello"
+        }
+      }
+    },
+    {
+      "seq": 20,
+      "emitted_at": "1970-01-01T00:00:19.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "text",
+          "text": "!"
+        }
+      }
+    },
+    {
+      "seq": 21,
+      "emitted_at": "1970-01-01T00:00:20.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_stop",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1
+      }
+    },
+    {
+      "seq": 22,
+      "emitted_at": "1970-01-01T00:00:21.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "message_complete",
+        "prompt_id": "PROMPT_0"
       }
     }
   ],
