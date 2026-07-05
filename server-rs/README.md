@@ -46,9 +46,13 @@ server-rs/
 
 ```bash
 cargo build       # build the server
-cargo test        # run all tests (143 tests)
+cargo test        # run all tests (148 tests)
 cargo run         # run the server (reads PILOT_PORT, PILOT_DATA_DIR, etc.)
 ```
+
+CI enforces `cargo fmt --check` + `cargo clippy --locked --all-targets -- -D
+warnings` + `cargo test` (the `rust-server` job in `.github/workflows/ci.yml`);
+run `bun run check:rs` from the repo root for the same locally.
 
 ## Codegen
 

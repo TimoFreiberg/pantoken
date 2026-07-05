@@ -276,8 +276,8 @@ server = the daemon owns everything it can. Known as of 2026-07-04:
 ### Phase 1 — mock-mode e2e to green, test-first (hub semantics)
 
 Stay on `MockDriver` for this phase — the thin deterministic stack plus the
-Bun control is what makes each of the 33 remaining failures attributable in
-minutes.
+Bun control is what makes each of the 15 remaining failures attributable in
+minutes. (Down from 33 at phase start; see the per-spec failure table above.)
 
 - [x] **Land the hub completion queue first** (decided, not wait-for-pain):
       all fire-and-forget `tokio::spawn` driver completions funnel through
@@ -302,10 +302,17 @@ minutes.
       behavior change (e2e stayed 273/25). Note: the single-flight/pending-
       switch coalescing machinery is now dormant under the single applier
       (cheap TS-mirroring insurance; noted in `switch_to`).
-- [ ] Work the failure clusters largest-first (see ground truth above). For
+- [~] Work the failure clusters largest-first (see ground truth above). For
       each cluster, port the relevant `hub.test.ts` / `hub-journal.test.ts`
       cases *before* fixing, so hub coverage back-fills as the burn-down
       proceeds (target: all 64+14 cases ported by the end of this phase).
+      **IN PROGRESS (2026-07-05):** 4 clusters done, test-first, each
+      review-clean (Opus) + committed: models (Phase 1.2, 4→0, +2 tests),
+      queue (Phase 1.3, 3→0, +3 tests), new-session-failure (Phase 1.4, 2→0,
+      +2 tests). Failures 33 → 15. Next: context-meter (2), reload-session
+      (2), update-card (2), then the singletons. ~11 ported hub tests added
+      so far (target 64+14 by phase end). The standing rule is "fix by
+      porting TS semantics, never by teaching the mock" — held across all 4.
 - [ ] Restore error-message parity: audit all TS `{type:"error"}` sends
       (~17 sites) and mirror them; driver failures must be client-visible —
       the `new-session-failure` cluster is this bug.
@@ -428,8 +435,10 @@ fail-loud philosophy applied to tests — not noise to be waited away.
 ## How to verify current state
 
 ```bash
-cd server-rs && cargo test                      # 143 tests, green
+cd server-rs && cargo test                      # 148 tests, green
+cd server-rs && cargo clippy --all-targets -- -D warnings   # 0 warnings (Phase 0.2)
+bun run check:rs                                # fmt + clippy + test locally (CI gate)
 bun test                                        # 760 tests, green
 bun run test:e2e                                # control vs Bun server: green
-PILOT_SERVER_IMPL=rust bun run test:e2e         # vs Rust server: 33 failures (post-Chunk-A)
+PILOT_SERVER_IMPL=rust bun run test:e2e         # vs Rust server: 15 failures (post-Phase-1.4)
 ```
