@@ -183,9 +183,11 @@ pub fn history_to_seed_events(
     // the synthetic fallback only fires for an optional-kind item that genuinely lacks
     // one (pre-.6 replay). It is a deterministic monotonic ISO stamp (epoch-anchored,
     // advancing per item) so the client's relative-time display gets a valid Date
-    // instead of an Invalid Date. The absolute value is wrong (epoch), but it's never
-    // shown as wall-clock — only as ordering within the replayed transcript, which seq
-    // preserves. Do NOT delete the fallback: the 4 optional kinds keep it reachable.
+    // instead of an Invalid Date. The absolute value is wrong (epoch → 1970), so a
+    // replayed pre-.6 row renders a stale relative time like "56y ago" — a known
+    // cosmetic tradeoff; the value's real job is preserving ordering within the
+    // replayed transcript, which seq preserves. Do NOT delete the fallback: the 4
+    // optional kinds keep it reachable.
     //
     // `new Date(i * 1000).toISOString()` → seconds-since-epoch → ISO 8601 UTC.
     // We format manually to avoid pulling in chrono just for this synthetic stamp.
@@ -523,7 +525,10 @@ pub fn history_to_seed_events(
 ///
 /// Used only for the synthetic fallback timestamp on transcript-rendering history
 /// items (user/assistant/tool_result) that lack `emitted_at`. The absolute value is
-/// never shown as wall-clock — only as ordering within the replayed transcript.
+/// wrong (epoch → 1970), so a replayed pre-.6 transcript row renders a stale
+/// relative time like "56y ago" in the client — a known cosmetic tradeoff, not a
+/// crash or Invalid Date: the value preserves *ordering* (the row sits in sequence
+/// within the replayed transcript), which is what the UI's ordering relies on.
 fn format_synthetic_iso(ms: u64) -> String {
     let total_secs = ms / 1000;
     let millis = ms % 1000;

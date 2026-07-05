@@ -117,9 +117,10 @@ export function historyToSeedEvents(
   // optional-kind item that genuinely lacks one (pre-.6 replay). It is a deterministic
   // monotonic ISO stamp (epoch-anchored, advancing per item) so the client's
   // relative-time display gets a valid Date instead of an Invalid Date. The absolute
-  // value is wrong (epoch), but it's never shown as wall-clock — only as ordering
-  // within the replayed transcript, which seq preserves. Do NOT delete the fallback:
-  // the 4 optional kinds keep it reachable.
+  // value is wrong (epoch → 1970), so a replayed pre-.6 row renders a stale relative
+  // time like "56y ago" — a known cosmetic tradeoff; the value's real job is
+  // preserving ordering within the replayed transcript, which seq preserves. Do NOT
+  // delete the fallback: the 4 optional kinds keep it reachable.
   const ts = (item: { emitted_at?: string }, i: number) =>
     item.emitted_at ?? new Date(i * 1000).toISOString();
 
