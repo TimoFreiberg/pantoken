@@ -1,0 +1,122 @@
+# parity-ready — handoff for the real-polytoken e2e + corpus capture session
+
+This file signals: **Phase 2.0 of the Rust-server port is committed, reviewed,
+build-green, and ready for live-polytoken validation.** A previous session
+(2026-07-06) did the work; this is what the next session should know that *isn't*
+already captured in commits / `server-rs/PROGRESS.md` / `docs/DECISIONS.md`.
+
+Read those first; this file is only the delta + the runbook for the live step.
+
+## What's done (don't redo)
+
+- **Phase 2.0 complete** (8 commits, `qlromxvu`→`zlrzxvrk`): codegen re-synced
+  to `0.4.0-unstable.7`; `emitted_at` adopted schema-driven (all 12 history
+  kinds — 8 required, 4 optional, fallback kept); `/prompt` TOCTOU collapsed
+  onto the daemon auto-queue (both drivers); SSE liveness rewritten to a
+  heartbeat timeout (`probe_health` + watcher task deleted); golden corpus +
+  Rust loader (4 tests) + capture harness added; build made green.
+- **Dual code review run + findings fixed** (codex/gpt-5.5 + meridian/claude-opus-4-8):
+  corpus canonicalization dedupes prompt ids + is key-driven (not UUID-shape),
+  60-frame timestamp rollover fixed, 2 regression tests added (proof the fix
+  bites: `canon_prompt_dedupes...` fails with dedupe removed). Two findings
+  rebutted (heartbeat churn is deliberate/self-healing; `expected_driver_events`
+  is intentionally untyped until Phase 2.1).
+- **Build state:** `bun run check` (0 errors/0 warnings) AND `bun run check:rs`
+  (fmt + clippy `-D warnings` + cargo test) both green. 182 Rust tests, 760 TS.
+  Pre-existing `scripts/codegen-polytoken-rs.ts` strict-null breakage was fixed
+  (commit `1210c4f8`) — it was NOT from Phase 2.0, but blocked `bun run check`.
+
+## What the next session does: TWO things
+
+### 1. Run the real-polytoken e2e parity loop (the Bun/TS control, then Rust)
+
+The `parity/` harness drives a REAL polytoken daemon (isolated; never touches prod
+sessions) and is the "is this failure mine or the suite's" oracle. Run it against
+**both** server impls and diff.
+
+```bash
+bun parity/parity.ts doctor --quick   # preflight (verified passing: deepseek key set)
+# Full e2e vs the TS (Bun) server — the control/oracle:
+bun parity/parity.ts up               # boots isolated daemon + Bun server + client
+bun parity/parity.ts parity           # runs the parity comparisons
+bun parity/parity.ts down             # idempotent, safe teardown
+
+# Then vs the RUST server (PILOT_SERVER_IMPL=rust):
+PILOT_SERVER_IMPL=rust bun parity/parity.ts up
+bun parity/parity.ts parity
+bun parity/parity.ts down
+```
+
+`parity/launch.ts:97` keys the Rust backend off `PILOT_SERVER_IMPL=rust`. The
+harness is ISOLATED (`parity/lib.ts` `isolationEnv`: XDG + `--sessions-dir` under
+`/Users/timo/.local/state/pilot-parity`), so it can't see or kill prod daemons.
+Known caveat: `parity doctor --quick` skips the real prompt round-trip — run
+`bun parity/parity.ts doctor` (no `--quick`) once for the real model-usable check
+(it spends one cheap deepseek call). Provider is `deepseek/deepseek-v4-pro`
+(`$DEEPSEEK_API_KEY` confirmed set).
+
+### 2. Capture the real golden corpus (grounds the seed fixtures in live output)
+
+The committed corpus (`server-rs/tests/corpus/0.4.0-unstable.7/*.json`) is
+**hand-authored-from-schema** — it deserializes into the real `DaemonEvent` enum
+(the loader test enforces this), but it is NOT yet a recording of what the daemon
+actually emits. Ground it now:
+
+```bash
+# Dry-run (prints canonicalized JSON to stdout, no write):
+bun run scripts/capture-daemon-corpus.ts streaming-turn
+
+# Write it (replaces the seed fixture with a real recording):
+bun run scripts/capture-daemon-corpus.ts streaming-turn --write
+```
+
+Then **review the diff** before committing (`jj diff` the scenario file), and
+re-run `cd server-rs && cargo test --test corpus` to confirm the real recording
+still deserializes into the enum. Capture as many of the 6 scenarios as is
+worth the spend; `streaming-turn` is fully automated, the other 5 are registered
+as stubs with the exact mid-turn driver steps in their `throw` messages (tool
+approval / ask-user-question / abort / queue-while-in-flight / reconnect) —
+script the POSTs against the seed fixture's shapes when you run them. Each is a
+real model turn = billed deepseek spend (a few cents each).
+
+**Canonicalization parity is load-bearing:** `scripts/capture-daemon-corpus.ts`
+MUST mirror `server-rs/pilot-server/tests/corpus.rs` exactly (session_id→SESSION,
+prompt ids→PROMPT_N deduped first-seen with HTTP-before-SSE, timestamps→monotonic
+epoch HH:MM:SS). If you change one, change both + update the "mirrors EXACTLY"
+contract. There's a known limitation (flagged in both files): wall-clock
+timestamps *inside* HTTP response bodies (e.g. `/state` `updated_at`) are NOT
+canonicalized — if a real capture surfaces non-deterministic ones, extend
+`canonicalize_value` in BOTH files together before freezing.
+
+## Gating / discipline
+
+- **Standing invariant #3 is now "pin the corpus, not the daemon"**
+  (DECISIONS.md D20). Live path = daemon head (`0.4.0-unstable.7` here);
+  determinism = the committed corpus. After capture, a daemon bump replays the
+  frozen corpus as the drift canary.
+- **Review strategy:** each chunk gets a dual review (codex/gpt-5.5 +
+  meridian/claude-opus-4-8 via the `review-subagent` skill). The Phase 2.0
+  review is DONE; re-review only if you change Phase 2.0 code (e.g. a real
+  capture alters a fixture and the loader — re-run `cargo test --test corpus`).
+- **Next phase after this session:** Phase 2.1 — port `event_map`/`ui_bridge`
+  + their 129+38 TS tests to Rust, shrunk against daemon-owned state. The
+  corpus is the oracle for that; `expected_driver_events` stays `null` until
+  the accumulator is validated, then gets typed+filled (review S1, rebutted).
+- **AC.3 (auto-queue) + AC.4 (heartbeat) are code-complete but not live-verified
+  yet** — the parity loop + the `queue-while-in-flight` capture are what confirm
+  them. Don't claim them green until you've seen them pass against the real
+  daemon.
+- jj: review with `jj diff --git`, commit per task, imperative ≤72 chars, only
+  files you touched. Don't push without asking.
+
+## Quick context the next session might otherwise have to rediscover
+
+- `polytoken --version` → `0.4.0-unstable.7`. `polytoken openapi` is the
+  authoritative source (hosted changelog lags daily releases).
+- `/prompt` now AUTO-QUEUES when busy (202 + `queued_item`), does NOT 409. 409
+  = slash-while-busy or full queue only. Both drivers were collapsed onto this.
+- SSE emits `heartbeat` ~10s (unstable.5+); liveness is a 30s timeout on
+  `stream.next()` (3× cadence). SSE resume via `Last-Event-ID` is a known
+  upstream NO-OP — the reconnect scenario asserts RESEED, not resume replay.
+- The `parity/` harness lists sessions ONLY via `polytokenSessions()` (isolated
+  `--sessions-dir`); never call bare `polytoken sessions` (it lists prod).
