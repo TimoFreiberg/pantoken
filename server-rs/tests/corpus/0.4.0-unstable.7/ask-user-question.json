@@ -1,10 +1,12 @@
 {
   "scenario": "ask-user-question",
   "version": "0.4.0-unstable.7",
-  "description": "A model-originated ask_user_question event: the agent emits a structured multi-question batch (single-select + free-text) and pauses awaiting a UI response. Exercises the AskUserQuestionPayload shape and the RegisterInterrogative effect path (the accumulator turns it into a hostUiRequest card).",
+  "description": "A turn where the model asks the user a structured question (ask_user_question interrogative) → the user answers → message_complete.",
   "canonicalization": {
     "session_id": "SESSION",
-    "prompt_ids": { "33333333-3333-3333-3333-333333333333": "PROMPT_0" },
+    "prompt_ids": {
+      "019f3494-19f2-7a90-8d24-697da867ae1f": "PROMPT_0"
+    },
     "timestamps": "monotonic-from-T0"
   },
   "http": [
@@ -14,23 +16,181 @@
       "request_body": null,
       "status": 200,
       "response_body": {
-        "active_facet": "default",
-        "env": {},
-        "flags": [],
-        "plugin_config": {},
+        "session_title": "main",
         "todos": [],
-        "turn_in_flight": true,
-        "session_id": "SESSION"
+        "flags": [],
+        "env": {
+          "HOME": "/Users/timo",
+          "LOGNAME": "timo",
+          "PATH": "/Users/timo/src/pilot-polytoken/node_modules/.bin:/Users/timo/src/pilot-polytoken/node_modules/.bin:/Users/timo/src/node_modules/.bin:/Users/timo/node_modules/.bin:/Users/node_modules/.bin:/node_modules/.bin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Users/timo/dotfiles/bin:/Users/timo/.bun/bin:/Users/timo/.local/bin:/Users/timo/.cargo/bin:/opt/homebrew/bin:/Users/timo/bin:/Users/timo/.orbstack/bin:/Users/timo/Library/pnpm:/Users/timo/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/a8f458e5-e9fc-4c72-8abc-0677eabc1fbd/40da3e81-612b-485a-8344-6fda9b414659/bin",
+          "SHELL": "/bin/zsh",
+          "TMPDIR": "/var/folders/0f/p0vjgtr15693rxhyw1ljybvr0000gn/T/",
+          "USER": "timo",
+          "XDG_CACHE_HOME": "/Users/timo/.local/state/pilot-parity/xdg-cache",
+          "XDG_CONFIG_HOME": "/Users/timo/.local/state/pilot-parity/xdg-config",
+          "XDG_DATA_HOME": "/Users/timo/.local/state/pilot-parity/xdg-data"
+        },
+        "available_subagents": [
+          "general-purpose",
+          "general-purpose-mini",
+          "plan-reviewer",
+          "researcher"
+        ],
+        "available_skills": [
+          "polytoken:investigating-a-codebase",
+          "polytoken:modifying-polytoken",
+          "polytoken:researching-on-the-internet"
+        ],
+        "active_facet": "execute",
+        "active_model": "deepseek/deepseek-v4-pro",
+        "active_reasoning_effort": "high",
+        "project_cwd": "/Users/timo/.local/state/pilot-parity/project",
+        "source_control": {
+          "kind": "git",
+          "label": "main",
+          "dirty": true
+        },
+        "adventurous_handoff_active": false,
+        "available_models": [
+          {
+            "name": "deepseek/deepseek-v4-pro",
+            "label": "deepseek/deepseek-v4-pro",
+            "reasoning": {
+              "type": "effort",
+              "effort_set": "deepseek_v4",
+              "can_disable": true,
+              "levels": [
+                "high",
+                "max"
+              ],
+              "default_level": "high"
+            }
+          },
+          {
+            "name": "deepseek/deepseek-v4-flash",
+            "label": "deepseek/deepseek-v4-flash",
+            "reasoning": {
+              "type": "effort",
+              "effort_set": "deepseek_v4",
+              "can_disable": true,
+              "levels": [
+                "high",
+                "max"
+              ],
+              "default_level": "high"
+            }
+          }
+        ],
+        "plugin_config": null
       }
     },
     {
       "method": "POST",
       "path": "/prompt",
-      "request_body": { "content": "which approach should I take?", "max_tool_turns": null },
+      "request_body": {
+        "content": "I'm torn between two approaches for a small refactor. Use your ask_user_question tool to ask which I prefer, with exactly two short options (A: extract a helper; B: inline it). Keep the options terse. After I answer, do NOT implement anything — reply with just one short sentence acknowledging my choice, then stop.",
+        "max_tool_turns": null
+      },
       "status": 202,
       "response_body": {
         "prompt_id": "PROMPT_0",
         "session_id": "SESSION"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/interrogative/019f3494-3034-7b83-9572-30006722bb21/respond",
+      "request_body": {
+        "kind": "ask_user_question_answers",
+        "answers": [
+          {
+            "question_id": "refactor",
+            "selected_option_ids": [
+              "a"
+            ]
+          }
+        ]
+      },
+      "status": 200,
+      "response_body": null
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "request_body": null,
+      "status": 200,
+      "response_body": {
+        "session_title": "main",
+        "todos": [],
+        "flags": [],
+        "env": {
+          "HOME": "/Users/timo",
+          "LOGNAME": "timo",
+          "PATH": "/Users/timo/src/pilot-polytoken/node_modules/.bin:/Users/timo/src/pilot-polytoken/node_modules/.bin:/Users/timo/src/node_modules/.bin:/Users/timo/node_modules/.bin:/Users/node_modules/.bin:/node_modules/.bin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Users/timo/dotfiles/bin:/Users/timo/.bun/bin:/Users/timo/.local/bin:/Users/timo/.cargo/bin:/opt/homebrew/bin:/Users/timo/bin:/Users/timo/.orbstack/bin:/Users/timo/Library/pnpm:/Users/timo/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/a8f458e5-e9fc-4c72-8abc-0677eabc1fbd/40da3e81-612b-485a-8344-6fda9b414659/bin",
+          "SHELL": "/bin/zsh",
+          "TMPDIR": "/var/folders/0f/p0vjgtr15693rxhyw1ljybvr0000gn/T/",
+          "USER": "timo",
+          "XDG_CACHE_HOME": "/Users/timo/.local/state/pilot-parity/xdg-cache",
+          "XDG_CONFIG_HOME": "/Users/timo/.local/state/pilot-parity/xdg-config",
+          "XDG_DATA_HOME": "/Users/timo/.local/state/pilot-parity/xdg-data"
+        },
+        "available_subagents": [
+          "general-purpose",
+          "general-purpose-mini",
+          "plan-reviewer",
+          "researcher"
+        ],
+        "available_skills": [
+          "polytoken:investigating-a-codebase",
+          "polytoken:modifying-polytoken",
+          "polytoken:researching-on-the-internet"
+        ],
+        "active_facet": "execute",
+        "active_model": "deepseek/deepseek-v4-pro",
+        "active_reasoning_effort": "high",
+        "project_cwd": "/Users/timo/.local/state/pilot-parity/project",
+        "source_control": {
+          "kind": "git",
+          "label": "main",
+          "dirty": true
+        },
+        "context_usage": {
+          "used_tokens": 11052,
+          "limit_tokens": 1000000
+        },
+        "most_recent_assistant_text": "Got it — extract a helper it is.",
+        "adventurous_handoff_active": false,
+        "available_models": [
+          {
+            "name": "deepseek/deepseek-v4-pro",
+            "label": "deepseek/deepseek-v4-pro",
+            "reasoning": {
+              "type": "effort",
+              "effort_set": "deepseek_v4",
+              "can_disable": true,
+              "levels": [
+                "high",
+                "max"
+              ],
+              "default_level": "high"
+            }
+          },
+          {
+            "name": "deepseek/deepseek-v4-flash",
+            "label": "deepseek/deepseek-v4-flash",
+            "reasoning": {
+              "type": "effort",
+              "effort_set": "deepseek_v4",
+              "can_disable": true,
+              "levels": [
+                "high",
+                "max"
+              ],
+              "default_level": "high"
+            }
+          }
+        ],
+        "plugin_config": null
       }
     }
   ],
@@ -39,17 +199,20 @@
       "seq": 0,
       "emitted_at": "1970-01-01T00:00:00.000Z",
       "session_id": "SESSION",
-      "event": { "type": "message_start", "prompt_id": "PROMPT_0" }
+      "event": {
+        "type": "session_state_changed",
+        "domains": [
+          "source_control"
+        ]
+      }
     },
     {
       "seq": 1,
       "emitted_at": "1970-01-01T00:00:01.000Z",
       "session_id": "SESSION",
       "event": {
-        "type": "content_block_start",
-        "block_index": 0,
-        "block_type": { "type": "text" },
-        "prompt_id": "PROMPT_0"
+        "type": "notification_autodrain_switch",
+        "enabled": true
       }
     },
     {
@@ -57,10 +220,14 @@
       "emitted_at": "1970-01-01T00:00:02.000Z",
       "session_id": "SESSION",
       "event": {
-        "type": "content_block_delta",
-        "block_index": 0,
-        "delta": { "type": "text", "text": "I need a decision." },
-        "prompt_id": "PROMPT_0"
+        "type": "system_reminder",
+        "slug": "repository-status",
+        "display_name": "Repository status",
+        "body": "Reminder: repository-status (Repository status)\n\nRepository status captured at session start.\n\nSource control: git\nRepository root: .\nCurrent branch: main\nDefault branch: main\nWorking tree: dirty\n\nChanged files:\n- ?? corpus-note.txt\n\nThis is a snapshot. Do not run source-control status or diff commands solely to rediscover this information. Run source-control commands when the user's request asks for them, when you need file-level details not shown here, or when the repository may have changed since this snapshot.",
+        "reason": {
+          "type": "session_start"
+        },
+        "emitted_at": "2026-07-05T23:19:09.121273Z"
       }
     },
     {
@@ -68,8 +235,7 @@
       "emitted_at": "1970-01-01T00:00:03.000Z",
       "session_id": "SESSION",
       "event": {
-        "type": "content_block_stop",
-        "block_index": 0,
+        "type": "message_start",
         "prompt_id": "PROMPT_0"
       }
     },
@@ -78,38 +244,4033 @@
       "emitted_at": "1970-01-01T00:00:04.000Z",
       "session_id": "SESSION",
       "event": {
-        "type": "ask_user_question",
-        "interrogative_id": "INTERROGATIVE_0",
+        "type": "content_block_start",
         "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "block_type": {
+          "type": "thinking"
+        }
+      }
+    },
+    {
+      "seq": 5,
+      "emitted_at": "1970-01-01T00:00:05.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "The"
+        }
+      }
+    },
+    {
+      "seq": 6,
+      "emitted_at": "1970-01-01T00:00:06.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " user"
+        }
+      }
+    },
+    {
+      "seq": 7,
+      "emitted_at": "1970-01-01T00:00:07.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " wants"
+        }
+      }
+    },
+    {
+      "seq": 8,
+      "emitted_at": "1970-01-01T00:00:08.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " me"
+        }
+      }
+    },
+    {
+      "seq": 9,
+      "emitted_at": "1970-01-01T00:00:09.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " to"
+        }
+      }
+    },
+    {
+      "seq": 10,
+      "emitted_at": "1970-01-01T00:00:10.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " use"
+        }
+      }
+    },
+    {
+      "seq": 11,
+      "emitted_at": "1970-01-01T00:00:11.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " the"
+        }
+      }
+    },
+    {
+      "seq": 12,
+      "emitted_at": "1970-01-01T00:00:12.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " `"
+        }
+      }
+    },
+    {
+      "seq": 13,
+      "emitted_at": "1970-01-01T00:00:13.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "ask"
+        }
+      }
+    },
+    {
+      "seq": 14,
+      "emitted_at": "1970-01-01T00:00:14.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "_user"
+        }
+      }
+    },
+    {
+      "seq": 15,
+      "emitted_at": "1970-01-01T00:00:15.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "_"
+        }
+      }
+    },
+    {
+      "seq": 16,
+      "emitted_at": "1970-01-01T00:00:16.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "question"
+        }
+      }
+    },
+    {
+      "seq": 17,
+      "emitted_at": "1970-01-01T00:00:17.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "`"
+        }
+      }
+    },
+    {
+      "seq": 18,
+      "emitted_at": "1970-01-01T00:00:18.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " tool"
+        }
+      }
+    },
+    {
+      "seq": 19,
+      "emitted_at": "1970-01-01T00:00:19.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " to"
+        }
+      }
+    },
+    {
+      "seq": 20,
+      "emitted_at": "1970-01-01T00:00:20.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " present"
+        }
+      }
+    },
+    {
+      "seq": 21,
+      "emitted_at": "1970-01-01T00:00:21.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " them"
+        }
+      }
+    },
+    {
+      "seq": 22,
+      "emitted_at": "1970-01-01T00:00:22.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " with"
+        }
+      }
+    },
+    {
+      "seq": 23,
+      "emitted_at": "1970-01-01T00:00:23.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " a"
+        }
+      }
+    },
+    {
+      "seq": 24,
+      "emitted_at": "1970-01-01T00:00:24.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " choice"
+        }
+      }
+    },
+    {
+      "seq": 25,
+      "emitted_at": "1970-01-01T00:00:25.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " between"
+        }
+      }
+    },
+    {
+      "seq": 26,
+      "emitted_at": "1970-01-01T00:00:26.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " two"
+        }
+      }
+    },
+    {
+      "seq": 27,
+      "emitted_at": "1970-01-01T00:00:27.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " ref"
+        }
+      }
+    },
+    {
+      "seq": 28,
+      "emitted_at": "1970-01-01T00:00:28.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "act"
+        }
+      }
+    },
+    {
+      "seq": 29,
+      "emitted_at": "1970-01-01T00:00:29.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "oring"
+        }
+      }
+    },
+    {
+      "seq": 30,
+      "emitted_at": "1970-01-01T00:00:30.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " approaches"
+        }
+      }
+    },
+    {
+      "seq": 31,
+      "emitted_at": "1970-01-01T00:00:31.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "."
+        }
+      }
+    },
+    {
+      "seq": 32,
+      "emitted_at": "1970-01-01T00:00:32.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " Let"
+        }
+      }
+    },
+    {
+      "seq": 33,
+      "emitted_at": "1970-01-01T00:00:33.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " me"
+        }
+      }
+    },
+    {
+      "seq": 34,
+      "emitted_at": "1970-01-01T00:00:34.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " craft"
+        }
+      }
+    },
+    {
+      "seq": 35,
+      "emitted_at": "1970-01-01T00:00:35.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " a"
+        }
+      }
+    },
+    {
+      "seq": 36,
+      "emitted_at": "1970-01-01T00:00:36.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " concise"
+        }
+      }
+    },
+    {
+      "seq": 37,
+      "emitted_at": "1970-01-01T00:00:37.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " question"
+        }
+      }
+    },
+    {
+      "seq": 38,
+      "emitted_at": "1970-01-01T00:00:38.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " with"
+        }
+      }
+    },
+    {
+      "seq": 39,
+      "emitted_at": "1970-01-01T00:00:39.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " two"
+        }
+      }
+    },
+    {
+      "seq": 40,
+      "emitted_at": "1970-01-01T00:00:40.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " options"
+        }
+      }
+    },
+    {
+      "seq": 41,
+      "emitted_at": "1970-01-01T00:00:41.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": ".\n\n"
+        }
+      }
+    },
+    {
+      "seq": 42,
+      "emitted_at": "1970-01-01T00:00:42.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "I"
+        }
+      }
+    },
+    {
+      "seq": 43,
+      "emitted_at": "1970-01-01T00:00:43.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " need"
+        }
+      }
+    },
+    {
+      "seq": 44,
+      "emitted_at": "1970-01-01T00:00:44.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " to"
+        }
+      }
+    },
+    {
+      "seq": 45,
+      "emitted_at": "1970-01-01T00:00:45.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " create"
+        }
+      }
+    },
+    {
+      "seq": 46,
+      "emitted_at": "1970-01-01T00:00:46.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " a"
+        }
+      }
+    },
+    {
+      "seq": 47,
+      "emitted_at": "1970-01-01T00:00:47.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " context"
+        }
+      }
+    },
+    {
+      "seq": 48,
+      "emitted_at": "1970-01-01T00:00:48.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " explain"
+        }
+      }
+    },
+    {
+      "seq": 49,
+      "emitted_at": "1970-01-01T00:00:49.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "er"
+        }
+      }
+    },
+    {
+      "seq": 50,
+      "emitted_at": "1970-01-01T00:00:50.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " since"
+        }
+      }
+    },
+    {
+      "seq": 51,
+      "emitted_at": "1970-01-01T00:00:51.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " the"
+        }
+      }
+    },
+    {
+      "seq": 52,
+      "emitted_at": "1970-01-01T00:00:52.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " instructions"
+        }
+      }
+    },
+    {
+      "seq": 53,
+      "emitted_at": "1970-01-01T00:00:53.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " say"
+        }
+      }
+    },
+    {
+      "seq": 54,
+      "emitted_at": "1970-01-01T00:00:54.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " \""
+        }
+      }
+    },
+    {
+      "seq": 55,
+      "emitted_at": "1970-01-01T00:00:55.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "Almost"
+        }
+      }
+    },
+    {
+      "seq": 56,
+      "emitted_at": "1970-01-01T00:00:56.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " every"
+        }
+      }
+    },
+    {
+      "seq": 57,
+      "emitted_at": "1970-01-01T00:00:57.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " question"
+        }
+      }
+    },
+    {
+      "seq": 58,
+      "emitted_at": "1970-01-01T00:00:58.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " should"
+        }
+      }
+    },
+    {
+      "seq": 59,
+      "emitted_at": "1970-01-01T00:00:59.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " include"
+        }
+      }
+    },
+    {
+      "seq": 60,
+      "emitted_at": "1970-01-01T00:01:00.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " one"
+        }
+      }
+    },
+    {
+      "seq": 61,
+      "emitted_at": "1970-01-01T00:01:01.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": ".\""
+        }
+      }
+    },
+    {
+      "seq": 62,
+      "emitted_at": "1970-01-01T00:01:02.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " But"
+        }
+      }
+    },
+    {
+      "seq": 63,
+      "emitted_at": "1970-01-01T00:01:03.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " they"
+        }
+      }
+    },
+    {
+      "seq": 64,
+      "emitted_at": "1970-01-01T00:01:04.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " also"
+        }
+      }
+    },
+    {
+      "seq": 65,
+      "emitted_at": "1970-01-01T00:01:05.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " said"
+        }
+      }
+    },
+    {
+      "seq": 66,
+      "emitted_at": "1970-01-01T00:01:06.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " \""
+        }
+      }
+    },
+    {
+      "seq": 67,
+      "emitted_at": "1970-01-01T00:01:07.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "Keep"
+        }
+      }
+    },
+    {
+      "seq": 68,
+      "emitted_at": "1970-01-01T00:01:08.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " the"
+        }
+      }
+    },
+    {
+      "seq": 69,
+      "emitted_at": "1970-01-01T00:01:09.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " options"
+        }
+      }
+    },
+    {
+      "seq": 70,
+      "emitted_at": "1970-01-01T00:01:10.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " t"
+        }
+      }
+    },
+    {
+      "seq": 71,
+      "emitted_at": "1970-01-01T00:01:11.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "erse"
+        }
+      }
+    },
+    {
+      "seq": 72,
+      "emitted_at": "1970-01-01T00:01:12.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "\""
+        }
+      }
+    },
+    {
+      "seq": 73,
+      "emitted_at": "1970-01-01T00:01:13.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " and"
+        }
+      }
+    },
+    {
+      "seq": 74,
+      "emitted_at": "1970-01-01T00:01:14.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " \""
+        }
+      }
+    },
+    {
+      "seq": 75,
+      "emitted_at": "1970-01-01T00:01:15.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "do"
+        }
+      }
+    },
+    {
+      "seq": 76,
+      "emitted_at": "1970-01-01T00:01:16.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " NOT"
+        }
+      }
+    },
+    {
+      "seq": 77,
+      "emitted_at": "1970-01-01T00:01:17.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " implement"
+        }
+      }
+    },
+    {
+      "seq": 78,
+      "emitted_at": "1970-01-01T00:01:18.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " anything"
+        }
+      }
+    },
+    {
+      "seq": 79,
+      "emitted_at": "1970-01-01T00:01:19.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " —"
+        }
+      }
+    },
+    {
+      "seq": 80,
+      "emitted_at": "1970-01-01T00:01:20.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " reply"
+        }
+      }
+    },
+    {
+      "seq": 81,
+      "emitted_at": "1970-01-01T00:01:21.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " with"
+        }
+      }
+    },
+    {
+      "seq": 82,
+      "emitted_at": "1970-01-01T00:01:22.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " just"
+        }
+      }
+    },
+    {
+      "seq": 83,
+      "emitted_at": "1970-01-01T00:01:23.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " one"
+        }
+      }
+    },
+    {
+      "seq": 84,
+      "emitted_at": "1970-01-01T00:01:24.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " short"
+        }
+      }
+    },
+    {
+      "seq": 85,
+      "emitted_at": "1970-01-01T00:01:25.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " sentence"
+        }
+      }
+    },
+    {
+      "seq": 86,
+      "emitted_at": "1970-01-01T00:01:26.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": ".\""
+        }
+      }
+    },
+    {
+      "seq": 87,
+      "emitted_at": "1970-01-01T00:01:27.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " So"
+        }
+      }
+    },
+    {
+      "seq": 88,
+      "emitted_at": "1970-01-01T00:01:28.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " I"
+        }
+      }
+    },
+    {
+      "seq": 89,
+      "emitted_at": "1970-01-01T00:01:29.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " should"
+        }
+      }
+    },
+    {
+      "seq": 90,
+      "emitted_at": "1970-01-01T00:01:30.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " keep"
+        }
+      }
+    },
+    {
+      "seq": 91,
+      "emitted_at": "1970-01-01T00:01:31.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " the"
+        }
+      }
+    },
+    {
+      "seq": 92,
+      "emitted_at": "1970-01-01T00:01:32.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " context"
+        }
+      }
+    },
+    {
+      "seq": 93,
+      "emitted_at": "1970-01-01T00:01:33.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " minimal"
+        }
+      }
+    },
+    {
+      "seq": 94,
+      "emitted_at": "1970-01-01T00:01:34.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " but"
+        }
+      }
+    },
+    {
+      "seq": 95,
+      "emitted_at": "1970-01-01T00:01:35.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " useful"
+        }
+      }
+    },
+    {
+      "seq": 96,
+      "emitted_at": "1970-01-01T00:01:36.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": ".\n\n"
+        }
+      }
+    },
+    {
+      "seq": 97,
+      "emitted_at": "1970-01-01T00:01:37.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "Let"
+        }
+      }
+    },
+    {
+      "seq": 98,
+      "emitted_at": "1970-01-01T00:01:38.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " me"
+        }
+      }
+    },
+    {
+      "seq": 99,
+      "emitted_at": "1970-01-01T00:01:39.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " construct"
+        }
+      }
+    },
+    {
+      "seq": 100,
+      "emitted_at": "1970-01-01T00:01:40.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " the"
+        }
+      }
+    },
+    {
+      "seq": 101,
+      "emitted_at": "1970-01-01T00:01:41.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " call"
+        }
+      }
+    },
+    {
+      "seq": 102,
+      "emitted_at": "1970-01-01T00:01:42.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "."
+        }
+      }
+    },
+    {
+      "seq": 103,
+      "emitted_at": "1970-01-01T00:01:43.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "signature_delta",
+          "signature": "c71e04da-9bb4-4ee5-9f4b-6ffe306a4381"
+        }
+      }
+    },
+    {
+      "seq": 104,
+      "emitted_at": "1970-01-01T00:01:44.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_stop",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0
+      }
+    },
+    {
+      "seq": 105,
+      "emitted_at": "1970-01-01T00:01:45.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_start",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "block_type": {
+          "type": "tool_use",
+          "id": "call_00_easGEznPnEdX7OTcNNqz4637",
+          "name": "ask_user_question"
+        }
+      }
+    },
+    {
+      "seq": 106,
+      "emitted_at": "1970-01-01T00:01:46.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "{"
+        }
+      }
+    },
+    {
+      "seq": 107,
+      "emitted_at": "1970-01-01T00:01:47.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\""
+        }
+      }
+    },
+    {
+      "seq": 108,
+      "emitted_at": "1970-01-01T00:01:48.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "questions"
+        }
+      }
+    },
+    {
+      "seq": 109,
+      "emitted_at": "1970-01-01T00:01:49.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\""
+        }
+      }
+    },
+    {
+      "seq": 110,
+      "emitted_at": "1970-01-01T00:01:50.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": ": "
+        }
+      }
+    },
+    {
+      "seq": 111,
+      "emitted_at": "1970-01-01T00:01:51.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "["
+        }
+      }
+    },
+    {
+      "seq": 112,
+      "emitted_at": "1970-01-01T00:01:52.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "{\""
+        }
+      }
+    },
+    {
+      "seq": 113,
+      "emitted_at": "1970-01-01T00:01:53.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "id"
+        }
+      }
+    },
+    {
+      "seq": 114,
+      "emitted_at": "1970-01-01T00:01:54.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\":"
+        }
+      }
+    },
+    {
+      "seq": 115,
+      "emitted_at": "1970-01-01T00:01:55.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " \""
+        }
+      }
+    },
+    {
+      "seq": 116,
+      "emitted_at": "1970-01-01T00:01:56.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "ref"
+        }
+      }
+    },
+    {
+      "seq": 117,
+      "emitted_at": "1970-01-01T00:01:57.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "actor"
+        }
+      }
+    },
+    {
+      "seq": 118,
+      "emitted_at": "1970-01-01T00:01:58.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\","
+        }
+      }
+    },
+    {
+      "seq": 119,
+      "emitted_at": "1970-01-01T00:01:59.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " \""
+        }
+      }
+    },
+    {
+      "seq": 120,
+      "emitted_at": "1970-01-01T00:02:00.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "question"
+        }
+      }
+    },
+    {
+      "seq": 121,
+      "emitted_at": "1970-01-01T00:02:01.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\":"
+        }
+      }
+    },
+    {
+      "seq": 122,
+      "emitted_at": "1970-01-01T00:02:02.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " \""
+        }
+      }
+    },
+    {
+      "seq": 123,
+      "emitted_at": "1970-01-01T00:02:03.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "Ext"
+        }
+      }
+    },
+    {
+      "seq": 124,
+      "emitted_at": "1970-01-01T00:02:04.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "ract"
+        }
+      }
+    },
+    {
+      "seq": 125,
+      "emitted_at": "1970-01-01T00:02:05.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " a"
+        }
+      }
+    },
+    {
+      "seq": 126,
+      "emitted_at": "1970-01-01T00:02:06.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " helper"
+        }
+      }
+    },
+    {
+      "seq": 127,
+      "emitted_at": "1970-01-01T00:02:07.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " or"
+        }
+      }
+    },
+    {
+      "seq": 128,
+      "emitted_at": "1970-01-01T00:02:08.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " inline"
+        }
+      }
+    },
+    {
+      "seq": 129,
+      "emitted_at": "1970-01-01T00:02:09.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " the"
+        }
+      }
+    },
+    {
+      "seq": 130,
+      "emitted_at": "1970-01-01T00:02:10.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " logic"
+        }
+      }
+    },
+    {
+      "seq": 131,
+      "emitted_at": "1970-01-01T00:02:11.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "?\","
+        }
+      }
+    },
+    {
+      "seq": 132,
+      "emitted_at": "1970-01-01T00:02:12.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " \""
+        }
+      }
+    },
+    {
+      "seq": 133,
+      "emitted_at": "1970-01-01T00:02:13.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "mode"
+        }
+      }
+    },
+    {
+      "seq": 134,
+      "emitted_at": "1970-01-01T00:02:14.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\":"
+        }
+      }
+    },
+    {
+      "seq": 135,
+      "emitted_at": "1970-01-01T00:02:15.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " \""
+        }
+      }
+    },
+    {
+      "seq": 136,
+      "emitted_at": "1970-01-01T00:02:16.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "single"
+        }
+      }
+    },
+    {
+      "seq": 137,
+      "emitted_at": "1970-01-01T00:02:17.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "_select"
+        }
+      }
+    },
+    {
+      "seq": 138,
+      "emitted_at": "1970-01-01T00:02:18.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\","
+        }
+      }
+    },
+    {
+      "seq": 139,
+      "emitted_at": "1970-01-01T00:02:19.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " \""
+        }
+      }
+    },
+    {
+      "seq": 140,
+      "emitted_at": "1970-01-01T00:02:20.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "allow"
+        }
+      }
+    },
+    {
+      "seq": 141,
+      "emitted_at": "1970-01-01T00:02:21.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "_free"
+        }
+      }
+    },
+    {
+      "seq": 142,
+      "emitted_at": "1970-01-01T00:02:22.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "_text"
+        }
+      }
+    },
+    {
+      "seq": 143,
+      "emitted_at": "1970-01-01T00:02:23.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\":"
+        }
+      }
+    },
+    {
+      "seq": 144,
+      "emitted_at": "1970-01-01T00:02:24.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " true"
+        }
+      }
+    },
+    {
+      "seq": 145,
+      "emitted_at": "1970-01-01T00:02:25.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": ","
+        }
+      }
+    },
+    {
+      "seq": 146,
+      "emitted_at": "1970-01-01T00:02:26.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " \""
+        }
+      }
+    },
+    {
+      "seq": 147,
+      "emitted_at": "1970-01-01T00:02:27.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "context"
+        }
+      }
+    },
+    {
+      "seq": 148,
+      "emitted_at": "1970-01-01T00:02:28.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\":"
+        }
+      }
+    },
+    {
+      "seq": 149,
+      "emitted_at": "1970-01-01T00:02:29.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " \""
+        }
+      }
+    },
+    {
+      "seq": 150,
+      "emitted_at": "1970-01-01T00:02:30.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "You"
+        }
+      }
+    },
+    {
+      "seq": 151,
+      "emitted_at": "1970-01-01T00:02:31.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " mentioned"
+        }
+      }
+    },
+    {
+      "seq": 152,
+      "emitted_at": "1970-01-01T00:02:32.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " a"
+        }
+      }
+    },
+    {
+      "seq": 153,
+      "emitted_at": "1970-01-01T00:02:33.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " small"
+        }
+      }
+    },
+    {
+      "seq": 154,
+      "emitted_at": "1970-01-01T00:02:34.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " ref"
+        }
+      }
+    },
+    {
+      "seq": 155,
+      "emitted_at": "1970-01-01T00:02:35.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "actor"
+        }
+      }
+    },
+    {
+      "seq": 156,
+      "emitted_at": "1970-01-01T00:02:36.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " with"
+        }
+      }
+    },
+    {
+      "seq": 157,
+      "emitted_at": "1970-01-01T00:02:37.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " two"
+        }
+      }
+    },
+    {
+      "seq": 158,
+      "emitted_at": "1970-01-01T00:02:38.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " approaches"
+        }
+      }
+    },
+    {
+      "seq": 159,
+      "emitted_at": "1970-01-01T00:02:39.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " on"
+        }
+      }
+    },
+    {
+      "seq": 160,
+      "emitted_at": "1970-01-01T00:02:40.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " the"
+        }
+      }
+    },
+    {
+      "seq": 161,
+      "emitted_at": "1970-01-01T00:02:41.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " table"
+        }
+      }
+    },
+    {
+      "seq": 162,
+      "emitted_at": "1970-01-01T00:02:42.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "."
+        }
+      }
+    },
+    {
+      "seq": 163,
+      "emitted_at": "1970-01-01T00:02:43.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " This"
+        }
+      }
+    },
+    {
+      "seq": 164,
+      "emitted_at": "1970-01-01T00:02:44.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " is"
+        }
+      }
+    },
+    {
+      "seq": 165,
+      "emitted_at": "1970-01-01T00:02:45.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " a"
+        }
+      }
+    },
+    {
+      "seq": 166,
+      "emitted_at": "1970-01-01T00:02:46.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " narrow"
+        }
+      }
+    },
+    {
+      "seq": 167,
+      "emitted_at": "1970-01-01T00:02:47.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": ","
+        }
+      }
+    },
+    {
+      "seq": 168,
+      "emitted_at": "1970-01-01T00:02:48.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " low"
+        }
+      }
+    },
+    {
+      "seq": 169,
+      "emitted_at": "1970-01-01T00:02:49.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "-st"
+        }
+      }
+    },
+    {
+      "seq": 170,
+      "emitted_at": "1970-01-01T00:02:50.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "akes"
+        }
+      }
+    },
+    {
+      "seq": 171,
+      "emitted_at": "1970-01-01T00:02:51.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " design"
+        }
+      }
+    },
+    {
+      "seq": 172,
+      "emitted_at": "1970-01-01T00:02:52.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " choice"
+        }
+      }
+    },
+    {
+      "seq": 173,
+      "emitted_at": "1970-01-01T00:02:53.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " —"
+        }
+      }
+    },
+    {
+      "seq": 174,
+      "emitted_at": "1970-01-01T00:02:54.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " pick"
+        }
+      }
+    },
+    {
+      "seq": 175,
+      "emitted_at": "1970-01-01T00:02:55.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " whichever"
+        }
+      }
+    },
+    {
+      "seq": 176,
+      "emitted_at": "1970-01-01T00:02:56.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " fits"
+        }
+      }
+    },
+    {
+      "seq": 177,
+      "emitted_at": "1970-01-01T00:02:57.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " better"
+        }
+      }
+    },
+    {
+      "seq": 178,
+      "emitted_at": "1970-01-01T00:02:58.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " with"
+        }
+      }
+    },
+    {
+      "seq": 179,
+      "emitted_at": "1970-01-01T00:02:59.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " how"
+        }
+      }
+    },
+    {
+      "seq": 180,
+      "emitted_at": "1970-01-01T00:03:00.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " you"
+        }
+      }
+    },
+    {
+      "seq": 181,
+      "emitted_at": "1970-01-01T00:03:01.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " see"
+        }
+      }
+    },
+    {
+      "seq": 182,
+      "emitted_at": "1970-01-01T00:03:02.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " the"
+        }
+      }
+    },
+    {
+      "seq": 183,
+      "emitted_at": "1970-01-01T00:03:03.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " surrounding"
+        }
+      }
+    },
+    {
+      "seq": 184,
+      "emitted_at": "1970-01-01T00:03:04.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " code"
+        }
+      }
+    },
+    {
+      "seq": 185,
+      "emitted_at": "1970-01-01T00:03:05.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " evolving"
+        }
+      }
+    },
+    {
+      "seq": 186,
+      "emitted_at": "1970-01-01T00:03:06.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": ".\","
+        }
+      }
+    },
+    {
+      "seq": 187,
+      "emitted_at": "1970-01-01T00:03:07.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " \""
+        }
+      }
+    },
+    {
+      "seq": 188,
+      "emitted_at": "1970-01-01T00:03:08.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "options"
+        }
+      }
+    },
+    {
+      "seq": 189,
+      "emitted_at": "1970-01-01T00:03:09.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\":"
+        }
+      }
+    },
+    {
+      "seq": 190,
+      "emitted_at": "1970-01-01T00:03:10.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " ["
+        }
+      }
+    },
+    {
+      "seq": 191,
+      "emitted_at": "1970-01-01T00:03:11.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "{\""
+        }
+      }
+    },
+    {
+      "seq": 192,
+      "emitted_at": "1970-01-01T00:03:12.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "id"
+        }
+      }
+    },
+    {
+      "seq": 193,
+      "emitted_at": "1970-01-01T00:03:13.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\":"
+        }
+      }
+    },
+    {
+      "seq": 194,
+      "emitted_at": "1970-01-01T00:03:14.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " \""
+        }
+      }
+    },
+    {
+      "seq": 195,
+      "emitted_at": "1970-01-01T00:03:15.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "a"
+        }
+      }
+    },
+    {
+      "seq": 196,
+      "emitted_at": "1970-01-01T00:03:16.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\","
+        }
+      }
+    },
+    {
+      "seq": 197,
+      "emitted_at": "1970-01-01T00:03:17.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " \""
+        }
+      }
+    },
+    {
+      "seq": 198,
+      "emitted_at": "1970-01-01T00:03:18.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "label"
+        }
+      }
+    },
+    {
+      "seq": 199,
+      "emitted_at": "1970-01-01T00:03:19.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\":"
+        }
+      }
+    },
+    {
+      "seq": 200,
+      "emitted_at": "1970-01-01T00:03:20.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " \""
+        }
+      }
+    },
+    {
+      "seq": 201,
+      "emitted_at": "1970-01-01T00:03:21.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "A"
+        }
+      }
+    },
+    {
+      "seq": 202,
+      "emitted_at": "1970-01-01T00:03:22.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " —"
+        }
+      }
+    },
+    {
+      "seq": 203,
+      "emitted_at": "1970-01-01T00:03:23.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " Extract"
+        }
+      }
+    },
+    {
+      "seq": 204,
+      "emitted_at": "1970-01-01T00:03:24.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " a"
+        }
+      }
+    },
+    {
+      "seq": 205,
+      "emitted_at": "1970-01-01T00:03:25.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " helper"
+        }
+      }
+    },
+    {
+      "seq": 206,
+      "emitted_at": "1970-01-01T00:03:26.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\","
+        }
+      }
+    },
+    {
+      "seq": 207,
+      "emitted_at": "1970-01-01T00:03:27.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " \""
+        }
+      }
+    },
+    {
+      "seq": 208,
+      "emitted_at": "1970-01-01T00:03:28.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "description"
+        }
+      }
+    },
+    {
+      "seq": 209,
+      "emitted_at": "1970-01-01T00:03:29.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\":"
+        }
+      }
+    },
+    {
+      "seq": 210,
+      "emitted_at": "1970-01-01T00:03:30.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " \""
+        }
+      }
+    },
+    {
+      "seq": 211,
+      "emitted_at": "1970-01-01T00:03:31.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "Pull"
+        }
+      }
+    },
+    {
+      "seq": 212,
+      "emitted_at": "1970-01-01T00:03:32.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " the"
+        }
+      }
+    },
+    {
+      "seq": 213,
+      "emitted_at": "1970-01-01T00:03:33.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " logic"
+        }
+      }
+    },
+    {
+      "seq": 214,
+      "emitted_at": "1970-01-01T00:03:34.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " into"
+        }
+      }
+    },
+    {
+      "seq": 215,
+      "emitted_at": "1970-01-01T00:03:35.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " a"
+        }
+      }
+    },
+    {
+      "seq": 216,
+      "emitted_at": "1970-01-01T00:03:36.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " named"
+        }
+      }
+    },
+    {
+      "seq": 217,
+      "emitted_at": "1970-01-01T00:03:37.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " helper"
+        }
+      }
+    },
+    {
+      "seq": 218,
+      "emitted_at": "1970-01-01T00:03:38.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " function"
+        }
+      }
+    },
+    {
+      "seq": 219,
+      "emitted_at": "1970-01-01T00:03:39.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": ".\""
+        }
+      }
+    },
+    {
+      "seq": 220,
+      "emitted_at": "1970-01-01T00:03:40.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "},"
+        }
+      }
+    },
+    {
+      "seq": 221,
+      "emitted_at": "1970-01-01T00:03:41.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " {\""
+        }
+      }
+    },
+    {
+      "seq": 222,
+      "emitted_at": "1970-01-01T00:03:42.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "id"
+        }
+      }
+    },
+    {
+      "seq": 223,
+      "emitted_at": "1970-01-01T00:03:43.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\":"
+        }
+      }
+    },
+    {
+      "seq": 224,
+      "emitted_at": "1970-01-01T00:03:44.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " \""
+        }
+      }
+    },
+    {
+      "seq": 225,
+      "emitted_at": "1970-01-01T00:03:45.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "b"
+        }
+      }
+    },
+    {
+      "seq": 226,
+      "emitted_at": "1970-01-01T00:03:46.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\","
+        }
+      }
+    },
+    {
+      "seq": 227,
+      "emitted_at": "1970-01-01T00:03:47.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " \""
+        }
+      }
+    },
+    {
+      "seq": 228,
+      "emitted_at": "1970-01-01T00:03:48.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "label"
+        }
+      }
+    },
+    {
+      "seq": 229,
+      "emitted_at": "1970-01-01T00:03:49.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\":"
+        }
+      }
+    },
+    {
+      "seq": 230,
+      "emitted_at": "1970-01-01T00:03:50.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " \""
+        }
+      }
+    },
+    {
+      "seq": 231,
+      "emitted_at": "1970-01-01T00:03:51.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "B"
+        }
+      }
+    },
+    {
+      "seq": 232,
+      "emitted_at": "1970-01-01T00:03:52.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " —"
+        }
+      }
+    },
+    {
+      "seq": 233,
+      "emitted_at": "1970-01-01T00:03:53.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " In"
+        }
+      }
+    },
+    {
+      "seq": 234,
+      "emitted_at": "1970-01-01T00:03:54.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "line"
+        }
+      }
+    },
+    {
+      "seq": 235,
+      "emitted_at": "1970-01-01T00:03:55.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " it"
+        }
+      }
+    },
+    {
+      "seq": 236,
+      "emitted_at": "1970-01-01T00:03:56.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\","
+        }
+      }
+    },
+    {
+      "seq": 237,
+      "emitted_at": "1970-01-01T00:03:57.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " \""
+        }
+      }
+    },
+    {
+      "seq": 238,
+      "emitted_at": "1970-01-01T00:03:58.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "description"
+        }
+      }
+    },
+    {
+      "seq": 239,
+      "emitted_at": "1970-01-01T00:03:59.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "\":"
+        }
+      }
+    },
+    {
+      "seq": 240,
+      "emitted_at": "1970-01-01T00:04:00.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " \""
+        }
+      }
+    },
+    {
+      "seq": 241,
+      "emitted_at": "1970-01-01T00:04:01.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "Keep"
+        }
+      }
+    },
+    {
+      "seq": 242,
+      "emitted_at": "1970-01-01T00:04:02.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " the"
+        }
+      }
+    },
+    {
+      "seq": 243,
+      "emitted_at": "1970-01-01T00:04:03.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " logic"
+        }
+      }
+    },
+    {
+      "seq": 244,
+      "emitted_at": "1970-01-01T00:04:04.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " inline"
+        }
+      }
+    },
+    {
+      "seq": 245,
+      "emitted_at": "1970-01-01T00:04:05.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " at"
+        }
+      }
+    },
+    {
+      "seq": 246,
+      "emitted_at": "1970-01-01T00:04:06.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " the"
+        }
+      }
+    },
+    {
+      "seq": 247,
+      "emitted_at": "1970-01-01T00:04:07.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " call"
+        }
+      }
+    },
+    {
+      "seq": 248,
+      "emitted_at": "1970-01-01T00:04:08.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": " site"
+        }
+      }
+    },
+    {
+      "seq": 249,
+      "emitted_at": "1970-01-01T00:04:09.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": ".\""
+        }
+      }
+    },
+    {
+      "seq": 250,
+      "emitted_at": "1970-01-01T00:04:10.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "}]"
+        }
+      }
+    },
+    {
+      "seq": 251,
+      "emitted_at": "1970-01-01T00:04:11.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "}]"
+        }
+      }
+    },
+    {
+      "seq": 252,
+      "emitted_at": "1970-01-01T00:04:12.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "tool_use_input",
+          "partial_json": "}"
+        }
+      }
+    },
+    {
+      "seq": 253,
+      "emitted_at": "1970-01-01T00:04:13.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_stop",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1
+      }
+    },
+    {
+      "seq": 254,
+      "emitted_at": "1970-01-01T00:04:14.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "tool_call",
+        "prompt_id": "PROMPT_0",
+        "call_id": "call_00_easGEznPnEdX7OTcNNqz4637",
+        "name": "ask_user_question",
+        "input": {
+          "questions": [
+            {
+              "id": "refactor",
+              "question": "Extract a helper or inline the logic?",
+              "mode": "single_select",
+              "allow_free_text": true,
+              "context": "You mentioned a small refactor with two approaches on the table. This is a narrow, low-stakes design choice — pick whichever fits better with how you see the surrounding code evolving.",
+              "options": [
+                {
+                  "id": "a",
+                  "label": "A — Extract a helper",
+                  "description": "Pull the logic into a named helper function."
+                },
+                {
+                  "id": "b",
+                  "label": "B — Inline it",
+                  "description": "Keep the logic inline at the call site."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "seq": 255,
+      "emitted_at": "1970-01-01T00:04:15.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "ask_user_question",
+        "prompt_id": "PROMPT_0",
+        "interrogative_id": "019f3494-3034-7b83-9572-30006722bb21",
         "payload": {
           "questions": [
             {
-              "id": "q_approach",
-              "context": "Two viable strategies for the refactor.",
-              "question": "Which implementation approach should I take?",
+              "id": "refactor",
+              "context": "You mentioned a small refactor with two approaches on the table. This is a narrow, low-stakes design choice — pick whichever fits better with how you see the surrounding code evolving.",
+              "question": "Extract a helper or inline the logic?",
               "mode": "single_select",
               "allow_free_text": true,
               "options": [
                 {
-                  "id": "minimal",
-                  "label": "Minimal",
-                  "description": "Make the smallest safe change."
+                  "id": "a",
+                  "label": "A — Extract a helper",
+                  "description": "Pull the logic into a named helper function."
                 },
                 {
-                  "id": "broader",
-                  "label": "Broader",
-                  "description": "Address nearby related behavior too."
+                  "id": "b",
+                  "label": "B — Inline it",
+                  "description": "Keep the logic inline at the call site."
                 }
               ]
-            },
-            {
-              "id": "q_name",
-              "question": "What should the new function be called?",
-              "mode": "text",
-              "allow_free_text": true
             }
           ]
         }
+      }
+    },
+    {
+      "seq": 256,
+      "emitted_at": "1970-01-01T00:04:16.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "tool_result",
+        "prompt_id": "PROMPT_0",
+        "call_id": "call_00_easGEznPnEdX7OTcNNqz4637",
+        "content": "{\n  \"answers\": [\n    {\n      \"question_id\": \"refactor\",\n      \"context\": \"You mentioned a small refactor with two approaches on the table. This is a narrow, low-stakes design choice — pick whichever…",
+        "content_full": {
+          "text": "{\n  \"answers\": [\n    {\n      \"question_id\": \"refactor\",\n      \"context\": \"You mentioned a small refactor with two approaches on the table. This is a narrow, low-stakes design choice — pick whichever fits better with how you see the surrounding code evolving.\",\n      \"question\": \"Extract a helper or inline the logic?\",\n      \"selected_option_ids\": [\n        \"a\"\n      ],\n      \"selected_options\": [\n        {\n          \"id\": \"a\",\n          \"label\": \"A — Extract a helper\"\n        }\n      ]\n    }\n  ]\n}"
+        }
+      }
+    },
+    {
+      "seq": 257,
+      "emitted_at": "1970-01-01T00:04:17.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_start",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "block_type": {
+          "type": "thinking"
+        }
+      }
+    },
+    {
+      "seq": 258,
+      "emitted_at": "1970-01-01T00:04:18.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "The"
+        }
+      }
+    },
+    {
+      "seq": 259,
+      "emitted_at": "1970-01-01T00:04:19.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " user"
+        }
+      }
+    },
+    {
+      "seq": 260,
+      "emitted_at": "1970-01-01T00:04:20.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " chose"
+        }
+      }
+    },
+    {
+      "seq": 261,
+      "emitted_at": "1970-01-01T00:04:21.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " option"
+        }
+      }
+    },
+    {
+      "seq": 262,
+      "emitted_at": "1970-01-01T00:04:22.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " A"
+        }
+      }
+    },
+    {
+      "seq": 263,
+      "emitted_at": "1970-01-01T00:04:23.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " —"
+        }
+      }
+    },
+    {
+      "seq": 264,
+      "emitted_at": "1970-01-01T00:04:24.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " extract"
+        }
+      }
+    },
+    {
+      "seq": 265,
+      "emitted_at": "1970-01-01T00:04:25.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " a"
+        }
+      }
+    },
+    {
+      "seq": 266,
+      "emitted_at": "1970-01-01T00:04:26.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " helper"
+        }
+      }
+    },
+    {
+      "seq": 267,
+      "emitted_at": "1970-01-01T00:04:27.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "."
+        }
+      }
+    },
+    {
+      "seq": 268,
+      "emitted_at": "1970-01-01T00:04:28.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " I"
+        }
+      }
+    },
+    {
+      "seq": 269,
+      "emitted_at": "1970-01-01T00:04:29.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "'ll"
+        }
+      }
+    },
+    {
+      "seq": 270,
+      "emitted_at": "1970-01-01T00:04:30.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " acknowledge"
+        }
+      }
+    },
+    {
+      "seq": 271,
+      "emitted_at": "1970-01-01T00:04:31.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " briefly"
+        }
+      }
+    },
+    {
+      "seq": 272,
+      "emitted_at": "1970-01-01T00:04:32.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " and"
+        }
+      }
+    },
+    {
+      "seq": 273,
+      "emitted_at": "1970-01-01T00:04:33.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " stop"
+        }
+      }
+    },
+    {
+      "seq": 274,
+      "emitted_at": "1970-01-01T00:04:34.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " as"
+        }
+      }
+    },
+    {
+      "seq": 275,
+      "emitted_at": "1970-01-01T00:04:35.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": " instructed"
+        }
+      }
+    },
+    {
+      "seq": 276,
+      "emitted_at": "1970-01-01T00:04:36.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "."
+        }
+      }
+    },
+    {
+      "seq": 277,
+      "emitted_at": "1970-01-01T00:04:37.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "signature_delta",
+          "signature": "24db94a1-3b52-44b0-bc97-a32bdc3dcd3d"
+        }
+      }
+    },
+    {
+      "seq": 278,
+      "emitted_at": "1970-01-01T00:04:38.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_stop",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0
+      }
+    },
+    {
+      "seq": 279,
+      "emitted_at": "1970-01-01T00:04:39.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_start",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "block_type": {
+          "type": "text"
+        }
+      }
+    },
+    {
+      "seq": 280,
+      "emitted_at": "1970-01-01T00:04:40.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "text",
+          "text": "Got"
+        }
+      }
+    },
+    {
+      "seq": 281,
+      "emitted_at": "1970-01-01T00:04:41.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "text",
+          "text": " it"
+        }
+      }
+    },
+    {
+      "seq": 282,
+      "emitted_at": "1970-01-01T00:04:42.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "text",
+          "text": " —"
+        }
+      }
+    },
+    {
+      "seq": 283,
+      "emitted_at": "1970-01-01T00:04:43.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "text",
+          "text": " extract"
+        }
+      }
+    },
+    {
+      "seq": 284,
+      "emitted_at": "1970-01-01T00:04:44.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "text",
+          "text": " a"
+        }
+      }
+    },
+    {
+      "seq": 285,
+      "emitted_at": "1970-01-01T00:04:45.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "text",
+          "text": " helper"
+        }
+      }
+    },
+    {
+      "seq": 286,
+      "emitted_at": "1970-01-01T00:04:46.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "text",
+          "text": " it"
+        }
+      }
+    },
+    {
+      "seq": 287,
+      "emitted_at": "1970-01-01T00:04:47.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "text",
+          "text": " is"
+        }
+      }
+    },
+    {
+      "seq": 288,
+      "emitted_at": "1970-01-01T00:04:48.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1,
+        "delta": {
+          "type": "text",
+          "text": "."
+        }
+      }
+    },
+    {
+      "seq": 289,
+      "emitted_at": "1970-01-01T00:04:49.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_stop",
+        "prompt_id": "PROMPT_0",
+        "block_index": 1
+      }
+    },
+    {
+      "seq": 290,
+      "emitted_at": "1970-01-01T00:04:50.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "message_complete",
+        "prompt_id": "PROMPT_0"
       }
     }
   ],
