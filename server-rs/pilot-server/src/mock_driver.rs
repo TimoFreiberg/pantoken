@@ -197,8 +197,8 @@ fn mock_commands() -> Vec<CommandInfo> {
             argument_hint: None,
         },
         CommandInfo {
-            name: "skill:polish".into(),
-            description: Some("Analyze a codebase for improvements".into()),
+            name: "skill:journal".into(),
+            description: Some("Capture a durable judgment for a future session".into()),
             source: CommandSource::Skill,
             argument_hint: None,
         },
@@ -206,6 +206,7 @@ fn mock_commands() -> Vec<CommandInfo> {
 }
 
 fn mock_files() -> Vec<FileInfo> {
+    // Faithful port of TS `MOCK_FILES` (`server/src/fixtures.ts:100-133`).
     vec![
         FileInfo {
             path: "README.md".into(),
@@ -256,7 +257,15 @@ fn mock_files() -> Vec<FileInfo> {
             is_directory: false,
         },
         FileInfo {
+            path: "server/src/hub.test.ts".into(),
+            is_directory: false,
+        },
+        FileInfo {
             path: "server/src/fixtures.ts".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "server/src/polytoken/polytoken-driver.ts".into(),
             is_directory: false,
         },
         FileInfo {
@@ -268,11 +277,63 @@ fn mock_files() -> Vec<FileInfo> {
             is_directory: false,
         },
         FileInfo {
+            path: "client/src/components/Composer.svelte".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "client/src/components/SlashMenu.svelte".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "client/src/lib/store.svelte.ts".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "client/src/lib/slash.ts".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "client/src/lib/slash.test.ts".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "client/src/lib/ws.svelte.ts".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "e2e".into(),
+            is_directory: true,
+        },
+        FileInfo {
+            path: "e2e/slash.e2e.ts".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "e2e/composer-resize.e2e.ts".into(),
+            is_directory: false,
+        },
+        FileInfo {
             path: "protocol".into(),
             is_directory: true,
         },
         FileInfo {
+            path: "protocol/src/wire.ts".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "protocol/src/session-driver.ts".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "protocol/src/state.ts".into(),
+            is_directory: false,
+        },
+        FileInfo {
             path: "package.json".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "tsconfig.json".into(),
             is_directory: false,
         },
     ]
@@ -2087,14 +2148,38 @@ impl PilotDriver for MockDriver {
         &self,
         query: String,
         _session_id: Option<SessionId>,
-        _cwd: Option<String>,
+        cwd: Option<String>,
     ) -> Vec<FileInfo> {
-        let q = query.to_lowercase();
-        mock_files()
+        // Faithful port of TS `MockDriver.listFiles()` (`server/src/mock-driver.ts:764-788`):
+        // a new-session draft passes its target cwd — surface it as a synthetic
+        // `<cwd>/DRAFT-CWD.md` match so the draft @-mention path
+        // (Composer → store → hub → driver) is verifiable end-to-end; the real
+        // driver actually searches that dir. A real session passes no cwd, so the
+        // marker is absent. Then case-insensitive substring filter, sort by path
+        // length, cap at 20.
+        let mut pool: Vec<FileInfo> = mock_files();
+        if let Some(cwd) = cwd {
+            let trimmed = cwd.trim_end_matches('/');
+            pool.insert(
+                0,
+                FileInfo {
+                    path: format!("{trimmed}/DRAFT-CWD.md"),
+                    is_directory: false,
+                },
+            );
+        }
+        let q = query.trim().to_lowercase();
+        if q.is_empty() {
+            return pool.into_iter().take(20).collect();
+        }
+        let mut matched: Vec<FileInfo> = pool
             .into_iter()
             .filter(|f| f.path.to_lowercase().contains(&q))
-            .take(20)
-            .collect()
+            .collect();
+        // sort_by is stable; sort by path length to match TS.
+        matched.sort_by_key(|f| f.path.len());
+        matched.truncate(20);
+        matched
     }
     async fn list_dir(&self, path: Option<String>) -> DirListing {
         // Faithful port of TS `listDir()`: resolve the (possibly-empty) path, look
@@ -2234,6 +2319,19 @@ impl PilotDriver for MockDriver {
                 message: "Context cleared".into(),
                 level: Some(NotifyLevel::Info),
             },
+        });
+    }
+
+    // Faithful port of TS `MockDriver.setNotificationAutodrain()`
+    // (`server/src/mock-driver.ts:849-858`): set the flag and emit a
+    // `sessionUpdated` whose snapshot carries `notificationAutodrain: enabled`
+    // so the Settings toggle round-trips through the hub → client.
+    async fn set_notification_autodrain(&self, enabled: bool, _session_id: Option<SessionId>) {
+        let mut snapshot = mock_snapshot(SessionStatus::Idle);
+        snapshot.notification_autodrain = Some(enabled);
+        self.emit(SessionDriverEvent::SessionUpdated {
+            base: base(),
+            snapshot,
         });
     }
 
