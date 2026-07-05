@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { store } from "../lib/store.svelte.js";
   import { scrollIndexIntoView } from "../lib/scroll-into-view.js";
 
@@ -96,6 +97,8 @@
     // the DOM has settled from any pending $state-driven re-renders.
     requestAnimationFrame(() => filterRef?.focus());
   }
+
+  onMount(() => refocus());
 
   function go(path: string) {
     store.queryDir(path);
@@ -323,7 +326,6 @@
       bind:value={filterText}
       bind:this={filterRef}
       placeholder={isPathMode ? "Type a path, Enter to go…" : "Filter subdirectories…"}
-      autofocus
       spellcheck="false"
       autocapitalize="off"
       autocorrect="off"

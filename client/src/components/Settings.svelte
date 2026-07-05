@@ -1083,12 +1083,6 @@
   .mitem.fav:hover {
     background: var(--surface-sunken);
   }
-  .mitem input[type="checkbox"] {
-    flex-shrink: 0;
-    accent-color: var(--accent);
-    width: 15px;
-    height: 15px;
-  }
   .mlabel {
     font-size: 13px;
     overflow: hidden;
@@ -1119,10 +1113,6 @@
     gap: 12px;
     padding: 7px 0;
   }
-  /* A disabled extension reads dimmed (its toggle is the lone full-opacity affordance). */
-  .ext.off .rinfo {
-    opacity: 0.55;
-  }
   .ext-error {
     font-size: 12px;
     color: var(--danger);
@@ -1130,25 +1120,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .keyform {
-    display: flex;
-    gap: 8px;
-    margin: 2px 0 8px;
-  }
-  .keyform input {
-    flex: 1;
-    min-width: 0;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm);
-    padding: 9px 11px;
-    font-size: 16px;
-    background: var(--bg);
-    color: var(--text);
-    outline: none;
-  }
-  .keyform input:focus {
-    border-color: var(--accent);
   }
   .note.warn {
     color: var(--accent);
@@ -1249,23 +1220,6 @@
   .oauth-msg {
     font-size: 13px;
     color: var(--text);
-  }
-  .oauth-form {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .oauth-form input {
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm);
-    padding: 9px 11px;
-    font-size: 16px;
-    background: var(--bg);
-    color: var(--text);
-    outline: none;
-  }
-  .oauth-form input:focus {
-    border-color: var(--accent);
   }
   .oauth-options {
     display: flex;

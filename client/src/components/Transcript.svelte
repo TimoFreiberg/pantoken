@@ -640,6 +640,8 @@
 
 <div
   class="transcript-wrap"
+  role="region"
+  aria-label="Transcript"
   onmouseenter={() => (navHovered = true)}
   onmouseleave={() => (navHovered = false)}
   onfocusin={() => (navHovered = true)}

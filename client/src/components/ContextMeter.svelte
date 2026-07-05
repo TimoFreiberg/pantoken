@@ -104,6 +104,8 @@
 {#if usage}
   <div
     class="ctx-meter"
+    role="group"
+    aria-label="Context window controls"
     onmouseenter={() => (hovered = true)}
     onmouseleave={() => (hovered = false)}
     onfocusin={() => (hovered = true)}
