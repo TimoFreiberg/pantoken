@@ -57,6 +57,19 @@ struct WarmSession {
         reason = "BUG: spawned daemon child is not retained/enforced until warm session lifecycle is fixed in Phase 2"
     )]
     owned_process: Mutex<Option<tokio::process::Child>>,
+    /// The push end of the per-warm-session SSE consumer channel. The
+    /// `client.subscribe` callback is synchronous (`Fn`), so it can only push
+    /// (never await); it does `tx.send(envelope)` (non-blocking, order-preserving).
+    /// The receiver is drained by ONE long-lived consumer task
+    /// (`sse_consumer_handle`) which folds events sequentially — mirroring TS
+    /// `polytoken-driver.ts:368-371`. See `install_warm` for the rationale on
+    /// the unbounded (not bounded) channel.
+    sse_tx: Mutex<Option<mpsc::UnboundedSender<SseEnvelope>>>,
+    /// The single per-warm-session SSE consumer task. Aborted on
+    /// `reload_session` disposal + `shutdown` so no task leaks. Structurally
+    /// guarantees ONE consumer per session (the `debug_assert` in `install_warm`
+    /// catches a second spawn at the code level).
+    sse_consumer_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 type SessionViewed = dyn Fn(SessionId) -> bool + Send + Sync;
@@ -215,19 +228,61 @@ impl PolytokenInner {
             monitor_mode: Mutex::new(None),
             autodrain_enabled: Mutex::new(None),
             owned_process: Mutex::new(None),
+            sse_tx: Mutex::new(None),
+            sse_consumer_handle: Mutex::new(None),
         });
 
-        // Subscribe to SSE events
-        let warm_clone = warm.clone();
-        let self_clone = self.clone();
+        // Subscribe to SSE via ONE per-warm-session consumer task (not a task
+        // per event). The daemon's `subscribe` callback is synchronous (`Fn`),
+        // so it can only push; it sends each envelope into an unbounded mpsc,
+        // and a single long-lived task drains the receiver sequentially,
+        // folding events in arrival order. This mirrors the TS SSE path
+        // (`polytoken-driver.ts:368-371`) which processes events sequentially.
+        //
+        // WHY UNBOUNDED (deliberate divergence from the hub's bounded(256) +
+        // `try_send` + panic completion queue): SSE is push-only with no
+        // backpressure seam, and connect-time replays can burst (the
+        // ask-user-question corpus is 291 frames). A bounded channel would
+        // either drop (corrupting the transcript — the wrong direction for
+        // fail-loud) or panic on a burst. Unbounded + sequential drain is the
+        // faithful choice; the cost is unbounded memory only if the consumer
+        // task stalls indefinitely, which would itself be a louder failure.
+        //
+        // Single-consumer invariant: `debug_assert` that no consumer is
+        // already running for this session, so a second `install_warm` on the
+        // same `WarmSession` is caught at the code level (not just
+        // probabilistically by the ordering test).
+        debug_assert!(
+            warm.sse_consumer_handle.lock().is_none(),
+            "install_warm: SSE consumer already running for this warm session"
+        );
+        let (sse_tx, mut sse_rx) = mpsc::unbounded_channel::<SseEnvelope>();
+        *warm.sse_tx.lock() = Some(sse_tx.clone());
+        let consumer_warm = warm.clone();
+        let consumer_self = self.clone();
+        let consumer_handle = tokio::spawn(async move {
+            while let Some(envelope) = sse_rx.recv().await {
+                consumer_self
+                    .handle_sse_event(consumer_warm.clone(), envelope)
+                    .await;
+            }
+            // sse_rx returns None when all senders drop — the subscription's
+            // stop() drops the sender held in the subscribe closure below, so
+            // the consumer task exits cleanly on disposal.
+        });
+        *warm.sse_consumer_handle.lock() = Some(consumer_handle);
+
+        // The subscribe callback just pushes into the channel (non-blocking,
+        // order-preserving). It never awaits, so it's safe as a sync `Fn`. A
+        // cloned sender is moved into the closure; when the subscription is
+        // stopped (`SseSubscription::stop` aborts the SSE loop task that owns
+        // this closure), the sender drops, and the consumer's `recv` returns
+        // None → the consumer task exits.
         let sub = client
             .subscribe(move |envelope: SseEnvelope| {
-                let warm = warm_clone.clone();
-                let driver = self_clone.clone();
-                // Process the daemon event — spawn a task to avoid blocking the SSE loop
-                tokio::spawn(async move {
-                    driver.handle_sse_event(warm, envelope).await;
-                });
+                // `send` fails only if the receiver was dropped (the consumer
+                // task exited) — drop the envelope silently during teardown.
+                let _ = sse_tx.send(envelope);
             })
             .await;
 
@@ -599,12 +654,28 @@ impl PilotDriver for PolytokenDriver {
             .and_then(|s| s.to_str())
             .unwrap_or("unknown")
             .to_string();
-        // Dispose existing warm session (extract before await to avoid holding the lock)
+        // Dispose existing warm session (extract before await to avoid holding the lock).
+        // Teardown order: stop the SSE subscription (aborts the daemon's stream
+        // loop → drops the subscribe closure's sender), drop our sender clone
+        // (so the consumer's recv() returns None), abort the consumer task
+        // (in case it's mid-handle_sse_event await), then close the client.
         let removed = self.inner.warm.write().remove(&session_id);
         if let Some(ws) = removed {
+            // Extract handles before awaiting (avoid holding parking_lot guards
+            // across .await — the deadlock class the hub already hit once).
             let sub = ws.sse_subscription.lock().take();
+            // Drop our sender clone so the consumer's recv() returns None once
+            // the subscribe-closure's sender is also gone.
+            *ws.sse_tx.lock() = None;
+            let consumer_handle = ws.sse_consumer_handle.lock().take();
             if let Some(sub) = sub {
                 sub.stop().await;
+            }
+            // Abort the consumer task (no-op if already exited) and await it so
+            // an in-flight handle_sse_event doesn't race the re-warm.
+            if let Some(handle) = consumer_handle {
+                handle.abort();
+                let _ = handle.await;
             }
             ws.client.close().await;
         }
@@ -1042,12 +1113,21 @@ impl PilotDriver for PolytokenDriver {
     }
 
     async fn shutdown(&self) {
-        // Extract all warm sessions before awaiting (avoid holding the lock across .await)
+        // Extract all warm sessions before awaiting (avoid holding the lock across .await).
+        // Per-session teardown mirrors reload_session: stop SSE, drop sender,
+        // abort consumer, close client.
         let warm: Vec<Arc<WarmSession>> = self.inner.warm.write().drain().map(|(_, v)| v).collect();
         for ws in warm {
+            // Extract handles before awaiting (avoid holding guards across .await).
             let sub = ws.sse_subscription.lock().take();
+            *ws.sse_tx.lock() = None;
+            let consumer_handle = ws.sse_consumer_handle.lock().take();
             if let Some(sub) = sub {
                 sub.stop().await;
+            }
+            if let Some(handle) = consumer_handle {
+                handle.abort();
+                let _ = handle.await;
             }
             ws.client.close().await;
         }

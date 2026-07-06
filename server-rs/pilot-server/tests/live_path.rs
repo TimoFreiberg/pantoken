@@ -363,3 +363,118 @@ async fn reload_session_disposes_old_warm_and_rewarms() {
 
     driver.unsubscribe(sub_id);
 }
+
+// ===========================================================================
+// Phase C — SSE ordering test (AC.3)
+// ===========================================================================
+
+/// Build a synthetic scenario whose SSE stream is: `message_start` →
+/// `content_block_start` (text) → N `content_block_delta` (text, each carrying
+/// its index as the delta text) → `content_block_stop` → `message_complete`.
+/// Each delta maps to an `AssistantDelta { text: "<idx>" }`, so the receiver
+/// can assert the emitted deltas arrive in the exact 0..N order — the
+/// invariant the per-event `tokio::spawn` violated (probabilistically) and the
+/// single per-session consumer now guarantees (deterministically).
+fn synthetic_ordering_scenario(n: usize) -> ScenarioFile {
+    use serde_json::json;
+    let mut sse: Vec<serde_json::Value> = Vec::with_capacity(n + 4);
+    sse.push(json!({
+        "seq": 0, "emitted_at": "1970-01-01T00:00:00.000Z", "session_id": "SESSION",
+        "event": { "type": "message_start", "prompt_id": "PROMPT_0" }
+    }));
+    sse.push(json!({
+        "seq": 1, "emitted_at": "1970-01-01T00:00:01.000Z", "session_id": "SESSION",
+        "event": { "type": "content_block_start", "prompt_id": "PROMPT_0", "block_index": 0,
+                   "block_type": { "type": "text" } }
+    }));
+    for i in 0..n {
+        sse.push(json!({
+            "seq": (i as i64) + 2, "emitted_at": "1970-01-01T00:00:00.000Z", "session_id": "SESSION",
+            "event": { "type": "content_block_delta", "prompt_id": "PROMPT_0", "block_index": 0,
+                       "delta": { "type": "text", "text": i.to_string() } }
+        }));
+    }
+    sse.push(json!({
+        "seq": (n as i64) + 2, "emitted_at": "1970-01-01T00:00:00.000Z", "session_id": "SESSION",
+        "event": { "type": "content_block_stop", "prompt_id": "PROMPT_0", "block_index": 0 }
+    }));
+    sse.push(json!({
+        "seq": (n as i64) + 3, "emitted_at": "1970-01-01T00:00:00.000Z", "session_id": "SESSION",
+        "event": { "type": "message_complete", "prompt_id": "PROMPT_0" }
+    }));
+    let json_str = json!({
+        "scenario": "synthetic-ordering",
+        "version": "test",
+        "description": "N ordered text deltas",
+        "canonicalization": {
+            "session_id": "SESSION",
+            "prompt_ids": {},
+            "timestamps": "monotonic-from-T0"
+        },
+        "http": [
+            // The driver's lifecycle calls: health, claim, state, history.
+            // The fake supplies canned /health + /claim; /state + /history
+            // return minimal bodies so warm-up completes.
+            { "method": "GET", "path": "/state", "status": 200,
+              "response_body": { "session_title": "t", "todos": [], "flags": [],
+                                 "env": {}, "project_cwd": "/PROJECT", "active_facet": "execute" } },
+            { "method": "GET", "path": "/history", "status": 200,
+              "response_body": { "items": [], "offset": 0, "total_projected_items": 0,
+                                 "history_revision": 0, "session_id": "SESSION" } }
+        ],
+        "sse": sse,
+        "expected_driver_events": null
+    })
+    .to_string();
+    serde_json::from_str::<ScenarioFile>(&json_str).expect("parse synthetic scenario")
+}
+
+/// AC.3: SSE events fold sequentially through ONE per-session consumer (no
+/// per-event `tokio::spawn`). A burst of 250 ordered text deltas yields
+/// in-order emitted `AssistantDelta` events.
+///
+/// **Invariant guard, weakly discriminating pre-fix:** against the old per-event
+/// `tokio::spawn` code, the failure was only probabilistic (unordered task
+/// scheduling), so this test may pass even on the buggy code. It confirms the
+/// fix WORKS post-fix; regression protection comes primarily from the
+/// structural guard (`debug_assert` one-consumer-per-session in `install_warm`).
+/// The burst is large (250) with a small inter-frame delay to give it what
+/// discriminating power it can have.
+#[tokio::test]
+async fn sse_burst_folds_in_order() {
+    let _guard = OVERRIDE_MUTEX.lock().await;
+
+    const N: usize = 250;
+    let scenario = synthetic_ordering_scenario(N);
+    // Tiny randomized-ish inter-frame delay (1ms) so the consumer tasks (in the
+    // old design) would interleave; the single consumer processes sequentially.
+    let fake = Arc::new(fake_daemon::spawn(scenario, "order-1".into(), 1).await);
+    let _ovr = OverrideGuard::install(fake.clone());
+
+    let (driver, _dir) = make_driver();
+    let (_sub_id, mut rx) = collect_events(&driver, 512);
+
+    let _seed = driver.new_session(NewSessionOptsData::default()).await;
+
+    // Collect N AssistantDelta events (the text deltas). Other events
+    // (SessionUpdated from message_start, etc.) are skipped. Timeout per recv
+    // so a stall fails the test rather than hanging.
+    let mut texts: Vec<String> = Vec::with_capacity(N);
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while texts.len() < N {
+        let ev = tokio::time::timeout_at(deadline, rx.recv())
+            .await
+            .expect("timed out waiting for AssistantDelta burst")
+            .expect("channel closed before all deltas arrived");
+        if let SessionDriverEvent::AssistantDelta { text, .. } = ev {
+            texts.push(text);
+        }
+    }
+
+    // Assert exact order: "0","1",…,"249".
+    let expected: Vec<String> = (0..N).map(|i| i.to_string()).collect();
+    assert_eq!(
+        texts, expected,
+        "SSE deltas folded out of order (expected 0..{N} in sequence)"
+    );
+}
