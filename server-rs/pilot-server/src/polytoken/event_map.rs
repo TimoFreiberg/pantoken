@@ -16,9 +16,9 @@
 //! `polytoken event-schema`).
 
 use pilot_daemon_types::{
-    BlockDeltaPayload, ContentBlockKind, CurrentGoal, DaemonEvent, PermissionCandidateRuleContext,
-    PermissionMonitor, ProviderError, SessionStateSnapshot, SystemReminderReason,
-    ToolLiveDisplayContent,
+    BlockDeltaPayload, ContentBlockKind, CurrentGoal, DaemonEvent, PendingTurnInputItem,
+    PendingTurnInputSnapshot, PermissionCandidateRuleContext, PermissionMonitor, ProviderError,
+    SessionStateSnapshot, SystemReminderReason, ToolLiveDisplayContent,
 };
 use pilot_protocol::session_driver::{
     AssistantDeltaChannel, FlaggedFile, FlaggedFileMode, GoalInfo, HostUiRequest, ImageContent,
@@ -224,6 +224,14 @@ fn meta(ctx: &dyn MapCtx) -> SessionEventBase {
         timestamp: ctx.now(),
         run_id: None,
     }
+}
+
+/// Public wrapper around `meta` so the driver (and other callers outside
+/// event_map) can build a `SessionEventBase` from a `MapCtx` without
+/// duplicating the sessionRef + timestamp convention. Used by the
+/// `RefetchQueue` effect's `QueueUpdated` emit.
+pub fn event_base(ctx: &dyn MapCtx) -> SessionEventBase {
+    meta(ctx)
 }
 
 /// Build a `hostUiRequest{kind:"notify"}` SessionDriverEvent. Pure — no I/O.
@@ -600,6 +608,42 @@ fn drained_queue_message(text: &str, item_id: Option<&str>, ts: &str) -> Session
         id,
         mode: SessionMessageDeliveryMode::Steer,
         text: text.to_string(),
+        created_at: ts.to_string(),
+        updated_at: ts.to_string(),
+    }
+}
+
+/// Build the pilot `queueUpdated` event's `messages` from a daemon
+/// `PendingTurnInputSnapshot` — a pure mapping (no I/O), unit-tested in isolation.
+///
+/// Mirrors TS `polytoken-driver.ts` `queueMsg(item, ts)` (the `refetchQueue`
+/// effect at :467-476): each `PendingTurnInputItem` → a `SessionQueuedMessage`
+/// with `mode: steer` (the daemon doesn't distinguish steer/followUp), `text`
+/// from `content`, and the fetch-time `ts` for both `created_at`/`updated_at`.
+///
+/// NOTE (ported from the TS comment): `PendingTurnInputItem` carries no
+/// timestamp (only id + content), so the timestamps are fetch-time, not
+/// queue-time. The `items[]` order IS queue order, so the message order is
+/// preserved; time-based sort would be fetch-order. Acceptable for v1 (the queue
+/// is display-only).
+pub fn queue_messages_from_snapshot(
+    snapshot: &PendingTurnInputSnapshot,
+    ts: &str,
+) -> Vec<SessionQueuedMessage> {
+    snapshot
+        .items
+        .iter()
+        .map(|item| queue_message_from_item(item, ts))
+        .collect()
+}
+
+/// Map one `PendingTurnInputItem` → `SessionQueuedMessage` (the per-item shape
+/// shared by `queue_messages_from_snapshot` and any future direct use).
+pub fn queue_message_from_item(item: &PendingTurnInputItem, ts: &str) -> SessionQueuedMessage {
+    SessionQueuedMessage {
+        id: item.id.clone(),
+        mode: SessionMessageDeliveryMode::Steer,
+        text: item.content.clone(),
         created_at: ts.to_string(),
         updated_at: ts.to_string(),
     }
@@ -1996,6 +2040,44 @@ mod tests {
         PermissionMonitorMode, SessionRef, TodoStatus, WorkspaceRef,
     };
     use serde_json::{Value, json};
+
+    // --- Phase D: queue_messages_from_snapshot unit tests (AC.5, pure helper) ---
+
+    fn snap(items: Vec<(&str, &str)>) -> PendingTurnInputSnapshot {
+        PendingTurnInputSnapshot {
+            items: items
+                .iter()
+                .map(|(id, content)| PendingTurnInputItem {
+                    id: id.to_string(),
+                    content: content.to_string(),
+                    admission_prompt_id: "PROMPT_0".to_string(),
+                })
+                .collect(),
+            queue_revision: 1,
+        }
+    }
+
+    #[test]
+    fn queue_messages_from_snapshot_maps_items_in_order() {
+        let snapshot = snap(vec![("q1", "first"), ("q2", "second")]);
+        let msgs = queue_messages_from_snapshot(&snapshot, "t0");
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].id, "q1");
+        assert_eq!(msgs[0].text, "first");
+        assert_eq!(msgs[0].mode, SessionMessageDeliveryMode::Steer);
+        assert_eq!(msgs[0].created_at, "t0");
+        assert_eq!(msgs[0].updated_at, "t0");
+        // Order preserved (queue order = items[] order).
+        assert_eq!(msgs[1].id, "q2");
+        assert_eq!(msgs[1].text, "second");
+    }
+
+    #[test]
+    fn queue_messages_from_snapshot_empty_snapshot_yields_empty() {
+        let snapshot = snap(vec![]);
+        let msgs = queue_messages_from_snapshot(&snapshot, "t0");
+        assert!(msgs.is_empty());
+    }
 
     struct TestCtx {
         r#ref: SessionRef,
