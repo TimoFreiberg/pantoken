@@ -109,7 +109,7 @@ pub struct SessionConfig {
 
 // ── Usage ───────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionUsage {
     pub tokens: Option<i64>,
     #[serde(rename = "contextWindow")]
@@ -334,7 +334,7 @@ pub struct SessionSnapshot {
 
 // ── Session list entry ─────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionListEntry {
     #[serde(rename = "sessionId")]
     pub session_id: SessionId,
@@ -369,7 +369,7 @@ pub struct SessionListEntry {
     pub worktree: Option<WorktreeInfo>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorktreeInfo {
     pub path: String,
     pub base: String,
