@@ -1843,6 +1843,11 @@ pub fn map_daemon_event(
             //   - goal None && transition≠cleared → preserve (only fetchState — a
             //     `proposed` goal must NOT blank the badge). The fetchState re-syncs
             //     the cached lastState from GET /state in every case.
+            // Equivalence to the TS (which branches on goal-presence, not
+            // `transition`) rests on the daemon invariant
+            // `goal:null ⟺ transition=="cleared"`; the contradictory inputs
+            // (null on a non-cleared transition, or absent on a cleared one) are
+            // unreachable, so the two never diverge observably.
             let fetch = DaemonEffect::FetchState {
                 emit: FetchEmit::SessionUpdated,
                 prompt_id: None,
