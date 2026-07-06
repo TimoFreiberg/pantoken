@@ -478,3 +478,120 @@ async fn sse_burst_folds_in_order() {
         "SSE deltas folded out of order (expected 0..{N} in sequence)"
     );
 }
+
+// ===========================================================================
+// Phase D — FetchState emit + RefetchQueue → queueUpdated (AC.4, AC.5)
+// ===========================================================================
+
+/// AC.4: a `FetchState` effect (from `message_complete`) emits the post-fetch
+/// `RunCompleted` event with the threaded `prompt_id` as both entry ids, AND
+/// the driver fetched fresh state (a `GET /state` hit the fake). The
+/// streaming-turn scenario ends in `message_complete` → FetchState.
+#[tokio::test]
+async fn fetch_state_emits_run_completed_with_prompt_id() {
+    let _guard = OVERRIDE_MUTEX.lock().await;
+
+    let scenario = corpus_loader::load_named(VERSION, "streaming-turn");
+    let fake = Arc::new(fake_daemon::spawn(scenario.clone(), "fetch-1".into(), 5).await);
+    let _ovr = OverrideGuard::install(fake.clone());
+
+    let (driver, _dir) = make_driver();
+    let (_sub_id, mut rx) = collect_events(&driver, 256);
+
+    let _seed = driver.new_session(NewSessionOptsData::default()).await;
+
+    // Wait for the RunCompleted (the message_complete → FetchState → emit).
+    let mut got = None;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(8);
+    while let Ok(Some(ev)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+        if matches!(ev, SessionDriverEvent::RunCompleted { .. }) {
+            got = Some(ev);
+            break;
+        }
+    }
+    let ev = got.expect("no RunCompleted emitted after message_complete");
+    match ev {
+        SessionDriverEvent::RunCompleted {
+            user_entry_id,
+            assistant_entry_id,
+            ..
+        } => {
+            // streaming-turn's prompt_id canonicalizes to PROMPT_0.
+            assert_eq!(
+                user_entry_id.as_deref(),
+                Some("PROMPT_0"),
+                "RunCompleted user_entry_id should be the daemon prompt_id"
+            );
+            assert_eq!(
+                assistant_entry_id.as_deref(),
+                Some("PROMPT_0"),
+                "RunCompleted assistant_entry_id should be the daemon prompt_id"
+            );
+        }
+        _ => unreachable!(),
+    }
+
+    // The FetchState effect fetched GET /state (the corpus records /state; the
+    // post-message_complete /state is the second recording). Assert the driver
+    // made at least one /state call beyond the warm-up one.
+    let state_calls = fake
+        .recorded_calls()
+        .iter()
+        .filter(|(m, p)| m == "GET" && p == "/state")
+        .count();
+    assert!(
+        state_calls >= 2,
+        "FetchState should have fetched /state after message_complete; /state calls: {}",
+        state_calls
+    );
+}
+
+/// AC.5: a `RefetchQueue` effect (from `pending_turn_input_queued`) emits a
+/// `QueueUpdated` carrying the full queue, AND the driver fetched it via `GET
+/// /turn/input`. The queue-while-in-flight scenario carries
+/// `pending_turn_input_queued`.
+#[tokio::test]
+async fn refetch_queue_emits_queue_updated() {
+    let _guard = OVERRIDE_MUTEX.lock().await;
+
+    let scenario = corpus_loader::load_named(VERSION, "queue-while-in-flight");
+    let fake = Arc::new(fake_daemon::spawn(scenario.clone(), "queue-1".into(), 5).await);
+    let _ovr = OverrideGuard::install(fake.clone());
+
+    let (driver, _dir) = make_driver();
+    let (_sub_id, mut rx) = collect_events(&driver, 256);
+
+    let _seed = driver.new_session(NewSessionOptsData::default()).await;
+
+    // Wait for the QueueUpdated (the pending_turn_input_queued → RefetchQueue →
+    // GET /turn/input → emit). Timeout so a missing emit fails fast.
+    let mut got = None;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(8);
+    while let Ok(Some(ev)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+        if matches!(ev, SessionDriverEvent::QueueUpdated { .. }) {
+            got = Some(ev);
+            break;
+        }
+    }
+    let ev = got.expect("no QueueUpdated emitted after pending_turn_input_queued");
+    match ev {
+        SessionDriverEvent::QueueUpdated { messages, .. } => {
+            // The canned /turn/input serves one item (q1, "queued-turn-text").
+            assert_eq!(
+                messages.len(),
+                1,
+                "QueueUpdated should carry the full queue (1 item)"
+            );
+            assert_eq!(messages[0].id, "q1");
+            assert_eq!(messages[0].text, "queued-turn-text");
+        }
+        _ => unreachable!(),
+    }
+
+    // The RefetchQueue effect fetched GET /turn/input.
+    assert!(
+        fake.called("GET", "/turn/input"),
+        "RefetchQueue should have fetched GET /turn/input; calls: {:?}",
+        fake.recorded_calls()
+    );
+}

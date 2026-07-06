@@ -402,15 +402,27 @@ impl PolytokenInner {
     /// Execute a daemon effect.
     async fn execute_effect(self: &Arc<Self>, ws: &Arc<WarmSession>, effect: DaemonEffect) {
         match effect {
-            #[expect(
-                unused_variables,
-                reason = "BUG: FetchState emit/prompt_id ignored; post-fetch event emission is Phase 2"
-            )]
             DaemonEffect::FetchState { emit, prompt_id } => {
+                // Refresh the cached state, then build the follow-up event from
+                // the REFRESHED cache (build_post_fetch_event is pure + tested).
+                // The prompt_id (from message_complete) is threaded through so
+                // RunCompleted carries the branch-handle entryIds. Mirrors TS
+                // executeEffect fetchState (polytoken-driver.ts:425-433).
                 let res = ws.client.state().await;
                 if let Some(state) = res.data {
                     *ws.last_state.write() = Some(state);
                 }
+                // Build a fresh ctx from the now-updated warm cache so the
+                // snapshot reflects the refreshed state (usage/title/etc.).
+                let fresh_ctx = DriverMapCtx {
+                    session_ref: ws.session_ref.clone(),
+                    workspace: ws.workspace.clone(),
+                    last_state: ws.last_state.read().clone(),
+                    monitor_mode: *ws.monitor_mode.lock(),
+                    autodrain_enabled: *ws.autodrain_enabled.lock(),
+                };
+                let ev = event_map::build_post_fetch_event(emit, &fresh_ctx, prompt_id.as_deref());
+                self.emit(ev);
             }
             DaemonEffect::Reseed => {
                 let res = ws.client.history(None, None).await;
@@ -427,8 +439,35 @@ impl PolytokenInner {
                 }
             }
             DaemonEffect::RefetchQueue => {
-                let _res = ws.client.turn_input_snapshot().await;
-                // TODO: map snapshot to queueUpdated event (Phase 2)
+                // The queue events carry one item + revision, not the full
+                // queue. pilot's queueUpdated REPLACES the full queue, so fetch
+                // GET /turn/input and emit the full queue. Mirrors TS
+                // refetchQueue (polytoken-driver.ts:460-476).
+                let res = ws.client.turn_input_snapshot().await;
+                if let Some(snapshot) = res.data {
+                    let now = {
+                        // Reuse the DriverMapCtx timestamp convention so the
+                        // fetch-time ts matches other emitted events.
+                        let ctx = DriverMapCtx {
+                            session_ref: ws.session_ref.clone(),
+                            workspace: ws.workspace.clone(),
+                            last_state: ws.last_state.read().clone(),
+                            monitor_mode: *ws.monitor_mode.lock(),
+                            autodrain_enabled: *ws.autodrain_enabled.lock(),
+                        };
+                        ctx.now()
+                    };
+                    let messages = event_map::queue_messages_from_snapshot(&snapshot, &now);
+                    let ctx = DriverMapCtx {
+                        session_ref: ws.session_ref.clone(),
+                        workspace: ws.workspace.clone(),
+                        last_state: ws.last_state.read().clone(),
+                        monitor_mode: *ws.monitor_mode.lock(),
+                        autodrain_enabled: *ws.autodrain_enabled.lock(),
+                    };
+                    let base = event_map::event_base(&ctx);
+                    self.emit(SessionDriverEvent::QueueUpdated { base, messages });
+                }
             }
             DaemonEffect::SetMonitorMode { mode } => {
                 *ws.monitor_mode.lock() = Some(mode);

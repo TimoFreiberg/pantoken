@@ -84,6 +84,23 @@ fn canned(method: &str, path: &str) -> Option<(StatusCode, Value)> {
     if m == "POST" && (p == "/tui-attachment/release" || p == "/terminate") {
         return Some((StatusCode::OK, serde_json::json!({"ok": true})));
     }
+    // GET /turn/input — the RefetchQueue effect's snapshot fetch. The corpus
+    // doesn't record /turn/input (the queue-while-in-flight scenario triggers
+    // a RefetchQueue but the capture didn't snapshot it), so serve a canned
+    // PendingTurnInputSnapshot with one queued item so the driver can build a
+    // QueueUpdated. (Tests that assert on the real queue contents use a
+    // synthetic scenario instead.)
+    if m == "GET" && p == "/turn/input" {
+        return Some((
+            StatusCode::OK,
+            serde_json::json!({
+                "items": [
+                    {"id": "q1", "content": "queued-turn-text", "admission_prompt_id": "PROMPT_0"}
+                ],
+                "queue_revision": 2
+            }),
+        ));
+    }
     None
 }
 
