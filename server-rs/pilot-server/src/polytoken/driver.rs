@@ -14,6 +14,30 @@
 //! `self: &Arc<Self>` so they can be cloned into spawned SSE tasks, and
 //! `open_session`/`new_session` can reach them from a plain `&self` by going
 //! through `self.inner`.
+//!
+//! ## SSE consumer: ONE per-session task, unbounded mpsc (not per-event spawn)
+//!
+//! Each warm session subscribes to the daemon's `/events` SSE stream via ONE
+//! long-lived consumer task that drains an unbounded `tokio::mpsc` sequentially.
+//! The `client.subscribe` callback is synchronous (`Fn`), so it can only push
+//! (`tx.send(envelope)` — non-blocking, order-preserving); the consumer task
+//! folds events in arrival order, mirroring the TS SSE path
+//! (`polytoken-driver.ts:368-371`). This replaces an earlier per-event
+//! `tokio::spawn` (unordered tasks → out-of-order deltas under bursts).
+//!
+//! **Deliberate divergence from the hub's bounded(256)+`try_send`+panic
+//! completion queue:** SSE is push-only with no backpressure seam, and
+//! connect-time replays can burst (the ask-user-question corpus is 291 frames).
+//! A bounded channel would either drop (corrupting the transcript — the wrong
+//! direction for fail-loud) or panic on a burst. Unbounded + sequential drain is
+//! the faithful choice; the cost is unbounded memory only if the consumer task
+//! stalls indefinitely, which would itself be a louder failure. The
+//! single-consumer invariant is `debug_assert`ed in `install_warm` (one consumer
+//! per session, caught at the code level — the primary regression protection,
+//! since the ordering test is only probabilistically discriminating).
+//!
+//! On disposal (`reload_session`/`shutdown`), the consumer's `JoinHandle` is
+//! aborted + awaited alongside the SSE-subscription teardown so no task leaks.
 //
 
 use std::collections::HashMap;
@@ -445,19 +469,9 @@ impl PolytokenInner {
                 // refetchQueue (polytoken-driver.ts:460-476).
                 let res = ws.client.turn_input_snapshot().await;
                 if let Some(snapshot) = res.data {
-                    let now = {
-                        // Reuse the DriverMapCtx timestamp convention so the
-                        // fetch-time ts matches other emitted events.
-                        let ctx = DriverMapCtx {
-                            session_ref: ws.session_ref.clone(),
-                            workspace: ws.workspace.clone(),
-                            last_state: ws.last_state.read().clone(),
-                            monitor_mode: *ws.monitor_mode.lock(),
-                            autodrain_enabled: *ws.autodrain_enabled.lock(),
-                        };
-                        ctx.now()
-                    };
-                    let messages = event_map::queue_messages_from_snapshot(&snapshot, &now);
+                    // One ctx for both the per-message ts and the base timestamp
+                    // (built from the same cached fields) so they're consistent
+                    // by construction, not coincidence.
                     let ctx = DriverMapCtx {
                         session_ref: ws.session_ref.clone(),
                         workspace: ws.workspace.clone(),
@@ -465,6 +479,8 @@ impl PolytokenInner {
                         monitor_mode: *ws.monitor_mode.lock(),
                         autodrain_enabled: *ws.autodrain_enabled.lock(),
                     };
+                    let now = ctx.now();
+                    let messages = event_map::queue_messages_from_snapshot(&snapshot, &now);
                     let base = event_map::event_base(&ctx);
                     self.emit(SessionDriverEvent::QueueUpdated { base, messages });
                 }
