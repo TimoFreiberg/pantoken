@@ -20,6 +20,7 @@ pub mod pidlock;
 pub mod polytoken;
 pub mod push;
 pub mod settings_store;
+pub mod shared;
 pub mod static_serve;
 pub mod stub_driver;
 pub mod ws_send;

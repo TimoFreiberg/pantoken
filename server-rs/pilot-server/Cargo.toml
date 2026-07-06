@@ -30,3 +30,4 @@ tokio-stream = { workspace = true }
 urlencoding = { workspace = true }
 web-push = { workspace = true }
 chrono = { workspace = true }
+rand = { workspace = true }

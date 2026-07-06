@@ -400,7 +400,7 @@ the modules that matter most for cutover:
 | polytoken/daemon-client.test.ts     | 14    | 0                      |
 | polytoken/lease-retry.test.ts       | 11    | 0                      |
 | polytoken/sessions-registry.test.ts | 15    | 0                      |
-| shared/* (worktree, login-env, warm-cap, background-model, session-list) | 53 | modules not ported |
+| shared/* (worktree, login-env, warm-cap, background-model, session-list) | 53 | 27 (Phase-1 pure ports 2026-07-06: warm_cap 10, login_env pure 11, session_list 4, worktree_name 2; background_model 10 counted above). worktree.rs, fs stores, and impure login_env capture deferred to later phases |
 
 And the e2e suite runs the **mock driver only**, so the live path
 (`daemon_client` → `event_map` → `driver`, ~5.7k lines) currently has **zero
