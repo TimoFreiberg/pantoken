@@ -365,8 +365,150 @@ async fn reload_session_disposes_old_warm_and_rewarms() {
 }
 
 // ===========================================================================
+// Phase 4 — multi-spawn fake-daemon harness
+// ===========================================================================
+
+#[tokio::test]
+async fn multi_spawn_override_mints_fresh_fake_per_new_session() {
+    let _guard = OVERRIDE_MUTEX.lock().await;
+
+    let scenario = synthetic_idle_scenario();
+    let override_guard = fake_daemon::MultiSpawnOverrideGuard::install(scenario, "multi-smoke");
+    let handle = override_guard.handle();
+
+    let (driver, _dir) = make_driver();
+    for _ in 0..3 {
+        let _seed = driver.new_session(NewSessionOptsData::default()).await;
+    }
+
+    let spawned = handle.spawned();
+    assert_eq!(spawned.len(), 3, "expected one fake daemon per new_session");
+
+    let session_ids: std::collections::BTreeSet<_> = spawned
+        .iter()
+        .map(|spawned| spawned.session_id.as_str())
+        .collect();
+    assert_eq!(
+        session_ids.len(),
+        3,
+        "each new_session should receive a distinct minted session id: {spawned:?}"
+    );
+
+    let ports: std::collections::BTreeSet<_> = spawned.iter().map(|spawned| spawned.port).collect();
+    assert_eq!(
+        ports.len(),
+        3,
+        "each fake daemon should bind a distinct ephemeral port: {spawned:?}"
+    );
+
+    for spawned in &spawned {
+        assert!(
+            spawned.called("GET", "/health"),
+            "{} never warmed through /health; calls: {:?}",
+            spawned.session_id,
+            spawned.recorded_calls()
+        );
+        assert!(
+            spawned.called("GET", "/state"),
+            "{} never fetched /state; calls: {:?}",
+            spawned.session_id,
+            spawned.recorded_calls()
+        );
+        assert!(
+            spawned.called("GET", "/history"),
+            "{} never built a seed from /history; calls: {:?}",
+            spawned.session_id,
+            spawned.recorded_calls()
+        );
+    }
+
+    let captured_opts = handle.captured_opts();
+    assert_eq!(
+        captured_opts.len(),
+        3,
+        "capture one SpawnDaemonOpts per spawn"
+    );
+    assert!(
+        captured_opts.iter().all(|opts| opts.login_env.is_none()),
+        "Phase 4 driver still passes login_env None; captured opts: {captured_opts:?}"
+    );
+}
+
+// ===========================================================================
 // Phase C — SSE ordering test (AC.3)
 // ===========================================================================
+
+/// Build a minimal `/state` + `/history` scenario (empty SSE) for the
+/// multi-spawn harness: just liveness plus a `turn_in_flight` flag readable
+/// from `/state`. The `/state` body is a full `SessionStateSnapshot` (pinned by
+/// `synthetic_state_scenarios_deserialize_as_session_state`).
+fn minimal_state_scenario(name: &str, turn_in_flight: bool) -> ScenarioFile {
+    use serde_json::json;
+    let json_str = json!({
+        "scenario": name,
+        "version": "test",
+        "description": "minimal state/history scenario for multi-spawn harness tests",
+        "canonicalization": {
+            "session_id": "SESSION",
+            "prompt_ids": {},
+            "timestamps": "monotonic-from-T0"
+        },
+        "http": [
+            { "method": "GET", "path": "/state", "status": 200,
+              "response_body": { "session_title": "t", "todos": [], "flags": [],
+                                 "env": {}, "project_cwd": "/PROJECT", "active_facet": "execute",
+                                 "plugin_config": {}, "turn_in_flight": turn_in_flight } },
+            { "method": "GET", "path": "/history", "status": 200,
+              "response_body": { "items": [], "offset": 0, "total_projected_items": 0,
+                                 "history_revision": 0, "session_id": "SESSION" } }
+        ],
+        "sse": [],
+        "expected_driver_events": null
+    })
+    .to_string();
+    serde_json::from_str::<ScenarioFile>(&json_str).expect("parse minimal synthetic scenario")
+}
+
+// Consumed now by `synthetic_state_scenarios_deserialize_as_session_state`, and
+// in Phase 5 by the warm-cap in-flight-skip eviction test (AC.7 — a session
+// whose /state reports turn_in_flight:true must never be evicted).
+fn synthetic_turn_in_flight_scenario() -> ScenarioFile {
+    minimal_state_scenario("synthetic-turn-in-flight", true)
+}
+
+/// Guard the synthetic `/state` fixtures against `SessionStateSnapshot` drift.
+/// The driver's warm path deserializes `/state` into that type and *swallows* a
+/// parse failure (`DaemonClient::get` uses `.ok()`), so a body missing a required
+/// field (e.g. `plugin_config`) would leave `last_state = None` and silently
+/// hollow out every scenario that depends on it — including the turn_in_flight
+/// eviction case. This pins that both synthetic bodies fully deserialize and that
+/// `turn_in_flight` survives the round-trip into the driver's state type.
+#[test]
+fn synthetic_state_scenarios_deserialize_as_session_state() {
+    for (scenario, expect_in_flight) in [
+        (synthetic_idle_scenario(), false),
+        (synthetic_turn_in_flight_scenario(), true),
+        (synthetic_ordering_scenario(1), false),
+    ] {
+        let state = scenario
+            .http
+            .iter()
+            .find(|entry| entry.method == "GET" && entry.path == "/state")
+            .and_then(|entry| entry.response_body.clone())
+            .expect("scenario serves a GET /state body");
+        let snapshot: pilot_daemon_types::SessionStateSnapshot = serde_json::from_value(state)
+            .expect("synthetic /state must deserialize as a full SessionStateSnapshot");
+        assert_eq!(
+            snapshot.turn_in_flight.unwrap_or(false),
+            expect_in_flight,
+            "turn_in_flight must survive the round-trip into the driver's state type"
+        );
+    }
+}
+
+fn synthetic_idle_scenario() -> ScenarioFile {
+    minimal_state_scenario("synthetic-idle", false)
+}
 
 /// Build a synthetic scenario whose SSE stream is: `message_start` →
 /// `content_block_start` (text) → N `content_block_delta` (text, each carrying
@@ -417,7 +559,8 @@ fn synthetic_ordering_scenario(n: usize) -> ScenarioFile {
             // return minimal bodies so warm-up completes.
             { "method": "GET", "path": "/state", "status": 200,
               "response_body": { "session_title": "t", "todos": [], "flags": [],
-                                 "env": {}, "project_cwd": "/PROJECT", "active_facet": "execute" } },
+                                 "env": {}, "project_cwd": "/PROJECT", "active_facet": "execute",
+                                 "plugin_config": {} } },
             { "method": "GET", "path": "/history", "status": 200,
               "response_body": { "items": [], "offset": 0, "total_projected_items": 0,
                                  "history_revision": 0, "session_id": "SESSION" } }

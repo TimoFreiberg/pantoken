@@ -25,6 +25,7 @@
 // as dead in the corpus binary. The live_path binary uses them all.
 #![allow(dead_code)]
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use axum::{
@@ -41,6 +42,10 @@ use parking_lot::Mutex;
 use serde_json::Value;
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::ReceiverStream;
+
+use pilot_server::polytoken::daemon_client::{
+    SpawnDaemonOpts, SpawnedDaemon, clear_spawn_override, set_spawn_override,
+};
 
 use super::corpus::ScenarioFile;
 
@@ -188,6 +193,160 @@ pub async fn spawn(
         session_id,
         state,
         _serve: serve,
+    }
+}
+
+/// A single fake spawned by [`MultiSpawnOverrideGuard`]. Kept inspectable so
+/// warm-cap tests can compare ports/session ids and per-daemon call logs.
+#[derive(Clone)]
+pub struct SpawnedFakeDaemon {
+    pub session_id: String,
+    pub port: u16,
+    fake: Arc<FakeDaemon>,
+}
+
+impl std::fmt::Debug for SpawnedFakeDaemon {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpawnedFakeDaemon")
+            .field("session_id", &self.session_id)
+            .field("port", &self.port)
+            .finish_non_exhaustive()
+    }
+}
+
+impl SpawnedFakeDaemon {
+    /// Every `(method, path)` the driver made to this fake, in arrival order.
+    pub fn recorded_calls(&self) -> Vec<(String, String)> {
+        self.fake.recorded_calls()
+    }
+
+    /// True iff the driver made a call matching `method` + `path` to this fake.
+    pub fn called(&self, method: &str, path: &str) -> bool {
+        self.fake.called(method, path)
+    }
+}
+
+#[derive(Default)]
+struct MultiSpawnState {
+    spawned: Vec<SpawnedFakeDaemon>,
+    opts: Vec<SpawnDaemonOpts>,
+    warm: BTreeSet<String>,
+    closed: BTreeSet<String>,
+}
+
+/// Inspectable handle for a multi-spawn override. Clone it into the test body;
+/// the guard owns override cleanup, while this handle exposes what happened.
+#[derive(Clone)]
+pub struct MultiSpawnHandle {
+    state: Arc<Mutex<MultiSpawnState>>,
+}
+
+impl MultiSpawnHandle {
+    /// Fakes spawned so far, in spawn/new-session order.
+    pub fn spawned(&self) -> Vec<SpawnedFakeDaemon> {
+        self.state.lock().spawned.clone()
+    }
+
+    /// `SpawnDaemonOpts` captured for each override invocation.
+    pub fn captured_opts(&self) -> Vec<SpawnDaemonOpts> {
+        self.state.lock().opts.clone()
+    }
+
+    /// Session ids the test observed as still warm. Phase 5 can feed this with
+    /// the hub/driver-visible warm set after driving `cap+1` sessions.
+    pub fn mark_warm_sessions<I>(&self, session_ids: I)
+    where
+        I: IntoIterator<Item = String>,
+    {
+        self.state.lock().warm = session_ids.into_iter().collect();
+    }
+
+    /// Last warm-set snapshot supplied through [`Self::mark_warm_sessions`].
+    pub fn warm_sessions(&self) -> Vec<String> {
+        self.state.lock().warm.iter().cloned().collect()
+    }
+
+    /// Record session ids whose `SessionClosed` event a test observed.
+    pub fn mark_session_closed<I>(&self, session_ids: I)
+    where
+        I: IntoIterator<Item = String>,
+    {
+        self.state.lock().closed = session_ids.into_iter().collect();
+    }
+
+    /// Last `SessionClosed` snapshot supplied through [`Self::mark_session_closed`].
+    pub fn session_closed(&self) -> Vec<String> {
+        self.state.lock().closed.iter().cloned().collect()
+    }
+}
+
+/// Multi-spawn override guard: every spawn invocation starts a fresh fake daemon
+/// on a fresh ephemeral port and returns its minted session id to the driver.
+pub struct MultiSpawnOverrideGuard {
+    handle: MultiSpawnHandle,
+}
+
+impl MultiSpawnOverrideGuard {
+    /// Install a multi-spawn override. The caller must hold the test binary's
+    /// process-global override mutex for the full guard lifetime.
+    pub fn install(scenario: ScenarioFile, session_prefix: impl Into<String>) -> Self {
+        Self::install_with_delay(scenario, session_prefix, 0)
+    }
+
+    /// Same as [`Self::install`], with explicit SSE inter-frame delay.
+    pub fn install_with_delay(
+        scenario: ScenarioFile,
+        session_prefix: impl Into<String>,
+        inter_frame_delay_ms: u64,
+    ) -> Self {
+        let state = Arc::new(Mutex::new(MultiSpawnState::default()));
+        let handle = MultiSpawnHandle {
+            state: state.clone(),
+        };
+        let session_prefix = session_prefix.into();
+        let scenario = Arc::new(scenario);
+
+        set_spawn_override(Arc::new(move |_bin: &str, opts: SpawnDaemonOpts| {
+            let state = state.clone();
+            let scenario = scenario.clone();
+            let session_prefix = session_prefix.clone();
+            Box::pin(async move {
+                let idx = {
+                    let mut state = state.lock();
+                    state.opts.push(opts.clone());
+                    state.opts.len()
+                };
+                let session_id = format!("{session_prefix}-{idx}");
+                let fake = Arc::new(
+                    spawn(
+                        (*scenario).clone(),
+                        session_id.clone(),
+                        inter_frame_delay_ms,
+                    )
+                    .await,
+                );
+                let port = fake.port;
+                let spawned = SpawnedFakeDaemon {
+                    session_id: session_id.clone(),
+                    port,
+                    fake,
+                };
+                state.lock().spawned.push(spawned);
+                Ok(SpawnedDaemon { session_id, port })
+            })
+        }));
+
+        Self { handle }
+    }
+
+    pub fn handle(&self) -> MultiSpawnHandle {
+        self.handle.clone()
+    }
+}
+
+impl Drop for MultiSpawnOverrideGuard {
+    fn drop(&mut self) {
+        clear_spawn_override();
     }
 }
 
