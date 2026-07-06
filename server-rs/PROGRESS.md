@@ -15,7 +15,12 @@ ui-bridge 38/38, dual-reviewed (Opus); surfaced + fixed a real live-path bug
 NEXT: the rest of Phase 2 — the **fake-daemon integration harness** (axum router
 driven by the frozen corpus) and the two driver.rs live-path bugs it can finally
 test (SSE per-event `tokio::spawn` ordering; `FetchState` emit / `RefetchQueue`
-being ignored). LIVE CORPUS CAPTURE DONE (2026-07-06, 5/6 scenarios,
+being ignored). **Phase 2 (items 1–3) COMPLETE (2026-07-06):** the harness +
+spawn-override seam are live, the warm-session lifecycle is wired (was entirely
+dead — `#[expect(dead_code)]`), and both effect bugs are fixed. See "Phase 2
+live-path validation" below for the findings + the `Arc<Inner>` refactor. Items
+4–5 (daemon-client/lease-retry test ports, shared/module ports) + Phases 2.5/3
+remain. LIVE CORPUS CAPTURE DONE (2026-07-06, 5/6 scenarios,
 deepseek): found+fixed a canonicalization bug (+regression test), 2 seed/reality
 mismatches, and RESOLVED the tool-call-approval permission gating (needs the
 `standard` matcher PLUS a version-2 `ask` permissions rule — `standard` alone
@@ -118,6 +123,63 @@ green (8 tests).**
   human-reviewed drift canary, not a byte-exact oracle. Content churn on re-capture is
   expected; the idempotency test only pins that canon-of-canon is stable.
 
+## Phase 2 live-path validation (2026-07-06, items 1–3 COMPLETE)
+
+The live path (`daemon_client` → `event_map` → `driver`, ~5.7k lines) had **zero
+coverage of any kind** before this — the e2e suite runs the mock driver only.
+This phase built the missing test infrastructure and wired + fixed the three
+named live-path bugs. All reviewer-approved (Phase B: no critical/high; Phase D
+pending).
+
+**The crux (verified by inspection):** the live path was non-functional past
+seeding. `warm_session` (the only SSE subscriber) was `#[expect(dead_code)]` and
+nothing called it — `open_session`/`new_session` seeded from `/history` then
+DROPPED the client, so every post-seed method (`prompt`, `abort`, streaming)
+did `get_warm(sid)` → `None` → silent no-op against a real daemon.
+
+**The structural knot:** `warm_session`/`handle_sse_event`/`execute_effect`
+take `self: &Arc<Self>` (cloned into spawned SSE tasks), but the hub owns
+`Box<dyn PilotDriver>` with `&self` trait methods — `open_session` literally
+couldn't call `warm_session` from `&self`. Resolved by an `Arc<PolytokenInner>`
+split: `PolytokenDriver { inner: Arc<PolytokenInner> }` is a thin wrapper whose
+trait impls delegate. Lock-across-await audited clean (reviewer-confirmed):
+all `parking_lot` guards dropped before `.await`; the extract-then-await
+patterns in `reload_session`/`shutdown` survived.
+
+**What landed (4 commits, one per phase):**
+- **Phase A — fake-daemon harness + spawn-override seam.** axum router replaying
+  the frozen corpus over an ephemeral port (HTTP replay + `GET /events` SSE
+  stream); `daemon_client::set_spawn_override` swaps the process launch so
+  `PolytokenDriver` reaches the fake end-to-end. AC.1 smoke test passes.
+- **Phase B — `Arc<Inner>` + warm-session wiring.** `open_session` (attach to a
+  known port) / `new_session` (spawn path) / `reload_session` (dispose + re-open)
+  now route through `install_warm` (health→lease→state→SSE→insert). The SSE fold
+  is LIVE end-to-end (AC.2: a `SessionUpdated` arrives after `new_session`).
+- **Phase C — SSE per-event ordering.** Replaced the per-event `tokio::spawn`
+  with ONE per-session unbounded-mpsc consumer task (sequential fold = TS parity).
+  Deliberate divergence from the hub's bounded+panic queue (SSE is push-only;
+  bursts up to 291 frames; dropping corrupts the transcript). `debug_assert`
+  single-consumer is the primary regression protection. AC.3: 250 ordered
+  deltas fold in order.
+- **Phase D — FetchState emit + RefetchQueue→queueUpdated.** Both were TODOs in
+  `execute_effect`. FetchState now emits `build_post_fetch_event` against the
+  refreshed cache with the threaded `prompt_id`; RefetchQueue maps the snapshot
+  → `QueueUpdated` via `queue_messages_from_snapshot` (pure, unit-tested).
+  AC.4 + AC.5.
+
+**Scope kept (out of scope, `#[expect]` BUG markers retained):** the `$HOME`
+workspace fabrication, `opts.worktree`, `login_env`, `owned_process` retention,
+`warm_cap` enforcement, `list_sessions` hardcoded closures. The reload
+re-warm-via-attach path needs `startup.json` (session-registry/worktree port —
+Phase 2 item 5); the harness can't exercise it, so the reload test asserts
+disposal + no-deadlock (the in-scope half) rather than re-warm emission.
+
+**Test-vehicle notes:** `pilot-server` was bin-only (integration tests couldn't
+reach driver internals); added `src/lib.rs` so tests import
+`pilot_server::polytoken::{driver,daemon_client,event_map}`. The corpus records
+no `/history` items and no `/turn/input` for the effect scenarios, so the
+harness serves canned responses for those lifecycle endpoints.
+
 ## Goal (unchanged)
 
 Replace the Bun/TS server (`server/`) with a Rust server implementing the same
@@ -127,10 +189,12 @@ validation legs are green plus a live-daemon smoke test.
 
 ## Where the port actually stands
 
-**Ground truth (2026-07-05, full suite, one machine, post-Phase-1.8 —
-mock-e2e burn-down COMPLETE):**
+**Ground truth (2026-07-06, full suite, one machine — Phase 2 items 1–3 done):**
 
-- `cargo test`: **176/176 pass** (5 daemon-types, 64 protocol, 107 server).
+- `cargo test`: **358/358 pass** (5 daemon-types, 64 protocol, 281 server — incl.
+  8 live-path integration tests under `tests/live_path.rs` + 8 corpus). The
+  live path now has its FIRST integration coverage: harness + spawn seam + warm
+  lifecycle + SSE ordering + both effect emits.
 - `cargo clippy --all-targets -- -D warnings`: 0 warnings (Phase 0.2).
 - `bun test` (TS side): 760/760 pass.
 - e2e vs Bun server (control): **320/321 pass** (the 1 is `sidebar-drafts` "retargeting
@@ -354,18 +418,23 @@ validated" — it validates hub + protocol + mock.
    codegen is clean again. The fake-daemon *concept* can return in Phase 2.5,
    rebuilt to speak real `DaemonEvent`s end to end.
 
-2. **Live-path bugs visible by inspection** (no test exists to catch them —
-   that's the point):
-   - `driver.rs` SSE handling spawns a task **per event**
-     (`subscribe` callback → `tokio::spawn(handle_sse_event)`); tokio tasks are
-     unordered, so two streaming deltas can fold out of order → garbled
-     accumulator/transcript under bursts. TS processes SSE sequentially.
-   - `DaemonEffect::FetchState { emit, prompt_id }` ignores both fields:
-     refreshes the cached state but never emits, so clients never see it.
-   - `DaemonEffect::RefetchQueue` is a TODO — `queueUpdated` never emitted.
+2. **Live-path bugs visible by inspection** (no test existed to catch them —
+   that's the point). **FIXED 2026-07-06 (Phase 2, items 1–3)** — the three
+   below now have integration coverage via the fake-daemon harness; the
+   remaining items are out-of-scope Phase-2 item 5 / Phase 3 work:
+   - ✅ `driver.rs` SSE handling spawned a task **per event** → unordered fold
+     under bursts. FIXED: one per-session unbounded-mpsc consumer task
+     (`debug_assert` single-consumer). See driver.rs header.
+   - ✅ `DaemonEffect::FetchState { emit, prompt_id }` ignored both fields.
+     FIXED: emits `build_post_fetch_event` against the refreshed cache.
+   - ✅ `DaemonEffect::RefetchQueue` was a TODO. FIXED: maps the snapshot →
+     `QueueUpdated` via `queue_messages_from_snapshot` (pure, unit-tested).
    - `new_session` ignores `opts.worktree` (worktree module unported) and
      passes `login_env: None` (login-env unported).
-   - `open_session` fabricates the workspace path from `$HOME`.
+   - `open_session` fabricates the workspace path from `$HOME`, and its
+     resume/reload path resolves the daemon port from `startup.json`
+     (session-registry/worktree port — Phase 2 item 5; the harness can't
+     exercise reload re-warm without it).
    - `list_sessions` hardcodes `archived_for: |_| false`,
      `worktree_for: |_| None` (archive-store/worktree-store unported).
    - `warm_cap` is parsed into config and **enforced nowhere** — the warm
