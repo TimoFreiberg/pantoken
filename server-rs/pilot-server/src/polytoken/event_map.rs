@@ -2583,4 +2583,196 @@ mod tests {
         assert_eq!(event_json(&out.events[0])["type"], "queuedMessageStarted");
         assert_eq!(effects_json(&out), vec![json!({ "type": "refetchQueue" })]);
     }
+
+    // ===== Chunk 2a: errors/retries, session metadata, compaction =====
+    // TS event-map.test.ts L485–L670. Oracle-derived assertions (AC.7).
+
+    #[test]
+    fn model_error_rate_limited_sets_turn_error_and_notify_warning() {
+        let mut acc = create_accumulator();
+        let out = fold(
+            json!({ "type": "model_error", "error": { "type": "rate_limited", "retry_after_seconds": 30 }, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        assert_eq!(
+            acc.turn_error.as_ref().unwrap().message,
+            "Rate limited (retry in 30s)"
+        );
+        let ev = event_json(&out.events[0]);
+        assert_eq!(ev["type"], "hostUiRequest");
+        assert_eq!(ev["request"]["kind"], "notify");
+        assert_eq!(ev["request"]["level"], "warning");
+    }
+
+    #[test]
+    #[ignore = "reason: phase 4/openapi type gap — generated ProviderError::Transport { message } lacks the oracle's `kind` field, so the TS transport-message case ('Transport error (connection_refused): conn refused') is unrepresentable without a codegen/type edit (out of event_map.rs scope)"]
+    fn model_error_transport_human_readable_message() {
+        // TS L499: error { type:"transport", kind:"connection_refused", message:"conn refused" }
+        // → turnError.message == "Transport error (connection_refused): conn refused".
+        let mut acc = create_accumulator();
+        fold(
+            json!({ "type": "model_error", "error": { "type": "transport", "kind": "connection_refused", "message": "conn refused" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        assert_eq!(
+            acc.turn_error.as_ref().unwrap().message,
+            "Transport error (connection_refused): conn refused"
+        );
+    }
+
+    #[test]
+    fn model_error_other_code_message_format() {
+        let mut acc = create_accumulator();
+        fold(
+            json!({ "type": "model_error", "error": { "type": "other", "code": "E500", "message": "internal" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        assert_eq!(acc.turn_error.as_ref().unwrap().message, "E500: internal");
+    }
+
+    #[test]
+    fn retry_wait_notify_with_attempt_max_retries() {
+        let out = fold_fresh(
+            json!({ "type": "retry_wait", "attempt": 2, "delay_ms": 5000, "error_summary": "rate_limited", "error_type": "rate_limited", "max_retries": 5, "prompt_id": "p1" }),
+        );
+        let ev = event_json(&out.events[0]);
+        assert_eq!(ev["type"], "hostUiRequest");
+        assert_eq!(ev["request"]["kind"], "notify");
+        assert_eq!(
+            ev["request"]["message"],
+            "Retrying (attempt 2/5): rate_limited"
+        );
+        assert_eq!(ev["request"]["level"], "warning");
+    }
+
+    #[test]
+    fn stream_discontinuity_reseed_effect() {
+        let out = fold_fresh(json!({ "type": "stream_discontinuity", "missed": 3 }));
+        assert_eq!(effects_json(&out), vec![json!({ "type": "reseed" })]);
+    }
+
+    #[test]
+    fn session_title_changed_session_updated_with_new_title_live_status() {
+        let out = fold_fresh(
+            json!({ "type": "session_title_changed", "source": "inferred", "title": "My New Title" }),
+        );
+        let ev = event_json(&out.events[0]);
+        assert_eq!(ev["type"], "sessionUpdated");
+        assert_eq!(ev["snapshot"]["title"], "My New Title");
+        assert_eq!(ev["snapshot"]["status"], "idle");
+    }
+
+    #[test]
+    fn session_title_changed_mid_turn_uses_live_status_running() {
+        let ctx = TestCtx {
+            live_status: SessionStatus::Running,
+            ..TestCtx::default()
+        };
+        let ev = daemon_event(
+            json!({ "type": "session_title_changed", "source": "operator", "title": "X" }),
+        );
+        let out = map_daemon_event(&ev, &mut create_accumulator(), &ctx);
+        assert_eq!(event_json(&out.events[0])["snapshot"]["status"], "running");
+    }
+
+    #[test]
+    fn session_state_changed_fetch_state_session_updated_effect() {
+        let out = fold_fresh(json!({ "type": "session_state_changed", "domains": ["todos"] }));
+        assert_eq!(
+            effects_json(&out),
+            vec![json!({ "type": "fetchState", "emit": "sessionUpdated", "promptId": null })]
+        );
+    }
+
+    #[test]
+    fn model_switch_session_updated_with_new_config_no_fetch() {
+        let out = fold_fresh(
+            json!({ "type": "model_switch", "from_model": "anthropic/old", "to_model": "openai/gpt-5", "to_reasoning_effort": "high" }),
+        );
+        let ev = event_json(&out.events[0]);
+        assert_eq!(ev["type"], "sessionUpdated");
+        assert_eq!(
+            ev["snapshot"]["config"],
+            json!({ "provider": "openai", "modelId": "openai/gpt-5", "thinkingLevel": "high" })
+        );
+    }
+
+    #[test]
+    fn session_rewound_reseed_effect() {
+        let out = fold_fresh(json!({ "type": "session_rewound", "rewound_to_index": 3 }));
+        assert_eq!(effects_json(&out), vec![json!({ "type": "reseed" })]);
+    }
+
+    #[test]
+    fn context_cleared_reseed_effect() {
+        let out = fold_fresh(json!({ "type": "context_cleared", "facet": "execute" }));
+        assert_eq!(effects_json(&out), vec![json!({ "type": "reseed" })]);
+    }
+
+    #[test]
+    fn facet_switch_fetch_state_session_updated_effect() {
+        let out = fold_fresh(
+            json!({ "type": "facet_switch", "from_facet": "plan", "to_facet": "execute" }),
+        );
+        assert_eq!(
+            effects_json(&out),
+            vec![json!({ "type": "fetchState", "emit": "sessionUpdated", "promptId": null })]
+        );
+    }
+
+    #[test]
+    fn compaction_started_notify_info() {
+        // The TS oracle (L622) uses reason:"auto_threshold", but the live daemon
+        // schema (wire-types.ts CompactionReason) is "threshold"|"manual" — the
+        // oracle is stale. Use the schema-valid "threshold" so the event
+        // deserializes; the assertion target (the notify message) is unchanged.
+        let out = fold_fresh(
+            json!({ "type": "compaction_started", "compaction_id": "c1", "reason": "threshold" }),
+        );
+        let ev = event_json(&out.events[0]);
+        assert_eq!(ev["type"], "hostUiRequest");
+        assert_eq!(ev["request"]["kind"], "notify");
+        assert_eq!(ev["request"]["message"], "Compacting context…");
+        assert_eq!(ev["request"]["level"], "info");
+    }
+
+    #[test]
+    fn compaction_complete_notify_and_fetch_state() {
+        let out = fold_fresh(
+            json!({ "type": "compaction_complete", "compaction_id": "c1", "preserved_files_count": 3, "summary_length": 500, "todos_count": 2 }),
+        );
+        assert_eq!(event_json(&out.events[0])["request"]["kind"], "notify");
+        assert_eq!(event_json(&out.events[0])["request"]["level"], "info");
+        assert_eq!(
+            effects_json(&out),
+            vec![json!({ "type": "fetchState", "emit": "sessionUpdated", "promptId": null })]
+        );
+    }
+
+    #[test]
+    fn compaction_cancelled_notify_warning() {
+        let out = fold_fresh(
+            json!({ "type": "compaction_cancelled", "compaction_id": "c1", "reason": "user_cancelled" }),
+        );
+        assert_eq!(event_json(&out.events[0])["request"]["level"], "warning");
+    }
+
+    #[test]
+    fn compaction_failed_notify_error() {
+        let out = fold_fresh(
+            json!({ "type": "compaction_failed", "compaction_id": "c1", "reason": { "type": "provider_error", "detail": "boom" } }),
+        );
+        assert_eq!(event_json(&out.events[0])["request"]["level"], "error");
+    }
+
+    #[test]
+    fn subagent_compaction_notice_notify_with_summary() {
+        let out = fold_fresh(
+            json!({ "type": "subagent_compaction_notice", "compaction_id": "c1", "emitted_at": "2026-06-28T10:00:00Z", "summary": "Subagent context compacted" }),
+        );
+        assert_eq!(
+            event_json(&out.events[0])["request"]["message"],
+            "Subagent context compacted"
+        );
+    }
 }
