@@ -278,9 +278,25 @@ flakes (dir-picker, sidebar-drafts) that pass in isolation — not deterministic
   lease retry; compiles, looks careful. **Untested.** (REVISIT before testing:
   the ported silence-vs-dead `/health`-probe dance predates unstable.5's SSE
   heartbeats — see "Daemon-owned first". Simplify first, then test.)
-- `event_map.rs` — structured port of the accumulator model. **Untested.**
-  (Behind the Phase-2 vocabulary gate — don't invest here until that call is
-  made.)
+- `event_map.rs` / `ui_bridge.rs` — structured port of the accumulator model.
+  **Phase 2.1 test port COMPLETE (2026-07-06):** `event-map.test.ts` (123 active
+  + 6 `#[ignore]` = 129/129) and `ui-bridge.test.ts` (38/38) ported to Rust
+  `#[cfg(test)]` modules; `cargo test` green, fmt+clippy clean. Covers
+  `map_daemon_event` (every DaemonEvent variant), `build_post_fetch_event`,
+  `reset_accumulator`, `snapshot_from_state`, the streaming-pipeline integration
+  turns, and the ui-bridge reverse builders + `PERMISSION_APPROVAL_*` constants.
+  The 6 `#[ignore]`s split into two documented classes: (a) **forward-compat enum
+  gap** (3) — the generated `InterrogativeType`/`SystemReminderReason`/`DaemonEvent`
+  enums reject unknown values at deserialization, so the TS "unknown variant →
+  empty + warn" forward-compat cases can't be constructed without a codegen edit
+  (Phase 4); (b) **daemon-type collapse** (3) — the generated
+  `current_goal`/`goal` fields are a single `Option<T>`, so serde maps daemon
+  `null` and an absent field both to `None`; the Rust source therefore treats a
+  present-state goal-less update as `cleared` (emits `sessionUpdated(goal:null)`)
+  where TS's `!== undefined` guard emits nothing. ⚠ The `goal_driver_update`
+  `transition:"proposed"` case may be a **latent goal-badge-blanking bug** if the
+  daemon ever emits a proposal without a goal — flagged for review; the fix (gate
+  the emit on `transition`, not goal-presence) is out of Phase 3 scope.
 - `hub.rs` — all 35 ClientMessage types have handlers. **Mock-e2e-validated +
   ~28 ported unit tests** (Phase 1.2–1.8: models, queue, new-session-failure,
   context-meter, reload-session, update-card/desktop-update-relay,
@@ -305,8 +321,8 @@ the modules that matter most for cutover:
 | ----------------------------------- | ----- | ---------------------- |
 | hub.test.ts                         | 64    | 0                      |
 | hub-journal.test.ts                 | 14    | 0 (journal unit ≠ hub integration) |
-| polytoken/event-map.test.ts         | 129   | 0                      |
-| polytoken/ui-bridge.test.ts         | 38    | 0                      |
+| polytoken/event-map.test.ts         | 129   | 123 (+6 `#[ignore]`, see below) |
+| polytoken/ui-bridge.test.ts         | 38    | 38 (ported)            |
 | polytoken/daemon-client.test.ts     | 14    | 0                      |
 | polytoken/lease-retry.test.ts       | 11    | 0                      |
 | polytoken/sessions-registry.test.ts | 15    | 0                      |
