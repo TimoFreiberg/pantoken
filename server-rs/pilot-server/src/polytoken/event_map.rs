@@ -3717,4 +3717,257 @@ mod tests {
         assert!(snap.flags.is_none());
         assert!(snap.todos.is_none());
     }
+
+    // -----------------------------------------------------------------------
+    // Remaining mapDaemonEvent cases: "-> empty" ambient events, mcp_server
+    // notices, agent_block_violation regression, and goal_driver_update.
+    // Ports the tail of event-map.test.ts `describe("mapDaemonEvent")`.
+    // -----------------------------------------------------------------------
+
+    /// Assert a daemon event folds to an empty result (no events, no effects).
+    fn assert_empty(value: Value) {
+        let out = fold_fresh(value);
+        assert!(out.events.is_empty(), "expected no events");
+        assert!(out.effects.is_empty(), "expected no effects");
+    }
+
+    #[test]
+    fn hook_fired_empty() {
+        assert_empty(
+            json!({ "type": "hook_fired", "event_type": "pre_tool", "hook_name": "my-hook", "outcome": "allowed" }),
+        );
+    }
+
+    #[test]
+    fn context_loaded_empty() {
+        assert_empty(json!({ "type": "context_loaded", "hash": "abc", "path": "/foo" }));
+    }
+
+    #[test]
+    fn tool_reveal_empty() {
+        assert_empty(
+            json!({ "type": "tool_reveal", "prompt_id": "p1", "source": { "type": "tool_search" }, "tool_names": ["bash"] }),
+        );
+    }
+
+    #[test]
+    fn classifier_decision_empty() {
+        assert_empty(
+            json!({ "type": "classifier_decision", "call_id": "c1", "outcome": "allow", "prompt_id": "p1", "tool_name": "bash" }),
+        );
+    }
+
+    #[test]
+    fn extension_registered_empty() {
+        assert_empty(json!({ "type": "extension_registered", "name": "my-ext" }));
+    }
+
+    #[test]
+    fn subagent_started_empty() {
+        assert_empty(
+            json!({ "type": "subagent_started", "handle": "h1", "model": "m", "subagent_type": "general" }),
+        );
+    }
+
+    #[test]
+    fn subagent_completed_empty() {
+        assert_empty(
+            json!({ "type": "subagent_completed", "handle": "h1", "outcome": { "kind": "success" }, "result_summary": "done" }),
+        );
+    }
+
+    #[test]
+    fn subsession_created_empty() {
+        assert_empty(
+            json!({ "type": "subsession_created", "facet": "execute", "port": 12345, "prompt_summary": "summary", "subsession_id": "sub1" }),
+        );
+    }
+
+    #[test]
+    fn subsession_stopped_empty() {
+        assert_empty(
+            json!({ "type": "subsession_stopped", "subsession_id": "sub1", "summary": "done" }),
+        );
+    }
+
+    #[test]
+    fn subsession_terminated_empty() {
+        assert_empty(
+            json!({ "type": "subsession_terminated", "reason": "cancelled", "subsession_id": "sub1" }),
+        );
+    }
+
+    #[test]
+    fn subsession_interrogative_empty() {
+        assert_empty(
+            json!({ "type": "subsession_interrogative", "interrogative_id": "i1", "interrogative_type": "confirmation", "question": "ok?", "subsession_id": "sub1" }),
+        );
+    }
+
+    #[test]
+    fn subsession_message_empty() {
+        assert_empty(
+            json!({ "type": "subsession_message", "subsession_id": "sub1", "summary": "msg" }),
+        );
+    }
+
+    #[test]
+    fn image_reference_resolved_empty() {
+        assert_empty(
+            json!({ "type": "image_reference_resolved", "file_size_bytes": 1024, "media_type": "image/png", "path": "/img.png", "prompt_id": "p1" }),
+        );
+    }
+
+    #[test]
+    fn job_promoted_empty() {
+        assert_empty(json!({ "type": "job_promoted", "job_id": "j1" }));
+    }
+
+    #[test]
+    fn job_completed_empty() {
+        assert_empty(json!({ "type": "job_completed", "exit_code": 0, "job_id": "j1" }));
+    }
+
+    #[test]
+    fn job_expiring_empty() {
+        assert_empty(json!({ "type": "job_expiring", "job_id": "j1" }));
+    }
+
+    #[test]
+    fn job_cancelled_empty() {
+        assert_empty(json!({ "type": "job_cancelled", "job_id": "j1" }));
+    }
+
+    #[test]
+    fn job_updated_empty() {
+        assert_empty(json!({ "type": "job_updated", "job_id": "j1" }));
+    }
+
+    #[test]
+    fn usage_throttle_empty() {
+        assert_empty(
+            json!({ "type": "usage_throttle", "action": { "kind": "proceed" }, "provider": "anthropic", "snapshot": {} }),
+        );
+    }
+
+    /// Assert a daemon event folds to a single notify hostUiRequest at the given
+    /// level whose message names `needle`, with no effects.
+    fn assert_notify(value: Value, level: &str, needle: &str) {
+        let out = fold_fresh(value);
+        assert!(out.effects.is_empty(), "expected no effects");
+        assert_eq!(out.events.len(), 1);
+        let req = &event_json(&out.events[0])["request"];
+        assert_eq!(req["kind"], "notify");
+        assert_eq!(req["level"], level);
+        assert!(
+            req["message"].as_str().unwrap().contains(needle),
+            "message {:?} should contain {:?}",
+            req["message"],
+            needle
+        );
+    }
+
+    #[test]
+    fn mcp_server_connected_info_notice() {
+        assert_notify(
+            json!({ "type": "mcp_server_connected", "resource_count": 3, "server_name": "my-mcp", "tool_count": 5, "transport": "stdio" }),
+            "info",
+            "my-mcp",
+        );
+    }
+
+    #[test]
+    fn mcp_server_disconnected_warning_notice() {
+        assert_notify(
+            json!({ "type": "mcp_server_disconnected", "reason": "error", "server_name": "my-mcp", "transport": "stdio" }),
+            "warning",
+            "my-mcp",
+        );
+    }
+
+    #[test]
+    fn mcp_server_reconnecting_info_notice() {
+        assert_notify(
+            json!({ "type": "mcp_server_reconnecting", "attempt": 1, "next_retry_in_ms": 1000, "server_name": "my-mcp", "transport": "stdio" }),
+            "info",
+            "my-mcp",
+        );
+    }
+
+    #[test]
+    fn mcp_server_disabled_warning_notice() {
+        assert_notify(
+            json!({ "type": "mcp_server_disabled", "reason": "config_error", "server_name": "my-mcp", "transport": "stdio" }),
+            "warning",
+            "my-mcp",
+        );
+    }
+
+    #[test]
+    fn agent_block_violation_warning_notify_regression() {
+        assert_notify(
+            json!({ "type": "agent_block_violation", "path": "/some/path", "tool_name": "shell_exec" }),
+            "warning",
+            "shell_exec",
+        );
+    }
+
+    #[test]
+    fn goal_driver_update_with_goal_object_session_updated_and_fetch_state() {
+        let goal = serde_json::to_value(make_goal("Ship feature X", "active")).unwrap();
+        let out = fold_fresh(
+            json!({ "type": "goal_driver_update", "goal": goal, "proposed_summary": null, "transition": "set" }),
+        );
+        assert_eq!(out.events.len(), 1);
+        let ev = event_json(&out.events[0]);
+        assert_eq!(ev["type"], "sessionUpdated");
+        assert_eq!(ev["snapshot"]["goal"]["summary"], "Ship feature X");
+        assert_eq!(ev["snapshot"]["goal"]["lifecycle"], "active");
+        assert_eq!(
+            effects_json(&out),
+            vec![json!({ "type": "fetchState", "emit": "sessionUpdated", "promptId": null })]
+        );
+    }
+
+    #[test]
+    fn goal_driver_update_with_goal_null_clears_goal() {
+        // The daemon sends goal:null when a goal is cleared. serde maps that to
+        // None on the single-Option field; the handler projects a `cleared`
+        // transition to a sessionUpdated carrying goal:null.
+        let out = fold_fresh(
+            json!({ "type": "goal_driver_update", "goal": null, "proposed_summary": null, "transition": "cleared" }),
+        );
+        assert_eq!(out.events.len(), 1);
+        let ev = event_json(&out.events[0]);
+        assert_eq!(ev["type"], "sessionUpdated");
+        assert!(ev["snapshot"]["goal"].is_null());
+        assert_eq!(
+            effects_json(&out),
+            vec![json!({ "type": "fetchState", "emit": "sessionUpdated", "promptId": null })]
+        );
+    }
+
+    #[test]
+    #[ignore = "reason: daemon-type collapse (codegen/Phase 4). The GoalDriverUpdate handler destructures only `goal` (event_map.rs ~1822), and serde maps BOTH daemon `null` and an absent `goal` field to None. So a goal-less update emits sessionUpdated(goal:null) regardless of `transition` — matching the real daemon, which always emits `goal`. The TS 'goal omitted (undefined) -> no sessionUpdated, only fetchState' distinction is structurally unrepresentable after deserialization; restoring it needs a double-Option in the generated type (or keying off `transition`)."]
+    fn goal_driver_update_with_goal_omitted_only_fetch_state() {
+        // TS: goal absent -> no sessionUpdated (would blank the badge), only
+        // fetchState. Rust collapses absent into null, so the handler emits a
+        // sessionUpdated(goal:null) here — the un-portable half.
+        let out = fold_fresh(
+            json!({ "type": "goal_driver_update", "proposed_summary": null, "transition": "proposed" }),
+        );
+        assert!(out.events.is_empty());
+        assert_eq!(
+            effects_json(&out),
+            vec![json!({ "type": "fetchState", "emit": "sessionUpdated", "promptId": null })]
+        );
+    }
+
+    #[test]
+    #[ignore = "reason: phase 4/openapi enum gap — the generated DaemonEvent enum is exhaustive (serde tag), so an unknown `type` fails to deserialize before map_daemon_event runs. The TS 'unknown variant -> empty + console.warn (observable)' forward-compat case cannot be constructed without a codegen/type edit; the Rust-idiomatic equivalent is that deserialization rejects the unknown variant loudly."]
+    fn unknown_variant_type_empty_observable() {
+        // TS L1621: fold({type:"future_unknown_variant"}) -> {events:[],effects:[]}
+        // plus a console.warn. Not constructible against the exhaustive Rust enum.
+        assert_empty(json!({ "type": "future_unknown_variant" }));
+    }
 }
