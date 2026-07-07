@@ -43,6 +43,12 @@ use crate::polytoken::daemon_client::{
     SpawnDaemonOpts, SpawnedDaemon, clear_spawn_override, set_spawn_override,
 };
 
+/// Per-frame delay between SSE frames pushed by `FakeControlHub::run_script`
+/// (controlled mode). Widens the window in which mid-flow UI (the queue tray,
+/// a working indicator) is observable by the dev surface + e2e assertions. See
+/// the push loop for rationale.
+const CONTROLLED_INTER_FRAME_DELAY_MS: u64 = 8;
+
 /// One canned response for a lifecycle endpoint the corpus doesn't record.
 fn canned(method: &str, path: &str) -> Option<(StatusCode, Value)> {
     let (m, p) = (method, path);
@@ -116,6 +122,14 @@ struct FakeState {
     /// Controlled-mode SSE sender. Present after GET /events connects; reset
     /// replaces it so a reset mid-stream cannot corrupt a later producer.
     sse_tx: Option<mpsc::Sender<Result<Event, std::convert::Infallible>>>,
+    /// The active HTTP-replay scenario. In controlled (fake-mode) use this
+    /// starts as the idle bootstrap scenario, then `run_script` swaps in the
+    /// chosen flow's recordings (and resets cursors) so that flow's in-turn
+    /// `FetchState`/`RefetchQueue` calls serve its own recorded responses
+    /// (post-turn usage/title, the queue snapshot, etc.) rather than the
+    /// bootstrap's idle body. `None` on the one-shot `spawn` path, which keeps
+    /// reading the spawn-time `AppState.scenario`.
+    scenario_override: Option<Arc<ScenarioFile>>,
 }
 
 /// The public handle returned by `spawn`. Owns the running server task + the
@@ -141,6 +155,19 @@ impl FakeDaemon {
             .calls
             .iter()
             .any(|(m, p)| m == method && p == path)
+    }
+
+    /// Swap the HTTP-replay scenario to `scenario` and reset the replay
+    /// cursors + call log, so the chosen flow's in-turn HTTP fetches
+    /// (`FetchState`→`/state`, `RefetchQueue`→`/turn/input`, a `Reseed`→
+    /// `/history`) serve that flow's recorded responses. Used by
+    /// `FakeControlHub::run_script` to arm a flow before pushing its SSE
+    /// frames. Controlled-mode only (one-shot `spawn` does not swap).
+    fn arm_scenario(&self, scenario: Arc<ScenarioFile>) {
+        let mut st = self.state.lock();
+        st.scenario_override = Some(scenario);
+        st.cursors.clear();
+        st.calls.clear();
     }
 }
 
@@ -188,6 +215,50 @@ pub async fn spawn(
 
 async fn spawn_controlled(scenario: ScenarioFile, session_id: String) -> Arc<FakeDaemon> {
     Arc::new(spawn_with_mode(scenario, session_id, SseMode::Controlled).await)
+}
+
+/// The idle landing scenario for a fake-mode bootstrap session: an empty
+/// transcript with `turn_in_flight:false`, so the seeded `sessionOpened`
+/// snapshot is `Idle` and the composer renders its placeholder. No corpus
+/// scenario represents this (they are all active-flow captures); this is the
+/// only synthetic fixture the fake daemon needs. The SSE list is empty —
+/// controlled mode holds the stream open for `run_script` to push a chosen
+/// flow's frames. The version is threaded in only for the `ScenarioFile`
+/// field; the body must deserialize as a full `SessionStateSnapshot`
+/// (mirroring `synthetic_idle_scenario` in tests/live_path.rs).
+fn bootstrap_scenario(version: &str) -> ScenarioFile {
+    let json_str = serde_json::json!({
+        "scenario": "bootstrap-idle",
+        "version": version,
+        "description": "idle empty landing session for fake-mode bootstrap",
+        "canonicalization": {
+            "session_id": "SESSION",
+            "prompt_ids": {},
+            "timestamps": "monotonic-from-T0"
+        },
+        "http": [
+            { "method": "GET", "path": "/state", "status": 200,
+              "response_body": {
+                  "session_title": "fake",
+                  "todos": [],
+                  "flags": [],
+                  "env": {},
+                  "project_cwd": "/fake",
+                  "active_facet": "execute",
+                  "plugin_config": {},
+                  "turn_in_flight": false
+              } },
+            { "method": "GET", "path": "/history", "status": 200,
+              "response_body": {
+                  "items": [], "offset": 0, "total_projected_items": 0,
+                  "history_revision": 0, "session_id": "SESSION"
+              } }
+        ],
+        "sse": [],
+        "expected_driver_events": null
+    })
+    .to_string();
+    serde_json::from_str::<ScenarioFile>(&json_str).expect("parse bootstrap scenario")
 }
 
 async fn spawn_with_mode(
@@ -251,13 +322,15 @@ impl FakeControlHub {
     pub async fn spawn_session(&self, session_prefix: &str) -> Arc<FakeDaemon> {
         let idx = self.inner.spawned.lock().len() + 1;
         let session_id = format!("{session_prefix}-{idx}");
-        let scenario = self
-            .inner
-            .scenarios
-            .get("reconnect-stream-discontinuity")
-            .or_else(|| self.inner.scenarios.values().next())
-            .unwrap_or_else(|| panic!("no fake daemon scenarios loaded for {}", self.inner.version))
-            .clone();
+        // The bootstrap session is the idle landing session the hub adopts at boot
+        // and after each `/debug/reset`: an empty transcript with the composer
+        // interactive (turn_in_flight:false). It must NOT reuse a corpus scenario —
+        // every recorded scenario is an active-flow capture (streaming/abort/etc.),
+        // and `reconnect-stream-discontinuity` even reports `turn_in_flight: true`
+        // in its first /state recording, which would seed a Running snapshot and
+        // leave the composer stuck on "Working…" (the dev surface drives a chosen
+        // flow's SSE later via run_script, over this held-open idle stream).
+        let scenario = bootstrap_scenario(&self.inner.version);
         let fake = spawn_controlled(scenario, session_id.clone()).await;
         self.inner
             .sessions
@@ -273,10 +346,15 @@ impl FakeControlHub {
         // a dev-surface reset, so dropping the sender here would force a reconnect
         // a follow-up `run_script` would race. The driver-side accumulator reset
         // (PolytokenDriver::reset) is what clears stale fold state.
+        //
+        // Also drop any `run_script`-armed scenario override: a reset re-adopts
+        // the idle bootstrap session, so the post-reset reseed's `GET /state`
+        // must serve the idle body (not a previous flow's post-turn recording).
         for fake in self.inner.sessions.lock().values() {
             let mut state = fake.state.lock();
             state.calls.clear();
             state.cursors.clear();
+            state.scenario_override = None;
         }
     }
 
@@ -302,6 +380,13 @@ impl FakeControlHub {
             .last()
             .cloned()
             .ok_or_else(|| "no fake session spawned".to_string())?;
+        // Arm this flow's HTTP recordings before pushing its SSE frames, so the
+        // in-turn `FetchState`/`RefetchQueue`/`Reseed` effects the frames will
+        // trigger serve the flow's own recorded responses (post-turn usage, the
+        // queue snapshot, etc.) — not the bootstrap's idle body. Without this
+        // the second `GET /state` (on `message_complete`) would 500 on cursor
+        // exhaustion against the single-recording bootstrap scenario.
+        fake.arm_scenario(Arc::new(scenario.clone()));
         // The driver's SSE subscription connects asynchronously, so a script
         // pushed right after boot/reset can arrive before `GET /events` has
         // registered its held-open sender. Poll briefly (up to ~2s) rather than
@@ -321,6 +406,19 @@ impl FakeControlHub {
             tx.send(Ok(frame_to_event(&frame)))
                 .await
                 .map_err(|_| "fake SSE stream disconnected".to_string())?;
+            // Pace the controlled push so intermediate states are observable:
+            // the corpus flows are live captures that run to completion, and a
+            // back-to-back push makes transient UI (e.g. the queue tray,
+            // populated mid-flight then drained before the turn ends) appear
+            // and vanish within a sub-millisecond window the client never
+            // renders. A small inter-frame delay widens that window so the
+            // dev surface (and a bounded `expect.poll` assertion) can observe
+            // mid-flow DOM, and it exercises the live SSE fold path at a
+            // realistic cadence rather than a zero-delay burst.
+            tokio::time::sleep(std::time::Duration::from_millis(
+                CONTROLLED_INTER_FRAME_DELAY_MS,
+            ))
+            .await;
         }
         Ok(())
     }
@@ -582,8 +680,14 @@ async fn http_handler(
             // Advance the cursor for this endpoint + return the recording.
             let key = (method.clone(), path.clone());
             let idx = st.cursors.get(&key).copied().unwrap_or(0);
-            let recording = app
-                .scenario
+            // Prefer a `run_script`-armed override (the active flow's
+            // recordings); fall back to the spawn-time scenario (one-shot
+            // `spawn`, or the idle bootstrap before any script is pushed).
+            let scenario = st
+                .scenario_override
+                .clone()
+                .unwrap_or_else(|| app.scenario.clone());
+            let recording = scenario
                 .http
                 .iter()
                 .filter(|e| e.method == method && e.path == path)
