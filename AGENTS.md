@@ -33,10 +33,10 @@ Monorepo, Bun workspaces.
   `pilot-daemon-types` (auto-generated from OpenAPI), `pilot-server` (the binary).
   Mock mode uses `mock_driver.rs`, a direct port of the TS MockDriver. Set
   `PILOT_SERVER_IMPL=rust` to launch the Rust binary instead of the Bun server.
-  **Not yet at parity — the live-daemon path is unvalidated; see
-  `server-rs/PROGRESS.md` before building on it.** Mock-mode e2e is at
-  ~283/298 passing (15 failures, down from 33); the live path
-  (`daemon_client` → `event_map` → `driver`) has zero coverage.
+  **The installed daemon is `0.5.0-unstable.1`** (bearer-token auth); the Rust
+  server is the only server path being maintained (the TS server in `server/`
+  is not being updated — cutover to Rust-only). See `server-rs/PROGRESS.md`
+  for the live-path validation status before building on it.
 - `client/` — Svelte 5 + Vite PWA. Reconnecting WS singleton, the same fold reducer,
   Claude-app theming in `src/app.css` (warm paper, light + dark).
 - `server/src/shared/` — agent-agnostic utilities both drivers + the hub use

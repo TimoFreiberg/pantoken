@@ -66,7 +66,10 @@ use crate::driver::{
     ArchiveResult, BranchResult, ClearQueueResult, NewSessionOptsData, PilotDriver,
     WorktreeCleanupResult, WorktreeRetained,
 };
-use crate::polytoken::daemon_client::{DaemonClient, SpawnDaemonOpts, SseSubscription};
+use crate::polytoken::daemon_client::{
+    DaemonClient, SpawnDaemonOpts, SseSubscription, default_global_config_dir,
+    read_credential_token, spawn_daemon,
+};
 use crate::polytoken::event_map::{self, DaemonEffect, FoldAccumulator, FoldResult, MapCtx};
 use crate::polytoken::fake_daemon::FakeControlHub;
 use crate::polytoken::history_seed::{self, HistoryMapCtx};
@@ -712,7 +715,10 @@ impl PolytokenInner {
         let opts = SpawnDaemonOpts {
             cwd: Some(cwd),
             session_id: None,
-            sessions_dir: None,
+            // Pass the real sessions_dir so spawn_new_daemon can find the
+            // daemon's startup.json to read the credential file path (daemon
+            // 0.5.0+ bearer auth). Mirrors the resume path's sessions_dir.
+            sessions_dir: Some(self.sessions_dir.to_string_lossy().to_string()),
             global_config_dir: None,
             // Thread the captured login-shell env into the spawn so the daemon
             // gets the user's real PATH + tool env (pilot launched from the .app
@@ -737,6 +743,7 @@ impl PolytokenInner {
             session_id.clone(),
             port,
             std::process::id() as i32,
+            spawned.auth_token.clone(),
         ));
 
         self.install_warm(client, session_id, session_ref, workspace, child)
@@ -754,6 +761,7 @@ impl PolytokenInner {
         session_ref: SessionRef,
         workspace: WorkspaceRef,
         port: u16,
+        auth_token: Option<String>,
     ) -> Result<Arc<WarmSession>, String> {
         if let Some(ws) = self.get_warm(&session_id) {
             return Ok(ws);
@@ -763,9 +771,44 @@ impl PolytokenInner {
             session_id.clone(),
             port,
             std::process::id() as i32,
+            auth_token,
         ));
 
         self.install_warm(client, session_id, session_ref, workspace, None)
+            .await
+    }
+
+    /// Spawn a resume daemon for a cold session (no running daemon found), then
+    /// install it into the warm pool. Mirrors TS `warmSession(cwd, sessionId)`
+    /// → `spawnResumeDaemon`. Used by `open_session` when no startup.json is
+    /// found or the attach path fails. Goes through `spawn_daemon` so the
+    /// fake-daemon spawn-override seam is honored.
+    async fn warm_session_resume(
+        self: &Arc<Self>,
+        session_id: SessionId,
+        session_ref: SessionRef,
+        workspace: WorkspaceRef,
+        cwd: String,
+    ) -> Result<Arc<WarmSession>, String> {
+        if let Some(ws) = self.get_warm(&session_id) {
+            return Ok(ws);
+        }
+        let opts = SpawnDaemonOpts {
+            cwd: Some(cwd),
+            session_id: Some(session_id.clone()),
+            sessions_dir: Some(self.sessions_dir.to_string_lossy().to_string()),
+            global_config_dir: Some(default_global_config_dir().to_string_lossy().to_string()),
+            login_env: self.login_env.lock().clone(),
+        };
+        let (spawned, child) = spawn_daemon(&self.bin_path, opts).await?;
+        // spawned.auth_token is read from the credential file (Phase 3).
+        let client = Arc::new(DaemonClient::new(
+            spawned.session_id.clone(),
+            spawned.port,
+            std::process::id() as i32,
+            spawned.auth_token.clone(),
+        ));
+        self.install_warm(client, session_id, session_ref, workspace, child)
             .await
     }
 
@@ -1192,38 +1235,51 @@ impl PilotDriver for PolytokenDriver {
             .unwrap_or_else(|| self.inner.sessions_dir.to_string_lossy().to_string());
         let workspace = WorkspaceRef {
             workspace_id: WorkspaceId::default(),
-            path: cwd,
+            path: cwd.clone(),
             display_name: None,
         };
 
-        // Resolve the daemon port from startup.json (the daemon is ALREADY running
-        // on that port — we just attach, we don't re-spawn). This mirrors the TS
-        // resume path where warmSession reuses the existing port.
+        // Resolve the daemon port + auth token from startup.json (the daemon is
+        // ALREADY running on that port — we just attach, we don't re-spawn).
+        // This mirrors the TS resume path where warmSession reuses the existing
+        // port. The auth token is read from the credential file pointed to by
+        // startup.json.credential_file_path (daemon 0.5.0+ bearer auth).
         let session_dir = self.inner.sessions_dir.join(&session_id);
         let startup_path = session_dir.join("startup.json");
-        let port = if startup_path.exists() {
+        let (port, auth_token) = if startup_path.exists() {
             if let Ok(raw) = std::fs::read_to_string(&startup_path) {
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) {
-                    json.get("port").and_then(|v| v.as_u64()).map(|p| p as u16)
+                    let port = json.get("port").and_then(|v| v.as_u64()).map(|p| p as u16);
+                    let token = json
+                        .get("credential_file_path")
+                        .and_then(|v| v.as_str())
+                        .and_then(|p| read_credential_token(Path::new(p)));
+                    (port, token)
                 } else {
-                    None
+                    (None, None)
                 }
             } else {
-                None
+                (None, None)
             }
         } else {
-            None
+            (None, None)
         };
 
         if let Some(port) = port {
             // Attach to the running daemon: claim lease, fetch state, subscribe SSE,
-            // insert into the warm pool. If attach fails, fall through to an empty
-            // seed rather than a hard error (the TS path throws, but the hub expects
+            // insert into the warm pool. If attach fails, fall through to cold-start
+            // spawn rather than a hard error (the TS path throws, but the hub expects
             // open_session to surface a seed; an empty seed keeps the session
             // visible while the daemon is unreachable).
             match self
                 .inner
-                .warm_session_attach(session_id.clone(), session_ref.clone(), workspace, port)
+                .warm_session_attach(
+                    session_id.clone(),
+                    session_ref.clone(),
+                    workspace.clone(),
+                    port,
+                    auth_token,
+                )
                 .await
             {
                 Ok(ws) => {
@@ -1243,6 +1299,31 @@ impl PilotDriver for PolytokenDriver {
                 Err(e) => {
                     warn!("open_session: warm attach failed for {session_id}: {e}");
                 }
+            }
+        }
+
+        // Cold-start: no running daemon found (no startup.json, or attach
+        // failed). Spawn a resume daemon, then attach + seed from its history.
+        // Mirrors the TS `openSession` cold-start path. Goes through
+        // `spawn_daemon` so the fake-daemon spawn-override seam is honored.
+        match self
+            .inner
+            .warm_session_resume(session_id.clone(), session_ref.clone(), workspace, cwd)
+            .await
+        {
+            Ok(ws) => {
+                let real_id = ws.client.session_id.clone();
+                self.inner.focus(&real_id);
+                let history_res = ws.client.history(None, None).await;
+                if let Some(history) = history_res.data {
+                    return Ok(history_seed::history_to_seed_events(
+                        &history.items,
+                        &HistoryMapCtx { r#ref: session_ref },
+                    ));
+                }
+            }
+            Err(e) => {
+                warn!("open_session: cold-start spawn failed for {session_id}: {e}");
             }
         }
 
@@ -2094,7 +2175,7 @@ mod tests {
             display_name: None,
         };
         Arc::new(WarmSession {
-            client: Arc::new(DaemonClient::new(session_id.to_string(), 1, 0)),
+            client: Arc::new(DaemonClient::new(session_id.to_string(), 1, 0, None)),
             accumulator: Mutex::new(event_map::create_accumulator()),
             last_state: RwLock::new(None),
             session_ref: SessionRef {

@@ -1210,11 +1210,6 @@ fn subagent_handle(ev: &DaemonEvent) -> Option<&str> {
         DaemonEvent::NotificationAutodrainSwitch { .. }
         | DaemonEvent::SubagentStarted { .. }
         | DaemonEvent::SubagentCompleted { .. }
-        | DaemonEvent::SubsessionCreated { .. }
-        | DaemonEvent::SubsessionStopped { .. }
-        | DaemonEvent::SubsessionTerminated { .. }
-        | DaemonEvent::SubsessionInterrogative { .. }
-        | DaemonEvent::SubsessionMessage { .. }
         | DaemonEvent::McpServerConnected { .. }
         | DaemonEvent::McpServerDisconnected { .. }
         | DaemonEvent::McpServerReconnecting { .. }
@@ -1941,11 +1936,6 @@ pub fn map_daemon_event(
         | DaemonEvent::ExtensionRegistered { .. }
         | DaemonEvent::SubagentStarted { .. }
         | DaemonEvent::SubagentCompleted { .. }
-        | DaemonEvent::SubsessionCreated { .. }
-        | DaemonEvent::SubsessionStopped { .. }
-        | DaemonEvent::SubsessionTerminated { .. }
-        | DaemonEvent::SubsessionInterrogative { .. }
-        | DaemonEvent::SubsessionMessage { .. }
         | DaemonEvent::ImageReferenceResolved { .. }
         | DaemonEvent::JobPromoted { .. }
         | DaemonEvent::JobCompleted { .. }
@@ -3917,41 +3907,6 @@ mod tests {
     fn subagent_completed_empty() {
         assert_empty(
             json!({ "type": "subagent_completed", "handle": "h1", "outcome": { "kind": "success" }, "result_summary": "done" }),
-        );
-    }
-
-    #[test]
-    fn subsession_created_empty() {
-        assert_empty(
-            json!({ "type": "subsession_created", "facet": "execute", "port": 12345, "prompt_summary": "summary", "subsession_id": "sub1" }),
-        );
-    }
-
-    #[test]
-    fn subsession_stopped_empty() {
-        assert_empty(
-            json!({ "type": "subsession_stopped", "subsession_id": "sub1", "summary": "done" }),
-        );
-    }
-
-    #[test]
-    fn subsession_terminated_empty() {
-        assert_empty(
-            json!({ "type": "subsession_terminated", "reason": "cancelled", "subsession_id": "sub1" }),
-        );
-    }
-
-    #[test]
-    fn subsession_interrogative_empty() {
-        assert_empty(
-            json!({ "type": "subsession_interrogative", "interrogative_id": "i1", "interrogative_type": "confirmation", "question": "ok?", "subsession_id": "sub1" }),
-        );
-    }
-
-    #[test]
-    fn subsession_message_empty() {
-        assert_empty(
-            json!({ "type": "subsession_message", "subsession_id": "sub1", "summary": "msg" }),
         );
     }
 
