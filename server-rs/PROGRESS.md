@@ -7,15 +7,11 @@
 a heartbeat timeout (health-probe machinery deleted); golden corpus + Rust loader
 (2 tests, AC.5) + capture harness added. Phase-2 vocabulary gate resolved as A′
 (accumulator stays server-side Rust; DECISIONS.md D19); version discipline now
-"pin the corpus, not the binary" (D20, supersedes standing invariant #3). 180
-Rust tests green, fmt+clippy clean. Phase 2.1 (event_map/ui_bridge unit-test
+"pin the corpus, not the binary" (D20, supersedes standing invariant #3). Phase 2.1 (event_map/ui_bridge unit-test
 port) COMPLETE 2026-07-06 — event-map 124 active + 5 `#[ignore]` = 129/129,
 ui-bridge 38/38, dual-reviewed (Opus); surfaced + fixed a real live-path bug
 (`goal_driver_update{transition:"proposed"}` was blanking the goal badge).
-NEXT: the rest of Phase 2 — the **fake-daemon integration harness** (axum router
-driven by the frozen corpus) and the two driver.rs live-path bugs it can finally
-test (SSE per-event `tokio::spawn` ordering; `FetchState` emit / `RefetchQueue`
-being ignored). **Phase 2 (items 1–3) COMPLETE (2026-07-06):** the harness +
+**Phase 2 (items 1–3) COMPLETE (2026-07-06):** the harness +
 spawn-override seam are live, the warm-session lifecycle is wired (was entirely
 dead — `#[expect(dead_code)]`), and both effect bugs are fixed. See "Phase 2
 live-path validation" below for the findings + the `Arc<Inner>` refactor. Items
@@ -37,6 +33,15 @@ mismatches, and RESOLVED the tool-call-approval permission gating (needs the
 does not prompt). Corpus now FROZEN: inner `event.emitted_at` canon + `/state`
 redaction landed, cross-language parity test added — see "Live corpus capture" below.
 
+> **Doc-consistency note (2026-07-07).** The test count in this header was
+> written when Phase 2.0 landed (180 tests); it is now **423** (5 daemon-types
+> + 64 protocol + 330 lib + 8 corpus + 16 live_path, 5 `#[ignore]`). The
+> authoritative counts live in "Where the port actually stands" below and the
+> "How to verify" block at the end. Several checklist items in Phase 2/3 and
+> bullets in "Wrong turns to undo" predate later phases and have been
+> reconciled in-place; where a bullet now reads "RESOLVED / DONE" the earlier
+> tense is the historical record, not the current state.
+
 Last updated: 2026-07-07 (Phase 5 — shared modules + fs stores + worktree +
 live-driver wiring COMPLETE + review-approved: 0 deterministic Rust e2e
 failures; 423 Rust tests green, 761 TS tests green, 298/298 Rust-server e2e).
@@ -46,7 +51,13 @@ daemon-owned items folded in from the polytoken changelog (unstable.6), the
 "Daemon-owned first" standing section, the Phase-2 event-vocabulary gate, and
 the Phase-3 daemon-bump step). This update reflects the Phase 1.5–1.8 cluster
 burn-down that cleared failures 13 → 0 deterministic, plus Phase 2 (items 1–3)
-live-path coverage and Phase 5 driver wiring.
+live-path coverage and Phase 5 driver wiring. **Doc-consistency pass
+(2026-07-07):** reconciled stale open-work prose against the code — Phase 2
+SSE/FetchState/RefetchQueue/fake-daemon-harness checkboxes, the Phase 3
+`/update/state` and daemon-bump items, and Wrong-turns #1/#3/#4/#5 now reflect
+that the work landed in Phases 1–2/5; the "Daemon-owned first" version framing
+updated to unstable.7 with unstable.6 features marked adopted. Test counts
+re-verified live: 423 Rust / 761 TS, both 0 fail.
 
 Chunk A (mock fixture text/lifecycle parity) is complete and reviewer-approved
 (32/32 e2e specs pass, 1 flake confirmed), cutting failures 72 → 33 (~90%).
@@ -365,9 +376,13 @@ flakes (dir-picker, sidebar-drafts) that pass in isolation — not deterministic
 - `pilot-daemon-types` codegen from `polytoken openapi` (161 types) — real
   pipeline; the old hand-edited `Passthrough` landmine has been removed.
 - `daemon_client.rs` — 1:1 method-surface port of daemon-client.ts including
-  lease retry; compiles, looks careful. **Untested.** (REVISIT before testing:
-  the ported silence-vs-dead `/health`-probe dance predates unstable.5's SSE
-  heartbeats — see "Daemon-owned first". Simplify first, then test.)
+  lease retry; compiles, looks careful. **Untested** (the dedicated
+  `daemon-client.test.ts` + `lease-retry.test.ts` ports are still open —
+  Phase 2 item 4). The liveness simplification that used to gate them is
+  **already done**: SSE liveness was rewritten to a heartbeat timeout in
+  Phase 2.0 (`heartbeat_timeout_ms` folded into the `stream.next()` read; the
+  silence-vs-dead `/health`-probe machinery was deleted). So porting those
+  test files no longer needs a "simplify first" preamble.
 - `event_map.rs` / `ui_bridge.rs` — structured port of the accumulator model.
   **Phase 2.1 test port COMPLETE (2026-07-06):** `event-map.test.ts` (124 active
   + 5 `#[ignore]` = 129/129) and `ui-bridge.test.ts` (38/38) ported to Rust
@@ -468,14 +483,20 @@ validated" — it validates hub + protocol + mock.
 
 ## Wrong turns to undo (ranked)
 
-1. **The fake-daemon architecture is now buried.**
+1. **The fake-daemon architecture — rebuilt (was buried).**
    Phase 5 built `fake_daemon.rs` (mock = in-process daemon behind the real
    driver). The e2e work then pivoted to a direct `MockDriver` port ("simpler,
    matches TS architecture" — a defensible call). Phase 0.1 removed the stale
-   skeleton and regen landmine: `fake_daemon.rs`, `DaemonEvent::Passthrough`,
-   the `Passthrough` event_map arm, and fake-daemon driver plumbing are gone;
-   codegen is clean again. The fake-daemon *concept* can return in Phase 2.5,
-   rebuilt to speak real `DaemonEvent`s end to end.
+   skeleton and regen landmine: the old `fake_daemon.rs`,
+   `DaemonEvent::Passthrough`, the `Passthrough` event_map arm, and
+   fake-daemon driver plumbing are gone; codegen is clean again.
+   **The rebuild landed in Phase 2 / Phase A (2026-07-06):**
+   `tests/support/fake_daemon.rs` is a real axum router replaying the frozen
+   corpus over an ephemeral port, speaking real `DaemonEvent`s end to end;
+   `daemon_client::set_spawn_override` routes `PolytokenDriver` to it. 16
+   live-path integration tests exercise it. What remains for Phase 2.5 is the
+   *dev surface* (`/dev/reset`, `/dev/script`) so the full Playwright e2e
+   suite can run through it as a second backend.
 
 2. **Live-path bugs visible by inspection** (no test existed to catch them —
    that's the point). **FIXED 2026-07-06 (Phase 2, items 1–3)** — the three
@@ -518,31 +539,55 @@ validated" — it validates hub + protocol + mock.
    - The hub never sends `modelDefaults` (TS broadcasts it).
 
 3. **Silent-degradation idiom.** Repo philosophy is fail-loud; the port
-   routinely does the opposite:
-   - `POST /update/state` never parses the body — every call behaves as
-     "no update available" and *clears* any pending update sha.
-   - `/push/*` endpoints return hardcoded `{ok:true}`; `push.rs` (store +
-     service shell) exists but is unwired; VAPID keygen + delivery are TODO;
-     the hub's `notify` is `None`.
-   - `/health` returns hardcoded zeros for clients/running/busy.
-   - Driver failures return empty `Vec` — no `{type:"error"}` to the client
-     (TS sends errors in ~17 places; Rust in ~6). The `new-session-failure`
-     e2e cluster fails exactly here.
-   - Nine modules carry blanket `#![allow(dead_code)]`; `driver.rs` adds
-     `#![allow(unused_variables)]` — which is precisely what hid the ignored
-     `opts.worktree` / `emit` / `prompt_id` parameters from the compiler.
-   - `build_sha` is hardcoded empty.
+   has residual spots that still do the opposite. Status as of 2026-07-07:
+   - ✅ `POST /update/state` — FIXED (Phase 1.7). `UpdateStateBody` parses the
+     body; `available` gates `sha`, `applyFailed` resets a stuck applying card.
+   - `/push/*` endpoints still return hardcoded `{ok:true}`; `push.rs` (store
+     + service shell) exists but is unwired; VAPID keygen + delivery are TODO;
+     the hub's `notify` is `None`. (Still open — Phase 3.)
+   - `/health` still returns hardcoded zeros for clients/running/busy. (Still
+     open — Phase 3.)
+   - ⚠ Driver-failure error parity: TS sends `{type:"error"}` in ~17 places,
+     Rust in ~6. Driver failures still return empty `Vec` rather than a
+     client-visible error in several spots. (Still open — Phase 1 tail; the
+     single unchecked Phase-1 box.)
+   - ✅ Blanket `#![allow(dead_code)]` / `#![allow(unused_variables)]` —
+     FIXED (Phase 0.2). All hand-written module-level allows removed; only 3
+     justified `#![allow(dead_code)]` remain (generated `pilot-daemon-types`
+     crate + the two `tests/support/` files compiled by both the `corpus` and
+     `live_path` binaries), and the old `driver.rs` `unused_variables` blanket
+     is gone — which is precisely what had hidden the ignored `opts.worktree`
+     / `emit` / `prompt_id` parameters. Survivors converted to item-level
+     `#[expect(dead_code, reason="...")]`, 16 tagged `BUG:`. (The bullet above
+     in this list previously claimed "nine modules carry blanket allows";
+     that was pre-Phase-0.2 and is no longer true.)
+   - `build_sha` is still hardcoded empty. (Still open — Phase 3.)
 
-4. **Concurrency model divergence, undocumented.** The hub is a global
-   `Arc<parking_lot::Mutex<SessionHub>>`; async driver calls are fire-and-forget
-   `tokio::spawn`s that re-lock to deliver. That's a workable transplant of the
-   single-threaded TS model, but: one deadlock already happened (fixed in
-   review), reset races needed a generation-counter band-aid, and completion
-   *ordering* is racy where TS is deterministic (e.g. the connect-time
-   sessionList/modelList/commandList/facetList/fileIndex fan-out). Every new
-   handler re-derives the locking rules from folklore.
+4. **Concurrency model divergence — partly addressed, partly standing.** The
+   hub is a global `Arc<parking_lot::Mutex<SessionHub>>`; async driver calls
+   are fire-and-forget `tokio::spawn`s that re-lock to deliver. That's a
+   workable transplant of the single-threaded TS model. The worst symptoms
+   were fixed by **Phase 1's completion-queue** (bounded `mpsc` (256) + one
+   long-lived applier task (`run_hub_op_applier`) that locks and applies in
+   FIFO dispatch order), which killed the connect-time
+   sessionList/modelList/commandList/facetList/fileIndex fan-out races and
+   restored TS-deterministic ordering. One deadlock happened earlier (fixed
+   in review); reset races needed a generation-counter band-aid. **Still
+   standing:** the documented divergence that the Rust queue serializes in
+   *dispatch* order (stricter than TS, which fires connect follow-ups
+   concurrently and applies in completion order) — accepted for this
+   single-user tool but noted. Every new handler still re-derives locking
+   rules from folklore; the hub.rs header documents the one-pattern
+   discipline.
 
-5. **No enforcement.** server-rs is absent from CI and from `bun run check`.
+5. **No enforcement — RESOLVED.** server-rs is in CI (Phase 0.2): the
+   `rust-server` job in `.github/workflows/ci.yml` runs `cargo fmt --check`
+   + `cargo clippy --locked --all-targets -- -D warnings` + `cargo test` on
+   ubuntu-latest. `bun run check:rs` runs the same three locally and is
+   wired into the root `package.json`. `server-rs/Cargo.lock` is tracked so
+   `--locked` works on a clean checkout. (The bullet previously claimed
+   "absent from CI and `bun run check`"; that was pre-Phase-0.2 and is no
+   longer true.)
 
 ## Resumption plan
 
@@ -570,12 +615,21 @@ proves hub+protocol+client — it never touches the live driver stack.
 
 ### Daemon-owned first — check the changelog (standing)
 
-Polytoken is moving underneath this plan (installed here: 0.4.0-unstable.5;
-**unstable.6 is already released**). Before porting, fixing, or testing any
-daemon-facing workaround, check <https://docs.polytoken.dev/changelog/> and
-diff a fresh `polytoken openapi` dump — prefer deleting a workaround the
+Polytoken is moving underneath this plan. Before porting, fixing, or testing
+any daemon-facing workaround, check <https://docs.polytoken.dev/changelog/>
+and diff a fresh `polytoken openapi` dump — prefer deleting a workaround the
 daemon now owns over porting it faithfully. Shortest path to a clean Rust
-server = the daemon owns everything it can. Known as of 2026-07-04:
+server = the daemon owns everything it can.
+
+> **Version status (2026-07-07):** installed here **0.4.0-unstable.7**. The
+> unstable.6 items below (`/history` `emitted_at`, `POST /prompt` auto-queue)
+> have already been **adopted** in Phase 2.0 — `emitted_at` is read
+> schema-driven in `history_seed.rs` (with a deterministic synthetic fallback
+> for pre-.6 replay), and the prompt-or-queue TOCTOU was collapsed onto the
+> daemon auto-queue. SSE heartbeats (unstable.5) are the liveness basis
+> (heartbeat timeout in `daemon_client.rs`). The bullets below are kept as
+> the rationale record; treat the "become deletable / verify on the bump"
+> guidance as **done for unstable.6**, and re-check only on the *next* bump.
 
 - **unstable.6: `/history` items now carry `emitted_at`** (upstream ask #1 —
   shipped). The TS timestamp fabrication ("56y ago" rows) and its ported
@@ -717,14 +771,22 @@ wants.
       emit on `transition`, not goal-presence) and strengthened the permission
       tests to assert choice content. See the `event_map.rs`/`ui_bridge.rs` bullet
       under "What is genuinely done and trustworthy".
-- [ ] Fix the SSE ordering bug with the Phase-1 idiom: per-warm-session
-      `mpsc` + one consumer task. Never per-event `tokio::spawn` — that's the
-      current bug (two streaming deltas can fold out of order).
-- [ ] Implement `DaemonEffect::FetchState`'s emit path (`emit`/`prompt_id`
-      are currently ignored) and `RefetchQueue` → `queueUpdated`; port the
-      TS tests that cover them. (Vocabulary-coupled — behind the gate above.
-      Note `RefetchQueue` also interacts with unstable.6's `/prompt`
-      auto-queue breaking change; see "Daemon-owned first".)
+- [x] Fix the SSE ordering bug with the Phase-1 idiom: per-warm-session
+      `mpsc` + one consumer task. Never per-event `tokio::spawn`. **DONE
+      (Phase 2 / Phase C, 2026-07-06):** one per-session unbounded-mpsc
+      consumer task (`mpsc::unbounded_channel` in `driver.rs`); `debug_assert`
+      single-consumer is the primary regression guard. AC.3: 250 ordered deltas
+      fold in order. See "Phase 2 live-path validation" → Phase C.
+- [x] Implement `DaemonEffect::FetchState`'s emit path (`emit`/`prompt_id`)
+      and `RefetchQueue` → `queueUpdated`; port the TS tests that cover them.
+      **DONE (Phase 2 / Phase D, 2026-07-06):** `FetchState` now emits
+      `build_post_fetch_event` against the refreshed cache with the threaded
+      `prompt_id`; `RefetchQueue` maps the snapshot → `QueueUpdated` via
+      `queue_messages_from_snapshot` (pure, unit-tested). AC.4 + AC.5. See
+      "Phase 2 live-path validation" → Phase D. (`RefetchQueue`'s interaction
+      with unstable.6's `/prompt` auto-queue is moot — the TOCTOU was
+      collapsed onto the daemon auto-queue in Phase 2.0; see "Daemon-owned
+      first".)
 - [~] Build the **daemon-fixture corpus** (5/6 real captures landed + FROZEN
       2026-07-06 — streaming-turn/queue-while-in-flight/abort/ask-user-question/
       tool-call-approval; reconnect-stream-discontinuity stays a seed (upstream
@@ -740,12 +802,18 @@ wants.
       bump / codegen regen. (Survives the vocabulary gate either way — the
       corpus speaks raw `DaemonEvent`s, which is exactly what a daemon-native
       protocol would forward. Build it regardless of the gate's outcome.)
-- [ ] Integration tests: rebuild the fake daemon as a test axum router
+- [x] Integration tests: rebuild the fake daemon as a test axum router
       speaking the **real** wire protocol, driven by the corpus; bind an
       ephemeral port, point `PolytokenDriver` at it, assert emitted
       `SessionDriverEvent`s and the effect HTTP calls. This covers the
       composition MockDriver e2e can never see: SSE loop → accumulator →
-      effects → HTTP back.
+      effects → HTTP back. **DONE (Phase 2 / Phase A, 2026-07-06):**
+      `tests/support/fake_daemon.rs` replays the frozen corpus over an
+      ephemeral port; `daemon_client::set_spawn_override` routes
+      `PolytokenDriver` to it end-to-end. 16 live-path integration tests in
+      `tests/live_path.rs` cover the ACs. (The dev *surface* — `/dev/reset`
+      and `/dev/script` driving the full e2e suite through it — is Phase 2.5;
+      the harness itself is live and test-only.)
 - [ ] Port `daemon-client.test.ts` + `lease-retry.test.ts` (25) — but first
       simplify liveness against unstable.5's SSE heartbeats ("Daemon-owned
       first") so the ported tests pin the new design, not the probe dance.
@@ -793,19 +861,28 @@ fail-loud philosophy applied to tests — not noise to be waited away.
 
 ### Phase 3 — cutover mechanics
 
-- [ ] **Bump polytoken to current (≥0.4.0-unstable.6) as an explicit step**
-      before the live smoke: re-run codegen, replay the golden corpus
-      (drift canary), adopt `emitted_at` (delete timestamp fabrication in
-      history seeding, TS and Rust), and adapt prompt-vs-queue routing to
-      the `/prompt` auto-queue breaking change. The TS server needs the
-      same adaptation while it remains the escape hatch.
+- [~] **Bump polytoken to current before the live smoke** — *mostly absorbed.*
+      The ambient daemon is already **0.4.0-unstable.7**, and the unstable.6
+      work this step was meant to do has landed: `emitted_at` is adopted in
+      `history_seed.rs` (schema-driven read + synthetic fallback), the
+      `/prompt` auto-queue TOCTOU is collapsed onto the daemon, and SSE
+      liveness is heartbeat-based. What remains of this item is the
+      **mechanical bump ritual for the *next* daemon release**: re-run
+      codegen, replay the golden corpus as the drift canary, adopt any newly
+      daemon-owned fields, and re-capture the corpus only on conscious
+      adoption. The TS server needs the same adaptation while it remains the
+      escape hatch.
 - [ ] Live smoke as the final gate: drive a real daemon session through the
       GUI via the parity harness (new session, prompt, stream, approve a
       tool, switch model/facet, abort, archive); diff `/debug/state` against
       the Bun server where feasible.
 - [ ] `/health`: real client/running/initializing/busy counts.
-- [ ] `POST /update/state`: parse `{available, sha, applyFailed}` (currently
-      the body is discarded and the pending update sha is wiped).
+- [x] `POST /update/state`: parse `{available, sha, applyFailed}`. **DONE
+      (Phase 1.7, 2026-07-05):** `UpdateStateBody` struct in `main.rs` parses
+      the body; `available` gates `sha`, `applyFailed` resets a stuck
+      "applying" card. Ported hub unit tests cover it. (Was originally
+      scoped as Phase 3 but landed during the update-card cluster burn-down;
+      retained here only to record the move.)
 - [ ] Push: VAPID keygen, web-push delivery, wire `push.rs` endpoints and the
       hub's `notify`.
 - [ ] `build_sha` from the dist marker.
