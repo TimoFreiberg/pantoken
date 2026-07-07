@@ -1,5 +1,7 @@
 //! The archive index: pilot's source of truth for which sessions the operator has
-//! archived. Keyed by the session's `.jsonl` path.
+//! archived. Keyed by the session's switch-key path — the live `PolytokenDriver`
+//! uses the `session.json` path, the mock uses the `.jsonl` path; the store
+//! itself is path-agnostic.
 //!
 //! Faithful port of `server/src/archive-store.ts`.
 

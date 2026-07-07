@@ -60,7 +60,8 @@ use async_trait::async_trait;
 
 use crate::archive_store::ArchiveStore;
 use crate::driver::{
-    BranchResult, ClearQueueResult, NewSessionOptsData, PilotDriver, WorktreeCleanupResult,
+    ArchiveResult, BranchResult, ClearQueueResult, NewSessionOptsData, PilotDriver,
+    WorktreeCleanupResult, WorktreeRetained,
 };
 use crate::polytoken::daemon_client::{DaemonClient, SpawnDaemonOpts, SseSubscription};
 use crate::polytoken::event_map::{self, DaemonEffect, FoldAccumulator, FoldResult, MapCtx};
@@ -120,10 +121,9 @@ struct PolytokenInner {
     /// daemon gets the user's real PATH + tool env. `None` only when capture
     /// ran but produced no env (a degraded state — spawn gets the inherited env).
     login_env: Mutex<Option<HashMap<String, String>>>,
-    /// The status of the login-env capture, stored for the Settings panel.
-    /// NOTE: the hub does NOT yet read this — `pilot_settings_msg` still sends
-    /// a hardcoded stub `LoginEnvStatus { ok: false, .. }`. This is the ready
-    /// read side for when the Settings-panel wiring is implemented.
+    /// The status of the login-env capture, surfaced in the Settings panel. The
+    /// hub reads it through the `PilotDriver::login_env_status` trait method
+    /// (see `pilot_settings_msg`).
     login_env_status: RwLock<LoginEnvStatus>,
     archive_store: Mutex<ArchiveStore>,
     worktree_store: Mutex<WorktreeStore>,
@@ -224,12 +224,43 @@ impl PolytokenDriver {
         }
     }
 
-    /// The login-env status, exposed for the Settings panel. NOTE: the hub
-    /// does NOT yet call this — `pilot_settings_msg` still sends a hardcoded
-    /// stub `LoginEnvStatus { ok: false, .. }`. This is the ready read side
-    /// for when the Settings-panel wiring is implemented.
+    /// The login-env status, exposed for the Settings panel and read by the hub
+    /// through the `PilotDriver` trait. Kept as an inherent delegate so
+    /// concrete-typed callers keep working.
     pub fn login_env_status(&self) -> LoginEnvStatus {
-        self.inner.login_env_status.read().clone()
+        <Self as PilotDriver>::login_env_status(self)
+    }
+
+    /// Reap the pilot worktree at `cwd` if one is live: remove it (honoring
+    /// `force`), tombstone it in the store on success, or report why it was
+    /// retained. Shared by `set_archived` and `cleanup_worktree`. Takes the
+    /// worktree meta under the lock, drops the guard, then awaits the removal
+    /// (lock-across-await discipline).
+    async fn reap_worktree(&self, cwd: &str, force: bool) -> ReapOutcome {
+        let meta = {
+            let store = self.inner.worktree_store.lock();
+            store.live(cwd).cloned()
+        };
+        let Some(meta) = meta else {
+            return ReapOutcome::NoWorktree;
+        };
+        match worktree::remove(&meta, force).await {
+            Ok(res) if res.removed => {
+                self.inner.worktree_store.lock().mark_reaped(cwd);
+                ReapOutcome::Reaped
+            }
+            Ok(res) => ReapOutcome::Retained(
+                res.reason
+                    .unwrap_or_else(|| "uncommitted changes".to_string()),
+            ),
+            // A genuine command/fs failure (not a dirty worktree, which is the
+            // `Ok(res)` arm above). Log it — fail-loud, mirroring TS's
+            // `console.error` in `setArchived`'s reap catch — then retain.
+            Err(e) => {
+                warn!("worktree reap failed for {cwd}: {e}");
+                ReapOutcome::Retained(e)
+            }
+        }
     }
 }
 
@@ -707,6 +738,17 @@ impl PolytokenInner {
     }
 }
 
+/// Outcome of reaping a pilot worktree at a session cwd. Shared by
+/// `set_archived` and `cleanup_worktree`.
+enum ReapOutcome {
+    /// No live pilot worktree registered at this cwd — nothing to reap.
+    NoWorktree,
+    /// The worktree was removed and tombstoned in the store.
+    Reaped,
+    /// The worktree was left in place (dirty or removal failed); carries the reason.
+    Retained(String),
+}
+
 #[async_trait]
 impl PilotDriver for PolytokenDriver {
     fn subscribe(&self, listener: Box<dyn Fn(SessionDriverEvent) + Send + Sync>) -> usize {
@@ -823,10 +865,8 @@ impl PilotDriver for PolytokenDriver {
             &sessions_dir,
             sessions_registry::ListColdSessionsOpts {
                 archived_for: Box::new(|session_json_path| archive_store.has(session_json_path)),
-                // NOTE: the archive WRITE side (`set_archived`) is still the
-                // trait-default no-op in the live PolytokenDriver (only the mock
-                // overrides it), so `archived` is always false on the live path
-                // until `set_archived` is wired — out of Phase 5 scope.
+                // The archive WRITE side is `set_archived` (below), which flips
+                // this flag; the read here overlays it onto the session list.
                 worktree_for: Some(Box::new(|cwd| {
                     PolytokenInner::worktree_field_for(cwd, &worktree_store)
                 })),
@@ -900,31 +940,69 @@ impl PilotDriver for PolytokenDriver {
     /// `removed:false` + a reason). Mirrors `polytoken-driver.ts:1380-1387`
     /// (`cleanupWorktree` → `reapWorktree`, `:862-872`).
     async fn cleanup_worktree(&self, path: String, force: bool) -> WorktreeCleanupResult {
-        let meta = {
-            let store = self.inner.worktree_store.lock();
-            store.live(&path).cloned()
-        };
-        let Some(meta) = meta else {
-            return WorktreeCleanupResult {
+        match self.reap_worktree(&path, force).await {
+            ReapOutcome::NoWorktree => WorktreeCleanupResult {
                 removed: false,
                 reason: Some("no pilot worktree at this path".to_string()),
-            };
-        };
-        match worktree::remove(&meta, force).await {
-            Ok(res) => {
-                if res.removed {
-                    self.inner.worktree_store.lock().mark_reaped(&path);
-                }
-                WorktreeCleanupResult {
-                    removed: res.removed,
-                    reason: res.reason,
-                }
-            }
-            Err(e) => WorktreeCleanupResult {
+            },
+            ReapOutcome::Reaped => WorktreeCleanupResult {
+                removed: true,
+                reason: None,
+            },
+            ReapOutcome::Retained(reason) => WorktreeCleanupResult {
                 removed: false,
-                reason: Some(e),
+                reason: Some(reason),
             },
         }
+    }
+
+    /// Set/clear the archived flag for a session, reaping its worktree on
+    /// archive. Mirrors `polytoken-driver.ts:1351` `setArchived`: flipping the
+    /// flag is enough for the list overlay (the read side already consults the
+    /// archive store); on archive we also reap a live worktree. A dirty
+    /// worktree is retained and surfaced, matching TS's `if (!meta) return`
+    /// no-retention case vs the dirty-worktree branch. The retained `reason` is
+    /// the concrete reason `worktree::remove` returns (e.g. "worktree has
+    /// uncommitted changes"), surfaced verbatim.
+    async fn set_archived(&self, path: String, archived: bool) -> ArchiveResult {
+        self.inner.archive_store.lock().set(&path, archived);
+        if !archived {
+            return ArchiveResult::default();
+        }
+        // The archive key (and thus `path`) is the session's `session.json`
+        // path — `.../sessions/<session_id>/session.json`. Derive the session id
+        // by walking up one dir, mirroring TS `sessionIdFromPath`
+        // (`polytoken-driver.ts:844`). This intentionally differs from the plan's
+        // "file stem" note: `file_stem` of a `session.json` path is "session", so
+        // the reap would never fire; the parent-dir name is the real id.
+        let session_path = std::path::Path::new(&path);
+        let session_id =
+            if session_path.file_name().and_then(|s| s.to_str()) == Some("session.json") {
+                session_path
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .and_then(|s| s.to_str())
+                    .map(str::to_string)
+            } else {
+                None
+            };
+        let Some(session_id) = session_id else {
+            return ArchiveResult::default();
+        };
+        let Some(cwd) = PolytokenInner::cwd_for_session(&self.inner.sessions_dir, &session_id)
+        else {
+            return ArchiveResult::default();
+        };
+        match self.reap_worktree(&cwd, false).await {
+            ReapOutcome::NoWorktree | ReapOutcome::Reaped => ArchiveResult::default(),
+            ReapOutcome::Retained(reason) => ArchiveResult {
+                worktree_retained: Some(WorktreeRetained { path: cwd, reason }),
+            },
+        }
+    }
+
+    fn login_env_status(&self) -> LoginEnvStatus {
+        self.inner.login_env_status.read().clone()
     }
 
     async fn open_session(&self, path: String) -> Result<Vec<SessionDriverEvent>, String> {

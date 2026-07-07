@@ -211,6 +211,9 @@ struct BufferedSwapEvent {
 const SWAP_BUFFER_CAP: usize = 256;
 const SWAP_BUFFER_TTL_MS: u128 = 5000;
 
+/// The injectable file-manager spawn seam (see `SessionHub::open_in_file_manager`).
+type OpenInFileManager = Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
+
 /// The session hub. Owns journals, client map, running/attention tracking,
 /// and orchestrates the driver.
 pub struct SessionHub {
@@ -226,6 +229,11 @@ pub struct SessionHub {
     data_dir: Option<PathBuf>,
     build_sha: String,
     delta_flush_ms: u64,
+
+    /// Injectable seam for opening the data dir in the platform file manager.
+    /// Defaults to the real spawn; tests override it to exercise the failure
+    /// path (mirrors TS's injected `openInFileManager`).
+    open_in_file_manager: OpenInFileManager,
 
     // ── Per-session state ────────────────────────────────────────────────
     journals: HashMap<SessionId, SessionJournal>,
@@ -267,6 +275,30 @@ pub struct SessionHub {
     epoch_counter: u64,
 }
 
+/// Open `dir` in the platform file manager (Finder / xdg-open). The default
+/// `open_in_file_manager` seam; overridable in tests. Returns `Err` when the
+/// spawn fails so the hub can surface it instead of silently discarding it.
+fn default_open_in_file_manager(dir: &str) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        let cmd = if cfg!(target_os = "macos") {
+            "open"
+        } else {
+            "xdg-open"
+        };
+        std::process::Command::new(cmd)
+            .arg(dir)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        Ok(())
+    }
+}
+
 impl SessionHub {
     #[expect(
         clippy::too_many_arguments,
@@ -291,6 +323,7 @@ impl SessionHub {
             data_dir,
             build_sha,
             delta_flush_ms,
+            open_in_file_manager: Box::new(default_open_in_file_manager),
             journals: HashMap::new(),
             pending_deltas: HashMap::new(),
             swap_buffer: HashMap::new(),
@@ -327,6 +360,16 @@ impl SessionHub {
     fn next_epoch(&mut self) -> u64 {
         self.epoch_counter += 1;
         self.epoch_counter
+    }
+
+    /// Override the file-manager spawn seam. Test-only — production keeps the
+    /// real `default_open_in_file_manager`.
+    #[cfg(test)]
+    fn set_open_in_file_manager(
+        &mut self,
+        f: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static,
+    ) {
+        self.open_in_file_manager = Box::new(f);
     }
 
     /// Establish the landing session a fresh client adopts.
@@ -1817,17 +1860,19 @@ impl SessionHub {
                 }
             }
             ClientMessage::OpenDataDir => {
-                if let Some(dir) = &self.data_dir {
-                    // Spawn the platform file manager (Finder/xdg-open/explorer)
-                    let dir_str = dir.display().to_string();
-                    #[cfg(unix)]
-                    {
-                        let cmd = if cfg!(target_os = "macos") {
-                            "open"
-                        } else {
-                            "xdg-open"
-                        };
-                        let _ = std::process::Command::new(cmd).arg(&dir_str).spawn();
+                let dir_str = self.data_dir.as_ref().map(|d| d.display().to_string());
+                if let Some(dir_str) = dir_str {
+                    // Open via the injectable seam so the failure path is
+                    // deterministically testable; surface spawn failures to the
+                    // client instead of silently discarding them (fail-loud).
+                    if let Err(e) = (self.open_in_file_manager)(&dir_str) {
+                        self.send_to_client(
+                            client_key,
+                            ServerMessage::Error {
+                                message: format!("couldn't open the data directory: {e}"),
+                                kind: None,
+                            },
+                        );
                     }
                 } else {
                     self.send_to_client(
@@ -2158,13 +2203,9 @@ impl SessionHub {
             .as_ref()
             .map(|dir| crate::settings_store::read_pilot_settings(dir))
             .unwrap_or_default();
-        // Login env status is a stub for now — the real implementation needs
-        // the login-env shared module (Phase 5).
-        let env = pilot_protocol::wire::LoginEnvStatus {
-            active_shell: None,
-            ok: false,
-            detail: None,
-        };
+        // Login-env status comes from the active driver (the live PolytokenDriver
+        // captures it at spawn; mock/default drivers report `{ok:false}`).
+        let env = self.driver.login_env_status();
         ServerMessage::PilotSettings {
             // Resolve the background-model warning from the cached model list
             // (ports TS `pilotSettingsMsg` → `resolveBackgroundModel`,
@@ -2882,6 +2923,106 @@ mod hub_models_tests {
         let hub_for_events = hub.clone();
         driver.subscribe(Box::new(move |ev| hub_for_events.lock().on_event(ev)));
         (driver, hub, rx)
+    }
+
+    /// AC.4: a driver that doesn't override `login_env_status` (the mock/default)
+    /// yields the `{ok:false}` default in `pilot_settings_msg`'s env — the trait
+    /// default holds (regression guard).
+    #[tokio::test]
+    async fn pilot_settings_defaults_login_env_when_unsupported() {
+        let (_driver, hub, _ops) = test_hub();
+        match hub.lock().pilot_settings_msg() {
+            ServerMessage::PilotSettings { env, .. } => {
+                assert!(!env.ok, "default login-env status should report ok:false");
+                assert_eq!(env.active_shell, None);
+                assert_eq!(env.detail, None);
+            }
+            other => panic!("expected PilotSettings, got {other:?}"),
+        }
+    }
+
+    /// AC.3: `pilot_settings_msg` surfaces the active driver's `login_env_status`
+    /// verbatim.
+    #[test]
+    fn pilot_settings_reports_driver_login_env() {
+        let driver: Arc<dyn PilotDriver> =
+            Arc::new(crate::stub_driver::StubDriver::new().with_login_env_status(
+                pilot_protocol::wire::LoginEnvStatus {
+                    active_shell: Some("zsh".into()),
+                    ok: true,
+                    detail: Some("captured 42 vars".into()),
+                },
+            ));
+        let (tx, _rx) = hub_op_channel();
+        let hub = SessionHub::new(
+            driver,
+            tx,
+            None,
+            250,
+            "test-server".into(),
+            None,
+            "test-sha".into(),
+            10,
+        );
+        match hub.lock().pilot_settings_msg() {
+            ServerMessage::PilotSettings { env, .. } => {
+                assert_eq!(env.active_shell.as_deref(), Some("zsh"));
+                assert!(env.ok);
+                assert_eq!(env.detail.as_deref(), Some("captured 42 vars"));
+            }
+            other => panic!("expected PilotSettings, got {other:?}"),
+        }
+    }
+
+    /// AC.5: `OpenDataDir` with a configured data dir but a failing file-manager
+    /// spawn surfaces the error to the client instead of silently discarding it.
+    #[tokio::test]
+    async fn open_data_dir_surfaces_spawn_failure() {
+        let driver: Arc<dyn PilotDriver> = Arc::new(MockDriver::new());
+        let (tx, _ops) = hub_op_channel();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let hub = SessionHub::new(
+            driver,
+            tx,
+            None,
+            250,
+            "test-server".into(),
+            Some(tmp.path().to_path_buf()),
+            "test-sha".into(),
+            10,
+        );
+        hub.lock().set_open_in_file_manager(|_| Err("boom".into()));
+
+        let (client_key, _tx2, mut rx) = hub.lock().add_client(None);
+        hub.lock()
+            .handle_client(client_key, ClientMessage::OpenDataDir);
+
+        let msg = drain_until(&mut rx, |m| matches!(m, ServerMessage::Error { .. })).await;
+        match msg {
+            ServerMessage::Error { message, .. } => assert!(
+                message.starts_with("couldn't open the data directory:"),
+                "unexpected error message: {message}"
+            ),
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    /// AC.5: `OpenDataDir` with no configured data dir surfaces the
+    /// not-configured error.
+    #[tokio::test]
+    async fn open_data_dir_errors_when_unconfigured() {
+        let (_driver, hub, _ops) = test_hub();
+        let (client_key, _tx, mut rx) = hub.lock().add_client(None);
+        hub.lock()
+            .handle_client(client_key, ClientMessage::OpenDataDir);
+
+        let msg = drain_until(&mut rx, |m| matches!(m, ServerMessage::Error { .. })).await;
+        match msg {
+            ServerMessage::Error { message, .. } => {
+                assert_eq!(message, "data directory is not configured on this server")
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
     }
 
     async fn drain_one(rx: &mut mpsc::Receiver<ServerMessage>) -> ServerMessage {

@@ -9,7 +9,7 @@ use pilot_protocol::session_driver::{
     CommandInfo, DirListing, FileInfo, ModelDefaults, ModelOption, PathStat, SessionDriverEvent,
     SessionId, SessionListEntry,
 };
-use pilot_protocol::wire::DeliveryMode;
+use pilot_protocol::wire::{DeliveryMode, LoginEnvStatus};
 use std::sync::Arc;
 
 use crate::driver::PilotDriver;
@@ -20,13 +20,26 @@ type Listener = Box<dyn Fn(SessionDriverEvent) + Send + Sync>;
 /// Used to boot the server without a real driver implementation.
 pub struct StubDriver {
     listeners: Arc<Mutex<Vec<Listener>>>,
+    login_env_status: LoginEnvStatus,
 }
 
 impl StubDriver {
     pub fn new() -> Self {
         Self {
             listeners: Arc::new(Mutex::new(Vec::new())),
+            login_env_status: LoginEnvStatus {
+                active_shell: None,
+                ok: false,
+                detail: None,
+            },
         }
+    }
+
+    /// Report a specific login-env status. The hub reads this via the
+    /// `PilotDriver` trait for the Settings panel.
+    pub fn with_login_env_status(mut self, status: LoginEnvStatus) -> Self {
+        self.login_env_status = status;
+        self
     }
 
     pub fn emit(&self, ev: SessionDriverEvent) {
@@ -55,6 +68,10 @@ impl PilotDriver for StubDriver {
     fn unsubscribe(&self, id: usize) {
         let mut listeners = self.listeners.lock();
         let _ = listeners.remove(id);
+    }
+
+    fn login_env_status(&self) -> LoginEnvStatus {
+        self.login_env_status.clone()
     }
 
     async fn prompt(

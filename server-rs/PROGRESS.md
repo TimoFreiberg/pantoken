@@ -21,12 +21,12 @@ wiring) COMPLETE (2026-07-07):** new_session (cwd validation + worktree +
 login-env threading, now `Result`), open_session (real `cwd_for_session`),
 list_sessions (real archive/worktree resolvers + warm merge + live-usage
 overlay), warm-cap eviction, and cleanup_worktree are all wired into the live
-`PolytokenDriver`; the 4 wired-path `#[expect]` markers removed. 423 Rust tests
-green (330 lib + 8 corpus + 16 live_path), fmt+clippy clean. Two known gaps
-left out of scope: `set_archived` is still a trait-default no-op on the live
-path, and the hub's `pilot_settings_msg` still sends a stub
-`LoginEnvStatus{ok:false}` (the driver exposes `login_env_status()` but the hub
-doesn't call it). LIVE CORPUS CAPTURE DONE (2026-07-06, 5/6 scenarios,
+`PolytokenDriver`; the 4 wired-path `#[expect]` markers removed. 430 Rust tests
+green (334 lib + 8 corpus + 19 live_path), fmt+clippy clean. The two gaps Phase
+5 left out of scope are now closed (2026-07-07 "leg 1" cleanup): `set_archived`
+is wired in the live `PolytokenDriver` (flips the flag + reaps a live worktree),
+and `pilot_settings_msg` now calls `driver.login_env_status()` via a new
+`PilotDriver` trait method. LIVE CORPUS CAPTURE DONE (2026-07-06, 5/6 scenarios,
 deepseek): found+fixed a canonicalization bug (+regression test), 2 seed/reality
 mismatches, and RESOLVED the tool-call-approval permission gating (needs the
 `standard` matcher PLUS a version-2 `ask` permissions rule — `standard` alone
@@ -34,8 +34,8 @@ does not prompt). Corpus now FROZEN: inner `event.emitted_at` canon + `/state`
 redaction landed, cross-language parity test added — see "Live corpus capture" below.
 
 > **Doc-consistency note (2026-07-07).** The test count in this header was
-> written when Phase 2.0 landed (180 tests); it is now **423** (5 daemon-types
-> + 64 protocol + 330 lib + 8 corpus + 16 live_path, 5 `#[ignore]`). The
+> written when Phase 2.0 landed (180 tests); it is now **430** (5 daemon-types
+> + 64 protocol + 334 lib + 8 corpus + 19 live_path, 5 `#[ignore]`). The
 > authoritative counts live in "Where the port actually stands" below and the
 > "How to verify" block at the end. Several checklist items in Phase 2/3 and
 > bullets in "Wrong turns to undo" predate later phases and have been
@@ -44,7 +44,7 @@ redaction landed, cross-language parity test added — see "Live corpus capture"
 
 Last updated: 2026-07-07 (Phase 5 — shared modules + fs stores + worktree +
 live-driver wiring COMPLETE + review-approved: 0 deterministic Rust e2e
-failures; 423 Rust tests green, 761 TS tests green, 298/298 Rust-server e2e).
+failures; 430 Rust tests green, 761 TS tests green, 298/298 Rust-server e2e).
 The 2026-07-04 full review + plan revision stands (fake-daemon e2e tier
 reinstated as Phase 2.5, hub completion queue made deliberate in Phase 1,
 daemon-owned items folded in from the polytoken changelog (unstable.6), the
@@ -57,7 +57,7 @@ SSE/FetchState/RefetchQueue/fake-daemon-harness checkboxes, the Phase 3
 `/update/state` and daemon-bump items, and Wrong-turns #1/#3/#4/#5 now reflect
 that the work landed in Phases 1–2/5; the "Daemon-owned first" version framing
 updated to unstable.7 with unstable.6 features marked adopted. Test counts
-re-verified live: 423 Rust / 761 TS, both 0 fail.
+re-verified live: 430 Rust / 761 TS, both 0 fail.
 
 Chunk A (mock fixture text/lifecycle parity) is complete and reviewer-approved
 (32/32 e2e specs pass, 1 flake confirmed), cutting failures 72 → 33 (~90%).
@@ -217,8 +217,8 @@ validation legs are green plus a live-daemon smoke test.
 
 **Ground truth (2026-07-07, full suite, one machine — Phase 5 done):**
 
-- `cargo test`: **423/423 pass** (5 daemon-types, 64 protocol, 330 server lib
-  [5 `#[ignore]`], 8 corpus, 16 live-path integration under `tests/live_path.rs`).
+- `cargo test`: **430/430 pass** (5 daemon-types, 64 protocol, 334 server lib
+  [5 `#[ignore]`], 8 corpus, 19 live-path integration under `tests/live_path.rs`).
   Phase 5 (items 4–5) wired the shared modules + fs stores + worktree planners
   into the live `PolytokenDriver`: `new_session` (cwd validation + worktree
   creation + login-env threading, now `Result`), `open_session` (real
@@ -442,14 +442,15 @@ AND wired (not just ported):
   resolvers backed by the stores + warm merge + live-usage overlay; warm-cap
   eviction hooked into `install_warm`; `cleanup_worktree` wired to
   `removeWorktree` + `mark_reaped`. The 4 wired-path `#[expect]` BUG markers
-  were removed. 16 live-path integration tests cover the ACs (see
+  were removed. 19 live-path integration tests cover the ACs (see
   `tests/live_path.rs`).
-- **Two known gaps Phase 5 surfaced and left out of scope** (tracked below in
-  "Wrong turns to undo"): (a) `set_archived` is still the trait-default no-op
-  in the live `PolytokenDriver` — the `archived` flag is always false on the
-  live path until it's wired (the `list_sessions` READ side is ready); (b) the
-  hub's `pilot_settings_msg` still sends a stub `LoginEnvStatus{ok:false}` —
-  the driver exposes `login_env_status()` but the hub doesn't call it yet.
+- **Two gaps Phase 5 surfaced are now closed** (2026-07-07 "leg 1" cleanup):
+  (a) `set_archived` is wired in the live `PolytokenDriver` — it flips the
+  archive flag and reaps a live worktree (dirty → retained via the shared
+  `reap_worktree` helper), covered by three `live_path` tests; (b) the hub's
+  `pilot_settings_msg` now calls `driver.login_env_status()` through a new
+  `PilotDriver` trait method (mock/default drivers still report `{ok:false}`),
+  covered by two hub tests.
 
 **The load-bearing caveat:** test-porting stopped where the code became
 I/O-shaped. The pure modules + fs stores + worktree planners now have Rust
@@ -530,13 +531,14 @@ validated" — it validates hub + protocol + mock.
      `focus` operation; emits synthetic `sessionClosed` before disposing each
      LRU victim, skipping any with `turn_in_flight` (covered by
      `warm_cap_evicts_lru_idle_session` + `warm_cap_never_evicts_in_flight`).
-   - **Still open (out of Phase 5 scope):** `set_archived` is still the
-     trait-default no-op in the live `PolytokenDriver` — the `archived` flag is
-     always false on the live path until it's wired (the `list_sessions` READ
-     side is ready). The hub's `pilot_settings_msg` still sends a stub
-     `LoginEnvStatus{ok:false}` — the driver exposes `login_env_status()` but
-     the hub doesn't call it yet.
-   - The hub never sends `modelDefaults` (TS broadcasts it).
+   - ✅ RESOLVED (2026-07-07 "leg 1" cleanup): `set_archived` is wired in the
+     live `PolytokenDriver` (flips the archive flag + reaps a live worktree,
+     dirty → retained; a shared `reap_worktree` helper backs both it and
+     `cleanup_worktree`). The hub's `pilot_settings_msg` now calls
+     `driver.login_env_status()` via a new synchronous `PilotDriver` trait
+     method (mock/default report `{ok:false}`). Covered by three `live_path`
+     tests + two hub tests. (The earlier "hub never sends `modelDefaults`"
+     bullet was wrong — `connect_model_defaults` broadcasts it, with a test.)
 
 3. **Silent-degradation idiom.** Repo philosophy is fail-loud; the port
    has residual spots that still do the opposite. Status as of 2026-07-07:
@@ -547,10 +549,15 @@ validated" — it validates hub + protocol + mock.
      the hub's `notify` is `None`. (Still open — Phase 3.)
    - `/health` still returns hardcoded zeros for clients/running/busy. (Still
      open — Phase 3.)
-   - ⚠ Driver-failure error parity: TS sends `{type:"error"}` in ~17 places,
-     Rust in ~6. Driver failures still return empty `Vec` rather than a
-     client-visible error in several spots. (Still open — Phase 1 tail; the
-     single unchecked Phase-1 box.)
+   - ✅ RESOLVED (2026-07-07 "leg 1" cleanup): an audit of every TS
+     `{type:"error"}` site vs Rust found the raw "~17 vs ~6" count was not a
+     list of real gaps — most TS error sites are capability guards dissolved by
+     Rust's trait defaults, catches on infallible Rust methods, HTTP-layer auth
+     (401 at upgrade vs an in-band message), or intentional empty-list
+     degradation shared by both. The one real silent spot was `OpenDataDir`
+     discarding the file-manager spawn error; it now surfaces `"couldn't open
+     the data directory: {e}"` through an injectable spawn seam (covered by
+     `open_data_dir_surfaces_spawn_failure`).
    - ✅ Blanket `#![allow(dead_code)]` / `#![allow(unused_variables)]` —
      FIXED (Phase 0.2). All hand-written module-level allows removed; only 3
      justified `#![allow(dead_code)]` remain (generated `pilot-daemon-types`
@@ -744,9 +751,12 @@ review-approved.** See the per-spec failure table + ground-truth block above.
       end — the remaining gap is the I/O-shaped live-path tests behind Phase 2/3).
       The standing rule "fix by porting TS semantics, never by teaching the
       mock" held across all 7.
-- [ ] Restore error-message parity: audit all TS `{type:"error"}` sends
-      (~17 sites) and mirror them; driver failures must be client-visible —
-      the `new-session-failure` cluster is this bug.
+- [x] Restore error-message parity: audited all TS `{type:"error"}` sends vs
+      Rust (2026-07-07 "leg 1"). The "~17 vs ~6" gap was mostly illusory —
+      trait-default-dissolved capability guards, catches on infallible methods,
+      HTTP-layer auth, and intentional empty-list degradation. The one real
+      silent spot, `OpenDataDir`'s discarded spawn error, now surfaces to the
+      client (`open_data_dir_surfaces_spawn_failure`).
 
 Rule: fix by porting TS semantics, never by teaching the mock what the spec
 wants.
@@ -810,7 +820,7 @@ wants.
       effects → HTTP back. **DONE (Phase 2 / Phase A, 2026-07-06):**
       `tests/support/fake_daemon.rs` replays the frozen corpus over an
       ephemeral port; `daemon_client::set_spawn_override` routes
-      `PolytokenDriver` to it end-to-end. 16 live-path integration tests in
+      `PolytokenDriver` to it end-to-end. 19 live-path integration tests in
       `tests/live_path.rs` cover the ACs. (The dev *surface* — `/dev/reset`
       and `/dev/script` driving the full e2e suite through it — is Phase 2.5;
       the harness itself is live and test-only.)
@@ -907,7 +917,7 @@ fail-loud philosophy applied to tests — not noise to be waited away.
 ## How to verify current state
 
 ```bash
-cd server-rs && cargo test                      # 423 tests, green (5 daemon-types, 64 protocol, 330 lib, 8 corpus, 16 live_path)
+cd server-rs && cargo test                      # 430 tests, green (5 daemon-types, 64 protocol, 334 lib, 8 corpus, 19 live_path)
 cd server-rs && cargo clippy --all-targets -- -D warnings   # 0 warnings (Phase 0.2)
 bun run check:rs                                # fmt + clippy + test locally (CI gate)
 bun test                                        # 761 tests, green
