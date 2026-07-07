@@ -2132,10 +2132,7 @@ mod tests {
             PolytokenInner::session_id_from_path("/some/path/my-session.jsonl"),
             None
         );
-        assert_eq!(
-            PolytokenInner::session_id_from_path("bare-name"),
-            None
-        );
+        assert_eq!(PolytokenInner::session_id_from_path("bare-name"), None);
         // Fewer than two components (matching TS's `parts.length < 2` guard).
         assert_eq!(PolytokenInner::session_id_from_path("session.json"), None);
         assert_eq!(PolytokenInner::session_id_from_path(""), None);

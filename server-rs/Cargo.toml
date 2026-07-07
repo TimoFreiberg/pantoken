@@ -27,6 +27,9 @@ futures-util = { version = "0.3", default-features = false }
 tokio-stream = { version = "0.1", default-features = false, features = ["sync"] }
 urlencoding = "2"
 web-push = { version = "0.11", default-features = false, features = ["hyper-client"] }
+# pure-rust feature avoids boring-sys (BoringSSL/cmake) — uses superboring pure-Rust backend, keeping the build cmake-free. web-push uses the same.
+jwt-simple = { version = "0.12", default-features = false, features = ["pure-rust"] }
+ct-codecs = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 rand = "0.9"
 ignore = "0.4"
