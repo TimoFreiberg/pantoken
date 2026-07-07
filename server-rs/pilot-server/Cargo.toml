@@ -31,3 +31,4 @@ urlencoding = { workspace = true }
 web-push = { workspace = true }
 chrono = { workspace = true }
 rand = { workspace = true }
+ignore = { workspace = true }
