@@ -24,6 +24,13 @@ const VITE_PORT = Number(process.env.PILOT_E2E_VITE_PORT) || 15173;
 export default defineConfig({
   testDir: "./e2e",
   testMatch: /\.e2e\.ts$/,
+  // The live tier (e2e/live/) has its OWN config (playwright.live.config.ts) with a
+  // fake-daemon webServer; exclude it here so the default mock run never picks up a
+  // live spec against the mock backend. Project-level testIgnore overrides this, so
+  // the desktop project repeats the exclusion; mobile inherits it (and its testMatch
+  // already excludes non-.mobile specs). Path-segment match, so e2e/live-updates.e2e.ts
+  // (no slash after "live") is untouched.
+  testIgnore: /[\\/]live[\\/]/,
   fullyParallel: false,
   workers: 1,
   retries: process.env.CI ? 1 : 0,
@@ -50,7 +57,7 @@ export default defineConfig({
         ...devices["Desktop Chrome"],
         viewport: { width: 1100, height: 850 },
       },
-      testIgnore: /\.mobile\.e2e\.ts$/,
+      testIgnore: [/\.mobile\.e2e\.ts$/, /[\\/]live[\\/]/],
     },
     {
       // Pixel 7 is a Chromium-based mobile descriptor — avoids a WebKit download

@@ -495,9 +495,13 @@ validated" — it validates hub + protocol + mock.
    `tests/support/fake_daemon.rs` is a real axum router replaying the frozen
    corpus over an ephemeral port, speaking real `DaemonEvent`s end to end;
    `daemon_client::set_spawn_override` routes `PolytokenDriver` to it. 16
-   live-path integration tests exercise it. What remains for Phase 2.5 is the
-   *dev surface* (`/dev/reset`, `/dev/script`) so the full Playwright e2e
-   suite can run through it as a second backend.
+   live-path integration tests exercise it. **Phase 2.5 (2026-07-07) added the
+   *dev surface*** — `/debug/reset` + the `mock` WS message now route to the fake
+   daemon (`PILOT_DRIVER=fake`, promoted from a test-only harness into
+   `src/polytoken/fake_daemon.rs`), and a corpus-SUBSET `e2e/live` Playwright tier
+   runs through it as a second backend (D21) — a beachhead over the frozen corpus
+   flows, not the full mock suite. (The dev surface uses the real `/debug/reset` +
+   `mock` message, not the earlier-planned `/dev/reset`/`/dev/script` naming.)
 
 2. **Live-path bugs visible by inspection** (no test existed to catch them —
    that's the point). **FIXED 2026-07-06 (Phase 2, items 1–3)** — the three
@@ -565,7 +569,14 @@ validated" — it validates hub + protocol + mock.
      `live_path` binaries), and the old `driver.rs` `unused_variables` blanket
      is gone — which is precisely what had hidden the ignored `opts.worktree`
      / `emit` / `prompt_id` parameters. Survivors converted to item-level
-     `#[expect(dead_code, reason="...")]`, 16 tagged `BUG:`. (The bullet above
+     `#[expect(dead_code, reason="...")]`, 16 tagged `BUG:`. **The 6 live-path
+   `BUG:` `#[expect]` markers in `driver.rs` are RESOLVED (Phase A, 2026-07-07):
+   `prompt` (deliver_as/images/prompt_id + focus-before-POST), `branch_from`
+   (seed begins with the `sessionOpened` snapshot), `list_commands`/`list_facets`/
+   `list_files` (targeted-session cwd + cache key; `list_facets` reads facet names
+   through the daemon VFS and falls back to `["execute","plan"]`), and spawned-child
+   retention (`owned_process` retained + killed on dispose). `-D warnings` now
+   enforces that no silently-ignored parameter remains.** (The bullet above
      in this list previously claimed "nine modules carry blanket allows";
      that was pre-Phase-0.2 and is no longer true.)
    - `build_sha` is still hardcoded empty. (Still open — Phase 3.)
@@ -858,12 +869,32 @@ The point: reuse the whole existing e2e suite as continuous live-path
 coverage. Flakes in this tier are product bugs (ordering, races) — the
 fail-loud philosophy applied to tests — not noise to be waited away.
 
-- [ ] Finish the rebuilt fake daemon's dev surface: `/dev/reset` and
-      `/dev/script` replaying corpus sequences — this is what `/debug/reset`
-      and the `mock` WS message hit when the server runs in fake-daemon mode
-      (real `PolytokenDriver` → in-process fake daemon).
-- [ ] Add a Playwright project (or env-gated CI job) running the FULL
-      existing e2e suite in fake-daemon mode. Same specs, second backend.
+- [x] **DONE (Phase 2.5, 2026-07-07):** the fake daemon's dev surface — the real
+      `PolytokenDriver` over an in-process, corpus-backed fake daemon
+      (`PILOT_DRIVER=fake`, `src/polytoken/fake_daemon.rs::FakeControlHub`). Wire:
+      `/debug/reset` → `hub.reset` → `driver.reset` (keeps the bootstrap session
+      warm so the *synchronous* `seed_default` reseeds — a deliberate divergence
+      from the plan's "dispose" wording, since re-warming is async) and the `mock`
+      WS message → `driver.run_script(name)` (maps a script name → corpus scenario,
+      pushes its SSE frames onto the held-open per-session stream). The runtime
+      controllable stream replaced the one-shot scenario drain; the single-consumer
+      ordering guarantee the `live_path` tests assert is preserved. Integration
+      tests: `live_path::{fake_mode_boots_and_bootstraps, dev_surface_reset_reseeds,
+      dev_surface_run_script_pushes_scenario}`. (The earlier `/dev/reset`·`/dev/script`
+      naming was never used — the real wire is `/debug/reset` + the `mock` message.)
+- [~] **Playwright live tier — landed as a corpus SUBSET (Phase 2.5, 2026-07-07;
+      D21).** A SEPARATE `playwright.live.config.ts` runs `e2e/live/*.e2e.ts`
+      (streaming, queue, abort, ask-user-question, tool-approval) against
+      `PILOT_DRIVER=fake` via `bun run test:e2e:live`; the default `test:e2e` mock
+      tier (`desktop`/`mobile`) is unchanged. This is a deliberate BEACHHEAD over the
+      frozen corpus flows, NOT the full ~298-spec suite (D21) — widening needs
+      conscious live captures. The specs assert structural DOM (roles/testids), not
+      the mock's fixture strings (the corpus content differs). CI job `web-live`
+      exists but is gated to `workflow_dispatch` until a first green run confirms the
+      specs (authored against the corpus + existing DOM selectors, not yet browser-run
+      in-session); promote it to the PR gate then. GROW-THE-CORPUS PATH: capture a new
+      scenario (`scripts/capture-daemon-corpus.ts`, operator + `$DEEPSEEK_API_KEY`),
+      add a `run_script` match arm + an `e2e/live` spec.
 - [ ] Keep the MockDriver project as the fast deterministic tier for UI dev
       (dev bar, Claude_Preview) and triage. Revisit after cutover: if the
       fake-daemon tier is green and comparably fast, consolidate to one mock
