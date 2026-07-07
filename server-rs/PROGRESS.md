@@ -1,13 +1,13 @@
 # Rust Server Port — Status & Resumption Plan
 
-**Status (2026-07-07):** Phase 5 complete. 430 Rust tests green (5 daemon-types,
-64 protocol, 334 lib [5 `#[ignore]`], 8 corpus, 19 live_path), 761 TS tests
+**Status (2026-07-07):** Phase 5 complete. 462 Rust tests green (5 daemon-types,
+64 protocol, 360 lib [5 `#[ignore]`], 8 corpus, 25 live_path), 761 TS tests
 green, 298/298 Rust-server e2e (0 deterministic failures). `cargo clippy
 --all-targets -- -D warnings` clean. Mock-e2e burn-down complete (Phase 1);
 live-path validation parts 1–2 complete (Phases 2, 2.5, 5); 6 live-path `BUG:`
-markers resolved (Phase A). Remaining: daemon-client/lease-retry test ports
-(Phase 2 item 4), Phase 3 cutover mechanics (live smoke, push, /health,
-build_sha, default flip).
+markers resolved (Phase A). Phase 3 `/health` real counts + `build_sha` env
+done. Remaining: daemon-client/lease-retry test ports (Phase 2 item 4), Phase 3
+cutover mechanics (live smoke, push, default flip).
 
 ## Goal
 
@@ -151,8 +151,10 @@ structural knot. 19 live-path integration tests cover the ACs.
 3. **Silent-degradation — mostly resolved.** Remaining open spots:
    - `/push/*` endpoints return hardcoded `{ok:true}`; `push.rs` exists but is
      unwired; VAPID keygen + delivery TODO; hub's `notify` is `None`. (Phase 3.)
-   - `/health` returns hardcoded zeros for clients/running/busy. (Phase 3.)
-   - `build_sha` is hardcoded empty. (Phase 3.)
+   - ✅ `/health` returns real client/running/initializing/busy counts
+     (Phase 3, 2026-07-07).
+   - ✅ `build_sha` reads `PILOT_BUILD_SHA` via `option_env!` (Phase 3,
+     2026-07-07); still needs a build step to set the var.
    - ✅ `POST /update/state`, error-message parity, `OpenDataDir` spawn error,
      blanket `#![allow]` — all fixed.
 
@@ -277,10 +279,14 @@ faithfully.
 - [ ] **Live smoke** as the final gate: drive a real daemon session through the
       GUI (new session, prompt, stream, approve a tool, switch model/facet,
       abort, archive); diff `/debug/state` against the Bun server where feasible.
-- [ ] `/health`: real client/running/initializing/busy counts.
+- [x] `/health`: real client/running/initializing/busy counts. (2026-07-07)
+      `client_count()` mirrors TS `clientCount()`; the handler returns
+      `{ok, clients, running, initializing, busy}` matching the TS shape.
 - [ ] Push: VAPID keygen, web-push delivery, wire `push.rs` endpoints and the
       hub's `notify`.
-- [ ] `build_sha` from the dist marker.
+- [~] `build_sha` from the dist marker — reads `PILOT_BUILD_SHA` at compile
+      time via `option_env!` (empty in dev). Still needs a build step (CI /
+      `build.rs`) to actually set the var; the read path is wired.
 - [ ] Flip the default server impl; keep `server/` for one release as the escape
       hatch; update AGENTS.md, docs/DECISIONS.md, docs/TODO.md, package.json
       scripts, CI.
