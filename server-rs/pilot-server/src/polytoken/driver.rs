@@ -197,7 +197,13 @@ impl PolytokenDriver {
         login_shell: Option<String>,
         fake_control: Option<FakeControlHub>,
     ) -> Self {
-        let sessions_dir = data_dir.join("sessions");
+        // Resolve sessions_dir to the daemon's own data dir
+        // (`$XDG_DATA_HOME/polytoken/sessions` or `~/.local/share/polytoken/sessions`),
+        // NOT pilot's data dir. The daemon writes startup.json, credential.json,
+        // and session.json here — pilot must read from the same place to discover
+        // cold sessions and pick up auth tokens. Mirrors TS
+        // `polytoken-driver.ts:166` `sessionsDir ?? defaultSessionsDir()`.
+        let sessions_dir = sessions_registry::default_sessions_dir();
         let captured = login_env::capture_login_env(login_shell.as_deref()).await;
         let CapturedLoginEnv { env, status } = captured;
         let login_env = if env.is_empty() { None } else { Some(env) };
