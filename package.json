@@ -13,6 +13,7 @@
     "test": "bun test protocol server client/src scripts",
     "test:e2e": "playwright test",
     "test:e2e:update": "playwright test --update-snapshots",
+    "test:e2e:live": "playwright test -c playwright.live.config.ts",
     "check": "tsc -p protocol/tsconfig.json --noEmit && tsc -p server/tsconfig.json --noEmit && tsc -p tsconfig.scripts.json --noEmit && tsc -p tsconfig.e2e.json --noEmit && tsc -p tsconfig.parity.json --noEmit && bun run --cwd client check",
     "check:rs": "cd server-rs && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test",
     "deploy:now": "bash scripts/deploy-now.sh"

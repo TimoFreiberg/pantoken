@@ -81,3 +81,16 @@ instead of silently corrupting the GUI. Re-capturing the corpus
 (`scripts/capture-daemon-corpus.ts`) is a deliberate, separate step taken on
 conscious adoption. Supersedes the earlier "pin the daemon version" standing
 invariant (PROGRESS.md #3).
+
+## D21. Fake-daemon live e2e tier is a corpus-backed beachhead, not the full suite
+The live driver stack (`daemon_client → event_map → driver`) gets its first
+browser coverage via `PILOT_DRIVER=fake`: the real `PolytokenDriver` over an
+in-process fake daemon replaying the frozen golden corpus (D20). The tier
+(`e2e/live/`, `bun run test:e2e:live`, separate `playwright.live.config.ts`) covers
+only the corpus-backed flows — streaming turn, queue-while-in-flight, abort,
+ask-user-question, tool-call approval — a deliberate subset, NOT the full ~298-spec
+mock suite. Widening it needs conscious live captures (operator + `$DEEPSEEK_API_KEY`
++ cost, non-deterministic content), out of scope until adopted. This is the third leg
+of the four-leg cutover gate (ported units → mock e2e → **fake-daemon e2e** → live
+smoke); the mock tier stays the broad UI regression net. (Operator decision,
+2026-07-07: Option 1.)

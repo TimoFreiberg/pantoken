@@ -82,6 +82,16 @@ without a running daemon and for the dev-bar (`/?dev`). The e2e suite sets it
 automatically; unit tests don't touch the driver at all. `PILOT_DRIVER=pi` is a hard
 error (the driver was removed on this branch).
 
+A third mode, **`PILOT_DRIVER=fake`** (Rust server only — set `PILOT_SERVER_IMPL=rust`),
+runs the real `PolytokenDriver` over an *in-process, corpus-backed fake daemon*:
+deterministic like the mock, but it exercises the live driver stack
+(`daemon_client → event_map → driver`) end-to-end. It reads the frozen corpus
+(`server-rs/tests/corpus`) and fails loud if it's absent, so it's dev/e2e-only (never
+shipped). The corpus-backed **live e2e tier** drives it: `bun run test:e2e:live`
+(separate `playwright.live.config.ts` over `e2e/live/`; the default `bun run test:e2e`
+mock tier — `desktop`/`mobile` — is unchanged). It's a deliberate subset over the
+frozen corpus flows, not the full mock suite (see `docs/DECISIONS.md` D21).
+
 **Worktree note:** if you're spawned in an isolated worktree, work there — don't
 fall back to `~/src/pilot` (a concurrent session may be committing there; two
 agents on one working copy scramble each other's commits). A fresh worktree

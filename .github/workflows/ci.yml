@@ -63,6 +63,43 @@ jobs:
           path: test-results/
           retention-days: 7
 
+  web-live:
+    name: web — live e2e (fake daemon)
+    # Corpus-backed live tier: the real Rust server (PILOT_DRIVER=fake +
+    # PILOT_SERVER_IMPL=rust) over the in-process fake daemon. Gated to manual
+    # dispatch until the specs have a confirmed green run — they were authored
+    # against the corpus + existing DOM selectors but not yet executed in a browser.
+    # Promote to the pull_request/push gate (drop this `if:`) once a dispatch run
+    # passes. This is the third leg of the cutover gate (see server-rs/PROGRESS.md).
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server-rs
+      - run: bun install --frozen-lockfile
+      # Pre-warm the Rust binary so dev.ts's `cargo run` answers /health quickly (the
+      # webServer timeout budgets a cold compile, but warming keeps it comfortable).
+      - run: cargo build
+        working-directory: server-rs
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+      - run: bunx playwright install --with-deps chromium
+      - run: bun run test:e2e:live
+      - name: Upload traces on live e2e failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-live-results
+          path: test-results/
+          retention-days: 7
+
   desktop:
     name: desktop shell — fmt, clippy
     if: github.ref_type == 'tag' || github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Release v')
