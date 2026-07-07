@@ -53,6 +53,10 @@ impl McpServerAction {
 pub struct SpawnedDaemon {
     pub session_id: String,
     pub port: u16,
+    /// Bearer token for daemon 0.5.0+ auth. `None` for legacy daemons / fake-daemon
+    /// test harness (which doesn't enforce auth). Read from the credential file
+    /// pointed to by `startup.json.credential_file_path`.
+    pub auth_token: Option<String>,
 }
 
 /// A claimed attachment lease + its lifecycle handles.
@@ -103,7 +107,11 @@ pub fn parse_spawn_output(stdout: &str) -> Result<SpawnedDaemon, String> {
             let port: u16 = port_str
                 .parse()
                 .map_err(|_| format!("polytoken new --no-attach line unparseable: {line:?}"))?;
-            Ok(SpawnedDaemon { session_id, port })
+            Ok(SpawnedDaemon {
+                session_id,
+                port,
+                auth_token: None,
+            })
         }
         _ => Err(format!(
             "polytoken new --no-attach line unparseable: {line:?}"
@@ -137,16 +145,21 @@ fn dirs_or_home_config() -> PathBuf {
 /// The parsed `startup.json` shape — the daemon writes `{state:"ready", pid, port}`
 /// on success or `{state:"failed", pid, message}` on failure.
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
-struct StartupJson {
-    state: String,
+pub struct StartupJson {
+    pub state: String,
     #[serde(default)]
-    session_id: Option<String>,
+    pub session_id: Option<String>,
     #[serde(default)]
-    pid: Option<i32>,
+    pub pid: Option<i32>,
     #[serde(default)]
-    port: Option<i32>,
+    pub port: Option<i32>,
     #[serde(default)]
-    message: Option<String>,
+    pub message: Option<String>,
+    /// Path to the credential file written by 0.5.0+ daemons (bearer-token auth).
+    /// Absent for legacy daemons that predate bearer auth — `#[serde(default)]`
+    /// makes those records deserialize to `None`.
+    #[serde(default)]
+    pub credential_file_path: Option<String>,
 }
 
 /// Read the `startup.json` a `polytoken daemon` writes to its session dir. Returns
@@ -173,6 +186,18 @@ fn read_startup_json(session_dir: &Path) -> Option<StartupJson> {
     }
 }
 
+/// Read the bearer token from a daemon credential file
+/// (`{"version":1,"kind":"daemon_auth","token":"<hex>"}` JSON written by 0.5.0+
+/// daemons at startup). Returns `None` if the file is missing or unparseable —
+/// legacy daemons that predate bearer auth have no credential file, so callers
+/// treat `None` as "no auth header" and the daemon (which doesn't enforce auth)
+/// accepts the request.
+pub fn read_credential_token(credential_file_path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(credential_file_path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&text).ok()?;
+    json.get("token")?.as_str().map(String::from)
+}
+
 /// Wait for a `polytoken daemon` (foreground) to write a `ready` startup.json,
 /// polling every 100ms up to `timeout_ms`. Returns the port. Throws on `failed`,
 /// timeout, or a malformed startup.json. The daemon writes `startup.json` to its
@@ -185,12 +210,17 @@ fn read_startup_json(session_dir: &Path) -> Option<StartupJson> {
 /// and `wait_for_health` spins for 10s against an unbound port → every cold resume
 /// of an old session times out. Only trust a `ready` file whose `pid` matches the
 /// process we started.
+///
+/// `child` — the spawned daemon process. We check `try_wait()` after each poll
+/// iteration: if the process exited early (e.g. CLI parse error) we read its
+/// stderr and fail immediately instead of silently polling for the full timeout.
 pub async fn wait_for_daemon_startup(
     sessions_dir: &str,
     session_id: &str,
     timeout_ms: u64,
     expect_pid: Option<i32>,
-) -> Result<u16, String> {
+    child: &mut tokio::process::Child,
+) -> Result<StartupJson, String> {
     let session_dir = PathBuf::from(sessions_dir).join(session_id);
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let mut last_json: Option<StartupJson> = None;
@@ -198,12 +228,12 @@ pub async fn wait_for_daemon_startup(
         if let Some(json) = read_startup_json(&session_dir) {
             last_json = Some(json.clone());
             if json.state == "ready" {
-                if let Some(port) = json.port {
+                if let Some(_port) = json.port {
                     // Stale startup.json from a prior (now-dead) daemon: its pid won't match
                     // the process we just spawned. Keep polling for OUR daemon's file.
                     let pid_matches = expect_pid.map(|ep| json.pid == Some(ep)).unwrap_or(true);
                     if pid_matches {
-                        return Ok(port as u16);
+                        return Ok(json);
                     }
                     // The file is stale — but note it so the timeout message is useful.
                 }
@@ -221,6 +251,24 @@ pub async fn wait_for_daemon_startup(
             }
             // state is something else (e.g. "starting") — keep polling.
         }
+
+        // Detect early process death: if the daemon exited before writing a
+        // ready startup.json, read its stderr and fail immediately rather than
+        // silently polling for the full timeout (the "click does nothing" symptom).
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let stderr = read_child_stderr(child).await;
+                return Err(format!(
+                    "polytoken daemon exited early (status {status}):\nstderr: {}",
+                    &stderr[..stderr.len().min(500)]
+                ));
+            }
+            Ok(None) => { /* still running, keep polling */ }
+            Err(e) => {
+                warn!("failed to check daemon process status: {e}");
+            }
+        }
+
         if Instant::now() >= deadline {
             let last_str = match &last_json {
                 Some(j) => serde_json::to_string(j).unwrap_or_else(|_| "<unparseable>".into()),
@@ -229,12 +277,31 @@ pub async fn wait_for_daemon_startup(
             let pid_str = expect_pid
                 .map(|p| p.to_string())
                 .unwrap_or_else(|| "any".into());
+            // On timeout, also surface the daemon's stderr for diagnostics.
+            let stderr = read_child_stderr(child).await;
             return Err(format!(
-                "polytoken daemon did not become ready within {}ms (startup.json: {}; expected pid: {})",
-                timeout_ms, last_str, pid_str
+                "polytoken daemon did not become ready within {}ms (startup.json: {}; expected pid: {})\ndaemon stderr: {}",
+                timeout_ms,
+                last_str,
+                pid_str,
+                &stderr[..stderr.len().min(500)]
             ));
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Read all available stderr from a child process (best-effort, non-blocking —
+/// the process is expected to have exited). Used by `wait_for_daemon_startup`
+/// to surface the daemon's error output on early death or timeout.
+async fn read_child_stderr(child: &mut tokio::process::Child) -> String {
+    if let Some(mut stderr) = child.stderr.take() {
+        use tokio::io::AsyncReadExt;
+        let mut buf = String::new();
+        let _ = stderr.read_to_string(&mut buf).await;
+        buf
+    } else {
+        String::new()
     }
 }
 
@@ -300,7 +367,22 @@ async fn spawn_new_daemon(
             &stdout[..stdout.len().min(500)]
         ));
     }
-    parse_spawn_output(&stdout).map(|spawned| (spawned, None))
+    parse_spawn_output(&stdout).map(|mut spawned| {
+        // Read the bearer token from the session dir's startup.json (daemon
+        // 0.5.0+ writes credential_file_path there after binding). The daemon
+        // auto-generates credentials internally for `new --no-attach` sessions;
+        // we read them back so the client can authenticate. None for legacy
+        // daemons that have no credential file.
+        if let Some(sessions_dir) = &opts.sessions_dir {
+            let session_dir = PathBuf::from(sessions_dir).join(&spawned.session_id);
+            if let Some(startup) = read_startup_json(&session_dir) {
+                if let Some(cred_path) = startup.credential_file_path.as_deref() {
+                    spawned.auth_token = read_credential_token(Path::new(cred_path));
+                }
+            }
+        }
+        (spawned, None)
+    })
 }
 
 /// Spawn a daemon to RESUME an existing session. Unlike `new --no-attach` (which
@@ -313,6 +395,31 @@ async fn spawn_new_daemon(
 /// `--global-config-dir` and `--sessions-dir` are passed explicitly because the
 /// `daemon` subcommand resolves config differently than `new --working-dir`
 /// (it does NOT walk upward from the project dir to find the global config).
+/// Build the arg vector for `polytoken daemon --resume`. Extracted as a pure
+/// function so it can be unit-tested (AC.3) without spawning a process.
+pub fn build_resume_args(
+    cwd: &str,
+    session_id: &str,
+    global_config_dir: &str,
+    sessions_dir: &str,
+    credential_file: &Path,
+) -> Vec<String> {
+    vec![
+        "daemon".into(),
+        "--project-dir".into(),
+        cwd.into(),
+        "--session-id".into(),
+        session_id.into(),
+        "--resume".into(),
+        "--global-config-dir".into(),
+        global_config_dir.into(),
+        "--sessions-dir".into(),
+        sessions_dir.into(),
+        "--credential-file".into(),
+        credential_file.to_string_lossy().into(),
+    ]
+}
+
 async fn spawn_resume_daemon(
     polytoken_bin: &str,
     opts: SpawnDaemonOpts,
@@ -322,18 +429,20 @@ async fn spawn_resume_daemon(
     let sessions_dir = opts.sessions_dir.as_ref().unwrap().clone();
     let global_config_dir = opts.global_config_dir.as_ref().unwrap().clone();
 
-    let args = vec![
-        "daemon".to_string(),
-        "--project-dir".into(),
-        cwd,
-        "--session-id".into(),
-        session_id.clone(),
-        "--resume".into(),
-        "--global-config-dir".into(),
-        global_config_dir,
-        "--sessions-dir".into(),
-        sessions_dir.clone(),
-    ];
+    // The 0.5.0+ daemon requires --credential-file <path> (it writes a bearer
+    // token there at startup, and every HTTP endpoint enforces auth). Use the
+    // conventional location the daemon itself uses: <session_dir>/credential.json.
+    let credential_file = PathBuf::from(&sessions_dir)
+        .join(&session_id)
+        .join("credential.json");
+
+    let args = build_resume_args(
+        &cwd,
+        &session_id,
+        &global_config_dir,
+        &sessions_dir,
+        &credential_file,
+    );
 
     let mut cmd = Command::new(polytoken_bin);
     cmd.args(&args);
@@ -357,8 +466,33 @@ async fn spawn_resume_daemon(
 
     // Poll startup.json for readiness (the daemon writes it once it has bound its
     // port). 15s is generous — a cold config load + history replay can take a moment.
-    match wait_for_daemon_startup(&sessions_dir, &session_id, 15_000, pid.map(|p| p as i32)).await {
-        Ok(port) => Ok((SpawnedDaemon { session_id, port }, Some(child))),
+    match wait_for_daemon_startup(
+        &sessions_dir,
+        &session_id,
+        15_000,
+        pid.map(|p| p as i32),
+        &mut child,
+    )
+    .await
+    {
+        Ok(startup) => {
+            let port = startup.port.ok_or("startup.json has no port")? as u16;
+            // Read the bearer token from the credential file (daemon 0.5.0+
+            // writes it during startup; startup.json.credential_file_path
+            // points to it). None for legacy daemons → no auth header.
+            let auth_token = startup
+                .credential_file_path
+                .as_deref()
+                .and_then(|p| read_credential_token(Path::new(p)));
+            Ok((
+                SpawnedDaemon {
+                    session_id,
+                    port,
+                    auth_token,
+                },
+                Some(child),
+            ))
+        }
         Err(e) => {
             // Startup failed — kill the background daemon so it doesn't leak.
             let _ = child.kill().await;
@@ -765,6 +899,9 @@ pub struct DaemonClient {
     pub port: u16,
     base_url: String,
     pid: i32,
+    /// Bearer token for daemon 0.5.0+ auth. `None` → no `Authorization` header
+    /// sent (legacy daemons / fake-daemon tests don't enforce auth).
+    auth_token: Option<String>,
     /// The daemon's own OS pid, captured from GET /health. Used as a kill() fallback
     /// when HTTP /terminate fails (a wedged daemon won't respond to HTTP).
     daemon_pid: Mutex<Option<i32>>,
@@ -782,13 +919,16 @@ type ErrorForStatus<T> = dyn Fn(Option<&T>, &str) -> Option<String>;
 
 impl DaemonClient {
     /// Create a new client for a daemon at `127.0.0.1:{port}` with the given pid.
-    pub fn new(session_id: String, port: u16, pid: i32) -> Self {
+    /// `auth_token` is the bearer token for daemon 0.5.0+ auth; pass `None` for
+    /// legacy daemons or test harnesses that don't enforce auth.
+    pub fn new(session_id: String, port: u16, pid: i32, auth_token: Option<String>) -> Self {
         let base_url = format!("http://127.0.0.1:{port}");
         Self {
             session_id,
             port,
             base_url,
             pid,
+            auth_token,
             daemon_pid: Mutex::new(None),
             lease: Mutex::new(None),
             sse_cancel: Mutex::new(None),
@@ -799,6 +939,13 @@ impl DaemonClient {
             // (GC pause, brief scheduler stall) before declaring the daemon dead.
             heartbeat_timeout_ms: 30_000,
         }
+    }
+
+    /// Build the `Authorization: Bearer <token>` header value if a token is set.
+    fn auth_header(&self) -> Option<(&'static str, String)> {
+        self.auth_token
+            .as_ref()
+            .map(|t| ("Authorization", format!("Bearer {t}")))
     }
 
     // --- HTTP helpers ---
@@ -833,6 +980,13 @@ impl DaemonClient {
             reqwest::Method::GET => self.http.get(url),
             reqwest::Method::DELETE => self.http.delete(url),
             _ => self.http.request(method, url),
+        };
+        // Attach the bearer auth header (daemon 0.5.0+). No-op when no token
+        // is set (legacy daemons / fake-daemon tests).
+        let req = if let Some((name, value)) = self.auth_header() {
+            req.header(name, value)
+        } else {
+            req
         };
         match tokio::time::timeout(Duration::from_millis(timeout_ms), req.send()).await {
             Err(_) => Err(()),      // timed out
@@ -1109,6 +1263,7 @@ impl DaemonClient {
         let http = self.http.clone();
         let base_url = self.base_url.clone();
         let pid = self.pid;
+        let auth_token = self.auth_token.clone();
         let heartbeat_handle = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_millis(heartbeat_ms));
             interval.tick().await; // first tick is immediate
@@ -1123,12 +1278,18 @@ impl DaemonClient {
                         };
                         let body_str = serde_json::to_string(&body).unwrap_or_default();
                         let url = format!("{base_url}/tui-attachment/heartbeat");
+                        let mut req = http.post(&url)
+                            .header("content-type", "application/json")
+                            .body(body_str);
+                        // Attach the bearer auth header (daemon 0.5.0+). Without
+                        // it the heartbeat 401s every ~5s, the lease lapses
+                        // (~30s), and the daemon evicts pilot's attachment.
+                        if let Some(ref token) = auth_token {
+                            req = req.header("Authorization", format!("Bearer {token}"));
+                        }
                         match tokio::time::timeout(
                             Duration::from_millis(10_000),
-                            http.post(&url)
-                                .header("content-type", "application/json")
-                                .body(body_str)
-                                .send(),
+                            req.send(),
                         )
                         .await
                         {
@@ -1833,6 +1994,11 @@ impl DaemonClient {
             if let Some(ref id) = last_event_id {
                 req = req.header("Last-Event-ID", id);
             }
+            // Attach the bearer auth header (daemon 0.5.0+). Without it the SSE
+            // stream returns 401 immediately and the loop spins on reconnect.
+            if let Some((name, value)) = self.auth_header() {
+                req = req.header(name, value);
+            }
 
             let response_result = tokio::select! {
                 _ = stop_notify.notified() => {
@@ -2101,4 +2267,135 @@ fn epoch_to_civil(secs: u64) -> (i32, u32, u32, u32, u32, u32) {
 #[deprecated(note = "use set_spawn_override / clear_spawn_override instead")]
 pub fn _set_spawn_for_testing(_enabled: bool) {
     // No-op: superseded by the real spawn-override seam.
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // AC.3 — build_resume_args includes --credential-file and the credential path.
+    #[test]
+    fn test_resume_args_include_credential_file() {
+        let args = build_resume_args(
+            "/project",
+            "sess-123",
+            "/config/polytoken",
+            "/data/sessions",
+            Path::new("/data/sessions/sess-123/credential.json"),
+        );
+        let cred_idx = args
+            .iter()
+            .position(|a| a == "--credential-file")
+            .expect("--credential-file not in args");
+        let cred_path = args
+            .get(cred_idx + 1)
+            .expect("no value after --credential-file");
+        assert_eq!(
+            *cred_path, "/data/sessions/sess-123/credential.json",
+            "credential file path should match the session dir + credential.json"
+        );
+        // Also verify the other required args are present.
+        assert!(args.contains(&"--resume".to_string()));
+        assert!(args.contains(&"--session-id".to_string()));
+        assert!(args.contains(&"sess-123".to_string()));
+        assert!(args.contains(&"--project-dir".to_string()));
+        assert!(args.contains(&"/project".to_string()));
+    }
+
+    // AC.2 — auth_header returns the correct header value when a token is set.
+    #[test]
+    fn test_auth_header_present_when_token_set() {
+        let client = DaemonClient::new("s1".into(), 1234, 1, Some("deadbeef".into()));
+        let (name, value) = client
+            .auth_header()
+            .expect("auth header should be present when token is set");
+        assert_eq!(name, "Authorization");
+        assert_eq!(value, "Bearer deadbeef");
+    }
+
+    // AC.2 — auth_header returns None when no token is set.
+    #[test]
+    fn test_auth_header_absent_when_token_none() {
+        let client = DaemonClient::new("s1".into(), 1234, 1, None);
+        assert!(
+            client.auth_header().is_none(),
+            "auth header should be absent when token is None"
+        );
+    }
+
+    // AC.4 — wait_for_daemon_startup detects early process death and includes
+    // stderr, returning within ~1s (not the full timeout).
+    #[tokio::test]
+    async fn test_wait_for_startup_detects_early_death() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sessions_dir = dir.path().to_string_lossy().to_string();
+        let session_id = "early-death-test";
+
+        // Spawn a process that exits immediately with a stderr message.
+        let mut child = tokio::process::Command::new("sh")
+            .args(["-c", "echo 'error: missing --credential-file' >&2; exit 1"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn sh");
+
+        let start = Instant::now();
+        let result = wait_for_daemon_startup(
+            &sessions_dir,
+            session_id,
+            15_000, // 15s timeout — should NOT take this long
+            None,
+            &mut child,
+        )
+        .await;
+        let elapsed = start.elapsed();
+
+        assert!(result.is_err(), "should return an error on early death");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("exited early"),
+            "error should mention early exit: {err}"
+        );
+        assert!(
+            err.contains("missing --credential-file"),
+            "error should include stderr: {err}"
+        );
+        // Should return within ~2s, not the full 15s timeout.
+        assert!(
+            elapsed.as_secs() < 5,
+            "should return quickly on early death, took {:?}",
+            elapsed
+        );
+    }
+
+    // AC.2 — read_credential_token reads the token from a credential file.
+    #[test]
+    fn test_read_credential_token() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cred_path = dir.path().join("credential.json");
+        std::fs::write(
+            &cred_path,
+            r#"{"version":1,"kind":"daemon_auth","token":"abc123"}"#,
+        )
+        .expect("write credential file");
+        let token = read_credential_token(&cred_path);
+        assert_eq!(token.as_deref(), Some("abc123"));
+    }
+
+    // AC.2 — read_credential_token returns None for a missing file.
+    #[test]
+    fn test_read_credential_token_missing_file() {
+        let token = read_credential_token(Path::new("/nonexistent/credential.json"));
+        assert!(token.is_none());
+    }
+
+    // AC.2 — read_credential_token returns None for a malformed file.
+    #[test]
+    fn test_read_credential_token_malformed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cred_path = dir.path().join("credential.json");
+        std::fs::write(&cred_path, "not json").expect("write");
+        let token = read_credential_token(&cred_path);
+        assert!(token.is_none());
+    }
 }

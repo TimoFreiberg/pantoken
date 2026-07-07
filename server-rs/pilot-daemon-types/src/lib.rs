@@ -731,36 +731,6 @@ pub enum DaemonEvent {
         outcome: SubagentOutcome,
         result_summary: String,
     },
-    SubsessionCreated {
-        facet: String,
-        port: i32,
-        prompt_summary: String,
-        subsession_id: SessionId,
-    },
-    SubsessionStopped {
-        subsession_id: SessionId,
-        summary: String,
-    },
-    SubsessionTerminated {
-        reason: String,
-        subsession_id: SessionId,
-    },
-    SubsessionInterrogative {
-        #[serde(skip_serializing_if = "Option::is_none", default)]
-        clarification_options: Option<Vec<ClarificationOption>>,
-        interrogative_id: InterrogativeId,
-        interrogative_type: InterrogativeType,
-        #[serde(skip_serializing_if = "Option::is_none", default)]
-        permission_candidate_rule: Option<PermissionCandidateRuleContext>,
-        question: String,
-        subsession_id: SessionId,
-    },
-    SubsessionMessage {
-        #[serde(skip_serializing_if = "Option::is_none", default)]
-        detail: Option<serde_json::Value>,
-        subsession_id: SessionId,
-        summary: String,
-    },
     McpServerConnected {
         resource_count: i32,
         server_name: String,
@@ -1255,7 +1225,6 @@ pub enum NotificationType {
         handle: String,
         outcome: SubagentOutcome,
     },
-    SubsessionMessage,
     ExtensionMessage {
         extension_name: String,
     },
@@ -1535,6 +1504,8 @@ pub type SessionId = String;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SessionRecord {
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub credential_file_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -1963,6 +1934,12 @@ pub enum TurnChunk {
         input_tokens: i32,
         output_tokens: i32,
     },
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UnauthorizedResponse {
+    pub code: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

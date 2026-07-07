@@ -2297,6 +2297,15 @@ fn classify_switch_error(raw: &str) -> (String, Option<String>) {
             session_switch(),
         );
     }
+    // 401 — auth failure (daemon 0.5.0+ bearer token mismatch). The token is
+    // read from the credential file; a 401 means the file is stale, missing,
+    // or the daemon is a different version than expected.
+    if raw.contains("lease claim failed (401)") || raw.contains("unauthorized") {
+        return (
+            "Couldn't authenticate to the session daemon. The daemon may be a different version than expected.".into(),
+            session_switch(),
+        );
+    }
     // Could not resolve session id from path.
     if raw.contains("could not resolve session id from path") {
         return (

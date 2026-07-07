@@ -433,6 +433,7 @@ pub fn install_fake_spawn(control: FakeControlHub) {
                 SpawnedDaemon {
                     session_id: fake.session_id.clone(),
                     port: fake.port,
+                    auth_token: None,
                 },
                 None,
             ))
@@ -576,7 +577,14 @@ impl MultiSpawnOverrideGuard {
                     fake,
                 };
                 state.lock().spawned.push(spawned);
-                Ok((SpawnedDaemon { session_id, port }, None))
+                Ok((
+                    SpawnedDaemon {
+                        session_id,
+                        port,
+                        auth_token: None,
+                    },
+                    None,
+                ))
             })
         }));
 
