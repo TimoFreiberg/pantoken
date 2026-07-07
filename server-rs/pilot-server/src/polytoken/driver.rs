@@ -396,6 +396,25 @@ impl PolytokenInner {
         order.push(session_id.clone());
     }
 
+    /// Extract the session id from a session path. The path is
+    /// `.../sessions/<session_id>/session.json` — the id is the **parent
+    /// directory name**, not the file stem (which is always `"session"`).
+    /// Mirrors TS `sessionIdFromPath` (`polytoken-driver.ts:844`).
+    ///
+    /// Returns `None` for non-`session.json` paths or paths with fewer than
+    /// two components — matching the TS `null` return whose callers throw
+    /// `"could not resolve session id from path"`. Callers must propagate
+    /// that as an `Err` rather than proceeding with a bogus id.
+    fn session_id_from_path(path: &str) -> Option<String> {
+        let normalized = path.replace('\\', "/");
+        let parts: Vec<&str> = normalized.split('/').filter(|s| !s.is_empty()).collect();
+        if parts.len() >= 2 && parts[parts.len() - 1] == "session.json" {
+            Some(parts[parts.len() - 2].to_string())
+        } else {
+            None
+        }
+    }
+
     /// Resolve a session's project cwd from its on-disk `session.json`, falling
     /// back to `None` when the metadata is missing/unreadable (the caller then
     /// falls back to the sessions dir, mirroring `polytoken-driver.ts:1138`).
@@ -1224,11 +1243,8 @@ impl PilotDriver for PolytokenDriver {
     }
 
     async fn open_session(&self, path: String) -> Result<Vec<SessionDriverEvent>, String> {
-        let session_id = std::path::Path::new(&path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown")
-            .to_string();
+        let session_id = PolytokenInner::session_id_from_path(&path)
+            .ok_or_else(|| format!("could not resolve session id from path: {path}"))?;
         let session_ref = SessionRef {
             workspace_id: WorkspaceId::default(),
             session_id: session_id.clone(),
@@ -1337,11 +1353,8 @@ impl PilotDriver for PolytokenDriver {
     }
 
     async fn reload_session(&self, path: String) -> Result<Vec<SessionDriverEvent>, String> {
-        let session_id = std::path::Path::new(&path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown")
-            .to_string();
+        let session_id = PolytokenInner::session_id_from_path(&path)
+            .ok_or_else(|| format!("could not resolve session id from path: {path}"))?;
         // Dispose existing warm session (extract before await to avoid holding the lock).
         // Teardown order: stop the SSE subscription (aborts the daemon's stream
         // loop → drops the subscribe closure's sender), drop our sender clone
@@ -1724,32 +1737,13 @@ impl PilotDriver for PolytokenDriver {
         cwd: Option<String>,
     ) -> Vec<FileInfo> {
         // Ports TS `polytoken-driver.ts:1589-1601`: caller cwd wins; otherwise
-        // fall back to the targeted session cwd.
+        // fall back to the targeted session cwd. The TS driver spawns `fd`
+        // directly; the Rust port uses an in-process `.gitignore`-aware walk
+        // via the `ignore` crate (no external binary dependency).
         let Some(root) = self.inner.file_lookup_root(cwd, session_id.as_ref()) else {
             return Vec::new();
         };
-        let mut args = vec![
-            "files".to_string(),
-            "--format".to_string(),
-            "json".to_string(),
-        ];
-        if !query.is_empty() {
-            args.extend(["--query".to_string(), query]);
-        }
-        args.extend(["--cwd".to_string(), root.clone()]);
-        match self.inner.run_polytoken(args, Some(root)).await {
-            Ok(out) => {
-                let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                if let Ok(paths) = serde_json::from_str::<Vec<String>>(&stdout) {
-                    return crate::polytoken::file_catalog::parse_file_catalog(&paths);
-                }
-                Vec::new()
-            }
-            Err(e) => {
-                error!("list_files failed: {e}");
-                Vec::new()
-            }
-        }
+        crate::polytoken::file_search::list_files_with_fd(std::path::Path::new(&root), &query)
     }
 
     async fn list_dir(&self, path: Option<String>) -> DirListing {
@@ -2099,6 +2093,54 @@ mod tests {
         );
     }
 
+    /// `session_id_from_path` extracts the parent directory name of
+    /// `session.json` — NOT the file stem (which is always `"session"`).
+    #[test]
+    fn session_id_from_path_extracts_parent_dir() {
+        assert_eq!(
+            PolytokenInner::session_id_from_path(
+                "/home/user/.pilot/sessions/2025-01-15T10-30-00-my-task/session.json"
+            ),
+            Some("2025-01-15T10-30-00-my-task".to_string())
+        );
+
+        // Windows-style backslash paths should work too.
+        assert_eq!(
+            PolytokenInner::session_id_from_path(
+                "C:\\Users\\timo\\.pilot\\sessions\\2025-01-15T10-30-00-my-task\\session.json"
+            ),
+            Some("2025-01-15T10-30-00-my-task".to_string())
+        );
+
+        // Trailing slash should not confuse the split.
+        assert_eq!(
+            PolytokenInner::session_id_from_path(
+                "/home/user/.pilot/sessions/2025-01-15T10-30-00-my-task/session.json/"
+            ),
+            Some("2025-01-15T10-30-00-my-task".to_string())
+        );
+    }
+
+    /// Non-`session.json` paths and paths with fewer than two components return
+    /// `None` — matching TS `sessionIdFromPath`'s `null`, whose callers throw
+    /// "could not resolve session id from path". The Rust callers propagate
+    /// that as an `Err` rather than proceeding with a bogus id.
+    #[test]
+    fn session_id_from_path_returns_none_for_non_standard_path() {
+        // Wrong file name → None (previously fell back to a bogus file stem).
+        assert_eq!(
+            PolytokenInner::session_id_from_path("/some/path/my-session.jsonl"),
+            None
+        );
+        assert_eq!(
+            PolytokenInner::session_id_from_path("bare-name"),
+            None
+        );
+        // Fewer than two components (matching TS's `parts.length < 2` guard).
+        assert_eq!(PolytokenInner::session_id_from_path("session.json"), None);
+        assert_eq!(PolytokenInner::session_id_from_path(""), None);
+    }
+
     // ---- focus: recency order via move-to-back ----
 
     /// AC.1 (focus unit): focusing a known id moves it to the back (most-recently
@@ -2286,23 +2328,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_files_uses_session_cwd_when_caller_omits_cwd() {
-        let calls = Arc::new(Mutex::new(Vec::<(Vec<String>, Option<String>)>::new()));
-        let calls_for_runner = calls.clone();
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, args, cwd| {
-            calls_for_runner.lock().push((args, cwd));
-            Box::pin(async { Ok(ok_output("[\"src/main.rs\"]")) })
-        });
-        let (driver, _dir) = driver_with_runner("s1", "/repo/files", runner);
+    async fn list_files_searches_session_cwd_when_caller_omits_cwd() {
+        // list_files now does an in-process .gitignore-aware walk (via the
+        // `ignore` crate) instead of spawning `polytoken files` (which doesn't
+        // exist). Create real files in a temp dir and verify they're found.
+        let repo = tempfile::tempdir().expect("repo tempdir");
+        let repo_path = repo.path();
+        std::fs::create_dir_all(repo_path.join("src")).expect("mkdir src");
+        std::fs::write(repo_path.join("src/main.rs"), "").expect("write main.rs");
+        std::fs::write(repo_path.join("src/lib.rs"), "").expect("write lib.rs");
+        std::fs::write(repo_path.join("README.md"), "").expect("write README.md");
+
+        // Use a no-op runner — list_files no longer goes through it.
+        let runner: Arc<CommandRunner> =
+            Arc::new(|_p, _a, _c| Box::pin(async { Err("unused".to_string()) }));
+        let (driver, _dir) = driver_with_runner("s1", repo_path.to_str().unwrap(), runner);
 
         let files = driver
             .list_files("main".into(), Some("s1".into()), None)
             .await;
 
-        assert_eq!(files.len(), 1);
-        let calls = calls.lock();
-        assert_eq!(calls[0].1.as_deref(), Some("/repo/files"));
-        assert!(calls[0].0.windows(2).any(|w| w == ["--cwd", "/repo/files"]));
+        assert_eq!(files.len(), 1, "should find only main.rs for query 'main'");
+        assert_eq!(files[0].path, "src/main.rs");
+    }
+
+    #[tokio::test]
+    async fn list_files_empty_query_returns_all_files() {
+        let repo = tempfile::tempdir().expect("repo tempdir");
+        let repo_path = repo.path();
+        std::fs::write(repo_path.join("a.rs"), "").expect("write a.rs");
+        std::fs::write(repo_path.join("b.rs"), "").expect("write b.rs");
+
+        let runner: Arc<CommandRunner> =
+            Arc::new(|_p, _a, _c| Box::pin(async { Err("unused".to_string()) }));
+        let (driver, _dir) = driver_with_runner("s1", repo_path.to_str().unwrap(), runner);
+
+        let files = driver.list_files("".into(), Some("s1".into()), None).await;
+        // Exact set (not `>= 2`): a fresh tempdir has only a.rs and b.rs, so an
+        // exact comparison also catches over-inclusion regressions.
+        let mut paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
+        paths.sort();
+        assert_eq!(paths, vec!["a.rs".to_string(), "b.rs".to_string()]);
     }
 
     #[test]
