@@ -2,10 +2,12 @@
 
 pub mod commands;
 pub mod config_notify;
+pub mod corpus;
 pub mod daemon_client;
 pub mod driver;
 pub mod event_map;
 pub mod facets;
+pub mod fake_daemon;
 pub mod file_catalog;
 pub mod history_seed;
 pub mod models;

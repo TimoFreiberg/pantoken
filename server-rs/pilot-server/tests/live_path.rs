@@ -399,6 +399,101 @@ async fn warm_child_killed_on_shutdown() {
     );
 }
 
+// ===========================================================================
+// Phase B — fake-mode boot + dev surface (AC.6, AC.7)
+// ===========================================================================
+
+/// Build a fake-mode driver: install the corpus-backed spawn override, then
+/// construct the real `PolytokenDriver` with `is_fake` + a `FakeControlHub`
+/// (which warms a bootstrap session on construction). The returned tuple keeps
+/// the tempdir + override-clear guard alive for the test body.
+async fn make_fake_driver() -> (
+    PolytokenDriver,
+    pilot_server::polytoken::fake_daemon::FakeControlHub,
+    tempfile::TempDir,
+    ClearOverrideOnDrop,
+) {
+    let control = pilot_server::polytoken::fake_daemon::FakeControlHub::load_default();
+    pilot_server::polytoken::fake_daemon::install_fake_spawn(control.clone());
+    let clear = ClearOverrideOnDrop;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let driver = PolytokenDriver::new_with_fake_control(
+        dir.path().to_path_buf(),
+        "polytoken".into(),
+        true,
+        64,
+        None,
+        Some(control.clone()),
+    )
+    .await;
+    (driver, control, dir, clear)
+}
+
+/// AC.6: `PILOT_DRIVER=fake` boots the real `PolytokenDriver` over an in-process
+/// fake daemon — the constructor warms a bootstrap session, so `default_seed`
+/// returns its `sessionOpened` (what the hub adopts as the landing session).
+#[tokio::test]
+async fn fake_mode_boots_and_bootstraps() {
+    let _guard = OVERRIDE_MUTEX.lock().await;
+    let (driver, _control, _dir, _clear) = make_fake_driver().await;
+
+    let seed = driver
+        .default_seed()
+        .expect("fake mode default_seed should return the bootstrap session");
+    assert!(
+        matches!(seed.first(), Some(SessionDriverEvent::SessionOpened { .. })),
+        "default_seed must begin with sessionOpened; got {:?}",
+        seed.first()
+    );
+}
+
+/// AC.7: `/debug/reset` → `driver.reset` keeps the bootstrap session warm so the
+/// hub's follow-up `seed_default` reseeds a `sessionOpened` deterministically.
+#[tokio::test]
+async fn dev_surface_reset_reseeds() {
+    let _guard = OVERRIDE_MUTEX.lock().await;
+    let (driver, _control, _dir, _clear) = make_fake_driver().await;
+
+    driver.reset(true);
+
+    let seed = driver
+        .default_seed()
+        .expect("reset must keep a warm session so seed_default reseeds");
+    assert!(
+        matches!(seed.first(), Some(SessionDriverEvent::SessionOpened { .. })),
+        "post-reset default_seed must begin with sessionOpened"
+    );
+}
+
+/// AC.7: a `{type:"mock", script}` WS message → `driver.run_script` pushes the
+/// mapped corpus scenario's SSE frames onto the bootstrap session's held-open
+/// stream, which the live fold path turns into driver events. `"stream"` maps to
+/// streaming-turn, whose frames fold to a `SessionUpdated`/`AssistantDelta`.
+#[tokio::test]
+async fn dev_surface_run_script_pushes_scenario() {
+    let _guard = OVERRIDE_MUTEX.lock().await;
+    let (driver, _control, _dir, _clear) = make_fake_driver().await;
+
+    let (_sub, mut rx) = collect_events(&driver, 256);
+    driver.run_script("stream".into());
+
+    let mut got = false;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(8);
+    while let Ok(Some(ev)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+        if matches!(
+            ev,
+            SessionDriverEvent::AssistantDelta { .. } | SessionDriverEvent::SessionUpdated { .. }
+        ) {
+            got = true;
+            break;
+        }
+    }
+    assert!(
+        got,
+        "run_script(\"stream\") should fold streaming-turn frames into driver events"
+    );
+}
+
 /// AC.2: after `new_session`, the warm session is SUBSCRIBED to daemon SSE and
 /// FOLDING events — the thing that was entirely dead before Phase B. We stream
 /// `streaming-turn` (whose 3rd SSE frame is `message_start`, which maps to a

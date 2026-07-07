@@ -68,6 +68,7 @@ use crate::driver::{
 };
 use crate::polytoken::daemon_client::{DaemonClient, SpawnDaemonOpts, SseSubscription};
 use crate::polytoken::event_map::{self, DaemonEffect, FoldAccumulator, FoldResult, MapCtx};
+use crate::polytoken::fake_daemon::FakeControlHub;
 use crate::polytoken::history_seed::{self, HistoryMapCtx};
 use crate::polytoken::models::parse_models;
 use crate::polytoken::sessions_registry;
@@ -135,6 +136,7 @@ struct PolytokenInner {
     sessions_dir: PathBuf,
     bin_path: String,
     is_fake: bool,
+    fake_control: Option<FakeControlHub>,
     warm_cap: i64,
     /// The captured login-shell env, threaded into every daemon spawn so the
     /// daemon gets the user's real PATH + tool env. `None` only when capture
@@ -181,12 +183,23 @@ impl PolytokenDriver {
         warm_cap: i64,
         login_shell: Option<String>,
     ) -> Self {
+        Self::new_with_fake_control(data_dir, bin_path, is_fake, warm_cap, login_shell, None).await
+    }
+
+    pub async fn new_with_fake_control(
+        data_dir: PathBuf,
+        bin_path: String,
+        is_fake: bool,
+        warm_cap: i64,
+        login_shell: Option<String>,
+        fake_control: Option<FakeControlHub>,
+    ) -> Self {
         let sessions_dir = data_dir.join("sessions");
         let captured = login_env::capture_login_env(login_shell.as_deref()).await;
         let CapturedLoginEnv { env, status } = captured;
         let login_env = if env.is_empty() { None } else { Some(env) };
 
-        Self {
+        let driver = Self {
             inner: Arc::new(PolytokenInner {
                 sessions_dir,
                 bin_path,
@@ -203,8 +216,16 @@ impl PolytokenDriver {
                 is_viewed: RwLock::new(None),
                 command_cache: Mutex::new(HashMap::new()),
                 command_runner: default_command_runner(),
+                fake_control,
             }),
+        };
+        // Fake mode: eagerly warm one bootstrap session so `default_seed()` (sync)
+        // always has an active warm session for the hub to adopt at boot and after
+        // every `/debug/reset`. Real mode skips this (fake_control is None).
+        if driver.inner.fake_control.is_some() {
+            driver.inner.clone().bootstrap_fake().await;
         }
+        driver
     }
 
     /// Test-only constructor: takes a pre-set `login_env` so the threading test
@@ -242,6 +263,7 @@ impl PolytokenDriver {
                 is_viewed: RwLock::new(None),
                 command_cache: Mutex::new(HashMap::new()),
                 command_runner: default_command_runner(),
+                fake_control: None,
             }),
         }
     }
@@ -416,6 +438,34 @@ impl PolytokenInner {
         cwd: Option<String>,
     ) -> Result<Output, String> {
         (self.command_runner)(self.bin_path.clone(), args, cwd).await
+    }
+
+    /// Fake mode bootstrap: warm one in-process fake session so `default_seed`
+    /// (sync) always has an active warm session for the hub to adopt at boot and
+    /// after each `/debug/reset`. The spawn-override (`install_fake_spawn`) mints
+    /// the real session id + port; the placeholder id/ref/cwd here are overwritten
+    /// by `warm_session` from the spawn result.
+    async fn bootstrap_fake(self: Arc<Self>) {
+        let workspace = WorkspaceRef {
+            workspace_id: "fake".to_string(),
+            path: "/fake".to_string(),
+            display_name: None,
+        };
+        let session_ref = SessionRef {
+            workspace_id: "fake".to_string(),
+            session_id: "fake-bootstrap".to_string(),
+        };
+        if let Err(e) = self
+            .warm_session(
+                "fake-bootstrap".to_string(),
+                session_ref,
+                workspace,
+                "/fake".to_string(),
+            )
+            .await
+        {
+            warn!("fake bootstrap warm failed: {e}");
+        }
     }
 
     fn build_branch_seed(
@@ -1782,15 +1832,80 @@ impl PilotDriver for PolytokenDriver {
     }
 
     fn run_script(&self, name: String) {
-        if self.inner.is_fake {
-            warn!("run_script({name}) on fake daemon — not yet wired");
+        // Dev surface (fake mode only): map a script name to a corpus scenario
+        // and push its SSE frames onto the active fake session's held-open
+        // stream. The push awaits the mpsc sender, so spawn it. Unknown names
+        // warn inside `run_script` (the mock's vocabulary is a superset).
+        if !self.inner.is_fake {
+            return;
         }
+        let Some(control) = self.inner.fake_control.clone() else {
+            warn!("run_script({name}): fake mode without a fake control handle");
+            return;
+        };
+        tokio::spawn(async move {
+            if let Err(e) = control.run_script(&name).await {
+                warn!("fake run_script({name}) failed: {e}");
+            }
+        });
     }
 
-    fn reset(&self, bootstrap: bool) {
-        if self.inner.is_fake {
-            warn!("reset({bootstrap}) on fake daemon — not yet wired");
+    fn reset(&self, _bootstrap: bool) {
+        // Dev surface (fake mode only). `_bootstrap` is honored by the HUB (it
+        // calls `seed_default()` after `driver.reset()` when bootstrapping —
+        // hub.rs), not here; mirroring `MockDriver::reset`, which also doesn't
+        // seed.
+        //
+        // DELIBERATE DIVERGENCE from the plan's "dispose warm sessions" wording:
+        // `default_seed()` is synchronous and reads the active warm session, but
+        // re-warming a fake session is async — so disposing here would leave the
+        // hub's immediately-following sync `seed_default()` with nothing to seed.
+        // Instead we KEEP the bootstrap session warm and only reset transient
+        // state: each accumulator (so a re-run script folds from a clean slate)
+        // and the fake daemon's cursors/call-log + stale SSE sender. This yields
+        // the same deterministic reseed AC.7 asks for, through the sync hub flow.
+        if !self.inner.is_fake {
+            return;
         }
+        let Some(control) = self.inner.fake_control.clone() else {
+            warn!("reset: fake mode without a fake control handle");
+            return;
+        };
+        for ws in self.inner.warm.read().values() {
+            let mut acc = ws.accumulator.lock();
+            event_map::reset_accumulator(&mut acc);
+        }
+        control.reset();
+    }
+
+    fn default_seed(&self) -> Option<Vec<SessionDriverEvent>> {
+        // Fake mode only: a freshly-connecting client (and the hub's boot-time
+        // + post-reset `seed_default`) adopts the bootstrap fake session. Mirrors
+        // TS `defaultSeed` (sessionOpened snapshot + cached transcript), but we
+        // return just the `sessionOpened` snapshot — enough for the dev surface,
+        // since the subsequent `run_script` drives the transcript. Real
+        // (non-fake) mode returns None: sessions come from client WS messages.
+        if !self.inner.is_fake {
+            return None;
+        }
+        self.inner.fake_control.as_ref()?;
+        let ws = self.inner.active_warm()?;
+        let ctx = DriverMapCtx {
+            session_ref: ws.session_ref.clone(),
+            workspace: ws.workspace.clone(),
+            last_state: ws.last_state.read().clone(),
+            monitor_mode: *ws.monitor_mode.lock(),
+            autodrain_enabled: *ws.autodrain_enabled.lock(),
+        };
+        let snapshot = ctx.snapshot(ctx.live_status());
+        Some(vec![SessionDriverEvent::SessionOpened {
+            base: SessionEventBase {
+                session_ref: ws.session_ref.clone(),
+                timestamp: DriverMapCtx::now_ts(),
+                run_id: None,
+            },
+            snapshot,
+        }])
     }
 }
 
@@ -1823,6 +1938,7 @@ mod tests {
             is_viewed: RwLock::new(None),
             command_cache: Mutex::new(HashMap::new()),
             command_runner: default_command_runner(),
+            fake_control: None,
         }
     }
 

@@ -32,7 +32,7 @@ pub struct AppState {
     pub config: Arc<config::Config>,
     pub static_server: Arc<pilot_server::static_serve::StaticServer>,
     pub hub: Arc<Mutex<SessionHub>>,
-    pub is_mock_driver: bool,
+    pub is_debug_driver: bool,
 }
 
 #[tokio::main]
@@ -71,16 +71,42 @@ async fn main() {
             }
         };
 
-    // Driver selection: PILOT_DRIVER=mock uses the fake daemon (in-process axum
-    // router); PILOT_DRIVER=polytoken uses the real polytoken daemon driver.
+    // Driver selection: `mock` = deterministic MockDriver; `fake` = the real
+    // PolytokenDriver over an in-process corpus-backed fake daemon (dev/e2e only);
+    // `polytoken` (default) = the real PolytokenDriver over a spawned daemon.
     let driver_mode = std::env::var("PILOT_DRIVER").unwrap_or_else(|_| "polytoken".into());
-    let is_mock_driver = driver_mode == "mock";
+    // `is_debug_driver` gates the /debug/reset dev endpoint. Both the
+    // deterministic mock and the corpus-backed fake driver expose it.
+    let is_debug_driver = driver_mode == "mock" || driver_mode == "fake";
     let driver: Arc<dyn PilotDriver> = {
         match driver_mode.as_str() {
             "mock" => {
                 // Use the MockDriver directly — it serves fixture data as SessionDriverEvent[],
                 // matching the TS MockDriver for e2e parity.
                 Arc::new(pilot_server::mock_driver::MockDriver::new())
+            }
+            "fake" => {
+                // The real PolytokenDriver driving an in-process, corpus-backed
+                // fake daemon. `FakeControlHub::load_default` reads the frozen
+                // corpus from the source tree and FAILS LOUD (panics) if it's
+                // absent — the shipped binary won't carry tests/corpus, so fake
+                // mode is dev/e2e only. The spawn-override must be installed
+                // BEFORE the driver's constructor warms its bootstrap session.
+                let control = pilot_server::polytoken::fake_daemon::FakeControlHub::load_default();
+                pilot_server::polytoken::fake_daemon::install_fake_spawn(control.clone());
+                let login_shell =
+                    pilot_server::settings_store::read_pilot_settings(&cfg.data_dir).login_shell;
+                Arc::new(
+                    PolytokenDriver::new_with_fake_control(
+                        cfg.data_dir.clone(),
+                        std::env::var("PILOT_POLYTOKEN_BIN").unwrap_or_else(|_| "polytoken".into()),
+                        true, // fake
+                        cfg.warm_cap,
+                        login_shell,
+                        Some(control),
+                    )
+                    .await,
+                )
             }
             _ => {
                 // Read the pilot-local settings for the configured login-shell
@@ -126,7 +152,7 @@ async fn main() {
         config: Arc::new(cfg.clone()),
         static_server,
         hub,
-        is_mock_driver,
+        is_debug_driver,
     };
 
     let app = build_router(state.clone());
@@ -433,8 +459,8 @@ async fn debug_reset(State(state): State<AppState>, Query(q): Query<PushQuery>) 
     if !check_token(&state, &HeaderMap::new(), &q) {
         return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
     }
-    if !state.is_mock_driver {
-        return (StatusCode::FORBIDDEN, "debug reset is mock-driver-only").into_response();
+    if !state.is_debug_driver {
+        return (StatusCode::FORBIDDEN, "debug reset is dev-driver-only").into_response();
     }
     let bootstrap = q.bootstrap.as_deref() != Some("0");
     let mut hub = state.hub.lock();
