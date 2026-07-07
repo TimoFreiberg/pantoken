@@ -9,7 +9,7 @@ use pilot_protocol::session_driver::{
     CommandInfo, DirListing, FileInfo, HostUiResponse, ImageContent, ModelDefaults, ModelOption,
     PathStat, PermissionMonitorMode, SessionDriverEvent, SessionId, SessionListEntry, SessionUsage,
 };
-use pilot_protocol::wire::{DeliveryMode, McpAction};
+use pilot_protocol::wire::{DeliveryMode, LoginEnvStatus, McpAction};
 
 /// Options for `PilotDriver::new_session`. All optional: a bare new session
 /// defaults to $HOME. The first `prompt` is delivered by the hub after
@@ -117,6 +117,18 @@ pub trait PilotDriver: Send + Sync {
     /// Archive or unarchive a session by its .jsonl path.
     async fn set_archived(&self, _path: String, _archived: bool) -> ArchiveResult {
         ArchiveResult::default()
+    }
+
+    /// The captured login-shell env status, surfaced in the Settings panel. The
+    /// live `PolytokenDriver` overrides this with its real capture; mock/default
+    /// drivers report `{ok:false}` (no capture ran). Synchronous — the concrete
+    /// impl just reads an `RwLock`, and the hub call site is a non-async `&self`.
+    fn login_env_status(&self) -> LoginEnvStatus {
+        LoginEnvStatus {
+            active_shell: None,
+            ok: false,
+            detail: None,
+        }
     }
 
     /// Rename a session by its .jsonl path.
