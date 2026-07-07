@@ -29,6 +29,13 @@ futures-util = { workspace = true }
 tokio-stream = { workspace = true }
 urlencoding = { workspace = true }
 web-push = { workspace = true }
+jwt-simple = { workspace = true }
+ct-codecs = { workspace = true }
 chrono = { workspace = true }
 rand = { workspace = true }
 ignore = { workspace = true }
+
+[dev-dependencies]
+# Pinned to 0.2 to match `web-push`'s `http` — tests construct push-service
+# responses via `web_push::request_builder::parse_response(http::StatusCode, _)`.
+http = "0.2"

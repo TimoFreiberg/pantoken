@@ -158,19 +158,7 @@ enum AttentionPhase {
     Done,
 }
 
-impl AttentionPhase {
-    #[expect(
-        dead_code,
-        reason = "attention notification formatting is unwired until Phase 3 push/notify integration"
-    )]
-    fn as_str(&self) -> &'static str {
-        match self {
-            AttentionPhase::Running => "running",
-            AttentionPhase::Failed => "failed",
-            AttentionPhase::Done => "done",
-        }
-    }
-}
+impl AttentionPhase {}
 
 /// One connected client (WS connection). Focus is per-connection.
 struct ClientConn {

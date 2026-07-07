@@ -12,16 +12,18 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use parking_lot::Mutex;
+use parking_lot::Mutex as ParkingMutex;
 use serde::Deserialize;
 use serde_json::json;
+use tokio::sync::Mutex as AsyncMutex;
 use tracing::{error, info, warn};
 
 // The module tree lives in `lib.rs` (so integration tests can reach the driver
 // stack as `pilot_server::…`). Re-import it here for the route handlers.
 use pilot_server::{
     config, hub::SessionHub, hub::hub_op_channel, hub::run_hub_op_applier, pidlock,
-    polytoken::driver::PolytokenDriver, static_serve,
+    polytoken::driver::PolytokenDriver, push::PushNotification, push::PushService,
+    push::PushSubscription, static_serve,
 };
 
 use pilot_server::driver::PilotDriver;
@@ -31,7 +33,8 @@ use pilot_server::driver::PilotDriver;
 pub struct AppState {
     pub config: Arc<config::Config>,
     pub static_server: Arc<pilot_server::static_serve::StaticServer>,
-    pub hub: Arc<Mutex<SessionHub>>,
+    pub hub: Arc<ParkingMutex<SessionHub>>,
+    pub push: Arc<AsyncMutex<PushService>>,
     pub is_debug_driver: bool,
 }
 
@@ -134,31 +137,52 @@ async fn main() {
 
     let (hub_ops, hub_op_rx) = hub_op_channel();
 
+    let static_server = Arc::new(static_serve::StaticServer::new(cfg.client_dist.clone()));
+
+    // Web Push service: owns the VAPID keypair + subscription store.
+    let push_service = Arc::new(AsyncMutex::new(PushService::new(
+        &cfg.data_dir,
+        cfg.vapid_subject.clone(),
+    )));
+
+    // Wire the hub's notify closure: when no clients are connected and a notable
+    // event fires (run completed/failed, approval needed), fan out a Web Push
+    // notification to all subscribed devices. The closure is sync (Fn), so the
+    // async send is spawned fire-and-forget onto the tokio runtime.
+    let push_for_notify = push_service.clone();
+    let notify: Arc<dyn Fn(pilot_server::hub::HubNotification) + Send + Sync> =
+        Arc::new(move |n: pilot_server::hub::HubNotification| {
+            let push = push_for_notify.clone();
+            let notification = pilot_server::push::PushNotification {
+                title: n.title,
+                body: n.body,
+                tag: n.tag,
+                url: n.url,
+            };
+            tokio::spawn(async move {
+                let mut svc = push.lock().await;
+                svc.send_to_all(&notification).await;
+            });
+        });
+
     let hub = SessionHub::new(
         driver,
         hub_ops,
-        None, // notify — wired in Phase 6 (push)
+        Some(notify),
         cfg.live_refresh_ms,
         server_id.clone(),
         Some(cfg.data_dir.clone()),
-        option_env!("PILOT_BUILD_SHA")
-            .unwrap_or("")
-            // build_sha: read at COMPILE time from the build environment (a
-            // CI/desktop-shell build exports PILOT_BUILD_SHA, e.g.
-            // `PILOT_BUILD_SHA=$(git rev-parse --short HEAD) cargo build`).
-            // Empty in dev (no build step sets it). There is no in-repo
-            // build.rs that sets it — it's an external convention.
-            .to_string(),
+        option_env!("PILOT_BUILD_SHA").unwrap_or("").to_string(),
         cfg.delta_flush_ms,
     );
 
     tokio::spawn(run_hub_op_applier(hub.clone(), hub_op_rx));
 
-    let static_server = Arc::new(static_serve::StaticServer::new(cfg.client_dist.clone()));
     let state = AppState {
         config: Arc::new(cfg.clone()),
         static_server,
         hub,
+        push: push_service,
         is_debug_driver,
     };
 
@@ -390,20 +414,55 @@ struct PushQuery {
     bootstrap: Option<String>,
 }
 
-async fn push_vapid(State(_state): State<AppState>, Query(_q): Query<PushQuery>) -> Response {
-    Json(json!({ "publicKey": "" })).into_response()
+/// Body of POST /push/unsubscribe — just the endpoint to drop.
+#[derive(Deserialize)]
+struct UnsubscribeBody {
+    endpoint: Option<String>,
 }
 
-async fn push_subscribe(State(state): State<AppState>, Query(q): Query<PushQuery>) -> Response {
+async fn push_vapid(State(state): State<AppState>, Query(q): Query<PushQuery>) -> Response {
     if !check_token(&state, &HeaderMap::new(), &q) {
         return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
     }
+    let push = state.push.lock().await;
+    Json(json!({ "publicKey": push.public_key() })).into_response()
+}
+
+async fn push_subscribe(
+    State(state): State<AppState>,
+    Query(q): Query<PushQuery>,
+    body: String,
+) -> Response {
+    if !check_token(&state, &HeaderMap::new(), &q) {
+        return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+    }
+    // C3: parse the body manually so a malformed JSON body returns 400 (matching
+    // TS `bad request`) rather than axum's default 422 from the `Json` extractor.
+    let sub: PushSubscription = match serde_json::from_str(&body) {
+        Ok(s) => s,
+        Err(_) => return (StatusCode::BAD_REQUEST, "bad request").into_response(),
+    };
+    let mut push = state.push.lock().await;
+    push.add(sub);
     Json(json!({ "ok": true })).into_response()
 }
 
-async fn push_unsubscribe(State(state): State<AppState>, Query(q): Query<PushQuery>) -> Response {
+async fn push_unsubscribe(
+    State(state): State<AppState>,
+    Query(q): Query<PushQuery>,
+    body: String,
+) -> Response {
     if !check_token(&state, &HeaderMap::new(), &q) {
         return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+    }
+    // C3: manual parse → 400 on malformed body (not axum's 422).
+    let parsed: UnsubscribeBody = match serde_json::from_str(&body) {
+        Ok(b) => b,
+        Err(_) => return (StatusCode::BAD_REQUEST, "bad request").into_response(),
+    };
+    let mut push = state.push.lock().await;
+    if let Some(endpoint) = parsed.endpoint {
+        push.remove(&endpoint);
     }
     Json(json!({ "ok": true })).into_response()
 }
@@ -412,7 +471,22 @@ async fn push_test(State(state): State<AppState>, Query(q): Query<PushQuery>) ->
     if !check_token(&state, &HeaderMap::new(), &q) {
         return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
     }
-    Json(json!({ "ok": true, "subscriptions": 0, "sent": 0 })).into_response()
+    // C4: capture `count` inside the same lock scope as `send_to_all` so the
+    // returned `subscriptions` reflects the count at send time (a separate
+    // lock could observe a different count if a (un)subscribe raced in between).
+    let (sent, count) = {
+        let mut push = state.push.lock().await;
+        let sent = push
+            .send_to_all(&PushNotification {
+                title: "pilot".into(),
+                body: "Test push ✅ — if you see this on a closed phone, it works.".into(),
+                tag: Some("pilot-test".into()),
+                url: None,
+            })
+            .await;
+        (sent, push.count())
+    };
+    Json(json!({ "ok": true, "subscriptions": count, "sent": sent })).into_response()
 }
 
 // ── /update/state ────────────────────────────────────────────────────────
