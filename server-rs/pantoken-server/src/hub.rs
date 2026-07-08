@@ -489,9 +489,36 @@ impl SessionHub {
             // Channel switch: flush the held run, start a new one
             self.flush_pending(&sid);
         }
-        // Start a new pending run with a flush timer
+        // Start a new pending run with a flush timer: without one, a held delta
+        // run only reaches viewers when the NEXT non-delta event happens to
+        // arrive (tool start, channel switch, run end) — i.e. streaming text
+        // lumps at block boundaries instead of flowing every delta_flush_ms.
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            // No runtime to host the timer (sync caller): skip coalescing rather
+            // than park the delta with no flush deadline.
+            self.ingest_now(ev);
+            return;
+        };
         let (abort_tx, abort_rx) = tokio::sync::oneshot::channel();
-        drop(abort_rx); // would be awaited by the timer task
+        let hub_ops = self.hub_ops.clone();
+        let flush_sid = sid.clone();
+        let flush_ms = self.delta_flush_ms;
+        runtime.spawn(async move {
+            tokio::select! {
+                // Flushed or dropped by another path — timer cancelled.
+                _ = abort_rx => {}
+                _ = tokio::time::sleep(std::time::Duration::from_millis(flush_ms)) => {
+                    hub_ops.enqueue(
+                        "delta_flush",
+                        Box::new(move |hub| {
+                            Box::pin(async move {
+                                hub.lock().flush_pending(&flush_sid);
+                            })
+                        }),
+                    );
+                }
+            }
+        });
         self.pending_deltas.insert(
             sid.clone(),
             PendingDelta {
@@ -3074,6 +3101,51 @@ mod hub_models_tests {
             .expect("timed out waiting for hub op")
             .expect("hub op channel closed");
         op(hub).await;
+    }
+
+    /// A coalesced assistantDelta run must reach viewers once delta_flush_ms
+    /// elapses, with no non-delta event required to force it out. Regression:
+    /// the port originally never armed the flush timer, so streamed text sat in
+    /// pending_deltas until the next tool/turn-end event — whole blocks arrived
+    /// as one lump.
+    #[tokio::test]
+    async fn coalesced_deltas_flush_on_the_timer_without_a_following_event() {
+        let (_driver, hub, mut ops) = test_hub(); // delta_flush_ms = 10
+        let (_client_key, _tx, mut rx) = hub.lock().add_client(None);
+
+        let delta = |text: &str| SessionDriverEvent::AssistantDelta {
+            base: SessionEventBase {
+                session_ref: session_ref_for("demo-session"),
+                timestamp: ts(),
+                run_id: None,
+            },
+            text: text.into(),
+            channel: Some(pantoken_protocol::session_driver::AssistantDeltaChannel::Text),
+            entry_id: None,
+        };
+        hub.lock().on_event(delta("hel"));
+        hub.lock().on_event(delta("lo"));
+
+        // The timer enqueues a delta_flush op after ~10ms; apply it.
+        apply_one(hub.clone(), &mut ops).await;
+
+        let msg = drain_until(&mut rx, |msg| {
+            matches!(
+                msg,
+                ServerMessage::Event {
+                    event: SessionDriverEvent::AssistantDelta { .. },
+                    ..
+                }
+            )
+        })
+        .await;
+        match msg {
+            ServerMessage::Event {
+                event: SessionDriverEvent::AssistantDelta { text, .. },
+                ..
+            } => assert_eq!(text, "hello", "run should flush merged"),
+            other => panic!("expected assistantDelta, got {other:?}"),
+        }
     }
 
     async fn receive_session_config(rx: &mut mpsc::Receiver<ServerMessage>) -> SessionConfig {
