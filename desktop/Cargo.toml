@@ -1,6 +1,6 @@
 [package]
 name = "pilot-desktop"
-version = "0.2.2"
+version = "0.2.3"
 description = "Pilot desktop shell — supervises the Bun hub as a sidecar and hosts the web client"
 edition = "2021"
 publish = false
