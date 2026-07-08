@@ -33,3 +33,4 @@ ct-codecs = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 rand = "0.9"
 ignore = "0.4"
+notify = "8"

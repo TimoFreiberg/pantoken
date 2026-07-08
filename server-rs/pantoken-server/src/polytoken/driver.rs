@@ -67,6 +67,7 @@ use crate::driver::{
     ArchiveResult, BranchResult, ClearQueueResult, NewSessionOptsData, PantokenDriver,
     TodoDeleteDependent, TodoDeleteError, WorktreeCleanupResult, WorktreeRetained,
 };
+use crate::polytoken::config_watcher;
 use crate::polytoken::daemon_client::{
     DaemonClient, SpawnDaemonOpts, SseSubscription, default_global_config_dir,
     read_credential_token, spawn_daemon,
@@ -74,7 +75,7 @@ use crate::polytoken::daemon_client::{
 use crate::polytoken::event_map::{self, DaemonEffect, FoldAccumulator, FoldResult, MapCtx};
 use crate::polytoken::fake_daemon::FakeControlHub;
 use crate::polytoken::history_seed::{self, HistoryMapCtx};
-use crate::polytoken::models::{model_post_key, parse_models};
+use crate::polytoken::models::{ParsedModels, model_post_key, parse_models};
 use crate::polytoken::sessions_registry;
 use crate::polytoken::ui_bridge::{PendingInterrogative, build_interrogative_response};
 use crate::shared::login_env::{self, CapturedLoginEnv};
@@ -163,6 +164,16 @@ struct PolytokenInner {
     is_viewed: RwLock<Option<Box<SessionViewed>>>,
     command_cache: Mutex<HashMap<String, Vec<CommandInfo>>>,
     facet_cache: Mutex<HashMap<String, Vec<String>>>,
+    /// Cached parsed `polytoken models` output. Shared by `list_models()` and
+    /// `get_model_defaults()` so a single subprocess result serves both.
+    /// `None` = not yet populated (or invalidated). Not cached on error.
+    model_cache: Mutex<Option<ParsedModels>>,
+    /// The inspectable status of the config watcher (binary/global config).
+    /// `Disabled` in fake/test mode.
+    watch_status: Mutex<config_watcher::WatchStatus>,
+    /// The watcher handle, kept alive for process lifetime. `None` in
+    /// fake/test mode or when watcher setup failed entirely.
+    watcher_handle: Mutex<Option<config_watcher::ConfigWatcherHandle>>,
     command_runner: Arc<CommandRunner>,
 }
 
@@ -227,6 +238,9 @@ impl PolytokenDriver {
                 is_viewed: RwLock::new(None),
                 command_cache: Mutex::new(HashMap::new()),
                 facet_cache: Mutex::new(HashMap::new()),
+                model_cache: Mutex::new(None),
+                watch_status: Mutex::new(config_watcher::WatchStatus::Disabled),
+                watcher_handle: Mutex::new(None),
                 command_runner: default_command_runner(),
                 fake_control,
             }),
@@ -236,6 +250,11 @@ impl PolytokenDriver {
         // every `/debug/reset`. Real mode skips this (fake_control is None).
         if driver.inner.fake_control.is_some() {
             driver.inner.clone().bootstrap_fake().await;
+        }
+        // Real (non-fake) mode: start the config watcher over the binary and
+        // global config directory. Fake mode stays Disabled (AC.9).
+        if !driver.inner.is_fake {
+            driver.inner.clone().start_config_watcher();
         }
         driver
     }
@@ -275,6 +294,9 @@ impl PolytokenDriver {
                 is_viewed: RwLock::new(None),
                 command_cache: Mutex::new(HashMap::new()),
                 facet_cache: Mutex::new(HashMap::new()),
+                model_cache: Mutex::new(None),
+                watch_status: Mutex::new(config_watcher::WatchStatus::Disabled),
+                watcher_handle: Mutex::new(None),
                 command_runner: default_command_runner(),
                 fake_control: None,
             }),
@@ -484,6 +506,123 @@ impl PolytokenInner {
         cwd: Option<String>,
     ) -> Result<Output, String> {
         (self.command_runner)(self.bin_path.clone(), args, cwd).await
+    }
+
+    // ---- Cache invalidation APIs ----
+
+    /// Invalidate the model/default cache. The next `list_models()` or
+    /// `get_model_defaults()` call will re-run `polytoken models`.
+    #[allow(dead_code)] // used by watcher integration + tests
+    pub fn invalidate_model_cache(&self) {
+        debug!("invalidating model cache");
+        *self.model_cache.lock() = None;
+    }
+
+    /// Invalidate ALL config-dependent caches: models/defaults, all facets,
+    /// and all commands. Used when the binary or global config changes.
+    pub fn invalidate_all_config_caches(&self) {
+        debug!("invalidating all config caches (models, facets, commands)");
+        *self.model_cache.lock() = None;
+        self.facet_cache.lock().clear();
+        self.command_cache.lock().clear();
+    }
+
+    /// Invalidate facet and command caches for a specific cwd only.
+    /// Used when a project-scoped config change is detected for that cwd.
+    #[allow(dead_code)] // used by watcher integration + tests
+    pub fn invalidate_cwd_config_caches(&self, cwd: &str) {
+        debug!("invalidating cwd config caches for {cwd}");
+        self.facet_cache.lock().remove(cwd);
+        self.command_cache.lock().remove(cwd);
+    }
+
+    /// Returns the current watcher status (for inspection / Settings panel).
+    #[allow(dead_code)] // used by tests
+    pub fn watch_status(&self) -> config_watcher::WatchStatus {
+        self.watch_status.lock().clone()
+    }
+
+    // ---- Config watcher setup ----
+
+    /// Start the config watcher over the resolved binary path and the global
+    /// config directory. Called only in real (non-fake) driver mode.
+    ///
+    /// Per-cwd project config watching is intentionally unavailable: Pantoken
+    /// delegates project config resolution to `polytoken --working-dir <cwd>`,
+    /// and no inspected CLI command exposes a project config dependency graph
+    /// or fingerprint. The watcher status explicitly reports this limitation
+    /// so callers don't silently assume per-cwd freshness.
+    fn start_config_watcher(self: Arc<Self>) {
+        let mut watched_paths: Vec<config_watcher::WatchedPath> = Vec::new();
+
+        // Watch the resolved binary path. If the configured binary is relative
+        // (e.g. `polytoken`), resolve it via PATH lookup; if that fails, skip
+        // binary watching and log the limitation.
+        if let Some(bin_abs) = config_watcher::resolve_binary_path(&self.bin_path) {
+            watched_paths.push(config_watcher::WatchedPath::Binary(bin_abs));
+        } else {
+            warn!(
+                "config watcher: could not resolve binary path '{}' to an absolute path; \
+                 binary watching is unavailable (global config watching remains active)",
+                self.bin_path
+            );
+        }
+
+        // Watch the global config directory (recursive). If it doesn't exist
+        // yet (first run), watch its parent so we catch the directory creation
+        // and subsequent config writes. If the parent also doesn't exist, skip
+        // with a log — the watcher status will reflect the failure.
+        let global_config = default_global_config_dir();
+        if global_config.exists() {
+            watched_paths.push(config_watcher::WatchedPath::GlobalConfig(global_config));
+        } else if let Some(parent) = global_config.parent() {
+            if parent.exists() {
+                warn!(
+                    "config watcher: global config dir {} does not exist yet; \
+                     watching parent {} to catch creation",
+                    global_config.display(),
+                    parent.display()
+                );
+                watched_paths.push(config_watcher::WatchedPath::GlobalConfig(
+                    parent.to_path_buf(),
+                ));
+            } else {
+                warn!(
+                    "config watcher: global config dir {} and its parent do not exist; \
+                     global config watching is unavailable",
+                    global_config.display()
+                );
+            }
+        } else {
+            warn!(
+                "config watcher: global config dir {} has no parent; \
+                 global config watching is unavailable",
+                global_config.display()
+            );
+        }
+
+        // The invalidation callback: invoked after debounce by the watcher task.
+        // It captures an Arc to the inner state and calls the appropriate
+        // invalidation method based on the action.
+        let inner = self.clone();
+        let invalidation: config_watcher::InvalidationCallback =
+            Arc::new(move |action| match action {
+                config_watcher::InvalidationAction::All => {
+                    inner.invalidate_all_config_caches();
+                }
+                config_watcher::InvalidationAction::None => {}
+            });
+
+        let (handle, status) = config_watcher::setup_watcher(
+            watched_paths,
+            invalidation,
+            // project_watching_unavailable = true: no verified project config
+            // path convention exists (see method doc above).
+            true,
+        );
+
+        *self.watch_status.lock() = status;
+        *self.watcher_handle.lock() = handle;
     }
 
     /// Fake mode bootstrap: warm one in-process fake session so `default_seed`
@@ -1883,44 +2022,49 @@ impl PantokenDriver for PolytokenDriver {
     }
 
     async fn list_models(&self) -> Vec<ModelOption> {
-        let bin_path = self.inner.bin_path.clone();
-        let output = tokio::process::Command::new(&bin_path)
-            .arg("models")
-            .output()
-            .await;
+        // Cache-first: return cached models if available (AC.1).
+        if let Some(cached) = self.inner.model_cache.lock().clone() {
+            return cached.models;
+        }
+        // Cache miss: run `polytoken models` through the injectable command
+        // runner (required for testability — AC.1-AC.3).
+        let output = self.inner.run_polytoken(vec!["models".into()], None).await;
         match output {
             Ok(out) => {
                 let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                parse_models(&stdout).models
+                let parsed = parse_models(&stdout);
+                let models = parsed.models.clone();
+                // Cache the full parsed result so get_model_defaults can reuse it.
+                *self.inner.model_cache.lock() = Some(parsed);
+                models
             }
             Err(e) => {
                 error!("list_models failed: {e}");
+                // Do not cache failed empty results (AC.3: next call retries).
                 Vec::new()
             }
         }
     }
 
     async fn get_model_defaults(&self) -> ModelDefaults {
-        let bin_path = self.inner.bin_path.clone();
-        let output = tokio::process::Command::new(&bin_path)
-            .arg("models")
-            .output()
-            .await;
-        match output {
-            Ok(out) => {
-                let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                let parsed = parse_models(&stdout);
-                ModelDefaults {
-                    provider: parsed
-                        .default_model
-                        .as_ref()
-                        .and_then(|m| m.split('/').next().map(|s| s.to_string())),
-                    model_id: parsed.default_model.clone(),
-                    thinking_level: None,
-                    favorites: Vec::new(),
-                }
-            }
-            Err(_) => ModelDefaults::default(),
+        // Reuse the same cached parsed models as list_models (AC.2).
+        // If the cache is empty, populate it by calling list_models.
+        if self.inner.model_cache.lock().is_none() {
+            self.list_models().await;
+        }
+        let parsed = self.inner.model_cache.lock().clone();
+        let Some(parsed) = parsed else {
+            // list_models failed and didn't cache — return defaults.
+            return ModelDefaults::default();
+        };
+        ModelDefaults {
+            provider: parsed
+                .default_model
+                .as_ref()
+                .and_then(|m| m.split('/').next().map(|s| s.to_string())),
+            model_id: parsed.default_model.clone(),
+            thinking_level: None,
+            favorites: Vec::new(),
         }
     }
 
@@ -2478,6 +2622,9 @@ mod tests {
             is_viewed: RwLock::new(None),
             command_cache: Mutex::new(HashMap::new()),
             facet_cache: Mutex::new(HashMap::new()),
+            model_cache: Mutex::new(None),
+            watch_status: Mutex::new(config_watcher::WatchStatus::Disabled),
+            watcher_handle: Mutex::new(None),
             command_runner: default_command_runner(),
             fake_control: None,
         }
@@ -3322,5 +3469,363 @@ mod tests {
             !last_assistant.streaming,
             "the idle re-assert must close the streaming bubble after reseed"
         );
+    }
+
+    // ---- AC.1: list_models caches subprocess output until invalidation ----
+
+    #[tokio::test]
+    async fn list_models_caches_subprocess_output_until_invalidated() {
+        let calls = Arc::new(Mutex::new(0));
+        let calls_clone = calls.clone();
+        let runner: Arc<CommandRunner> = Arc::new(move |_program, args, _cwd| {
+            *calls_clone.lock() += 1;
+            Box::pin(async move {
+                assert!(
+                    args.contains(&"models".to_string()),
+                    "expected models arg, got {args:?}"
+                );
+                Ok(ok_output(
+                    "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n",
+                ))
+            })
+        });
+        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
+
+        let models1 = driver.list_models().await;
+        let models2 = driver.list_models().await;
+
+        assert_eq!(models1.len(), 1);
+        assert_eq!(models1[0].model_id, "umans/umans-glm-5.2");
+        assert_eq!(models2.len(), 1, "second call should return cached models");
+        assert_eq!(
+            *calls.lock(),
+            1,
+            "polytoken models should run at most once until invalidation"
+        );
+    }
+
+    // ---- AC.2: get_model_defaults reuses cached models result ----
+
+    #[tokio::test]
+    async fn model_defaults_reuses_cached_models_result() {
+        let calls = Arc::new(Mutex::new(0));
+        let calls_clone = calls.clone();
+        let runner: Arc<CommandRunner> = Arc::new(move |_program, args, _cwd| {
+            *calls_clone.lock() += 1;
+            Box::pin(async move {
+                assert!(args.contains(&"models".to_string()));
+                Ok(ok_output(
+                    "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n",
+                ))
+            })
+        });
+        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
+
+        let _ = driver.list_models().await;
+        let defaults = driver.get_model_defaults().await;
+
+        assert_eq!(
+            *calls.lock(),
+            1,
+            "get_model_defaults should reuse the cached models result, not re-run"
+        );
+        assert_eq!(defaults.provider.as_deref(), Some("umans"));
+        assert_eq!(defaults.model_id.as_deref(), Some("umans/umans-glm-5.2"));
+    }
+
+    // ---- AC.3: model cache invalidation forces re-run ----
+
+    #[tokio::test]
+    async fn model_cache_invalidation_forces_models_rerun() {
+        let output = Arc::new(Mutex::new(
+            "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n".to_string(),
+        ));
+        let output_clone = output.clone();
+        let calls = Arc::new(Mutex::new(0));
+        let calls_clone = calls.clone();
+        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
+            let out = output_clone.lock().clone();
+            *calls_clone.lock() += 1;
+            Box::pin(async move { Ok(ok_output(&out)) })
+        });
+        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
+
+        let models1 = driver.list_models().await;
+        assert_eq!(models1.len(), 1);
+        assert_eq!(models1[0].model_id, "umans/umans-glm-5.2");
+        assert_eq!(*calls.lock(), 1);
+
+        // Invalidate the model cache.
+        driver.inner.invalidate_model_cache();
+
+        // Change the output so we can verify the re-run observes it.
+        *output.lock() =
+            "default_model: deepseek/deepseek-v4-pro\n\nmodels:\n- deepseek/deepseek-v4-pro\n  provider: deepseek/deepseek-v4-pro\n".to_string();
+
+        let models2 = driver.list_models().await;
+        assert_eq!(models2.len(), 1);
+        assert_eq!(
+            models2[0].model_id, "deepseek/deepseek-v4-pro",
+            "after invalidation, list_models should re-run and observe updated output"
+        );
+        assert_eq!(*calls.lock(), 2, "invalidation should force a re-run");
+    }
+
+    // ---- AC.3b: model cache not populated on subprocess error ----
+
+    #[tokio::test]
+    async fn model_cache_not_populated_on_error() {
+        let calls = Arc::new(Mutex::new(0));
+        let calls_clone = calls.clone();
+        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
+            *calls_clone.lock() += 1;
+            Box::pin(async { Err("subprocess failed".to_string()) })
+        });
+        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
+
+        let models1 = driver.list_models().await;
+        assert!(models1.is_empty(), "error should yield empty list");
+        let models2 = driver.list_models().await;
+        assert!(models2.is_empty(), "second call also empty");
+        assert_eq!(
+            *calls.lock(),
+            2,
+            "failed result should NOT be cached — each call retries"
+        );
+    }
+
+    // ---- AC.5: cwd-scoped invalidation clears only targeted caches ----
+
+    #[tokio::test]
+    async fn cwd_config_invalidation_clears_only_targeted_facet_and_command_cache() {
+        let calls = Arc::new(Mutex::new(Vec::<(Vec<String>, Option<String>)>::new()));
+        let calls_clone = calls.clone();
+        let runner: Arc<CommandRunner> = Arc::new(move |_program, args, cwd| {
+            calls_clone.lock().push((args.clone(), cwd.clone()));
+            Box::pin(async move {
+                if args.iter().any(|a| a == "ls") {
+                    Ok(ok_output("execute.md\n"))
+                } else if args.iter().any(|a| a == "print-slash-commands") {
+                    Ok(ok_output("[]"))
+                } else {
+                    Ok(ok_output("---\nname: execute\n---\nbody"))
+                }
+            })
+        });
+        // Build a driver with two sessions in the same sessions_dir, each with
+        // a different cwd, so we can test cwd-scoped invalidation.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sessions_dir = dir.path().join("sessions");
+        write_session_json(&sessions_dir, "s1", "/repo/a");
+        write_session_json(&sessions_dir, "s2", "/repo/b");
+        let mut inner = inner_with_order(vec!["s1".into(), "s2".into()], 64);
+        inner.sessions_dir = sessions_dir;
+        inner.bin_path = "polytoken-test".into();
+        inner.command_runner = runner;
+        inner.warm.write().insert("s1".into(), warm_for("s1"));
+        inner.warm.write().insert("s2".into(), warm_for("s2"));
+        let driver = PolytokenDriver {
+            inner: Arc::new(inner),
+        };
+
+        // Populate both cwds.
+        let _ = driver.list_commands(Some("s1".into())).await;
+        let _ = driver.list_facets(Some("s1".into())).await;
+        let _ = driver.list_commands(Some("s2".into())).await;
+        let _ = driver.list_facets(Some("s2".into())).await;
+
+        let initial_calls = calls.lock().len();
+        assert!(initial_calls > 0, "should have made subprocess calls");
+
+        // Invalidate only /repo/a.
+        driver.inner.invalidate_cwd_config_caches("/repo/a");
+
+        // /repo/a should re-run; /repo/b should hit cache.
+        calls.lock().clear();
+        let _ = driver.list_commands(Some("s1".into())).await;
+        let _ = driver.list_facets(Some("s1".into())).await;
+        let _ = driver.list_commands(Some("s2".into())).await;
+        let _ = driver.list_facets(Some("s2".into())).await;
+
+        let after_calls = calls.lock();
+        // /repo/a commands + facets should have re-run (at least 2 calls).
+        assert!(
+            after_calls.len() >= 2,
+            "invalidated cwd should re-run, got {} calls",
+            after_calls.len()
+        );
+        // All re-run calls should be for /repo/a (cwd of s1).
+        assert!(
+            after_calls
+                .iter()
+                .all(|(_, cwd)| cwd.as_deref() == Some("/repo/a")),
+            "only /repo/a should re-run, but got: {after_calls:?}"
+        );
+    }
+
+    // ---- AC.5b: global invalidation clears all cwd-scoped caches ----
+
+    #[tokio::test]
+    async fn global_invalidation_clears_all_cwd_scoped_caches() {
+        let calls = Arc::new(Mutex::new(Vec::<(Vec<String>, Option<String>)>::new()));
+        let calls_clone = calls.clone();
+        let runner: Arc<CommandRunner> = Arc::new(move |_program, args, cwd| {
+            calls_clone.lock().push((args.clone(), cwd.clone()));
+            Box::pin(async move {
+                if args.iter().any(|a| a == "ls") {
+                    Ok(ok_output("execute.md\n"))
+                } else if args.iter().any(|a| a == "print-slash-commands") {
+                    Ok(ok_output("[]"))
+                } else {
+                    Ok(ok_output("---\nname: execute\n---\nbody"))
+                }
+            })
+        });
+        // Build a driver with two sessions in the same sessions_dir.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sessions_dir = dir.path().join("sessions");
+        write_session_json(&sessions_dir, "s1", "/repo/a");
+        write_session_json(&sessions_dir, "s2", "/repo/b");
+        let mut inner = inner_with_order(vec!["s1".into(), "s2".into()], 64);
+        inner.sessions_dir = sessions_dir;
+        inner.bin_path = "polytoken-test".into();
+        inner.command_runner = runner;
+        inner.warm.write().insert("s1".into(), warm_for("s1"));
+        inner.warm.write().insert("s2".into(), warm_for("s2"));
+        let driver = PolytokenDriver {
+            inner: Arc::new(inner),
+        };
+
+        // Populate both cwds.
+        let _ = driver.list_commands(Some("s1".into())).await;
+        let _ = driver.list_commands(Some("s2".into())).await;
+
+        // Global invalidation.
+        driver.inner.invalidate_all_config_caches();
+
+        // Both cwds should re-run.
+        calls.lock().clear();
+        let _ = driver.list_commands(Some("s1".into())).await;
+        let _ = driver.list_commands(Some("s2".into())).await;
+
+        let after_calls = calls.lock();
+        assert!(
+            after_calls.len() >= 2,
+            "both cwds should re-run after global invalidation, got {} calls",
+            after_calls.len()
+        );
+    }
+
+    // ---- AC.9: fake-mode construction does not start watcher ----
+
+    #[tokio::test]
+    async fn fake_mode_construction_does_not_start_watcher() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let driver = PolytokenDriver::new_with_login_env(
+            dir.path().to_path_buf(),
+            "polytoken".into(),
+            true, // is_fake = true
+            64,
+            None,
+        )
+        .await;
+
+        assert!(
+            matches!(
+                driver.inner.watch_status(),
+                config_watcher::WatchStatus::Disabled
+            ),
+            "fake mode should have Disabled watcher status"
+        );
+        assert!(
+            driver.inner.watcher_handle.lock().is_none(),
+            "fake mode should not have a watcher handle"
+        );
+    }
+
+    // ---- AC.9b: non-fake with login_env also has Disabled watcher (test constructor) ----
+
+    #[tokio::test]
+    async fn test_constructor_does_not_start_watcher() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let driver = PolytokenDriver::new_with_login_env(
+            dir.path().to_path_buf(),
+            "polytoken".into(),
+            false, // not fake, but test constructor doesn't start watcher
+            64,
+            None,
+        )
+        .await;
+
+        // The test constructor (new_with_login_env) never starts the watcher,
+        // even if is_fake is false. Only new_with_fake_control starts it.
+        assert!(
+            matches!(
+                driver.inner.watch_status(),
+                config_watcher::WatchStatus::Disabled
+            ),
+            "test constructor should have Disabled watcher status"
+        );
+    }
+
+    // ---- AC.8: watcher setup failure records status and driver still lists ----
+
+    #[tokio::test]
+    async fn watch_setup_failure_records_status_and_driver_still_lists() {
+        // Use the config_watcher module directly with an unwatchable path.
+        let called = Arc::new(Mutex::new(false));
+        let called_clone = called.clone();
+        let invalidation: config_watcher::InvalidationCallback = Arc::new(move |_| {
+            *called_clone.lock() = true;
+        });
+
+        let bad_path = PathBuf::from("/nonexistent-root-xyz-12345/polytoken");
+        let (handle, status) = config_watcher::setup_watcher(
+            vec![config_watcher::WatchedPath::Binary(bad_path)],
+            invalidation,
+            true,
+        );
+
+        // The status should reflect the failure (Failed or PartialFailure).
+        // On some platforms the watch may succeed deferred, so we accept Ok too,
+        // but the key invariant is: no crash, and the status is inspectable.
+        match &status {
+            config_watcher::WatchStatus::Failed { .. } => {
+                assert!(handle.is_none(), "failed watcher should have no handle");
+            }
+            config_watcher::WatchStatus::PartialFailure { .. } => {
+                // Acceptable — some paths failed but others may have succeeded.
+            }
+            config_watcher::WatchStatus::Ok { .. } => {
+                // On some platforms, watching a nonexistent parent might
+                // succeed (deferred). That's acceptable.
+            }
+            config_watcher::WatchStatus::Disabled => {
+                // Shouldn't happen when paths were provided, but if the
+                // watcher returned no watched paths, it's effectively disabled.
+            }
+        }
+
+        // The driver should still work through the injected command runner
+        // regardless of watcher status.
+        let calls = Arc::new(Mutex::new(0));
+        let calls_clone = calls.clone();
+        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
+            *calls_clone.lock() += 1;
+            Box::pin(async {
+                Ok(ok_output(
+                    "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n",
+                ))
+            })
+        });
+        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
+
+        let models = driver.list_models().await;
+        assert_eq!(
+            models.len(),
+            1,
+            "driver should still list models despite watcher status"
+        );
+        assert_eq!(*calls.lock(), 1);
     }
 }

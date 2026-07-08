@@ -2,6 +2,7 @@
 
 pub mod commands;
 pub mod config_notify;
+pub mod config_watcher;
 pub mod corpus;
 pub mod daemon_client;
 pub mod driver;
