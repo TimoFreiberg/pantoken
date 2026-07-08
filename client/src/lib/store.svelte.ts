@@ -89,6 +89,11 @@ function navEntryEquals(a: NavEntry, b: NavEntry): boolean {
 
 class PilotStore {
   session = $state<SessionState>(initialSessionState());
+  /** Existing-session switch whose daemon attach/history seed has not landed yet.
+   *  Client-only: lets the clicked row/header/transcript react immediately instead of
+   *  showing the previous session during a slow cold resume. Cleared by the matching
+   *  seed, by an error, or by navigating elsewhere. */
+  openingSession = $state<SessionListEntry | null>(null);
   serverId = $state<string | null>(loadLastServerId());
   /** The server's data directory (absolute path), broadcast in `hello`. Shown in Settings
    *  with copy + reveal-in-Finder actions. Empty string until hello arrives (or when the
@@ -416,8 +421,7 @@ class PilotStore {
   get pinnedSidebarIds(): ReadonlySet<string> {
     const ids = new Set(this.runningIds);
     if (!this.draft) {
-      const viewed = this.session.ref?.sessionId ?? this.activeSessionId;
-      if (viewed) ids.add(viewed);
+      if (this.viewedSessionId) ids.add(this.viewedSessionId);
     }
     return ids;
   }
@@ -429,7 +433,7 @@ class PilotStore {
   cycleSession(dir: 1 | -1): void {
     const order = this.sidebarOrder;
     if (order.length === 0) return;
-    const currentId = this.session.ref?.sessionId ?? this.activeSessionId;
+    const currentId = this.viewedSessionId;
     const idx = order.findIndex((s) => s.sessionId === currentId);
     const next =
       idx === -1
@@ -852,6 +856,9 @@ class PilotStore {
         // (no need to retry an openSession that landed) + any stale switch error.
         this.lastAttemptedSessionPath = null;
         this.lastError = null;
+        // The seed for the session we were opening has arrived — clear the
+        // optimistic placeholder so the real transcript takes over.
+        this.openingSession = null;
         this.maybeOpenBootDraft();
         // Dev-only: time how long this full transcript render takes. The signal for
         // "is it time to build JS windowing?" (see docs/DESIGN.md).
@@ -1013,6 +1020,9 @@ class PilotStore {
           // as a dismissible toast, not the alarming red error banner. The generic
           // banner (no kind) stays for genuinely unexpected errors.
           console.error("[server error]", msg.message);
+          // The switch failed — clear the optimistic opening placeholder so the
+          // prior session (or draft) shows through instead of a stuck spinner.
+          this.openingSession = null;
           if (this.bootRestoreInFlight) {
             this.bootRestoreInFlight = false;
             if (this.serverId) clearLastSession(this.serverId);
@@ -1495,6 +1505,8 @@ class PilotStore {
     // Navigating away abandons any in-flight "creating session" placeholder — its
     // optimistic prompt row must not bleed onto the session we're switching to.
     this.creatingSession = null;
+    // Also clear any stale opening-session placeholder from a prior switch.
+    this.openingSession = null;
     const entry = this.sessions.find((s) => s.path === path);
     const id = entry?.sessionId;
     // Restore the target's saved draft into the composer (empty if none).
@@ -1521,6 +1533,11 @@ class PilotStore {
     this.fileIndex = { files: [], truncated: false };
     this.files = { query: "", items: [] };
     this.lastAttemptedSessionPath = path;
+    // Optimistic: surface the target session immediately so the sidebar row,
+    // header, and transcript all react the instant the user clicks — instead of
+    // showing the prior session during a potentially slow daemon attach. The
+    // real seed clears this when it arrives; an error or navigation clears it too.
+    if (entry) this.openingSession = entry;
     send({ type: "openSession", path });
   }
   /** Focus a session named by cross-session attention/notification metadata. */
@@ -1709,6 +1726,8 @@ class PilotStore {
     this.stashDraft();
     // A fresh draft replaces any in-flight "creating session" placeholder.
     this.creatingSession = null;
+    // Entering a draft also clears an in-flight existing-session open.
+    this.openingSession = null;
     // Find-in-transcript is a transcript-reading tool; entering a draft is a context
     // switch, so don't let an open find box linger across it.
     this.searchOpen = false;
@@ -2212,6 +2231,15 @@ class PilotStore {
       this.sessions.find((s) => s.sessionId === this.activeSessionId)?.path ??
       null
     );
+  }
+  /** The session id the UI should treat as "currently viewed" — the optimistic
+   *  opening session during a switch, else the folded seed's ref, else the
+   *  server-authoritative activeSessionId. UI components read this so the
+   *  sidebar/header/transcript react the instant a click fires, not seconds
+   *  later when the seed lands. */
+  get viewedSessionId(): string | null {
+    if (this.openingSession) return this.openingSession.sessionId;
+    return this.session.ref?.sessionId ?? this.activeSessionId;
   }
   /** Dev/verification: register this device for push, then trigger a server test push. */
   async testPush(): Promise<void> {

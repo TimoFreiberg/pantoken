@@ -49,7 +49,7 @@
   // The cwd of the currently-active session, used to prefill the new-dir input so
   // "new session near where I am" is one keystroke, not a full path retype.
   const activeCwd = $derived(
-    store.sessions.find((s) => s.sessionId === store.activeSessionId)?.cwd ?? "",
+    store.sessions.find((s) => s.sessionId === store.viewedSessionId)?.cwd ?? "",
   );
 
   // Filter-as-you-type search over the session list (name, preview, path). Grouping +
@@ -662,7 +662,7 @@
                   <div class="row-line">
                     <button
                       class="row"
-                      class:active={s.sessionId === store.activeSessionId}
+                      class:active={s.sessionId === store.viewedSessionId}
                       title={activity
                         ? `${s.displayName || s.preview || "Session"} — ${activity}`
                         : `Open ${s.displayName || s.preview || "session"}`}
