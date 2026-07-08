@@ -955,14 +955,14 @@
     {/snippet}
 
     {#each turns as turn (turn.id)}
-      {#if turn.user}
-        {@render itemView(turn.user)}
-      {/if}
-      <!-- Lanes render the turn body in chronological order: each collapsible work run
-           folds behind its own "Worked for Ns" header, while pinned items (the answer
-           Q&A, screenshots) stay in place between runs so they don't float to the
-           bottom as later work streams in. -->
-      {#each turn.lanes as lane (lane.id)}
+        {#if turn.user}
+          {@render itemView(turn.user)}
+        {/if}
+        <!-- Lanes render the turn body in chronological order: each collapsible work run
+             folds behind its own "Worked for Ns" header, while pinned items (the answer
+             Q&A, screenshots) stay in place between runs so they don't float to the
+             bottom as later work streams in. -->
+        {#each turn.lanes as lane (lane.id)}
         {#if lane.kind === "pinned"}
           {@render itemView(lane.item)}
         {:else if lane.collapsible}
@@ -1013,6 +1013,15 @@
     {/if}
   </div>
 </div>
+{#if store.openingSession}
+  <div class="opening-overlay" data-testid="opening-session-placeholder">
+    <span class="opening-mark" aria-hidden="true">
+      <span class="pi">π</span>
+      <span class="ring"><span class="dot"></span></span>
+    </span>
+    <span class="opening-label">Opening session…</span>
+  </div>
+{/if}
 {#if showNewPill}
   <button
     class="new-pill"
@@ -1592,7 +1601,64 @@
     font-size: 14px;
   }
 
-  /* ── Injected custom-message (nudge) pill ── */
+  /* ── Opening-session overlay (existing-session switch, pre-seed) ── */
+  /* Positioned over the scroller so it doesn't affect scroll geometry — the
+     old transcript stays in the DOM (hidden behind the overlay) so scroll
+     restoration measures the right height when the seed swaps in. */
+  .opening-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: var(--text-faint);
+    font-size: 14px;
+    pointer-events: none;
+    background: var(--surface);
+  }
+  .opening-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    width: 18px;
+    height: 18px;
+  }
+  .opening-mark .pi {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-faint);
+    line-height: 1;
+  }
+  .opening-mark .ring {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+  }
+  .opening-mark .ring .dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--text-faint);
+  }
+  .opening-mark .ring {
+    animation: orbit 1.1s linear infinite;
+  }
+  @keyframes orbit {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .opening-mark .ring {
+      animation: none;
+    }
+    .opening-mark .dot {
+      display: none;
+    }
+  }
   .row.inject {
     align-items: flex-start;
     gap: 5px;
