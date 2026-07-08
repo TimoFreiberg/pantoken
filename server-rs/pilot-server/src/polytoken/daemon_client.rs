@@ -321,6 +321,19 @@ pub struct SpawnDaemonOpts {
     pub login_env: Option<HashMap<String, String>>,
 }
 
+fn merged_spawn_env(
+    login_env: Option<&HashMap<String, String>>,
+) -> Option<HashMap<String, String>> {
+    let login_env = login_env?;
+    if login_env.is_empty() {
+        return None;
+    }
+
+    let mut env: HashMap<String, String> = std::env::vars().collect();
+    env.extend(login_env.iter().map(|(k, v)| (k.clone(), v.clone())));
+    Some(env)
+}
+
 /// Spawn a NEW polytoken daemon session (no resume). `polytoken --working-dir <cwd>
 /// new --no-attach` prints `session_id=<id> port=<port>` to stdout and exits 0;
 /// the daemon runs detached.
@@ -341,16 +354,8 @@ async fn spawn_new_daemon(
     cmd.args(&cmd_args[1..]);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
-    if let Some(login_env) = &opts.login_env {
-        if !login_env.is_empty() {
-            // Merge: login env wins over process env.
-            for (k, v) in std::env::vars() {
-                cmd.env(k, v);
-            }
-            for (k, v) in login_env {
-                cmd.env(k, v);
-            }
-        }
+    if let Some(env) = merged_spawn_env(opts.login_env.as_ref()) {
+        cmd.envs(env);
     }
 
     let output = cmd
@@ -448,15 +453,8 @@ async fn spawn_resume_daemon(
     cmd.args(&args);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
-    if let Some(login_env) = &opts.login_env {
-        if !login_env.is_empty() {
-            for (k, v) in std::env::vars() {
-                cmd.env(k, v);
-            }
-            for (k, v) in login_env {
-                cmd.env(k, v);
-            }
-        }
+    if let Some(env) = merged_spawn_env(opts.login_env.as_ref()) {
+        cmd.envs(env);
     }
 
     let mut child = cmd
@@ -2360,6 +2358,270 @@ mod tests {
             client.auth_header().is_none(),
             "auth header should be absent when token is None"
         );
+    }
+
+    fn write_startup_json(
+        sessions_dir: &Path,
+        session_id: &str,
+        state: &str,
+        pid: Option<i32>,
+        port: Option<i32>,
+        message: Option<&str>,
+    ) {
+        let session_dir = sessions_dir.join(session_id);
+        std::fs::create_dir_all(&session_dir).expect("create session dir");
+        let startup = StartupJson {
+            state: state.to_string(),
+            session_id: Some(session_id.to_string()),
+            pid,
+            port,
+            message: message.map(str::to_string),
+            credential_file_path: None,
+        };
+        std::fs::write(
+            session_dir.join("startup.json"),
+            serde_json::to_string(&startup).expect("serialize startup.json"),
+        )
+        .expect("write startup.json");
+    }
+
+    fn spawn_sleep_child(stderr: std::process::Stdio) -> tokio::process::Child {
+        tokio::process::Command::new("sh")
+            .args(["-c", "sleep 5"])
+            .stdout(std::process::Stdio::null())
+            .stderr(stderr)
+            .spawn()
+            .expect("spawn sleep child")
+    }
+
+    async fn cleanup_child(child: &mut tokio::process::Child) {
+        if child.try_wait().expect("try_wait child").is_none() {
+            child.kill().await.expect("kill child");
+        }
+        let _ = child.wait().await;
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_startup_ignores_stale_ready_wrong_pid() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sessions_dir = dir.path().to_path_buf();
+        let session_id = "stale-ready-test";
+        let expected_pid = 12345;
+        write_startup_json(
+            &sessions_dir,
+            session_id,
+            "ready",
+            Some(99999),
+            Some(60339),
+            None,
+        );
+
+        let writer_sessions_dir = sessions_dir.clone();
+        let writer_session_id = session_id.to_string();
+        let writer = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(75)).await;
+            write_startup_json(
+                &writer_sessions_dir,
+                &writer_session_id,
+                "ready",
+                Some(expected_pid),
+                Some(54321),
+                None,
+            );
+        });
+
+        let mut child = spawn_sleep_child(std::process::Stdio::piped());
+        let result = wait_for_daemon_startup(
+            &sessions_dir.to_string_lossy(),
+            session_id,
+            1_000,
+            Some(expected_pid),
+            &mut child,
+        )
+        .await;
+        cleanup_child(&mut child).await;
+        writer.await.expect("writer task");
+
+        let startup = result.expect("matching ready startup.json");
+        assert_eq!(startup.port, Some(54321));
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_startup_without_expected_pid_accepts_any_ready_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sessions_dir = dir.path().to_path_buf();
+        let session_id = "any-ready-test";
+        write_startup_json(
+            &sessions_dir,
+            session_id,
+            "ready",
+            Some(99999),
+            Some(60339),
+            None,
+        );
+
+        let mut child = spawn_sleep_child(std::process::Stdio::piped());
+        let result = wait_for_daemon_startup(
+            &sessions_dir.to_string_lossy(),
+            session_id,
+            1_000,
+            None,
+            &mut child,
+        )
+        .await;
+        cleanup_child(&mut child).await;
+
+        let startup = result.expect("ready startup.json without expected pid");
+        assert_eq!(startup.port, Some(60339));
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_startup_ignores_stale_failed_wrong_pid() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sessions_dir = dir.path().to_path_buf();
+        let session_id = "stale-failed-test";
+        let expected_pid = 12345;
+        write_startup_json(
+            &sessions_dir,
+            session_id,
+            "failed",
+            Some(99999),
+            None,
+            Some("prior crash"),
+        );
+
+        let writer_sessions_dir = sessions_dir.clone();
+        let writer_session_id = session_id.to_string();
+        let writer = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(75)).await;
+            write_startup_json(
+                &writer_sessions_dir,
+                &writer_session_id,
+                "ready",
+                Some(expected_pid),
+                Some(54321),
+                None,
+            );
+        });
+
+        let mut child = spawn_sleep_child(std::process::Stdio::piped());
+        let result = wait_for_daemon_startup(
+            &sessions_dir.to_string_lossy(),
+            session_id,
+            1_000,
+            Some(expected_pid),
+            &mut child,
+        )
+        .await;
+        cleanup_child(&mut child).await;
+        writer.await.expect("writer task");
+
+        let startup = result.expect("matching ready startup.json");
+        assert_eq!(startup.port, Some(54321));
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_startup_failed_file_from_expected_pid_is_terminal() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sessions_dir = dir.path().to_path_buf();
+        let session_id = "own-failed-test";
+        let expected_pid = 12345;
+
+        let writer_sessions_dir = sessions_dir.clone();
+        let writer_session_id = session_id.to_string();
+        let writer = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(75)).await;
+            write_startup_json(
+                &writer_sessions_dir,
+                &writer_session_id,
+                "failed",
+                Some(expected_pid),
+                None,
+                Some("config parse error"),
+            );
+        });
+
+        let mut child = spawn_sleep_child(std::process::Stdio::piped());
+        let result = wait_for_daemon_startup(
+            &sessions_dir.to_string_lossy(),
+            session_id,
+            1_000,
+            Some(expected_pid),
+            &mut child,
+        )
+        .await;
+        cleanup_child(&mut child).await;
+        writer.await.expect("writer task");
+
+        let err = result.expect_err("expected failed startup.json to be terminal");
+        assert!(
+            err.contains("config parse error"),
+            "error should include daemon failure message: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_startup_timeout_names_stale_file_and_expected_pid() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sessions_dir = dir.path().to_path_buf();
+        let session_id = "stale-timeout-test";
+        write_startup_json(
+            &sessions_dir,
+            session_id,
+            "ready",
+            Some(99999),
+            Some(60339),
+            None,
+        );
+
+        let mut child = spawn_sleep_child(std::process::Stdio::null());
+        let result = wait_for_daemon_startup(
+            &sessions_dir.to_string_lossy(),
+            session_id,
+            350,
+            Some(12345),
+            &mut child,
+        )
+        .await;
+        cleanup_child(&mut child).await;
+
+        let err = result.expect_err("expected stale startup.json timeout");
+        assert!(
+            err.contains("did not become ready"),
+            "error should mention readiness timeout: {err}"
+        );
+        assert!(
+            err.contains("expected pid: 12345"),
+            "error should include expected pid: {err}"
+        );
+    }
+
+    #[test]
+    fn test_spawn_env_merges_login_env_over_process_env() {
+        let mut login_env = HashMap::new();
+        login_env.insert("PATH".to_string(), "/login/bin".to_string());
+        login_env.insert("PILOT_TEST_LOGIN_ENV".to_string(), "from-login".to_string());
+
+        let env = merged_spawn_env(Some(&login_env)).expect("merged env");
+        assert_eq!(env.get("PATH").map(String::as_str), Some("/login/bin"));
+        assert_eq!(
+            env.get("PILOT_TEST_LOGIN_ENV").map(String::as_str),
+            Some("from-login")
+        );
+        if let Ok(home) = std::env::var("HOME") {
+            assert_eq!(env.get("HOME"), Some(&home));
+        }
+    }
+
+    #[test]
+    fn test_spawn_env_absent_login_env_inherits_process_env() {
+        assert!(merged_spawn_env(None).is_none());
+    }
+
+    #[test]
+    fn test_spawn_env_empty_login_env_inherits_process_env() {
+        let login_env = HashMap::new();
+        assert!(merged_spawn_env(Some(&login_env)).is_none());
     }
 
     // AC.4 — wait_for_daemon_startup detects early process death and includes
