@@ -115,3 +115,13 @@ test("history navigation does not hijack the slash-command menu arrows", async (
   await page.keyboard.press("ArrowUp");
   await expect(ta).toHaveValue("/");
 });
+
+test("Alt+Enter inserts a newline instead of sending", async ({ page }) => {
+  const ta = composer(page);
+  await ta.focus();
+  await page.keyboard.type("line one");
+  // Alt+Enter should insert a newline, not send (matching Shift+Enter behavior).
+  await page.keyboard.press("Alt+Enter");
+  await page.keyboard.type("line two");
+  await expect(ta).toHaveValue("line one\nline two");
+});

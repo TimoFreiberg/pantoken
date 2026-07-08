@@ -14,6 +14,22 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
       `polytoken-upstream-feature-asks.md` #1); e2e suite asserts mock behaviors
       the live driver never produces.
 
+## ✅ Fixed (2026-07-09)
+
+- [x] Handoff plan doesn't work in the GUI — polytoken driver never emitted
+      `HostUiResolved` after `respond_interrogative`; the dialog card stayed
+      open. Now emits it unconditionally (success or error) + cleans up the
+      pending interrogative map.
+- [x] Facet hotkeys open the popup instead of cycling; number keys (1–9)
+      quick-select inside the popup.
+- [x] Top area of the GUI can be dragged and double-clicked to maximize
+      (Tauri `data-tauri-drag-region` on the status header).
+- [x] Q&A form + result render markdown in the context text window.
+- [x] Default permission mode respects the polytoken config —
+      `get_permission_monitor()` is now called during `install_warm` to seed
+      the cached mode.
+- [x] opt+enter inserts a newline in the prompt text field.
+
 ## 🔵 Corpus capture follow-ups (from the 2026-07-06 live-capture session)
 
 Full detail in `server-rs/PROGRESS.md` → "Live corpus capture (2026-07-06)". The

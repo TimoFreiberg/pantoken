@@ -127,6 +127,18 @@ test("qna form: sidebar can focus another chat and returning restores the draft"
   );
 });
 
+test("qna form renders markdown in the context field", async ({ page }) => {
+  await drive(page, "qna");
+  const form = qnaForm(page);
+  // The context field now renders markdown. The mock's Q1 context contains
+  // `bun.lock` (inline code) and **Note:** (bold). Assert both render as HTML.
+  const ctx = form.locator(".ctx");
+  await expect(ctx).toBeVisible();
+  // Multiple inline code spans exist — assert at least one is present.
+  await expect(ctx.locator("code").first()).toBeVisible();
+  await expect(ctx.locator("strong")).toBeVisible();
+});
+
 test("qna form: Cancel dismisses without answering", async ({ page }) => {
   await drive(page, "qna");
   await qnaForm(page).getByRole("button", { name: "Cancel" }).click();

@@ -28,6 +28,7 @@
     badgeClass = "",
     minWidth = "200px",
     closeLabel = "Close menu",
+    openExternal = 0,
     onSelect,
     body,
   }: {
@@ -42,12 +43,33 @@
     badgeClass?: string;
     minWidth?: string;
     closeLabel?: string;
+    openExternal?: number;
     onSelect?: (index: number) => void;
     body: Snippet<[{ sel: number; close: () => void }]>;
   } = $props();
 
   let open = $state(false);
   let sel = $state(0);
+  let panelEl = $state<HTMLElement>();
+
+  // External open trigger (e.g. ⌘⇧C hotkey). A counter so each request re-fires
+  // even if the menu was already open — re-opening resets sel + focuses the panel.
+  let lastOpenN = 0;
+  $effect(() => {
+    if (openExternal > lastOpenN) {
+      lastOpenN = openExternal;
+      sel = initialSel;
+      open = true;
+    }
+  });
+
+  // Move focus into the panel when it opens so keyboard nav (arrows, number
+  // keys, Enter, Esc) reaches the panel's onKeydown — not the composer textarea.
+  $effect(() => {
+    if (open && panelEl) {
+      queueMicrotask(() => panelEl?.focus());
+    }
+  });
 
   function toggle() {
     if (open) {
@@ -74,6 +96,14 @@
       e.preventDefault();
       onSelect?.(sel);
       close();
+    } else {
+      // Number keys 1–9: quick-select the Nth option.
+      const num = parseInt(e.key, 10);
+      if (!isNaN(num) && num >= 1 && num <= count) {
+        e.preventDefault();
+        onSelect?.(num - 1);
+        close();
+      }
     }
   }
 </script>
@@ -97,13 +127,14 @@
       role="listbox"
       aria-label={ariaLabel}
       tabindex="-1"
+      bind:this={panelEl}
       transition:reveal
       style:min-width={minWidth}
       onkeydown={onKeydown}
     >
       <div class="group-title">{groupTitle}</div>
       {@render body({ sel, close })}
-      <div class="kbd-hint">↑↓ move · ↵ select · esc cancel</div>
+      <div class="kbd-hint">↑↓ move · 1-9 select · ↵ select · esc cancel</div>
     </div>
   {/if}
 </div>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ToolItem } from "@pantoken/protocol";
   import { parseQnaResult, toolOutputText } from "../lib/transcript-view.js";
+  import Markdown from "./Markdown.svelte";
 
   // The `answer` tool's result, rendered visibly in the transcript (not buried in a
   // collapsed tool card) so the user can read back the answers they submitted. The
@@ -21,7 +22,7 @@
     {#each entries as e, i (i)}
       <div class="qr-item">
         <div class="qr-question">{e.question}</div>
-        {#if e.context}<div class="qr-context">{e.context}</div>{/if}
+        {#if e.context}<div class="qr-context"><Markdown content={e.context} final /></div>{/if}
         <div class="qr-answer">{e.answer || "(no answer)"}</div>
       </div>
     {/each}

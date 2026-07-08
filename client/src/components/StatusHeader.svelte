@@ -113,7 +113,7 @@
 </script>
 
 <svelte:window onkeydown={onWindowKeydown} />
-<header class="hdr">
+<header class="hdr" data-tauri-drag-region>
   <IconButton
     data-testid="sidebar-toggle"
     title="Toggle sessions (⌘B)"
