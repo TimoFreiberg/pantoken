@@ -57,7 +57,7 @@ use pilot_protocol::session_driver::{
 };
 use pilot_protocol::wire::{DeliveryMode, LoginEnvStatus, McpAction};
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use async_trait::async_trait;
 
@@ -1380,7 +1380,10 @@ impl PilotDriver for PolytokenDriver {
                     }
                 }
                 Err(e) => {
-                    warn!("open_session: warm attach failed for {session_id}: {e}");
+                    // Expected when the daemon from a stale startup.json has
+                    // died — the cold-start spawn below handles it. Keep this
+                    // at debug so normal operation stays warning-free.
+                    debug!("open_session: warm attach failed for {session_id}: {e}");
                 }
             }
         }
