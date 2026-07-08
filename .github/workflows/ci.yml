@@ -188,19 +188,15 @@ jobs:
       - run: cargo test
         working-directory: server-rs
 
-  # Tag pushes only (scripts/desktop/release.ts creates them): build the signed
-  # bundled .app and publish it + latest.json as a GitHub release — but only after
-  # both test jobs pass. Same script as a local publish; the minisign key comes from
-  # the TAURI_SIGNING_PRIVATE_KEY Actions secret (one-time setup:
-  #   gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/pantoken-shell.key).
-  release:
-    name: release — build, sign, publish
+  # Tag pushes only (scripts/desktop/release.ts creates them): prepare the signed
+  # bundled .app in parallel with the gates, then publish only after those gates pass.
+  # The minisign key comes from the TAURI_SIGNING_PRIVATE_KEY Actions secret
+  # (one-time setup: gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/pantoken-shell.key).
+  release-prepare:
+    name: release — prepare signed app
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [web-check, web-e2e, desktop]
     runs-on: macos-14 # arm64 → the darwin-aarch64 artifact installed apps expect
     timeout-minutes: 40
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -217,12 +213,56 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop
-      - name: Build and publish
+      - name: Build signed release artifacts
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: >
+          bun scripts/desktop/publish.ts
+          --dry-run
+          --repo ${{ github.repository }}
+          --tag-must-match "${{ github.ref_name }}"
+      - name: Upload signed release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-release-artifacts
+          path: |
+            desktop/target/release/bundle/macos/Pantoken.app/
+            desktop/target/release/bundle/macos/Pantoken.app.tar.gz
+            desktop/target/release/bundle/macos/Pantoken.app.tar.gz.sig
+            desktop/target/release/bundle/macos/latest.json
+          retention-days: 1
+
+  release:
+    name: release — publish
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [web-check, web-e2e, desktop, release-prepare]
+    runs-on: macos-14 # publish.ts validates the macOS bundle with plutil
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Cache Bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - name: Download signed release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-release-artifacts
+          path: desktop/target/release/bundle/macos
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: >
           bun scripts/desktop/publish.ts
+          --skip-build
           --repo ${{ github.repository }}
           --tag-must-match "${{ github.ref_name }}"
