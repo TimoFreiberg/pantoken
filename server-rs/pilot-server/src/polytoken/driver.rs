@@ -1309,12 +1309,26 @@ impl PilotDriver for PolytokenDriver {
                     // TS `focus(existing.ref.sessionId)` on the instant-switch path.
                     let real_id = ws.client.session_id.clone();
                     self.inner.focus(&real_id);
-                    // Build the seed from the warm client's /history.
+                    // Build the seed from current /state + /history. The leading
+                    // SessionOpened is authoritative for idle vs running; replaying
+                    // bare history would make old idle sessions look in-progress
+                    // because user/assistant/tool events set the hub's running set.
+                    let ctx = DriverMapCtx {
+                        session_ref: ws.session_ref.clone(),
+                        workspace: ws.workspace.clone(),
+                        last_state: ws.last_state.read().clone(),
+                        monitor_mode: *ws.monitor_mode.lock(),
+                        autodrain_enabled: *ws.autodrain_enabled.lock(),
+                    };
+                    let snapshot = ctx.snapshot(ctx.live_status());
                     let history_res = ws.client.history(None, None).await;
                     if let Some(history) = history_res.data {
-                        return Ok(history_seed::history_to_seed_events(
+                        return Ok(PolytokenInner::build_branch_seed(
+                            snapshot,
                             &history.items,
-                            &HistoryMapCtx { r#ref: session_ref },
+                            &HistoryMapCtx {
+                                r#ref: ws.session_ref.clone(),
+                            },
                         ));
                     }
                 }
@@ -1336,11 +1350,22 @@ impl PilotDriver for PolytokenDriver {
             Ok(ws) => {
                 let real_id = ws.client.session_id.clone();
                 self.inner.focus(&real_id);
+                let ctx = DriverMapCtx {
+                    session_ref: ws.session_ref.clone(),
+                    workspace: ws.workspace.clone(),
+                    last_state: ws.last_state.read().clone(),
+                    monitor_mode: *ws.monitor_mode.lock(),
+                    autodrain_enabled: *ws.autodrain_enabled.lock(),
+                };
+                let snapshot = ctx.snapshot(ctx.live_status());
                 let history_res = ws.client.history(None, None).await;
                 if let Some(history) = history_res.data {
-                    return Ok(history_seed::history_to_seed_events(
+                    return Ok(PolytokenInner::build_branch_seed(
+                        snapshot,
                         &history.items,
-                        &HistoryMapCtx { r#ref: session_ref },
+                        &HistoryMapCtx {
+                            r#ref: ws.session_ref.clone(),
+                        },
                     ));
                 }
             }
@@ -1447,12 +1472,6 @@ impl PilotDriver for PolytokenDriver {
             .await
         {
             Ok(ws) => {
-                let session_id = ws.client.session_id.clone();
-                let session_ref = SessionRef {
-                    workspace_id: WorkspaceId::default(),
-                    session_id: session_id.clone(),
-                };
-
                 // Apply model/thinking if specified (on the warm client, before seeding)
                 if let Some(model) = &opts.model {
                     let model_str = format!("{}/{}", model.provider, model.model_id);
@@ -1483,17 +1502,35 @@ impl PilotDriver for PolytokenDriver {
                     *ws.monitor_mode.lock() = Some(mode);
                 }
 
-                // Build seed from history
+                // Build seed from current /state + /history. Even an empty
+                // transcript needs the leading SessionOpened; the hub treats an
+                // empty seed as a failed switch.
+                let ctx = DriverMapCtx {
+                    session_ref: ws.session_ref.clone(),
+                    workspace: ws.workspace.clone(),
+                    last_state: ws.last_state.read().clone(),
+                    monitor_mode: *ws.monitor_mode.lock(),
+                    autodrain_enabled: *ws.autodrain_enabled.lock(),
+                };
+                let snapshot = ctx.snapshot(ctx.live_status());
                 let history_res = ws.client.history(None, None).await;
                 if let Some(history) = history_res.data {
-                    return Ok(history_seed::history_to_seed_events(
+                    return Ok(PolytokenInner::build_branch_seed(
+                        snapshot,
                         &history.items,
-                        &HistoryMapCtx { r#ref: session_ref },
+                        &HistoryMapCtx {
+                            r#ref: ws.session_ref.clone(),
+                        },
                     ));
                 }
-                // A successful spawn with empty history is a valid empty seed —
-                // the session exists. Mirrors the TS path.
-                Ok(Vec::new())
+                Ok(vec![SessionDriverEvent::SessionOpened {
+                    base: SessionEventBase {
+                        session_ref: ws.session_ref.clone(),
+                        timestamp: DriverMapCtx::now_ts(),
+                        run_id: None,
+                    },
+                    snapshot,
+                }])
             }
             Err(e) => {
                 error!("new_session warm failed: {e}");
