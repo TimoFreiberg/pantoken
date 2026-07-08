@@ -296,22 +296,22 @@ export function foldEvent(
       // carries the queue replaces it (including []); an older/partial snapshot that omits
       // the field must not erase live queue state.
       if (s.queuedMessages) state.queued = [...s.queuedMessages];
-      // Settle ALL in-flight state when the turn ends — not just the open
-      // assistant. An idle/failed snapshot means no turn is live, so any tool
-      // still "running" is an orphan (a replayed history whose tool_result was
-      // lost to a context_cleared, or a live out-of-band re-snapshot mid-turn).
-      // Leaving it running makes `turnActive` (the transcript's in-progress
-      // signal) disagree with `runningIds` (the sidebar's): the latter is
-      // cleared by the idle snapshot, but the former also checks for running
-      // tool cards. This matches the Rust fold. Previously only runCompleted
-      // interrupted running tools; sessionUpdated/sessionOpened did not,
-      // causing the sidebar↔transcript desync (regression `05f4jw-rust`).
+      // The fold closes the open assistant on any non-running snapshot but only
+      // interrupts running tools on runCompleted/runFailed/sessionClosed.
+      // Orphaned tools from replay are settled by the seed builder
+      // (history_to_seed_events emits a synthetic ToolFinished(interrupted)).
+      // An idle sessionUpdated can be a transient mid-tool snapshot (the daemon's
+      // isStreaming briefly reads false during a rename/model change/auto-title),
+      // so interrupting on it would kill a genuinely running tool — the
+      // turnActive robustness design ORs independent in-flight signals precisely
+      // so a single glitch can't hide the stop affordance.
       if (s.status !== "running") {
         closeOpenAssistant(state.items, ev.timestamp);
-        interruptRunningTools(state.items, ev.timestamp);
       }
-      // runCompleted also stamps branch handles (entryIds).
+      // runCompleted settles running tools (authoritative turn end) and stamps
+      // branch handles (entryIds).
       if (ev.type === "runCompleted") {
+        interruptRunningTools(state.items, ev.timestamp);
         if (ev.assistantEntryId)
           stampLastEntryId(state.items, "assistant", ev.assistantEntryId);
         if (ev.userEntryId)
@@ -425,7 +425,11 @@ export function foldEvent(
         (i): i is ToolItem => i.kind === "tool" && i.id === ev.callId,
       );
       if (t) {
-        t.status = ev.success ? "ok" : "error";
+        t.status = ev.interrupted
+          ? "interrupted"
+          : ev.success
+            ? "ok"
+            : "error";
         t.output = ev.output;
         if (ev.images) t.images = ev.images;
         t.finishedAt = ev.timestamp;

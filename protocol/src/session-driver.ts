@@ -1,6 +1,6 @@
-// Pilot's WS contract types (originally adapted from pi-gui's session-driver).
+// Pantoken's WS contract types (originally adapted from pi-gui's session-driver).
 // This is the normalized, JSON-serializable surface of a daemon session.
-// We adopt it as pilot's wire contract; trimmed to what pilot consumes.
+// We adopt it as pantoken's wire contract; trimmed to what pantoken consumes.
 
 export type WorkspaceId = string;
 export type SessionId = string;
@@ -27,7 +27,7 @@ export interface SessionRef {
  *  - `failed`: the last run errored. */
 export type SessionStatus = "idle" | "initializing" | "running" | "failed";
 /** The daemon's per-session permission-monitor mode. Mirrors the daemon's
- *  OpenAPI-generated `PermissionMonitorMode` (server-rs/pilot-daemon-types)
+ *  OpenAPI-generated `PermissionMonitorMode` (server-rs/pantoken-daemon-types)
  *  — the single source of truth is the daemon spec; this copy is the shared
  *  client/server import. Keep in sync if the daemon adds a mode. */
 export type PermissionMonitorMode = "standard" | "bypass" | "bypass_plus" | "autonomous";
@@ -123,7 +123,7 @@ export interface FileInfo {
   /** Whether the entry is a directory (the menu renders a trailing "/"). */
   readonly isDirectory: boolean;
 }
-/** Pilot's view of the daemon's GLOBAL model config (not per-session): the default new
+/** Pantoken's view of the daemon's GLOBAL model config (not per-session): the default new
  *  sessions start from, plus the favorites subset the header picker is filtered to.
  *  `favorites` are concrete `provider:modelId` refs (resolved server-side from the daemon's
  *  glob-capable `enabledModels` patterns); empty = no filter, show every model.
@@ -240,7 +240,7 @@ export interface SessionListEntry {
   readonly updatedAt: Timestamp;
   readonly createdAt: Timestamp;
   /** When the operator last sent a message here — the timestamp of the last role-"user"
-   *  entry in the session, or `createdAt` if none yet. Pilot derives this itself from the
+   *  entry in the session, or `createdAt` if none yet. Pantoken derives this itself from the
    *  session .jsonl (no daemon change). It's the sidebar's sort key: Claude-app-style "most
    *  recently used on top", but WITHOUT `updatedAt`'s noise — `updatedAt` bumps on every
    *  streamed agent turn, so sorting by it makes running sessions jump around as they
@@ -252,15 +252,15 @@ export interface SessionListEntry {
    *  we don't load a session just to show its gauge — so the sidebar shows a ring
    *  only where this is set. */
   readonly usage?: SessionUsage;
-  /** Whether the operator has archived this session (pilot-side flag; the driver
+  /** Whether the operator has archived this session (pantoken-side flag; the driver
    *  resolves it at list time). Archived sessions are hidden by the sidebar's
    *  active-only filter, alongside ones untouched for >7 days. */
   readonly archived: boolean;
-  /** Present when this session runs in (or once ran in) a jj/git worktree pilot created
+  /** Present when this session runs in (or once ran in) a jj/git worktree pantoken created
    *  (the cwd is the worktree). The driver resolves it at list time from its worktree
    *  index; the sidebar shows an indicator + a clean-up/copy-path action, and groups the
    *  row under the parent project (`base`) instead of its own worktree-basename group.
-   *  Absent for normal sessions and for workspaces pilot didn't create (hand-made jj/git
+   *  Absent for normal sessions and for workspaces pantoken didn't create (hand-made jj/git
    *  workspaces keep their own group). */
   readonly worktree?: {
     readonly path: string;
@@ -464,10 +464,10 @@ export interface SessionUpdatedEvent extends SessionEventBase {
 export interface AssistantDeltaEvent extends SessionEventBase {
   readonly type: "assistantDelta";
   readonly text: string;
-  /** pilot extension: distinguish reasoning deltas from answer text */
+  /** pantoken extension: distinguish reasoning deltas from answer text */
   readonly channel?: "text" | "thinking";
-  /** pilot extension: the daemon's tree entry id for the assistant message this delta belongs
-   *  to — the branch handle a "branch from here" button names (see PilotDriver.branchFrom).
+  /** pantoken extension: the daemon's tree entry id for the assistant message this delta belongs
+   *  to — the branch handle a "branch from here" button names (see PantokenDriver.branchFrom).
    *  Set only on the REPLAY path (history-map), where the persisted entry is known; absent
    *  on the live stream (the daemon doesn't assign the id until the message persists at turn end,
    *  so the live path backfills it via {@link RunCompletedEvent.assistantEntryId}). All
@@ -484,16 +484,16 @@ export interface QueueUpdatedEvent extends SessionEventBase {
   readonly messages: readonly SessionQueuedMessage[];
 }
 export interface UserMessageEvent extends SessionEventBase {
-  // pilot extension: echo the user's submitted prompt into the transcript
+  // pantoken extension: echo the user's submitted prompt into the transcript
   readonly type: "userMessage";
   /** Stable client-generated prompt id on the live path. Reusing it lets the client
    *  reconcile its optimistic row with the authoritative event without a duplicate. */
   readonly id: string;
   readonly text: string;
   readonly images?: readonly ImageContent[];
-  /** pilot extension: the daemon's tree entry id for this user prompt — the branch handle a
+  /** pantoken extension: the daemon's tree entry id for this user prompt — the branch handle a
    *  "branch from this prompt" button names. Set on the REPLAY path (history-map); absent
-   *  on the live emit (pilot emits userMessage before the daemon persists the entry), where it's
+   *  on the live emit (pantoken emits userMessage before the daemon persists the entry), where it's
    *  backfilled via {@link RunCompletedEvent.userEntryId} at turn end. */
   readonly entryId?: string;
 }
@@ -515,7 +515,7 @@ export interface ToolStartedEvent extends SessionEventBase {
   readonly toolName: string;
   readonly callId: string;
   readonly input?: unknown;
-  /** pilot extension: human label + description resolved from getAllTools() */
+  /** pantoken extension: human label + description resolved from getAllTools() */
   readonly label?: string;
   readonly description?: string;
 }
@@ -536,11 +536,17 @@ export interface ToolFinishedEvent extends SessionEventBase {
    *  too). The base64 lives ONLY here; the live path strips it from `output` to avoid
    *  shipping the bytes twice. */
   readonly images?: readonly ImageContent[];
+  /** Marks the tool as interrupted (–) rather than errored (✕). Set only by the
+   *  synthetic ToolFinished the seed builder emits for orphaned tool_use blocks
+   *  (whose tool_result was lost to a context_cleared); never set on the live path.
+   *  Optional + defaults to false for backward compatibility — old clients that
+   *  don't read it fall back to error (success:false → error), which is acceptable. */
+  readonly interrupted?: boolean;
 }
 export interface RunCompletedEvent extends SessionEventBase {
   readonly type: "runCompleted";
   readonly snapshot: SessionSnapshot;
-  /** pilot extension: the daemon's tree entry ids for the turn that just completed, used to
+  /** pantoken extension: the daemon's tree entry ids for the turn that just completed, used to
    *  backfill the branch handle onto the LIVE-streamed transcript (the ids don't exist
    *  until the messages persist at turn end — see AssistantDeltaEvent.entryId). The
    *  reducer stamps `assistantEntryId` onto the turn-final assistant item and
@@ -550,7 +556,7 @@ export interface RunCompletedEvent extends SessionEventBase {
   readonly assistantEntryId?: string;
 }
 export interface UsageUpdatedEvent extends SessionEventBase {
-  // pilot-synthetic: the context-window fill changed mid-turn. Emitted by the hub on a
+  // pantoken-synthetic: the context-window fill changed mid-turn. Emitted by the hub on a
   // debounced timer while a turn runs, so the composer's context meter climbs live
   // instead of freezing at the last turn-boundary snapshot. Carries ONLY usage — unlike
   // a full sessionUpdated it never touches title/config/queued, so a mid-turn refresh
@@ -572,7 +578,7 @@ export interface HostUiRequestEvent extends SessionEventBase {
   readonly request: HostUiRequest;
 }
 export interface HostUiResolvedEvent extends SessionEventBase {
-  // pilot-synthetic: a pending dialog settled (a client answered, or the agent
+  // pantoken-synthetic: a pending dialog settled (a client answered, or the agent
   // auto-resolved on timeout). Emitted by the server, never by the daemon.
   readonly type: "hostUiResolved";
   readonly requestId: string;

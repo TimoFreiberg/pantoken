@@ -15,7 +15,7 @@ import {
   initialSessionState,
   type LoginEnvStatus,
   type ModelDefaults,
-  type PilotSettings,
+  type PantokenSettings,
   type ModelOption,
   type PermissionMonitorMode,
   type ServerMessage,
@@ -25,7 +25,7 @@ import {
   type SessionState,
   type TranscriptItem,
   PROTOCOL_VERSION,
-} from "@pilot/protocol";
+} from "@pantoken/protocol";
 import { clearToken, getToken, setToken } from "./auth.js";
 import { buildFullHash } from "./build-info.js";
 import { notifyNativeUpdateStarting } from "./native-bridge.js";
@@ -87,7 +87,7 @@ function navEntryEquals(a: NavEntry, b: NavEntry): boolean {
     : a.cwd === (b as { cwd: string }).cwd;
 }
 
-class PilotStore {
+class PantokenStore {
   session = $state<SessionState>(initialSessionState());
   /** Existing-session switch whose daemon attach/history seed has not landed yet.
    *  Client-only: lets the clicked row/header/transcript react immediately instead of
@@ -115,7 +115,7 @@ class PilotStore {
   // session was already active). Prevents reconnects from re-opening a draft the
   // operator dismissed.
   bootDraftHandled = $state(false);
-  // True only while boot is reopening the last session saved for this Pilot server.
+  // True only while boot is reopening the last session saved for this Pantoken server.
   // If the disk entry disappears between list + open, the switch error clears the stale
   // preference and falls back to the normal $HOME draft instead of leaving a blank pane.
   private bootRestoreInFlight = false;
@@ -201,11 +201,11 @@ class PilotStore {
   // Settings panel: the agent's global model defaults + favorites. Server-authoritative,
   // delivered like `models`.
   modelDefaults = $state<ModelDefaults>({ favorites: [] });
-  // Pilot-local settings (Settings "Environment" section) + the live status of the
+  // Pantoken-local settings (Settings "Environment" section) + the live status of the
   // server's startup login-shell env capture. Server-authoritative, sent on connect and
   // after a change. `loginEnv.activeShell` is what the running server captured with;
-  // compare to `pilotSettings.loginShell` to know whether a restart is pending.
-  pilotSettings = $state<PilotSettings>({
+  // compare to `pantokenSettings.loginShell` to know whether a restart is pending.
+  pantokenSettings = $state<PantokenSettings>({
     loginShell: null,
     backgroundModel: null,
   });
@@ -239,7 +239,7 @@ class PilotStore {
   private draftConfigMap =
     $state<Record<string, StoredDraftConfig>>(loadDraftConfigMap());
   // Per-session (and per new-session-draft) submit log: every prompt the user has SENT,
-  // recorded at the submit chokepoint and persisted in localStorage (key `pilot.promptHistory`).
+  // recorded at the submit chokepoint and persisted in localStorage (key `pantoken.promptHistory`).
   // This is the durable, independent backing for ArrowUp recall — independent of the transcript
   // and the outbox on purpose, so a prompt eaten by an API error / a future janky bug is still
   // recallable. Keyed like draftMap (`s:<sessionId>` / `n:<cwd>`). The navigable list merges this
@@ -669,11 +669,14 @@ class PilotStore {
    *
    *  INVARIANT: `turnActive` and `sessionStatus()` (the sidebar's running indicator)
    *  must always agree. Both ultimately derive from the same authoritative signals —
-   *  the server's `runningIds` set and the folded session state. The fold settles ALL
-   *  in-flight state (streaming assistant + running tools) on any non-running
-   *  snapshot, so an idle session can't have orphaned streaming/running items that
-   *  make `turnActive` return true while `runningIds` is clear (regression `05f4jw-rust`:
-   *  an orphaned tool_use whose tool_result was lost to a context_cleared). */
+   *  the server's `runningIds` set and the folded session state. The fold closes the
+   *  open assistant on any non-running snapshot but only interrupts running tools on
+   *  runCompleted/runFailed/sessionClosed. Orphaned tools from replay are settled by
+   *  the seed builder (history_to_seed_events emits a synthetic
+   *  ToolFinished(interrupted)), so an idle session can't have orphaned running items
+   *  that make `turnActive` return true while `runningIds` is clear (regression
+   *  `05f4jw-rust`: an orphaned tool_use whose tool_result was lost to a
+   *  context_cleared). */
   get turnActive(): boolean {
     // When drafting a new session, the main pane shows the new-session form —
     // not any running session. Hide streaming controls so the stop button and
@@ -695,7 +698,7 @@ class PilotStore {
    *  actually feeding you (the number climbs) from a stall (it freezes). Sums assistant
    *  text + thinking since the last user/inject turn boundary; tools and earlier turns are
    *  excluded, so it resets per turn for free. It's an ESTIMATE (~4 chars/token): the agent only
-   *  surfaces context-window usage to pilot, not exact per-turn output token counts, so we
+   *  surfaces context-window usage to pantoken, not exact per-turn output token counts, so we
    *  approximate from the streamed characters we already fold. Counting the thinking channel
    *  too is the point — it proves liveness during "Thinking…" when no answer text shows.
    *
@@ -797,7 +800,7 @@ class PilotStore {
   private requestSeed(): void {
     if (this.seedRequested) return;
     this.seedRequested = true;
-    console.error("[pilot] event seq gap — requesting a fresh seed");
+    console.error("[pantoken] event seq gap — requesting a fresh seed");
     send({ type: "requestSeed" });
   }
 
@@ -810,7 +813,7 @@ class PilotStore {
         if (msg.protocolVersion !== PROTOCOL_VERSION) {
           this.protocolMismatch = `Server protocol version ${msg.protocolVersion} doesn't match client ${PROTOCOL_VERSION}. Hard-refresh the page (⌘⇧R) to update.`;
           console.error(
-            `[pilot] protocol version mismatch: server=${msg.protocolVersion} client=${PROTOCOL_VERSION}`,
+            `[pantoken] protocol version mismatch: server=${msg.protocolVersion} client=${PROTOCOL_VERSION}`,
           );
           return;
         }
@@ -1004,8 +1007,8 @@ class PilotStore {
       case "modelDefaults":
         this.modelDefaults = msg.defaults;
         break;
-      case "pilotSettings":
-        this.pilotSettings = msg.settings;
+      case "pantokenSettings":
+        this.pantokenSettings = msg.settings;
         this.loginEnv = msg.env;
         this.loginShellPendingRestart = msg.pendingRestart;
         this.backgroundModelWarning = msg.backgroundModelWarning;
@@ -1577,7 +1580,7 @@ class PilotStore {
       requestAnimationFrame(() => {
         const ms = Math.round(performance.now() - start);
         console.debug(
-          `[pilot] transcript render: ${itemCount} items · ${ms}ms (to paint)`,
+          `[pantoken] transcript render: ${itemCount} items · ${ms}ms (to paint)`,
         );
       }),
     );
@@ -1655,7 +1658,7 @@ class PilotStore {
     return null;
   }
   /** On boot, if no session is active (empty landing), restore this client's last
-   *  focused session for the current Pilot server. If none survives, open a new-session
+   *  focused session for the current Pantoken server. If none survives, open a new-session
    *  draft at $HOME so the operator lands on a prompt page rather than a blank transcript.
    *  Fires at most once per store instance (reconnects don't re-open a dismissed
    *  draft), and only when both the seed and the sessionList have arrived —
@@ -2116,22 +2119,22 @@ class PilotStore {
     return this.modelDefaults.favorites.includes(`${provider}:${modelId}`);
   }
 
-  /** Set (or clear, with null/empty) the login shell pilot captures env from at startup.
+  /** Set (or clear, with null/empty) the login shell pantoken captures env from at startup.
    *  Optimistic local update; the server persists + re-broadcasts. Applies on the next
    *  server restart — the Settings panel surfaces the pending-restart state. */
   setLoginShell(path: string | null): void {
     const next = path?.trim() ? path.trim() : null;
-    this.pilotSettings = { ...this.pilotSettings, loginShell: next };
+    this.pantokenSettings = { ...this.pantokenSettings, loginShell: next };
     send({ type: "setLoginShell", path: next });
   }
-  /** Set (or clear, with null/empty) the background-model spec pilot's own extensions
+  /** Set (or clear, with null/empty) the background-model spec pantoken's own extensions
    *  run their cheap out-of-band LLM calls against. Optimistic local update; the
    *  server persists + re-broadcasts (carrying the resolved `warning` for a bad spec).
    *  Clears `backgroundModelWarning` optimistically too so saving a good spec right
    *  after a bad one doesn't flash the stale red error until the broadcast lands. */
   setBackgroundModel(spec: string | null): void {
     const next = spec?.trim() ? spec.trim() : null;
-    this.pilotSettings = { ...this.pilotSettings, backgroundModel: next };
+    this.pantokenSettings = { ...this.pantokenSettings, backgroundModel: next };
     this.backgroundModelWarning = undefined;
     send({ type: "setBackgroundModel", spec: next });
   }
@@ -2168,7 +2171,7 @@ class PilotStore {
       // Archiving the session you're looking at: it would otherwise linger (pinned as the
       // viewed row) until you navigated away by hand. Flip into a new-session draft for the
       // same project so the row drops immediately and you land on a prompt page rather than
-      // the just-archived transcript. A pilot worktree session's cwd may be reaped on
+      // the just-archived transcript. A pantoken worktree session's cwd may be reaped on
       // archive, so draft into the parent repo (`worktree.base`) instead of the dead dir.
       const viewedId = this.session.ref?.sessionId ?? this.activeSessionId;
       const archivingFocused = s != null && s.sessionId === viewedId;
@@ -2196,7 +2199,7 @@ class PilotStore {
     );
     send({ type: "renameSession", path, name: next });
   }
-  /** Remove a pilot-created worktree (by its path == the session cwd). `force` discards
+  /** Remove a pantoken-created worktree (by its path == the session cwd). `force` discards
    *  uncommitted changes. The server re-broadcasts the list, clearing the indicator. */
   cleanupWorktree(path: string, force = false): void {
     send({ type: "cleanupWorktree", path, force });
@@ -2256,7 +2259,7 @@ class PilotStore {
   }
 }
 
-const SIDEBAR_KEY = "pilot.sidebarOpen";
+const SIDEBAR_KEY = "pantoken.sidebarOpen";
 
 /** Matches a lease-conflict (409) error message from classifySwitchError. The
  *  classified message is either the full claimLease text ("another TUI is
@@ -2278,7 +2281,7 @@ function persistSidebarOpen(open: boolean): void {
     localStorage.setItem(SIDEBAR_KEY, open ? "1" : "0");
 }
 
-const SHOW_ARCHIVED_KEY = "pilot.showArchived";
+const SHOW_ARCHIVED_KEY = "pantoken.showArchived";
 
 /** Default the sidebar filter to active-only; a stored preference wins. */
 function initialShowArchived(): boolean {
@@ -2291,7 +2294,7 @@ function persistShowArchived(show: boolean): void {
     localStorage.setItem(SHOW_ARCHIVED_KEY, show ? "1" : "0");
 }
 
-const HIDE_THINKING_KEY = "pilot.hideThinking";
+const HIDE_THINKING_KEY = "pantoken.hideThinking";
 
 /** Default to HIDING thinking blocks (the owner's call): the reasoning stream is noise
  *  for most reading, and the composer's "Thinking…" indicator still signals activity.
@@ -2308,12 +2311,12 @@ function persistHideThinking(hide: boolean): void {
     localStorage.setItem(HIDE_THINKING_KEY, hide ? "1" : "0");
 }
 
-const DRAFTS_KEY = "pilot.composerDrafts";
-const DRAFT_CONFIG_KEY = "pilot.draftConfig";
-const LAST_SESSION_PREFIX = "pilot.lastSession.";
-const LAST_SERVER_KEY = "pilot.lastServerId";
+const DRAFTS_KEY = "pantoken.composerDrafts";
+const DRAFT_CONFIG_KEY = "pantoken.draftConfig";
+const LAST_SESSION_PREFIX = "pantoken.lastSession.";
+const LAST_SERVER_KEY = "pantoken.lastServerId";
 
-const LAST_PROJECT_CWD_KEY = "pilot.lastProjectCwd";
+const LAST_PROJECT_CWD_KEY = "pantoken.lastProjectCwd";
 
 function loadLastProjectCwd(): string {
   if (typeof window === "undefined") return "";
@@ -2507,7 +2510,7 @@ function persistDraftConfigMap(map: Record<string, StoredDraftConfig>): void {
   }
 }
 
-const PROMPT_HISTORY_KEY = "pilot.promptHistory";
+const PROMPT_HISTORY_KEY = "pantoken.promptHistory";
 // Per-key cap on the submit log. Plenty for recall; bounds localStorage growth (the
 // navigable list is padded further by the transcript, which is server-side anyway).
 const PROMPT_HISTORY_CAP = 100;
@@ -2540,4 +2543,4 @@ function persistPromptHistory(map: Record<string, string[]>): void {
   }
 }
 
-export const store = new PilotStore();
+export const store = new PantokenStore();

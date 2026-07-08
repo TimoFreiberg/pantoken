@@ -1,4 +1,4 @@
-# Pilot — Decisions
+# Pantoken — Decisions
 
 Settled architectural calls. Each is reversible unless noted. Numbers kept
 for cross-reference with git history.
@@ -36,12 +36,12 @@ point. The only human gate is the project-trust gate (D12), handled daemon-side.
 
 ## D12. Workspace = arbitrary GUI paths, trust as safety net
 No allowlist — open any path from the UI. The safety net is the trust gate,
-which the polytoken daemon handles entirely on its side. The pilot-side
+which the polytoken daemon handles entirely on its side. The pantoken-side
 out-of-band trust channel (`trustRequest`/`trustResolved`/`trustResponse` +
 `subscribeTrust`/`respondTrust` + `TrustCard.svelte`) was removed — it was
 mock-only demo code that could never fire under the polytoken daemon.
 **Resolved:** the daemon's `capability` interrogative covers untrusted-dir
-prompts; the pilot UI no longer renders a trust card.
+prompts; the pantoken UI no longer renders a trust card.
 
 ## D17. Draft persistence
 Everything settable in the new-session draft UI is persisted per-project (keyed
@@ -60,10 +60,10 @@ TCC-prompt-free, even in /Applications). The Rust-hub rewrite remains a
 separate, criteria-gated decision. Full rationale, spike results, and the open
 artifact-hosting decision: `docs/ADR-desktop-shell.md`.
 
-## D19. Daemon→pilot accumulator stays server-side in Rust (A′)
+## D19. Daemon→pantoken accumulator stays server-side in Rust (A′)
 The event accumulator (`event_map` + `ui_bridge`: `DaemonEvent` → `SessionDriverEvent`)
 stays server-side, ported to Rust — it is NOT moved client-side. The client is
-Svelte/TS and stays thin on the stable pilot WS wire. Moving the accumulator
+Svelte/TS and stays thin on the stable pantoken WS wire. Moving the accumulator
 client-side would relocate logic out of Rust into TS and duplicate it across
 desktop + the imminent mobile app, losing the server's version-shield against
 daemon churn (polytoken moves ~daily). The daemon owning more state
@@ -84,7 +84,7 @@ invariant (PROGRESS.md #3).
 
 ## D21. Fake-daemon live e2e tier is a corpus-backed beachhead, not the full suite
 The live driver stack (`daemon_client → event_map → driver`) gets its first
-browser coverage via `PILOT_DRIVER=fake`: the real `PolytokenDriver` over an
+browser coverage via `PANTOKEN_DRIVER=fake`: the real `PolytokenDriver` over an
 in-process fake daemon replaying the frozen golden corpus (D20). The tier
 (`e2e/live/`, `bun run test:e2e:live`, separate `playwright.live.config.ts`) covers
 only the corpus-backed flows — streaming turn, queue-while-in-flight, abort,
@@ -112,12 +112,15 @@ streaming assistant bubble, any still-running tool card). The item-level signals
 exist as a belt-and-suspenders for live mid-turn glitches, but they must not
 survive past a turn boundary.
 
-The invariant is enforced at the fold: any non-running snapshot
-(`sessionOpened`/`sessionUpdated`/`runCompleted` with `status != running`)
-settles ALL in-flight state — it closes the open assistant bubble AND interrupts
-orphaned running tools. Previously only `runCompleted` interrupted running
-tools; `sessionUpdated`/`sessionOpened` only closed the assistant. That gap
-caused the sidebar↔transcript desync (`05f4jw-rust`): an orphaned `tool_use`
-whose `tool_result` was lost to a `context_cleared` survived the trailing idle
-re-assert `build_branch_seed` appends, leaving `turnActive` true (phantom
-running tool) while `runningIds` was clear (sidebar correctly idle).
+The fold closes the open assistant on any non-running snapshot but only interrupts
+running tools on runCompleted/runFailed/sessionClosed. Orphaned tools from replay
+are settled by the seed builder (history_to_seed_events emits a synthetic
+ToolFinished(interrupted)). An idle sessionUpdated can be a transient mid-tool
+snapshot (the daemon's isStreaming briefly reads false during a rename/model
+change/auto-title), so interrupting on it would kill a genuinely running tool —
+the turnActive robustness design ORs independent in-flight signals precisely so a
+single glitch can't hide the stop affordance. Previously the fold interrupted
+running tools on every non-running snapshot (commit `qtmolyozptku`), which fixed the
+replay-path orphan but broke the live-path `turnActive` invariant (`staleidle`
+e2e). The orphan settlement now lives at the source (the seed builder) rather than
+in the fold, so both paths get their correct behavior without conflict.

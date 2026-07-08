@@ -224,14 +224,13 @@ describe("foldEvent", () => {
     });
   });
 
-  test("an idle sessionUpdated interrupts an orphaned running tool", () => {
-    // A non-running (idle/failed) snapshot means no turn is live, so any tool
-    // still marked "running" is an orphan — its tool_result was lost (e.g. to a
-    // context_cleared) or an out-of-band re-snapshot flipped the status to idle
-    // mid-turn. Interrupting it keeps `turnActive` (the transcript's in-progress
-    // signal) in sync with `runningIds` (the sidebar's), which is cleared by the
-    // idle snapshot. Regression `05f4jw-rust`: orphaned handoff_plan tool_use
-    // left the transcript showing Working…/Stop while the sidebar showed idle.
+  test("an idle sessionUpdated does not interrupt a live tool", () => {
+    // An idle sessionUpdated can be a transient mid-tool snapshot (the daemon's
+    // isStreaming briefly reads false during a rename/model change/auto-title).
+    // Interrupting on it would kill a genuinely running tool — the turnActive
+    // robustness design ORs independent in-flight signals precisely so a single
+    // glitch can't hide the stop affordance. Orphaned tools from replay are
+    // settled by the seed builder (history_to_seed_events), not the fold.
     const s = foldAll([
       base({ type: "toolStarted", callId: "c1", toolName: "bash" }),
       base({
@@ -248,8 +247,7 @@ describe("foldEvent", () => {
     ]);
     expect(s.items[0]).toMatchObject({
       kind: "tool",
-      status: "interrupted",
-      finishedAt: "settle-at",
+      status: "running",
     });
   });
 
@@ -266,6 +264,28 @@ describe("foldEvent", () => {
       kind: "tool",
       status: "interrupted",
       finishedAt: "failed-at",
+    });
+  });
+
+  test("a toolFinished with interrupted:true sets status interrupted", () => {
+    // The seed builder (history_to_seed_events) emits synthetic ToolFinished
+    // with interrupted:true for orphaned tool_use blocks whose tool_result was
+    // lost (e.g. to a context_cleared). The fold must map this to "interrupted"
+    // (–), not "error" (✕), preserving the exact status the replay path expects.
+    const s = foldAll([
+      base({ type: "toolStarted", callId: "c1", toolName: "bash" }),
+      base({
+        type: "toolFinished",
+        callId: "c1",
+        success: false,
+        interrupted: true,
+        timestamp: "settle-at",
+      }),
+    ]);
+    expect(s.items[0]).toMatchObject({
+      kind: "tool",
+      status: "interrupted",
+      finishedAt: "settle-at",
     });
   });
 
@@ -378,14 +398,14 @@ describe("foldEvent", () => {
         issue: {
           capability: "custom",
           classification: "terminal-only",
-          message: "Custom UI is not available in the pilot remote.",
+          message: "Custom UI is not available in the pantoken remote.",
         },
       }),
     ]);
     expect(s.items[0]).toMatchObject({
       kind: "notice",
       level: "warning",
-      text: 'Extension capability "custom" is terminal-only: Custom UI is not available in the pilot remote.',
+      text: 'Extension capability "custom" is terminal-only: Custom UI is not available in the pantoken remote.',
     });
   });
 
