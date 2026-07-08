@@ -350,10 +350,10 @@ impl SessionHub {
         self.epoch_counter
     }
 
-    /// Override the file-manager spawn seam. Test-only — production keeps the
-    /// real `default_open_in_file_manager`.
-    #[cfg(test)]
-    fn set_open_in_file_manager(
+    /// Override the file-manager spawn seam. Production keeps the real
+    /// `default_open_in_file_manager`; debug drivers (mock/fake) inject a no-op
+    /// so the e2e Reveal button never spawns a real Finder/xdg-open window.
+    pub fn set_open_in_file_manager(
         &mut self,
         f: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static,
     ) {
