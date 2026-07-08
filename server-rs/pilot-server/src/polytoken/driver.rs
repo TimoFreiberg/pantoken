@@ -2602,4 +2602,119 @@ mod tests {
              else a freshly loaded idle session shows the working spinner"
         );
     }
+
+    /// Regression (`050hrk-cheek`, live shape): a session whose history ends on a
+    /// *completed* assistant turn (thinking + text, no trailing tool_use) that is
+    /// then followed by one-or-more `session-resumed` system_reminders — the exact
+    /// tail every resumed cold session grows (the daemon appends a `session-resumed`
+    /// reminder on each `--resume`). This is NOT the "ends mid-thinking" shape; the
+    /// last transcript row is a finished reply, but the trailing reminders map to
+    /// `customMessage` events AFTER the last `assistantDelta`. The seed must still
+    /// fold to idle with the assistant bubble closed — i.e. the trailing snapshot
+    /// re-assert has to win over the intervening reminders. Without it, opening the
+    /// cold session shows "Working…" + a Stop button forever.
+    #[test]
+    fn build_branch_seed_settles_completed_turn_with_trailing_resume_reminders() {
+        use pilot_protocol::state::{TranscriptItem, fold_all};
+
+        let session_ref = SessionRef {
+            workspace_id: "ws".into(),
+            session_id: "s1".into(),
+        };
+        let workspace = WorkspaceRef {
+            workspace_id: "ws".into(),
+            path: "/repo".into(),
+            display_name: None,
+        };
+        let snapshot = event_map::snapshot_from_state(
+            None,
+            &session_ref,
+            &workspace,
+            SessionStatus::Idle,
+            "2025-01-01T00:00:00.000Z",
+            None,
+            None,
+        );
+        // The live `050hrk-cheek` tail: a completed assistant turn (thinking +
+        // text), then three `session-resumed` reminders (one per resume).
+        let history = vec![
+            serde_json::json!({
+                "type": "user",
+                "content": "resolve the conflicts",
+                "prompt_id": "p1",
+                "emitted_at": "2025-01-01T00:00:01.000Z",
+            }),
+            serde_json::json!({
+                "type": "assistant",
+                "prompt_id": "p1",
+                "blocks": [
+                    { "type": "thinking", "text": "everything looks good" },
+                    { "type": "text", "text": "All done! Here's the summary…" }
+                ],
+                "emitted_at": "2025-01-01T00:00:02.000Z",
+            }),
+            serde_json::json!({
+                "type": "system_reminder",
+                "slug": "session-resumed",
+                "reason": { "type": "session_resumed" },
+                "body": "This session has been resumed from saved history.",
+                "emitted_at": "2025-01-01T00:00:03.000Z",
+            }),
+            serde_json::json!({
+                "type": "system_reminder",
+                "slug": "session-resumed",
+                "reason": { "type": "session_resumed" },
+                "body": "This session has been resumed from saved history.",
+                "emitted_at": "2025-01-01T00:00:04.000Z",
+            }),
+            serde_json::json!({
+                "type": "system_reminder",
+                "slug": "session-resumed",
+                "reason": { "type": "session_resumed" },
+                "body": "This session has been resumed from saved history.",
+                "emitted_at": "2025-01-01T00:00:05.000Z",
+            }),
+        ];
+        let seed = PolytokenInner::build_branch_seed(
+            snapshot,
+            &history,
+            &HistoryMapCtx {
+                r#ref: session_ref.clone(),
+            },
+        );
+
+        // The seed must end with an idle SessionUpdated re-assert — the reminders
+        // are appended AFTER the last assistantDelta, so the re-assert is what the
+        // hub's `track_running` reads to clear the running set (drop the Stop button).
+        assert!(
+            matches!(
+                seed.last(),
+                Some(SessionDriverEvent::SessionUpdated { snapshot, .. })
+                    if matches!(snapshot.status, SessionStatus::Idle)
+            ),
+            "seed must end with an idle SessionUpdated re-assert; got {:?}",
+            seed.last()
+        );
+
+        let state = fold_all(&seed);
+        assert!(
+            matches!(state.status, SessionStatus::Idle),
+            "folded seed status should be idle, got {:?}",
+            state.status
+        );
+        let last_assistant = state
+            .items
+            .iter()
+            .rev()
+            .find_map(|it| match it {
+                TranscriptItem::Assistant(a) => Some(a),
+                _ => None,
+            })
+            .expect("seed should fold to an assistant item");
+        assert!(
+            !last_assistant.streaming,
+            "trailing session-resumed reminders must not leave the assistant bubble \
+             streaming — the idle re-assert has to close it"
+        );
+    }
 }

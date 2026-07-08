@@ -720,6 +720,33 @@ impl SessionHub {
                         Some("Run failed"),
                         timestamp,
                     ),
+                    Some(SessionStatus::Idle) => {
+                        // An authoritative idle snapshot settles a stuck "Running"
+                        // attention phase, exactly as `track_running` clears the running
+                        // set on idle above. A replayed transcript ends on an
+                        // assistantDelta/toolFinished (phase Running, e.g. "Responding"),
+                        // and the trailing idle re-assert `build_branch_seed` appends must
+                        // settle attention too — otherwise a freshly OPENED cold idle
+                        // session shows "Responding" in the sidebar forever (regression
+                        // `050hrk-cheek`: runningIds is empty and the transcript is closed,
+                        // but the attention record stays Running). Only downgrade an
+                        // EXISTING Running record with no pending approval → Done; never
+                        // CREATE a record (a bare sessionOpened(idle) on a fresh session
+                        // has no activity to settle) and never clobber Waiting/Failed/Done.
+                        let stuck_running = self
+                            .attention
+                            .get(sid)
+                            .map(|r| r.phase == AttentionPhase::Running && r.pending.is_empty())
+                            .unwrap_or(false);
+                        if stuck_running {
+                            self.set_attention_base(
+                                sid,
+                                AttentionPhase::Done,
+                                Some("Done"),
+                                timestamp,
+                            );
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -3984,5 +4011,137 @@ mod hub_models_tests {
         // A connected client should be reflected in client_count.
         let (_key, _tx, _rx) = hub.lock().add_client(None);
         assert_eq!(hub.lock().client_count(), 1);
+    }
+
+    /// Regression (`050hrk-cheek`): opening a cold, idle session must not leave it
+    /// showing "Responding" in the sidebar. The replayed transcript ends on an
+    /// `assistantDelta` (attention phase Running, activity "Responding"), and any
+    /// trailing `session-resumed` reminder is an inert `customMessage`. The idle
+    /// `sessionUpdated` that `build_branch_seed` appends must settle that stuck
+    /// phase — mirroring how it clears the running set — so `sessionActivity` stops
+    /// reporting "Responding". Before the fix the attention record stayed Running
+    /// forever even though `runningIds` was empty and the transcript was closed.
+    #[tokio::test]
+    async fn idle_session_updated_settles_stuck_responding_attention() {
+        use pilot_protocol::session_driver::{AssistantDeltaChannel, SessionStatus, WorkspaceRef};
+
+        let (_driver, hub, _ops) = test_hub();
+        let sref = session_ref_for("cold-1");
+        let workspace = WorkspaceRef {
+            workspace_id: sref.workspace_id.clone(),
+            path: "/repo".into(),
+            display_name: None,
+        };
+
+        // A text delta from the last (completed) turn leaves attention Running "Responding".
+        hub.lock().on_event(SessionDriverEvent::AssistantDelta {
+            base: SessionEventBase {
+                session_ref: sref.clone(),
+                timestamp: ts(),
+                run_id: None,
+            },
+            text: "All done!".into(),
+            channel: Some(AssistantDeltaChannel::Text),
+            entry_id: None,
+        });
+        let att = hub
+            .lock()
+            .attention_for(&sref.session_id)
+            .expect("attention record after delta");
+        assert_eq!(att.phase, SessionAttentionPhase::Running);
+        assert_eq!(att.activity.as_deref(), Some("Responding"));
+
+        // A trailing session-resumed reminder (customMessage) must NOT settle it.
+        hub.lock().on_event(SessionDriverEvent::CustomMessage {
+            base: SessionEventBase {
+                session_ref: sref.clone(),
+                timestamp: ts(),
+                run_id: None,
+            },
+            id: "reminder-session-resumed-0".into(),
+            custom_type: "session-resumed".into(),
+            text: "This session has been resumed from saved history.".into(),
+            display: false,
+        });
+        assert_eq!(
+            hub.lock()
+                .attention_for(&sref.session_id)
+                .and_then(|a| a.activity)
+                .as_deref(),
+            Some("Responding"),
+            "a customMessage must not settle attention"
+        );
+
+        // The authoritative idle re-assert settles the stuck Running phase.
+        let idle_snap = crate::polytoken::event_map::snapshot_from_state(
+            None,
+            &sref,
+            &workspace,
+            SessionStatus::Idle,
+            &ts(),
+            None,
+            None,
+        );
+        hub.lock().on_event(SessionDriverEvent::SessionUpdated {
+            base: SessionEventBase {
+                session_ref: sref.clone(),
+                timestamp: ts(),
+                run_id: None,
+            },
+            snapshot: idle_snap,
+        });
+
+        let settled = hub
+            .lock()
+            .attention_for(&sref.session_id)
+            .expect("attention record still present after settle");
+        assert_ne!(
+            settled.phase,
+            SessionAttentionPhase::Running,
+            "idle re-assert must clear the Running phase"
+        );
+        assert_ne!(
+            settled.activity.as_deref(),
+            Some("Responding"),
+            "a freshly opened idle session must stop showing 'Responding'"
+        );
+    }
+
+    /// A bare `sessionOpened(idle)` on a session with NO prior activity must NOT
+    /// synthesize an attention record — the idle-settle path only downgrades an
+    /// existing stuck Running record, it never creates one (else every opened
+    /// empty session would flash a spurious "Done").
+    #[tokio::test]
+    async fn idle_session_opened_does_not_create_attention_record() {
+        use pilot_protocol::session_driver::{SessionStatus, WorkspaceRef};
+
+        let (_driver, hub, _ops) = test_hub();
+        let sref = session_ref_for("fresh-1");
+        let workspace = WorkspaceRef {
+            workspace_id: sref.workspace_id.clone(),
+            path: "/repo".into(),
+            display_name: None,
+        };
+        let idle_snap = crate::polytoken::event_map::snapshot_from_state(
+            None,
+            &sref,
+            &workspace,
+            SessionStatus::Idle,
+            &ts(),
+            None,
+            None,
+        );
+        hub.lock().on_event(SessionDriverEvent::SessionOpened {
+            base: SessionEventBase {
+                session_ref: sref.clone(),
+                timestamp: ts(),
+                run_id: None,
+            },
+            snapshot: idle_snap,
+        });
+        assert!(
+            hub.lock().attention_for(&sref.session_id).is_none(),
+            "an idle sessionOpened with no activity must not create an attention record"
+        );
     }
 }
