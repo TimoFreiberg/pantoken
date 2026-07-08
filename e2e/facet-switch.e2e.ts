@@ -5,9 +5,8 @@ import { gotoFresh, openSidebar } from "./helpers.js";
 // it sends a setFacet wire message → the mock emits a sessionUpdated snapshot
 // with the new facet → foldEvent propagates → the badge updates. The badge shows
 // the ACTUAL current facet ("Execute"/"Plan"), not the old affordance label.
-// ⌘⇧C (Cmd+Shift+C) cycles through all available facets — it fires even when
-// the composer is focused (unlike the old Shift+Tab, which the browser consumed
-// for reverse-focus traversal in form fields).
+// ⌘⇧C (Cmd+Shift+C) opens the dropdown picker — it fires even when the composer
+// is focused. Number keys (1-9) quick-select inside the open dropdown.
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
@@ -47,7 +46,7 @@ test("the facet badge sits in the composer toolbar, left of the model badge", as
   );
 });
 
-test("Cmd+Shift+C cycles facets even when the composer is focused", async ({
+test("Cmd+Shift+C opens the facet dropdown even when the composer is focused", async ({
   page,
 }) => {
   const badge = page.getByTestId("facet-badge");
@@ -56,25 +55,50 @@ test("Cmd+Shift+C cycles facets even when the composer is focused", async ({
   // Focus the composer textarea — the key fix: the hotkey must fire even here.
   await page.getByPlaceholder("Message pantoken…").focus();
 
-  // Cmd+Shift+C → switch to plan mode.
+  // Cmd+Shift+C → opens the dropdown picker (does NOT cycle).
   await page.keyboard.press("Meta+Shift+C");
-  await expect(badge).toHaveText("Plan");
+
+  // The panel should be visible with the facet options.
+  const panel = page.locator(".panel[role='listbox']");
+  await expect(panel).toBeVisible();
+
+  // The options should list the three facets with number prefixes.
+  await expect(panel.getByRole("option", { name: /Plan/ })).toBeVisible();
+  await expect(panel.getByRole("option", { name: /Research/ })).toBeVisible();
+
+  // Escape closes the panel without changing the facet.
+  await page.keyboard.press("Escape");
+  await expect(panel).not.toBeVisible();
+  await expect(badge).toHaveText("Execute");
 });
 
-test("Cmd+Shift+C cycles through all facets and wraps", async ({ page }) => {
+test("number key quick-selects a facet from the open dropdown", async ({
+  page,
+}) => {
   const badge = page.getByTestId("facet-badge");
   await expect(badge).toHaveText("Execute");
 
-  // The mock returns three facets: ["execute", "plan", "research"]. Pressing the
-  // hotkey N (= facet count) times cycles execute → plan → research → execute (wrap).
+  // Open the dropdown via the hotkey.
   await page.keyboard.press("Meta+Shift+C");
+  const panel = page.locator(".panel[role='listbox']");
+  await expect(panel).toBeVisible();
+
+  // Press "2" → selects the 2nd facet (plan). Panel closes, badge updates.
+  await page.keyboard.press("2");
+  await expect(panel).not.toBeVisible();
   await expect(badge).toHaveText("Plan");
 
+  // Open again, press "1" → back to execute.
   await page.keyboard.press("Meta+Shift+C");
-  await expect(badge).toHaveText("Research");
-
-  await page.keyboard.press("Meta+Shift+C");
+  await expect(panel).toBeVisible();
+  await page.keyboard.press("1");
   await expect(badge).toHaveText("Execute");
+
+  // Open again, press "3" → research.
+  await page.keyboard.press("Meta+Shift+C");
+  await expect(panel).toBeVisible();
+  await page.keyboard.press("3");
+  await expect(badge).toHaveText("Research");
 });
 
 test("Shift+Tab does not toggle facets", async ({ page }) => {
@@ -93,7 +117,7 @@ test("Shift+Tab does not toggle facets", async ({ page }) => {
 // old session. These tests guard against the regression where the draft view mutated
 // the focused session instead.
 
-test("⌘⇧C in the new-session draft cycles the DRAFT's facet, not the session's", async ({
+test("⌘⇧C in the new-session draft opens the dropdown for the DRAFT's facet, not the session's", async ({
   page,
 }) => {
   await openSidebar(page);
@@ -108,8 +132,11 @@ test("⌘⇧C in the new-session draft cycles the DRAFT's facet, not the session
   const draftBadge = page.getByTestId("facet-badge");
   await expect(draftBadge).toHaveText("Execute");
 
-  // ⌘⇧C cycles the draft's facet (not the previously focused session's).
+  // ⌘⇧C opens the dropdown for the draft's facet. Press "2" to select Plan.
   await page.keyboard.press("Meta+Shift+C");
+  const panel = page.locator(".panel[role='listbox']");
+  await expect(panel).toBeVisible();
+  await page.keyboard.press("2");
   await expect(draftBadge).toHaveText("Plan");
 
   // Navigate back to the old session — its facet must be unchanged ("Execute").

@@ -2437,7 +2437,7 @@ impl PantokenDriver for MockDriver {
                     questions: vec![
                         QnaQuestion {
                             question: "Which package manager should I use?".into(),
-                            context: Some("The repo has both a bun.lock and a package-lock.json.".into()),
+                            context: Some("The repo has both a `bun.lock` and a `package-lock.json`.\n\n**Note:** `bun` is recommended for speed.".into()),
                             multi_select: None,
                             options: Some(vec![
                                 QnaQuestionOption { label: "bun".into(), description: Some("Matches bun.lock (recommended)".into()) },

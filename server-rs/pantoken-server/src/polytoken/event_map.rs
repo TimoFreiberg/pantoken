@@ -1035,7 +1035,7 @@ pub fn build_post_fetch_event(
 /// Convert the daemon's `PermissionMonitor` (a tagged enum with data) to pantoken's
 /// `PermissionMonitorMode` (a flat copy enum). The daemon's `type` tag is the
 /// discriminator the TS reads via `ev.to_monitor.type`.
-fn monitor_to_mode(monitor: &PermissionMonitor) -> PermissionMonitorMode {
+pub fn monitor_to_mode(monitor: &PermissionMonitor) -> PermissionMonitorMode {
     match monitor {
         PermissionMonitor::Standard => PermissionMonitorMode::Standard,
         PermissionMonitor::Bypass => PermissionMonitorMode::Bypass,

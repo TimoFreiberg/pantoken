@@ -691,6 +691,22 @@
       abortFromComposer();
       return;
     }
+    // Alt+Enter (opt+enter on macOS) inserts a newline, matching the polytoken
+    // TUI behavior. Chromium doesn't insert one natively for Alt+Enter (unlike
+    // Shift+Enter), so we do it explicitly at the cursor position.
+    if (e.key === "Enter" && e.altKey) {
+      e.preventDefault();
+      const ta = e.currentTarget as HTMLTextAreaElement;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      const val = store.composerDraft;
+      store.composerDraft = val.slice(0, start) + "\n" + val.slice(end);
+      // Restore the caret after Svelte re-renders the bound value.
+      queueMicrotask(() => {
+        ta.selectionStart = ta.selectionEnd = start + 1;
+      });
+      return;
+    }
     if (e.key !== "Enter" || e.shiftKey) return;
     // On a touch device a bare Enter inserts a newline (let the textarea handle it) so a
     // multi-line prompt is typeable from a soft keyboard; send is the button or ⌘/Ctrl+Enter.

@@ -97,3 +97,14 @@ test("⌘B toggles the sidebar", async ({ page }) => {
   await page.keyboard.press("Control+b");
   await expect(sidebar).toHaveAttribute("data-open", "true");
 });
+
+test("the status header has a Tauri drag region for window dragging", async ({
+  page,
+}) => {
+  // The Tauri shell uses TitleBarStyle::Overlay (chromeless). The header needs
+  // data-tauri-drag-region for both window dragging and double-click-to-maximize
+  // on macOS. The attribute is inert in a browser (unknown data-* attr), so this
+  // just asserts its presence — the actual drag behavior is desktop-only.
+  const header = page.locator("header.hdr");
+  await expect(header).toHaveAttribute("data-tauri-drag-region");
+});

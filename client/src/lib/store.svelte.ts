@@ -331,6 +331,9 @@ class PantokenStore {
   // Bump to ask the composer textarea to retake focus — e.g. after the model/effort
   // menu closes from a keyboard-driven flow. A counter so each request re-fires.
   focusComposerN = $state(0);
+  // Bump to ask the facet MenuBadge to open its dropdown — driven by the ⌘⇧C
+  // hotkey. A counter so each keystroke re-fires (even if the menu was already open).
+  facetMenuOpenN = $state(0);
   // The most recently selected project's cwd (a session's cwd, or a new-session draft's
   // target). Persisted per-device so ⌘N defaults a fresh draft there even on a cold
   // landing with no session restored. Maintained by setLastProjectCwd.
@@ -338,6 +341,10 @@ class PantokenStore {
 
   focusComposer(): void {
     this.focusComposerN++;
+  }
+
+  openFacetMenu(): void {
+    this.facetMenuOpenN++;
   }
 
   // Back/forward navigation history (⌘[ / ⌘]). A stack of views — focused sessions and

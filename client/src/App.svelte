@@ -176,7 +176,7 @@
 
   // App-global navigation hotkeys. The ⌘/Ctrl modifier keeps them clear of typing;
   // component-local handlers own the ⇧-modified combos (⌘⇧M/E/J) and arrow nav, so we
-  // take only the unshifted, alt-free set here — plus ⌘⇧C (facet cycle) and ⌘⇧P
+  // take only the unshifted, alt-free set here — plus ⌘⇧C (facet menu) and ⌘⇧P
   // (permission monitor cycle), which are app-global. (⌘N is browser-reserved in a
   // plain tab but free in the installed PWA / desktop app, pantoken's primary surface;
   // ⌘[ / ⌘] cancel the browser's history nav, which is unused since the app routes
@@ -195,16 +195,16 @@
       store.cycleSession(e.shiftKey ? -1 : 1);
       return;
     }
-    // ⌘⇧C / Ctrl+Shift+C — cycle facets. A modifier combo so it fires even
-    // when the composer is focused (unlike Shift+Tab, which the browser
-    // consumes for reverse-focus traversal in form fields). Known trade-off:
-    // ⌘⇧C is the browser's Inspect Element shortcut, so like ⌘N it mostly
-    // won't reach us in a plain tab, and the installed PWA / desktop app —
-    // pantoken's primary surface — deliberately gives it to the page (devtools
-    // stay reachable via menu / ⌘⌥I there). Cycles through all available
-    // facets from the facet list, not just execute↔plan. While drafting a
-    // new session, composerFacet/setFacet target the DRAFT's facet pick —
-    // not the last-focused live session.
+    // ⌘⇧C / Ctrl+Shift+C — open the facet dropdown. A modifier combo so it
+    // fires even when the composer is focused (unlike Shift+Tab, which the
+    // browser consumes for reverse-focus traversal in form fields). Known
+    // trade-off: ⌘⇧C is the browser's Inspect Element shortcut, so like ⌘N
+    // it mostly won't reach us in a plain tab, and the installed PWA /
+    // desktop app — pantoken's primary surface — deliberately gives it to
+    // the page (devtools stay reachable via menu / ⌘⌥I there). Opens the
+    // facet picker; number keys (1-9) quick-select inside it. While
+    // drafting a new session, composerFacet/setFacet target the DRAFT's
+    // facet pick — not the last-focused live session.
     // Must run before the modifier early-return below (has Shift).
     if (
       (e.metaKey || e.ctrlKey) &&
@@ -213,12 +213,7 @@
       (e.key === "C" || e.key === "c")
     ) {
       e.preventDefault();
-      const facets = store.facets;
-      if (facets.length === 0) return;
-      const current = store.composerFacet;
-      const idx = facets.indexOf(current);
-      const next = facets[(idx + 1) % facets.length] ?? facets[0]!;
-      store.setFacet(next);
+      store.openFacetMenu();
       return;
     }
     // ⌘Shift+P — cycle permission monitor mode

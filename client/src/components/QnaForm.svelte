@@ -17,6 +17,7 @@
   import type { HostUiRequest, QnaAnswer } from "@pantoken/protocol";
   import Button from "./ui/Button.svelte";
   import Chevron from "./ui/Chevron.svelte";
+  import Markdown from "./Markdown.svelte";
 
   // The remote face of the answer extension's Q&A widget: one card per question,
   // a highlight-selected choice list (single) / checkbox list (multi) / free-text,
@@ -261,7 +262,7 @@
   {#if !collapsed}
   <div class="card" transition:reveal>
     <p class="q">{q.question}</p>
-    {#if q.context}<p class="ctx">{q.context}</p>{/if}
+    {#if q.context}<div class="ctx"><Markdown content={q.context} final /></div>{/if}
 
     {#if hasOptions}
       <div class="opts" role={isMulti ? "group" : "radiogroup"}>

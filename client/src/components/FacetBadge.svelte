@@ -6,8 +6,8 @@
   // draft's pick while drafting a new session, else the active session's live
   // facet (composerFacet unifies the two, mirroring composerConfig); clicking
   // opens a dropdown listing all available facets (from `polytoken vfs ls
-  // polytoken://facets`). The active facet gets an accent tint. ⌘⇧C cycles
-  // through all facets (works even when the composer is focused) — the dropdown
+  // polytoken://facets`). The active facet gets an accent tint. ⌘⇧C opens
+  // this dropdown (number keys 1-9 quick-select inside it) — the dropdown
   // is for discovering and switching to specific facets.
   //
   // The dropdown chrome (badge, open/close, keyboard nav, backdrop, panel CSS)
@@ -25,7 +25,7 @@
 
 <MenuBadge
   {label}
-  title={`Facet: ${facet} — click to switch (⌘⇧C cycles facets)`}
+  title={`Facet: ${facet} — click to switch (⌘⇧C opens this menu)`}
   testid="facet-badge"
   ariaLabel="Facet"
   groupTitle="Facet"
@@ -35,6 +35,7 @@
   badgeClass={isPlan ? "facet-badge plan" : "facet-badge"}
   minWidth="160px"
   closeLabel="Close facet menu"
+  openExternal={store.facetMenuOpenN}
   onSelect={(i) => store.setFacet(facets[i] ?? "execute")}
 >
   {#snippet body({ sel, close })}
@@ -51,7 +52,10 @@
           close();
         }}
       >
-        <span class="item-label">{opt.charAt(0).toUpperCase() + opt.slice(1)}</span>
+        <span class="item-label">
+          <span class="item-num">{i + 1}</span>
+          {opt.charAt(0).toUpperCase() + opt.slice(1)}
+        </span>
       </button>
     {/each}
     {#if !store.draft}
@@ -98,6 +102,15 @@
   }
   .item-label {
     font-size: 12.5px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .item-num {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    min-width: 10px;
   }
   .item.hl {
     background: var(--surface-sunken);

@@ -732,6 +732,18 @@ impl PolytokenInner {
 
         *warm.sse_subscription.lock() = Some(sub);
 
+        // Seed the cached monitor mode from the daemon's actual state. The
+        // daemon's config may set a non-standard default (e.g. bypass), and
+        // without this the badge shows "Standard" until the user explicitly
+        // picks a mode. `new_session` overrides this with the user's explicit
+        // pick AFTER `warm_session` returns, so the seed only sticks when the
+        // user didn't choose (the common case for resume/attach). On error,
+        // `monitor_mode` stays `None` (the prior behavior) — fail gracefully.
+        if let Ok(pm) = warm.client.get_permission_monitor().await {
+            let mode = event_map::monitor_to_mode(&pm.monitor);
+            *warm.monitor_mode.lock() = Some(mode);
+        }
+
         self.warm.write().insert(session_id.clone(), warm.clone());
         // Focus the new session (most-recently focused) before running eviction
         // so it's the protected id (never evicted). Mirrors TS `focus(spawned.sessionId)`.
@@ -1260,32 +1272,67 @@ impl PantokenDriver for PolytokenDriver {
 
     fn respond_ui(&self, response: HostUiResponse, session_id: Option<SessionId>) {
         let Some(sid) = session_id else { return };
-        if let Some(ws) = self.inner.get_warm(&sid) {
-            // Extract request_id from the HostUiResponse
-            let request_id = match &response {
-                pantoken_protocol::session_driver::HostUiResponse::Value { request_id, .. } => {
-                    request_id
-                }
-                pantoken_protocol::session_driver::HostUiResponse::Confirmed {
-                    request_id, ..
-                } => request_id,
-                pantoken_protocol::session_driver::HostUiResponse::Answers {
-                    request_id, ..
-                } => request_id,
-                pantoken_protocol::session_driver::HostUiResponse::Cancelled {
-                    request_id, ..
-                } => request_id,
-            };
-            let pending = ws.pending_interrogatives.lock().get(request_id).cloned();
-            if let Some(pending) = pending {
-                if let Some(resp) = build_interrogative_response(&pending, &response) {
-                    let ws = ws.clone();
-                    let id = pending.interrogative_id.clone();
-                    tokio::spawn(async move {
-                        let _ = ws.client.respond_interrogative(&id, &resp).await;
+        let Some(ws) = self.inner.get_warm(&sid) else {
+            return;
+        };
+
+        // Extract request_id from the HostUiResponse (all variants carry it).
+        let request_id = match &response {
+            HostUiResponse::Value { request_id, .. } => request_id,
+            HostUiResponse::Confirmed { request_id, .. } => request_id,
+            HostUiResponse::Answers { request_id, .. } => request_id,
+            HostUiResponse::Cancelled { request_id, .. } => request_id,
+        }
+        .clone();
+
+        // Emit HostUiResolved IMMEDIATELY so the dialog card closes. The mock
+        // driver does this synchronously (mock_driver.rs:1803); the live driver
+        // must too, or the card stays open forever (the daemon has no
+        // interrogative_resolved SSE event — pantoken owns this).
+        let now = DriverMapCtx::now_ts();
+        self.inner.emit(SessionDriverEvent::HostUiResolved {
+            base: SessionEventBase {
+                session_ref: ws.session_ref.clone(),
+                timestamp: now,
+                run_id: None,
+            },
+            request_id: request_id.clone(),
+        });
+
+        // Look up the pending interrogative to build the reverse response.
+        // `remove` (not `get`) so a stale client request can't re-fire the POST.
+        let pending = ws.pending_interrogatives.lock().remove(&request_id);
+        let Some(pending) = pending else { return };
+
+        // Build the InterrogativeResponse and spawn the POST to the daemon.
+        if let Some(resp) = build_interrogative_response(&pending, &response) {
+            let ws = ws.clone();
+            let inner = self.inner.clone();
+            let interrogative_id = pending.interrogative_id.clone();
+            let session_ref = ws.session_ref.clone();
+            tokio::spawn(async move {
+                if let Err(e) = ws
+                    .client
+                    .respond_interrogative(&interrogative_id, &resp)
+                    .await
+                {
+                    warn!("respond_interrogative failed for {interrogative_id}: {e}");
+                    // Surface the failure in the transcript so the user knows
+                    // their answer didn't reach the daemon.
+                    inner.emit(SessionDriverEvent::HostUiRequest {
+                        base: SessionEventBase {
+                            session_ref,
+                            timestamp: DriverMapCtx::now_ts(),
+                            run_id: None,
+                        },
+                        request: HostUiRequest::Notify {
+                            request_id: format!("respond-error-{interrogative_id}"),
+                            message: format!("Failed to send response to daemon: {e}"),
+                            level: Some(NotifyLevel::Error),
+                        },
                     });
                 }
-            }
+            });
         }
     }
 
