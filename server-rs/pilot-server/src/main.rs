@@ -176,6 +176,13 @@ async fn main() {
         cfg.delta_flush_ms,
     );
 
+    // Debug drivers (mock/fake) must never spawn a real file-manager window —
+    // the e2e settings spec clicks Reveal, which would pop Finder on macOS.
+    // Inject a no-op opener (mirrors the TS hub's mock-mode no-op).
+    if is_debug_driver {
+        hub.lock().set_open_in_file_manager(|_| Ok(()));
+    }
+
     tokio::spawn(run_hub_op_applier(hub.clone(), hub_op_rx));
 
     let state = AppState {
