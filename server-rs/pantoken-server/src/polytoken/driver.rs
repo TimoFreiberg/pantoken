@@ -46,6 +46,7 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::Output;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use pantoken_daemon_types::*;
 use pantoken_protocol::session_driver::{
@@ -172,9 +173,9 @@ struct PolytokenInner {
     /// herd: N concurrent callers on a cold cache would each spawn
     /// `polytoken models` independently. When `true`, a fetch is in progress;
     /// other callers wait on `model_cache_notify` and then re-check the cache.
-    /// Held only for nanoseconds (never across `.await`), so a sync Mutex is
-    /// safe here — no async lock scheduling risk.
-    model_cache_fetching: Mutex<bool>,
+    /// An `AtomicBool` is sufficient — we only need a single CAS, no
+    /// multi-field invariant, and no lock held across `.await`.
+    model_cache_fetching: AtomicBool,
     /// Wakeup signal for callers waiting on an in-progress model fetch.
     /// Notified after the fetcher stores the result (or gives up on error).
     model_cache_notify: tokio::sync::Notify,
@@ -249,7 +250,7 @@ impl PolytokenDriver {
                 command_cache: Mutex::new(HashMap::new()),
                 facet_cache: Mutex::new(HashMap::new()),
                 model_cache: Mutex::new(None),
-                model_cache_fetching: Mutex::new(false),
+                model_cache_fetching: AtomicBool::new(false),
                 model_cache_notify: tokio::sync::Notify::new(),
                 watch_status: Mutex::new(config_watcher::WatchStatus::Disabled),
                 watcher_handle: Mutex::new(None),
@@ -307,7 +308,7 @@ impl PolytokenDriver {
                 command_cache: Mutex::new(HashMap::new()),
                 facet_cache: Mutex::new(HashMap::new()),
                 model_cache: Mutex::new(None),
-                model_cache_fetching: Mutex::new(false),
+                model_cache_fetching: AtomicBool::new(false),
                 model_cache_notify: tokio::sync::Notify::new(),
                 watch_status: Mutex::new(config_watcher::WatchStatus::Disabled),
                 watcher_handle: Mutex::new(None),
@@ -574,8 +575,8 @@ impl PolytokenInner {
     /// the cache is empty. Uses single-flight deduplication: concurrent
     /// callers on a cold cache share one subprocess.
     ///
-    /// The single-flight mechanism uses a sync `Mutex<bool>` "fetching" flag
-    /// (held only for nanoseconds, never across `.await`) plus a
+    /// The single-flight mechanism uses an `AtomicBool` "fetching" flag
+    /// (set via `compare_exchange`, never held across `.await`) plus a
     /// `tokio::sync::Notify` to wake waiters. This avoids the scheduling risks
     /// of holding an async mutex across a subprocess `.await`.
     ///
@@ -595,16 +596,11 @@ impl PolytokenInner {
                 return cached;
             }
 
-            // Try to become the fetcher: set the flag (sync lock, no .await).
-            let became_fetcher = {
-                let mut fetching = self.model_cache_fetching.lock();
-                if *fetching {
-                    false
-                } else {
-                    *fetching = true;
-                    true
-                }
-            };
+            // Try to become the fetcher: CAS false→true (no lock, no .await).
+            let became_fetcher = self
+                .model_cache_fetching
+                .compare_exchange(false, true, Ordering::Acquire, Ordering::Acquire)
+                .is_ok();
 
             if became_fetcher {
                 // We're the elected caller. Run the subprocess with NO lock held.
@@ -623,7 +619,7 @@ impl PolytokenInner {
                     }
                 };
                 // Clear the flag and wake one waiter (baton-start).
-                *self.model_cache_fetching.lock() = false;
+                self.model_cache_fetching.store(false, Ordering::Release);
                 self.model_cache_notify.notify_one();
                 return parsed;
             }
@@ -2710,7 +2706,7 @@ mod tests {
             command_cache: Mutex::new(HashMap::new()),
             facet_cache: Mutex::new(HashMap::new()),
             model_cache: Mutex::new(None),
-            model_cache_fetching: Mutex::new(false),
+            model_cache_fetching: AtomicBool::new(false),
             model_cache_notify: tokio::sync::Notify::new(),
             watch_status: Mutex::new(config_watcher::WatchStatus::Disabled),
             watcher_handle: Mutex::new(None),
