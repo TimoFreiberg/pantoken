@@ -31,7 +31,11 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
       structurally not textually. The rest of the suite still has no
       live-driver corroboration. (The old "see DECISIONS.md D21" pointer is
       dead — that entry was deleted in the docs cleanup; the tier summary
-      lives in `server-rs/PROGRESS.md` Phase 2.5.)
+      lives in `server-rs/PROGRESS.md` Phase 2.5.) **2026-07-10 note:** the
+      tier ran green locally 3× during the overnight session (5/5 each time,
+      including after the sessionAction refactor) — one green
+      `workflow_dispatch` run in CI is all that's left before promoting it to
+      a blocking gate (drop the `if:` per the comment in ci.yml).
 - [ ] move "archived" popups elsewhere (top of sidebar? still middle of transcript but top instead of bottom? discuss first)
 - ~~[x]~~ The "new session" view leaked the previous session's state:
       ApprovalLayer/QnaInline dialogs, PlanView, the right context panel
@@ -208,9 +212,9 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
       principle re-mint an epoch a stale resume token still holds (needs more
       epoch bumps than elapsed ms — effectively unreachable). Revisit only if
       phantom-resume bugs ever show up.
-- [ ] `bun run check` has no enforcement — a red server typecheck sat on main
-      unnoticed (fixed in 204d3361) and the chain short-circuits, so everything
-      after it had stopped gating too. Decide: pre-push hook vs CI.
+- ~~[x]~~ `bun run check` enforcement — resolved in favor of CI: the `web-check`
+      job runs `bun run check` + `bun test` on every PR and push to main
+      (`.github/workflows/ci.yml`).
 - [ ] `sse_loop` retries forever even on permanent failures (401 included) —
       its own comment admits it. Post-warm liveness needs a "this session
       died" client signal before fail-fast is honest there (the restore path
