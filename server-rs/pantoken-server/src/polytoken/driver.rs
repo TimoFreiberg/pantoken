@@ -1490,6 +1490,14 @@ impl PantokenDriver for PolytokenDriver {
             }
             return Ok(());
         }
+        // The daemon resolved this send's `@`-refs synchronously (PromptAccepted.
+        // resolved_references) since it wasn't queued — map straight onto the emitted
+        // UserMessage. A queued send (the branch above) gets none here; those resolve
+        // later, at drain (see event_map's PendingTurnInputDrained handling).
+        let references = accepted
+            .resolved_references
+            .as_deref()
+            .map(event_map::map_resolved_references);
         self.inner.emit(SessionDriverEvent::UserMessage {
             base: base.clone(),
             id: prompt_id
@@ -1497,6 +1505,7 @@ impl PantokenDriver for PolytokenDriver {
             text,
             images: (!images.is_empty()).then_some(images.clone()),
             entry_id: None,
+            references,
         });
         if !images.is_empty() {
             let plural = if images.len() == 1 {

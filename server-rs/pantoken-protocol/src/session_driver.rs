@@ -74,6 +74,19 @@ pub enum ImageContent {
 
 // ── Queued messages ─────────────────────────────────────────────────────
 
+/// One `@`-reference the daemon resolved out of a prompt's text (file/skill/
+/// subagent/model). Mirrors TS `ResolvedRef`. `kind` is daemon-defined and
+/// open-ended — the client only badges it, never branches on a closed set.
+/// `file_kind` is a file-kind-only subtype (e.g. directory vs regular file);
+/// absent for non-file kinds.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ResolvedRef {
+    pub kind: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none", default, rename = "fileKind")]
+    pub file_kind: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionQueuedMessage {
     pub id: String,
@@ -83,6 +96,11 @@ pub struct SessionQueuedMessage {
     pub created_at: Timestamp,
     #[serde(rename = "updatedAt")]
     pub updated_at: Timestamp,
+    /// References the daemon resolved when this item drained into the active
+    /// turn (`PendingTurnInputDrained.resolved_references`). None while still
+    /// queued — the daemon only resolves refs at drain time.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub references: Option<Vec<ResolvedRef>>,
 }
 
 // ── Session config ──────────────────────────────────────────────────────
@@ -807,6 +825,12 @@ pub enum SessionDriverEvent {
         images: Option<Vec<ImageContent>>,
         #[serde(skip_serializing_if = "Option::is_none", default, rename = "entryId")]
         entry_id: Option<String>,
+        /// References the daemon resolved out of this prompt's `@`-mentions
+        /// (`PromptAccepted.resolved_references`). None when the send went
+        /// straight into the pending-turn queue — those resolve later, at
+        /// drain, and land on `SessionQueuedMessage.references` instead.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        references: Option<Vec<ResolvedRef>>,
     },
     CustomMessage {
         #[serde(flatten)]

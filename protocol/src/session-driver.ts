@@ -30,7 +30,8 @@ export type SessionStatus = "idle" | "initializing" | "running" | "failed";
  *  OpenAPI-generated `PermissionMonitorMode` (server-rs/pantoken-daemon-types)
  *  — the single source of truth is the daemon spec; this copy is the shared
  *  client/server import. Keep in sync if the daemon adds a mode. */
-export type PermissionMonitorMode = "standard" | "bypass" | "bypass_plus" | "autonomous";
+export type PermissionMonitorMode =
+  "standard" | "bypass" | "bypass_plus" | "autonomous";
 export type SessionMessageDeliveryMode = "steer" | "followUp";
 
 /** An image attachment for a user message, as the daemon carries them. Base64-encoded
@@ -41,12 +42,29 @@ export interface ImageContent {
   readonly mimeType: string; // e.g. "image/jpeg", "image/png"
 }
 
+/** One `@`-reference the daemon resolved out of a prompt's text (file/skill/subagent/
+ *  model). `kind` is daemon-defined and open-ended (e.g. "file", "skill", "subagent",
+ *  "model") — the client only badges it, never branches on a closed set. `fileKind`
+ *  is a file-kind-only subtype (e.g. directory vs regular file); absent for non-file
+ *  kinds. Carried on {@link UserMessageEvent} (the live send) and on
+ *  {@link SessionQueuedMessage} (a drained queue item, resolved at drain time — see
+ *  `PendingTurnInputDrained.resolved_references` in the daemon's OpenAPI schema). */
+export interface ResolvedRef {
+  readonly kind: string;
+  readonly name: string;
+  readonly fileKind?: string;
+}
+
 export interface SessionQueuedMessage {
   readonly id: string;
   readonly mode: SessionMessageDeliveryMode;
   readonly text: string;
   readonly createdAt: Timestamp;
   readonly updatedAt: Timestamp;
+  /** References the daemon resolved when this item drained into the active turn
+   *  (`PendingTurnInputDrained.resolved_references`). Undefined while still queued —
+   *  the daemon only resolves refs at drain time, not on initial queueing. */
+  readonly references?: readonly ResolvedRef[];
 }
 
 export interface SessionConfig {
@@ -70,7 +88,8 @@ export interface SessionUsage {
 }
 
 /** Connection status of an MCP server, mirroring the daemon's McpServerStatus. */
-export type McpServerStatus = "connected" | "disconnected" | "reconnecting" | "disabled";
+export type McpServerStatus =
+  "connected" | "disconnected" | "reconnecting" | "disabled";
 
 /** Status of a configured MCP server — a JSON-safe projection of the daemon's
  *  `McpServerStatusEntry`. Drives the Settings "MCP" tab. */
@@ -182,7 +201,8 @@ export interface BackgroundJob {
   /** Whether this is a subagent or shell background job. */
   readonly kind: "shell" | "subagent";
   /** Lifecycle state. */
-  readonly status: "reserved" | "running" | "completed" | "failed" | "cancelled";
+  readonly status:
+    "reserved" | "running" | "completed" | "failed" | "cancelled";
   /** The tool name that started the job (e.g. "subagent" or "shell_exec"). */
   readonly toolName: string;
   /** ISO datetime when the job was created. */
@@ -461,13 +481,7 @@ export type HostUiRequest =
   | { readonly kind: "reset"; readonly requestId: string };
 
 export type HostUiDialogKind =
-  | "confirm"
-  | "input"
-  | "select"
-  | "editor"
-  | "qna"
-  | "plan"
-  | "permission";
+  "confirm" | "input" | "select" | "editor" | "qna" | "plan" | "permission";
 
 export function isDialogRequest(
   r: HostUiRequest,
@@ -535,6 +549,11 @@ export interface UserMessageEvent extends SessionEventBase {
    *  on the live emit (pantoken emits userMessage before the daemon persists the entry), where it's
    *  backfilled via {@link RunCompletedEvent.userEntryId} at turn end. */
   readonly entryId?: string;
+  /** References the daemon resolved out of this prompt's `@`-mentions
+   *  (`PromptAccepted.resolved_references`). Undefined when the send went straight into
+   *  the pending-turn queue (steer/follow-up) — those resolve later, at drain, and land
+   *  on {@link SessionQueuedMessage.references} instead (see `queuedMessageStarted`). */
+  readonly references?: readonly ResolvedRef[];
 }
 export interface CustomMessageEvent extends SessionEventBase {
   // An extension-injected `role:"custom"` message (the daemon's `sendMessage`). These trigger

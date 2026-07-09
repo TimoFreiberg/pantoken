@@ -18,12 +18,12 @@
 use pantoken_daemon_types::{
     BlockDeltaPayload, ContentBlockKind, CurrentGoal, DaemonEvent, NotificationType,
     PendingTurnInputItem, PendingTurnInputSnapshot, PermissionCandidateRuleContext,
-    PermissionMonitor, ProviderError, SessionStateSnapshot, SubagentResultKind,
-    SystemReminderReason, ToolLiveDisplayContent,
+    PermissionMonitor, ProviderError, ResolvedPromptReference, SessionStateSnapshot,
+    SubagentResultKind, SystemReminderReason, ToolLiveDisplayContent,
 };
 use pantoken_protocol::session_driver::{
     AssistantDeltaChannel, FlaggedFile, FlaggedFileMode, GoalInfo, HostUiRequest, ImageContent,
-    McpServerInfo, NotifyLevel, PermissionMonitorMode, QnaQuestion, QnaQuestionOption,
+    McpServerInfo, NotifyLevel, PermissionMonitorMode, QnaQuestion, QnaQuestionOption, ResolvedRef,
     SessionConfig, SessionDriverEvent, SessionEventBase, SessionMessageDeliveryMode,
     SessionQueuedMessage, SessionSnapshot, SessionStatus, SessionUsage, TodoItem,
     TodoStatus as PantokenTodoStatus, WorkspaceRef,
@@ -626,7 +626,18 @@ fn extract_tool_result(
 /// Build a stable `SessionQueuedMessage` from a `pending_turn_input_drained` event's
 /// content. The daemon doesn't distinguish steer from followUp; pantoken's
 /// mode is UX-only, so we default to "steer" (the mid-turn case).
-fn drained_queue_message(text: &str, item_id: Option<&str>, ts: &str) -> SessionQueuedMessage {
+///
+/// `resolved_references` is the daemon's `PendingTurnInputDrained.resolved_references`
+/// — the queued item's `@`-refs are only resolved NOW, at drain time (the initial
+/// queueing via POST /turn/input carries none). Threaded onto the message so the
+/// fold (`queuedMessageStarted` → UserItem) can show the same resolution chips a
+/// live send gets.
+fn drained_queue_message(
+    text: &str,
+    item_id: Option<&str>,
+    ts: &str,
+    resolved_references: Option<&[ResolvedPromptReference]>,
+) -> SessionQueuedMessage {
     let id = item_id
         .map(|s| s.to_string())
         .unwrap_or_else(|| format!("drain-{}", ts));
@@ -636,7 +647,39 @@ fn drained_queue_message(text: &str, item_id: Option<&str>, ts: &str) -> Session
         text: text.to_string(),
         created_at: ts.to_string(),
         updated_at: ts.to_string(),
+        references: resolved_references.map(map_resolved_references),
     }
+}
+
+/// Map the daemon's `ResolvedPromptReference` list onto pantoken's wire
+/// `ResolvedRef` — a pure, direct field-for-field projection (no I/O), shared by
+/// the live driver's `PromptAccepted`/`PendingTurnInputDrained` handling.
+pub fn map_resolved_references(refs: &[ResolvedPromptReference]) -> Vec<ResolvedRef> {
+    refs.iter()
+        .map(|r| ResolvedRef {
+            kind: r.kind.clone(),
+            name: r.name.clone(),
+            file_kind: r.file_kind.clone(),
+        })
+        .collect()
+}
+
+/// Render a `PendingTurnInputDiscarded.missing_references` list into the visible
+/// warning text (`notify`, level Warning) shown when a queued steer/follow-up is
+/// dropped for lacking a reference the daemon couldn't resolve. Generic over
+/// `(kind, name)` pairs so both the live daemon's `ResolvedPromptReference` and the
+/// mock driver's own `ResolvedRef` fixtures can share the exact wording.
+pub fn format_missing_references_message<'a>(
+    refs: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> String {
+    let parts: Vec<String> = refs
+        .into_iter()
+        .map(|(kind, name)| format!("{kind} \"{name}\""))
+        .collect();
+    format!(
+        "Queued message dropped — missing references: {}",
+        parts.join(", ")
+    )
 }
 
 /// Build the pantoken `queueUpdated` event's `messages` from a daemon
@@ -672,6 +715,10 @@ pub fn queue_message_from_item(item: &PendingTurnInputItem, ts: &str) -> Session
         text: item.content.clone(),
         created_at: ts.to_string(),
         updated_at: ts.to_string(),
+        // `PendingTurnInputItem` (the GET /turn/input snapshot shape) carries no
+        // resolved_references — the daemon only resolves refs at drain time
+        // (PendingTurnInputDrained), not while an item merely sits in the queue.
+        references: None,
     }
 }
 
@@ -1503,25 +1550,62 @@ pub fn map_daemon_event(
 
         // ===== Queue (steering / follow-up) =====
         DaemonEvent::PendingTurnInputQueued { .. }
-        | DaemonEvent::PendingTurnInputDequeued { .. }
-        | DaemonEvent::PendingTurnInputDiscarded { .. } => {
+        | DaemonEvent::PendingTurnInputDequeued { .. } => {
             // These events carry one item + revision, NOT the full queue. pantoken's
             // queueUpdated REPLACES the full queue, so we must fetch GET /turn/input.
             fold_result(vec![], vec![DaemonEffect::RefetchQueue])
         }
 
+        DaemonEvent::PendingTurnInputDiscarded {
+            missing_references, ..
+        } => {
+            // Same "refetch the authoritative queue" need as Queued/Dequeued above
+            // (this event carries one item + revision, not the full queue), plus: when
+            // the daemon names WHY (missing_references — an `@`-reference it couldn't
+            // resolve), surface a visible warning so the operator knows their queued
+            // steer/follow-up never made it into the turn. Other discard reasons
+            // (cancelled, superseded, …) carry no missing_references and stay silent,
+            // matching prior behavior.
+            let mut evs = vec![];
+            if let Some(refs) = missing_references {
+                if !refs.is_empty() {
+                    let ts = base.timestamp.clone();
+                    let message = format_missing_references_message(
+                        refs.iter().map(|r| (r.kind.as_str(), r.name.as_str())),
+                    );
+                    evs.push(notify(
+                        base,
+                        format!("discard-missing-refs-{}", ts),
+                        message,
+                        NotifyLevel::Warning,
+                    ));
+                }
+            }
+            fold_result(evs, vec![DaemonEffect::RefetchQueue])
+        }
+
         DaemonEvent::PendingTurnInputDrained {
-            content, item_ids, ..
+            content,
+            item_ids,
+            resolved_references,
+            ..
         } => {
             // A queued message is being delivered (admitted into the active turn).
-            // Emit queuedMessageStarted (with the content). The spike (§3) only observed
+            // Emit queuedMessageStarted (with the content + the daemon's now-resolved
+            // `@`-refs — PendingTurnInputDrained.resolved_references — so the fold shows
+            // the same resolution chips a live send gets). The spike (§3) only observed
             // single-item drains (item_ids.length === 1), so we declare the queue empty
             // in that case. If the daemon ever batches multiple drains in one event,
             // we can't know from item_ids[0] alone whether the queue is now empty — so
             // conservatively emit a refetchQueue effect to get the authoritative queue
             // state when more than one item was drained.
             let now = ctx.now();
-            let msg = drained_queue_message(content, item_ids.first().map(|s| s.as_str()), &now);
+            let msg = drained_queue_message(
+                content,
+                item_ids.first().map(|s| s.as_str()),
+                &now,
+                resolved_references.as_deref(),
+            );
             let single_item = item_ids.len() <= 1;
             let mut evs = vec![SessionDriverEvent::QueuedMessageStarted {
                 base: base.clone(),
@@ -2104,6 +2188,70 @@ mod tests {
         let snapshot = snap(vec![]);
         let msgs = queue_messages_from_snapshot(&snapshot, "t0");
         assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn queue_message_from_item_carries_no_references() {
+        // PendingTurnInputItem (the GET /turn/input snapshot shape) has no
+        // resolved-reference field — the daemon only resolves refs at drain time.
+        let item = PendingTurnInputItem {
+            id: "q1".into(),
+            content: "@skill:debug please".into(),
+            admission_prompt_id: "PROMPT_0".into(),
+        };
+        let msg = queue_message_from_item(&item, "t0");
+        assert!(msg.references.is_none());
+    }
+
+    // --- map_resolved_references (pure helper) ---
+
+    #[test]
+    fn map_resolved_references_maps_each_field() {
+        let refs = vec![
+            ResolvedPromptReference {
+                kind: "skill".into(),
+                name: "debug".into(),
+                file_kind: None,
+            },
+            ResolvedPromptReference {
+                kind: "file".into(),
+                name: "README.md".into(),
+                file_kind: Some("file".into()),
+            },
+        ];
+        let mapped = map_resolved_references(&refs);
+        assert_eq!(mapped.len(), 2);
+        assert_eq!(mapped[0].kind, "skill");
+        assert_eq!(mapped[0].name, "debug");
+        assert_eq!(mapped[0].file_kind, None);
+        assert_eq!(mapped[1].kind, "file");
+        assert_eq!(mapped[1].name, "README.md");
+        assert_eq!(mapped[1].file_kind, Some("file".to_string()));
+    }
+
+    #[test]
+    fn map_resolved_references_empty_yields_empty() {
+        assert!(map_resolved_references(&[]).is_empty());
+    }
+
+    // --- format_missing_references_message (pure helper) ---
+
+    #[test]
+    fn format_missing_references_message_joins_kind_and_name_pairs() {
+        let message = format_missing_references_message([("skill", "foo"), ("file", "bar.md")]);
+        assert_eq!(
+            message,
+            "Queued message dropped — missing references: skill \"foo\", file \"bar.md\""
+        );
+    }
+
+    #[test]
+    fn format_missing_references_message_single_ref() {
+        let message = format_missing_references_message([("subagent", "reviewer")]);
+        assert_eq!(
+            message,
+            "Queued message dropped — missing references: subagent \"reviewer\""
+        );
     }
 
     struct TestCtx {
@@ -2734,9 +2882,53 @@ mod tests {
 
     #[test]
     fn pending_turn_input_discarded_refetch_queue_effect() {
+        // No missing_references on this discard (e.g. superseded/cancelled) — must
+        // stay silent (no notify), matching prior behavior; only the refetch fires.
         let out = fold_fresh(
             json!({ "type": "pending_turn_input_discarded", "item_ids": ["item1"], "queue_revision": 3, "reason": "superseded" }),
         );
+        assert!(out.events.is_empty());
+        assert_eq!(effects_json(&out), vec![json!({ "type": "refetchQueue" })]);
+    }
+
+    #[test]
+    fn pending_turn_input_discarded_with_missing_references_emits_visible_warning() {
+        let out = fold_fresh(json!({
+            "type": "pending_turn_input_discarded",
+            "item_ids": ["item1"],
+            "queue_revision": 4,
+            "reason": "unresolved reference",
+            "missing_references": [
+                { "kind": "skill", "name": "foo" },
+                { "kind": "file", "name": "bar.md" }
+            ]
+        }));
+        assert_eq!(out.events.len(), 1);
+        let ev = event_json(&out.events[0]);
+        assert_eq!(ev["type"], "hostUiRequest");
+        assert_eq!(ev["request"]["kind"], "notify");
+        assert_eq!(ev["request"]["level"], "warning");
+        assert_eq!(
+            ev["request"]["message"],
+            "Queued message dropped — missing references: skill \"foo\", file \"bar.md\""
+        );
+        // Still refetches the authoritative queue, same as every other discard.
+        assert_eq!(effects_json(&out), vec![json!({ "type": "refetchQueue" })]);
+    }
+
+    #[test]
+    fn pending_turn_input_discarded_with_empty_missing_references_stays_silent() {
+        // The field can be present-but-empty (defensive daemon-schema edge case) —
+        // treat like absent, not like "zero refs, still warn" (an empty warning
+        // reads as a bug, not a discard reason).
+        let out = fold_fresh(json!({
+            "type": "pending_turn_input_discarded",
+            "item_ids": ["item1"],
+            "queue_revision": 5,
+            "reason": "unresolved reference",
+            "missing_references": []
+        }));
+        assert!(out.events.is_empty());
         assert_eq!(effects_json(&out), vec![json!({ "type": "refetchQueue" })]);
     }
 
@@ -2750,9 +2942,34 @@ mod tests {
         assert_eq!(ev0["type"], "queuedMessageStarted");
         assert_eq!(ev0["message"]["mode"], "steer");
         assert_eq!(ev0["message"]["text"], "steer this");
+        // No resolved_references on this drain — the promoted message carries none.
+        assert!(ev0["message"].get("references").is_none());
         let ev1 = event_json(&out.events[1]);
         assert_eq!(ev1["type"], "queueUpdated");
         assert_eq!(ev1["messages"], json!([]));
+    }
+
+    #[test]
+    fn pending_turn_input_drained_carries_resolved_references_onto_queued_message() {
+        // The daemon resolves a drained queue item's `@`-refs only now
+        // (PendingTurnInputDrained.resolved_references) — must ride onto the
+        // QueuedMessageStarted event's message, not get dropped.
+        let out = fold_fresh(json!({
+            "type": "pending_turn_input_drained",
+            "admission_prompt_ids": ["p1"],
+            "content": "@skill:debug please",
+            "final_prompt_id": "p2",
+            "item_ids": ["item1"],
+            "queue_revision": 0,
+            "raw_history_index": 5,
+            "resolved_references": [{ "kind": "skill", "name": "debug" }]
+        }));
+        let ev0 = event_json(&out.events[0]);
+        assert_eq!(ev0["type"], "queuedMessageStarted");
+        assert_eq!(
+            ev0["message"]["references"],
+            json!([{ "kind": "skill", "name": "debug" }])
+        );
     }
 
     #[test]

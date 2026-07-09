@@ -339,6 +339,7 @@ mod tests {
             text: text.into(),
             images: None,
             entry_id: None,
+            references: None,
         }
     }
 

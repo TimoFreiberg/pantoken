@@ -12,6 +12,7 @@ import {
   isDialogRequest,
   type McpServerInfo,
   type PermissionMonitorMode,
+  type ResolvedRef,
   type SessionConfig,
   type SessionDriverEvent,
   type SessionQueuedMessage,
@@ -27,6 +28,11 @@ export interface UserItem {
   text: string;
   /** Image attachments, if any. */
   images?: readonly ImageContent[];
+  /** References the daemon resolved out of this prompt's `@`-mentions — folded from
+   *  `userMessage.references` (a live/replayed send) or `queuedMessageStarted.message.references`
+   *  (a queued item drained into the turn). Undefined when the daemon reported none, or
+   *  the send never resolved any (draft replay, older history). Renders as subtle chips. */
+  references?: readonly ResolvedRef[];
   /** ISO timestamp of when this user turn was sent. */
   ts?: string;
   /** the daemon's tree entry id for this prompt — the handle "branch from this prompt" sends to
@@ -327,6 +333,7 @@ export function foldEvent(
         id: ev.id,
         text: ev.text,
         images: ev.images,
+        references: ev.references,
         ts: ev.timestamp,
         // entryId rides the event on the replay path; live emits omit it (backfilled at
         // runCompleted). undefined is fine — the branch button just stays hidden.
@@ -353,12 +360,15 @@ export function foldEvent(
     }
 
     case "queuedMessageStarted": {
-      // The queued message is now being delivered; surface it as a user turn.
+      // The queued message is now being delivered; surface it as a user turn. The
+      // daemon only resolves `@`-refs at drain time (PendingTurnInputDrained), so
+      // `references` rides the queued-message envelope itself, not a fresh userMessage.
       closeOpenAssistant(state.items);
       state.items.push({
         kind: "user",
         id: ev.message.id,
         text: ev.message.text,
+        references: ev.message.references,
         ts: ev.message.createdAt ?? ev.timestamp,
       });
       state.queued = state.queued.filter((q) => q.id !== ev.message.id);
@@ -425,11 +435,7 @@ export function foldEvent(
         (i): i is ToolItem => i.kind === "tool" && i.id === ev.callId,
       );
       if (t) {
-        t.status = ev.interrupted
-          ? "interrupted"
-          : ev.success
-            ? "ok"
-            : "error";
+        t.status = ev.interrupted ? "interrupted" : ev.success ? "ok" : "error";
         t.output = ev.output;
         if (ev.images) t.images = ev.images;
         t.finishedAt = ev.timestamp;

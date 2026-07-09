@@ -365,6 +365,66 @@ fn mock_subagents() -> Vec<String> {
     vec!["reviewer".into(), "explorer".into()]
 }
 
+/// Scan a prompt's text for whitespace-delimited `@`-tokens and resolve them against
+/// the mock's own fixtures — a deterministic stand-in for the real daemon's
+/// `resolved_references` (`PromptAccepted.resolved_references`), so e2e can assert
+/// chips without a live daemon. Deliberately dumb: no quoting/escaping awareness, no
+/// fuzzy matching — a token either exactly matches a recognized `@kind:name` prefix
+/// (kind-filtered against `mock_skills()`/`mock_subagents()`) or a known
+/// `mock_files()` path, or it's silently skipped (most `@`s in a prompt aren't
+/// references at all). `@model:` tokens aren't filtered against a fixture list — the
+/// daemon accepts any provider/model — so they always resolve. Duplicate mentions of
+/// the same (kind, name) collapse to one chip, first-seen order.
+fn parse_at_references(text: &str) -> Vec<ResolvedRef> {
+    let skills = mock_skills();
+    let subagents = mock_subagents();
+    let files = mock_files();
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for token in text.split_whitespace() {
+        let Some(rest) = token.strip_prefix('@') else {
+            continue;
+        };
+        let resolved = if let Some(name) = rest.strip_prefix("skill:") {
+            skills
+                .iter()
+                .find(|s| s.as_str() == name)
+                .map(|_| ResolvedRef {
+                    kind: "skill".into(),
+                    name: name.into(),
+                    file_kind: None,
+                })
+        } else if let Some(name) = rest.strip_prefix("subagent:") {
+            subagents
+                .iter()
+                .find(|s| s.as_str() == name)
+                .map(|_| ResolvedRef {
+                    kind: "subagent".into(),
+                    name: name.into(),
+                    file_kind: None,
+                })
+        } else if let Some(name) = rest.strip_prefix("model:") {
+            Some(ResolvedRef {
+                kind: "model".into(),
+                name: name.into(),
+                file_kind: None,
+            })
+        } else {
+            files.iter().find(|f| f.path == rest).map(|f| ResolvedRef {
+                kind: "file".into(),
+                name: rest.into(),
+                file_kind: Some(if f.is_directory { "directory" } else { "file" }.into()),
+            })
+        };
+        if let Some(r) = resolved {
+            if seen.insert((r.kind.clone(), r.name.clone())) {
+                out.push(r);
+            }
+        }
+    }
+    out
+}
+
 fn mock_usage() -> SessionUsage {
     SessionUsage {
         tokens: Some(47200),
@@ -931,6 +991,7 @@ fn mock_session_seed(path: &str) -> Vec<SessionDriverEvent> {
                 text: user_text.into(),
                 images: None,
                 entry_id: None,
+                references: None,
             },
             SessionDriverEvent::AssistantDelta {
                 base: b(),
@@ -991,6 +1052,7 @@ fn greeting_seed() -> Vec<SessionDriverEvent> {
             text: GREETING_PROMPT.into(),
             entry_id: Some("e-u1".into()),
             images: None,
+            references: None,
         },
     ];
 
@@ -1103,6 +1165,7 @@ fn restored_session_seed() -> Vec<SessionDriverEvent> {
             text: "Refactor the retry helper to use exponential backoff.".into(),
             images: None,
             entry_id: Some("e-u-restored-1".into()),
+            references: None,
         },
         SessionDriverEvent::AssistantDelta {
             base: b(),
@@ -1300,6 +1363,7 @@ fn greeting_script() -> Vec<ScriptStep> {
                 text: GREETING_PROMPT.into(),
                 entry_id: Some("e-u1".into()),
                 images: None,
+                references: None,
             },
         },
     ];
@@ -1391,6 +1455,12 @@ fn prompt_reply_script(
     } else {
         Some(images.to_vec())
     };
+    // Deterministic resolution feedback: scan the sent text for `@`-tokens the mock
+    // recognizes, mirroring the daemon's PromptAccepted.resolved_references.
+    let references = {
+        let refs = parse_at_references(text);
+        (!refs.is_empty()).then_some(refs)
+    };
 
     let mut steps = vec![
         ScriptStep {
@@ -1401,6 +1471,7 @@ fn prompt_reply_script(
                 text: text.into(),
                 images: user_images,
                 entry_id: Some(format!("e-{u_id}")),
+                references,
             },
         },
         ScriptStep {
@@ -1595,6 +1666,10 @@ fn new_session_reply(
         ..template.clone()
     };
     let reply = "On it — the session's up. Let me take a first look at what you asked for.";
+    let references = {
+        let refs = parse_at_references(user_text);
+        (!refs.is_empty()).then_some(refs)
+    };
     let mut steps = vec![
         ScriptStep {
             wait_ms: 0,
@@ -1608,6 +1683,7 @@ fn new_session_reply(
                     Some(images.to_vec())
                 },
                 entry_id: Some(format!("e-{user_id}")),
+                references,
             },
         },
         ScriptStep {
@@ -2961,7 +3037,7 @@ impl PantokenDriver for MockDriver {
             ],
             "staleidle" => {
                 let mut s = vec![
-                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: format!("u-stale-{}", ts()), text: "Run the long thing — but glitch the status mid-turn.".into(), images: None, entry_id: None } },
+                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: format!("u-stale-{}", ts()), text: "Run the long thing — but glitch the status mid-turn.".into(), images: None, entry_id: None, references: None } },
                     ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated { base: base(), snapshot: mock_snapshot(SessionStatus::Running) } },
                 ];
                 for chunk in deltas("On it — kicking off a command that takes a while.", 3) {
@@ -2979,7 +3055,7 @@ impl PantokenDriver for MockDriver {
             // ── Turn scripts ───────────────────────────────────────────────
             "pendinghold" => {
                 let mut s = vec![
-                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: format!("u-pending-{}", ts()), text: "Refactor the auth middleware".into(), images: None, entry_id: None } },
+                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: format!("u-pending-{}", ts()), text: "Refactor the auth middleware".into(), images: None, entry_id: None, references: None } },
                     ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated { base: base(), snapshot: mock_snapshot(SessionStatus::Running) } },
                 ];
                 for chunk in deltas("Let me look at how auth is wired before I touch it.", 3) {
@@ -2989,7 +3065,7 @@ impl PantokenDriver for MockDriver {
             }
             "idle" => {
                 let mut s = vec![
-                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: format!("u-idle-{}", ts()), text: "End this turn without a runCompleted, please.".into(), images: None, entry_id: None } },
+                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: format!("u-idle-{}", ts()), text: "End this turn without a runCompleted, please.".into(), images: None, entry_id: None, references: None } },
                     ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated { base: base(), snapshot: mock_snapshot(SessionStatus::Running) } },
                 ];
                 for chunk in deltas("Done — this turn ends with a status update, not a runCompleted event.", 3) {
@@ -3087,7 +3163,7 @@ impl PantokenDriver for MockDriver {
             // ── Journal nudge ──────────────────────────────────────────────
             "journalnudge" => {
                 let mut s: Vec<ScriptStep> = vec![
-                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: "u-jn-1".into(), text: "Rename the helper and update its callers.".into(), images: None, entry_id: None } },
+                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: "u-jn-1".into(), text: "Rename the helper and update its callers.".into(), images: None, entry_id: None, references: None } },
                 ];
                 advance_ts(12_000);
                 for chunk in deltas("I'll rename it and fix the call sites. Let me find them first.", 3) {
@@ -3120,7 +3196,7 @@ impl PantokenDriver for MockDriver {
             // ── Skill load ────────────────────────────────────────────────
             "skill" => {
                 let mut s = vec![
-                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: format!("u-{}", ts()), text: "Something's off with the fold reducer — can you dig in?".into(), images: None, entry_id: None } },
+                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: format!("u-{}", ts()), text: "Something's off with the fold reducer — can you dig in?".into(), images: None, entry_id: None, references: None } },
                     ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated { base: base(), snapshot: mock_snapshot(SessionStatus::Running) } },
                 ];
                 for chunk in deltas("This calls for the debug skill — let me load it, then trace the reducer.", 3) {
@@ -3138,7 +3214,7 @@ impl PantokenDriver for MockDriver {
             // ── Answer card ────────────────────────────────────────────────
             "answercard" => {
                 let mut s: Vec<ScriptStep> = vec![
-                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: "ac-u1".into(), text: "Strip the unused dep and regenerate the lockfile.".into(), images: None, entry_id: Some("e-ac-u1".into()) } },
+                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: "ac-u1".into(), text: "Strip the unused dep and regenerate the lockfile.".into(), images: None, entry_id: Some("e-ac-u1".into()), references: None } },
                     ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated { base: base(), snapshot: mock_snapshot(SessionStatus::Running) } },
                 ];
                 for chunk in deltas("Let me check what's currently declared first.", 3) {
@@ -3167,7 +3243,7 @@ impl PantokenDriver for MockDriver {
             // ── Answer lead-up card ────────────────────────────────────────
             "answerleadup" => {
                 let mut s: Vec<ScriptStep> = vec![
-                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: "alu-u1".into(), text: "Ship the dep removal. Anything I should decide before you commit?".into(), images: None, entry_id: Some("e-alu-u1".into()) } },
+                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: "alu-u1".into(), text: "Ship the dep removal. Anything I should decide before you commit?".into(), images: None, entry_id: Some("e-alu-u1".into()), references: None } },
                     ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated { base: base(), snapshot: mock_snapshot(SessionStatus::Running) } },
                 ];
                 for chunk in deltas("Let me check what's currently declared first.", 3) {
@@ -3246,7 +3322,7 @@ impl PantokenDriver for MockDriver {
                 let u_id = format!("u-reset-{}", ts());
                 let mut s: Vec<ScriptStep> = vec![
                     ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionReset { base: base() } },
-                    ScriptStep { wait_ms: 20, event: SessionDriverEvent::UserMessage { base: base(), id: u_id.clone(), text: "Replayed prompt after the reset.".into(), images: None, entry_id: Some(format!("e-{u_id}")) } },
+                    ScriptStep { wait_ms: 20, event: SessionDriverEvent::UserMessage { base: base(), id: u_id.clone(), text: "Replayed prompt after the reset.".into(), images: None, entry_id: Some(format!("e-{u_id}")), references: None } },
                 ];
                 for chunk in deltas("Transcript rebuilt from daemon history after a reset.", 3) {
                     s.push(ScriptStep { wait_ms: 28, event: SessionDriverEvent::AssistantDelta { base: base(), text: chunk, channel: Some(AssistantDeltaChannel::Text), entry_id: None } });
@@ -3257,7 +3333,7 @@ impl PantokenDriver for MockDriver {
             "images" => {
                 let call_id = format!("img-{}", ts());
                 let mut s = vec![
-                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: format!("u-{}", ts()), text: "Here's the current screen — can you mock up a cleaner layout?".into(), images: Some(vec![ImageContent::Image { data: SHOT_PNG_B64.into(), mime_type: "image/png".into() }]), entry_id: None } },
+                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: format!("u-{}", ts()), text: "Here's the current screen — can you mock up a cleaner layout?".into(), images: Some(vec![ImageContent::Image { data: SHOT_PNG_B64.into(), mime_type: "image/png".into() }]), entry_id: None, references: None } },
                     ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated { base: base(), snapshot: mock_snapshot(SessionStatus::Running) } },
                 ];
                 for chunk in deltas("Sure — let me render a quick mockup and show it to you.", 3) {
@@ -3286,7 +3362,7 @@ impl PantokenDriver for MockDriver {
             "longoutput" => {
                 let log: String = (1..=40).map(|i| format!("[{:02}] test/case-{}.spec.ts … ok ({}ms)", i, i, i * 3)).collect::<Vec<_>>().join("\n");
                 let mut s = vec![
-                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: format!("u-{}", ts()), text: "Run the test suite and show me the output.".into(), images: None, entry_id: None } },
+                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: format!("u-{}", ts()), text: "Run the test suite and show me the output.".into(), images: None, entry_id: None, references: None } },
                     ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated { base: base(), snapshot: mock_snapshot(SessionStatus::Running) } },
                 ];
                 for chunk in deltas("Running the suite now.", 3) {
@@ -3304,7 +3380,7 @@ impl PantokenDriver for MockDriver {
             }
             "markdown" => {
                 let mut s = vec![
-                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: format!("u-{}", ts()), text: "Show me a markdown formatting sample.".into(), images: None, entry_id: None } },
+                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: format!("u-{}", ts()), text: "Show me a markdown formatting sample.".into(), images: None, entry_id: None, references: None } },
                     ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated { base: base(), snapshot: mock_snapshot(SessionStatus::Running) } },
                 ];
                 for chunk in deltas(MARKDOWN_SAMPLE, 3) {
@@ -3315,7 +3391,7 @@ impl PantokenDriver for MockDriver {
             }
             "search" => {
                 let mut s = vec![
-                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: format!("u-{}", ts()), text: "Where is the WebSocket reconnect logic?".into(), images: None, entry_id: None } },
+                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: format!("u-{}", ts()), text: "Where is the WebSocket reconnect logic?".into(), images: None, entry_id: None, references: None } },
                     ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated { base: base(), snapshot: mock_snapshot(SessionStatus::Running) } },
                 ];
                 for chunk in deltas("Let me poke around the codebase a few ways.", 3) {
@@ -3339,7 +3415,7 @@ impl PantokenDriver for MockDriver {
             }
             "thinkingtools" => {
                 let mut s = vec![
-                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: format!("u-{}", ts()), text: "Trace the reconnect path and check it end-to-end.".into(), images: None, entry_id: None } },
+                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::UserMessage { base: base(), id: format!("u-{}", ts()), text: "Trace the reconnect path and check it end-to-end.".into(), images: None, entry_id: None, references: None } },
                     ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated { base: base(), snapshot: mock_snapshot(SessionStatus::Running) } },
                 ];
                 let c1 = format!("tbt-1-{}", ts());
@@ -3388,6 +3464,7 @@ impl PantokenDriver for MockDriver {
                             text: "Please inspect the failing test first.".into(),
                             created_at: "queue-1".into(),
                             updated_at: "queue-1".into(),
+                            references: None,
                         },
                         SessionQueuedMessage {
                             id: "queue-followup-fixture".into(),
@@ -3395,6 +3472,7 @@ impl PantokenDriver for MockDriver {
                             text: "Then summarize the fix and remaining risks.".into(),
                             created_at: "queue-2".into(),
                             updated_at: "queue-2".into(),
+                            references: None,
                         },
                     ],
                 );
@@ -3415,6 +3493,40 @@ impl PantokenDriver for MockDriver {
                     self.emit(SessionDriverEvent::QueuedMessageStarted {
                         base: base(),
                         message,
+                    });
+                    self.emit_queue(SESSION_ID);
+                }
+                return;
+            }
+            "discardqueue" => {
+                // Mirrors the daemon's `PendingTurnInputDiscarded { missing_references }`
+                // path: a queued steer/follow-up gets dropped because an `@`-reference it
+                // named couldn't be resolved. Pops the queue head like "deliverqueue"
+                // does, but emits the visible missing-refs warning instead of promoting
+                // it into the turn — same `notify` mechanism + wording the real driver's
+                // event_map uses (event_map::format_missing_references_message), so e2e
+                // exercises the identical rendering path deterministically.
+                let dropped = {
+                    let mut queues = self.queues.lock();
+                    let queued = queues.entry(SESSION_ID.into()).or_default();
+                    if queued.is_empty() {
+                        None
+                    } else {
+                        Some(queued.remove(0))
+                    }
+                };
+                if dropped.is_some() {
+                    let missing = [("skill", "ghost-skill"), ("file", "ghost-file.md")];
+                    let message = crate::polytoken::event_map::format_missing_references_message(
+                        missing.iter().copied(),
+                    );
+                    self.emit(SessionDriverEvent::HostUiRequest {
+                        base: base(),
+                        request: HostUiRequest::Notify {
+                            request_id: format!("discard-missing-refs-{}", ts()),
+                            message,
+                            level: Some(NotifyLevel::Warning),
+                        },
                     });
                     self.emit_queue(SESSION_ID);
                 }
@@ -3617,5 +3729,111 @@ mod ignored_project_files_tests {
         let revealed = driver.list_files("env".into(), None, None, true).await;
         let names: Vec<&str> = revealed.iter().map(|f| f.path.as_str()).collect();
         assert!(names.contains(&".env"));
+    }
+}
+
+#[cfg(test)]
+mod parse_at_references_tests {
+    use super::*;
+
+    #[test]
+    fn recognizes_a_known_skill() {
+        let refs = parse_at_references("please @skill:debug this");
+        assert_eq!(
+            refs,
+            vec![ResolvedRef {
+                kind: "skill".into(),
+                name: "debug".into(),
+                file_kind: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn unknown_skill_name_resolves_to_nothing() {
+        let refs = parse_at_references("@skill:nonexistent please");
+        assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn recognizes_a_known_subagent() {
+        let refs = parse_at_references("ask @subagent:reviewer to look");
+        assert_eq!(
+            refs,
+            vec![ResolvedRef {
+                kind: "subagent".into(),
+                name: "reviewer".into(),
+                file_kind: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn model_tokens_always_resolve_unfiltered() {
+        // Unlike skill/subagent, `@model:` isn't checked against a fixture list —
+        // any provider/model the daemon would accept resolves.
+        let refs = parse_at_references("use @model:anthropic/claude-opus-4-8(high) please");
+        assert_eq!(
+            refs,
+            vec![ResolvedRef {
+                kind: "model".into(),
+                name: "anthropic/claude-opus-4-8(high)".into(),
+                file_kind: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn recognizes_a_known_file_and_tags_its_file_kind() {
+        let refs = parse_at_references("check @README.md and @docs");
+        assert_eq!(
+            refs,
+            vec![
+                ResolvedRef {
+                    kind: "file".into(),
+                    name: "README.md".into(),
+                    file_kind: Some("file".into()),
+                },
+                ResolvedRef {
+                    kind: "file".into(),
+                    name: "docs".into(),
+                    file_kind: Some("directory".into()),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn unrecognized_path_resolves_to_nothing() {
+        let refs = parse_at_references("check @nonexistent-file.md please");
+        assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn plain_at_with_no_recognized_form_is_skipped() {
+        // Not every `@` in a prompt is a reference (e.g. an email-like mention) —
+        // the parser is deliberately dumb: no match, no ref, no error.
+        let refs = parse_at_references("ping @someone about this");
+        assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn duplicate_mentions_collapse_to_one_chip() {
+        let refs = parse_at_references("@skill:debug then @skill:debug again");
+        assert_eq!(refs.len(), 1);
+    }
+
+    #[test]
+    fn mixed_prompt_resolves_each_recognized_kind_in_order() {
+        let refs = parse_at_references(
+            "@skill:debug @subagent:reviewer @model:openai/gpt-5 @README.md @unknown:thing",
+        );
+        let kinds: Vec<&str> = refs.iter().map(|r| r.kind.as_str()).collect();
+        assert_eq!(kinds, vec!["skill", "subagent", "model", "file"]);
+    }
+
+    #[test]
+    fn empty_text_yields_no_references() {
+        assert!(parse_at_references("").is_empty());
     }
 }

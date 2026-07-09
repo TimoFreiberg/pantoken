@@ -781,6 +781,19 @@
               </button>
             {/if}
           {/if}
+          {#if item.references && item.references.length > 0}
+            <!-- Subtle chips for the `@`-references the daemon resolved out of this
+                 prompt (file/skill/subagent/model) — kind-badged, muted, name in mono.
+                 Non-interactive (nothing to click through to yet); the tooltip names
+                 the resolved kind + name for anyone who wants the detail. -->
+            <div class="ref-chips">
+              {#each item.references as ref (ref.kind + ":" + ref.name)}
+                <span class="ref-chip" title={`Resolved reference: ${ref.kind} ${ref.name}`}>
+                  <span class="ref-kind">{ref.kind}</span><span class="ref-name">{ref.name}</span>
+                </span>
+              {/each}
+            </div>
+          {/if}
           {#if item.delivery}
             <div class="delivery {item.delivery}" role={item.delivery === "rejected" ? "alert" : "status"}>
               <span>
@@ -1332,6 +1345,49 @@
   /* The chevron inherits a faint currentColor; brighten with the label on hover. */
   .prompt-expand:hover :global(.chevron) {
     opacity: 1;
+  }
+  /* Resolution-feedback chips: subtle pills under the sent prompt naming the
+     `@`-references the daemon resolved. Right-aligned like the bubble (the row is
+     flex-end); non-interactive, so no hover/focus treatment — just a tooltip. Kind
+     badge styling echoes AtMenu.svelte's `.kind-badge` (a separate Svelte component's
+     scoped styles can't be shared directly, so this mirrors the look rather than the
+     rule). */
+  .ref-chips {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px;
+    margin-top: 4px;
+    max-width: 86%;
+  }
+  .ref-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 1px 8px 1px 3px;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    line-height: 1.6;
+  }
+  .ref-kind {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-faint);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 1px 6px;
+  }
+  .ref-name {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   /* Brief accent flash on a prompt row the user jumped to via ⌘↑/⌘↓, confirming the
      landing target after an instant (non-animated) scroll. The flash is on the row, not

@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::session_driver::{
     FlaggedFile, GoalInfo, HostUiRequest, ImageContent, McpServerInfo, NotifyLevel,
-    PermissionMonitorMode, SessionConfig, SessionDriverEvent, SessionQueuedMessage, SessionRef,
-    SessionStatus, SessionUsage, TodoItem,
+    PermissionMonitorMode, ResolvedRef, SessionConfig, SessionDriverEvent, SessionQueuedMessage,
+    SessionRef, SessionStatus, SessionUsage, TodoItem,
 };
 
 // ── Transcript items ────────────────────────────────────────────────────
@@ -33,6 +33,12 @@ pub struct UserItem {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub images: Option<Vec<ImageContent>>,
+    /// References the daemon resolved out of this prompt's `@`-mentions — folded
+    /// from `UserMessage.references` (a live/replayed send) or
+    /// `QueuedMessageStarted.message.references` (a queued item drained into the
+    /// turn). None when the daemon reported none. Renders as subtle chips.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub references: Option<Vec<ResolvedRef>>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub ts: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default, rename = "entryId")]
@@ -389,6 +395,7 @@ pub fn fold_event(state: &mut SessionState, ev: &SessionDriverEvent) {
             text,
             images,
             entry_id,
+            references,
             ..
         } => {
             close_open_assistant(&mut state.items, None);
@@ -396,6 +403,7 @@ pub fn fold_event(state: &mut SessionState, ev: &SessionDriverEvent) {
                 id: id.clone(),
                 text: text.clone(),
                 images: images.clone(),
+                references: references.clone(),
                 ts: Some(ev.timestamp().clone()),
                 entry_id: entry_id.clone(),
                 delivery: None,
@@ -421,11 +429,15 @@ pub fn fold_event(state: &mut SessionState, ev: &SessionDriverEvent) {
         }
 
         E::QueuedMessageStarted { message, .. } => {
+            // The daemon only resolves `@`-refs at drain time (PendingTurnInputDrained),
+            // so `references` rides the queued-message envelope itself, not a fresh
+            // UserMessage.
             close_open_assistant(&mut state.items, None);
             state.items.push(TranscriptItem::User(UserItem {
                 id: message.id.clone(),
                 text: message.text.clone(),
                 images: None,
+                references: message.references.clone(),
                 ts: Some(message.created_at.clone()),
                 entry_id: None,
                 delivery: None,
@@ -881,11 +893,42 @@ mod tests {
             text: "Hello".into(),
             images: None,
             entry_id: None,
+            references: None,
         };
         fold_event(&mut s, &ev);
         assert_eq!(s.items.len(), 1);
         match &s.items[0] {
             TranscriptItem::User(u) => assert_eq!(u.text, "Hello"),
+            _ => panic!("expected user item"),
+        }
+    }
+
+    #[test]
+    fn fold_user_message_carries_resolved_references() {
+        // A live send resolved an `@skill:debug` mention — the daemon's
+        // PromptAccepted.resolved_references, mapped onto the emitted UserMessage
+        // (driver.rs prompt()), must ride onto the folded UserItem unchanged.
+        let mut s = initial_session_state();
+        let ev = E::UserMessage {
+            base: base(),
+            id: "u1".into(),
+            text: "@skill:debug please".into(),
+            images: None,
+            entry_id: None,
+            references: Some(vec![crate::session_driver::ResolvedRef {
+                kind: "skill".into(),
+                name: "debug".into(),
+                file_kind: None,
+            }]),
+        };
+        fold_event(&mut s, &ev);
+        match &s.items[0] {
+            TranscriptItem::User(u) => {
+                let refs = u.references.as_ref().expect("references");
+                assert_eq!(refs.len(), 1);
+                assert_eq!(refs[0].kind, "skill");
+                assert_eq!(refs[0].name, "debug");
+            }
             _ => panic!("expected user item"),
         }
     }
@@ -1062,6 +1105,7 @@ mod tests {
                 text: "hi".into(),
                 images: None,
                 entry_id: None,
+                references: None,
             },
         );
         assert!(!s.items.is_empty());
@@ -1128,6 +1172,7 @@ mod tests {
             text: "queued msg".into(),
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
+            references: None,
         };
         fold_event(
             &mut s,
@@ -1153,6 +1198,7 @@ mod tests {
                 text: "Hello".into(),
                 images: None,
                 entry_id: None,
+                references: None,
             },
             E::AssistantDelta {
                 base: base(),
@@ -1242,10 +1288,13 @@ mod tests {
             text: "queued".into(),
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
+            references: None,
         };
         s.queued.push(msg);
         assert_eq!(s.queued.len(), 1);
 
+        // The drained item resolves its `@`-refs only now (PendingTurnInputDrained),
+        // so `references` rides this event's message, not a separate UserMessage.
         fold_event(
             &mut s,
             &E::QueuedMessageStarted {
@@ -1256,13 +1305,24 @@ mod tests {
                     text: "queued".into(),
                     created_at: "2026-01-01T00:00:00Z".into(),
                     updated_at: "2026-01-01T00:00:00Z".into(),
+                    references: Some(vec![crate::session_driver::ResolvedRef {
+                        kind: "file".into(),
+                        name: "bar.md".into(),
+                        file_kind: None,
+                    }]),
                 },
             },
         );
         assert_eq!(s.queued.len(), 0);
         assert_eq!(s.items.len(), 1);
         match &s.items[0] {
-            TranscriptItem::User(u) => assert_eq!(u.text, "queued"),
+            TranscriptItem::User(u) => {
+                assert_eq!(u.text, "queued");
+                let refs = u.references.as_ref().expect("references");
+                assert_eq!(refs.len(), 1);
+                assert_eq!(refs[0].kind, "file");
+                assert_eq!(refs[0].name, "bar.md");
+            }
             _ => panic!("expected user item"),
         }
     }
@@ -1735,6 +1795,7 @@ mod tests {
             text: "queued msg".into(),
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
+            references: None,
         };
         // Set a non-empty queue via snapshot
         let mut snap = snapshot(SessionStatus::Running);
@@ -1770,6 +1831,7 @@ mod tests {
             text: "queued msg".into(),
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
+            references: None,
         };
         let mut snap1 = snapshot(SessionStatus::Running);
         snap1.queued_messages = Some(vec![msg]);
