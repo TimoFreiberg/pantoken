@@ -305,7 +305,11 @@ export type SessionAction =
       kind: "setMcpServer";
       serverName: string;
       action: "enable" | "disable" | "disconnect" | "reconnect";
-    };
+    }
+  | { kind: "setModel"; provider: string; modelId: string }
+  | { kind: "setThinking"; level: string }
+  | { kind: "setFacet"; facet: string }
+  | { kind: "setPermissionMonitor"; mode: PermissionMonitorMode };
 
 export type ClientMessage =
   | { type: "hello"; auth?: string; resume?: ResumeToken }
@@ -329,25 +333,6 @@ export type ClientMessage =
    *  client's editor (Pi parity: Alt+Up). */
   | { type: "restoreQueue"; sessionId?: SessionId }
   | { type: "respondUi"; response: HostUiResponse; sessionId?: SessionId }
-  /** Switch a session's model. Omit sessionId to target the focused session. */
-  | {
-      type: "setModel";
-      provider: string;
-      modelId: string;
-      sessionId?: SessionId;
-    }
-  /** Switch a session's thinking level. Omit sessionId to target the focused one. */
-  | { type: "setThinking"; level: string; sessionId?: SessionId }
-  /** Switch a session's active facet (e.g. "execute" ↔ "plan"). Omit sessionId to
-   *  target the focused session. */
-  | { type: "setFacet"; facet: string; sessionId?: SessionId }
-  /** Switch the active permission-monitor mode. Omit sessionId to target the
-   *  focused session. Mirrors `setFacet`. */
-  | {
-      type: "setPermissionMonitor";
-      mode: PermissionMonitorMode;
-      sessionId?: SessionId;
-    }
   /** The data-driven envelope for fire-and-forget session actions that share one
    *  shape: a daemon POST whose effect arrives via later events (snapshots,
    *  notifications, usage updates) — no direct reply. Adding an action = one

@@ -2712,71 +2712,40 @@ impl PantokenDriver for PolytokenDriver {
         }
     }
 
-    fn set_model(&self, _provider: String, model_id: String, session_id: Option<SessionId>) {
-        if let Some(sid) = &session_id {
-            if let Some(ws) = self.inner.get_warm(sid) {
-                let ws = ws.clone();
-                let inner = self.inner.clone();
-                let model = model_post_key(&model_id);
-                tokio::spawn(async move {
-                    if let Err(e) = ws.client.set_model(&model, None).await {
-                        inner.report_action_error(&ws.session_ref, "Model switch", &e);
-                    }
-                });
-            }
-        }
-    }
-
-    fn set_thinking(&self, level: String, session_id: Option<SessionId>) {
-        if let Some(sid) = &session_id {
-            if let Some(ws) = self.inner.get_warm(sid) {
-                let ws = ws.clone();
-                let inner = self.inner.clone();
-                let state = ws.last_state.read().clone();
-                match state.and_then(|s| s.active_model) {
-                    Some(model) => {
-                        tokio::spawn(async move {
-                            if let Err(e) = ws.client.set_model(&model, Some(&level)).await {
-                                inner.report_action_error(
-                                    &ws.session_ref,
-                                    "Thinking-level switch",
-                                    &e,
-                                );
-                            }
-                        });
-                    }
-                    None => {
-                        // POST /model needs the model key alongside the level; without
-                        // a cached state there is nothing valid to send.
-                        inner.report_action_error(
-                            &ws.session_ref,
-                            "Thinking-level switch",
-                            "the session's active model isn't known yet — try again in a moment",
-                        );
-                    }
+    async fn session_action(&self, action: SessionAction, session_id: Option<SessionId>) {
+        use crate::polytoken::daemon_client::McpServerAction;
+        let Some(sid) = &session_id else { return };
+        let Some(ws) = self.inner.get_warm(sid) else {
+            return;
+        };
+        let (what, result) = match action {
+            SessionAction::SetModel { model_id, .. } => (
+                "Model switch".to_string(),
+                ws.client.set_model(&model_post_key(&model_id), None).await,
+            ),
+            SessionAction::SetThinking { level } => {
+                // POST /model needs the model key alongside the level; without a
+                // cached state there is nothing valid to send.
+                let model = ws.last_state.read().clone().and_then(|s| s.active_model);
+                match model {
+                    Some(model) => (
+                        "Thinking-level switch".to_string(),
+                        ws.client.set_model(&model, Some(&level)).await,
+                    ),
+                    None => (
+                        "Thinking-level switch".to_string(),
+                        Err(
+                            "the session's active model isn't known yet — try again in a moment"
+                                .to_string(),
+                        ),
+                    ),
                 }
             }
-        }
-    }
-
-    fn set_facet(&self, facet: String, session_id: Option<SessionId>) {
-        if let Some(sid) = &session_id {
-            if let Some(ws) = self.inner.get_warm(sid) {
-                let ws = ws.clone();
-                let inner = self.inner.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = ws.client.set_facet(&facet).await {
-                        inner.report_action_error(&ws.session_ref, "Facet switch", &e);
-                    }
-                });
-            }
-        }
-    }
-
-    fn set_permission_monitor(&self, mode: PermissionMonitorMode, session_id: Option<SessionId>) {
-        if let Some(sid) = &session_id {
-            if let Some(ws) = self.inner.get_warm(sid) {
-                let ws = ws.clone();
+            SessionAction::SetFacet { facet } => (
+                "Facet switch".to_string(),
+                ws.client.set_facet(&facet).await,
+            ),
+            SessionAction::SetPermissionMonitor { mode } => {
                 let daemon_mode = match mode {
                     PermissionMonitorMode::Standard => {
                         pantoken_daemon_types::PermissionMonitorMode::Standard
@@ -2791,23 +2760,11 @@ impl PantokenDriver for PolytokenDriver {
                         pantoken_daemon_types::PermissionMonitorMode::Autonomous
                     }
                 };
-                let inner = self.inner.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = ws.client.set_permission_mode(daemon_mode).await {
-                        inner.report_action_error(&ws.session_ref, "Permission-mode switch", &e);
-                    }
-                });
+                (
+                    "Permission-mode switch".to_string(),
+                    ws.client.set_permission_mode(daemon_mode).await,
+                )
             }
-        }
-    }
-
-    async fn session_action(&self, action: SessionAction, session_id: Option<SessionId>) {
-        use crate::polytoken::daemon_client::McpServerAction;
-        let Some(sid) = &session_id else { return };
-        let Some(ws) = self.inner.get_warm(sid) else {
-            return;
-        };
-        let (what, result) = match action {
             SessionAction::ToggleAdventurousHandoff => (
                 "Adventurous-handoff toggle".to_string(),
                 ws.client.toggle_adventurous_handoff().await.map(|_| ()),

@@ -1376,27 +1376,6 @@ impl SessionHub {
                     });
                 }
             }
-            ClientMessage::SetModel {
-                provider,
-                model_id,
-                session_id,
-            } => {
-                let target = session_id.clone().or(focused_id);
-                self.driver
-                    .set_model(provider.clone(), model_id.clone(), target);
-            }
-            ClientMessage::SetThinking { level, session_id } => {
-                let target = session_id.clone().or(focused_id);
-                self.driver.set_thinking(level.clone(), target);
-            }
-            ClientMessage::SetFacet { facet, session_id } => {
-                let target = session_id.clone().or(focused_id);
-                self.driver.set_facet(facet.clone(), target);
-            }
-            ClientMessage::SetPermissionMonitor { mode, session_id } => {
-                let target = session_id.clone().or(focused_id);
-                self.driver.set_permission_monitor(*mode, target);
-            }
             ClientMessage::SessionAction { action, session_id } => {
                 let target = session_id.clone().or(focused_id);
                 let driver = self.driver.clone();
@@ -3731,15 +3710,21 @@ mod hub_models_tests {
     #[tokio::test]
     async fn set_model_and_thinking_emit_config_snapshots() {
         // Back-fills TS MockDriver semantics from `server/src/mock-driver.ts:810`:
-        // setModel/setThinking mutate current config and emit sessionUpdated.
-        let (_driver, hub, _hub_ops) = test_hub();
+        // setModel/setThinking (as sessionAction arms) mutate current config and
+        // emit sessionUpdated. Runs the real ops applier instead of hand-stepping
+        // apply_one: the first sessionUpdated also enqueues a session-list refresh
+        // op, which single-stepping would consume in place of the second action.
+        let (_driver, hub, hub_ops) = test_hub();
         let (client_key, _tx, mut rx) = hub.lock().add_client(None);
+        let applier = tokio::spawn(run_hub_op_applier(hub.clone(), hub_ops));
 
         hub.lock().handle_client(
             client_key,
-            ClientMessage::SetModel {
-                provider: "deepseek".into(),
-                model_id: "deepseek-v4-flash".into(),
+            ClientMessage::SessionAction {
+                action: pantoken_protocol::wire::SessionAction::SetModel {
+                    provider: "deepseek".into(),
+                    model_id: "deepseek-v4-flash".into(),
+                },
                 session_id: None,
             },
         );
@@ -3750,8 +3735,10 @@ mod hub_models_tests {
 
         hub.lock().handle_client(
             client_key,
-            ClientMessage::SetThinking {
-                level: "high".into(),
+            ClientMessage::SessionAction {
+                action: pantoken_protocol::wire::SessionAction::SetThinking {
+                    level: "high".into(),
+                },
                 session_id: None,
             },
         );
@@ -3759,6 +3746,7 @@ mod hub_models_tests {
         assert_eq!(config.provider.as_deref(), Some("deepseek"));
         assert_eq!(config.model_id.as_deref(), Some("deepseek-v4-flash"));
         assert_eq!(config.thinking_level.as_deref(), Some("high"));
+        applier.abort();
     }
 
     #[tokio::test]

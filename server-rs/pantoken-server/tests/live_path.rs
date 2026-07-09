@@ -231,11 +231,15 @@ async fn model_switches_post_full_registry_model_id() {
     );
 
     let calls_before = fake.recorded_request_bodies().len();
-    driver.set_model(
-        "deepseek".into(),
-        "deepseek/deepseek-v4-pro".into(),
-        Some(fake.session_id.clone()),
-    );
+    driver
+        .session_action(
+            pantoken_protocol::wire::SessionAction::SetModel {
+                provider: "deepseek".into(),
+                model_id: "deepseek/deepseek-v4-pro".into(),
+            },
+            Some(fake.session_id.clone()),
+        )
+        .await;
 
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
     let live_body = loop {

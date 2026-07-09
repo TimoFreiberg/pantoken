@@ -168,19 +168,6 @@ impl PantokenDriver for StubDriver {
         }
     }
 
-    fn set_model(&self, _provider: String, _model_id: String, _session_id: Option<SessionId>) {}
-
-    fn set_thinking(&self, _level: String, _session_id: Option<SessionId>) {}
-
-    fn set_facet(&self, _facet: String, _session_id: Option<SessionId>) {}
-
-    fn set_permission_monitor(
-        &self,
-        _mode: pantoken_protocol::session_driver::PermissionMonitorMode,
-        _session_id: Option<SessionId>,
-    ) {
-    }
-
     async fn get_model_defaults(&self) -> ModelDefaults {
         ModelDefaults::default()
     }
