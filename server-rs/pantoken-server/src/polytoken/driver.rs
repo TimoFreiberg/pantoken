@@ -77,6 +77,7 @@ use crate::polytoken::event_map::{self, DaemonEffect, FoldAccumulator, FoldResul
 use crate::polytoken::fake_daemon::FakeControlHub;
 use crate::polytoken::history_seed::{self, HistoryMapCtx};
 use crate::polytoken::models::{ParsedModels, model_post_key, parse_models};
+use crate::polytoken::restore_error::RestoreErrorClass;
 use crate::polytoken::sessions_registry;
 use crate::polytoken::ui_bridge::{PendingInterrogative, build_interrogative_response};
 use crate::shared::login_env::{self, CapturedLoginEnv};
@@ -895,8 +896,22 @@ impl PolytokenInner {
             Err(e) => return Err(format!("lease claim failed: {e}")),
         }
 
-        // Fetch initial state
+        // Fetch initial state. A daemon/protocol version mismatch (the
+        // response body doesn't deserialize into our generated type) would
+        // otherwise degrade completely silently: status can be 200 with
+        // `data: None` and no `error` set (the daemon technically answered,
+        // it just didn't answer in the shape we expected). Log it loudly so
+        // a codegen drift shows up somewhere instead of just rendering as an
+        // idle-looking session with no usage/title/status.
         let state_res = client.state().await;
+        if state_res.data.is_none() {
+            warn!(
+                "install_warm: GET /state returned no usable data for {session_id} \
+                 (status {}): {} — proceeding with no cached state",
+                state_res.status,
+                state_res.error.as_deref().unwrap_or("<no body>")
+            );
+        }
         let last_state = state_res.data;
 
         // Create the warm session
@@ -1206,6 +1221,23 @@ impl PolytokenInner {
     /// Process an SSE event: map through event_map, emit results, execute effects.
     async fn handle_sse_event(self: &Arc<Self>, ws: Arc<WarmSession>, envelope: SseEnvelope) {
         let ev = envelope.event;
+
+        // Keep the cached last_state's title in sync with the daemon's own idea
+        // of it. `SessionTitleChanged` (source: operator|inferred) maps (in
+        // event_map) to a one-shot `SessionUpdated` wire event for whichever
+        // client is viewing the transcript, but on its own carries no
+        // `DaemonEffect` (no FetchState/Reseed) — so without this, `last_state`
+        // (what `list_sessions()` reads for a warm session's sidebar row) would
+        // only catch up whenever some UNRELATED effect happened to refetch the
+        // full `/state` (e.g. after a turn completes). An inferred auto-title —
+        // or an operator rename — landing mid-idle would otherwise lag in the
+        // sidebar until then. Patch it directly so the row is never stale
+        // regardless of the daemon's next unrelated fetch.
+        if let DaemonEvent::SessionTitleChanged { title, .. } = &ev {
+            if let Some(state) = ws.last_state.write().as_mut() {
+                state.session_title = Some(title.clone());
+            }
+        }
 
         // Build the MapCtx from the warm session's cached state
         let ctx = DriverMapCtx {
@@ -1728,9 +1760,78 @@ impl PantokenDriver for PolytokenDriver {
         self.inner.login_env_status.read().clone()
     }
 
+    /// Rename a session by its `.../sessions/<id>/session.json` path.
+    ///
+    /// Two branches, because "where does a title actually live" has two
+    /// different answers depending on whether a daemon is running:
+    ///
+    /// - WARM: the daemon owns `session.json` while it's alive, so route the
+    ///   rename through its own `POST /title` (mirrors the `/model`/`/facet`
+    ///   setters) instead of writing the file ourselves and racing its writer.
+    ///   `SessionTitleChanged`'s SSE echo (`handle_sse_event`) does NOT refresh
+    ///   the cached `last_state` by itself — it only produces a one-shot
+    ///   client-facing `SessionUpdated` (no `FetchState`/`Reseed` effect) — and
+    ///   it arrives asynchronously regardless. `hub.rs` re-broadcasts
+    ///   `list_sessions()` synchronously right after this call returns, so
+    ///   patch `last_state` here too: otherwise that very first re-broadcast
+    ///   still carries the old name — docs/TODO.md bug 1's exact symptom
+    ///   ("I press enter... it just doesn't change the existing name").
+    /// - COLD: do NOT spawn a daemon just to rename it — that would also
+    ///   hijack focus (`open_session`'s cold path calls `self.inner.focus`,
+    ///   plus the hub's session-switch completion sets the client's
+    ///   `activeSessionId`) — docs/TODO.md bug 2. Persist directly into
+    ///   `session.json`'s `overridden_title` instead: confirmed (against this
+    ///   machine's real polytoken sessions dir) to be the exact field the
+    ///   daemon itself writes when a warm rename lands, so the cold read path
+    ///   (`sessions_registry::cold_session_entry`) and a warm rename agree on
+    ///   one on-disk representation — no separate pantoken-only overlay needed.
+    async fn rename_session(&self, path: String, name: String) {
+        let Some(session_id) = PolytokenInner::session_id_from_path(&path) else {
+            warn!("rename_session: could not resolve session id from path: {path}");
+            return;
+        };
+
+        if let Some(ws) = self.inner.get_warm(&session_id) {
+            match ws.client.set_title(&name).await {
+                Ok(()) => {
+                    if let Some(state) = ws.last_state.write().as_mut() {
+                        state.session_title = Some(name.clone());
+                    }
+                }
+                Err(e) => {
+                    warn!("rename_session: POST /title failed for {session_id}: {e}");
+                    self.inner.emit(SessionDriverEvent::HostUiRequest {
+                        base: SessionEventBase {
+                            session_ref: ws.session_ref.clone(),
+                            timestamp: DriverMapCtx::now_ts(),
+                            run_id: None,
+                        },
+                        request: HostUiRequest::Notify {
+                            request_id: format!(
+                                "rename-failed-{}",
+                                chrono::Utc::now().timestamp_millis()
+                            ),
+                            message: format!("Couldn't rename session: {e}"),
+                            level: Some(NotifyLevel::Error),
+                        },
+                    });
+                }
+            }
+            return;
+        }
+
+        // Cold: never reaches get_warm/open_session/focus above — no spawn,
+        // no activeSessionId change, by construction.
+        if let Err(e) = sessions_registry::write_overridden_title(Path::new(&path), &name) {
+            warn!("rename_session: failed to persist title for cold session {path}: {e}");
+        }
+    }
+
     async fn open_session(&self, path: String) -> Result<Vec<SessionDriverEvent>, String> {
-        let session_id = PolytokenInner::session_id_from_path(&path)
-            .ok_or_else(|| format!("could not resolve session id from path: {path}"))?;
+        let Some(session_id) = PolytokenInner::session_id_from_path(&path) else {
+            warn!("open_session: could not resolve session id from path: {path}");
+            return Err(format!("could not resolve session id from path: {path}"));
+        };
 
         // Fast path: if the session is already in the warm pool, the SSE consumer
         // has been live-folding events into the hub's journal continuously.
@@ -1848,6 +1949,11 @@ impl PantokenDriver for PolytokenDriver {
                             },
                         ));
                     }
+                    warn!(
+                        "open_session: attach succeeded for {session_id} but GET /history \
+                         returned no data (status {}); falling back to cold-start",
+                        history_res.status
+                    );
                 }
                 Err(e) => {
                     // Expected when the daemon from a stale startup.json has
@@ -1858,13 +1964,34 @@ impl PantokenDriver for PolytokenDriver {
             }
         }
 
+        // Fail fast when the project directory is gone: `polytoken daemon
+        // --resume --project-dir <cwd>` can never succeed against a deleted
+        // directory (docs/TODO.md — restoring a session run in a directory
+        // that no longer exists "can't ever succeed" and must not be
+        // retried). Checked directly (no string sniffing needed — we already
+        // have `cwd` in hand) BEFORE paying for a process spawn plus up to
+        // ~25s of startup/health polling, so every click on this session
+        // fails instantly with a clear reason instead of repeating a doomed
+        // spawn. This does NOT gate the attach branch above: attaching to an
+        // already-running daemon needs only the port, not the cwd, so a
+        // still-warm daemon for a since-deleted project keeps working.
+        if !Path::new(&cwd).is_dir() {
+            error!("open_session: cold-start aborted for {session_id} — cwd does not exist: {cwd}");
+            return Err(format!("session directory no longer exists: {cwd}"));
+        }
+
         // Cold-start: no running daemon found (no startup.json, or attach
         // failed). Spawn a resume daemon, then attach + seed from its history.
         // Mirrors the TS `openSession` cold-start path. Goes through
         // `spawn_daemon` so the fake-daemon spawn-override seam is honored.
         match self
             .inner
-            .warm_session_resume(session_id.clone(), session_ref.clone(), workspace, cwd)
+            .warm_session_resume(
+                session_id.clone(),
+                session_ref.clone(),
+                workspace,
+                cwd.clone(),
+            )
             .await
         {
             Ok(ws) => {
@@ -1888,9 +2015,31 @@ impl PantokenDriver for PolytokenDriver {
                         },
                     ));
                 }
+                warn!(
+                    "open_session: cold-start spawn succeeded for {session_id} (cwd {cwd}) but \
+                     GET /history returned no data (status {}); falling back to an empty seed",
+                    history_res.status
+                );
             }
             Err(e) => {
-                warn!("open_session: cold-start spawn failed for {session_id}: {e}");
+                // Classify so the log level (and, via `classify_switch_error`
+                // in hub.rs, the user-facing message) matches whether this
+                // was ever going to work. Always propagate — swallowing this
+                // into `Ok(Vec::new())` is what caused restore failures to
+                // surface only as the generic "session switch returned no
+                // session" banner instead of the real reason.
+                let class = RestoreErrorClass::classify(&e);
+                if class.is_permanent() {
+                    error!(
+                        "open_session: cold-start spawn failed permanently for {session_id} \
+                         (cwd {cwd}): {e}"
+                    );
+                } else {
+                    warn!(
+                        "open_session: cold-start spawn failed for {session_id} (cwd {cwd}): {e}"
+                    );
+                }
+                return Err(e);
             }
         }
 
@@ -3956,5 +4105,337 @@ mod tests {
             1,
             "concurrent cache miss should share one subprocess (single-flight)"
         );
+    }
+
+    // ---- docs/TODO.md open bug: restoring a session whose cwd no longer
+    // exists must fail fast, with a clear message, and must not be retried ----
+
+    /// Serializes `SPAWN_OVERRIDE` use within this test binary (it's
+    /// process-global — see `daemon_client::set_spawn_override`'s doc comment).
+    /// Three tests below install `PanicIfSpawnedGuard`; each takes this lock
+    /// first (held across the whole test body, hence a `tokio::sync::Mutex`,
+    /// not `parking_lot`) so they can't race each other's install/clear.
+    /// Mirrors `tests/live_path.rs`'s `OVERRIDE_MUTEX`.
+    static OVERRIDE_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    /// Installs a spawn override that panics if it's ever invoked, proving a
+    /// code path never reaches the spawn seam. Clears itself on drop
+    /// (panic-safe). Callers must hold `OVERRIDE_MUTEX` for the guard's whole
+    /// lifetime — `SPAWN_OVERRIDE` is process-global and `fake_daemon.rs`/
+    /// `hub.rs`'s tests use `MockDriver` (never `PolytokenDriver`), so this
+    /// binary is the only contender, but multiple tests here now use it.
+    struct PanicIfSpawnedGuard;
+    impl PanicIfSpawnedGuard {
+        fn install() -> Self {
+            crate::polytoken::daemon_client::set_spawn_override(Arc::new(
+                |_bin: &str, _opts: SpawnDaemonOpts| {
+                    Box::pin(async {
+                        panic!(
+                            "spawn_daemon must not be called when the session cwd is missing \
+                             — open_session should fail fast before ever reaching this seam"
+                        )
+                    })
+                },
+            ));
+            Self
+        }
+    }
+    impl Drop for PanicIfSpawnedGuard {
+        fn drop(&mut self) {
+            crate::polytoken::daemon_client::clear_spawn_override();
+        }
+    }
+
+    /// The concrete case from docs/TODO.md: "trying to restore a session that
+    /// was run in a directory that no longer exists can't ever succeed."
+    /// Arrange a registry entry (`session.json`) pointing at a temp dir, then
+    /// delete that dir — mirrors a session whose project was moved/deleted
+    /// after the session ran. No `startup.json` is written, so this is a
+    /// genuinely cold session (nothing to attach to).
+    #[tokio::test]
+    async fn open_session_fails_fast_when_project_dir_is_gone() {
+        let _lock = OVERRIDE_MUTEX.lock().await;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sessions_dir = dir.path().join("sessions");
+        let project_dir = dir.path().join("project-that-gets-deleted");
+        std::fs::create_dir_all(&project_dir).expect("mkdir project");
+        write_session_json(
+            &sessions_dir,
+            "sess-gone",
+            project_dir.to_str().expect("utf8 path"),
+        );
+        std::fs::remove_dir_all(&project_dir).expect("delete project dir");
+        assert!(
+            !project_dir.exists(),
+            "precondition: the project dir must actually be gone"
+        );
+
+        let mut inner = inner_with_order(vec![], 64);
+        inner.sessions_dir = sessions_dir.clone();
+        inner.bin_path = "polytoken-must-not-run".into();
+        let driver = PolytokenDriver {
+            inner: Arc::new(inner),
+        };
+
+        // Prove open_session never attempts a spawn: this panics if reached.
+        let _guard = PanicIfSpawnedGuard::install();
+
+        let path = sessions_dir
+            .join("sess-gone")
+            .join("session.json")
+            .to_string_lossy()
+            .to_string();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            driver.open_session(path).await
+        })
+        .await
+        .expect(
+            "open_session must return promptly on a missing cwd, not hang through \
+             startup/health polling",
+        );
+
+        let err = result.expect_err(
+            "opening a session whose cwd no longer exists must fail, not silently \
+             return an empty seed (the prior 'session switch returned no session' bug)",
+        );
+        assert!(
+            err.contains(project_dir.to_str().unwrap()),
+            "error should name the missing directory, got: {err}"
+        );
+        assert_eq!(
+            RestoreErrorClass::classify(&err),
+            RestoreErrorClass::MissingCwd,
+            "the error should classify as permanent (MissingCwd), got: {err}"
+        );
+        assert!(
+            RestoreErrorClass::classify(&err).is_permanent(),
+            "a deleted project directory must classify as permanent — retrying can't help"
+        );
+    }
+
+    /// A stale `startup.json` (from a since-dead daemon) must not change the
+    /// outcome: attach is attempted and fails (nothing listens on that port),
+    /// and the cold-start fallback must still fail fast on the missing cwd
+    /// rather than attempting a spawn.
+    #[tokio::test]
+    async fn open_session_fails_fast_when_project_dir_is_gone_even_with_stale_startup_json() {
+        let _lock = OVERRIDE_MUTEX.lock().await;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sessions_dir = dir.path().join("sessions");
+        let project_dir = dir.path().join("project-that-gets-deleted-2");
+        std::fs::create_dir_all(&project_dir).expect("mkdir project");
+        write_session_json(
+            &sessions_dir,
+            "sess-gone-2",
+            project_dir.to_str().expect("utf8 path"),
+        );
+        // A stale startup.json pointing at a port nothing listens on (a prior
+        // daemon that has since died) — attach must fail and fall through.
+        std::fs::write(
+            sessions_dir.join("sess-gone-2").join("startup.json"),
+            serde_json::json!({
+                "state": "ready",
+                "pid": 999_999_999u64,
+                "port": 1u16,
+            })
+            .to_string(),
+        )
+        .expect("write startup.json");
+        std::fs::remove_dir_all(&project_dir).expect("delete project dir");
+
+        let mut inner = inner_with_order(vec![], 64);
+        inner.sessions_dir = sessions_dir.clone();
+        inner.bin_path = "polytoken-must-not-run".into();
+        let driver = PolytokenDriver {
+            inner: Arc::new(inner),
+        };
+
+        let _guard = PanicIfSpawnedGuard::install();
+
+        let path = sessions_dir
+            .join("sess-gone-2")
+            .join("session.json")
+            .to_string_lossy()
+            .to_string();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            driver.open_session(path).await
+        })
+        .await
+        .expect("open_session must return promptly, not hang");
+
+        let err = result.expect_err("must fail, not silently return an empty seed");
+        assert!(
+            err.contains(project_dir.to_str().unwrap()),
+            "error should name the missing directory even after a failed attach, got: {err}"
+        );
+    }
+
+    /// The general half of the fix, independent of the missing-cwd case:
+    /// ANY cold-start spawn failure must propagate as `Err`, not silently
+    /// degrade to `Ok(Vec::new())`. Before this fix, `open_session` logged the
+    /// spawn failure at `warn!` but still returned an empty seed, so the
+    /// client only ever saw the generic "session switch returned no session"
+    /// banner — never the real reason. Here the cwd genuinely exists (so the
+    /// new fail-fast check does NOT fire); the failure is a real spawn error
+    /// (no such binary on PATH, no override installed) — a different, more
+    /// mundane error class than `MissingCwd`, exercising the propagation path
+    /// generally rather than the specific permanent-classification path.
+    #[tokio::test]
+    async fn open_session_propagates_cold_start_spawn_errors_instead_of_swallowing_them() {
+        // Reads the process-global spawn seam (relies on NO override being
+        // installed), so it must serialize against the PanicIfSpawnedGuard
+        // tests even though it installs nothing itself.
+        let _lock = OVERRIDE_MUTEX.lock().await;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sessions_dir = dir.path().join("sessions");
+        // A REAL, existing project dir — the fail-fast cwd check must not
+        // fire here; the failure below must come from the spawn itself.
+        let project_dir = dir.path().join("real-project");
+        std::fs::create_dir_all(&project_dir).expect("mkdir project");
+        write_session_json(
+            &sessions_dir,
+            "sess-bad-binary",
+            project_dir.to_str().expect("utf8 path"),
+        );
+
+        let mut inner = inner_with_order(vec![], 64);
+        inner.sessions_dir = sessions_dir.clone();
+        // No spawn override installed, and this binary does not exist on
+        // PATH — `Command::spawn()` fails immediately (ENOENT), giving a
+        // real (not fail-fast-shortcut) spawn error to propagate.
+        inner.bin_path = "polytoken-definitely-does-not-exist-on-this-machine".into();
+        let driver = PolytokenDriver {
+            inner: Arc::new(inner),
+        };
+
+        let path = sessions_dir
+            .join("sess-bad-binary")
+            .join("session.json")
+            .to_string_lossy()
+            .to_string();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            driver.open_session(path).await
+        })
+        .await
+        .expect("open_session must return promptly on a spawn failure, not hang");
+
+        let err = result.expect_err(
+            "a cold-start spawn failure must propagate as Err, not silently degrade to an \
+             empty seed (the prior 'session switch returned no session' bug)",
+        );
+        assert!(
+            err.contains("failed to spawn polytoken daemon"),
+            "error should be the real spawn failure, not a generic fallback: {err}"
+        );
+        // This is NOT the missing-cwd case (the project dir is real) — a
+        // plain spawn failure like this is treated as non-permanent (benefit
+        // of the doubt: could be a transient OS resource issue), unlike a
+        // deleted project directory.
+        assert!(
+            !RestoreErrorClass::classify(&err).is_permanent(),
+            "a generic spawn failure should not be classified permanent: {err}"
+        );
+    }
+
+    // ---- docs/TODO.md open bugs: rename doesn't work / renaming a cold
+    // session hijacks activeSessionId (and spawns a daemon) ----
+
+    /// Bug 2 (cold-session rename): renaming a session with no warm daemon
+    /// must NOT spawn one (that would also hijack focus/activeSessionId via
+    /// `open_session`'s cold path — out of scope for `rename_session` to ever
+    /// reach). Reuses the same panic-if-spawned proof as the open_session
+    /// fail-fast tests above, now serialized behind `OVERRIDE_MUTEX` since
+    /// this is a second consumer of the process-global spawn override.
+    #[tokio::test]
+    async fn rename_session_cold_persists_overridden_title_without_spawning_or_warming() {
+        let _lock = OVERRIDE_MUTEX.lock().await;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sessions_dir = dir.path().join("sessions");
+        write_session_json(&sessions_dir, "cold-1", "/some/project");
+
+        let mut inner = inner_with_order(vec![], 64);
+        inner.sessions_dir = sessions_dir.clone();
+        inner.bin_path = "polytoken-must-not-run".into();
+        let driver = PolytokenDriver {
+            inner: Arc::new(inner),
+        };
+
+        // Prove rename_session never attempts a spawn for a cold session.
+        let _guard = PanicIfSpawnedGuard::install();
+
+        let path = sessions_dir
+            .join("cold-1")
+            .join("session.json")
+            .to_string_lossy()
+            .to_string();
+        driver
+            .rename_session(path, "Renamed While Cold".to_string())
+            .await;
+
+        // No warm session was created as a side effect (the structural half of
+        // "doesn't hijack activeSessionId": nothing here ever calls
+        // `open_session`/`focus`, which is what a client-visible focus switch
+        // would require).
+        assert!(
+            driver.inner.get_warm(&"cold-1".to_string()).is_none(),
+            "a cold rename must not warm the session"
+        );
+
+        // Bug 1 (persistence): the new title is visible via list_sessions()...
+        let sessions = driver.list_sessions().await;
+        let entry = sessions
+            .iter()
+            .find(|s| s.session_id == "cold-1")
+            .expect("cold-1 should still be listed");
+        assert_eq!(
+            entry.display_name.as_deref(),
+            Some("Renamed While Cold"),
+            "the renamed title should be the cold session's display name"
+        );
+
+        // ...and it's read straight off disk, not some in-memory shortcut: a
+        // FRESH driver instance (simulating a pantoken-server restart) over the
+        // same sessions_dir must see the same title.
+        let mut restarted_inner = inner_with_order(vec![], 64);
+        restarted_inner.sessions_dir = sessions_dir.clone();
+        restarted_inner.bin_path = "polytoken-must-not-run".into();
+        let restarted_driver = PolytokenDriver {
+            inner: Arc::new(restarted_inner),
+        };
+        let sessions_after_restart = restarted_driver.list_sessions().await;
+        let entry_after_restart = sessions_after_restart
+            .iter()
+            .find(|s| s.session_id == "cold-1")
+            .expect("cold-1 should survive a fresh driver instance");
+        assert_eq!(
+            entry_after_restart.display_name.as_deref(),
+            Some("Renamed While Cold"),
+            "the rename must survive a pantoken-server restart (a fresh driver \
+             reading the same on-disk sessions_dir)"
+        );
+    }
+
+    /// A cold rename with an unresolvable path (not a `.../<id>/session.json`
+    /// shape) must degrade quietly — no panic, no spawn — mirroring how
+    /// `open_session` treats the same unresolvable-path case.
+    #[tokio::test]
+    async fn rename_session_with_unresolvable_path_is_a_quiet_no_op() {
+        let _lock = OVERRIDE_MUTEX.lock().await;
+        let mut inner = inner_with_order(vec![], 64);
+        inner.bin_path = "polytoken-must-not-run".into();
+        let driver = PolytokenDriver {
+            inner: Arc::new(inner),
+        };
+        let _guard = PanicIfSpawnedGuard::install();
+
+        // Not a session.json path — session_id_from_path returns None.
+        driver
+            .rename_session(
+                "/not/a/session/path.txt".to_string(),
+                "New Name".to_string(),
+            )
+            .await;
+        // No assertion beyond "didn't panic" — this proves the not-found path
+        // degrades quietly rather than e.g. unwrapping None.
     }
 }

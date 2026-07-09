@@ -56,3 +56,43 @@ test("Escape cancels a rename without changing the name", async ({ page }) => {
   await expect(sidebar.getByText("Wire up the WebSocket bridge")).toBeVisible();
   await expect(sidebar.getByText("Discarded name")).toHaveCount(0);
 });
+
+test("renaming a non-focused session doesn't switch the active session", async ({
+  page,
+}) => {
+  // docs/TODO.md: "renaming a cold session hijacks activeSessionId (and
+  // spawns a daemon)". The mock has no warm/cold distinction (that half is
+  // covered by Rust driver/live-path tests against the real daemon client),
+  // but the client-observable half — does the rename ever move focus — is
+  // fully exercisable here: "Wire up the WebSocket bridge" (demo-session) is
+  // the default-focused greeting session; "Explore the fold reducer" is a
+  // different, non-focused row. Renaming the latter via the overflow menu
+  // (never clicking into the row itself) must not touch the former's focus.
+  await openSidebar(page);
+  const sidebar = page.getByTestId("sidebar");
+
+  const activeRow = sidebar.locator("button.row.active");
+  await expect(activeRow).toContainText("Wire up the WebSocket bridge");
+
+  const row = sidebar
+    .locator(".row-wrap")
+    .filter({ hasText: "Explore the fold reducer" });
+  await row.hover();
+  await row.getByTestId("session-menu").click();
+  await sidebar.getByRole("menuitem", { name: "Rename", exact: true }).click();
+
+  const input = sidebar.locator(".rename-input");
+  await input.fill("Fold reducer, take two");
+  await sidebar.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(sidebar.getByText("Fold reducer, take two")).toBeVisible();
+
+  // The renamed row did not take focus...
+  const renamedRow = sidebar
+    .locator(".row-wrap")
+    .filter({ hasText: "Fold reducer, take two" })
+    .locator("button.row");
+  await expect(renamedRow).not.toHaveClass(/\bactive\b/);
+  // ...and the greeting session is still the (only) active one.
+  await expect(activeRow).toContainText("Wire up the WebSocket bridge");
+  await expect(sidebar.locator("button.row.active")).toHaveCount(1);
+});

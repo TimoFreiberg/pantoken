@@ -94,6 +94,14 @@ fn canned(method: &str, path: &str) -> Option<(StatusCode, Value)> {
     if m == "POST" && p == "/model" {
         return Some((StatusCode::OK, serde_json::json!({"ok": true})));
     }
+    // POST /title — acknowledge an operator title override (a rename). Tests
+    // inspect the recorded request body to verify the submitted title.
+    if m == "POST" && p == "/title" {
+        return Some((
+            StatusCode::OK,
+            serde_json::json!({"title": "", "overridden": true}),
+        ));
+    }
     // GET /turn/input — the RefetchQueue effect's snapshot fetch. The corpus
     // doesn't record /turn/input (the queue-while-in-flight scenario triggers
     // a RefetchQueue but the capture didn't snapshot it), so serve a canned

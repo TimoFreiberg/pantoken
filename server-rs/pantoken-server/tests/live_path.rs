@@ -264,6 +264,62 @@ async fn model_switches_post_full_registry_model_id() {
     );
 }
 
+/// docs/TODO.md bug 1 ("rename session doesn't work"), warm half: renaming a
+/// WARM session must reach the daemon's real `POST /title` (previously a
+/// dead no-op — `PolytokenDriver` never overrode the trait's default), and
+/// `list_sessions()` must reflect the new title IMMEDIATELY — not just once
+/// the `SessionTitleChanged` SSE echo eventually lands (it arrives
+/// asynchronously and, on its own, doesn't even refresh the cached
+/// `last_state` — see `handle_sse_event`'s comment). `rename_session` awaits
+/// the POST and patches `last_state` itself before returning, so no polling
+/// loop is needed here (unlike `set_model` above, which fires the POST from a
+/// detached `tokio::spawn`).
+#[tokio::test]
+async fn rename_session_warm_posts_title_and_updates_list_sessions_immediately() {
+    let _guard = OVERRIDE_MUTEX.lock().await;
+
+    let scenario = corpus_loader::load_named(VERSION, "streaming-turn");
+    let fake = Arc::new(fake_daemon::spawn(scenario.clone(), "rename-warm-1".into(), 0).await);
+    let _ovr = OverrideGuard::install(fake.clone());
+
+    let (driver, _dir) = make_driver().await;
+    driver
+        .new_session(NewSessionOptsData::default())
+        .await
+        .expect("new_session");
+
+    // Any `.../<session_id>/session.json`-shaped path resolves the session id;
+    // it need not exist on disk — a WARM rename never touches the filesystem.
+    let path = format!("/fake/sessions/{}/session.json", fake.session_id);
+    driver
+        .rename_session(path, "Renamed While Warm".to_string())
+        .await;
+
+    let title_body = fake
+        .recorded_request_bodies()
+        .into_iter()
+        .find(|(method, path, _body)| method == "POST" && path == "/title")
+        .map(|(_method, _path, body)| body)
+        .expect("rename_session should POST /title for a warm session");
+    let title_json: serde_json::Value =
+        serde_json::from_str(&title_body).expect("title request body json");
+    assert_eq!(title_json["title"], "Renamed While Warm");
+
+    // No polling loop: rename_session awaits the POST and patches last_state
+    // itself, so list_sessions() reflects it on the very next call.
+    let sessions = driver.list_sessions().await;
+    let entry = sessions
+        .iter()
+        .find(|s| s.session_id == fake.session_id)
+        .expect("the warm session should still be listed");
+    assert_eq!(
+        entry.display_name.as_deref(),
+        Some("Renamed While Warm"),
+        "the sidebar row must reflect the new title immediately, before any \
+         SessionTitleChanged SSE echo arrives"
+    );
+}
+
 // ===========================================================================
 // Phase A.5 — verify corpus scenario → effect mapping (pre-Phase-D insurance)
 // ===========================================================================
@@ -722,13 +778,17 @@ async fn reload_session_disposes_old_warm_and_rewarms() {
     // Write a session.json for `reload-1` so the cold-start re-warm (fired by
     // reload_session) can resolve the project cwd. Production always sends the
     // `.../<id>/session.json` path; the session id is the parent dir name.
+    // `project_path` must be a real, existing directory — `open_session`
+    // fails fast (no spawn attempt) when the cwd is missing (docs/TODO.md).
     let reload_dir = dir.path().join("sessions").join("reload-1");
     std::fs::create_dir_all(&reload_dir).expect("mkdir reload-1 session dir");
+    let project_dir = dir.path().join("project");
+    std::fs::create_dir_all(&project_dir).expect("mkdir project dir");
     std::fs::write(
         reload_dir.join("session.json"),
         serde_json::json!({
             "session_id": "reload-1",
-            "project_path": "/tmp/project",
+            "project_path": project_dir.to_string_lossy(),
             "created_at": "2025-01-01T00:00:00Z",
             "last_activity_at": "2025-01-01T00:00:00Z",
         })
@@ -882,14 +942,18 @@ async fn test_open_session_cold_start_spawns_daemon() {
 
     // Write a session.json so cwd_for_session resolves (open_session reads it
     // to find the project cwd for the resume spawn). No startup.json — the
-    // cold-start path should fire.
+    // cold-start path should fire. `project_path` must be a real, existing
+    // directory — `open_session` fails fast (no spawn attempt) when the cwd
+    // is missing (docs/TODO.md).
     let session_id = "cold-session-1";
     let sessions_dir = dir.path().join("sessions");
     let session_dir = sessions_dir.join(session_id);
     std::fs::create_dir_all(&session_dir).expect("mkdir session dir");
+    let project_dir = dir.path().join("project");
+    std::fs::create_dir_all(&project_dir).expect("mkdir project dir");
     let session_json = serde_json::json!({
         "session_id": session_id,
-        "project_path": "/tmp/project",
+        "project_path": project_dir.to_string_lossy(),
         "created_at": "2025-01-01T00:00:00Z",
         "last_activity_at": "2025-01-01T00:00:00Z",
     });
@@ -956,16 +1020,20 @@ async fn open_session_warm_reopen_skips_history_fetch() {
     let (driver, dir) = make_driver().await;
 
     // Write a session.json so cwd_for_session resolves (same setup as the
-    // cold-start test above).
+    // cold-start test above). `project_path` must be a real, existing
+    // directory — `open_session` fails fast (no spawn attempt) when the cwd
+    // is missing (docs/TODO.md).
     let session_id = "warm-reopen-1";
     let sessions_dir = dir.path().join("sessions");
     let session_dir = sessions_dir.join(session_id);
     std::fs::create_dir_all(&session_dir).expect("mkdir session dir");
+    let project_dir = dir.path().join("project");
+    std::fs::create_dir_all(&project_dir).expect("mkdir project dir");
     std::fs::write(
         session_dir.join("session.json"),
         serde_json::json!({
             "session_id": session_id,
-            "project_path": "/tmp/project",
+            "project_path": project_dir.to_string_lossy(),
             "created_at": "2025-01-01T00:00:00Z",
             "last_activity_at": "2025-01-01T00:00:00Z",
         })
