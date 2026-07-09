@@ -113,10 +113,7 @@ describe("filterHiddenThinking", () => {
 
   test("with thinking hidden, a thinking-only item as the LAST item is kept (active tail)", () => {
     const out = filterHiddenThinking(
-      [
-        tool("b1", "bash"),
-        asst("t1", { text: "", thinking: "pondering" }),
-      ],
+      [tool("b1", "bash"), asst("t1", { text: "", thinking: "pondering" })],
       true,
     );
     // t1 is the last item, thinking-only, no text → the active tail → kept.
@@ -195,10 +192,7 @@ describe("thinkingTailId", () => {
 
   test("returns undefined when the last item has no thinking", () => {
     expect(
-      thinkingTailId([
-        tool("b1", "bash"),
-        asst("a1", { text: "answer" }),
-      ]),
+      thinkingTailId([tool("b1", "bash"), asst("a1", { text: "answer" })]),
     ).toBeUndefined();
   });
 
@@ -305,6 +299,89 @@ describe("groupTurns", () => {
     ]);
     expect(turns[0]!.startTs).toBe("1000");
     expect(turns[0]!.endTs).toBe("38000");
+  });
+});
+
+// Regression for docs/TODO.md: "The feature that collapses the early working part
+// of a turn ... seems to not be triggered when a cold session is restored in the
+// GUI." A cold restore replays the daemon's raw history (server-rs/pantoken-server/
+// src/polytoken/history_seed.rs), which never emits a runCompleted-equivalent
+// completion — the trailing assistant bubble is instead closed by a later,
+// out-of-band re-assert (the polytoken driver's `build_branch_seed` trailing
+// SessionUpdated, driver.rs:784-793) stamped at RELOAD wall-clock time, not the
+// turn's real historical end. So a restored turn's `completedAt` sits far past its
+// `ts` (unlike a live-settled turn, where they're seconds apart) — the shape these
+// tests pin. `groupTurns` must still offer the collapse: `lastTurnActive` (the
+// caller's already-resolved `store.turnActive`, not anything the seed stamped) is
+// the only signal it consults for the last turn — verified this holds even though
+// nothing here reads `completedAt`/`streaming` to decide collapsibility.
+describe("groupTurns: cold-restored session (regression)", () => {
+  test("a restored turn with real tool work collapses once turnActive resolves false", () => {
+    const turns = groupTurns(
+      [
+        user("u1", "2025-01-01T00:00:01.000Z"),
+        asst("narration", { ts: "2025-01-01T00:00:02.000Z", streaming: false }),
+        tool("t1", "bash"),
+        asst("final", {
+          ts: "2025-01-01T00:00:04.000Z",
+          streaming: false,
+          completedAt: "2025-06-01T12:00:00.000Z",
+        }),
+      ],
+      // The caller resolves turnActive to false for a genuinely idle restored
+      // session (status idle, no runningIds entry, no tool left running) — the
+      // only input groupTurns uses to gate the last turn's collapsibility.
+      false,
+    );
+    expect(turns).toHaveLength(1);
+    const t = turns[0]!;
+    expect(t.collapsible).toBe(true);
+    expect(t.lanes.some((l) => l.kind === "work" && l.collapsible)).toBe(true);
+    expect(t.response.map((i) => i.id)).toEqual(["final"]);
+  });
+
+  test("the same shape stays inline while turnActive is still true (no early collapse)", () => {
+    // The other side of the same fixture: the "live in-flight turns never
+    // collapse early" guarantee must survive alongside the restore fix.
+    const turns = groupTurns(
+      [
+        user("u1", "2025-01-01T00:00:01.000Z"),
+        asst("narration", { ts: "2025-01-01T00:00:02.000Z", streaming: false }),
+        tool("t1", "bash"),
+        asst("final", {
+          ts: "2025-01-01T00:00:04.000Z",
+          streaming: false,
+          completedAt: "2025-06-01T12:00:00.000Z",
+        }),
+      ],
+      true,
+    );
+    expect(turns[0]!.collapsible).toBe(false);
+  });
+
+  test("multiple restored turns each collapse independently, not just the last", () => {
+    const turns = groupTurns(
+      [
+        user("u1", "2025-01-01T00:00:01.000Z"),
+        tool("t1", "bash"),
+        asst("final1", {
+          ts: "2025-01-01T00:00:02.000Z",
+          streaming: false,
+          completedAt: "2025-06-01T12:00:00.000Z",
+        }),
+        user("u2", "2025-01-01T00:00:03.000Z"),
+        tool("t2", "bash"),
+        asst("final2", {
+          ts: "2025-01-01T00:00:04.000Z",
+          streaming: false,
+          completedAt: "2025-06-01T12:00:00.000Z",
+        }),
+      ],
+      false,
+    );
+    expect(turns).toHaveLength(2);
+    expect(turns[0]!.collapsible).toBe(true);
+    expect(turns[1]!.collapsible).toBe(true);
   });
 });
 

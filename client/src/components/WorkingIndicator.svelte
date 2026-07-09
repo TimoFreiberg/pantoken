@@ -5,8 +5,9 @@
 
   // The current turn is in its THINKING phase: the open assistant bubble is
   // accumulating reasoning but hasn't emitted answer text yet. With thinking blocks
-  // hidden (the default) this is the only feedback the model is doing something, so
-  // the indicator says "Thinking…" instead of the generic "Working…".
+  // hidden (the default) the ThinkingBlock's own collapsed tail is the only feedback
+  // the model is doing something — this row just swaps its tooltip and suppresses its
+  // own "Working…" text so the two don't say "Thinking…" twice (see `label` below).
   const thinking = $derived.by(() => {
     const items = store.session.items;
     const last = items[items.length - 1];
@@ -57,10 +58,14 @@
   // A new session is being created server-side (session warming up + first prompt in flight),
   // before its first turn has started. We show the indicator through this gap too so the
   // just-sent prompt isn't left under a silent, idle-looking composer; the real turn's
-  // "Working…"/"Thinking…" takes over the moment the run starts (turnActive wins the label).
+  // "Working…" takes over the moment the run starts (turnActive wins the label).
   const creating = $derived(store.creatingSession !== null && !store.turnActive);
+  // No "Thinking…" text here while thinking: the ThinkingBlock right above already
+  // shows that label (docs/TODO.md dedupe) — this row keeps only the spinner, the
+  // elapsed timer, and the token count during that phase. "Working…" isn't
+  // duplicated anywhere else, so it's untouched.
   const label = $derived(
-    store.turnActive ? (thinking ? "Thinking…" : "Working…") : "Starting session…",
+    store.turnActive ? (thinking ? "" : "Working…") : "Starting session…",
   );
 </script>
 
@@ -85,12 +90,15 @@
              centering transform never collides with the orbit animation. -->
         <span class="ring"><span class="dot"></span></span>
       </span>
-      <span class="label" data-testid="working-label">{label}</span>
+      {#if label}
+        <span class="label" data-testid="working-label">{label}</span>
+      {/if}
     </span>
     <!-- aria-hidden: both this elapsed timer and the token counter below live inside the
          role=status live region and tick frequently; announcing every tick would spam a
-         screen reader. They're visual liveness affordances — the "Working…"/"Thinking…"
-         label carries the announced state. -->
+         screen reader. They're visual liveness affordances — the label (when present)
+         carries the announced state; while thinking, the ThinkingBlock's own label is
+         the announced text instead. -->
     {#if elapsed}
       <span
         class="elapsed"
