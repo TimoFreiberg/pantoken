@@ -45,6 +45,54 @@ describe("foldEvent", () => {
     expect(s.items[0]).toMatchObject({ kind: "user", text: "hi", ts: "t1" });
   });
 
+  test("user message carries resolved references onto the folded item", () => {
+    // A live send resolved an `@skill:debug` mention — PromptAccepted.resolved_references,
+    // mapped onto the emitted userMessage event (driver.rs prompt()) — must ride onto
+    // the folded UserItem unchanged. Mirrors the Rust
+    // fold_user_message_carries_resolved_references test (parity requirement).
+    const s = foldAll([
+      base({
+        type: "userMessage",
+        id: "u1",
+        text: "@skill:debug please",
+        timestamp: "t1",
+        references: [{ kind: "skill", name: "debug" }],
+      }),
+    ]);
+    expect(s.items[0]).toMatchObject({
+      kind: "user",
+      text: "@skill:debug please",
+      references: [{ kind: "skill", name: "debug" }],
+    });
+  });
+
+  test("queuedMessageStarted carries the drained item's resolved references", () => {
+    // The daemon only resolves a queued item's `@`-refs at drain time
+    // (PendingTurnInputDrained.resolved_references), so `references` rides the queued
+    // message envelope itself, not a fresh userMessage. Mirrors the Rust
+    // fold_queued_message_started_surfaces_user_and_dequeues test (parity requirement).
+    const s = initialSessionState();
+    foldEvent(
+      s,
+      base({
+        type: "queuedMessageStarted",
+        message: {
+          id: "q1",
+          mode: "steer",
+          text: "queued",
+          createdAt: "t1",
+          updatedAt: "t1",
+          references: [{ kind: "file", name: "bar.md" }],
+        },
+      }),
+    );
+    expect(s.items[0]).toMatchObject({
+      kind: "user",
+      text: "queued",
+      references: [{ kind: "file", name: "bar.md" }],
+    });
+  });
+
   test("queueUpdated replaces the full queue and omitted snapshots preserve it", () => {
     const queued = {
       id: "q1",
@@ -329,7 +377,10 @@ describe("foldEvent", () => {
       }),
     );
     expect(s.pendingApprovals).toHaveLength(1);
-    expect(s.pendingApprovals[0]).toMatchObject({ kind: "permission", requestId: "perm1" });
+    expect(s.pendingApprovals[0]).toMatchObject({
+      kind: "permission",
+      requestId: "perm1",
+    });
     foldEvent(s, base({ type: "hostUiResolved", requestId: "perm1" }));
     expect(s.pendingApprovals).toHaveLength(0);
   });

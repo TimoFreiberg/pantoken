@@ -244,6 +244,12 @@ pub fn history_to_seed_events(
                     text: text.to_string(),
                     images: None,
                     entry_id,
+                    // History replay carries no resolved-reference data (the daemon's
+                    // session .jsonl doesn't persist PromptAccepted.resolved_references) —
+                    // replayed user messages simply have no chips. Confirmed intentional
+                    // per the resolution-feedback design (docs/DECISIONS.md-adjacent plan);
+                    // not a gap to fill later.
+                    references: None,
                 });
             }
             "assistant" => {

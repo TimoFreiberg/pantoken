@@ -3939,6 +3939,7 @@ mod hub_models_tests {
             text: "wedged msg".into(),
             images: None,
             entry_id: None,
+            references: None,
         };
         hub.lock().on_event(wedge);
 
@@ -4395,6 +4396,7 @@ mod hub_models_tests {
             text: "hello".into(),
             images: None,
             entry_id: None,
+            references: None,
         };
         hub.lock().on_event(ev);
 
