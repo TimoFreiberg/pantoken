@@ -3,7 +3,6 @@
   import { sessionSubtitle } from "../lib/session-subtitle.js";
   import GoalBadge from "./GoalBadge.svelte";
   import IconButton from "./ui/IconButton.svelte";
-  import RightSidebar from "./RightSidebar.svelte";
 
   let hotkeyN = $state(0);
 
@@ -113,17 +112,19 @@
 </script>
 
 <svelte:window onkeydown={onWindowKeydown} />
-<header class="hdr" data-tauri-drag-region>
-  <IconButton
-    data-testid="sidebar-toggle"
-    title="Toggle sessions (⌘B)"
-    aria-label="Toggle sessions"
-    onclick={() => store.toggleSidebar()}
-  >
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-      <path d="M3 6h18M3 12h18M3 18h18" />
-    </svg>
-  </IconButton>
+<!-- data-tauri-drag-region="deep": Tauri v2 only treats an element as a drag surface
+     when the mousedown TARGET itself carries the attribute (or is inside a "deep"-tagged
+     ancestor) — a bare attribute on just <header> never fires for clicks on its children
+     (the title, subtitle, spacer…), which is nearly the whole header. "deep" extends the
+     drag surface to the entire subtree while still respecting Tauri's own built-in
+     clickable-element exclusion (real <button>/<a>/<input>… without their own override
+     always block dragging first) — the bell/plan/settings/etc. IconButtons stay clickable
+     with no per-element opt-out needed. This ALSO needs an IPC grant to actually fire:
+     this page is served over http://127.0.0.1:<port>, not the tauri:// asset protocol,
+     so it gets no Tauri IPC by default (see desktop/capabilities/default.json) — the
+     start_dragging command is explicitly re-granted to this origin in
+     desktop/capabilities/window-drag.json. -->
+<header class="hdr" data-tauri-drag-region="deep">
   <div class="left">
     <span class="title-row">
       {#if initializing}
@@ -177,16 +178,6 @@
         </svg>
       </IconButton>
     {/if}
-    <IconButton
-      data-testid="context-toggle"
-      title="Context panel — todos, jobs & flagged files (⌘⇧J)"
-      aria-label="Toggle context panel"
-      onclick={() => store.toggleRightSidebar()}
-    >
-      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M3 6h18M3 12h18M3 18h18" />
-      </svg>
-    </IconButton>
     <IconButton
       data-testid="settings-toggle"
       title="Settings (⌘,)"

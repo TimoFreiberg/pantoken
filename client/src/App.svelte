@@ -21,12 +21,14 @@
   import { imageViewer } from "./lib/image-viewer.svelte.js";
   import { attention, type AttentionSurface } from "./lib/attention-cycle.svelte.js";
   import IconButton from "./components/ui/IconButton.svelte";
+  import Chevron from "./components/ui/Chevron.svelte";
   import { notifyIfUnfocused } from "./lib/notify.js";
   import { wakeLock } from "./lib/wake-lock.js";
   import { trackKeyboardInset } from "./lib/keyboard-inset.js";
   import { STEP as FONT_STEP } from "./lib/font-scale.js";
   import { edgeSwipe } from "./lib/edge-swipe.js";
   import { createEdgeSwipe } from "./lib/edge-swipe.svelte.js";
+  import { reveal } from "./lib/transitions.js";
   import type { PermissionMonitorMode } from "@pantoken/protocol";
 
   // Dev affordance: ?dev shows buttons that drive the mock to any UI state, so the
@@ -49,9 +51,10 @@
 
   // Left-edge swipe opens the phone drawer. One controller instance owns the live-follow
   // snapshot; the Sidebar reacts to it for the transform, the action below fires open/cancel.
-  // Phone-only (the drawer is the desktop sidebar, always reachable via ⌘B / the header
-  // button) and disabled once the drawer is open (a second swipe would just fight the
-  // drawer's own scrim/scroll). Tracks the same 859px breakpoint the drawer CSS uses.
+  // Phone-only (the drawer is the desktop sidebar, always reachable via ⌘B or the left
+  // edge pop-in arrow below) and disabled once the drawer is open (a second swipe would
+  // just fight the drawer's own scrim/scroll). Tracks the same 859px breakpoint the
+  // drawer CSS uses.
   const edge = createEdgeSwipe();
   const PHONE_MQ = "(max-width: 859px)";
   const edgeEnabled = $derived(
@@ -304,6 +307,24 @@
 {:else}
 <div class="shell">
   <Sidebar edge={edge} />
+  <!-- Left edge pop-in arrow: the only way to reopen a collapsed sessions sidebar now
+       that the header hamburger is gone (⌘B works too). Fixed to the viewport edge —
+       NOT inside <Sidebar>, whose root is `display:none`/translated off-screen while
+       closed and so can't host a persistently-visible affordance itself. Mirrors the
+       sidebar's own in-panel collapse arrow (kept as-is; "that one's good" per the
+       TODO this implements). -->
+  {#if !store.sidebarOpen}
+    <button
+      class="edge-tab edge-tab-left"
+      data-testid="sidebar-edge-open"
+      title="Show sessions (⌘B)"
+      aria-label="Show sessions"
+      onclick={() => store.openSidebar()}
+      transition:reveal={{ axis: "x" }}
+    >
+      <Chevron open={false} />
+    </button>
+  {/if}
   <div
     class="app"
     use:edgeSwipe={{
@@ -336,6 +357,22 @@
       <ApprovalLayer />
     </div>
   </div>
+  <!-- Right edge pop-in arrow: same idea as the left one, for the collapsed context
+       panel (⌘⇧J also reopens it). The Chevron's one shipped orientation points right
+       (its "closed" pose) — mirrored horizontally here so it points back toward the
+       content, matching the left tab's inward-pointing arrow. -->
+  {#if !store.rightSidebarOpen}
+    <button
+      class="edge-tab edge-tab-right"
+      data-testid="context-edge-open"
+      title="Show context panel (⌘⇧J)"
+      aria-label="Show context panel"
+      onclick={() => store.openRightSidebar()}
+      transition:reveal={{ axis: "x" }}
+    >
+      <span class="edge-tab-mirror"><Chevron open={false} /></span>
+    </button>
+  {/if}
   <RightSidebar />
 </div>
 <Settings />
@@ -439,6 +476,62 @@
     .shell,
     .app {
       height: calc(100dvh - var(--keyboard-inset, 0px));
+    }
+  }
+  /* Edge pop-in arrows: shown at the very screen edge whenever the corresponding
+     sidebar is collapsed, replacing the removed header hamburgers as the click
+     affordance to bring it back (⌘B / ⌘⇧J work too). Fixed to the viewport rather
+     than laid out in the flex row, since a collapsed sidebar's own root is
+     display:none (desktop) or translated off-screen (phone drawer) — either way
+     not a place a persistently-visible control could live. Vertically centered,
+     slim at rest, sized up to a full touch target on coarse pointers. */
+  .edge-tab {
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 45;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 64px;
+    padding: 0;
+    color: var(--text-faint);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-card);
+    cursor: pointer;
+  }
+  .edge-tab:hover {
+    color: var(--text);
+    background: var(--surface-sunken);
+    border-color: var(--border-strong);
+  }
+  .edge-tab:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .edge-tab-left {
+    left: 0;
+    border-left: none;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  }
+  .edge-tab-right {
+    right: 0;
+    border-right: none;
+    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  }
+  /* The shared Chevron only ships one baked-in horizontal orientation (it points
+     right in its "closed" pose); mirror it for the right tab so the glyph points
+     back toward the content, same inward sense as the left tab's arrow. */
+  .edge-tab-mirror {
+    display: inline-flex;
+    transform: scaleX(-1);
+  }
+  @media (pointer: coarse) {
+    .edge-tab {
+      width: 22px;
+      height: 72px;
     }
   }
   .chat {

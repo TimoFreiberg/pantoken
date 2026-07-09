@@ -1,12 +1,16 @@
 <script lang="ts">
   import { store } from "../lib/store.svelte.js";
   import IconButton from "./ui/IconButton.svelte";
+  import Chevron from "./ui/Chevron.svelte";
   import TodoDetail from "./TodoDetail.svelte";
   import JobDetail from "./JobDetail.svelte";
 
-  // The right context panel: todos, background jobs, and flagged files from
-  // the active session. Mirrors the left Sidebar's drawer pattern (scrim on
-  // mobile, fixed column on desktop). Toggled by the StatusHeader button or ⌘⇧J.
+  // The right context panel: flagged files, background jobs, and todos from
+  // the active session (in that order — matches the polytoken TUI). Mirrors the
+  // left Sidebar's drawer pattern (scrim on mobile, fixed column on desktop).
+  // No title label (the left sidebar doesn't have one either) — just the
+  // collapse control, symmetric with the left sidebar's '‹'. Toggled by ⌘⇧J or
+  // the edge pop-in arrow (App.svelte) while collapsed.
 
   const s = $derived(store.session);
   const flags = $derived(s.flags);
@@ -58,42 +62,39 @@
   data-open={open}
 >
   <div class="top">
-    <span class="title">Context</span>
     <IconButton
-      title="Close context panel (⌘⇧J)"
-      aria-label="Close context panel"
-      onclick={() => store.closeRightSidebar()}>›</IconButton
+      title="Collapse context panel (⌘⇧J)"
+      aria-label="Collapse context panel"
+      onclick={() => store.closeRightSidebar()}
     >
+      <Chevron open={false} />
+    </IconButton>
   </div>
 
   <div class="content">
-    <!-- Todos -->
-    <section class="section" data-testid="todos">
+    <!-- Flagged files -->
+    <section class="section" data-testid="flagged-files">
       <div class="section-head">
-        <span class="section-title">Todos</span>
-        {#if todos.length > 0}
-          <span class="section-count">{todos.length}</span>
+        <span class="section-title">Flagged files</span>
+        {#if flags.length > 0}
+          <span class="section-count">{flags.length}</span>
         {/if}
       </div>
-      {#if todos.length === 0}
-        <p class="empty">No todos</p>
+      {#if flags.length === 0}
+        <p class="empty">No flagged files</p>
       {:else}
-        <ul class="todo-list">
-          {#each todos as t (t.id)}
-            <li class="todo-item {t.status}">
+        <ul class="file-list">
+          {#each flags as f (f.path)}
+            <li class="file-item" title={`${f.mode === "included" ? "Included in context" : "Referenced"}: ${f.path}`}>
+              <span class="file-mode {f.mode}">{f.mode === "included" ? "I" : "R"}</span>
+              <span class="file-path">{f.path}</span>
               <button
-                class="todo-btn"
-                title={`${STATUS_LABEL[t.status] ?? t.status}${t.dependencies.length > 0 ? ` (depends on ${t.dependencies.length})` : ""} — click for details`}
-                onclick={() => (store.selectedTodoId = t.id)}
-              >
-                <span class="todo-icon">{STATUS_ICON[t.status] ?? "?"}</span>
-                <div class="todo-body">
-                  <span class="todo-title">{t.title}</span>
-                  {#if t.description}
-                    <span class="todo-desc">{t.description}</span>
-                  {/if}
-                </div>
-              </button>
+                class="copy-btn"
+                title="Copy path to clipboard"
+                aria-label="Copy {f.path} to clipboard"
+                data-testid="copy-path-{f.path}"
+                onclick={() => copyPath(f.path)}
+              >⎘</button>
             </li>
           {/each}
         </ul>
@@ -136,29 +137,33 @@
       {/if}
     </section>
 
-    <!-- Flagged files -->
-    <section class="section" data-testid="flagged-files">
+    <!-- Todos -->
+    <section class="section" data-testid="todos">
       <div class="section-head">
-        <span class="section-title">Flagged files</span>
-        {#if flags.length > 0}
-          <span class="section-count">{flags.length}</span>
+        <span class="section-title">Todos</span>
+        {#if todos.length > 0}
+          <span class="section-count">{todos.length}</span>
         {/if}
       </div>
-      {#if flags.length === 0}
-        <p class="empty">No flagged files</p>
+      {#if todos.length === 0}
+        <p class="empty">No todos</p>
       {:else}
-        <ul class="file-list">
-          {#each flags as f (f.path)}
-            <li class="file-item" title={`${f.mode === "included" ? "Included in context" : "Referenced"}: ${f.path}`}>
-              <span class="file-mode {f.mode}">{f.mode === "included" ? "I" : "R"}</span>
-              <span class="file-path">{f.path}</span>
+        <ul class="todo-list">
+          {#each todos as t (t.id)}
+            <li class="todo-item {t.status}">
               <button
-                class="copy-btn"
-                title="Copy path to clipboard"
-                aria-label="Copy {f.path} to clipboard"
-                data-testid="copy-path-{f.path}"
-                onclick={() => copyPath(f.path)}
-              >⎘</button>
+                class="todo-btn"
+                title={`${STATUS_LABEL[t.status] ?? t.status}${t.dependencies.length > 0 ? ` (depends on ${t.dependencies.length})` : ""} — click for details`}
+                onclick={() => (store.selectedTodoId = t.id)}
+              >
+                <span class="todo-icon">{STATUS_ICON[t.status] ?? "?"}</span>
+                <div class="todo-body">
+                  <span class="todo-title">{t.title}</span>
+                  {#if t.description}
+                    <span class="todo-desc">{t.description}</span>
+                  {/if}
+                </div>
+              </button>
             </li>
           {/each}
         </ul>
@@ -186,16 +191,11 @@
   .top {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    /* No title label (mirrors the left Sidebar's .top) — just the collapse
+       control, pinned to the trailing edge. */
+    justify-content: flex-end;
     padding: 10px 12px 8px;
     border-bottom: 1px solid var(--border);
-  }
-  .title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
   }
   .content {
     flex: 1;

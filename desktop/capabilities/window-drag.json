@@ -1,0 +1,11 @@
+{
+  "$schema": "../target/schemas/desktop-schema.json",
+  "identifier": "window-drag",
+  "description": "Narrow, deliberate exception to default.json's 'the hub-served web client gets NO Tauri IPC' rule: grants exactly the start_dragging command to the client's own origin (http://127.0.0.1:<port>, a random port per launch — the client is never served from the tauri:// asset protocol, so it needs an explicit `remote` grant to get ANY IPC at all; core:default alone, scoped only to local app URLs, would not reach it). This is what makes `data-tauri-drag-region` in StatusHeader.svelte's chromeless-window header actually work: Tauri's own injected script invokes plugin:window|start_dragging on a drag-region mousedown, with no Tauri-specific JS in the client itself. Everything else about the client stays exactly as IPC-less as default.json describes — this grants nothing beyond dragging.",
+  "local": false,
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*/**"]
+  },
+  "permissions": ["core:window:allow-start-dragging"]
+}
