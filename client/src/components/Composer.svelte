@@ -72,6 +72,10 @@
   // "A turn is in flight" — the robust signal (see store.turnActive), so the stop pill +
   // steer/queue affordances stay correct even if the folded status glitches mid-turn.
   const streaming = $derived(store.turnActive);
+  // The stop action has its own acknowledgement lifecycle. Keep it distinct from
+  // `streaming`: a broken daemon can still be running while the ordinary Stop pill
+  // has become an explicit recovery action.
+  const stopState = $derived(store.stopState);
   // Drafting a brand-new session: the composer doubles as the new-session form (config
   // chips above, first prompt below). Send creates the session + delivers the prompt.
   const drafting = $derived(store.draft != null);
@@ -840,10 +844,19 @@
         <button
           class="stop"
           onclick={() => store.abort()}
-          disabled={store.connection !== "connected"}
+          disabled={store.connection !== "connected" || stopState === "stopping"}
           title={store.connection === "connected"
-            ? "Stop the agent (Esc)"
-            : "Can't stop while offline — the agent keeps running"}>■ Stop</button
+            ? stopState === "stopping"
+              ? "Stop requested — waiting for Pantoken"
+              : stopState === "unconfirmed"
+                ? "Retry stopping the agent (Esc)"
+                : "Stop the agent (Esc)"
+            : "Can't stop while offline — the agent keeps running"}
+          >{stopState === "stopping"
+            ? "■ Stopping…"
+            : stopState === "unconfirmed"
+              ? "↻ Retry stop"
+              : "■ Stop"}</button
         >
       </div>
     {/if}

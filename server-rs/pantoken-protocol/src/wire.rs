@@ -243,6 +243,15 @@ pub enum ServerMessage {
         path: String,
         reason: String,
     },
+    /// Correlated outcome for one stop attempt. `accepted` means the daemon accepted
+    /// the request; a terminal driver event still settles the transcript.
+    AbortResult {
+        #[serde(skip_serializing_if = "Option::is_none", default, rename = "requestId")]
+        request_id: Option<String>,
+        accepted: bool,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        error: Option<String>,
+    },
     Error {
         message: String,
         #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -273,6 +282,8 @@ pub enum ClientMessage {
         session_id: Option<SessionId>,
     },
     Abort {
+        #[serde(skip_serializing_if = "Option::is_none", default, rename = "requestId")]
+        request_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default, rename = "sessionId")]
         session_id: Option<SessionId>,
     },
@@ -749,6 +760,29 @@ mod tests {
                 assert_eq!(kind, Some("session-switch".to_string()));
             }
             _ => panic!("expected Error"),
+        }
+    }
+
+    #[test]
+    fn roundtrip_abort_result() {
+        let json_str = r#"{
+            "type": "abortResult",
+            "requestId": "stop-1",
+            "accepted": false,
+            "error": "daemon did not receive stop"
+        }"#;
+        let msg: ServerMessage = serde_json::from_str(json_str).unwrap();
+        match msg {
+            ServerMessage::AbortResult {
+                request_id,
+                accepted,
+                error,
+            } => {
+                assert_eq!(request_id.as_deref(), Some("stop-1"));
+                assert!(!accepted);
+                assert_eq!(error.as_deref(), Some("daemon did not receive stop"));
+            }
+            _ => panic!("expected AbortResult"),
         }
     }
 

@@ -256,6 +256,15 @@ export type ServerMessage =
    *  client so its archived toast can explain the leftover and offer a force-delete.
    *  `path` == the worktree dir (== the session's cwd), the key `cleanupWorktree` takes. */
   | { type: "worktreeRetained"; path: string; reason: string }
+  /** Correlated outcome for one stop attempt. `accepted` means the daemon accepted
+   *  the request; the transcript still has to receive a terminal event before the
+   *  client may call the turn stopped. */
+  | {
+      type: "abortResult";
+      requestId?: string;
+      accepted: boolean;
+      error?: string;
+    }
   | { type: "error"; message: string; kind?: "session-switch" | "abort" };
 
 /** Tail-resume request: "I still hold {sessionId} folded through {epoch, seq}".
@@ -280,7 +289,13 @@ export type ClientMessage =
       deliverAs?: "steer" | "followUp";
       sessionId?: SessionId;
     }
-  | { type: "abort"; sessionId?: SessionId }
+  | {
+      type: "abort";
+      /** Correlates this request with its `abortResult`, so a late response cannot
+       *  overwrite the state of a retry or a subsequently-started turn. */
+      requestId?: string;
+      sessionId?: SessionId;
+    }
   /** Clear every pending steering/follow-up message and restore their text to this
    *  client's editor (Pi parity: Alt+Up). */
   | { type: "restoreQueue"; sessionId?: SessionId }

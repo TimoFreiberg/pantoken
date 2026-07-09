@@ -40,6 +40,48 @@ test("the Stop pill disables while offline (a remote turn can't be stopped)", as
   );
 });
 
+test("a slow stop becomes an explicit retry state, then reports late settlement", async ({
+  page,
+}) => {
+  // The mock delays this one abort beyond the client's 500ms confirmation window.
+  await drive(page, "slowabort");
+  await drive(page, "streamhold");
+  const stop = page.locator(".composer-wrap .stop");
+  await stop.click();
+
+  await expect(stop).toHaveText("■ Stopping…");
+  await expect(stop).toBeDisabled();
+  await expect(page.getByTestId("working-label")).toHaveText("Stopping…");
+
+  await expect(stop).toHaveText("↻ Retry stop", { timeout: 1_500 });
+  await expect(stop).toBeEnabled();
+  await expect(page.getByTestId("working-label")).toHaveText(
+    "Stop unconfirmed",
+  );
+  await expect(
+    page.getByTestId("toast").filter({
+      hasText: "Couldn't confirm the stop within 500ms",
+    }),
+  ).toBeVisible();
+
+  // The delayed server outcome still settles the transcript and explains that it
+  // arrived after the deadline instead of silently removing the recovery state.
+  await expect(stop).toHaveCount(0);
+  await expect(page.getByTestId("working-indicator")).toHaveCount(0);
+  await expect(
+    page
+      .getByTestId("sidebar")
+      .getByText("Couldn't confirm the stop within 500ms", {
+        exact: false,
+      }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByTestId("toast").filter({
+      hasText: "The agent stopped after Pantoken's 500ms confirmation window.",
+    }),
+  ).toBeVisible();
+});
+
 test("the Stop pill survives a stray mid-turn idle snapshot (turn still in flight)", async ({
   page,
 }) => {
@@ -54,7 +96,9 @@ test("the Stop pill survives a stray mid-turn idle snapshot (turn still in fligh
   // While the turn is still live, the tool renders as a bare card OUTSIDE any
   // collapsible folder — the user watches the call run before the turn settles.
   await expect(page.locator(".tool.summary")).toHaveCount(0);
-  const tool = page.locator(".scroller > .tool, .work-body > .tool, .tool.running").first();
+  const tool = page
+    .locator(".scroller > .tool, .work-body > .tool, .tool.running")
+    .first();
   await expect(tool.locator(":scope > .head .name")).toHaveText(
     "Run shell command",
   );

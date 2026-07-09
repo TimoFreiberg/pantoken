@@ -60,12 +60,21 @@
   // just-sent prompt isn't left under a silent, idle-looking composer; the real turn's
   // "Working…" takes over the moment the run starts (turnActive wins the label).
   const creating = $derived(store.creatingSession !== null && !store.turnActive);
+  const stopState = $derived(store.stopState);
   // No "Thinking…" text here while thinking: the ThinkingBlock right above already
   // shows that label (docs/TODO.md dedupe) — this row keeps only the spinner, the
   // elapsed timer, and the token count during that phase. "Working…" isn't
   // duplicated anywhere else, so it's untouched.
   const label = $derived(
-    store.turnActive ? (thinking ? "" : "Working…") : "Starting session…",
+    store.turnActive
+      ? stopState === "stopping"
+        ? "Stopping…"
+        : stopState === "unconfirmed"
+          ? "Stop unconfirmed"
+          : thinking
+            ? ""
+            : "Working…"
+      : "Starting session…",
   );
 </script>
 
@@ -80,6 +89,10 @@
       class="inner"
       title={creating
         ? "Starting the new session"
+        : stopState === "stopping"
+          ? "Stop requested — waiting for Pantoken"
+          : stopState === "unconfirmed"
+            ? "Pantoken could not confirm the stop; the agent may still be running"
         : thinking
           ? "Agent is thinking"
           : "Agent is working"}

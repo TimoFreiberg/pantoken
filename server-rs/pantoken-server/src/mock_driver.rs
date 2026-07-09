@@ -1566,6 +1566,9 @@ pub struct MockDriver {
     /// lease-conflict detection both fire), then the flag clears so a Retry
     /// succeeds.
     fail_next_session: Arc<AtomicBool>,
+    /// One-shot artificial delay before abort settles. Dev/e2e-only: exercises the
+    /// client-side stop confirmation deadline without weakening normal mock aborts.
+    abort_delay_ms: AtomicU64,
     /// Pending host-UI dialogs (keyed by requestId), so respondUi can look up the
     /// original request (e.g. a Q&A's questions) when forming the tool result.
     /// Mirrors the TS MockDriver's `pendingDialogs`.
@@ -1673,6 +1676,7 @@ impl MockDriver {
             last_created: Mutex::new(None),
             fail_next_new_session: Arc::new(AtomicBool::new(false)),
             fail_next_session: Arc::new(AtomicBool::new(false)),
+            abort_delay_ms: AtomicU64::new(0),
             pending_dialogs: Arc::new(Mutex::new(std::collections::HashMap::new())),
             adventurous_handoff: Arc::new(std::sync::Mutex::new(false)),
             in_flight: Arc::new(Mutex::new(None)),
@@ -1971,6 +1975,10 @@ impl PantokenDriver for MockDriver {
         // tool_execution_end on abort), then emit runCompleted to end the turn.
         // Without cancel_timers the Stop pill never clears — a scheduled delta
         // fires after the abort's runCompleted and the turn re-activates.
+        let delay_ms = self.abort_delay_ms.swap(0, Ordering::SeqCst);
+        if delay_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+        }
         self.cancel_timers();
         let b = base();
         self.emit(SessionDriverEvent::RunCompleted {
@@ -2658,6 +2666,12 @@ impl PantokenDriver for MockDriver {
 
     fn run_script(&self, name: String) {
         let steps: Vec<ScriptStep> = match name.as_str() {
+            // Keep this one-shot delay out of normal fixtures. It exists solely to
+            // verify the 500ms stop confirmation contract in browser e2e.
+            "slowabort" => {
+                self.abort_delay_ms.store(1000, Ordering::SeqCst);
+                return;
+            }
             // ── Approval dialogs ────────────────────────────────────────────
             "confirm" => vec![
                 ScriptStep { wait_ms: 0, event: SessionDriverEvent::HostUiRequest { base: base(), request: HostUiRequest::Confirm {
@@ -3328,6 +3342,7 @@ impl PantokenDriver for MockDriver {
         *self.last_created.lock() = None;
         self.fail_next_new_session.store(false, Ordering::SeqCst);
         self.fail_next_session.store(false, Ordering::SeqCst);
+        self.abort_delay_ms.store(0, Ordering::SeqCst);
         *self.adventurous_handoff.lock().unwrap() = false;
         // Restore the mutable session/worktree state to the fixture baseline —
         // faithful port of TS `reset()`: `this.sessions = SESSION_LIST.map(...)`,
