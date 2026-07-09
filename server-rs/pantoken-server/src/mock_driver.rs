@@ -21,21 +21,6 @@ use crate::driver::{
 };
 use async_trait::async_trait;
 
-/// Whether a HostUiRequest is a dialog (awaiting a response), mirroring the TS
-/// `isDialogRequest`. Notify/Status/Widget are fire-and-forget ambient UI.
-fn is_dialog_request(r: &HostUiRequest) -> bool {
-    matches!(
-        r,
-        HostUiRequest::Confirm { .. }
-            | HostUiRequest::Input { .. }
-            | HostUiRequest::Select { .. }
-            | HostUiRequest::Editor { .. }
-            | HostUiRequest::Qna { .. }
-            | HostUiRequest::Plan { .. }
-            | HostUiRequest::Permission { .. }
-    )
-}
-
 /// Accessor for the requestId field shared by every HostUiRequest variant.
 /// (Free function — we can't add an inherent impl on a type from another crate.)
 fn request_id_of(r: &HostUiRequest) -> &str {

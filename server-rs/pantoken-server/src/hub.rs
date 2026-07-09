@@ -46,7 +46,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use futures_util::FutureExt;
 use pantoken_protocol::session_driver::{
     HostUiRequest, HostUiResponse, ModelOption, SessionDriverEvent, SessionDriverEvent as E,
-    SessionEventBase, SessionId, SessionRef, SessionStatus,
+    SessionEventBase, SessionId, SessionRef, SessionStatus, is_dialog_request,
 };
 use pantoken_protocol::state::{SessionState, fold_all, fold_event, initial_session_state};
 use pantoken_protocol::wire::{
@@ -995,8 +995,7 @@ impl SessionHub {
                 });
             } else if disc == "hostUiRequest" {
                 if let E::HostUiRequest { request, .. } = ev {
-                    let kind = request.kind();
-                    if matches!(kind, "confirm" | "select" | "input" | "editor" | "qna") {
+                    if is_dialog_request(request) {
                         let title = request.title().unwrap_or("Waiting on you");
                         notify(HubNotification {
                             title: "Approval needed".into(),
@@ -2946,13 +2945,6 @@ fn request_title(request: &HostUiRequest) -> String {
     } else {
         "Waiting on you".into()
     }
-}
-
-fn is_dialog_request(request: &HostUiRequest) -> bool {
-    matches!(
-        request.kind(),
-        "confirm" | "select" | "input" | "editor" | "qna" | "permission"
-    )
 }
 
 /// Extract the request_id from a HostUiResponse (all variants carry it).
