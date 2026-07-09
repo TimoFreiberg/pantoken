@@ -119,6 +119,11 @@ fn canned(method: &str, path: &str) -> Option<(StatusCode, Value)> {
             }),
         ));
     }
+    // DELETE /turn/input/newest — clear_queue's drain primitive. Tests count the
+    // recorded calls (one per snapshotted item) to verify the full drain.
+    if m == "DELETE" && p == "/turn/input/newest" {
+        return Some((StatusCode::OK, serde_json::json!({"ok": true})));
+    }
     None
 }
 
