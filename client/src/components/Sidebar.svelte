@@ -506,7 +506,9 @@
   data-open={store.sidebarOpen}
   style={sidebarTransform ? `transform: ${sidebarTransform}` : undefined}
 >
-  <div class="top">
+  <!-- data-tauri-drag-region="deep": desktop-shell window drag, same contract as
+       StatusHeader (real buttons stay clickable; needs the window-drag IPC grant). -->
+  <div class="top" data-tauri-drag-region="deep">
     <IconButton
       title="Collapse sidebar (⌘B)"
       aria-label="Collapse sidebar"

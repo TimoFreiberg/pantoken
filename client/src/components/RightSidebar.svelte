@@ -61,7 +61,9 @@
   data-testid="right-sidebar"
   data-open={open}
 >
-  <div class="top">
+  <!-- data-tauri-drag-region="deep": desktop-shell window drag, same contract as
+       StatusHeader (real buttons stay clickable; needs the window-drag IPC grant). -->
+  <div class="top" data-tauri-drag-region="deep">
     <IconButton
       title="Collapse context panel (⌘⇧J)"
       aria-label="Collapse context panel"

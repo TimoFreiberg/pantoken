@@ -43,7 +43,25 @@ function gitInfo(): { hash: string; date: string; fullHash: string } {
     }
   }
 }
+// The nearest release tag reachable from the built commit (e.g. "v0.2.15"), for the
+// sidebar footer. Its own fallback chain, independent of gitInfo's: a jj worktree can
+// resolve HEAD via git yet have no tags in its git view (agent worktrees do), and a
+// shallow deploy clone can have git but no tags — "" hides the tag rather than lying.
+function releaseTag(): string {
+  try {
+    return run("git describe --tags --abbrev=0");
+  } catch {
+    try {
+      return run(
+        `jj log --no-graph --color=never -r 'latest(tags() & ::@-)' -T 'tags'`,
+      );
+    } catch {
+      return "";
+    }
+  }
+}
 const BUILD = gitInfo();
+const TAG = releaseTag();
 
 // Write the built commit's full sha into <outDir>/.pantoken-built-sha after a production
 // build. The server reads this — NOT git HEAD — to decide whether the running app is
@@ -79,6 +97,7 @@ export default defineConfig({
   define: {
     __BUILD_HASH__: JSON.stringify(BUILD.hash),
     __BUILD_DATE__: JSON.stringify(BUILD.date),
+    __BUILD_TAG__: JSON.stringify(TAG),
     // Full sha, compared against hello.buildSha (the sha of the bundle the
     // server is SERVING) to detect that the server updated underneath a
     // long-lived tab/PWA. Matches the .pantoken-built-sha marker by construction.

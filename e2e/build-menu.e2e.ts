@@ -34,9 +34,10 @@ test("copy build hash writes the commit hash to the clipboard", async ({
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await openSidebar(page);
   const version = page.getByTestId("sidebar").getByTestId("version");
-  // The label is "<hash>" or "<hash> · <date>"; the copy action grabs only the hash.
+  // The label is "<tag> · <hash> · <date>" with unresolvable pieces dropped; the
+  // copy action grabs only the hash — pick the segment that looks like one.
   const label = ((await version.textContent()) ?? "").trim();
-  const hash = label.split(" · ")[0];
+  const hash = label.split(" · ").find((s) => /^([0-9a-f]{7,}|dev)$/.test(s));
 
   await version.click({ button: "right" });
   await page.getByTestId("copy-build-hash").click();

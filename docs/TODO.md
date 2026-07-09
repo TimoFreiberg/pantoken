@@ -12,8 +12,11 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
       chips don't survive history replay (daemon `.jsonl` doesn't persist
       `resolved_references`); external paths with spaces can't be referenced
       (mention token ends at whitespace — TUI parity).
-- [ ] currently only top of transcript is draggable, top of both sidebars should be too
-- [ ] add version git tag to bottom of sidebar next to git hash
+- ~~[x]~~ tops of both sidebars are now window-drag surfaces
+      (`data-tauri-drag-region="deep"`, same contract as StatusHeader).
+- ~~[x]~~ sidebar build stamp now leads with the nearest release tag
+      (`v0.2.15 · <hash> · <date>`); tag resolves via `git describe` with a
+      jj fallback, hides when unresolvable.
 - ~~[x]~~ Subagent-completion notice dumped the whole report as a giant
       ellipse-shaped pill. Fixed at both ends: `notification_message` in
       `event_map.rs` builds a short label from `notification_type`
@@ -164,6 +167,11 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
 ## 🧹 Minor
 
 - [ ] add `x` delete button on queued prompts (if not there already)
+      **Blocked by a daemon constraint (checked 2026-07-09):** the daemon's only
+      removal primitive is `DELETE /turn/input/newest` — no delete-by-id. A ✕ on
+      an arbitrary item would need clear-all + re-queue, which races the daemon's
+      turn-end drain. Honest options: ✕ on the newest item only, or keep the
+      existing "Edit all (⌥↑)" restore-to-composer flow. Product call needed.
 
 - [ ] Fix the two perf scripts (broken under Bun isolated `node_modules`) so the
       C1 measurements stay reproducible.
