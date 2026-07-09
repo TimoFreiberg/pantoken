@@ -114,7 +114,7 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
   "📐 Architecture direction" note that lived here (Rust hub end-state, distribution
   model) is superseded by that ADR; the Rust-hub target stays gated by the criteria
   in it.
-  - [ ] Dogfood `desktop/` (tray, close-to-tray, titlebar/traffic-light fit,
+  - [x] Dogfood `desktop/` (tray, close-to-tray, titlebar/traffic-light fit,
         update overlay — the visual bits an agent can't eyeball).
   - [x] **Bundled mode shipped (2026-07-03):** compiled hub as `externalBin` + client
         as a bundle resource; packaged .apps are self-contained (no clone, no bun) and
@@ -184,12 +184,9 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
 - [ ] Voice dictation on mobile (Web Speech API mic button)
 
 ### Transcript reading
-- [ ] Collapse-all / expand-all tool calls
-- [ ] Per-code-block copy + language label
-- [ ] Copy-on-hover for code blocks
+- [ ] code-block language label
 - [ ] "New since you left" divider (marker at first message while unfocused)
 - [ ] Inline image rendering (markdown image / screenshot path → inline)
-- [ ] Merge sequential read calls visually (contiguous ranges → one card)
 
 ### Sessions & navigation
 - [ ] Command palette (⌘K) — fuzzy switcher over sessions + actions
