@@ -3,13 +3,13 @@
 Settled architectural calls. Each is reversible unless noted. Numbers kept
 for cross-reference with git history.
 
-## D1. Monorepo: GUI + remote infra in one repo
+## Monorepo: GUI + remote infra in one repo
 `protocol/` (shared types + fold reducer, no runtime deps) · `server-rs/` (Rust
 WS hub + drivers) · `client/` (Svelte 5 PWA) · `deploy/`. The server *is* the
 protocol contract — WS schema, server-side fold, and client reducer must evolve
 together, so splitting now forces premature version coordination.
 
-## D5. State model: server-authoritative, split durable vs per-client
+## State model: server-authoritative, split durable vs per-client
 **Durable shared** (server-owned, broadcast): sessions, transcripts, statuses,
 pending approvals. **Per-client view** (client-local, never shared): selected
 session, composer draft, sidebar collapse. This split is load-bearing at the
@@ -17,50 +17,48 @@ protocol level — broadcasting one whole-state blob makes two tabs fight over
 the composer. The server owns pending approvals, the transcript snapshot, and
 ambient status/widgets because the daemon can't replay them on reconnect.
 
-## D6. Verification = deterministic mock + screenshot loop
+## Verification = deterministic mock + screenshot loop
 A mock driver replays scripted event sequences so every UI state is
 reproducible without a live daemon. `/debug/state` + `/debug/reset` (mock-only)
 let an agent assert on server state directly. `/?dev` drives the mock to any
 state. This is the dev/test surface; the live polytoken driver is for real use.
 
-## D8. Concurrency = multiple concurrent warm sessions
+## Concurrency = multiple concurrent warm sessions
 N sessions run/stream concurrently server-side, each a separate polytoken
 daemon process (one daemon = one session = one port). The hub keeps a
 `Map<sessionId, WarmSession>`; all clients share one focused session (per-
 client focus is overkill for single-user). Nothing is disposed on a focus-
 change, so a backgrounded session keeps streaming and re-focuses instantly.
 
-## D9. Approval posture = no tool gating
-No per-tool / per-command approval extension. Autonomous background work is the
-point. The only human gate is the project-trust gate (D12), handled daemon-side.
+## Polytoken feature parity
+We want to support any feature that the polytoken tui supports.
+Having extra features is fine, like git/jj workspace management.
 
-## D12. Workspace = arbitrary GUI paths, trust as safety net
-No allowlist — open any path from the UI. The safety net is the trust gate,
-which the polytoken daemon handles entirely on its side. The pantoken-side
-out-of-band trust channel (`trustRequest`/`trustResolved`/`trustResponse` +
-`subscribeTrust`/`respondTrust` + `TrustCard.svelte`) was removed — it was
-mock-only demo code that could never fire under the polytoken daemon.
-**Resolved:** the daemon's `capability` interrogative covers untrusted-dir
-prompts; the pantoken UI no longer renders a trust card.
+## Workspace = arbitrary GUI paths, trust as safety net
+No allowlist — open any path from the UI. polytoken daemons have a permission/approval system which we support.
+The operator is responsible for checking what directory they're working in.
 
-## D17. Draft persistence
+## Draft persistence
 Everything settable in the new-session draft UI is persisted per-project (keyed
 `n:<cwd>` in localStorage) and survives a session switch + reload. Losing a
 half-configured draft erodes trust in the tool. Default for any new draft
 control: persist it, unless it's inherently ephemeral. Add an e2e round-trip
 in `e2e/drafts.e2e.ts` for each persisted field.
 
-## D18. Desktop shell = Tauri v2, hub stays a Bun sidecar
-The Swift/AppKit shell is replaced by a Tauri v2 app (`desktop/`): Rust
-owns exactly the part that must never die (port pick, spawn, /health gate,
-liveness, crash-loop breaker, signal-safe teardown), while hub logic stays TS
-where its tests live. Shell self-updates via tauri-plugin-updater (minisign,
-our key, no Apple involvement — ad-hoc self-update verified quarantine- and
-TCC-prompt-free, even in /Applications). The Rust-hub rewrite remains a
-separate, criteria-gated decision. Full rationale, spike results, and the open
-artifact-hosting decision: `docs/ADR-desktop-shell.md`.
+## Tech stack
+The desktop GUI is a Tauri app. As much as is reasonable is written in Rust (good language).
+There are good architectural reasons for keeping the gui and the server separate, mostly the ability for remote gui sessions to connect to a local hub to be able to start agent sessions on the local machine.
+Otherwise, keep architecture simple and straightforward.
 
-## D19. Daemon→pantoken accumulator stays server-side in Rust (A′)
+## Rust best practices
+Async where necessary, sync where possible.
+Anything that can reasonably block should not be a gui bottleneck, gui snappiness is paramount.
+Panics should be avoided, prefer complex error handling over simple panics that cause random crashes.
+The operator won't look at the logs, so don't log informational stuff via tracing. Do log stuff to tracing that can help diagnose error cases. 
+Do not use Tokio Mutexes. No exceptions. 
+Actors and channels are good when work can be done in the background. But for things in the user action bottleneck path, it is likely to cause visible latency. So we might want to look for different solutions. 
+
+## Daemon→pantoken accumulator stays server-side in Rust (A′)
 The event accumulator (`event_map` + `ui_bridge`: `DaemonEvent` → `SessionDriverEvent`)
 stays server-side, ported to Rust — it is NOT moved client-side. The client is
 Svelte/TS and stays thin on the stable pantoken WS wire. Moving the accumulator
@@ -71,7 +69,7 @@ daemon churn (polytoken moves ~daily). The daemon owning more state
 not change where it lives. Single authority = one place to adapt on a daemon bump,
 which is decisive now that mobile is the next build target after desktop.
 
-## D20. Pin the golden corpus, not the daemon binary
+## Pin the golden corpus, not the daemon binary
 The live path runs against the ambient `polytoken` binary (daemon head, upgraded
 ~daily); there is no pin mechanism. Deterministic tests instead replay a committed
 golden SSE corpus captured from a tagged version
@@ -82,45 +80,7 @@ instead of silently corrupting the GUI. Re-capturing the corpus
 conscious adoption. Supersedes the earlier "pin the daemon version" standing
 invariant (PROGRESS.md #3).
 
-## D21. Fake-daemon live e2e tier is a corpus-backed beachhead, not the full suite
-The live driver stack (`daemon_client → event_map → driver`) gets its first
-browser coverage via `PANTOKEN_DRIVER=fake`: the real `PolytokenDriver` over an
-in-process fake daemon replaying the frozen golden corpus (D20). The tier
-(`e2e/live/`, `bun run test:e2e:live`, separate `playwright.live.config.ts`) covers
-only the corpus-backed flows — streaming turn, queue-while-in-flight, abort,
-ask-user-question, tool-call approval — a deliberate subset, NOT the full ~298-spec
-mock suite. Widening it needs conscious live captures (operator + `$DEEPSEEK_API_KEY`
-+ cost, non-deterministic content), out of scope until adopted. This is the third leg
-of the four-leg cutover gate (ported units → mock e2e → **fake-daemon e2e** → live
-smoke); the mock tier stays the broad UI regression net. (Operator decision,
-2026-07-07: Option 1.)
-
-## D22. Invariant: sidebar running indicator and transcript in-progress display must agree
-
-The sidebar's per-session status indicator (`store.sessionStatus()`, driven by
-the server-pushed `runningIds` set) and the transcript's in-progress display
-(`store.turnActive`, driving the WorkingIndicator spinner + token counter and the
-Composer's Stop button) must always agree: if one shows running, so must the
-other, and vice versa.
-
-These two signals are derived from different views of the same underlying
-truth. `runningIds` is server-authoritative — the hub's `track_running` flips it
-on for turn-bearing events (`userMessage`, `assistantDelta`, `toolStarted`) and
-clears it when an idle/failed snapshot arrives. `turnActive` ORs the folded
-`session.status` with `runningIds` and two item-level in-flight signals (an open
-streaming assistant bubble, any still-running tool card). The item-level signals
-exist as a belt-and-suspenders for live mid-turn glitches, but they must not
-survive past a turn boundary.
-
-The fold closes the open assistant on any non-running snapshot but only interrupts
-running tools on runCompleted/runFailed/sessionClosed. Orphaned tools from replay
-are settled by the seed builder (history_to_seed_events emits a synthetic
-ToolFinished(interrupted)). An idle sessionUpdated can be a transient mid-tool
-snapshot (the daemon's isStreaming briefly reads false during a rename/model
-change/auto-title), so interrupting on it would kill a genuinely running tool —
-the turnActive robustness design ORs independent in-flight signals precisely so a
-single glitch can't hide the stop affordance. Previously the fold interrupted
-running tools on every non-running snapshot (commit `qtmolyozptku`), which fixed the
-replay-path orphan but broke the live-path `turnActive` invariant (`staleidle`
-e2e). The orphan settlement now lives at the source (the seed builder) rather than
-in the fold, so both paths get their correct behavior without conflict.
+## Invariant: sidebar running indicator and transcript in-progress display must agree
+Both the sidebar listing the sessions and the currently open session transcript have in-progress indicators.
+The sidebar has a spinner on the right of the session title and the session transcript has a visual spinner at the bottom, a running token display, and a stop button that allows stopping the running agent turn.
+These should always agree with each other. If one is visible, all of them must be visible.
