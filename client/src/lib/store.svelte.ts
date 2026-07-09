@@ -34,6 +34,7 @@ import { filterSessions } from "./session-filter.js";
 import { dedupeConsecutive } from "./prompt-history.js";
 import { deliveryState } from "./delivery.js";
 import { ensurePermission } from "./notify.js";
+import { reseedDraftFromDefaults } from "./store-helpers.js";
 import {
   applyThemeMode,
   getThemeMode,
@@ -1032,6 +1033,14 @@ class PantokenStore {
         break;
       case "modelDefaults":
         this.modelDefaults = msg.defaults;
+        // Re-seed the active draft's unset model/thinking from the now-arrived
+        // defaults. Covers the boot-path timing gap where `startDraft` fired on
+        // `sessionList` (earlier in the connect queue) and seeded from the
+        // initial empty `modelDefaults`. Only fills undefined fields — explicit
+        // picks (or restored `draftConfigMap` overrides) are preserved.
+        if (this.draft) {
+          this.draft = reseedDraftFromDefaults(this.draft, msg.defaults);
+        }
         break;
       case "pantokenSettings":
         this.pantokenSettings = msg.settings;
