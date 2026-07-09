@@ -5,7 +5,13 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
 
 ## 🔴 Open bugs
 
-- [ ] pantoken needs to support all the `@` references like polytoken does, see "Referencing things with @" in https://docs.polytoken.dev/using-polytoken/prompting-and-input/#referencing-things-with-
+- ~~[x]~~ pantoken supports all the `@` references like polytoken does (files,
+      `@~/`/`@/`/`@../` external paths, `@skill:`, `@subagent:`,
+      `@model:p/m(level)` with `[`/`]` reasoning, Shift+Tab ignore toggle,
+      resolved-ref chips + missing-ref warnings). Known limits, accepted:
+      chips don't survive history replay (daemon `.jsonl` doesn't persist
+      `resolved_references`); external paths with spaces can't be referenced
+      (mention token ends at whitespace — TUI parity).
 - [ ] currently only top of transcript is draggable, top of both sidebars should be too
 - [ ] add version git tag to bottom of sidebar next to git hash
 - [ ] **Subagent-completion notice dumps the whole report (and renders as a
