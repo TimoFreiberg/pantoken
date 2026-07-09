@@ -10,16 +10,28 @@
   let {
     items,
     selected,
+    reasoningLevel = null,
     onpick,
     onhover,
   }: {
     items: readonly AtItem[];
     selected: number;
+    /** The reasoning level dialed in (via `[`/`]`) for the currently selected model
+     *  row, or null when none is chosen. Rendered only on that row — see the `model`
+     *  branch below. Irrelevant for every other row kind. */
+    reasoningLevel?: string | null;
     onpick: (item: AtItem) => void;
     onhover: (index: number) => void;
   } = $props();
 
   const KEYBOARD_HINT = "(↑↓ to move, ↵/Tab to select, Esc to dismiss)";
+  const hasModelRow = $derived(items.some((item) => item.kind === "model"));
+  // Built as one expression (rather than inline template text + a `{#if}`) so Svelte's
+  // whitespace trimming around block boundaries can't silently eat the separating space.
+  const footerHint = $derived(
+    "↑↓ navigate · ↵ select · esc dismiss · skill: subagent: model: for more" +
+      (hasModelRow ? " · [ ] reasoning" : ""),
+  );
 
   function rowKey(item: AtItem): string {
     switch (item.kind) {
@@ -45,7 +57,7 @@
       case "subagent":
         return `Insert @subagent:${item.name} ${KEYBOARD_HINT}`;
       case "model":
-        return `Insert @model:${item.model.provider}/${item.model.modelId} ${KEYBOARD_HINT}`;
+        return `Insert @model:${item.model.provider}/${item.model.modelId} — [ ] adjust reasoning ${KEYBOARD_HINT}`;
       case "sigil":
         return `Insert @${item.prefix} to ${item.label} ${KEYBOARD_HINT}`;
     }
@@ -94,6 +106,9 @@
         {#if item.model.label && item.model.label !== item.model.modelId}
           <span class="meta">{item.model.label}</span>
         {/if}
+        {#if i === selected && reasoningLevel !== null}
+          <span class="reasoning">reasoning: {reasoningLevel}</span>
+        {/if}
         <span class="kind-badge">model</span>
       {:else if item.kind === "sigil"}
         <span class="icon" aria-hidden="true">▸</span>
@@ -102,7 +117,7 @@
       {/if}
     </button>
   {/each}
-  <div class="footer">↑↓ navigate · ↵ select · esc dismiss · skill: subagent: model: for more</div>
+  <div class="footer">{footerHint}</div>
 </div>
 
 <style>
@@ -174,6 +189,18 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  /* The selected model row's dialed-in reasoning level (`[`/`]`) — right-aligned,
+     mirroring the polytoken TUI. `margin-left: auto` pushes it to the row's right
+     edge when `.meta` is absent; when `.meta` is present its own flex-grow already
+     claims the free space, so this row still reads right-aligned as a group. */
+  .reasoning {
+    flex-shrink: 0;
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    padding-left: 8px;
   }
   /* Kind badge — a small static pill echoing the toolbar MenuBadge's rounded-pill
      look (client/src/components/ui/MenuBadge.svelte), but non-interactive: it's a

@@ -137,3 +137,89 @@ test("Escape dismisses the @-reference menu without changing the draft", async (
   await expect(menu(page)).toHaveCount(0);
   await expect(box).toHaveValue("@skill:");
 });
+
+test("[ ] adjust a selected model row's reasoning level; accepting appends (level)", async ({
+  page,
+}) => {
+  const box = ta(page);
+  await box.click();
+  // Narrow to the single leveled model claude-sonnet-4-6 (mock fixture:
+  // thinkingLevels off/low/medium/high — server-rs/pantoken-server/src/mock_driver.rs).
+  await page.keyboard.type("@m:sonnet");
+  await expect(menu(page)).toBeVisible();
+  await expect(row(page, "model:anthropic/claude-sonnet-4-6")).toBeVisible();
+
+  // No level chosen yet — no "reasoning:" text on the row.
+  await expect(
+    row(page, "model:anthropic/claude-sonnet-4-6"),
+  ).not.toContainText("reasoning:");
+
+  // ] steps up from unset: null -> "off".
+  await box.press("]");
+  await expect(row(page, "model:anthropic/claude-sonnet-4-6")).toContainText(
+    "reasoning: off",
+  );
+  // ] again: "off" -> "low".
+  await box.press("]");
+  await expect(row(page, "model:anthropic/claude-sonnet-4-6")).toContainText(
+    "reasoning: low",
+  );
+  // [ steps back down: "low" -> "off".
+  await box.press("[");
+  await expect(row(page, "model:anthropic/claude-sonnet-4-6")).toContainText(
+    "reasoning: off",
+  );
+
+  await box.press("Enter");
+  await expect(box).toHaveValue("@model:anthropic/claude-sonnet-4-6(off)");
+});
+
+test("] clamps at the top level of a single-level model instead of wrapping", async ({
+  page,
+}) => {
+  const box = ta(page);
+  await box.click();
+  // deepseek-v4-flash's only thinking level is "off" (mock fixture).
+  await page.keyboard.type("@m:deepseek");
+  await expect(menu(page)).toBeVisible();
+  await expect(row(page, "model:deepseek/deepseek-v4-flash")).toBeVisible();
+
+  await box.press("]");
+  await expect(row(page, "model:deepseek/deepseek-v4-flash")).toContainText(
+    "reasoning: off",
+  );
+  // A second ] clamps at the top instead of wrapping back to unset.
+  await box.press("]");
+  await expect(row(page, "model:deepseek/deepseek-v4-flash")).toContainText(
+    "reasoning: off",
+  );
+  // [ steps back past the only level, to unset — the reasoning text disappears.
+  await box.press("[");
+  await expect(row(page, "model:deepseek/deepseek-v4-flash")).not.toContainText(
+    "reasoning:",
+  );
+
+  await box.press("Enter");
+  // No level chosen at accept time — unchanged, suffix-free insertion.
+  await expect(box).toHaveValue("@model:deepseek/deepseek-v4-flash");
+});
+
+test("[ and ] on a non-model row type the character into the draft instead of being swallowed", async ({
+  page,
+}) => {
+  const box = ta(page);
+  await box.click();
+  await page.keyboard.type("@skill:");
+  await expect(menu(page)).toBeVisible();
+  // The first skill row ("debug") is highlighted by default — a skill row, not a
+  // model row, so [ ] must NOT be intercepted for reasoning-level stepping.
+  await expect(row(page, "skill:debug")).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+
+  await box.press("[");
+  await expect(box).toHaveValue("@skill:[");
+  await box.press("]");
+  await expect(box).toHaveValue("@skill:[]");
+});
