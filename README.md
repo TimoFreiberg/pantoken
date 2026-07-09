@@ -11,6 +11,20 @@ streaming transcript, tool cards, prompt/steer/stop, mobile approval cards (incl
 generic fallback), ambient status/widgets, a reconnecting
 PWA. Real pi wiring (M5) and remote deploy (M7) are next. See `docs/`.
 
+## Install (macOS desktop app)
+
+The app is ad-hoc signed, not notarized — a browser download gets quarantined
+and Gatekeeper refuses it. This one-liner fetches it via curl (no quarantine
+xattr) and extracts it to `/Applications`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/TimoFreiberg/pantoken/main/install.sh | bash
+```
+
+After the first launch, the app self-updates. Already downloaded a "damaged"
+browser copy? Un-quarantine it: `xattr -cr /path/to/Pantoken.app`. See
+[`desktop/README.md`](desktop/README.md) for build-from-source and details.
+
 ## Quick start (dev)
 
 ```bash

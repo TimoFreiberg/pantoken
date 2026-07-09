@@ -77,6 +77,9 @@ be opened"* dialog, with no Open-Anyway path on current macOS (the right-click â
 bypass no longer applies to ad-hoc apps). Install without a browser instead:
 
 ```bash
+# one-liner (resolves the right arch + extracts to /Applications):
+curl -fsSL https://raw.githubusercontent.com/TimoFreiberg/pantoken/main/install.sh | bash
+# or, the bare curl+tar the script wraps:
 curl -sSL https://github.com/TimoFreiberg/polytoken-gui/releases/latest/download/Pantoken.app.tar.gz \
   | tar xz -C /Applications
 ```
