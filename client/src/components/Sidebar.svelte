@@ -382,11 +382,68 @@
     };
   });
 
-  // Per-project collapse state, keyed by cwd. Empty = everything expanded.
-  let collapsed = $state<Record<string, boolean>>({});
-  function toggleGroup(cwd: string): void {
-    collapsed = { ...collapsed, [cwd]: !collapsed[cwd] };
+  // Per-project collapse state, keyed by cwd. Empty = everything expanded. Persisted
+  // per-device in localStorage — docs/TODO.md asks for this as a general principle
+  // ("all front-end state should be persisted if reasonably possible"): a project you
+  // collapsed should still be collapsed after a GUI restart. Only `true` (collapsed)
+  // entries are ever stored; toggling back to expanded deletes the key rather than
+  // writing `false`, so the map's size tracks "projects currently collapsed", not
+  // "projects ever touched".
+  const COLLAPSED_GROUPS_KEY = "pantoken.sidebarCollapsedGroups";
+  function loadCollapsedGroups(): Record<string, boolean> {
+    if (typeof window === "undefined") return {};
+    try {
+      const raw = localStorage.getItem(COLLAPSED_GROUPS_KEY);
+      if (!raw) return {};
+      const parsed: unknown = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return {};
+      const out: Record<string, boolean> = {};
+      for (const [cwd, v] of Object.entries(parsed as Record<string, unknown>))
+        if (v === true) out[cwd] = true;
+      return out;
+    } catch {
+      return {};
+    }
   }
+  function persistCollapsedGroups(map: Record<string, boolean>): void {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify(map));
+    } catch {
+      // Storage full / unavailable (private mode) — collapse state stays in-memory
+      // this session only.
+    }
+  }
+  let collapsed = $state<Record<string, boolean>>(loadCollapsedGroups());
+  function toggleGroup(cwd: string): void {
+    const next = { ...collapsed };
+    if (next[cwd]) delete next[cwd];
+    else next[cwd] = true;
+    collapsed = next;
+    persistCollapsedGroups(collapsed);
+  }
+
+  // Prune collapse entries for projects that no longer have any session on disk —
+  // otherwise a renamed/removed project's flag lingers in localStorage forever (slow,
+  // small, but unbounded). Gated on a non-empty session list: `store.sessions` starts
+  // `[]` before the first server snapshot lands, and `sessionList` is always a full
+  // authoritative replace (never a delta) — pruning against that empty pre-boot list
+  // would wipe every stored flag the instant the page loads, which is exactly the bug
+  // this persistence exists to fix.
+  $effect(() => {
+    if (store.sessions.length === 0) return;
+    const known = new Set(store.sessions.map((s) => s.cwd));
+    let changed = false;
+    const next: Record<string, boolean> = {};
+    for (const cwd of Object.keys(collapsed)) {
+      if (known.has(cwd)) next[cwd] = true;
+      else changed = true;
+    }
+    if (changed) {
+      collapsed = next;
+      persistCollapsedGroups(collapsed);
+    }
+  });
 
   // Re-scan disk whenever the sidebar opens, so a session another client created
   // (or the agent itself) shows up without a reload.
@@ -662,7 +719,8 @@
                   <div class="row-line">
                     <button
                       class="row"
-                      class:active={s.sessionId === store.viewedSessionId}
+                      class:active={s.sessionId === store.viewedSessionId &&
+                        !store.draft}
                       title={activity
                         ? `${s.displayName || s.preview || "Session"} — ${activity}`
                         : `Open ${s.displayName || s.preview || "session"}`}
@@ -953,7 +1011,7 @@
     padding: 12px 14px 10px;
   }
   .new {
-    padding: 0 10px 8px;
+    padding: 0 16px 8px;
   }
   .new-btn {
     display: flex;
@@ -994,7 +1052,7 @@
   }
 
   .search {
-    padding: 0 10px 8px;
+    padding: 0 16px 8px;
   }
   .search-input {
     width: 100%;
@@ -1017,7 +1075,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 0 10px 8px;
+    padding: 0 16px 8px;
   }
   .filter-toggle {
     font-size: 12px;
@@ -1067,7 +1125,11 @@
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: 4px 6px 14px 2px;
+    /* Codex-style outer gutter (see .group-toggle/.group-head/ul below, which add the
+       rest): left/right 10px here, plus each row/header's own inner padding, lands the
+       header text ~16px from the sidebar edge and indents session rows a further step
+       under it — was flush-left (2px) before, per docs/TODO.md's margin complaint. */
+    padding: 6px 10px 14px 10px;
   }
   /* Quiet build stamp pinned at the bottom of the sidebar. */
   .app-update {
@@ -1076,7 +1138,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    margin: 0 10px 8px;
+    margin: 0 16px 8px;
     padding: 8px 10px;
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
@@ -1089,7 +1151,7 @@
   }
   .version {
     flex-shrink: 0;
-    padding: 8px 14px calc(8px + env(safe-area-inset-bottom));
+    padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
     font-family: var(--font-mono);
     font-size: 10.5px;
     color: var(--text-faint);
@@ -1100,7 +1162,7 @@
     user-select: none;
   }
   .empty {
-    padding: 16px 10px;
+    padding: 16px;
     font-size: 13px;
     color: var(--text-muted);
     text-align: center;
@@ -1112,9 +1174,10 @@
     display: flex;
     align-items: center;
     gap: 2px;
-    /* Flush left: the project title anchors the very edge; the small right pad just
-       keeps the + button off the scrollbar. */
-    padding: 0 4px 0 0;
+    /* The project title sits at the sidebar's outer gutter (.list's 10px + this
+       button's own left padding below = ~16px, Codex's outer margin); the small right
+       pad just keeps the + button off the scrollbar. */
+    padding: 0 6px 0 0;
   }
   .group-toggle {
     display: flex;
@@ -1124,7 +1187,7 @@
     min-width: 0;
     background: transparent;
     border: none;
-    padding: 7px 4px;
+    padding: 8px 6px;
     color: var(--text-muted);
     font-size: 11.5px;
     text-transform: uppercase;
@@ -1177,10 +1240,13 @@
   }
   ul {
     list-style: none;
-    /* No list indent — each row's leading gutter (.lead) supplies the nesting offset, so
-       the project title stays flush left while session titles sit slightly inset. */
+    /* Indent session rows a step further than their project header (Codex-style
+       hierarchy): this 10px left padding shifts each row's own box that much further
+       right than the header's box (10px from the sidebar edge -> 20px), so the row
+       pill reads as nested under the project name above it. The small right padding
+       keeps the (already edge-inset) pill off the scrollbar too. */
     margin: 0 0 2px;
-    padding: 0;
+    padding: 0 4px 0 10px;
   }
   /* A row plus its overflow (⋯) trigger. The ⋯ overlays the row's right edge on hover
      rather than reserving a column, so the title keeps the full width. */
@@ -1200,8 +1266,11 @@
     text-align: left;
     background: transparent;
     border: none;
-    border-radius: var(--radius-sm);
-    padding: 6px 8px 6px 4px;
+    /* Softer, rounder pill than the old --radius-sm (9px) — closer to Codex's selected-row
+       shape. Shared by :hover and .active below (same box, just a background swap), so the
+       corner radius never jumps between hover and selected. */
+    border-radius: var(--radius);
+    padding: 7px 8px 7px 4px;
   }
   .row:hover {
     background: var(--surface);
