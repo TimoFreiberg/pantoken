@@ -1,15 +1,13 @@
 # pantoken
 
-A personal, single-user remote-control web UI for the [`pi`](https://github.com/earendil-works/pi)
-coding agent. pi runs on a Mac Mini; you control it from a work-MacBook browser or
-your phone over Tailscale. The look mirrors the Claude app.
+A personal, single-user gui for the [`polytoken`](https://docs.polytoken.dev/introduction/)
+coding agent, with remote control and mobile app aspirations.
+
+Tauri app with a Svelte frontend and an internal Rust server.
 
 ## Status
 
-Early. M0–M3 built and screenshot-verified against a deterministic mock of pi:
-streaming transcript, tool cards, prompt/steer/stop, mobile approval cards (incl.
-generic fallback), ambient status/widgets, a reconnecting
-PWA. Real pi wiring (M5) and remote deploy (M7) are next. See `docs/`.
+Early, close to dogfoodable.
 
 ## Install (macOS desktop app)
 
@@ -29,30 +27,17 @@ browser copy? Un-quarantine it: `xattr -cr /path/to/Pantoken.app`. See
 
 ```bash
 bun install
-PANTOKEN_DRIVER=mock bun run dev   # mock driver (no pi running, use with ?dev bar)
-# or if you have pi running:  bun run dev
+PANTOKEN_DRIVER=mock bun run dev   # mock driver
+# or if you want to run a real coding agent:  bun run dev
 open http://localhost:5173
 ```
 
-The server defaults to the real pi SDK driver. Set `PANTOKEN_DRIVER=mock` to use the
+The server defaults to the real agent driver. Set `PANTOKEN_DRIVER=mock` to use the
 deterministic mock — you want this for UI development without a running pi instance
 and for the dev bar (`http://localhost:5173/?dev`).
 
 `http://localhost:5173/?dev` adds a dev bar to drive the mock to any UI state.
 `http://localhost:8787/debug/state` dumps the authoritative session state as JSON.
 
-**Desktop app:** `desktop/` is a macOS `.app` (Swift/AppKit + `WKWebView` shell) that
-runs a local pantoken server from a dedicated clone, supervises it, and auto-updates it
-from `origin/main`. See [`desktop/README.md`](desktop/README.md) to build + run it.
-
 **Tests:** `bun test` (unit) needs no mock; `bun run test:e2e` (Playwright) sets
 `PANTOKEN_DRIVER=mock` automatically.
-
-## Architecture (one paragraph)
-
-A Bun/TS server embeds the pi SDK behind a `PantokenDriver` seam, folds the agent's
-event stream into an authoritative `SessionState`, and broadcasts it over WebSocket;
-browser/phone clients are thin projections that fold the same events with the same
-reducer and snapshot-on-reconnect. Shared durable state lives on the server;
-per-client view state (selection, composer draft) stays local. Full design,
-decisions, and the feature roadmap are in [`docs/`](docs/).

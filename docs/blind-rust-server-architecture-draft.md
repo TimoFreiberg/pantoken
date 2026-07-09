@@ -2,6 +2,8 @@
 
 Status: draft for discussion. Written against `polytoken 0.4.0-unstable.5`.
 
+author note: we should probably check in when we're at the stable dogfooding state if we want to take over anything from this doc
+
 ## 1. Scope
 
 A Rust server ("the hub") that sits between Polytoken session daemons on one
