@@ -8,6 +8,34 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
 - [ ] POST /interrogative/respond fails with 401 because the Authorization header is missing
 - [ ] currently only top of transcript is draggable, top of both sidebars should be too ()
 - [ ] add version git tag to bottom of sidebar next to git hash
+- [ ] **Subagent-completion notice dumps the whole report (and renders as a
+      giant ellipse).** When a subagent / `job_block` returns, the daemon emits
+      `notification_queued` with `notification_type: SubagentComplete { handle,
+      outcome }` (or `JobComplete { exit_code }`), and the polytoken event map
+      surfaces the notification's **`summary` verbatim** as an info notice
+      (`server-rs/pantoken-server/src/polytoken/event_map.rs:1751`, the
+      `NotificationQueued` arm). For a review subagent that `summary` is the
+      entire report, so the transcript gets a multi-KB `ℹ` notice. The `.notice`
+      pill CSS then can't cope: it uses `border-radius: 999px`
+      (`client/src/components/Transcript.svelte`, notice branch ~L944, `.notice`
+      ~L1531), which the browser clamps to `min(width, height) / 2` — on a tall
+      block that's a rounded-stadium/ellipse whose faint `1px var(--border)`
+      outline traces a big curve *over* the text (repro'd: a 900×352 notice →
+      176px effective corner radius, matching the dogfood screenshot of two
+      in-flight `job_block` reports). `align-items: center` floats the `ℹ` to the
+      vertical middle; `.ntext` has no `white-space`, so the report's newlines
+      collapse to one run-on paragraph. **Primary fix (at the source):** in the
+      `NotificationQueued` arm build a short label from `notification_type`
+      instead of passing `summary` through — e.g. `SubagentComplete{handle,
+      outcome}` → "Subagent {handle} {Success|Failure|Cancelled}", `JobComplete`
+      → "Job completed (exit N)"; keep `summary` only for the short-by-nature
+      types (`HookResult`, `ExtensionMessage`, `Unknown`). The full report stays
+      reachable via the job detail (`JobDetail.svelte` renders the job's output
+      tail from GET /jobs). **Defense-in-depth (CSS):** still harden `.notice`
+      so a long body can never draw the ellipse again — bound the radius
+      (`var(--radius-sm)` not `999px`), `align-items: flex-start`, `.ntext`
+      `white-space: pre-wrap` (other sources like `SubagentCompactionNotice.summary`
+      can also be long).
 - [ ] **e2e live-tier coverage gap** (was "e2e suite asserts mock behaviors the
       live driver never produces"): the corpus-backed live tier exists
       (`e2e/live/`, 5 spec files vs `PANTOKEN_DRIVER=fake`, real recorded
