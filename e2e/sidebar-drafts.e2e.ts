@@ -45,6 +45,37 @@ test("a draft nests under its project and survives navigating away", async ({
   await expect(pantokenDraft).not.toHaveClass(/\bactive\b/);
 });
 
+test("opening a draft highlights only the draft — the previously focused session drops its highlight", async ({
+  page,
+}) => {
+  // docs/TODO.md: "When the new session draft view is open in the sidebar both the
+  // new session and the previously focused session are highlighted at once. Only the
+  // 'new session' should be highlighted."
+  await openSidebar(page);
+  const sidebar = page.getByTestId("sidebar");
+
+  // The greeting session is focused (and highlighted) before any draft opens.
+  const focusedRow = sidebar.locator("button.row", {
+    hasText: "Wire up the WebSocket bridge",
+  });
+  await expect(focusedRow).toHaveClass(/\bactive\b/);
+
+  await newDraftIn(page, "pantoken");
+  const draftRow = group(page, "pantoken").getByTestId("draft-row");
+  await expect(draftRow).toHaveClass(/\bactive\b/);
+
+  // The previously focused row is still visible, but plain — not highlighted...
+  await expect(focusedRow).toBeVisible();
+  await expect(focusedRow).not.toHaveClass(/\bactive\b/);
+  // ...so the draft is the ONLY highlighted row in the whole sidebar.
+  await expect(sidebar.locator("button.row.active")).toHaveCount(1);
+
+  // Canceling the draft (back to the focused session) restores its highlight.
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(focusedRow).toHaveClass(/\bactive\b/);
+  await expect(sidebar.locator("button.row.active")).toHaveCount(1);
+});
+
 test("the × discards a draft", async ({ page }) => {
   await openSidebar(page);
   await newDraftIn(page, "pantoken");

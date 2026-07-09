@@ -98,7 +98,8 @@ test("an empty launch restores this client's last-focused session", async ({
       page.evaluate(() =>
         Object.entries(localStorage).some(
           ([key, value]) =>
-            key.startsWith("pantoken.lastSession.") && value === "older-session",
+            key.startsWith("pantoken.lastSession.") &&
+            value === "older-session",
         ),
       ),
     )
@@ -156,9 +157,9 @@ test("a pantoken-created worktree session groups under its parent project, inter
 
   // The worktree session (cwd /Users/timo/src/pantoken-worktree) groups under its PARENT
   // project (the pantoken repo, its `base`) — NOT a separate "pantoken-worktree" group.
-  await expect(list.getByText("pantoken-worktree", { exact: true })).toHaveCount(
-    0,
-  );
+  await expect(
+    list.getByText("pantoken-worktree", { exact: true }),
+  ).toHaveCount(0);
 
   const pantokenGroup = list
     .locator(".group")
@@ -172,7 +173,9 @@ test("a pantoken-created worktree session groups under its parent project, inter
   await expect(
     pantokenGroup.getByText("Wire up the WebSocket bridge"),
   ).toBeVisible();
-  await expect(pantokenGroup.getByText("Explore the fold reducer")).toBeVisible();
+  await expect(
+    pantokenGroup.getByText("Explore the fold reducer"),
+  ).toBeVisible();
 });
 
 test("rows show a relative last-activity timestamp; the count appears only when collapsed", async ({
@@ -200,6 +203,48 @@ test("rows show a relative last-activity timestamp; the count appears only when 
   await pantokenGroup.locator(".group-toggle").click();
   await expect(pantokenGroup.locator(".count")).toBeVisible();
   await expect(demoRow).toHaveCount(0);
+});
+
+test("a collapsed project stays collapsed after a reload; other projects aren't affected", async ({
+  page,
+}) => {
+  // docs/TODO.md: "The collapsed state of projects in the sidebar should be
+  // persisted, so when restoring the GUI, it should keep projects collapsed that I
+  // previously collapsed."
+  await openSidebar(page);
+  const sidebar = page.getByTestId("sidebar");
+  const pantokenGroup = sidebar
+    .locator(".group")
+    .filter({ has: page.locator(".proj", { hasText: "pantoken" }) });
+  const retryLibGroup = sidebar
+    .locator(".group")
+    .filter({ has: page.locator(".proj", { hasText: "retry-lib" }) });
+
+  // Collapse pantoken only — retry-lib stays expanded.
+  await pantokenGroup.locator(".group-toggle").click();
+  await expect(pantokenGroup.locator(".count")).toBeVisible();
+  await expect(retryLibGroup.locator(".count")).toHaveCount(0);
+
+  // Reload: this is a client-only localStorage preference, independent of the
+  // server's (freshly re-fetched) session list, so it must survive a full reboot.
+  await page.reload();
+  await openSidebar(page);
+  await expect(pantokenGroup.locator(".count")).toBeVisible();
+  await expect(
+    pantokenGroup.getByText("Wire up the WebSocket bridge"),
+  ).toHaveCount(0);
+  // The untouched project wasn't collapsed by the reload — keyed per-project, not global.
+  await expect(retryLibGroup.locator(".count")).toHaveCount(0);
+  await expect(
+    retryLibGroup.getByText("Cold-restore regression check"),
+  ).toBeVisible();
+
+  // Expanding it back removes the count and reveals the rows again — round-trip intact.
+  await pantokenGroup.locator(".group-toggle").click();
+  await expect(pantokenGroup.locator(".count")).toHaveCount(0);
+  await expect(
+    pantokenGroup.getByText("Wire up the WebSocket bridge"),
+  ).toBeVisible();
 });
 
 test("relative timestamps tick forward as time passes", async ({ page }) => {
@@ -346,12 +391,13 @@ test("reopening the sidebar focuses the search box (desktop)", async ({
 
   // Close, then reopen — the closed→open transition lands focus in the search box so a
   // keyboard user can filter immediately. (On a phone this is suppressed; desktop only.)
-  await page.getByTestId("sidebar-toggle").click();
+  // ⌘B round-trips the same store toggle the removed header hamburger used to.
+  await page.keyboard.press("Control+b");
   await expect(page.getByTestId("sidebar")).toHaveAttribute(
     "data-open",
     "false",
   );
-  await page.getByTestId("sidebar-toggle").click();
+  await page.keyboard.press("Control+b");
   await expect(search).toBeFocused();
 });
 

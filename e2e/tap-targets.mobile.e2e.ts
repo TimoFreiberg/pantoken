@@ -40,3 +40,13 @@ test("settings collapse headers meet the 44px touch target", async ({
   for (const id of ["appearance", "models", "environment", "token"])
     await expectTall(page.getByTestId(`settings-tab-${id}`));
 });
+
+test("the sidebar and context-panel edge-open arrows meet the 44px touch target", async ({
+  page,
+}) => {
+  // Both drawers are closed by default on a phone, so both edge arrows are already
+  // showing — no driving needed. They're the only tap affordance left now that the
+  // header hamburgers are gone, so a cramped hit target here would be a real regression.
+  await expectTall(page.getByTestId("sidebar-edge-open"));
+  await expectTall(page.getByTestId("context-edge-open"));
+});
