@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 
 use pantoken_protocol::session_driver::{SessionListEntry, WorktreeInfo};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 /// The on-disk `session.json` shape — the durable per-session metadata polytoken
 /// writes when a session is created. Fields are all optional in the parser
@@ -39,6 +40,17 @@ pub struct SessionJson {
     pub last_user_message_preview: Option<String>,
     #[serde(default)]
     pub initial_model_name: Option<String>,
+    /// The operator's manually-set title (a rename), as the polytoken daemon
+    /// persists it to disk — `None` when the session has never been renamed
+    /// (its sidebar row falls back to the auto-inferred preview instead).
+    /// Confirmed against real on-disk sessions (`~/.local/share/polytoken/sessions/*/session.json`):
+    /// this is the exact field/spelling the daemon itself writes when a
+    /// warm rename lands via `POST /title`. Reading it here is what makes a
+    /// cold session's sidebar row show the actually-renamed title instead of
+    /// silently reverting to the preview (docs/TODO.md: "I have no idea if
+    /// the title we are displaying in the sidebar is the right one").
+    #[serde(default)]
+    pub overridden_title: Option<String>,
     /// Tagged: `{kind:"standalone"}` | `{kind:"local", session_id}`. The parent
     /// session, for subsessions. Standalone = no parent.
     #[serde(default)]
@@ -104,12 +116,12 @@ pub fn read_session_json(session_dir: &Path) -> Option<SessionJson> {
         Ok(contents) => match serde_json::from_str::<SessionJson>(&contents) {
             Ok(meta) => Some(meta),
             Err(e) => {
-                eprintln!("[polytoken] failed to parse {}: {}", file.display(), e);
+                warn!("[polytoken] failed to parse {}: {}", file.display(), e);
                 None
             }
         },
         Err(e) => {
-            eprintln!("[polytoken] failed to read {}: {}", file.display(), e);
+            warn!("[polytoken] failed to read {}: {}", file.display(), e);
             None
         }
     }
@@ -121,7 +133,21 @@ pub fn read_session_json(session_dir: &Path) -> Option<SessionJson> {
 pub fn list_session_ids(sessions_dir: &Path) -> Vec<String> {
     let entries = match fs::read_dir(sessions_dir) {
         Ok(e) => e,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            // A missing sessions dir is normal on a fresh install (no session
+            // has ever been created) — not worth a log. Anything else
+            // (permission denied, I/O error) is unexpected and worth
+            // surfacing: a silently-empty result looks identical to "no
+            // sessions yet" otherwise, hiding a genuinely broken registry.
+            if e.kind() != std::io::ErrorKind::NotFound {
+                warn!(
+                    "[polytoken] failed to read sessions dir {}: {}",
+                    sessions_dir.display(),
+                    e
+                );
+            }
+            return Vec::new();
+        }
     };
 
     let mut with_mtime: Vec<(String, Option<std::time::SystemTime>)> = Vec::new();
@@ -232,7 +258,12 @@ fn cold_session_entry_from_meta(
             .to_string_lossy()
             .to_string(),
         cwd,
-        display_name: None,
+        // Was unconditionally `None` — a cold session whose title was ever
+        // set (via a warm rename, or a prior process before this fix) showed
+        // its preview text instead, silently discarding the daemon's own
+        // durable `overridden_title`. See `write_overridden_title` below for
+        // the write side (cold-session renames, which never warm the daemon).
+        display_name: meta.overridden_title.clone(),
         preview,
         // The daemon doesn't expose a per-session user-message count without a
         // daemon; 0 is a safe default (the sidebar shows it, not a wrong number).
@@ -245,6 +276,40 @@ fn cold_session_entry_from_meta(
         archived: opts.archived,
         worktree: opts.worktree,
     }
+}
+
+/// Persist an operator title override directly into a session's on-disk
+/// `session.json`, bypassing the daemon entirely.
+///
+/// ONLY safe to call when the session is COLD (no daemon running for it) —
+/// while a session is warm, the daemon is the sole writer of this file, and a
+/// concurrent write from here could race it and lose an update on either
+/// side. `PolytokenDriver::rename_session` enforces this: a warm session is
+/// renamed through the daemon's own `POST /title` instead (see driver.rs).
+///
+/// Round-trips through a generic `serde_json::Value` rather than the typed
+/// `SessionJson` — that struct only declares the fields this crate reads
+/// (e.g. it has no `version` field, even though real session.json files do).
+/// Deserializing into `SessionJson` and re-serializing would silently drop
+/// every field it doesn't model. Patching one key of the raw object preserves
+/// everything else byte-for-byte (modulo key order/whitespace).
+pub fn write_overridden_title(session_json_path: &Path, title: &str) -> std::io::Result<()> {
+    let raw = fs::read_to_string(session_json_path)?;
+    let mut value: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let obj = value.as_object_mut().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{} is not a JSON object", session_json_path.display()),
+        )
+    })?;
+    obj.insert(
+        "overridden_title".to_string(),
+        serde_json::Value::String(title.to_string()),
+    );
+    let out = serde_json::to_string_pretty(&value)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    fs::write(session_json_path, out)
 }
 
 /// Callbacks the caller provides to resolve pantoken-side flags.
@@ -348,6 +413,7 @@ mod tests {
             last_activity_at: "2026-06-28T11:00:00Z".to_string(),
             last_user_message_preview: Some("hello".to_string()),
             initial_model_name: Some("anthropic/claude".to_string()),
+            overridden_title: None,
             parent_session_id: Some(ParentSessionRef::Standalone),
         };
         over(&mut m);
@@ -507,6 +573,54 @@ mod tests {
         // preview present → last_user_message_at == last_activity_at.
         assert_eq!(entry.last_user_message_at, "2026-06-28T11:00:00Z");
         assert_eq!(entry.path, dir.path().join("abc123").join("session.json"));
+    }
+
+    #[test]
+    fn cold_session_entry_display_name_is_none_without_an_override() {
+        // Regression guard for the inverse of the bug below: a session that was
+        // never renamed must still show no display name (falls back to the
+        // preview client-side), not e.g. an empty string.
+        let dir = make_sessions_dir(&[(
+            "never-renamed",
+            Some(base_meta(|m| m.session_id = "never-renamed".to_string())),
+        )]);
+        let entry = cold_session_entry(
+            &dir.path().join("never-renamed"),
+            "never-renamed",
+            ColdSessionOpts {
+                archived: false,
+                worktree: None,
+            },
+        )
+        .expect("should build an entry");
+        assert_eq!(entry.display_name, None);
+    }
+
+    #[test]
+    fn cold_session_entry_surfaces_overridden_title_as_display_name() {
+        // The concrete bug: docs/TODO.md doubted "the title we are displaying
+        // in the sidebar is the right one" for a renamed, cold session. Before
+        // this fix, `display_name` was hardcoded `None` regardless of
+        // `overridden_title` — confirmed against real on-disk session.json
+        // files from this machine's own polytoken sessions dir, which DO carry
+        // this exact field once a session has been renamed.
+        let dir = make_sessions_dir(&[(
+            "renamed",
+            Some(base_meta(|m| {
+                m.session_id = "renamed".to_string();
+                m.overridden_title = Some("My Custom Title".to_string());
+            })),
+        )]);
+        let entry = cold_session_entry(
+            &dir.path().join("renamed"),
+            "renamed",
+            ColdSessionOpts {
+                archived: false,
+                worktree: None,
+            },
+        )
+        .expect("should build an entry");
+        assert_eq!(entry.display_name.as_deref(), Some("My Custom Title"));
     }
 
     #[test]
@@ -673,5 +787,84 @@ mod tests {
             },
         );
         assert!(entries.is_empty());
+    }
+
+    // ── write_overridden_title ────────────────────────────────────────────
+
+    #[test]
+    fn write_overridden_title_sets_the_field_and_is_read_back_by_cold_session_entry() {
+        let dir =
+            make_sessions_dir(&[("s1", Some(base_meta(|m| m.session_id = "s1".to_string())))]);
+        let path = dir.path().join("s1").join("session.json");
+
+        write_overridden_title(&path, "Renamed While Cold").expect("should write");
+
+        let entry = cold_session_entry(
+            &dir.path().join("s1"),
+            "s1",
+            ColdSessionOpts {
+                archived: false,
+                worktree: None,
+            },
+        )
+        .expect("should still build an entry");
+        assert_eq!(entry.display_name.as_deref(), Some("Renamed While Cold"));
+    }
+
+    #[test]
+    fn write_overridden_title_preserves_fields_the_typed_struct_does_not_model() {
+        // The real on-disk shape has a `version` field `SessionJson` doesn't
+        // declare (see the module's real-world field survey). A naive
+        // deserialize-into-SessionJson-then-reserialize round-trip would
+        // silently drop it; the raw-Value patch must not.
+        let dir = tempfile::tempdir().unwrap();
+        let session_dir = dir.path().join("s1");
+        fs::create_dir_all(&session_dir).unwrap();
+        let path = session_dir.join("session.json");
+        fs::write(
+            &path,
+            serde_json::json!({
+                "version": 1,
+                "session_id": "s1",
+                "project_path": "/proj",
+                "created_at": "2026-06-28T10:00:00Z",
+                "last_activity_at": "2026-06-28T11:00:00Z",
+                "some_future_field": {"nested": true},
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        write_overridden_title(&path, "New Title").expect("should write");
+
+        let raw = fs::read_to_string(&path).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(value["version"], 1);
+        assert_eq!(value["some_future_field"]["nested"], true);
+        assert_eq!(value["overridden_title"], "New Title");
+    }
+
+    #[test]
+    fn write_overridden_title_overwrites_a_previous_override() {
+        let dir = make_sessions_dir(&[(
+            "s1",
+            Some(base_meta(|m| {
+                m.session_id = "s1".to_string();
+                m.overridden_title = Some("Old Title".to_string());
+            })),
+        )]);
+        let path = dir.path().join("s1").join("session.json");
+
+        write_overridden_title(&path, "New Title").expect("should write");
+
+        let got = read_session_json(&dir.path().join("s1")).expect("should parse");
+        assert_eq!(got.overridden_title.as_deref(), Some("New Title"));
+    }
+
+    #[test]
+    fn write_overridden_title_errors_on_a_missing_session_json_instead_of_panicking() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = write_overridden_title(&dir.path().join("nope.json"), "Title");
+        assert!(result.is_err());
     }
 }
