@@ -229,34 +229,58 @@
   // `null` = no level chosen (unchanged accept: plain `@model:provider/modelId`). Reset
   // effect is below, alongside atQ/atOpen (which it depends on).
   let modelLevel = $state<string | null>(null);
+  // Shift+Tab ignore-rules toggle (polytoken TUI parity): while true, the picker bypasses
+  // the local index entirely and always server-queries with `includeIgnored: true`, so
+  // hidden dotfiles and gitignored entries join the candidates (project AND external
+  // modes — see the keydown block and the debounced-fallback effect below). Unlike
+  // `modelLevel` this must SURVIVE further typing within the same mention (so narrowing
+  // the query after revealing `.env` doesn't immediately hide it again) — its reset effect
+  // (below, near `atDismissed`) is keyed on the active token's identity (`atTokenPos`) and
+  // an explicit Escape-dismiss, not on `atQ`'s text or `atOpen` (see that effect's comment
+  // for why `atOpen` specifically would create a feedback loop here).
+  let ignoreOff = $state(false);
   let fileDebounce: ReturnType<typeof setTimeout> | undefined;
   const atMatch = $derived(extractAtQuery(store.composerDraft, cursorPos));
   const atQ = $derived(atMatch?.query ?? null);
+  // Identifies WHICH `@` is the active mention (its position in the draft), as opposed to
+  // `atQ`'s text content, which changes on every keystroke. Used only to scope
+  // `ignoreOff`'s reset to "a different/no mention became active", not "the same mention's
+  // text changed".
+  const atTokenPos = $derived(atMatch?.atPos ?? null);
   const atClass = $derived(atQ === null ? null : classifyAtQuery(atQ));
   // Instant local matches over the prefetched index — the dominant path. Suppressed while
   // drafting a new session: the pushed index is the previously-focused session's cwd, so its
   // files are wrong for the draft's target project. A draft searches via the server fallback
-  // (scoped to the draft cwd) instead. Only meaningful in project mode; used here purely as
-  // the "are local matches thin" signal for the fallback effect below (buildAtItems below
-  // does its own filtering over the full index for the actual menu items).
+  // (scoped to the draft cwd) instead. Also suppressed while `ignoreOff` is toggled on — the
+  // local index never carries the hidden/gitignored entries the toggle wants revealed, so
+  // it's server-only for the duration (Composer bypasses it entirely). Only meaningful in
+  // project mode; used here purely as the "are local matches thin" signal for the fallback
+  // effect below (buildAtItems below does its own filtering over the full index for the
+  // actual menu items).
   const localFileItems = $derived(
-    atQ === null || drafting
+    atQ === null || drafting || ignoreOff
       ? []
       : filterFiles(store.fileIndex.files, atQ, AT_MENU_LIMIT),
   );
-  // Server fallback results, but only while they match the *current* query (the echoed
-  // query guards a stale in-flight response from landing under a newer keystroke).
+  // Server fallback results, but only while they match the *current* query AND toggle state
+  // (both echoed back by the server) — either one being stale (an in-flight response from a
+  // newer keystroke, or from before/after a Shift+Tab flip) must not land in the menu.
   const serverFileItems = $derived(
-    atQ !== null && store.files.query === atQ ? store.files.items : [],
+    atQ !== null &&
+      store.files.query === atQ &&
+      store.files.includeIgnored === ignoreOff
+      ? store.files.items
+      : [],
   );
   // The full kind-aware menu list: file/skill/subagent/model/sigil rows, built by the pure
   // `buildAtItems` helper so the ordering/filtering logic is unit-testable independent of
-  // this component. `files` is emptied while drafting (see localFileItems above).
+  // this component. `files` is emptied while drafting or ignoreOff-toggled (see
+  // localFileItems above) — the server is the sole source in either case.
   const atItems = $derived.by((): AtItem[] => {
     if (atQ === null) return [];
     return buildAtItems({
       query: atQ,
-      files: drafting ? [] : store.fileIndex.files,
+      files: drafting || ignoreOff ? [] : store.fileIndex.files,
       serverFiles: serverFileItems,
       skills: store.atRefs.skills,
       subagents: store.atRefs.subagents,
@@ -266,6 +290,12 @@
   });
   const atOpen = $derived(
     atQ !== null && !atDismissed && atItems.length > 0,
+  );
+  // Whether the current mode's candidates are affected by the ignore-rules toggle at all —
+  // only file browsing (project/external) has a notion of "hidden"/"gitignored"; skill/
+  // subagent/model takeovers have no such concept. Drives the AtMenu footer hint.
+  const ignoreToggleApplies = $derived(
+    atClass?.mode === "project" || atClass?.mode === "external",
   );
   $effect(() => {
     if (atSel >= atItems.length) atSel = 0;
@@ -280,22 +310,43 @@
     atOpen;
     modelLevel = null;
   });
+  // ignoreOff resets when the ACTIVE MENTION ITSELF changes (a different `@`, or none at
+  // all — `atTokenPos`) or the menu is explicitly dismissed (Escape — `atDismissed`) —
+  // deliberately NOT on every `atQ` keystroke like modelLevel above, so continuing to
+  // narrow the query while the toggle is on doesn't immediately re-hide what it just
+  // revealed. Also deliberately NOT keyed on `atOpen`: toggling `ignoreOff` on is ITSELF
+  // what flips a zero-local-match menu open once the server responds (bypassing the local
+  // index and waiting on `serverFileItems`) — depending on `atOpen` here would reset the
+  // toggle the instant that response arrived and the menu opened, undoing itself in a
+  // feedback loop (open → reset → server items invalidated by the guard → closes again).
+  $effect(() => {
+    atTokenPos;
+    atDismissed;
+    ignoreOff = false;
+  });
 
   // Debounced server fallback: ALWAYS fires in external mode (`~/…`, `/…`, `../…`) —
   // there's no local index for paths outside the project, so the server is the only
   // source. In project (file) mode it fires only when the index was truncated and local
   // matches are thin (the wanted file may live past the cap), OR always while drafting
   // (no session index exists for the draft's target cwd, so the server `fd` search
-  // scoped to that cwd is the only source). Skill/subagent/model modes never reach the
-  // server here — their sources are already local (atRefs/models). The common
-  // non-draft project-file case never reaches the server either.
+  // scoped to that cwd is the only source), OR always while `ignoreOff` is toggled on
+  // (the local index never has hidden/gitignored entries, so the truncated/thin gating is
+  // suspended for the duration). Skill/subagent/model modes never reach the server here —
+  // their sources are already local (atRefs/models). The common non-draft, untoggled
+  // project-file case never reaches the server either.
   $effect(() => {
     const q = atQ;
+    // Read explicitly (not just inside the setTimeout closure below) so toggling
+    // Shift+Tab — with nothing else about the active mention changing — still
+    // re-triggers this effect and re-fires the query with the new flag value.
+    const off = ignoreOff;
     const needFallback =
       q !== null &&
       (atClass?.mode === "external" ||
         (atClass?.mode === "project" &&
           (drafting ||
+            off ||
             (store.fileIndex.truncated && localFileItems.length < FALLBACK_MIN))));
     clearTimeout(fileDebounce);
     if (!needFallback) return;
@@ -307,7 +358,7 @@
       ? store.draft?.cwd.trim() || store.defaultNewSessionCwd
       : undefined;
     fileDebounce = setTimeout(() => {
-      if (q !== null) store.queryFiles(q, cwd);
+      if (q !== null) store.queryFiles(q, cwd, off);
     }, 150);
     return () => clearTimeout(fileDebounce);
   });
@@ -683,6 +734,31 @@
         return;
       }
     }
+    // Shift+Tab: toggle the ignore-rules picker state (polytoken TUI parity) — hidden
+    // dotfiles and gitignored entries join the candidates while on. Deliberately checked
+    // ahead of (and independent of) the `atOpen`-gated block below, on the weaker
+    // `atQ !== null && !atDismissed` condition: a project-mode query that matches ONLY a
+    // currently-hidden dotfile has zero local candidates, so `atOpen` (which additionally
+    // requires `atItems.length > 0`) is still false at this point — the menu hasn't
+    // rendered yet — but the toggle must still work here, since it's the only way to ever
+    // reveal that candidate and make the menu open. MUST also be checked before the
+    // atOpen block's own Enter/Tab accept branch below: that branch matches on
+    // `e.key === "Tab"` alone, so without this earlier, shift-guarded check it would
+    // swallow Shift+Tab as an accept instead of a toggle. Plain Tab (no shift) still
+    // falls through to that block's accept, unaffected.
+    if (
+      atQ !== null &&
+      !atDismissed &&
+      e.key === "Tab" &&
+      e.shiftKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey
+    ) {
+      e.preventDefault();
+      ignoreOff = !ignoreOff;
+      return;
+    }
     // @-reference keyboard handling (after slash, so slash takes priority if both
     // menus somehow overlap — the user typed `/` first).
     if (atOpen) {
@@ -1015,6 +1091,7 @@
           items={atItems}
           selected={atSel}
           reasoningLevel={modelLevel}
+          ignoreOff={ignoreToggleApplies ? ignoreOff : null}
           onpick={acceptAtItem}
           onhover={(i) => (atSel = i)}
         />

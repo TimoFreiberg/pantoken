@@ -79,36 +79,45 @@ fn path_matches(path: &str, query_segments: &[String]) -> bool {
 /// `FILE_QUERY_CAP` results. Mirrors `listFilesWithFd` in
 /// `server/src/file-search.ts`.
 ///
-/// Behavior (matching `fd`'s `baseFdArgs`):
-/// - `.gitignore`-aware (via `ignore` crate)
+/// Behavior (matching `fd`'s `baseFdArgs`) when `include_ignored` is false (the
+/// default — the picker's Shift+Tab toggle off):
+/// - Hidden files (dotfiles) are excluded
+/// - `.gitignore`-aware (via `ignore` crate): gitignored entries are excluded
 /// - Follows symlinks
-/// - Includes hidden files (dotfiles)
 /// - Excludes the `.git` tree
 /// - Lists both files and directories
 /// - Caps results at `FILE_QUERY_CAP`
+///
+/// When `include_ignored` is true (Shift+Tab toggled on), every ignore-file
+/// source is disabled AND hidden files are included — dotfiles and gitignored
+/// entries both surface. `.git` itself stays excluded either way (nobody wants
+/// its internals in the picker, toggle or not — and the polytoken docs say the
+/// project's private dir stays excluded too).
 ///
 /// **Divergence from TS `baseFdArgs`:** `.git_global(false)` skips the user's
 /// *global* gitignore (`core.excludesFile` / `~/.gitignore_global`), whereas
 /// `fd`'s default respects it. Global patterns are usually editor/OS cruft
 /// (`*.swp`, `.DS_Store`); skipping them is a deliberate simplification for
-/// the truncated-index fallback path.
-pub fn list_files_with_fd(root: &Path, query: &str) -> Vec<FileInfo> {
+/// the truncated-index fallback path — kept off in both toggle states.
+pub fn list_files_with_fd(root: &Path, query: &str, include_ignored: bool) -> Vec<FileInfo> {
     let query_segments = build_path_query(query);
     let walker = WalkBuilder::new(root)
         // `hidden(false)` DISABLES the ignore crate's hidden-file filter, i.e.
-        // it INCLUDES dotfiles — matching `fd --hidden` / TS `baseFdArgs`.
-        // (The crate's `hidden(true)` would *ignore* dotfiles, the opposite
-        // of what @-mention search wants.)
-        .hidden(false)
-        .ignore(true) // .gitignore aware
-        .git_ignore(true)
+        // it INCLUDES dotfiles (matching `fd --hidden` / TS `baseFdArgs`) —
+        // only when the toggle is on. Off (the crate's own default), hidden
+        // files are excluded, so a dotfile stays out of the picker until
+        // Shift+Tab reveals it.
+        .hidden(!include_ignored)
+        .ignore(!include_ignored) // .gitignore aware unless toggled off
+        .git_ignore(!include_ignored)
         .git_global(false)
-        .git_exclude(true)
+        .git_exclude(!include_ignored)
         .follow_links(true)
         .filter_entry(|entry| {
-            // Exclude the .git directory tree (belt-and-suspenders — ignore
-            // already respects .gitignore, but a repo without .gitignore
-            // shouldn't leak .git internals).
+            // Exclude the .git directory tree regardless of the toggle
+            // (belt-and-suspenders — ignore already respects .gitignore, but a
+            // repo without .gitignore shouldn't leak .git internals, and the
+            // toggle disables ignore-file sources entirely).
             let name = entry.file_name().to_string_lossy();
             name != ".git"
         })
@@ -245,11 +254,17 @@ fn resolve_dir_prefix(dir_prefix: &str, base: &Path, home: &Path) -> PathBuf {
 /// prefixes); `home` is the server's `$HOME` (used to resolve `~`). A
 /// missing/unreadable directory yields an empty vec — no error, matching the
 /// project-search fallback's graceful-empty behavior. Hidden (dot-prefixed)
-/// entries are excluded unless the partial itself starts with `.` — the
-/// global reveal-all toggle is a later stage. Directories sort before files;
-/// each group sorts case-insensitively alphabetical. Results are capped at
-/// `cap`.
-pub fn list_external(base: &Path, home: &Path, query: &str, cap: usize) -> Vec<FileInfo> {
+/// entries are excluded unless the partial itself starts with `.` OR
+/// `include_ignored` is set (the picker's Shift+Tab toggle reveals every
+/// dotfile regardless of the partial). Directories sort before files; each
+/// group sorts case-insensitively alphabetical. Results are capped at `cap`.
+pub fn list_external(
+    base: &Path,
+    home: &Path,
+    query: &str,
+    cap: usize,
+    include_ignored: bool,
+) -> Vec<FileInfo> {
     let (dir_prefix, partial) = split_external_query(query);
     let dir = resolve_dir_prefix(&dir_prefix, base, home);
 
@@ -259,7 +274,7 @@ pub fn list_external(base: &Path, home: &Path, query: &str, cap: usize) -> Vec<F
     };
 
     let partial_lower = partial.to_lowercase();
-    let reveal_dotfiles = partial.starts_with('.');
+    let reveal_dotfiles = include_ignored || partial.starts_with('.');
 
     let mut entries: Vec<(String, bool)> = Vec::new();
     for entry in read_dir.flatten() {
@@ -345,7 +360,7 @@ mod tests {
         fs::write(root.join("src/lib.rs"), "pub fn lib() {}").expect("write");
         fs::write(root.join("README.md"), "# project").expect("write");
 
-        let files = list_files_with_fd(root, "");
+        let files = list_files_with_fd(root, "", false);
         assert!(!files.is_empty(), "should find files");
         assert!(
             files.iter().any(|f| f.path == "src/main.rs"),
@@ -366,7 +381,7 @@ mod tests {
         fs::write(root.join("src/main.rs"), "").expect("write");
         fs::write(root.join("src/lib.rs"), "").expect("write");
 
-        let files = list_files_with_fd(root, "main");
+        let files = list_files_with_fd(root, "main", false);
         assert_eq!(files.len(), 1, "should only find main.rs");
         assert_eq!(files[0].path, "src/main.rs");
     }
@@ -380,7 +395,7 @@ mod tests {
         fs::write(root.join(".git/HEAD"), "ref").expect("write");
         fs::write(root.join("main.rs"), "").expect("write");
 
-        let files = list_files_with_fd(root, "");
+        let files = list_files_with_fd(root, "", false);
         assert!(
             !files.iter().any(|f| f.path.starts_with(".git")),
             "should not include .git entries"
@@ -401,7 +416,7 @@ mod tests {
             fs::write(root.join(format!("file_{i}.txt")), "").expect("write");
         }
 
-        let files = list_files_with_fd(root, "");
+        let files = list_files_with_fd(root, "", false);
         assert!(
             files.len() <= FILE_QUERY_CAP,
             "should cap at FILE_QUERY_CAP, got {}",
@@ -417,7 +432,7 @@ mod tests {
         fs::create_dir_all(root.join("src/components")).expect("mkdir");
         fs::write(root.join("src/main.rs"), "").expect("write");
 
-        let files = list_files_with_fd(root, "");
+        let files = list_files_with_fd(root, "", false);
         assert!(
             files.iter().any(|f| f.is_directory && f.path == "src"),
             "should include directories"
@@ -425,20 +440,21 @@ mod tests {
     }
 
     #[test]
-    fn test_list_files_includes_hidden_files() {
-        // Regression guard for the `.hidden(false)` call: dotfiles must be
-        // INCLUDED (matching `fd --hidden`). With `.hidden(true)` (the bug)
-        // every dotfile is silently dropped — this test would catch that.
+    fn test_list_files_hides_dotfiles_by_default() {
+        // Shift+Tab picker parity: a dotfile is hidden by default (`include_ignored:
+        // false`) — regression guard for `.hidden(!include_ignored)`. With
+        // `.hidden(false)` unconditionally (the pre-toggle bug) every dotfile would
+        // leak into the default, untoggled search.
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
 
         fs::write(root.join(".env"), "SECRET=1").expect("write .env");
         fs::write(root.join("visible.rs"), "").expect("write visible.rs");
 
-        let files = list_files_with_fd(root, "");
+        let files = list_files_with_fd(root, "", false);
         assert!(
-            files.iter().any(|f| f.path == ".env"),
-            "should include dotfiles, got: {:?}",
+            !files.iter().any(|f| f.path == ".env"),
+            "dotfile should be hidden by default, got: {:?}",
             files
         );
         assert!(
@@ -448,11 +464,34 @@ mod tests {
     }
 
     #[test]
-    fn test_list_files_is_gitignore_aware() {
-        // The headline feature: the `ignore` crate respects `.gitignore`.
-        // Like `fd` (and the TS `baseFdArgs`, which passes no
-        // `--no-require-git`), gitignore rules only apply inside a git repo, so
-        // initialize one. Ignored files must NOT appear in results.
+    fn test_list_files_reveals_dotfiles_when_include_ignored() {
+        // The Shift+Tab toggle (`include_ignored: true`) reveals the dotfile hidden
+        // by the previous test — matching `fd --hidden`.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+
+        fs::write(root.join(".env"), "SECRET=1").expect("write .env");
+        fs::write(root.join("visible.rs"), "").expect("write visible.rs");
+
+        let files = list_files_with_fd(root, "", true);
+        assert!(
+            files.iter().any(|f| f.path == ".env"),
+            "should include dotfiles when include_ignored is set, got: {:?}",
+            files
+        );
+        assert!(
+            files.iter().any(|f| f.path == "visible.rs"),
+            "should still include regular files"
+        );
+    }
+
+    #[test]
+    fn test_list_files_is_gitignore_aware_by_default() {
+        // The headline feature: the `ignore` crate respects `.gitignore` when
+        // `include_ignored` is false (the default). Like `fd` (and the TS
+        // `baseFdArgs`, which passes no `--no-require-git`), gitignore rules only
+        // apply inside a git repo, so initialize one. Ignored files must NOT appear
+        // in results.
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
 
@@ -461,7 +500,7 @@ mod tests {
         fs::write(root.join("keep.rs"), "").expect("write keep.rs");
         fs::write(root.join("ignored.log"), "noise").expect("write ignored.log");
 
-        let files = list_files_with_fd(root, "");
+        let files = list_files_with_fd(root, "", false);
         assert!(
             files.iter().any(|f| f.path == "keep.rs"),
             "non-ignored file should be found"
@@ -469,6 +508,46 @@ mod tests {
         assert!(
             !files.iter().any(|f| f.path == "ignored.log"),
             "gitignored file should NOT be found, got: {:?}",
+            files
+        );
+    }
+
+    #[test]
+    fn test_list_files_reveals_gitignored_when_include_ignored() {
+        // Shift+Tab toggled on (`include_ignored: true`) disables every ignore-file
+        // source, so the previously-hidden gitignored file surfaces. `.git` itself
+        // must still be excluded (belt-and-suspenders filter_entry), even toggled on.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+
+        fs::create_dir_all(root.join(".git")).expect("mkdir .git");
+        fs::write(root.join(".git/HEAD"), "ref: refs/heads/main").expect("write .git/HEAD");
+        fs::write(root.join(".gitignore"), "*.log\n").expect("write .gitignore");
+        fs::write(root.join("keep.rs"), "").expect("write keep.rs");
+        fs::write(root.join("ignored.log"), "noise").expect("write ignored.log");
+
+        let files = list_files_with_fd(root, "", true);
+        assert!(
+            files.iter().any(|f| f.path == "keep.rs"),
+            "non-ignored file should still be found"
+        );
+        assert!(
+            files.iter().any(|f| f.path == "ignored.log"),
+            "gitignored file SHOULD be found when include_ignored is set, got: {:?}",
+            files
+        );
+        // `.gitignore` itself IS a legitimate dotfile the toggle reveals — only the
+        // `.git` directory (and its contents) must stay excluded.
+        assert!(
+            files.iter().any(|f| f.path == ".gitignore"),
+            "the .gitignore dotfile itself should be revealed too, got: {:?}",
+            files
+        );
+        assert!(
+            !files
+                .iter()
+                .any(|f| f.path == ".git" || f.path.starts_with(".git/")),
+            ".git internals must stay excluded even with the toggle on, got: {:?}",
             files
         );
     }
@@ -485,7 +564,7 @@ mod tests {
         fs::write(root.join("real.rs"), "").expect("write real.rs");
         symlink("real.rs", root.join("link.rs")).expect("symlink");
 
-        let files = list_files_with_fd(root, "");
+        let files = list_files_with_fd(root, "", false);
         assert!(
             files.iter().any(|f| f.path == "link.rs"),
             "symlink target should be found (follow_links), got: {:?}",
@@ -568,7 +647,7 @@ mod external_tests {
         let home = setup_home();
         let base = tempfile::tempdir().expect("base tempdir");
 
-        let files = list_external(base.path(), home.path(), "~", 50);
+        let files = list_external(base.path(), home.path(), "~", 50, false);
         let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
 
         assert!(names.contains(&"~/notes.md"));
@@ -585,7 +664,7 @@ mod external_tests {
         let home = setup_home();
         let base = tempfile::tempdir().expect("base tempdir");
 
-        let files = list_external(base.path(), home.path(), "~/Documents/", 50);
+        let files = list_external(base.path(), home.path(), "~/Documents/", 50, false);
         let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
 
         assert!(names.contains(&"~/Documents/report.md"));
@@ -598,7 +677,7 @@ mod external_tests {
         fs::write(home.path().join("Documents/other.txt"), "").expect("write other.txt");
         let base = tempfile::tempdir().expect("base tempdir");
 
-        let files = list_external(base.path(), home.path(), "~/Documents/REP", 50);
+        let files = list_external(base.path(), home.path(), "~/Documents/REP", 50, false);
         let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
 
         assert!(names.contains(&"~/Documents/report.md"));
@@ -611,13 +690,29 @@ mod external_tests {
         let home = setup_home();
         let base = tempfile::tempdir().expect("base tempdir");
 
-        let hidden = list_external(base.path(), home.path(), "~", 50);
+        let hidden = list_external(base.path(), home.path(), "~", 50, false);
         assert!(!hidden.iter().any(|f| f.path == "~/.secrets"));
 
-        let revealed = list_external(base.path(), home.path(), "~/.se", 50);
+        let revealed = list_external(base.path(), home.path(), "~/.se", 50, false);
         assert!(
             revealed.iter().any(|f| f.path == "~/.secrets"),
             "a partial starting with '.' should reveal dotfiles, got: {:?}",
+            revealed
+        );
+    }
+
+    #[test]
+    fn test_list_external_reveals_dotfiles_when_include_ignored_regardless_of_partial() {
+        // Shift+Tab toggled on (`include_ignored: true`) reveals `.secrets` even
+        // though the partial ("") doesn't itself start with `.` — the OR condition
+        // in `reveal_dotfiles`.
+        let home = setup_home();
+        let base = tempfile::tempdir().expect("base tempdir");
+
+        let revealed = list_external(base.path(), home.path(), "~", 50, true);
+        assert!(
+            revealed.iter().any(|f| f.path == "~/.secrets"),
+            "include_ignored should reveal dotfiles regardless of the partial, got: {:?}",
             revealed
         );
     }
@@ -630,7 +725,7 @@ mod external_tests {
         fs::write(root.path().join("sibling.txt"), "").expect("write sibling.txt");
         let home = tempfile::tempdir().expect("home tempdir"); // unused by this query
 
-        let files = list_external(&base_dir, home.path(), "..", 50);
+        let files = list_external(&base_dir, home.path(), "..", 50, false);
         let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
 
         assert!(names.contains(&"../sibling.txt"));
@@ -642,7 +737,7 @@ mod external_tests {
         let home = setup_home();
         let base = tempfile::tempdir().expect("base tempdir");
 
-        let files = list_external(base.path(), home.path(), "~/does-not-exist/", 50);
+        let files = list_external(base.path(), home.path(), "~/does-not-exist/", 50, false);
         assert!(files.is_empty());
     }
 
@@ -655,7 +750,7 @@ mod external_tests {
         fs::create_dir_all(home.path().join("z_dir")).expect("mkdir z_dir");
         let base = tempfile::tempdir().expect("base tempdir");
 
-        let files = list_external(base.path(), home.path(), "~", 50);
+        let files = list_external(base.path(), home.path(), "~", 50, false);
         let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
 
         assert_eq!(names, vec!["~/a_dir", "~/z_dir", "~/b.txt", "~/c.txt"]);
@@ -669,7 +764,7 @@ mod external_tests {
         }
         let base = tempfile::tempdir().expect("base tempdir");
 
-        let files = list_external(base.path(), home.path(), "~", 3);
+        let files = list_external(base.path(), home.path(), "~", 3, false);
         assert_eq!(files.len(), 3);
     }
 
@@ -678,7 +773,7 @@ mod external_tests {
         let base = tempfile::tempdir().expect("base tempdir");
         let home = tempfile::tempdir().expect("home tempdir");
 
-        let files = list_external(base.path(), home.path(), "/", 5);
+        let files = list_external(base.path(), home.path(), "/", 5, false);
         for f in &files {
             assert!(
                 !f.path.contains("//"),

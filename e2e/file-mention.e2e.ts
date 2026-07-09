@@ -298,3 +298,85 @@ test("@/etc/ lists the root-anchored fixture", async ({ page }) => {
   await expect(menu(page)).toBeVisible();
   await expect(row(page, "file:/etc/hosts")).toBeVisible();
 });
+
+// Shift+Tab ignore-rules toggle (polytoken TUI parity): while the picker is open, it
+// reveals hidden dotfiles and gitignored entries in BOTH project and external modes.
+// The mock's `.env`/`dist/bundle.js` (project) and `~/.secrets` (external) fixtures are
+// deliberately absent from the always-visible lists so the toggle has something of its
+// own to reveal (server-rs/pantoken-server/src/mock_driver.rs `mock_ignored_files()` /
+// `mock_external_tree()`).
+
+test("project mode: a query matching only a hidden fixture shows nothing until Shift+Tab reveals it, and again to hide it", async ({
+  page,
+}) => {
+  const box = ta(page);
+  await box.click();
+  await page.keyboard.type("@env");
+  // Zero local matches — no visible fixture path contains "env" — so the menu doesn't
+  // even render yet. This is the case Shift+Tab must still work from: there's no open
+  // menu to press it "inside" of.
+  await expect(menu(page)).toHaveCount(0);
+
+  await box.press("Shift+Tab");
+  await expect(menu(page)).toBeVisible();
+  await expect(row(page, "file:.env")).toBeVisible();
+  await expect(menu(page)).toContainText("ignored files shown");
+
+  // Shift+Tab again hides it — back to zero matches, menu gone.
+  await box.press("Shift+Tab");
+  await expect(menu(page)).toHaveCount(0);
+});
+
+test("@~/ then Shift+Tab reveals the hidden ~/.secrets fixture; Shift+Tab again hides it", async ({
+  page,
+}) => {
+  const box = ta(page);
+  await box.click();
+  await page.keyboard.type("@~/");
+  await expect(menu(page)).toBeVisible();
+  await expect(row(page, "file:~/.secrets")).toHaveCount(0);
+  await expect(menu(page)).toContainText("⇧Tab ignored files");
+
+  await box.press("Shift+Tab");
+  await expect(row(page, "file:~/.secrets")).toBeVisible();
+  await expect(menu(page)).toContainText("ignored files shown");
+
+  await box.press("Shift+Tab");
+  await expect(row(page, "file:~/.secrets")).toHaveCount(0);
+});
+
+test("plain Tab still accepts the highlighted row after Shift+Tab has toggled ignored files on", async ({
+  page,
+}) => {
+  const box = ta(page);
+  await box.click();
+  await page.keyboard.type("@~/");
+  await expect(menu(page)).toBeVisible();
+
+  // Shift+Tab toggles the ignore state without accepting anything — the draft stays put.
+  await box.press("Shift+Tab");
+  await expect(row(page, "file:~/.secrets")).toBeVisible();
+  await expect(box).toHaveValue("@~/");
+
+  // Dirs sort first ("~/projects"), then dotfile-then-alpha files: ~/.secrets, ~/notes.md,
+  // ~/todo.txt — arrow down once from the default-highlighted first row to reach .secrets,
+  // then accept with plain (unshifted) Tab.
+  await box.press("ArrowDown");
+  await box.press("Tab");
+  await expect(box).toHaveValue("@~/.secrets");
+});
+
+test("Escape still dismisses the menu after the ignore toggle has been used", async ({
+  page,
+}) => {
+  const box = ta(page);
+  await box.click();
+  await page.keyboard.type("@~/");
+  await expect(menu(page)).toBeVisible();
+  await box.press("Shift+Tab");
+  await expect(row(page, "file:~/.secrets")).toBeVisible();
+
+  await box.press("Escape");
+  await expect(menu(page)).toHaveCount(0);
+  await expect(box).toHaveValue("@~/");
+});

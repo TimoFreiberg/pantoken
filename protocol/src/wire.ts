@@ -193,8 +193,17 @@ export type ServerMessage =
    *  used only when the {@link fileIndex} was truncated and local matches are thin (so a
    *  wanted file may live past the index cap). The client sends {@link queryFiles}
    *  (debounced); the `query` field echoes the request so stale responses are dropped.
-   *  Merged into the local matches, deduped by path. See {@link FileInfo}. */
-  | { type: "fileList"; query: string; files: readonly FileInfo[] }
+   *  Merged into the local matches, deduped by path. See {@link FileInfo}.
+   *
+   *  `includeIgnored` echoes the request's flag (Shift+Tab picker toggle) — a second
+   *  staleness guard alongside `query`: a toggled request must not be satisfied by a
+   *  stale untoggled response (or vice versa) racing back after the toggle flipped. */
+  | {
+      type: "fileList";
+      query: string;
+      files: readonly FileInfo[];
+      includeIgnored?: boolean;
+    }
   /** A directory listing for the new-session project picker, in reply to {@link queryDir}.
    *  Carries the resolved `path` so a client that navigated on can drop a stale response.
    *  See {@link DirListing}. */
@@ -442,8 +451,17 @@ export type ClientMessage =
    *  Debounce client-side (~150ms); the server echoes the query back so stale responses
    *  can be dropped. `cwd` overrides the search root: a new-session draft has no session yet,
    *  so its @-mentions must search the soon-to-be project dir, not the previously focused
-   *  session's cwd (which the pushed index reflects). Omitted -> the focused session's cwd. */
-  | { type: "queryFiles"; query: string; cwd?: string }
+   *  session's cwd (which the pushed index reflects). Omitted -> the focused session's cwd.
+   *
+   *  `includeIgnored`: the picker's Shift+Tab toggle — when true, hidden dotfiles and
+   *  gitignored entries are included too (project AND external browsing), bypassing the
+   *  normal ignore-file filtering. Omitted/false is the default (filtered) behavior. */
+  | {
+      type: "queryFiles";
+      query: string;
+      cwd?: string;
+      includeIgnored?: boolean;
+    }
   /** Browse a directory on the SERVER's filesystem for the new-session project picker.
    *  `path` omitted/empty -> the server's $HOME; `~`/relative segments are resolved
    *  server-side. The server responds with {@link dirListing}. */

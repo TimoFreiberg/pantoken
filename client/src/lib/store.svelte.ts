@@ -217,9 +217,16 @@ class PantokenStore {
   // Fallback file-search results for the current @-mention query (the server `fd` path,
   // only requested when `fileIndex.truncated`). The server echoes the query so we can drop
   // stale responses; the composer merges these into the local matches. See `queryFiles()`.
-  files = $state<{ query: string; items: readonly FileInfo[] }>({
+  // `includeIgnored` echoes the request's Shift+Tab toggle flag — a second staleness guard
+  // alongside `query`: a toggled request must not be satisfied by a stale untoggled response.
+  files = $state<{
+    query: string;
+    items: readonly FileInfo[];
+    includeIgnored: boolean;
+  }>({
     query: "",
     items: [],
+    includeIgnored: false,
   });
   // New-session directory picker: the server-side listing for the directory it's currently
   // showing (entries are child dir names). The server resolves paths on ITS filesystem, so
@@ -1073,7 +1080,11 @@ class PantokenStore {
         };
         break;
       case "fileList":
-        this.files = { query: msg.query, items: [...msg.files] };
+        this.files = {
+          query: msg.query,
+          items: [...msg.files],
+          includeIgnored: msg.includeIgnored ?? false,
+        };
         break;
       case "dirListing":
         this.dirListing = {
@@ -1650,9 +1661,11 @@ class PantokenStore {
    *  The result arrives as a `fileList` server message (the `query` field is
    *  echoed back so we can ignore stale responses). Called debounced (~150ms)
    *  from the Composer on each keystroke after `@`. `cwd` targets a new-session
-   *  draft's project dir (no session exists yet); omitted -> the focused session's cwd. */
-  queryFiles(query: string, cwd?: string): void {
-    send({ type: "queryFiles", query, cwd });
+   *  draft's project dir (no session exists yet); omitted -> the focused session's cwd.
+   *  `includeIgnored` forwards the picker's Shift+Tab toggle (echoed back on `fileList`
+   *  as a second staleness guard alongside `query`). */
+  queryFiles(query: string, cwd?: string, includeIgnored?: boolean): void {
+    send({ type: "queryFiles", query, cwd, includeIgnored });
   }
   /** Browse a directory on the SERVER's filesystem for the new-session project picker.
    *  Empty/omitted -> the server's $HOME. The reply arrives as a `dirListing` message
@@ -1724,7 +1737,7 @@ class PantokenStore {
     // (on switch). The stale index is the one that bites — it'd match instantly when the
     // user types `@`. The fallback-query cache is cleared for the same reason.
     this.fileIndex = { files: [], truncated: false };
-    this.files = { query: "", items: [] };
+    this.files = { query: "", items: [], includeIgnored: false };
     // Same reasoning for skills/subagents: session/cwd-scoped, re-pushed on switch.
     this.atRefs = { skills: [], subagents: [] };
     this.lastAttemptedSessionPath = path;

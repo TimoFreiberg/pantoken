@@ -146,6 +146,7 @@ impl PantokenDriver for StubDriver {
         _query: String,
         _session_id: Option<SessionId>,
         _cwd: Option<String>,
+        _include_ignored: bool,
     ) -> Vec<FileInfo> {
         Vec::new()
     }

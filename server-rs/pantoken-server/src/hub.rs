@@ -1943,18 +1943,32 @@ impl SessionHub {
                     }),
                 );
             }
-            ClientMessage::QueryFiles { query, cwd } => {
+            ClientMessage::QueryFiles {
+                query,
+                cwd,
+                include_ignored,
+            } => {
                 let driver = self.driver.clone();
                 let focused = focused_id.clone();
                 let query = query.clone();
                 let cwd = cwd.clone();
+                let include_ignored = include_ignored.unwrap_or(false);
                 self.hub_ops.enqueue(
                     "query_files",
                     Box::new(move |hub| {
                         Box::pin(async move {
-                            let files = driver.list_files(query.clone(), focused, cwd).await;
+                            let files = driver
+                                .list_files(query.clone(), focused, cwd, include_ignored)
+                                .await;
                             let h = hub.lock();
-                            h.send_to_client(client_key, ServerMessage::FileList { query, files });
+                            h.send_to_client(
+                                client_key,
+                                ServerMessage::FileList {
+                                    query,
+                                    files,
+                                    include_ignored: Some(include_ignored),
+                                },
+                            );
                         })
                     }),
                 );
