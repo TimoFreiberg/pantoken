@@ -11,6 +11,7 @@
     items,
     selected,
     reasoningLevel = null,
+    ignoreOff = null,
     onpick,
     onhover,
   }: {
@@ -20,6 +21,11 @@
      *  row, or null when none is chosen. Rendered only on that row — see the `model`
      *  branch below. Irrelevant for every other row kind. */
     reasoningLevel?: string | null;
+    /** The Shift+Tab ignore-rules toggle state, or `null` when the current mode has no
+     *  notion of "ignored" (skill/subagent/model takeovers) — the footer hint is omitted
+     *  entirely in that case. `false` = hidden dotfiles/gitignored entries stay hidden
+     *  (default); `true` = revealed. */
+    ignoreOff?: boolean | null;
     onpick: (item: AtItem) => void;
     onhover: (index: number) => void;
   } = $props();
@@ -30,7 +36,12 @@
   // whitespace trimming around block boundaries can't silently eat the separating space.
   const footerHint = $derived(
     "↑↓ navigate · ↵ select · esc dismiss · skill: subagent: model: for more" +
-      (hasModelRow ? " · [ ] reasoning" : ""),
+      (hasModelRow ? " · [ ] reasoning" : "") +
+      (ignoreOff === null
+        ? ""
+        : ignoreOff
+          ? " · ignored files shown · ⇧Tab hide"
+          : " · ⇧Tab ignored files"),
   );
 
   function rowKey(item: AtItem): string {

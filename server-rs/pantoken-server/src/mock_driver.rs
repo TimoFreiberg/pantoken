@@ -339,6 +339,24 @@ fn mock_files() -> Vec<FileInfo> {
     ]
 }
 
+/// Project-side Shift+Tab fixtures — a dotfile and a gitignored-looking build
+/// artifact, deliberately absent from `mock_files()`'s always-visible list so
+/// `list_files`'s ignore toggle has something project-mode-specific to reveal
+/// (mirrors the real driver's `list_files_with_fd(include_ignored: true)`,
+/// which surfaces dotfiles + gitignored entries that are hidden by default).
+fn mock_ignored_files() -> Vec<FileInfo> {
+    vec![
+        FileInfo {
+            path: ".env".into(),
+            is_directory: false,
+        },
+        FileInfo {
+            path: "dist/bundle.js".into(),
+            is_directory: false,
+        },
+    ]
+}
+
 fn mock_skills() -> Vec<String> {
     vec!["debug".into(), "journal".into()]
 }
@@ -808,15 +826,17 @@ fn mock_external_tree() -> &'static HashMap<&'static str, Vec<(&'static str, boo
 /// as-typed directory prefix up in `mock_external_tree()` instead of
 /// resolving + reading a real directory. An unknown prefix (not one of the
 /// fixture's browsable dirs) yields an empty vec, same graceful-empty
-/// behavior as a missing real directory.
-fn mock_list_external(query: &str) -> Vec<FileInfo> {
+/// behavior as a missing real directory. `include_ignored` mirrors the real
+/// `list_external`'s Shift+Tab flag: when set, dotfiles are revealed
+/// regardless of the partial (the OR condition below).
+fn mock_list_external(query: &str, include_ignored: bool) -> Vec<FileInfo> {
     let (dir_prefix, partial) = crate::polytoken::file_search::split_external_query(query);
     let Some(children) = mock_external_tree().get(dir_prefix.as_str()) else {
         return Vec::new();
     };
 
     let partial_lower = partial.to_lowercase();
-    let reveal_dotfiles = partial.starts_with('.');
+    let reveal_dotfiles = include_ignored || partial.starts_with('.');
 
     let mut entries: Vec<(&str, bool)> = children
         .iter()
@@ -2517,6 +2537,7 @@ impl PantokenDriver for MockDriver {
         query: String,
         _session_id: Option<SessionId>,
         cwd: Option<String>,
+        include_ignored: bool,
     ) -> Vec<FileInfo> {
         // A query starting with `~`, `/`, or `..` addresses the filesystem
         // OUTSIDE the project — mirrors the real driver's dispatch in
@@ -2524,7 +2545,7 @@ impl PantokenDriver for MockDriver {
         // synthetic `mock_external_tree()` instead of resolving + reading a
         // real directory (the mock never touches the real disk).
         if crate::polytoken::file_search::is_external_query(&query) {
-            return mock_list_external(&query);
+            return mock_list_external(&query, include_ignored);
         }
         // Faithful port of TS `MockDriver.listFiles()` (`server/src/mock-driver.ts:764-788`):
         // a new-session draft passes its target cwd — surface it as a synthetic
@@ -2533,7 +2554,18 @@ impl PantokenDriver for MockDriver {
         // driver actually searches that dir. A real session passes no cwd, so the
         // marker is absent. Then case-insensitive substring filter, sort by path
         // length, cap at 20.
-        let mut pool: Vec<FileInfo> = mock_files();
+        // Shift+Tab picker parity: `.env`/`dist/bundle.js`-style fixtures only
+        // surface when the ignore toggle is on — mirrors the real driver
+        // revealing dotfiles/gitignored entries only with `include_ignored: true`.
+        // Prepended (not appended) so the bare-`@` head (capped at 20, below)
+        // still surfaces them — `mock_files()` alone already fills the cap.
+        let mut pool: Vec<FileInfo> = if include_ignored {
+            let mut ignored = mock_ignored_files();
+            ignored.extend(mock_files());
+            ignored
+        } else {
+            mock_files()
+        };
         if let Some(cwd) = cwd {
             let trimmed = cwd.trim_end_matches('/');
             pool.insert(
@@ -3463,7 +3495,7 @@ mod external_list_files_tests {
     #[tokio::test]
     async fn tilde_alone_lists_home_dirs_first_dotfile_hidden() {
         let driver = MockDriver::new();
-        let files = driver.list_files("~".into(), None, None).await;
+        let files = driver.list_files("~".into(), None, None, false).await;
         let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
 
         // Dirs before files: "projects" before the two plain files.
@@ -3477,7 +3509,7 @@ mod external_list_files_tests {
     #[tokio::test]
     async fn tilde_dot_partial_reveals_the_hidden_dotfile() {
         let driver = MockDriver::new();
-        let files = driver.list_files("~/.se".into(), None, None).await;
+        let files = driver.list_files("~/.se".into(), None, None, false).await;
         let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(names, vec!["~/.secrets"]);
     }
@@ -3485,7 +3517,7 @@ mod external_list_files_tests {
     #[tokio::test]
     async fn tilde_proj_narrows_to_projects_dir() {
         let driver = MockDriver::new();
-        let files = driver.list_files("~/proj".into(), None, None).await;
+        let files = driver.list_files("~/proj".into(), None, None, false).await;
         let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(names, vec!["~/projects"]);
     }
@@ -3493,7 +3525,9 @@ mod external_list_files_tests {
     #[tokio::test]
     async fn drills_into_projects_directory() {
         let driver = MockDriver::new();
-        let files = driver.list_files("~/projects/".into(), None, None).await;
+        let files = driver
+            .list_files("~/projects/".into(), None, None, false)
+            .await;
         let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(
             names,
@@ -3508,7 +3542,7 @@ mod external_list_files_tests {
     #[tokio::test]
     async fn slash_etc_lists_the_etc_fixture() {
         let driver = MockDriver::new();
-        let files = driver.list_files("/etc/".into(), None, None).await;
+        let files = driver.list_files("/etc/".into(), None, None, false).await;
         let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(names, vec!["/etc/hosts"]);
     }
@@ -3516,7 +3550,7 @@ mod external_list_files_tests {
     #[tokio::test]
     async fn dotdot_alone_lists_the_relative_fixture() {
         let driver = MockDriver::new();
-        let files = driver.list_files("..".into(), None, None).await;
+        let files = driver.list_files("..".into(), None, None, false).await;
         let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(names, vec!["../sibling-project", "../NOTES.md"]);
     }
@@ -3524,7 +3558,64 @@ mod external_list_files_tests {
     #[tokio::test]
     async fn unknown_external_prefix_is_empty() {
         let driver = MockDriver::new();
-        let files = driver.list_files("~/nope/".into(), None, None).await;
+        let files = driver.list_files("~/nope/".into(), None, None, false).await;
         assert!(files.is_empty());
+    }
+
+    #[tokio::test]
+    async fn tilde_alone_with_include_ignored_reveals_the_hidden_dotfile() {
+        // Shift+Tab toggled on: `.secrets` surfaces even though the query ("~") has
+        // no partial starting with '.' — mirrors the real driver's
+        // `list_external(include_ignored: true)`.
+        let driver = MockDriver::new();
+        let files = driver.list_files("~".into(), None, None, true).await;
+        let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert!(
+            names.contains(&"~/.secrets"),
+            "include_ignored should reveal the dotfile, got: {:?}",
+            names
+        );
+    }
+}
+
+#[cfg(test)]
+mod ignored_project_files_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn project_query_hides_env_and_dist_by_default() {
+        let driver = MockDriver::new();
+        let files = driver.list_files("".into(), None, None, false).await;
+        let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert!(!names.contains(&".env"), "hidden by default");
+        assert!(!names.contains(&"dist/bundle.js"), "hidden by default");
+    }
+
+    #[tokio::test]
+    async fn project_query_reveals_env_and_dist_when_include_ignored() {
+        let driver = MockDriver::new();
+        let files = driver.list_files("".into(), None, None, true).await;
+        let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert!(
+            names.contains(&".env"),
+            "include_ignored should reveal .env, got: {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"dist/bundle.js"),
+            "include_ignored should reveal dist/bundle.js, got: {:?}",
+            names
+        );
+    }
+
+    #[tokio::test]
+    async fn narrowing_query_matches_ignored_fixtures_only_when_flagged() {
+        let driver = MockDriver::new();
+        let hidden = driver.list_files("env".into(), None, None, false).await;
+        assert!(hidden.is_empty(), "no .env match without the flag");
+
+        let revealed = driver.list_files("env".into(), None, None, true).await;
+        let names: Vec<&str> = revealed.iter().map(|f| f.path.as_str()).collect();
+        assert!(names.contains(&".env"));
     }
 }

@@ -2471,6 +2471,7 @@ impl PantokenDriver for PolytokenDriver {
         query: String,
         session_id: Option<SessionId>,
         cwd: Option<String>,
+        include_ignored: bool,
     ) -> Vec<FileInfo> {
         // Ports TS `polytoken-driver.ts:1589-1601`: caller cwd wins; otherwise
         // fall back to the targeted session cwd. The TS driver spawns `fd`
@@ -2492,9 +2493,14 @@ impl PantokenDriver for PolytokenDriver {
                 std::path::Path::new(&home),
                 &query,
                 crate::polytoken::file_search::FILE_QUERY_CAP,
+                include_ignored,
             );
         }
-        crate::polytoken::file_search::list_files_with_fd(std::path::Path::new(&root), &query)
+        crate::polytoken::file_search::list_files_with_fd(
+            std::path::Path::new(&root),
+            &query,
+            include_ignored,
+        )
     }
 
     async fn list_dir(&self, path: Option<String>) -> DirListing {
@@ -3277,7 +3283,7 @@ mod tests {
         let (driver, _dir) = driver_with_runner("s1", repo_path.to_str().unwrap(), runner);
 
         let files = driver
-            .list_files("main".into(), Some("s1".into()), None)
+            .list_files("main".into(), Some("s1".into()), None, false)
             .await;
 
         assert_eq!(files.len(), 1, "should find only main.rs for query 'main'");
@@ -3295,7 +3301,9 @@ mod tests {
             Arc::new(|_p, _a, _c| Box::pin(async { Err("unused".to_string()) }));
         let (driver, _dir) = driver_with_runner("s1", repo_path.to_str().unwrap(), runner);
 
-        let files = driver.list_files("".into(), Some("s1".into()), None).await;
+        let files = driver
+            .list_files("".into(), Some("s1".into()), None, false)
+            .await;
         // Exact set (not `>= 2`): a fresh tempdir has only a.rs and b.rs, so an
         // exact comparison also catches over-inclusion regressions.
         let mut paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
@@ -3320,12 +3328,54 @@ mod tests {
         let (driver, _dir) = driver_with_runner("s1", repo_path.to_str().unwrap(), runner);
 
         let files = driver
-            .list_files("..".into(), Some("s1".into()), None)
+            .list_files("..".into(), Some("s1".into()), None, false)
             .await;
         let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
 
         assert!(names.contains(&"../sibling.txt"));
         assert!(names.contains(&"../project"));
+    }
+
+    #[tokio::test]
+    async fn list_files_include_ignored_reveals_dotfiles_and_gitignored_entries() {
+        // End-to-end through the driver method (not just the pure `file_search`
+        // helpers): `include_ignored` must reach `list_files_with_fd` and flip its
+        // hidden/gitignore filtering.
+        let repo = tempfile::tempdir().expect("repo tempdir");
+        let repo_path = repo.path();
+        std::fs::create_dir_all(repo_path.join(".git")).expect("mkdir .git");
+        std::fs::write(repo_path.join(".gitignore"), "*.log\n").expect("write .gitignore");
+        std::fs::write(repo_path.join(".env"), "SECRET=1").expect("write .env");
+        std::fs::write(repo_path.join("ignored.log"), "noise").expect("write ignored.log");
+        std::fs::write(repo_path.join("visible.rs"), "").expect("write visible.rs");
+
+        let runner: Arc<CommandRunner> =
+            Arc::new(|_p, _a, _c| Box::pin(async { Err("unused".to_string()) }));
+        let (driver, _dir) = driver_with_runner("s1", repo_path.to_str().unwrap(), runner);
+
+        let default_files = driver
+            .list_files("".into(), Some("s1".into()), None, false)
+            .await;
+        let default_names: Vec<&str> = default_files.iter().map(|f| f.path.as_str()).collect();
+        assert!(!default_names.contains(&".env"), "hidden by default");
+        assert!(!default_names.contains(&"ignored.log"), "hidden by default");
+        assert!(default_names.contains(&"visible.rs"));
+
+        let toggled_files = driver
+            .list_files("".into(), Some("s1".into()), None, true)
+            .await;
+        let toggled_names: Vec<&str> = toggled_files.iter().map(|f| f.path.as_str()).collect();
+        assert!(
+            toggled_names.contains(&".env"),
+            "revealed with include_ignored, got: {:?}",
+            toggled_names
+        );
+        assert!(
+            toggled_names.contains(&"ignored.log"),
+            "revealed with include_ignored, got: {:?}",
+            toggled_names
+        );
+        assert!(toggled_names.contains(&"visible.rs"));
     }
 
     #[test]

@@ -175,9 +175,19 @@ pub enum ServerMessage {
         #[serde(default)]
         truncated: bool,
     },
+    /// `include_ignored` echoes the request's flag (Shift+Tab picker toggle) — a
+    /// second staleness guard alongside `query`: a toggled request must not be
+    /// satisfied by a stale untoggled response (or vice versa) racing back after
+    /// the toggle flipped.
     FileList {
         query: String,
         files: Vec<FileInfo>,
+        #[serde(
+            skip_serializing_if = "Option::is_none",
+            default,
+            rename = "includeIgnored"
+        )]
+        include_ignored: Option<bool>,
     },
     /// Skills + subagents available for composer `@`-reference autocomplete.
     /// Server-authoritative like `FileIndex`; pushed on connect and re-pushed
@@ -413,10 +423,20 @@ pub enum ClientMessage {
     DeleteTodo {
         id: i64,
     },
+    /// `include_ignored`: the picker's Shift+Tab toggle — when true, hidden
+    /// dotfiles and gitignored entries are included too (project AND external
+    /// browsing), bypassing the normal ignore-file filtering. Absent/false is
+    /// the default (filtered) behavior.
     QueryFiles {
         query: String,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         cwd: Option<String>,
+        #[serde(
+            skip_serializing_if = "Option::is_none",
+            default,
+            rename = "includeIgnored"
+        )]
+        include_ignored: Option<bool>,
     },
     QueryDir {
         #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -630,6 +650,76 @@ mod tests {
                 assert_eq!(refs.subagents, vec!["reviewer".to_string()]);
             }
             _ => panic!("expected AtRefs"),
+        }
+    }
+
+    #[test]
+    fn query_files_include_ignored_omitted_when_absent_present_when_set() {
+        // Regression guard for the Shift+Tab ignore-toggle plumbing: `includeIgnored`
+        // must round-trip as an omitted key (not `null`) when unset, matching the TS
+        // `includeIgnored?: boolean` — an older server/client pair that never sends
+        // the field must not choke on a missing key.
+        let without = ClientMessage::QueryFiles {
+            query: "foo".into(),
+            cwd: None,
+            include_ignored: None,
+        };
+        let json = serde_json::to_value(&without).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "type": "queryFiles", "query": "foo" })
+        );
+
+        let with_flag = ClientMessage::QueryFiles {
+            query: "foo".into(),
+            cwd: None,
+            include_ignored: Some(true),
+        };
+        let json = serde_json::to_value(&with_flag).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "type": "queryFiles", "query": "foo", "includeIgnored": true })
+        );
+
+        let parsed: ClientMessage = serde_json::from_value(json).unwrap();
+        match parsed {
+            ClientMessage::QueryFiles {
+                include_ignored, ..
+            } => {
+                assert_eq!(include_ignored, Some(true));
+            }
+            _ => panic!("expected QueryFiles"),
+        }
+    }
+
+    #[test]
+    fn file_list_echoes_include_ignored() {
+        // `fileList`'s echoed flag is the staleness guard alongside `query`: a
+        // toggled request must not be satisfied by a stale untoggled response.
+        let msg = ServerMessage::FileList {
+            query: "foo".into(),
+            files: vec![],
+            include_ignored: Some(true),
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "fileList",
+                "query": "foo",
+                "files": [],
+                "includeIgnored": true,
+            })
+        );
+
+        let parsed: ServerMessage = serde_json::from_value(json).unwrap();
+        match parsed {
+            ServerMessage::FileList {
+                include_ignored, ..
+            } => {
+                assert_eq!(include_ignored, Some(true));
+            }
+            _ => panic!("expected FileList"),
         }
     }
 

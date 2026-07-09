@@ -195,12 +195,16 @@ pub trait PantokenDriver: Send + Sync {
     /// (server-authoritative, session/cwd-scoped like `list_file_index`).
     async fn list_at_refs(&self, session_id: Option<SessionId>) -> AtRefs;
 
-    /// Fallback file search for a composer @-mention query.
+    /// Fallback file search for a composer @-mention query. `include_ignored` is
+    /// the picker's Shift+Tab toggle: when true, hidden dotfiles and gitignored
+    /// entries are included too (project AND external browsing), bypassing the
+    /// normal ignore-file filtering.
     async fn list_files(
         &self,
         query: String,
         session_id: Option<SessionId>,
         cwd: Option<String>,
+        include_ignored: bool,
     ) -> Vec<FileInfo>;
 
     /// List a directory's child directories for the new-session project picker.
