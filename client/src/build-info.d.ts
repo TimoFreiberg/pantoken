@@ -2,3 +2,4 @@
 declare const __BUILD_HASH__: string;
 declare const __BUILD_DATE__: string;
 declare const __BUILD_FULL_HASH__: string;
+declare const __BUILD_TAG__: string;
