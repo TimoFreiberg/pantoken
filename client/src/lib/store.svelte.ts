@@ -2238,7 +2238,10 @@ class PantokenStore {
       this.persistDraftConfig();
       return;
     }
-    send({ type: "setModel", provider, modelId });
+    send({
+      type: "sessionAction",
+      action: { kind: "setModel", provider, modelId },
+    });
   }
   setThinking(level: string): void {
     if (this.draft) {
@@ -2246,7 +2249,7 @@ class PantokenStore {
       this.persistDraftConfig();
       return;
     }
-    send({ type: "setThinking", level });
+    send({ type: "sessionAction", action: { kind: "setThinking", level } });
   }
   /** Switch the facet: the draft's pick while drafting a new session (applied at
    *  creation), else the active session's live facet over the wire. */
@@ -2256,7 +2259,7 @@ class PantokenStore {
       this.persistDraftConfig();
       return;
     }
-    send({ type: "setFacet", facet });
+    send({ type: "sessionAction", action: { kind: "setFacet", facet } });
   }
 
   /** Ask the server to re-read the available facets (reload affordance for when
@@ -2287,7 +2290,7 @@ class PantokenStore {
       this.persistDraftConfig();
       return;
     }
-    send({ type: "setPermissionMonitor", mode });
+    send({ type: "sessionAction", action: { kind: "setPermissionMonitor", mode } });
   }
 
   /** Toggle the adventurous auto-handoff flag (lets plan mode autonomously start

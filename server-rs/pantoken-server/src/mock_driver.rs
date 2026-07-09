@@ -2727,44 +2727,6 @@ impl PantokenDriver for MockDriver {
         }
     }
 
-    fn set_model(&self, provider: String, model_id: String, _session_id: Option<SessionId>) {
-        let mut config = self.config.lock();
-        config.provider = Some(provider);
-        config.model_id = Some(model_id);
-        let mut snapshot = snap(SessionStatus::Idle, None, None, None, None, None);
-        snapshot.config = Some(config.clone());
-        drop(config);
-        self.emit(SessionDriverEvent::SessionUpdated {
-            base: base(),
-            snapshot,
-        });
-    }
-    fn set_thinking(&self, level: String, _session_id: Option<SessionId>) {
-        let mut config = self.config.lock();
-        config.thinking_level = Some(level);
-        let mut snapshot = snap(SessionStatus::Idle, None, None, None, None, None);
-        snapshot.config = Some(config.clone());
-        drop(config);
-        self.emit(SessionDriverEvent::SessionUpdated {
-            base: base(),
-            snapshot,
-        });
-    }
-    fn set_facet(&self, facet: String, _session_id: Option<SessionId>) {
-        self.emit(SessionDriverEvent::SessionUpdated {
-            base: base(),
-            snapshot: snap(SessionStatus::Idle, Some(facet), None, None, None, None),
-        });
-    }
-    fn set_permission_monitor(&self, mode: PermissionMonitorMode, _session_id: Option<SessionId>) {
-        let mut s = snap(SessionStatus::Idle, None, None, None, None, None);
-        s.permission_monitor = Some(mode);
-        self.emit(SessionDriverEvent::SessionUpdated {
-            base: base(),
-            snapshot: s,
-        });
-    }
-
     fn get_usage(&self, _session_id: Option<SessionId>) -> Option<SessionUsage> {
         let tokens = LIVE_USAGE_TOKENS.fetch_add(2800, Ordering::Relaxed) + 2800;
         let tokens = tokens.min(200000) as i64;
@@ -2782,6 +2744,43 @@ impl PantokenDriver for MockDriver {
     // SetMcpServer is a mock no-op (the MCP e2e drives UI states via widgets).
     async fn session_action(&self, action: SessionAction, _session_id: Option<SessionId>) {
         match action {
+            SessionAction::SetModel { provider, model_id } => {
+                let mut config = self.config.lock();
+                config.provider = Some(provider);
+                config.model_id = Some(model_id);
+                let mut snapshot = snap(SessionStatus::Idle, None, None, None, None, None);
+                snapshot.config = Some(config.clone());
+                drop(config);
+                self.emit(SessionDriverEvent::SessionUpdated {
+                    base: base(),
+                    snapshot,
+                });
+            }
+            SessionAction::SetThinking { level } => {
+                let mut config = self.config.lock();
+                config.thinking_level = Some(level);
+                let mut snapshot = snap(SessionStatus::Idle, None, None, None, None, None);
+                snapshot.config = Some(config.clone());
+                drop(config);
+                self.emit(SessionDriverEvent::SessionUpdated {
+                    base: base(),
+                    snapshot,
+                });
+            }
+            SessionAction::SetFacet { facet } => {
+                self.emit(SessionDriverEvent::SessionUpdated {
+                    base: base(),
+                    snapshot: snap(SessionStatus::Idle, Some(facet), None, None, None, None),
+                });
+            }
+            SessionAction::SetPermissionMonitor { mode } => {
+                let mut s = snap(SessionStatus::Idle, None, None, None, None, None);
+                s.permission_monitor = Some(mode);
+                self.emit(SessionDriverEvent::SessionUpdated {
+                    base: base(),
+                    snapshot: s,
+                });
+            }
             SessionAction::ToggleAdventurousHandoff => {
                 // Flip the local flag and broadcast a sessionUpdated snapshot
                 // carrying the new value.

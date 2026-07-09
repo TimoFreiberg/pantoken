@@ -313,28 +313,6 @@ pub enum ClientMessage {
         #[serde(skip_serializing_if = "Option::is_none", default, rename = "sessionId")]
         session_id: Option<SessionId>,
     },
-    SetModel {
-        provider: String,
-        #[serde(rename = "modelId")]
-        model_id: String,
-        #[serde(skip_serializing_if = "Option::is_none", default, rename = "sessionId")]
-        session_id: Option<SessionId>,
-    },
-    SetThinking {
-        level: String,
-        #[serde(skip_serializing_if = "Option::is_none", default, rename = "sessionId")]
-        session_id: Option<SessionId>,
-    },
-    SetFacet {
-        facet: String,
-        #[serde(skip_serializing_if = "Option::is_none", default, rename = "sessionId")]
-        session_id: Option<SessionId>,
-    },
-    SetPermissionMonitor {
-        mode: PermissionMonitorMode,
-        #[serde(skip_serializing_if = "Option::is_none", default, rename = "sessionId")]
-        session_id: Option<SessionId>,
-    },
     /// The data-driven envelope for fire-and-forget session actions that share
     /// one shape (a daemon POST; updated state arrives via later events).
     /// Adding an action = one `SessionAction` variant + one arm per driver.
@@ -486,6 +464,20 @@ pub enum SessionAction {
         #[serde(rename = "serverName")]
         server_name: String,
         action: McpAction,
+    },
+    SetModel {
+        provider: String,
+        #[serde(rename = "modelId")]
+        model_id: String,
+    },
+    SetThinking {
+        level: String,
+    },
+    SetFacet {
+        facet: String,
+    },
+    SetPermissionMonitor {
+        mode: PermissionMonitorMode,
     },
 }
 

@@ -231,23 +231,12 @@ pub trait PantokenDriver: Send + Sync {
         ))
     }
 
-    /// Switch a session's model.
-    fn set_model(&self, provider: String, model_id: String, session_id: Option<SessionId>);
-
-    /// Switch a session's thinking level.
-    fn set_thinking(&self, level: String, session_id: Option<SessionId>);
-
-    /// Switch a session's active facet.
-    fn set_facet(&self, facet: String, session_id: Option<SessionId>);
-
-    /// Switch the active permission-monitor mode.
-    fn set_permission_monitor(&self, mode: PermissionMonitorMode, session_id: Option<SessionId>);
-
-    /// Run a fire-and-forget pass-through action (compact, clear-context,
-    /// MCP server management, the toggles — see `SessionAction`). One method
-    /// instead of one per action: they share a single lifecycle (a daemon
-    /// POST whose effect arrives via later driver events), so adding an
-    /// action is a `SessionAction` variant + one match arm per driver.
+    /// Run a fire-and-forget pass-through action (the model/thinking/facet/
+    /// permission setters, compact, clear-context, MCP server management, the
+    /// toggles — see `SessionAction`). One method instead of one per action:
+    /// they share a single lifecycle (a daemon POST whose effect arrives via
+    /// later driver events), so adding an action is a `SessionAction` variant
+    /// + one match arm per driver.
     async fn session_action(&self, _action: SessionAction, _session_id: Option<SessionId>) {}
 
     /// The daemon's global default model/thinking for new sessions.
