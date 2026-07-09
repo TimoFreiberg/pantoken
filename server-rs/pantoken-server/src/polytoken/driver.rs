@@ -1543,13 +1543,41 @@ impl PantokenDriver for PolytokenDriver {
     }
 
     async fn clear_queue(&self, session_id: Option<SessionId>) -> ClearQueueResult {
-        if let Some(sid) = session_id {
-            if let Some(ws) = self.inner.get_warm(&sid) {
-                let _ = ws.client.turn_input_snapshot().await;
-                let _ = ws.client.dequeue_newest_input().await;
+        // Contract (see the mock): return EVERY queued text and leave the queue
+        // empty — the hub hands the texts back to the requesting composer. The
+        // daemon's only removal primitive is DELETE /turn/input/newest, so:
+        // snapshot for the texts (items[] is queue order), then delete once per
+        // item. Not atomic — a turn finishing mid-drain can pull remaining items
+        // into the model; the daemon offers nothing stronger. Convergence of the
+        // shared queueUpdated state rides the dequeue SSE events (each triggers
+        // a RefetchQueue effect).
+        let Some(sid) = session_id else {
+            return ClearQueueResult::default();
+        };
+        let Some(ws) = self.inner.get_warm(&sid) else {
+            return ClearQueueResult::default();
+        };
+        let items = ws
+            .client
+            .turn_input_snapshot()
+            .await
+            .data
+            .map(|s| s.items)
+            .unwrap_or_default();
+        for _ in &items {
+            // 409 (queue already empty) is an Ok no-op; stop only on real failures
+            // rather than hammering a daemon that just refused us.
+            if ws.client.dequeue_newest_input().await.is_err() {
+                break;
             }
         }
-        ClearQueueResult::default()
+        ClearQueueResult {
+            // Queue items surface in pantoken as mode:Steer (the daemon has no
+            // steer/follow-up discriminator) — hand the texts back on that side;
+            // the client joins steering ++ follow_up, so order is preserved.
+            steering: items.into_iter().map(|i| i.content).collect(),
+            follow_up: Vec::new(),
+        }
     }
 
     fn respond_ui(&self, response: HostUiResponse, session_id: Option<SessionId>) {

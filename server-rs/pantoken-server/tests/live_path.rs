@@ -1426,6 +1426,48 @@ async fn refetch_queue_emits_queue_updated() {
     );
 }
 
+/// clear_queue (the client's ⌥↑ "Edit all" restore) must return EVERY queued
+/// text and drain the daemon's queue — the daemon's only removal primitive is
+/// DELETE /turn/input/newest, so the driver snapshots first and deletes once
+/// per item. Regression: it used to dequeue a single item and return nothing,
+/// silently deleting the newest queued prompt.
+#[tokio::test]
+async fn clear_queue_drains_daemon_queue_and_returns_texts() {
+    let _guard = OVERRIDE_MUTEX.lock().await;
+
+    let scenario = corpus_loader::load_named(VERSION, "streaming-turn");
+    let fake = Arc::new(fake_daemon::spawn(scenario, "clear-queue-1".into(), 0).await);
+    let _ovr = OverrideGuard::install(fake.clone());
+
+    let (driver, _dir) = make_driver().await;
+
+    let _seed = driver
+        .new_session(NewSessionOptsData::default())
+        .await
+        .expect("new_session");
+
+    let restored = driver.clear_queue(Some(fake.session_id.clone())).await;
+
+    // The canned GET /turn/input serves one item ("queued-turn-text") — its text
+    // must come back for the composer, on the steering side (queue items surface
+    // as mode:Steer; there is no daemon-side steer/follow-up split).
+    assert_eq!(restored.steering, vec!["queued-turn-text".to_string()]);
+    assert!(restored.follow_up.is_empty());
+
+    // One DELETE per snapshotted item — the queue is actually drained.
+    let deletes = fake
+        .recorded_calls()
+        .iter()
+        .filter(|(m, p)| m == "DELETE" && p == "/turn/input/newest")
+        .count();
+    assert_eq!(
+        deletes,
+        1,
+        "expected one dequeue per snapshotted item; calls: {:?}",
+        fake.recorded_calls()
+    );
+}
+
 // ===========================================================================
 // Phase 5 — new_session wiring: cwd resolution, worktree, login-env,
 //           warm-cap eviction, invalid-cwd errors (AC.7, AC.8, AC.9, AC.12)
