@@ -1061,7 +1061,7 @@
     border-top: 1px solid var(--border);
     background: color-mix(in srgb, var(--bg) 86%, transparent);
     backdrop-filter: blur(8px);
-    padding: 10px 16px calc(12px + env(safe-area-inset-bottom));
+    padding: 10px 44px calc(12px + env(safe-area-inset-bottom));
   }
   .composer-wrap.drag-active {
     background: color-mix(in srgb, var(--accent) 10%, var(--bg));
@@ -1327,6 +1327,10 @@
   @media (max-width: 859px) {
     .toolbar-hint {
       display: none;
+    }
+    /* Sidebars are overlay drawers here — no gutter to hold against them. */
+    .composer-wrap {
+      padding-inline: 16px;
     }
   }
   .toolbar {

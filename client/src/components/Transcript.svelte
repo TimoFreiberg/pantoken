@@ -200,12 +200,16 @@
     return () => clearInterval(timer);
   });
 
+  const ANCIENT_CUTOFF_MS = Date.parse("2020-01-01T00:00:00Z");
+
   /** Human-friendly relative time. Reads `now` so callers re-run on each tick. */
   function relativeTime(iso: string): string {
     // `iso` may be an ISO 8601 string or epoch milliseconds as a string.
     // Number(iso) handles the epoch-ms case; Date.parse handles ISO strings.
     const then = new Date(Number(iso) || iso).getTime();
-    if (Number.isNaN(then)) return "";
+    // Same plausibility floor as lib/relative-time.ts: fabricated epoch-era
+    // stamps (seed fallbacks) must render as nothing, not "20644d ago".
+    if (Number.isNaN(then) || then < ANCIENT_CUTOFF_MS) return "";
     const diff = now - then;
     if (diff < 45_000) return "just now";
     const mins = Math.round(diff / 60_000);
@@ -1208,7 +1212,7 @@
        a plain --maxw column would — only code opts wider. */
     max-width: var(--maxw-wide);
     margin: 0 auto;
-    padding: 22px 18px 28px;
+    padding: 22px 44px 28px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -1518,6 +1522,10 @@
     .branch,
     .row.user .copy {
       opacity: 1;
+    }
+    /* Sidebars are overlay drawers here — no gutter to hold against them. */
+    .col {
+      padding-inline: 18px;
     }
   }
   .notice {
