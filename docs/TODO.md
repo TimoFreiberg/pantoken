@@ -5,29 +5,31 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
 
 ## 🔴 Open bugs
 
-- [ ] rename session doesn't work. The GUI feature appears to work correctly. I can press the rename button, enter a new name in the text field, press enter, and it just doesn't change the existing name. Or at least it does not change the displayed name. I have no idea if the name the title we are displaying in the sidebar is the right one. 
-- [ ] The feature that collapses the early working part of a turn when the final message is written seems to not be triggered when a cold session is restored in the GUI.  
-- [ ] We need to analyze all kinds of errors that restoring a session can return. Some of them shouldn't be retried. For example, trying to restore a session that was run in a directory that no longer exists can't ever succeed. Errors in that feature should be logged if they aren't already. 
-- [ ] The collapsed state of projects in the sidebar should be persisted, so when restoring the GUI, it should keep projects collapsed that I previously collapsed. I think that should be a general principle. All the front end state should be persisted if reasonably possible. 
-- [ ] When the new session draft view is open in the sidebar both the new session and the previously focused session are highlighted at once. Only the "new session" should be highlighted. 
-- [ ] The sidebar should be visible by default. It's fine if it's collapsible, but by default it should be visible. also, instead of having a hamburger menu in the top bar that toggles the sidebar, the sidebar should have a little pop-in arrow on the very edge similar to the arrow that collapsed it (that one's good). so add another indicator/show sidebar button when collapsed, keep it as is when expanded, remove the hamburger menu. also also, the sidebar doesn't need the "Context" title, just remove that. and the categories should be ordered flagged files -> async jobs -> todos (so it's equal to polytoken tui)
-- [ ] add more of a margin to the left side of the sidebar. we can just compare a pantoken screenshot with a codex screenshot and make the visuals closer to codex when in doubt
-- [ ] when an agent is actively thinking, there's both the collapsed thinking block with the text "Thinking..." with an animation and then directly below that the spinner, the text "Thinking..." _again_ and a timer and token count.
-    we can remove the text "Thinking..." from the bottom progress area and the progress animation from the thinking block to deduplicate stuff
-- [ ] "drag region" from commit 4fbb4a58befcbb4166791717655203a290de092d still doesn't work. 
-
 - [ ] POST /interrogative/respond fails with 401 because the Authorization header is missing
-
-
-- [ ] **Medium-tier (5 remaining):** (TODO: this is an older entry, verify that they're still issues!) optimistic userMessage before POST leaves
-      ghost rows on failure (reduced: may be fixed); renaming a cold session
-      hijacks activeSessionId (and spawns a daemon); phone-wake half-open sockets
-      show a green "live" LED over a dead link; ⌘F can't search collapsed
-      "Worked for Ns" bodies (DOM-only search); reloaded transcripts show
-      "56y ago" (synthetic epoch timestamps — daemon gap, see
-      `polytoken-upstream-feature-asks.md` #1); e2e suite asserts mock behaviors
-      the live driver never produces.
-
+- [ ] **e2e live-tier coverage gap** (was "e2e suite asserts mock behaviors the
+      live driver never produces"): the corpus-backed live tier exists
+      (`e2e/live/`, 5 spec files vs `PANTOKEN_DRIVER=fake`, real recorded
+      daemon traffic) and passes, but it's gated to manual `workflow_dispatch`
+      in CI — not a blocking gate yet — and covers 5 of ~80 spec files,
+      structurally not textually. The rest of the suite still has no
+      live-driver corroboration. (The old "see DECISIONS.md D21" pointer is
+      dead — that entry was deleted in the docs cleanup; the tier summary
+      lives in `server-rs/PROGRESS.md` Phase 2.5.)
+- ~~[x]~~ Cold-restore transcript collapse ("not triggered when a cold session
+      is restored"): could NOT be reproduced (2026-07-09) — the seed builder's
+      trailing re-assert already settles restored turns (since "Settle
+      orphaned tools in seed builder, not fold"), verified from fold-simulation
+      down to browser e2e. Regression coverage added (mock
+      `restored_session_seed` fixture + unit + e2e). If it recurs live,
+      capture a live repro before reopening — the mock-reproducible mechanism
+      is demonstrably fixed.
+- ~~[x]~~ Drag region (2026-07-09): three stacked causes fixed — the header now
+      uses Tauri's subtree mode (`data-tauri-drag-region="deep"`, verified
+      against the vendored 2.11.5 drag script), `core:window:allow-start-dragging`
+      is granted, and a `remote` capability scope now covers the
+      `http://127.0.0.1` webview origin (capabilities silently didn't apply to
+      it at all before). Agent-unverifiable by nature — confirm dragging +
+      double-click-maximize by hand during the `desktop/` dogfood pass.
 
 
 ## 🔵 Corpus capture follow-ups (from the 2026-07-06 live-capture session)
@@ -171,6 +173,31 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
       after it had stopped gating too. Decide: pre-push hook vs CI.
 - [ ] Settings.svelte carries ~10 unused CSS selectors (svelte-check warnings)
       left behind by a refactor — sweep them.
+- [ ] `sse_loop` retries forever even on permanent failures (401 included) —
+      its own comment admits it. Post-warm liveness needs a "this session
+      died" client signal before fail-fast is honest there (the restore path
+      is classified now; see `polytoken/restore_error.rs`).
+- [ ] `spawn_new_daemon`/`spawn_resume_daemon` flatten `io::Error` into
+      strings — binary-missing vs dir-missing both read "No such file or
+      directory". Preserve `ErrorKind` so `restore_error::classify` can stop
+      string-sniffing.
+- [ ] Restore fail-fast treats an unmounted volume as permanent `MissingCwd`
+      (deliberate: the toast says move it back; re-clicking re-checks).
+      Revisit only if external-volume projects become a real workflow.
+- [ ] `sessions_registry` fabricates `1970-01-01` for a cold session whose
+      `session.json` lacks `created_at` — render-hidden by `relative-time`'s
+      2020 plausibility floor. Make the wire timestamp nullable instead if it
+      ever matters.
+- [ ] The bottom working indicator no longer announces the thinking phase to
+      screen readers (label removed for dedupe; timer/tokens are aria-hidden;
+      the ThinkingBlock label isn't in a live region). Add sr-only text if
+      a11y ever matters here.
+- [ ] Warm-rename durability leans on the daemon flushing `overridden_title`
+      to `session.json` on its own cadence (empirically true; not
+      contractual).
+- [ ] Composer `expanded` is the one sticky-looking UI state left
+      unpersisted — by design (auto-resets on send). Product call before
+      persisting.
 
 ## 💡 Brainstorm (unfiltered — triage into the lanes above)
 
