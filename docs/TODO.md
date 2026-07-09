@@ -6,6 +6,8 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
 ## 🔴 Open bugs
 
 - [ ] POST /interrogative/respond fails with 401 because the Authorization header is missing
+- [ ] currently only top of transcript is draggable, top of both sidebars should be too ()
+- [ ] add version git tag to bottom of sidebar next to git hash
 - [ ] **e2e live-tier coverage gap** (was "e2e suite asserts mock behaviors the
       live driver never produces"): the corpus-backed live tier exists
       (`e2e/live/`, 5 spec files vs `PANTOKEN_DRIVER=fake`, real recorded
@@ -31,6 +33,7 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
       it at all before). Agent-unverifiable by nature — confirm dragging +
       double-click-maximize by hand during the `desktop/` dogfood pass.
 
+- [ ] move "archived" popups elsewhere (top of sidebar? still middle of transcript but top instead of bottom? discuss first)
 
 ## 🔵 Corpus capture follow-ups (from the 2026-07-06 live-capture session)
 
