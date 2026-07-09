@@ -50,7 +50,7 @@ bunx tsc --noEmit -p tsconfig.e2e.json       # typecheck e2e/ (Playwright doesn'
 bun run --cwd client check                    # svelte-check
 bun run --cwd client build                    # prod bundle
 cd server-rs && cargo build       # build the Rust server
-cd server-rs && cargo test        # run all Rust tests
+cd server-rs && cargo nextest run # run all Rust tests
 cd server-rs && cargo run         # run the Rust server (reads PANTOKEN_PORT, PANTOKEN_DATA_DIR, etc.)
 ```
 

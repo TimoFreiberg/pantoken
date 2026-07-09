@@ -16,6 +16,8 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
     we can remove the text "Thinking..." from the bottom progress area and the progress animation from the thinking block to deduplicate stuff
 - [ ] "drag region" from commit 4fbb4a58befcbb4166791717655203a290de092d still doesn't work. 
 
+- [ ] POST /interrogative/respond fails with 401 because the Authorization header is missing
+
 
 - [ ] **Medium-tier (5 remaining):** (TODO: this is an older entry, verify that they're still issues!) optimistic userMessage before POST leaves
       ghost rows on failure (reduced: may be fixed); renaming a cold session
