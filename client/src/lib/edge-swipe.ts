@@ -5,8 +5,8 @@
 // The gesture math lives in a DOM-free `EdgeSwipeTracker` so it's unit-testable; the
 // Svelte action wires touch events and reports snapshots back to the component, which
 // owns the live-follow transform + the open/close decision (see `createEdgeSwipe` in the
-// `.svelte.ts` sibling). Touch-only by design: the sidebar toggle (⌘B) and the header's
-// hamburger button are the desktop affordances.
+// `.svelte.ts` sibling). Touch-only by design: ⌘B and the left edge pop-in arrow
+// (App.svelte) are the tap/keyboard affordances, on both desktop and phone.
 
 export type SwipePhase = "idle" | "pulling" | "armed";
 

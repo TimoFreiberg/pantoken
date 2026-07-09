@@ -1,32 +1,40 @@
 import { expect, test } from "@playwright/test";
-import { drive, gotoFresh } from "./helpers.js";
+import { drive, gotoFresh, openRightSidebar } from "./helpers.js";
 
-// The right context panel (RightSidebar) shows the active session's todos,
-// background jobs, and flagged files — live session context. Driven by the
-// folded session state (flags/todos) and the server's JobsList broadcast (jobs).
-// Toggled by the StatusHeader button or ⌘⇧J.
+// The right context panel (RightSidebar) shows the active session's flagged files,
+// background jobs, and todos — live session context, in that order (matches the
+// polytoken TUI). Driven by the folded session state (flags/todos) and the server's
+// JobsList broadcast (jobs). Open by default on desktop (same rule as the left
+// Sidebar); toggled by ⌘⇧J or, while collapsed, the right edge pop-in arrow
+// (App.svelte) — there's no more header button. Has no "Context" title — just the
+// collapse control, mirroring the left sidebar's title-less header.
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-async function openPanel(page: import("@playwright/test").Page): Promise<void> {
-  await page.getByTestId("context-toggle").click();
+const openPanel = openRightSidebar;
+
+test("the context panel is open by default on desktop", async ({ page }) => {
   await expect(page.getByTestId("right-sidebar")).toHaveAttribute(
     "data-open",
     "true",
   );
-}
+});
+
+test("the context panel has no title — just the collapse control", async ({
+  page,
+}) => {
+  const panel = page.getByTestId("right-sidebar");
+  await expect(panel).toHaveAttribute("data-open", "true");
+  await expect(panel).not.toContainText("Context");
+  await expect(
+    page.getByRole("button", { name: "Collapse context panel" }),
+  ).toBeVisible();
+});
 
 test("the context panel renders flagged files and todos", async ({ page }) => {
-  // Before driving `context`: panel is closed.
-  await expect(page.getByTestId("right-sidebar")).toHaveAttribute(
-    "data-open",
-    "false",
-  );
-
-  // Open the panel.
-  await page.getByTestId("context-toggle").click();
+  // Desktop default: already open (no click needed).
   await expect(page.getByTestId("right-sidebar")).toHaveAttribute(
     "data-open",
     "true",
@@ -48,37 +56,51 @@ test("the context panel renders flagged files and todos", async ({ page }) => {
   await expect(todos).toContainText("Add e2e tests");
 });
 
-test("the context panel toggles open and closed", async ({ page }) => {
-  const toggle = page.getByTestId("context-toggle");
-  await expect(page.getByTestId("right-sidebar")).toHaveAttribute(
-    "data-open",
-    "false",
-  );
+test("sections render in order: flagged files, background jobs, todos", async ({
+  page,
+}) => {
+  await openPanel(page);
+  await drive(page, "context");
 
-  // Open.
-  await toggle.click();
-  await expect(page.getByTestId("right-sidebar")).toHaveAttribute(
-    "data-open",
-    "true",
-  );
+  // AC-equivalent to the old todos→jobs→files order: the TODO explicitly asks for
+  // flagged files -> async jobs -> todos, matching the polytoken TUI.
+  const testids = await page
+    .getByTestId("right-sidebar")
+    .locator("[data-testid]")
+    .evaluateAll((els) =>
+      els
+        .map((el) => el.getAttribute("data-testid"))
+        .filter(
+          (id): id is string =>
+            id === "flagged-files" ||
+            id === "background-jobs" ||
+            id === "todos",
+        ),
+    );
+  expect(testids).toEqual(["flagged-files", "background-jobs", "todos"]);
+});
 
-  // Close.
-  await toggle.click();
-  await expect(page.getByTestId("right-sidebar")).toHaveAttribute(
-    "data-open",
-    "false",
-  );
+test("the context panel closes via its own control and reopens via the edge arrow", async ({
+  page,
+}) => {
+  const panel = page.getByTestId("right-sidebar");
+  // Desktop default: open.
+  await expect(panel).toHaveAttribute("data-open", "true");
+
+  // Close via its own in-panel collapse control (no more header toggle button).
+  await page.getByRole("button", { name: "Collapse context panel" }).click();
+  await expect(panel).toHaveAttribute("data-open", "false");
+
+  // Reopen via the edge pop-in arrow.
+  await page.getByTestId("context-edge-open").click();
+  await expect(panel).toHaveAttribute("data-open", "true");
 });
 
 // AC.7: empty states for all three sections.
 test("the context panel shows empty states when no flags/todos/jobs", async ({
   page,
 }) => {
-  await page.getByTestId("context-toggle").click();
-  await expect(page.getByTestId("right-sidebar")).toHaveAttribute(
-    "data-open",
-    "true",
-  );
+  await openPanel(page);
 
   // The default mock snapshot has no flags/todos → empty states.
   await expect(page.getByTestId("flagged-files")).toContainText(
@@ -90,10 +112,9 @@ test("the context panel shows empty states when no flags/todos/jobs", async ({
   );
 });
 
-// AC.1: three sections render with the context fixture.
-test("three sections render: todos, background jobs, flagged files", async ({
-  page,
-}) => {
+// AC.1: three sections render with the context fixture (order is covered by the
+// dedicated "sections render in order" test above).
+test("three sections all render with the context fixture", async ({ page }) => {
   await openPanel(page);
   await drive(page, "context");
 
@@ -166,7 +187,9 @@ test("background jobs section renders fixture jobs", async ({ page }) => {
 });
 
 // AC.5: clicking a job opens a detail view with the output tail.
-test("clicking a job opens a detail view with output tail", async ({ page }) => {
+test("clicking a job opens a detail view with output tail", async ({
+  page,
+}) => {
   await openPanel(page);
   await drive(page, "context");
 
@@ -198,9 +221,7 @@ test("copy-path button copies flagged file path to clipboard", async ({
   await page.getByTestId("copy-path-src/app.ts").click();
 
   // Assert the clipboard contains the path.
-  const clipboard = await page.evaluate(() =>
-    navigator.clipboard.readText(),
-  );
+  const clipboard = await page.evaluate(() => navigator.clipboard.readText());
   expect(clipboard).toBe("src/app.ts");
 });
 

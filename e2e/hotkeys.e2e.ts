@@ -65,12 +65,17 @@ test("back history reaches a new-session draft", async ({ page }) => {
 test("Ctrl+Tab / Ctrl+Shift+Tab cycle through sessions in sidebar order", async ({
   page,
 }) => {
-  // Boot lands on the active row. Sidebar order: project groups A→Z (pantoken, scratch),
-  // newest-first within a group — so "Wire up…" → "Explore…" → the scratch session.
+  // Boot lands on the active row. Sidebar order: project groups A→Z (pantoken,
+  // retry-lib, scratch), newest-first within a group — so "Wire up…" → "Explore…" →
+  // the cold-restore regression fixture (mock_driver.rs's own distinct-cwd group,
+  // added for the cold-restore collapse bug, docs/TODO.md) → the scratch session.
   await expect(title(page)).toContainText("Wire up the WebSocket bridge");
 
   await page.keyboard.press("Control+Tab");
   await expect(title(page)).toContainText("Explore the fold reducer");
+
+  await page.keyboard.press("Control+Tab");
+  await expect(title(page)).toContainText("Cold-restore regression check");
 
   await page.keyboard.press("Control+Tab");
   await expect(title(page)).toContainText("scratch");
@@ -84,7 +89,7 @@ test("Ctrl+Tab / Ctrl+Shift+Tab cycle through sessions in sidebar order", async 
   await expect(title(page)).toContainText("scratch");
 
   await page.keyboard.press("Control+Shift+Tab");
-  await expect(title(page)).toContainText("Explore the fold reducer");
+  await expect(title(page)).toContainText("Cold-restore regression check");
 });
 
 test("⌘B toggles the sidebar", async ({ page }) => {
@@ -98,13 +103,28 @@ test("⌘B toggles the sidebar", async ({ page }) => {
   await expect(sidebar).toHaveAttribute("data-open", "true");
 });
 
-test("the status header has a Tauri drag region for window dragging", async ({
+test("⌘⇧J toggles the context panel", async ({ page }) => {
+  const panel = page.getByTestId("right-sidebar");
+  await expect(panel).toHaveAttribute("data-open", "true"); // desktop default
+
+  await page.keyboard.press("Control+Shift+j");
+  await expect(panel).toHaveAttribute("data-open", "false");
+
+  await page.keyboard.press("Control+Shift+j");
+  await expect(panel).toHaveAttribute("data-open", "true");
+});
+
+test("the status header has a Tauri drag region covering its whole non-interactive surface", async ({
   page,
 }) => {
-  // The Tauri shell uses TitleBarStyle::Overlay (chromeless). The header needs
-  // data-tauri-drag-region for both window dragging and double-click-to-maximize
-  // on macOS. The attribute is inert in a browser (unknown data-* attr), so this
-  // just asserts its presence — the actual drag behavior is desktop-only.
+  // The Tauri shell uses TitleBarStyle::Overlay (chromeless). "deep" (not a bare
+  // attribute) is required so a click anywhere in the header's non-interactive area —
+  // not just the literal <header> element itself — starts a drag; Tauri's own
+  // clickable-element heuristic still exempts real buttons (bell, plan/settings
+  // toggles) without any per-element opt-out. The attribute is inert in a browser
+  // (unknown data-* attr), so this just asserts its value — the actual drag behavior
+  // (and the desktop shell's IPC grant for it, see desktop/capabilities/window-drag.json)
+  // is desktop-only and needs a human dogfood pass.
   const header = page.locator("header.hdr");
-  await expect(header).toHaveAttribute("data-tauri-drag-region");
+  await expect(header).toHaveAttribute("data-tauri-drag-region", "deep");
 });

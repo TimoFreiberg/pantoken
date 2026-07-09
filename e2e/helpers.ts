@@ -58,23 +58,29 @@ export async function expandWork(
  *  in localStorage); pass a SectionId to land on a specific one. */
 export async function openSettings(
   page: Page,
-  section?:
-    | "appearance"
-    | "notifications"
-    | "models"
-    | "environment"
-    | "token",
+  section?: "appearance" | "notifications" | "models" | "environment" | "token",
 ): Promise<void> {
   await page.getByTestId("settings-toggle").click();
   if (section) await page.getByTestId(`settings-tab-${section}`).click();
 }
 
 /** Ensure the session sidebar is open. Desktop opens by default; the phone drawer
- *  needs the toggle. Driven off `data-open` (the drawer stays mounted off-screen, so
- *  visibility checks are unreliable). */
+ *  needs the left edge pop-in arrow (the header hamburger was removed — this is now
+ *  the only click affordance, besides ⌘B). Driven off `data-open` (the drawer stays
+ *  mounted off-screen, so visibility checks are unreliable). */
 export async function openSidebar(page: Page): Promise<void> {
   const sidebar = page.getByTestId("sidebar");
   if ((await sidebar.getAttribute("data-open")) !== "true")
-    await page.getByTestId("sidebar-toggle").click();
+    await page.getByTestId("sidebar-edge-open").click();
   await expect(sidebar).toHaveAttribute("data-open", "true");
+}
+
+/** Ensure the right context panel (flagged files, background jobs, todos) is open.
+ *  Mirrors openSidebar: desktop opens by default, the phone drawer (and a
+ *  user-collapsed desktop panel) needs the right edge pop-in arrow. */
+export async function openRightSidebar(page: Page): Promise<void> {
+  const panel = page.getByTestId("right-sidebar");
+  if ((await panel.getAttribute("data-open")) !== "true")
+    await page.getByTestId("context-edge-open").click();
+  await expect(panel).toHaveAttribute("data-open", "true");
 }
