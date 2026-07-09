@@ -2624,10 +2624,10 @@ sleep 30
     }
 
     #[tokio::test]
-    async fn test_respond_interrogative_sends_bearer_auth() {
+    async fn test_respond_interrogative_sends_bearer_auth_for_daemon_responses() {
         use std::sync::{
             Arc,
-            atomic::{AtomicBool, Ordering},
+            atomic::{AtomicUsize, Ordering},
         };
 
         use axum::{
@@ -2641,30 +2641,32 @@ sleep 30
         use serde_json::Value;
         use tokio::net::TcpListener;
 
-        let saw_valid_body = Arc::new(AtomicBool::new(false));
-        let saw_valid_body_handler = saw_valid_body.clone();
+        let saw_valid_bodies = Arc::new(AtomicUsize::new(0));
+        let saw_valid_bodies_handler = saw_valid_bodies.clone();
         let app = Router::new().route(
             "/interrogative/{id}/respond",
             post(
                 move |Path(id): Path<String>, headers: HeaderMap, Json(body): Json<Value>| {
-                    let saw_valid_body = saw_valid_body_handler.clone();
+                    let saw_valid_bodies = saw_valid_bodies_handler.clone();
                     async move {
                         if headers.get("authorization").and_then(|v| v.to_str().ok())
                             != Some("Bearer test-token")
                         {
                             return StatusCode::UNAUTHORIZED.into_response();
                         }
-                        if id != "perm-1" {
-                            return StatusCode::NOT_FOUND.into_response();
-                        }
-                        if body
-                            == serde_json::json!({
+                        let expected = match id.as_str() {
+                            "perm-1" => serde_json::json!({
                                 "kind": "permission_answer",
                                 "granted": true,
-                            })
-                        {
-                            saw_valid_body.store(true, Ordering::SeqCst);
-                        }
+                            }),
+                            "plan-1" => serde_json::json!({
+                                "kind": "plan_handoff_answer",
+                                "decision": "implement_current_context",
+                            }),
+                            _ => return StatusCode::NOT_FOUND.into_response(),
+                        };
+                        assert_eq!(body, expected);
+                        saw_valid_bodies.fetch_add(1, Ordering::SeqCst);
                         StatusCode::NO_CONTENT.into_response()
                     }
                 },
@@ -2678,18 +2680,26 @@ sleep 30
         });
 
         let client = DaemonClient::new("s1".into(), port, 1, Some("test-token".into()));
-        let response = InterrogativeResponse::PermissionAnswer {
+        let permission_response = InterrogativeResponse::PermissionAnswer {
             granted: true,
             persistence_target: None,
         };
+        let plan_response = InterrogativeResponse::PlanHandoffAnswer {
+            decision: serde_json::Value::String("implement_current_context".into()),
+        };
 
         client
-            .respond_interrogative("perm-1", &response)
+            .respond_interrogative("perm-1", &permission_response)
             .await
-            .expect("respond_interrogative should include bearer auth");
-        assert!(
-            saw_valid_body.load(Ordering::SeqCst),
-            "handler should receive the permission response body"
+            .expect("permission response should include bearer auth");
+        client
+            .respond_interrogative("plan-1", &plan_response)
+            .await
+            .expect("plan response should include bearer auth");
+        assert_eq!(
+            saw_valid_bodies.load(Ordering::SeqCst),
+            2,
+            "handler should receive every interrogative response body"
         );
 
         server.abort();
