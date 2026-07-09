@@ -7,6 +7,7 @@
     filterFiles,
     classifyAtQuery,
     buildAtItems,
+    stepLevel,
     type AtItem,
   } from "../lib/file-autocomplete.js";
   import {
@@ -220,6 +221,12 @@
   const FALLBACK_MIN = 25;
   let atSel = $state(0);
   let atDismissed = $state(false);
+  // Model reasoning level (polytoken TUI parity): `[`/`]` step the highlighted model
+  // row's level while it's a "model" item (see the atOpen keydown block below); the
+  // selected row renders it as `reasoning: <level>`, and accepting appends `(<level>)`.
+  // `null` = no level chosen (unchanged accept: plain `@model:provider/modelId`). Reset
+  // effect is below, alongside atQ/atOpen (which it depends on).
+  let modelLevel = $state<string | null>(null);
   let fileDebounce: ReturnType<typeof setTimeout> | undefined;
   const atMatch = $derived(extractAtQuery(store.composerDraft, cursorPos));
   const atQ = $derived(atMatch?.query ?? null);
@@ -260,6 +267,16 @@
   );
   $effect(() => {
     if (atSel >= atItems.length) atSel = 0;
+  });
+  // The selected row or the active query moving invalidates any level dialed in for
+  // the previous model — mirrors the atSel-out-of-range reset just above. Also fires
+  // when the menu closes (atOpen false) so a dismissed/closed picker never leaves a
+  // stale level behind for the next time it opens.
+  $effect(() => {
+    atSel;
+    atQ;
+    atOpen;
+    modelLevel = null;
   });
 
   // Debounced server fallback: fires only in project (file) mode, when the index was
@@ -525,7 +542,8 @@
    *      keep typing to narrow further.
    *    - skill/subagent: `@skill:<name>` / `@subagent:<name>`.
    *    - model: `@model:<provider>/<modelId>` — always canonical, even if the user
-   *      typed the `m:` shorthand.
+   *      typed the `m:` shorthand — plus a `(<level>)` suffix when a reasoning level
+   *      was dialed in with `[`/`]` (unset stays suffix-free).
    *    - sigil: just `@<prefix>` (e.g. `@skill:`) — the cursor lands right after the
    *      colon, so the menu recomputes to that kind's list (same keep-narrowing
    *      mechanic as a directory `/`). */
@@ -546,6 +564,7 @@
         break;
       case "model":
         inserted = `model:${item.model.provider}/${item.model.modelId}`;
+        if (modelLevel !== null) inserted += `(${modelLevel})`;
         break;
       case "sigil":
         inserted = item.prefix;
@@ -555,6 +574,7 @@
       draft.slice(0, m.atPos) + "@" + inserted + draft.slice(cursorPos);
     atDismissed = false;
     atSel = 0;
+    modelLevel = null;
     queueMicrotask(() => {
       ta?.focus();
       autosize();
@@ -660,6 +680,26 @@
     // menus somehow overlap — the user typed `/` first).
     if (atOpen) {
       const n = atItems.length;
+      // Model reasoning level (polytoken TUI parity): `[`/`]` step the highlighted
+      // model row's level up/down. Only while a model row is selected — every other
+      // kind leaves `[`/`]` alone so they type normally (e.g. into a file path).
+      const selectedAtItem = atItems[atSel];
+      if (
+        selectedAtItem?.kind === "model" &&
+        (e.key === "[" || e.key === "]") &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !e.shiftKey
+      ) {
+        e.preventDefault();
+        modelLevel = stepLevel(
+          selectedAtItem.model.thinkingLevels,
+          modelLevel,
+          e.key === "]" ? 1 : -1,
+        );
+        return;
+      }
       if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
         e.preventDefault();
         atSel = (atSel + 1) % n;
@@ -967,6 +1007,7 @@
         <AtMenu
           items={atItems}
           selected={atSel}
+          reasoningLevel={modelLevel}
           onpick={acceptAtItem}
           onhover={(i) => (atSel = i)}
         />

@@ -253,6 +253,46 @@ const SIGILS: readonly {
   { prefix: "model:", label: "browse models…" },
 ];
 
+/** Whether a sigil's kind has anything to browse into. `model:` is always available
+ *  (models are a fixed, always-available source); `skill:`/`subagent:` need a
+ *  non-empty source list (an empty fixture/session has nothing to browse into). */
+function sigilAvailable(
+  prefix: "skill:" | "subagent:" | "model:",
+  skills: readonly string[],
+  subagents: readonly string[],
+): boolean {
+  if (prefix === "model:") return true;
+  if (prefix === "skill:") return skills.length > 0;
+  return subagents.length > 0;
+}
+
+/**
+ * Step a model's reasoning-level selection while a model row is highlighted in the
+ * `@model:`/`@m:` picker — `]` (`dir = 1`) steps up, `[` (`dir = -1`) steps down.
+ * `null` means "no level chosen", which is both the picker's starting state and the
+ * floor: stepping down from `levels[0]` returns to `null` rather than wrapping to the
+ * top. Stepping up clamps at `levels.at(-1)` rather than wrapping back to `null` —
+ * the two directions are deliberately asymmetric (repeatedly pressing `]` settles at
+ * max reasoning instead of cycling past it back to "unset"), matching the polytoken
+ * TUI. A model with no `thinkingLevels` (or an empty list) always yields `null` —
+ * there's nothing to select. A `current` value that isn't one of `levels` (stale,
+ * e.g. leftover from a differently-leveled model) is treated the same as `null`.
+ */
+export function stepLevel(
+  levels: readonly string[] | undefined,
+  current: string | null,
+  dir: 1 | -1,
+): string | null {
+  if (!levels || levels.length === 0) return null;
+  const idx = current === null ? -1 : levels.indexOf(current);
+  if (dir === 1) {
+    const next = Math.min(idx + 1, levels.length - 1);
+    return levels[next] ?? null;
+  }
+  const next = idx - 1;
+  return next < 0 ? null : (levels[next] ?? null);
+}
+
 export interface BuildAtItemsParams {
   /** The full text after `@` (before any sigil stripping) — classified internally. */
   query: string;
@@ -331,7 +371,20 @@ export function buildAtItems(params: BuildAtItemsParams): AtItem[] {
     .slice(0, limit)
     .map((file): AtItem => ({ kind: "file", file }));
 
-  if (partial === "") return items; // bare @: files only, no kind noise
+  if (partial === "") {
+    if (items.length > 0) return items; // bare @ with files: no kind noise, no sigils
+    // No file candidates at all for a bare `@` (empty/unindexed cwd) — an empty menu
+    // would hide every other kind. Fall back to the sigil rows (still honoring the
+    // "suppress sigils for an empty source list" rule below) so the other kinds stay
+    // discoverable instead of the picker just not opening.
+    return SIGILS.filter((sigil) =>
+      sigilAvailable(sigil.prefix, skills, subagents),
+    ).map((sigil): AtItem => ({
+      kind: "sigil",
+      prefix: sigil.prefix,
+      label: sigil.label,
+    }));
+  }
 
   const KIND_LIMIT = 5;
   for (const name of filterNames(skills, partial, KIND_LIMIT)) {
@@ -345,12 +398,7 @@ export function buildAtItems(params: BuildAtItemsParams): AtItem[] {
   }
 
   for (const sigil of SIGILS) {
-    const available =
-      sigil.prefix === "model:"
-        ? true
-        : sigil.prefix === "skill:"
-          ? skills.length > 0
-          : subagents.length > 0;
+    const available = sigilAvailable(sigil.prefix, skills, subagents);
     if (available && sigil.prefix.startsWith(partial)) {
       items.push({ kind: "sigil", prefix: sigil.prefix, label: sigil.label });
     }

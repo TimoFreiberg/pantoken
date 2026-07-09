@@ -7,6 +7,7 @@ import {
   filterFiles,
   filterModels,
   filterNames,
+  stepLevel,
   type AtItem,
 } from "./file-autocomplete.js";
 
@@ -348,6 +349,57 @@ describe("filterModels", () => {
   });
 });
 
+describe("stepLevel", () => {
+  const LEVELS = ["off", "low", "medium", "high"] as const;
+
+  test("undefined levels always yield null", () => {
+    expect(stepLevel(undefined, null, 1)).toBeNull();
+    expect(stepLevel(undefined, "high", -1)).toBeNull();
+  });
+
+  test("empty levels always yield null", () => {
+    expect(stepLevel([], null, 1)).toBeNull();
+    expect(stepLevel([], "high", -1)).toBeNull();
+  });
+
+  test("] steps null to the first level, then onward", () => {
+    let level = stepLevel(LEVELS, null, 1);
+    expect(level).toBe("off");
+    level = stepLevel(LEVELS, level, 1);
+    expect(level).toBe("low");
+    level = stepLevel(LEVELS, level, 1);
+    expect(level).toBe("medium");
+  });
+
+  test("] clamps at the top level instead of wrapping to null", () => {
+    expect(stepLevel(LEVELS, "high", 1)).toBe("high");
+  });
+
+  test("[ steps down through the levels", () => {
+    expect(stepLevel(LEVELS, "high", -1)).toBe("medium");
+    expect(stepLevel(LEVELS, "medium", -1)).toBe("low");
+  });
+
+  test("[ steps past the first level back to null", () => {
+    expect(stepLevel(LEVELS, "off", -1)).toBeNull();
+  });
+
+  test("[ on null stays null (already at the floor)", () => {
+    expect(stepLevel(LEVELS, null, -1)).toBeNull();
+  });
+
+  test("a single-level list clamps immediately", () => {
+    expect(stepLevel(["off"], null, 1)).toBe("off");
+    expect(stepLevel(["off"], "off", 1)).toBe("off");
+    expect(stepLevel(["off"], "off", -1)).toBeNull();
+  });
+
+  test("a stale current not present in levels is treated as null", () => {
+    expect(stepLevel(LEVELS, "extreme", 1)).toBe("off");
+    expect(stepLevel(LEVELS, "extreme", -1)).toBeNull();
+  });
+});
+
 describe("buildAtItems", () => {
   const f = (path: string, isDirectory = false): FileInfo => ({
     path,
@@ -421,6 +473,54 @@ describe("buildAtItems", () => {
       { kind: "file", file: f("README.md") },
       { kind: "file", file: f("store", true) },
       { kind: "file", file: f("store.ts") },
+    ] satisfies AtItem[]);
+  });
+
+  test("bare @ with zero file candidates falls back to the sigil rows", () => {
+    // Empty/unindexed cwd: no files at all for a bare `@`. Without the fallback this
+    // would be an empty menu (no way to discover skill:/subagent:/model:).
+    const items = buildAtItems({
+      files: [],
+      serverFiles: [],
+      skills: SKILLS,
+      subagents: SUBAGENTS,
+      models: MODELS,
+      query: "",
+    });
+    expect(items).toEqual([
+      { kind: "sigil", prefix: "skill:", label: "browse skills…" },
+      { kind: "sigil", prefix: "subagent:", label: "browse subagents…" },
+      { kind: "sigil", prefix: "model:", label: "browse models…" },
+    ] satisfies AtItem[]);
+  });
+
+  test("bare @ with zero files AND empty skill/subagent lists still offers model: (always available)", () => {
+    const items = buildAtItems({
+      files: [],
+      serverFiles: [],
+      skills: [],
+      subagents: [],
+      models: [],
+      query: "",
+    });
+    expect(items).toEqual([
+      { kind: "sigil", prefix: "model:", label: "browse models…" },
+    ] satisfies AtItem[]);
+  });
+
+  test("bare @ with server file extras (but no local index) is not treated as zero candidates", () => {
+    // serverFiles alone should suppress the sigil fallback just like local files do —
+    // there IS something to show, so don't also inject sigil noise.
+    const items = buildAtItems({
+      files: [],
+      serverFiles: [f("README.md")],
+      skills: SKILLS,
+      subagents: SUBAGENTS,
+      models: MODELS,
+      query: "",
+    });
+    expect(items).toEqual([
+      { kind: "file", file: f("README.md") },
     ] satisfies AtItem[]);
   });
 
