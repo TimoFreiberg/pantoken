@@ -5,7 +5,19 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
 
 ## 🔴 Open bugs
 
-- [ ] **Medium-tier (5 remaining):** optimistic userMessage before POST leaves
+- [ ] rename session doesn't work. The GUI feature appears to work correctly. I can press the rename button, enter a new name in the text field, press enter, and it just doesn't change the existing name. Or at least it does not change the displayed name. I have no idea if the name the title we are displaying in the sidebar is the right one. 
+- [ ] The feature that collapses the early working part of a turn when the final message is written seems to not be triggered when a cold session is restored in the GUI.  
+- [ ] We need to analyze all kinds of errors that restoring a session can return. Some of them shouldn't be retried. For example, trying to restore a session that was run in a directory that no longer exists can't ever succeed. Errors in that feature should be logged if they aren't already. 
+- [ ] The collapsed state of projects in the sidebar should be persisted, so when restoring the GUI, it should keep projects collapsed that I previously collapsed. I think that should be a general principle. All the front end state should be persisted if reasonably possible. 
+- [ ] When the new session draft view is open in the sidebar both the new session and the previously focused session are highlighted at once. Only the "new session" should be highlighted. 
+- [ ] The sidebar should be visible by default. It's fine if it's collapsible, but by default it should be visible. also, instead of having a hamburger menu in the top bar that toggles the sidebar, the sidebar should have a little pop-in arrow on the very edge similar to the arrow that collapsed it (that one's good). so add another indicator/show sidebar button when collapsed, keep it as is when expanded, remove the hamburger menu. also also, the sidebar doesn't need the "Context" title, just remove that. and the categories should be ordered flagged files -> async jobs -> todos (so it's equal to polytoken tui)
+- [ ] add more of a margin to the left side of the sidebar. we can just compare a pantoken screenshot with a codex screenshot and make the visuals closer to codex when in doubt
+- [ ] when an agent is actively thinking, there's both the collapsed thinking block with the text "Thinking..." with an animation and then directly below that the spinner, the text "Thinking..." _again_ and a timer and token count.
+    we can remove the text "Thinking..." from the bottom progress area and the progress animation from the thinking block to deduplicate stuff
+- [ ] "drag region" from commit 4fbb4a58befcbb4166791717655203a290de092d still doesn't work. 
+
+
+- [ ] **Medium-tier (5 remaining):** (TODO: this is an older entry, verify that they're still issues!) optimistic userMessage before POST leaves
       ghost rows on failure (reduced: may be fixed); renaming a cold session
       hijacks activeSessionId (and spawns a daemon); phone-wake half-open sockets
       show a green "live" LED over a dead link; ⌘F can't search collapsed
@@ -14,23 +26,8 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
       `polytoken-upstream-feature-asks.md` #1); e2e suite asserts mock behaviors
       the live driver never produces.
 
-## ✅ Fixed (2026-07-09)
 
-- [x] Handoff plan doesn't work in the GUI — polytoken driver never emitted
-      `HostUiResolved` after `respond_interrogative`; the dialog card stayed
-      open. Now emits it unconditionally (success or error) + cleans up the
-      pending interrogative map.
-- [x] Facet hotkeys open the popup instead of cycling; number keys (1–9)
-      quick-select inside the popup.
-- [x] Top area of the GUI can be dragged and double-clicked to maximize
-      (Tauri `data-tauri-drag-region` on the status header).
-- [x] Q&A form + result render markdown in the context text window.
-- [x] Default permission mode respects the polytoken config —
-      `get_permission_monitor()` is now called during `install_warm` to seed
-      the cached mode.
-- [x] opt+enter inserts a newline in the prompt text field.
-- [ ] epic: there should be a sidebar showing "Flagged files", "Async Jobs"
-      (e.g. subagents) and "Todos", like polytoken has.
+
 ## 🔵 Corpus capture follow-ups (from the 2026-07-06 live-capture session)
 
 Full detail in `server-rs/PROGRESS.md` → "Live corpus capture (2026-07-06)". The
