@@ -585,6 +585,26 @@ fn mock_session_list() -> Vec<SessionListEntry> {
             archived: false,
             worktree: None,
         },
+        // Regression fixture for the cold-restore collapse bug (docs/TODO.md): its
+        // seed (`restored_session_seed`) mimics `history_to_seed_events` +
+        // `build_branch_seed`'s replay shape — real tool work, settled via a bare
+        // idle `SessionUpdated` re-assert rather than a `RunCompleted`. Own project
+        // group (distinct cwd) so it can't perturb "pantoken" group row counts.
+        SessionListEntry {
+            session_id: "restored-session".into(),
+            path: "/sessions/restored-session.jsonl".into(),
+            cwd: "/Users/timo/src/retry-lib".into(),
+            display_name: Some("Cold-restore regression check".into()),
+            preview: "Refactor the retry helper to use exponential backoff.".into(),
+            user_message_count: 1,
+            usage: None,
+            updated_at: iso_ago(90 * 60_000),
+            created_at: iso_ago(day),
+            last_user_message_at: iso_ago(90 * 60_000 + 60_000),
+            parent_session_path: None,
+            archived: false,
+            worktree: None,
+        },
         SessionListEntry {
             session_id: "archived-session".into(),
             path: "/sessions/archived-session.jsonl".into(),
@@ -838,6 +858,7 @@ fn mock_session_seed(path: &str) -> Vec<SessionDriverEvent> {
             "quick scratch session",
             "Noted — nothing else here.",
         ),
+        "/sessions/restored-session.jsonl" => restored_session_seed(),
         _ => session_seed(
             "unknown",
             "Session",
@@ -923,6 +944,102 @@ fn greeting_seed() -> Vec<SessionDriverEvent> {
     });
 
     events
+}
+
+/// A COLD-RESTORED session's seed: the shape `history_to_seed_events` (server-rs/
+/// pantoken-server/src/polytoken/history_seed.rs) + the `build_branch_seed` wrapper
+/// (server-rs/pantoken-server/src/polytoken/driver.rs:755-795) produce when the
+/// polytoken driver reopens a session with real tool work from `GET /history` —
+/// deliberately NOT what a live-settled turn looks like (contrast `greeting_seed`/
+/// `session_seed` above, which end on a proper `RunCompleted`). The defining trait:
+/// daemon history replay has no `runCompleted` record to synthesize, so the trailing
+/// bubble is settled by a bare idle `SessionUpdated` re-assert instead — no entryId
+/// backfill (`stampLastEntryId` only runs on `runCompleted`), no `interruptRunningTools`
+/// pass. The mock has no daemon history to replay, so nothing else reaches this shape;
+/// it exists to give `open_session`/`reload_session` a deterministic fixture for it.
+/// Regression bed for docs/TODO.md: "The feature that collapses the early working part
+/// of a turn when the final message is written seems to not be triggered when a cold
+/// session is restored in the GUI."
+fn restored_session_seed() -> Vec<SessionDriverEvent> {
+    let ref_id = session_ref_for("restored-session");
+    let b = || SessionEventBase {
+        session_ref: ref_id.clone(),
+        timestamp: ts(),
+        run_id: None,
+    };
+    let snap = || SessionSnapshot {
+        r#ref: ref_id.clone(),
+        workspace: mock_workspace(),
+        title: "Cold-restore regression check".into(),
+        status: SessionStatus::Idle,
+        updated_at: ts(),
+        archived_at: None,
+        preview: None,
+        config: Some(mock_default_config()),
+        usage: None,
+        running_run_id: None,
+        queued_messages: None,
+        facet: None,
+        permission_monitor: None,
+        adventurous_handoff: None,
+        notification_autodrain: None,
+        active_plan: None,
+        goal: None,
+        flags: None,
+        todos: None,
+        mcp_servers: None,
+    };
+    vec![
+        // The leading snapshot (build_branch_seed's first element).
+        SessionDriverEvent::SessionOpened {
+            base: b(),
+            snapshot: snap(),
+        },
+        SessionDriverEvent::UserMessage {
+            base: b(),
+            id: "u-restored-1".into(),
+            text: "Refactor the retry helper to use exponential backoff.".into(),
+            images: None,
+            entry_id: Some("e-u-restored-1".into()),
+        },
+        SessionDriverEvent::AssistantDelta {
+            base: b(),
+            text: "Sure — let me check the current implementation first.".into(),
+            channel: Some(AssistantDeltaChannel::Text),
+            entry_id: Some("e-a-restored-1".into()),
+        },
+        SessionDriverEvent::ToolStarted {
+            base: b(),
+            call_id: "restored-t1".into(),
+            tool_name: "bash".into(),
+            label: Some("Run shell command".into()),
+            description: Some("Execute a command in the workspace shell".into()),
+            input: Some(serde_json::json!({"command": "rg -n \"function retry\" src"})),
+        },
+        SessionDriverEvent::ToolFinished {
+            base: b(),
+            call_id: "restored-t1".into(),
+            success: true,
+            output: Some(serde_json::json!(
+                "src/retry.ts:3:export function retry(fn) {"
+            )),
+            images: None,
+            interrupted: None,
+        },
+        SessionDriverEvent::AssistantDelta {
+            base: b(),
+            text: "Done — `retry()` now backs off exponentially with a capped delay.".into(),
+            channel: Some(AssistantDeltaChannel::Text),
+            entry_id: Some("e-a-restored-1".into()),
+        },
+        // The trailing re-assert build_branch_seed appends AFTER replayed history
+        // (driver.rs:784-793) — a bare SessionUpdated, never a runCompleted. This is
+        // the ONLY thing that closes the final assistant bubble on this path.
+        SessionDriverEvent::SessionUpdated {
+            base: b(),
+            snapshot: snap(),
+        },
+    ]
 }
 
 /// Split text into streaming deltas of ~n words, preserving whitespace.

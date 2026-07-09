@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { gotoFresh } from "./helpers.js";
+import { gotoFresh, openSidebar } from "./helpers.js";
 
 // Control (not Meta) — CI runs Chromium on Linux and the handler accepts metaKey||ctrlKey.
 
@@ -78,4 +78,37 @@ test("⌘F does nothing while drafting a new session (no transcript)", async ({
   ).toBeVisible();
   await page.keyboard.press("Control+f");
   await expect(box(page)).toBeHidden();
+});
+
+// Regression: runSearch TreeWalks only rendered DOM, so a match that lives entirely
+// inside a collapsed "Worked for Ns" run was invisible to it (the lane is unmounted via
+// {#if workShown(...)}, not just hidden). The "Cold-restore regression check" fixture
+// (restored_session_seed in mock_driver.rs) always opens with its one work run collapsed
+// by default (see reload-session.e2e.ts) — exactly the shape this needs.
+test("search finds a match inside a collapsed work run and expands it", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  const sidebar = page.getByTestId("sidebar");
+  await sidebar.getByText("Cold-restore regression check").click();
+  await expect(page.locator("header .title")).toContainText(
+    "Cold-restore regression check",
+  );
+
+  // Precondition: the run is genuinely collapsed on open, same as reload-session.e2e.ts.
+  const toggle = page.getByTestId("work-toggle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByTestId("work-body")).toHaveCount(0);
+
+  // "current implementation" only appears in the collapsed run's narration ("Sure —
+  // let me check the current implementation first.") — never in the turn-final visible
+  // response ("...now backs off exponentially...").
+  await page.keyboard.press("Control+f");
+  await findInput(page).fill("current implementation");
+  await expect(count(page)).toHaveText(/^1\/\d+$/);
+
+  // Finding it must actually expand the run, not just see through it while it stays
+  // visually collapsed.
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByTestId("work-body")).toBeVisible();
 });

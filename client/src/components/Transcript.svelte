@@ -142,6 +142,12 @@
     workOpen = { ...workOpen, [laneId]: !current };
   }
   function workShown(laneId: string, turn: TurnGroup): boolean {
+    // ⌘F must be able to find (and land on) a match inside a collapsed "Worked for Ns"
+    // run — otherwise runSearch's TreeWalker never sees its unmounted text. Force every
+    // lane open while search is active; `workOpen` itself is left untouched, so closing
+    // search naturally restores each lane's prior state (manual toggle or the turnDone
+    // default) with no extra bookkeeping.
+    if (store.searchOpen) return true;
     return workOpen[laneId] ?? !turnDone(turn);
   }
 

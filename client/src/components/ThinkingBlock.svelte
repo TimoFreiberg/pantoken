@@ -10,8 +10,11 @@
 <div class="think" class:open>
   <button class="head" title={open ? "Collapse thinking" : "Expand thinking"} onclick={() => (open = !open)}>
     <Chevron {open} size={10} />
+    <!-- The label alone carries the "still streaming" signal now; the bottom
+         WorkingIndicator dropped its own "Thinking…" text and this block dropped
+         its shimmer animation, so the two no longer duplicate each other
+         (docs/TODO.md). -->
     <span class="label">{streaming ? "Thinking…" : "Thought process"}</span>
-    {#if streaming}<span class="shimmer"></span>{/if}
   </button>
   {#if open}
     <div class="body" transition:reveal>{text}</div>
@@ -39,27 +42,6 @@
   }
   .label {
     font-style: italic;
-  }
-  .shimmer {
-    width: 28px;
-    height: 6px;
-    border-radius: 99px;
-    background: linear-gradient(90deg, var(--border) 25%, var(--text-faint) 50%, var(--border) 75%);
-    background-size: 200% 100%;
-    animation: slide 1.3s linear infinite;
-  }
-  @keyframes slide {
-    to {
-      background-position: -200% 0;
-    }
-  }
-  /* Honour the app's reduced-motion contract (WorkingIndicator + the markstream
-     fade both guard theirs). The shimmer animates background-position (a paint,
-     not a composited transform), so it must stop under prefers-reduced-motion. */
-  @media (prefers-reduced-motion: reduce) {
-    .shimmer {
-      animation: none;
-    }
   }
   .body {
     margin-top: 6px;

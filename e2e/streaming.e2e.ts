@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
-import { drive, expandWork, gotoFresh, openSettings, waitForSettledWorkBlocks } from "./helpers.js";
+import {
+  drive,
+  expandWork,
+  gotoFresh,
+  openSettings,
+  waitForSettledWorkBlocks,
+} from "./helpers.js";
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
@@ -28,10 +34,7 @@ test("a streamed reply renders user text, a working block, and the final answer"
   ).toBeVisible();
   // Scope to THIS turn's work block: the greeting turn also renders tool cards,
   // so an unscoped `.tool` could match both and trip strict mode.
-  const work = page
-    .locator(".turn-work")
-    .last()
-    .getByTestId("work-body");
+  const work = page.locator(".turn-work").last().getByTestId("work-body");
   const toolCard = work.locator(":scope > .tool");
   await expect(toolCard).toHaveCount(1);
   await expect(toolCard.locator(":scope > .head .name")).toHaveText(
@@ -119,10 +122,13 @@ test("with thinking hidden, the active thinking tail renders while streaming (pe
 }) => {
   // The "pendinghold" fixture streams only thinking deltas (no answer text),
   // never settling. While the turn is active and thinking-only, the last item
-  // IS the active thinking tail, so a ThinkingBlock renders — its streaming
-  // shimmer (unique to ThinkingBlock, only present while streaming) is visible.
+  // IS the active thinking tail, so a ThinkingBlock renders — its label reads
+  // "Thinking…" while streaming (the block's shimmer animation was removed as
+  // part of the thinking-dedupe fix; the label text is the only "still
+  // streaming" signal now — docs/TODO.md).
   await drive(page, "pendinghold");
-  await expect(page.locator(".think .shimmer")).toBeVisible();
+  await expect(page.locator(".think .label")).toHaveText("Thinking…");
+  await expect(page.locator(".think .shimmer")).toHaveCount(0);
 });
 
 test("run-failed shows an error card whose Resume sends continue", async ({

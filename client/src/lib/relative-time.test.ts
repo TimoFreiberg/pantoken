@@ -35,6 +35,15 @@ describe("relativeTime", () => {
     expect(relativeTime("not-a-date", NOW)).toBe("");
     expect(relativeTime("", NOW)).toBe("");
   });
+
+  test("implausibly ancient → empty string, same as unparseable", () => {
+    // The regression case: sessions_registry.rs falls back to "1970-01-01" for a cold
+    // session with no recorded created_at — that must never render as a literal "56y
+    // ago" in the sidebar.
+    expect(relativeTime("1970-01-01T00:00:00Z", NOW)).toBe("");
+    expect(relativeTime("2019-12-31T23:59:59Z", NOW)).toBe(""); // just before the floor
+    expect(relativeTime("2020-01-01T00:00:00Z", NOW)).not.toBe(""); // at the floor: real
+  });
 });
 
 describe("compactTime", () => {
@@ -51,5 +60,9 @@ describe("compactTime", () => {
   test("future clamps to now; unparseable → empty string", () => {
     expect(compactTime(ago(-5 * MIN), NOW)).toBe("now");
     expect(compactTime("not-a-date", NOW)).toBe("");
+  });
+
+  test("implausibly ancient → empty string, same as unparseable", () => {
+    expect(compactTime("1970-01-01T00:00:00Z", NOW)).toBe("");
   });
 });
