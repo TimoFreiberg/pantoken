@@ -1350,25 +1350,36 @@ impl SessionHub {
                     }),
                 );
             }
-            ClientMessage::Abort { session_id } => {
+            ClientMessage::Abort {
+                request_id,
+                session_id,
+            } => {
                 let target = session_id.clone().or(focused_id);
+                let request_id = request_id.clone();
                 let driver = self.driver.clone();
-                self.hub_ops.enqueue(
-                    "abort",
-                    Box::new(move |hub| {
-                        Box::pin(async move {
-                            if let Err(e) = driver.abort(target).await {
-                                hub.lock().send_to_client(
-                                    client_key,
-                                    ServerMessage::Error {
-                                        message: e,
-                                        kind: Some("abort".into()),
-                                    },
-                                );
-                            }
-                        })
-                    }),
-                );
+                let client = self.clients.get(&client_key).map(|conn| conn.send.clone());
+                // Stop is a control-plane escape hatch: it must not wait behind a
+                // serialized prompt, session switch, or refresh in the hub-op queue.
+                // The completion only sends a client-private result, so it needs no
+                // hub lock and cannot reorder the shared event journal.
+                if let Some(client) = client {
+                    tokio::spawn(async move {
+                        let result = driver.abort(target).await;
+                        let msg = match result {
+                            Ok(()) => ServerMessage::AbortResult {
+                                request_id,
+                                accepted: true,
+                                error: None,
+                            },
+                            Err(error) => ServerMessage::AbortResult {
+                                request_id,
+                                accepted: false,
+                                error: Some(error),
+                            },
+                        };
+                        let _ = client.send(msg).await;
+                    });
+                }
             }
             ClientMessage::SetModel {
                 provider,
@@ -3208,11 +3219,11 @@ mod hub_models_tests {
     }
 
     #[tokio::test]
-    async fn abort_failure_surfaces_to_requesting_client() {
+    async fn abort_failure_surfaces_as_a_correlated_result() {
         let driver: Arc<dyn PantokenDriver> = Arc::new(
             crate::stub_driver::StubDriver::new().with_abort_error("daemon did not receive stop"),
         );
-        let (tx, mut ops) = hub_op_channel();
+        let (tx, _ops) = hub_op_channel();
         let hub = SessionHub::new(
             driver,
             tx,
@@ -3225,17 +3236,26 @@ mod hub_models_tests {
         );
 
         let (client_key, _tx, mut rx) = hub.lock().add_client(None);
-        hub.lock()
-            .handle_client(client_key, ClientMessage::Abort { session_id: None });
-        apply_one(hub.clone(), &mut ops).await;
+        hub.lock().handle_client(
+            client_key,
+            ClientMessage::Abort {
+                request_id: Some("stop-1".into()),
+                session_id: None,
+            },
+        );
 
-        let msg = drain_until(&mut rx, |m| matches!(m, ServerMessage::Error { .. })).await;
+        let msg = drain_until(&mut rx, |m| matches!(m, ServerMessage::AbortResult { .. })).await;
         match msg {
-            ServerMessage::Error { message, kind } => {
-                assert_eq!(message, "daemon did not receive stop");
-                assert_eq!(kind.as_deref(), Some("abort"));
+            ServerMessage::AbortResult {
+                request_id,
+                accepted,
+                error,
+            } => {
+                assert_eq!(request_id.as_deref(), Some("stop-1"));
+                assert!(!accepted);
+                assert_eq!(error.as_deref(), Some("daemon did not receive stop"));
             }
-            other => panic!("expected Error, got {other:?}"),
+            other => panic!("expected AbortResult, got {other:?}"),
         }
     }
 

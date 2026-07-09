@@ -77,6 +77,20 @@ export interface Toast {
   action?: { label: string; run: () => void };
 }
 
+/** Client-visible lifecycle of one request to stop the focused turn. This is
+ * deliberately separate from `turnActive`: the latter is daemon/transcript truth,
+ * while this records whether the user's control action received an outcome. */
+export type StopState = "stopping" | "unconfirmed";
+
+interface StopOperation {
+  requestId: string;
+  sessionId: string;
+  state: StopState;
+  error?: string;
+}
+
+const STOP_CONFIRMATION_TIMEOUT_MS = 500;
+
 /** A view in the back/forward navigation history (⌘[ / ⌘]): a focused session, or a
  *  pending new-session draft identified by its project cwd. Client-only view state. */
 type NavEntry =
@@ -308,6 +322,11 @@ class PantokenStore {
   // never sent upstream; each carries an optional one-shot action and auto-dismisses.
   toasts = $state<Toast[]>([]);
   private toastSeq = 0;
+  /** The outstanding stop action, if any. This never changes daemon state itself: it
+   * makes the action's result visible instead of leaving the ordinary running UI stuck. */
+  private stopOperation = $state<StopOperation | null>(null);
+  private stopConfirmationTimer: ReturnType<typeof setTimeout> | null = null;
+  private stopRequestSeq = 0;
   // Blocking-dialog requestIds this client itself answered, so an echoed `hostUiResolved`
   // for one of them isn't mistaken for a "resolved on another device" event.
   private locallyResolved = new Set<string>();
@@ -713,6 +732,54 @@ class PantokenStore {
     return items.some((i) => i.kind === "tool" && i.status === "running");
   }
 
+  /** Stop-operation state for the transcript currently on screen. Components must
+   * never show an old session's pending stop after navigation. */
+  get stopState(): StopState | null {
+    const sid = this.session.ref?.sessionId;
+    const operation = this.stopOperation;
+    return operation && operation.sessionId === sid ? operation.state : null;
+  }
+
+  private clearStopConfirmationTimer(): void {
+    if (this.stopConfirmationTimer !== null) {
+      clearTimeout(this.stopConfirmationTimer);
+      this.stopConfirmationTimer = null;
+    }
+  }
+
+  /** A terminal folded event settled the visible turn. Clear the corresponding
+   * action state too; if it arrived beyond the 500ms promise, explain that late
+   * confirmation rather than making the recovery state vanish mysteriously. */
+  private settleStopOperation(): void {
+    const operation = this.stopOperation;
+    if (
+      !operation ||
+      operation.sessionId !== this.session.ref?.sessionId ||
+      this.turnActive
+    )
+      return;
+    this.clearStopConfirmationTimer();
+    this.stopOperation = null;
+    if (operation.state === "unconfirmed") {
+      if (this.lastError === operation.error) this.lastError = null;
+      this.toast(
+        "The agent stopped after Pantoken's 500ms confirmation window.",
+        {
+          durationMs: 8000,
+        },
+      );
+    }
+  }
+
+  private markStopUnconfirmed(requestId: string, message: string): void {
+    const operation = this.stopOperation;
+    if (!operation || operation.requestId !== requestId) return;
+    this.clearStopConfirmationTimer();
+    this.stopOperation = { ...operation, state: "unconfirmed", error: message };
+    this.lastError = message;
+    this.toast(message, { durationMs: 8000 });
+  }
+
   /** Estimated tokens the model has streamed into the focused session's CURRENT turn —
    *  a liveness counter shown beside the working spinner so you can tell the API is
    *  actually feeding you (the number climbs) from a stall (it freezes). Sums assistant
@@ -877,6 +944,7 @@ class PantokenStore {
         this.seedSeq = msg.seq;
         this.seedRequested = false;
         this.session = built;
+        this.settleStopOperation();
         this.ready = true;
         // A seed for the session we're creating may already carry its first prompt
         // (or none yet — the userMessage event folds in next). Either way, hand off.
@@ -927,6 +995,7 @@ class PantokenStore {
           this.locallyResolved.delete(ev.requestId);
         }
         foldEvent(this.session, ev);
+        this.settleStopOperation();
         // The creating session's first userMessage may have just folded in — retire the
         // optimistic placeholder so the real row takes over without a flicker.
         this.maybeFinishCreating();
@@ -1031,6 +1100,37 @@ class PantokenStore {
       case "promptResult":
         void this.settlePrompt(msg);
         break;
+      case "abortResult": {
+        const operation = this.stopOperation;
+        const matches =
+          operation !== null &&
+          msg.requestId !== undefined &&
+          operation.requestId === msg.requestId;
+        if (!matches) {
+          // A retry or a session switch superseded this attempt. Success is already
+          // visible through the terminal event; failures must still not disappear.
+          if (!msg.accepted)
+            this.toast(
+              `A late stop request failed: ${msg.error ?? "unknown error"}`,
+              {
+                durationMs: 8000,
+              },
+            );
+          break;
+        }
+        if (!msg.accepted) {
+          this.markStopUnconfirmed(
+            operation.requestId,
+            msg.error ?? "Pantoken couldn't send the stop request.",
+          );
+        } else if (operation.state === "unconfirmed") {
+          this.toast(
+            "Pantoken accepted the stop request after 500ms; waiting for the agent to settle.",
+            { durationMs: 8000 },
+          );
+        }
+        break;
+      }
       case "modelDefaults":
         this.modelDefaults = msg.defaults;
         // Re-seed the active draft's unset model/thinking from the now-arrived
@@ -1407,11 +1507,42 @@ class PantokenStore {
     return true;
   }
   abort(): void {
-    // A bare send is dropped while the socket's down. Mirror restoreQueue and surface it,
-    // so an Esc-abort offline gives feedback instead of silently no-opping (the Stop pill
-    // itself is disabled while disconnected).
-    if (!send({ type: "abort" }))
+    const sessionId = this.session.ref?.sessionId;
+    if (!sessionId) {
+      this.lastError = "Can't stop — there is no active session.";
+      this.toast(this.lastError, { durationMs: 8000 });
+      return;
+    }
+    const prior = this.stopOperation;
+    if (prior?.sessionId === sessionId && prior.state === "stopping") {
+      this.toast("Stop already requested — waiting for Pantoken.", {
+        durationMs: 2500,
+      });
+      return;
+    }
+
+    // A timeout state is intentionally retryable. Each retry gets a fresh id so a
+    // late answer from the earlier request cannot overwrite the newer action.
+    this.clearStopConfirmationTimer();
+    const requestId = `stop-${Date.now()}-${++this.stopRequestSeq}`;
+    if (!send({ type: "abort", requestId, sessionId })) {
       this.lastError = "Can't stop the agent while offline — it keeps running.";
+      this.stopOperation = {
+        requestId,
+        sessionId,
+        state: "unconfirmed",
+        error: this.lastError ?? undefined,
+      };
+      this.toast(this.lastError, { durationMs: 8000 });
+      return;
+    }
+    this.stopOperation = { requestId, sessionId, state: "stopping" };
+    this.stopConfirmationTimer = setTimeout(() => {
+      this.markStopUnconfirmed(
+        requestId,
+        "Couldn't confirm the stop within 500ms — the agent may still be running.",
+      );
+    }, STOP_CONFIRMATION_TIMEOUT_MS);
   }
   /** Pi-parity dequeue: atomically clear every steer/follow-up and return it here. */
   restoreQueue(): void {
