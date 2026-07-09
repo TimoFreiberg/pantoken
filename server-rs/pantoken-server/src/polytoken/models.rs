@@ -37,30 +37,55 @@ pub struct ParsedModels {
     pub models: Vec<ModelOption>,
     pub default_model: Option<String>,
     pub default_small_model: Option<String>,
+    /// The default model's default thinking level — sourced from the `(default)`
+    /// marker inside the default model's reasoning `levels=` segment. `None` when
+    /// there's no default model, no reasoning line, or no `(default)` marker.
+    pub default_thinking_level: Option<String>,
 }
 
-/// Parse a `reasoning:` line's levels list into thinking levels.
+/// The parsed reasoning info for a model: the thinking levels list + which one
+/// is the default (the level marked `(default)` in the `levels=` segment).
+#[derive(Debug, Clone, Default)]
+pub struct ReasoningInfo {
+    pub levels: Vec<String>,
+    pub default_level: Option<String>,
+}
+
+/// Parse a `reasoning:` line into reasoning levels + the default level.
 /// Input shape: `effort set=<set>; levels=high (default), max, none; can_disable=yes`
-/// → extract the `levels=` segment, strip the `(default)` marker, split on `,`, trim.
-/// Returns `[]` when the segment is absent (a non-reasoning model).
-fn parse_reasoning_levels(reasoning_line: &str) -> Vec<String> {
+/// → extract the `levels=` segment, split on `,`, trim each, and detect the
+/// `(default)` marker (case-insensitive) to record the default level. Returns
+/// empty levels + `None` default when the `levels=` segment is absent (a
+/// non-reasoning model, or the `thinking; states=` format which has no levels).
+pub fn parse_reasoning(reasoning_line: &str) -> ReasoningInfo {
     // Extract the `levels=` segment (up to the next `;` or end of string).
     let Some(after_levels) = reasoning_line.find("levels=") else {
-        return Vec::new();
+        return ReasoningInfo::default();
     };
     let rest = &reasoning_line[after_levels + "levels=".len()..];
     let segment = rest.split(';').next().unwrap_or("");
-    segment
-        .split(',')
-        .map(|l| {
-            // Strip the `(default)` marker (case-insensitive) and trim.
-            l.replace("(default)", "")
-                .replace("(DEFAULT)", "")
-                .trim()
-                .to_string()
-        })
-        .filter(|l| !l.is_empty())
-        .collect()
+    let mut levels = Vec::new();
+    let mut default_level = None;
+    for raw in segment.split(',') {
+        // Detect the `(default)` marker (case-insensitive) before stripping.
+        let is_default = raw.to_lowercase().contains("(default)");
+        let level = raw
+            .replace("(default)", "")
+            .replace("(DEFAULT)", "")
+            .trim()
+            .to_string();
+        if level.is_empty() {
+            continue;
+        }
+        if is_default && default_level.is_none() {
+            default_level = Some(level.clone());
+        }
+        levels.push(level);
+    }
+    ReasoningInfo {
+        levels,
+        default_level,
+    }
 }
 
 /// Extract the first non-whitespace token after a literal prefix at the start
@@ -87,16 +112,23 @@ pub fn parse_models(stdout: &str) -> ParsedModels {
     // Only treat `- <id>` lines as model headers once we've seen the `models:`
     // section marker. Set on the bare `models:` line; stays true after.
     let mut in_models_section = false;
+    // The default model's default thinking level — captured when the default
+    // model is flushed (its reasoning `(default)` marker). `default_model` is
+    // a top-level marker parsed before the `models:` section, so it's already
+    // known when each model is flushed.
+    let mut default_thinking_level: Option<String> = None;
 
-    // flush closure inlined as a macro-like block.
+    // flush closure: emits the current model block and returns its id + default
+    // thinking level (so the caller can match the id against `default_model`).
     let flush = |cid: &mut Option<String>,
                  cprov: &mut Option<String>,
                  creason: &mut Option<String>,
-                 models: &mut Vec<ModelOption>| {
+                 models: &mut Vec<ModelOption>|
+     -> Option<(String, Option<String>)> {
         let Some(id) = cid.take() else {
             *cprov = None;
             *creason = None;
-            return;
+            return None;
         };
         // The model id (e.g. `deepseek/deepseek-v4-pro`) already carries its
         // provider prefix; polytoken's `provider:` field is often identical.
@@ -106,15 +138,18 @@ pub fn parse_models(stdout: &str) -> ParsedModels {
         let provider = cprov
             .clone()
             .unwrap_or_else(|| id.split('/').next().unwrap_or(&id).to_string());
-        let thinking_levels = creason.as_ref().map(|r| parse_reasoning_levels(r));
+        let info = creason.as_ref().map(|r| parse_reasoning(r));
+        let thinking_levels = info.as_ref().map(|i| i.levels.clone());
+        let model_default_level = info.and_then(|i| i.default_level);
         models.push(ModelOption {
             provider,
             model_id: id.clone(),
-            label: id,
+            label: id.clone(),
             thinking_levels,
         });
         *cprov = None;
         *creason = None;
+        Some((id, model_default_level))
     };
 
     for raw in stdout.split('\n') {
@@ -139,12 +174,16 @@ pub fn parse_models(stdout: &str) -> ParsedModels {
         // Matches `^-\s+(\S+)` — starts with `-` then whitespace, then non-ws token.
         if in_models_section {
             if let Some(id) = parse_model_header(line) {
-                flush(
+                if let Some((flushed_id, lvl)) = flush(
                     &mut current_id,
                     &mut current_provider,
                     &mut current_reasoning,
                     &mut models,
-                );
+                ) {
+                    if Some(&flushed_id) == default_model.as_ref() {
+                        default_thinking_level = lvl;
+                    }
+                }
                 current_id = Some(id);
                 continue;
             }
@@ -164,16 +203,21 @@ pub fn parse_models(stdout: &str) -> ParsedModels {
             continue;
         }
     }
-    flush(
+    if let Some((flushed_id, lvl)) = flush(
         &mut current_id,
         &mut current_provider,
         &mut current_reasoning,
         &mut models,
-    );
+    ) {
+        if Some(&flushed_id) == default_model.as_ref() {
+            default_thinking_level = lvl;
+        }
+    }
     ParsedModels {
         models,
         default_model,
         default_small_model,
+        default_thinking_level,
     }
 }
 
@@ -292,6 +336,7 @@ models:
             out.default_small_model.as_deref(),
             Some("umans/umans-flash")
         );
+        assert_eq!(out.default_thinking_level.as_deref(), Some("high"));
         assert_eq!(out.models.len(), 3);
 
         let pro = &out.models[0];
@@ -361,11 +406,84 @@ models:
     }
 
     #[test]
+    fn parse_reasoning_captures_default_level() {
+        let info =
+            parse_reasoning("effort set=x; levels=high (default), max, none; can_disable=yes");
+        assert_eq!(
+            info.levels,
+            ["high".to_string(), "max".into(), "none".into()]
+        );
+        assert_eq!(info.default_level.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn parse_reasoning_default_level_none_when_no_marker() {
+        let info = parse_reasoning("effort set=x; levels=low, medium, high; can_disable=yes");
+        assert_eq!(
+            info.levels,
+            ["low".to_string(), "medium".into(), "high".into()]
+        );
+        assert!(info.default_level.is_none());
+    }
+
+    #[test]
+    fn parse_reasoning_default_level_case_insensitive() {
+        let info =
+            parse_reasoning("effort set=x; levels=low, medium (DEFAULT), high; can_disable=yes");
+        assert_eq!(info.default_level.as_deref(), Some("medium"));
+    }
+
+    #[test]
+    fn parse_reasoning_empty_when_no_levels_segment() {
+        // The `thinking; states=` format has no `levels=` segment.
+        let info = parse_reasoning("thinking; states=thinking:on (t, default)");
+        assert!(info.levels.is_empty());
+        assert!(info.default_level.is_none());
+    }
+
+    #[test]
+    fn default_thinking_level_captured_from_default_model() {
+        let out = parse_models(
+            "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=high (default), max, none; can_disable=yes\n",
+        );
+        assert_eq!(out.default_model.as_deref(), Some("umans/umans-glm-5.2"));
+        assert_eq!(out.default_thinking_level.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn default_thinking_level_none_when_no_default_marker() {
+        let out = parse_models(
+            "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=low, medium, high; can_disable=yes\n",
+        );
+        assert_eq!(out.default_model.as_deref(), Some("umans/umans-glm-5.2"));
+        assert!(out.default_thinking_level.is_none());
+    }
+
+    #[test]
+    fn default_thinking_level_none_when_no_reasoning_line() {
+        let out = parse_models(
+            "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n",
+        );
+        assert_eq!(out.default_model.as_deref(), Some("umans/umans-glm-5.2"));
+        assert!(out.default_thinking_level.is_none());
+    }
+
+    #[test]
+    fn default_thinking_level_none_when_no_default_model() {
+        let out = parse_models(
+            "models:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=high (default), max, none; can_disable=yes\n",
+        );
+        assert!(out.default_model.is_none());
+        assert!(out.default_thinking_level.is_none());
+    }
+
+    #[test]
     fn empty_output_yields_no_models_and_null_defaults() {
         let out = parse_models("");
         assert!(out.models.is_empty());
         assert!(out.default_model.is_none());
         assert!(out.default_small_model.is_none());
+        assert!(out.default_thinking_level.is_none());
     }
 
     #[test]

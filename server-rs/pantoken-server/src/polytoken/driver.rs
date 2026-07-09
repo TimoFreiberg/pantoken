@@ -2285,13 +2285,20 @@ impl PantokenDriver for PolytokenDriver {
     async fn get_model_defaults(&self) -> ModelDefaults {
         // Reuse the same cached parsed models as list_models (AC.2).
         let parsed = self.inner.get_or_fetch_parsed_models().await;
+        let default = parsed.default_model.as_deref();
+        // Look up the default model in the parsed list so `provider` matches
+        // `ModelOption.provider` (the `provider:` field), not the split-on-`/`
+        // prefix — the client's active-model lookup compares against the picker's
+        // provider, so a mismatch leaves the badge showing a raw id. Fall back to
+        // the split prefix when the default model isn't in the parsed list (config
+        // drift), preserving the old behavior.
+        let model = default.and_then(|id| parsed.models.iter().find(|m| m.model_id == id));
         ModelDefaults {
-            provider: parsed
-                .default_model
-                .as_ref()
-                .and_then(|m| m.split('/').next().map(|s| s.to_string())),
+            provider: model
+                .map(|m| m.provider.clone())
+                .or_else(|| default.and_then(|m| m.split('/').next().map(|s| s.to_string()))),
             model_id: parsed.default_model.clone(),
-            thinking_level: None,
+            thinking_level: parsed.default_thinking_level.clone(),
             favorites: Vec::new(),
         }
     }
@@ -3751,7 +3758,7 @@ mod tests {
             Box::pin(async move {
                 assert!(args.contains(&"models".to_string()));
                 Ok(ok_output(
-                    "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n",
+                    "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=high (default), max, none; can_disable=yes\n",
                 ))
             })
         });
@@ -3765,8 +3772,107 @@ mod tests {
             1,
             "get_model_defaults should reuse the cached models result, not re-run"
         );
-        assert_eq!(defaults.provider.as_deref(), Some("umans"));
+        assert_eq!(
+            defaults.provider.as_deref(),
+            Some("umans/umans-glm-5.2"),
+            "provider should match the ModelOption.provider field, not the split prefix"
+        );
         assert_eq!(defaults.model_id.as_deref(), Some("umans/umans-glm-5.2"));
+        assert_eq!(
+            defaults.thinking_level.as_deref(),
+            Some("high"),
+            "thinking_level should be the default model's default reasoning level"
+        );
+    }
+
+    #[tokio::test]
+    async fn model_defaults_provider_matches_model_option_provider() {
+        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
+            Box::pin(async move {
+                Ok(ok_output(
+                    "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=high (default), max, none; can_disable=yes\n",
+                ))
+            })
+        });
+        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
+
+        let models = driver.list_models().await;
+        let defaults = driver.get_model_defaults().await;
+
+        let default_model = models
+            .iter()
+            .find(|m| m.model_id == defaults.model_id.as_deref().unwrap_or(""))
+            .expect("default model should be in the model list");
+        assert_eq!(
+            defaults.provider.as_deref(),
+            Some(default_model.provider.as_str()),
+            "get_model_defaults().provider must equal ModelOption.provider for the default model"
+        );
+    }
+
+    #[tokio::test]
+    async fn model_defaults_thinking_level_from_default_model_reasoning() {
+        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
+            Box::pin(async move {
+                Ok(ok_output(
+                    "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=low, medium (default), high, none; can_disable=yes\n",
+                ))
+            })
+        });
+        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
+
+        let defaults = driver.get_model_defaults().await;
+        assert_eq!(defaults.model_id.as_deref(), Some("umans/umans-glm-5.2"));
+        assert_eq!(
+            defaults.thinking_level.as_deref(),
+            Some("medium"),
+            "thinking_level should be the level marked (default) in the reasoning line"
+        );
+    }
+
+    #[tokio::test]
+    async fn model_defaults_thinking_level_none_when_no_default_marker() {
+        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
+            Box::pin(async move {
+                Ok(ok_output(
+                    "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=low, medium, high; can_disable=yes\n",
+                ))
+            })
+        });
+        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
+
+        let defaults = driver.get_model_defaults().await;
+        assert_eq!(defaults.model_id.as_deref(), Some("umans/umans-glm-5.2"));
+        assert_eq!(defaults.provider.as_deref(), Some("umans/umans-glm-5.2"));
+        assert!(
+            defaults.thinking_level.is_none(),
+            "thinking_level should be None when no level is marked (default)"
+        );
+    }
+
+    #[tokio::test]
+    async fn model_defaults_falls_back_to_split_when_default_not_in_models() {
+        // Config drift: default_model points to a model absent from the models: section.
+        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
+            Box::pin(async move {
+                Ok(ok_output(
+                    "default_model: umans/missing-model\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=high (default), max, none; can_disable=yes\n",
+                ))
+            })
+        });
+        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
+
+        let defaults = driver.get_model_defaults().await;
+        assert_eq!(defaults.model_id.as_deref(), Some("umans/missing-model"));
+        assert_eq!(
+            defaults.provider.as_deref(),
+            Some("umans"),
+            "provider should fall back to the split-on-`/` prefix when the default model isn't in the parsed list"
+        );
+        assert!(
+            defaults.thinking_level.is_none(),
+            "thinking_level should be None when the default model isn't in the parsed list"
+        );
     }
 
     // ---- AC.3: model cache invalidation forces re-run ----
