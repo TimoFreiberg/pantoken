@@ -86,15 +86,20 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
       Buffering lives in `SessionHub.ingest` (wrapping the un-buffered
       `ingestNow`); see `server-rs/pantoken-server/src/hub.rs` + the "assistantDelta coalescing (N1)"
       block in `hub.test.ts`.
-- [ ] **Client markdown re-parse is O(n²) per streamed message (C1).**
-      `Markdown.svelte` re-parses full content on every content change; the
-      parser has no incremental/prefix caching. **Re-measure now that N1 landed:**
-      N1 collapses a token burst into one frame, so it cuts the *number* of
-      re-parses (was one per token, now one per ~50ms flush) but not the per-parse
-      O(n) cost — a long message still re-parses its full length on each flush, so
-      the O(n²)-over-a-message shape may persist at lower constant factor. Profile
-      a long streamed message under the 50ms default before deciding if incremental
-      parsing is still worth it.
+- [ ] **Client markdown re-parse is O(n²) per streamed message (C1) — measured
+      2026-07-09, verdict: acceptable, revisit only for ≥50KB messages.**
+      Numbers (scripts/perf-streaming*.ts, now working again): full re-parse per
+      content commit at ~0.15ms/KB (≈1.6ms at 10KB), super-linear over a stream
+      (10.5KB message ≈ 915ms total parse CPU at per-token cadence). But the
+      real cadence is bounded twice: N1 coalesces flushes to ≤20/s, and
+      markstream's smooth-stream reveal commits at ≤30fps (`maxCommitFps`
+      default 30; NB smooth streaming IS active in our usage — 'auto' resolves
+      true since we pass no `typewriter`/`maxLiveNodes`, so re-parses follow
+      reveal commits, not just flushes). Typical ≤10KB message ⇒ ≤~50ms parse
+      CPU per streamed second on desktop, ~3× on phone — fine. At 50KB+ it's
+      ~8ms/commit × 30fps ⇒ jank; if such messages become real, the fix is
+      app-level: split settled blocks from the streaming tail (pre-parsed
+      `nodes` mode) — incremental parsing inside the parser is not needed.
 - [ ] **Virtualize the transcript when measurements justify it (C2).**
       Per-turn grouping is memoized (`createTurnGrouper`), so settled turns reuse
       their view models while the active tail streams. Real JS windowing remains
@@ -173,8 +178,9 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
       turn-end drain. Honest options: ✕ on the newest item only, or keep the
       existing "Edit all (⌥↑)" restore-to-composer flow. Product call needed.
 
-- [ ] Fix the two perf scripts (broken under Bun isolated `node_modules`) so the
-      C1 measurements stay reproducible.
+- ~~[x]~~ The two perf scripts work again under Bun isolated `node_modules`
+      (two-hop `Bun.resolveSync` through the store — Bun ignores
+      `require.resolve`'s `paths` option, which is what broke them).
 - ~~[x]~~ `maybe_notify` (hub.rs) re-implemented the blocking-dialog kind list by
       hand — and had already drifted (missed `plan` + `permission` pushes; the
       hub's local `is_dialog_request` also missed `plan`, so plan proposals

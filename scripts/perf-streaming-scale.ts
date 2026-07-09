@@ -1,11 +1,18 @@
 // Scaling check: does the per-token re-parse cost grow with answer length (O(n²))?
 // Measures one full stream at increasing answer sizes.
 
+import { realpathSync } from "node:fs";
+import { dirname } from "node:path";
 import { foldEvent, initialSessionState } from "../protocol/src/index.js";
 
-const parserPath = require.resolve("stream-markdown-parser", {
-  paths: [`${process.cwd()}/client`],
-});
+// Two-hop resolution through the Bun store — see perf-streaming.ts.
+const markstreamReal = realpathSync(
+  Bun.resolveSync("markstream-svelte", `${process.cwd()}/client`),
+);
+const parserPath = Bun.resolveSync(
+  "stream-markdown-parser",
+  dirname(markstreamReal),
+);
 const { parseMarkdownToStructure, getMarkdown } = await import(parserPath);
 
 const markdown = getMarkdown("perf-scale", { customHtmlTags: [] });

@@ -10,13 +10,22 @@
 // against a hypothetical coalesced / batched variant. Run:
 //   bun run scripts/perf-streaming.ts
 
+import { realpathSync } from "node:fs";
+import { dirname } from "node:path";
 import { foldEvent, initialSessionState } from "../protocol/src/index.js";
 
-// Resolve the real parser the app uses, via the client workspace's resolution
-// (stream-markdown-parser is a transitive dep of markstream-svelte).
-const parserPath = require.resolve("stream-markdown-parser", {
-  paths: [`${process.cwd()}/client`],
-});
+// Resolve the real parser the app uses (a transitive dep of markstream-svelte).
+// Two hops because Bun ignores require.resolve's `paths` option and the
+// isolated-install store keeps transitive deps out of client/node_modules:
+// resolve markstream-svelte from client/, realpath into the store (where its
+// deps are siblings), then resolve the parser from there.
+const markstreamReal = realpathSync(
+  Bun.resolveSync("markstream-svelte", `${process.cwd()}/client`),
+);
+const parserPath = Bun.resolveSync(
+  "stream-markdown-parser",
+  dirname(markstreamReal),
+);
 const { parseMarkdownToStructure, getMarkdown } = await import(parserPath);
 
 // A representative long assistant answer: prose + a fenced code block + a list,
