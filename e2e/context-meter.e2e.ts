@@ -10,7 +10,8 @@ test("the composer footer shows the context-window meter", async ({ page }) => {
   await expect(meter).toBeVisible();
   // MOCK_USAGE is 47,200 / 200,000 tokens → 24%.
   await expect(meter).toHaveText(/24%/);
-  await expect(meter).toHaveAttribute("title", /47,200 \/ 200,000 tokens/);
+  // Detail is provided only by the context menu; the ring has no competing browser tooltip.
+  await expect(meter).not.toHaveAttribute("title");
 });
 
 test("a context-pressure cue surfaces once the window is nearly full", async ({

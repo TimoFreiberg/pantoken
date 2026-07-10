@@ -17,8 +17,8 @@
     testid?: string;
   } = $props();
 
-  // pct drives the ring; clamp the ARC to 100 (an overflow still reads the real % in
-  // the label/tooltip). null tokens = window known but count pending (post-compaction).
+  // pct drives the ring; clamp the arc to 100. Null tokens = window known but count
+  // pending (post-compaction).
   const pct = $derived(usage.percent);
   const arc = $derived(pct === null ? 0 : Math.max(0, Math.min(100, pct)));
   const pctLabel = $derived(
@@ -26,18 +26,9 @@
   );
   const tone = $derived(contextTone(pct));
 
-  function fmt(n: number): string {
-    return n.toLocaleString("en-US");
-  }
-  const title = $derived.by(() => {
-    const win = `${fmt(usage.contextWindow)} token window`;
-    if (usage.tokens === null)
-      return `Context size pending — recomputed after the next response · ${win}`;
-    return `${fmt(usage.tokens)} / ${fmt(usage.contextWindow)} tokens in context · ${pctLabel} of the window`;
-  });
 </script>
 
-<div class="meter {tone}" {title} data-testid={testid}>
+<div class="meter {tone}" data-testid={testid}>
   <svg
     class="ring"
     viewBox="0 0 36 36"
@@ -71,7 +62,7 @@
     font-size: 12.5px;
     letter-spacing: -0.01em;
     color: var(--text-muted);
-    /* Display-only — no pointer affordance; the tooltip carries the detail. */
+    /* Display-only — the surrounding context menu carries the detail. */
     cursor: default;
     user-select: none;
   }
