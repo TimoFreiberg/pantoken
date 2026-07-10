@@ -32,6 +32,12 @@ import { clearToken, getToken, setToken } from "./auth.js";
 import { buildFullHash } from "./build-info.js";
 import { notifyNativeUpdateStarting } from "./native-bridge.js";
 import { filterSessions } from "./session-filter.js";
+import {
+  DEFAULT_RIGHT_SIDEBAR_WIDTH,
+  DEFAULT_SIDEBAR_WIDTH,
+  parseStoredWidth,
+  sanitizeStoredWidth,
+} from "./sidebar-width.js";
 import { dedupeConsecutive } from "./prompt-history.js";
 import { deliveryState } from "./delivery.js";
 import { ensurePermission } from "./notify.js";
@@ -324,6 +330,10 @@ class PantokenStore {
   // default-visible-on-desktop / default-hidden-on-phone rule as the left sidebar,
   // and persisted the same way — a collapsed choice should stick.
   rightSidebarOpen = $state(initialRightSidebarOpen());
+  // Desktop panel widths are CSS-pixel preferences. Effective rendering clamps these
+  // against the current viewport; the persisted values are never viewport-clamped.
+  sidebarWidth = $state(initialSidebarWidth());
+  rightSidebarWidth = $state(initialRightSidebarWidth());
   // Sidebar filter: false = active only (hide archived + sessions untouched >7d),
   // true = show everything. Per-device, persisted in localStorage; defaults to
   // active-only (the decluttering is the point).
@@ -2182,6 +2192,18 @@ class PantokenStore {
     this.rightSidebarOpen = true;
     persistRightSidebarOpen(true);
   }
+  setSidebarWidth(width: number): void {
+    const sanitized = sanitizeStoredWidth(width);
+    if (sanitized === null) return;
+    this.sidebarWidth = sanitized;
+    persistSidebarWidth(sanitized);
+  }
+  setRightSidebarWidth(width: number): void {
+    const sanitized = sanitizeStoredWidth(width);
+    if (sanitized === null) return;
+    this.rightSidebarWidth = sanitized;
+    persistRightSidebarWidth(sanitized);
+  }
   /** Flip the active-only ↔ all filter; persisted per-device. */
   toggleShowArchived(): void {
     this.showArchived = !this.showArchived;
@@ -2537,6 +2559,45 @@ function initialRightSidebarOpen(): boolean {
 function persistRightSidebarOpen(open: boolean): void {
   if (typeof window !== "undefined")
     localStorage.setItem(RIGHT_SIDEBAR_KEY, open ? "1" : "0");
+}
+
+const SIDEBAR_WIDTH_KEY = "pantoken.sidebarWidth";
+const RIGHT_SIDEBAR_WIDTH_KEY = "pantoken.rightSidebarWidth";
+
+function initialSidebarWidth(): number {
+  if (typeof window === "undefined") return DEFAULT_SIDEBAR_WIDTH;
+  try {
+    return parseStoredWidth(localStorage.getItem(SIDEBAR_WIDTH_KEY), DEFAULT_SIDEBAR_WIDTH);
+  } catch {
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
+}
+
+function initialRightSidebarWidth(): number {
+  if (typeof window === "undefined") return DEFAULT_RIGHT_SIDEBAR_WIDTH;
+  try {
+    return parseStoredWidth(localStorage.getItem(RIGHT_SIDEBAR_WIDTH_KEY), DEFAULT_RIGHT_SIDEBAR_WIDTH);
+  } catch {
+    return DEFAULT_RIGHT_SIDEBAR_WIDTH;
+  }
+}
+
+function persistSidebarWidth(width: number): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width));
+  } catch {
+    // Storage is optional; retain the in-memory preference.
+  }
+}
+
+function persistRightSidebarWidth(width: number): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(RIGHT_SIDEBAR_WIDTH_KEY, String(width));
+  } catch {
+    // Storage is optional; retain the in-memory preference.
+  }
 }
 
 const SHOW_ARCHIVED_KEY = "pantoken.showArchived";
