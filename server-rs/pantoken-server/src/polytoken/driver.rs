@@ -659,12 +659,12 @@ impl PolytokenInner {
                             } else {
                                 let preview: String = stdout.chars().take(4000).collect();
                                 warn!(
-                                    "polytoken models returned zero models; parsed stdout ({} bytes):\\n{}",
+                                    "polytoken models returned zero models; parsed stdout ({} bytes):\n{}",
                                     stdout.len(),
                                     preview
                                 );
                                 ModelCatalogDiagnostic::CouldNotBeParsed {
-                                    message: "polytoken models returned output, but no model entries could be parsed".into(),
+                                    message: "polytoken models returned output, but no model entries were parsed".into(),
                                 }
                             };
                             *self.model_catalog_diagnostic.lock() = Some(diagnostic);
@@ -678,7 +678,8 @@ impl PolytokenInner {
                         error!("list_models failed: {e}");
                         *self.model_catalog_diagnostic.lock() =
                             Some(ModelCatalogDiagnostic::NoResponse {
-                                message: format!("could not run polytoken models: {e}"),
+                                message: "could not discover models; check polytoken configuration"
+                                    .into(),
                             });
                         // Do not cache failed results (AC.3: next call retries).
                         ParsedModels::default()
@@ -4247,6 +4248,51 @@ mod tests {
             defaults.thinking_level.is_none(),
             "thinking_level should be None when the default model isn't in the parsed list"
         );
+    }
+
+    // ---- model catalog diagnostics ----
+
+    #[tokio::test]
+    async fn model_catalog_empty_stdout_sets_empty_output_diagnostic() {
+        let runner: Arc<CommandRunner> =
+            Arc::new(move |_program, _args, _cwd| Box::pin(async { Ok(ok_output("")) }));
+        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
+
+        assert!(driver.list_models().await.is_empty());
+        assert!(matches!(
+            driver.model_catalog_diagnostic(),
+            Some(ModelCatalogDiagnostic::EmptyOutput { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn model_catalog_nonempty_zero_entries_sets_parse_diagnostic() {
+        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
+            Box::pin(async { Ok(ok_output("default_model: missing\nmodels:\n")) })
+        });
+        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
+
+        assert!(driver.list_models().await.is_empty());
+        assert!(matches!(
+            driver.model_catalog_diagnostic(),
+            Some(ModelCatalogDiagnostic::CouldNotBeParsed { message })
+                if message.contains("no model entries")
+        ));
+    }
+
+    #[tokio::test]
+    async fn model_catalog_subprocess_failure_sets_no_response_diagnostic() {
+        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
+            Box::pin(async { Err("models command failed".to_string()) })
+        });
+        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
+
+        assert!(driver.list_models().await.is_empty());
+        assert!(matches!(
+            driver.model_catalog_diagnostic(),
+            Some(ModelCatalogDiagnostic::NoResponse { message })
+                if message == "could not discover models; check polytoken configuration"
+        ));
     }
 
     // ---- AC.3: model cache invalidation forces re-run ----

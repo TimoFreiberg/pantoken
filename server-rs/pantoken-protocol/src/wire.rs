@@ -915,6 +915,29 @@ mod tests {
     }
 
     #[test]
+    fn roundtrip_server_model_list_other_diagnostics() {
+        for kind in ["emptyOutput", "noResponse"] {
+            let json = format!(
+                r#"{{"type":"modelList","models":[],"diagnostic":{{"kind":"{kind}","message":"diagnostic"}}}}"#
+            );
+            let msg: ServerMessage = serde_json::from_str(&json).unwrap();
+            match msg {
+                ServerMessage::ModelList { diagnostic, .. } => {
+                    assert_eq!(
+                        diagnostic.as_ref().map(|d| match d {
+                            ModelCatalogDiagnostic::EmptyOutput { .. } => "emptyOutput",
+                            ModelCatalogDiagnostic::NoResponse { .. } => "noResponse",
+                            ModelCatalogDiagnostic::CouldNotBeParsed { .. } => "couldNotBeParsed",
+                        }),
+                        Some(kind)
+                    );
+                }
+                _ => panic!("expected ModelList"),
+            }
+        }
+    }
+
+    #[test]
     fn roundtrip_branch() {
         let json_str = r#"{
             "type": "branch",
