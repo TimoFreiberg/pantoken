@@ -71,6 +71,9 @@
   // own hotkeys and are not agent-initiated.
   const activeAttentionSurfaces = $derived.by(() => {
     const surfaces: AttentionSurface[] = ["transcript"];
+    // While drafting, store.session is the previous session and its qna/approval
+    // cards are unmounted (App gates them on !store.draft) — don't offer them.
+    if (store.draft) return surfaces;
     if (store.session.pendingApprovals.some((r) => r.kind === "qna"))
       surfaces.push("qna");
     if (store.session.pendingApprovals.some((r) => r.kind !== "qna"))
@@ -272,8 +275,10 @@
         break;
       case "p":
       case "P":
-        // ⌘P — toggle the plan view overlay (only when a plan exists).
-        if (store.session.activePlan) {
+        // ⌘P — toggle the plan view overlay (only when a plan exists). Inert
+        // while drafting: store.session is the PREVIOUS session and PlanView is
+        // unmounted in the draft view, so toggling would only flip invisible state.
+        if (!store.draft && store.session.activePlan) {
           e.preventDefault();
           store.togglePlanView();
         }
@@ -281,8 +286,11 @@
       case "\\":
         // ⌘\ / Ctrl+\ — cycle focus through active agent-driven attention surfaces
         // (transcript → qna → approval → …). Each cycled-away-from surface
-        // collapses to a pill. No-op when a user-driven modal owns the keyboard.
+        // collapses to a pill. No-op when a user-driven modal owns the keyboard,
+        // or while drafting (the qna/approval surfaces belong to the previous
+        // session and are unmounted in the draft view).
         if (
+          store.draft ||
           store.settingsOpen ||
           store.planViewOpen ||
           imageViewer.index !== null

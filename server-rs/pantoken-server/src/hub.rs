@@ -3049,6 +3049,7 @@ impl HostUiRequestExt for HostUiRequest {
     fn title(&self) -> Option<&str> {
         match self {
             HostUiRequest::Confirm { title, .. } => Some(title),
+            HostUiRequest::Input { title, .. } => Some(title),
             HostUiRequest::Select { title, .. } => Some(title),
             HostUiRequest::Editor { title, .. } => Some(title),
             HostUiRequest::Qna { title, .. } => title.as_deref(),

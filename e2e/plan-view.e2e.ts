@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { drive, gotoFresh } from "./helpers.js";
+import { drive, gotoFresh, openSidebar } from "./helpers.js";
 
 // The PlanView overlay surfaces the daemon's active_plan (the plan facet's
 // structured plan document) as a modal rendering of the plan markdown. Triggered
@@ -44,6 +44,33 @@ test("⌘P toggles the plan view overlay", async ({ page }) => {
   // ⌘P again closes it.
   await page.keyboard.press("Meta+p");
   await expect(page.getByTestId("plan-view")).toHaveCount(0);
+});
+
+test("a new-session draft hides the plan button and makes ⌘P inert", async ({
+  page,
+}) => {
+  await drive(page, "planview");
+  await expect(page.getByTestId("plan-view-toggle")).toBeVisible();
+
+  // In the draft view store.session still holds the previous session's plan, but
+  // PlanView is unmounted — the button must hide and ⌘P must not flip its state.
+  await openSidebar(page);
+  await page.getByRole("button", { name: "New session…" }).click();
+  await expect(
+    page.getByPlaceholder("Describe a task or ask a question…"),
+  ).toBeVisible();
+  await expect(page.getByTestId("plan-view-toggle")).toHaveCount(0);
+
+  await page.keyboard.press("Meta+p");
+  await expect(page.getByTestId("plan-view")).toHaveCount(0);
+
+  // Returning to the session restores the button (state wasn't corrupted).
+  await openSidebar(page);
+  await page
+    .getByTestId("sidebar")
+    .locator(".row", { hasText: "Wire up the WebSocket bridge" })
+    .click();
+  await expect(page.getByTestId("plan-view-toggle")).toBeVisible();
 });
 
 test("the overlay renders the full plan markdown", async ({ page }) => {

@@ -17,7 +17,11 @@
       e.preventDefault();
       store.hotkeyAction = { which: "thinking", n: ++hotkeyN };
     } else if (e.key === "j" || e.key === "J") {
-      // ⌘⇧J — the right context panel (todos, jobs, flagged files).
+      // ⌘⇧J — the right context panel (todos, jobs, flagged files). Inert while
+      // drafting: the panel shows the ACTIVE session's context and is unmounted
+      // in the draft view, so a toggle here would only flip persisted state
+      // invisibly (and surprise you when the draft closes).
+      if (store.draft) return;
       e.preventDefault();
       store.toggleRightSidebar();
     }
@@ -165,7 +169,7 @@
         <span class="bell-label">{pushLabel[push]}</span>
       </button>
     {/if}
-    {#if s.activePlan}
+    {#if s.activePlan && !drafting}
       <IconButton
         data-testid="plan-view-toggle"
         title="View the active plan (⌘P)"
