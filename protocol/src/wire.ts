@@ -174,7 +174,7 @@ export type ServerMessage =
     }
   /** The models available to switch to (server-authoritative, like `sessionList`).
    *  The current selection rides each session's snapshot `config`, not this. When
-   *  discovery degraded, `diagnostic` explains why the list is empty so the GUI can
+   *  discovery fails, `diagnostic` explains why the list is empty so the GUI can
    *  fail visibly instead of silently hiding the picker. */
   | {
       type: "modelList";

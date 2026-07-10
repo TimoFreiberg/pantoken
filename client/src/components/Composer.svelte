@@ -1233,7 +1233,7 @@
         <ModelPicker />
         {#if store.modelCatalogDiagnostic}
           <span class="model-diagnostic" title={store.modelCatalogDiagnostic.message}>
-            Model picker unavailable: {store.modelCatalogDiagnostic.message}
+            Model picker unavailable — {store.modelCatalogDiagnostic.message}
           </span>
         {/if}
       </div>
