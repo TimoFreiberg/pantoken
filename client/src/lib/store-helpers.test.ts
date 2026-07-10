@@ -11,6 +11,7 @@ const FULL_DEFAULTS: ModelDefaults = {
   modelId: "umans/umans-glm-5.2",
   thinkingLevel: "high",
   favorites: [],
+  defaultPermissionMonitor: "bypass_plus",
 };
 
 describe("reseedDraftFromDefaults", () => {
@@ -22,6 +23,7 @@ describe("reseedDraftFromDefaults", () => {
       modelId: "umans/umans-glm-5.2",
     });
     expect(out.thinking).toBe("high");
+    expect(out.permissionMonitor).toBe("bypass_plus");
   });
 
   test("does not clobber an explicitly picked model", () => {
@@ -33,6 +35,12 @@ describe("reseedDraftFromDefaults", () => {
     const out = reseedDraftFromDefaults(draft, FULL_DEFAULTS);
     expect(out.model).toEqual({ provider: "anthropic", modelId: "claude-sonnet-5" });
     expect(out.thinking).toBe("max");
+  });
+
+  test("does not clobber an explicitly picked permission monitor", () => {
+    const draft: DraftConfig = { ...emptyDraft(), permissionMonitor: "autonomous" };
+    const out = reseedDraftFromDefaults(draft, FULL_DEFAULTS);
+    expect(out.permissionMonitor).toBe("autonomous");
   });
 
   test("seeds only the unset field when the other is already set", () => {
@@ -74,6 +82,7 @@ describe("reseedDraftFromDefaults", () => {
       ...emptyDraft(),
       model: { provider: "anthropic", modelId: "claude-sonnet-5" },
       thinking: "max",
+      permissionMonitor: "autonomous",
     };
     const out = reseedDraftFromDefaults(draft, FULL_DEFAULTS);
     expect(out).toBe(draft);

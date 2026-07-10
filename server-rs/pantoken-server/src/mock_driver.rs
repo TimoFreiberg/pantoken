@@ -2576,6 +2576,7 @@ impl PantokenDriver for MockDriver {
             model_id: default.model_id,
             thinking_level: default.thinking_level,
             favorites: Vec::new(),
+            default_permission_monitor: None,
         }
     }
     async fn list_commands(&self, _session_id: Option<SessionId>) -> Vec<CommandInfo> {

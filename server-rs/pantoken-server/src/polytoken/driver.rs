@@ -2518,6 +2518,23 @@ impl PantokenDriver for PolytokenDriver {
         // the split prefix when the default model isn't in the parsed list (config
         // drift), preserving the old behavior.
         let model = default.and_then(|id| parsed.models.iter().find(|m| m.model_id == id));
+        // A global config default is available through any warm daemon session.
+        // Clone clients before awaiting so the synchronous warm-map lock is not
+        // held across network I/O; cold starts simply omit this optional field.
+        let warm_clients: Vec<Arc<DaemonClient>> = self
+            .inner
+            .warm
+            .read()
+            .values()
+            .map(|warm| warm.client.clone())
+            .collect();
+        let mut default_permission_monitor = None;
+        for client in warm_clients {
+            if let Ok(pm) = client.get_permission_monitor().await {
+                default_permission_monitor = Some(event_map::monitor_to_mode(&pm.config_default));
+                break;
+            }
+        }
         ModelDefaults {
             provider: model
                 .map(|m| m.provider.clone())
@@ -2525,6 +2542,7 @@ impl PantokenDriver for PolytokenDriver {
             model_id: parsed.default_model.clone(),
             thinking_level: parsed.default_thinking_level.clone(),
             favorites: Vec::new(),
+            default_permission_monitor,
         }
     }
 
@@ -4309,6 +4327,26 @@ mod tests {
         assert!(
             defaults.thinking_level.is_none(),
             "thinking_level should be None when the default model isn't in the parsed list"
+        );
+    }
+
+    #[tokio::test]
+    async fn model_defaults_permission_monitor_none_on_cold_start() {
+        // No warm session has a live daemon, so get_permission_monitor() errors
+        // and default_permission_monitor stays None (the cold-start fallback).
+        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
+            Box::pin(async move {
+                Ok(ok_output(
+                    "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=high (default), max, none; can_disable=yes\n",
+                ))
+            })
+        });
+        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
+
+        let defaults = driver.get_model_defaults().await;
+        assert!(
+            defaults.default_permission_monitor.is_none(),
+            "default_permission_monitor should be None when no warm daemon is reachable"
         );
     }
 

@@ -158,6 +158,7 @@ export interface ModelDefaults {
   readonly modelId?: string;
   readonly thinkingLevel?: string;
   readonly favorites: readonly string[];
+  readonly defaultPermissionMonitor?: PermissionMonitorMode;
 }
 
 /** A projection of the daemon's CurrentGoal for display. Only the fields

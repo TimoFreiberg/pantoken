@@ -197,6 +197,12 @@ pub struct ModelDefaults {
     pub thinking_level: Option<String>,
     #[serde(default)]
     pub favorites: Vec<String>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        rename = "defaultPermissionMonitor"
+    )]
+    pub default_permission_monitor: Option<PermissionMonitorMode>,
 }
 
 // ── Commands ───────────────────────────────────────────────────────────
