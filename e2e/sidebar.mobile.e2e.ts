@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { gotoFresh, openRightSidebar, openSidebar } from "./helpers.js";
+import { gotoFresh, openSidebar } from "./helpers.js";
 
 // Runs under the "mobile" project (Pixel 7 viewport).
 test.beforeEach(async ({ page }) => {
@@ -46,10 +46,11 @@ test("the context panel is closed by default on a phone, with a header arrow to 
   await expect(edgeOpen).toBeVisible();
   await edgeOpen.click();
   await expect(panel).toHaveAttribute("data-open", "true");
-  // Sanity: the shared helper works too (same click, wrapped). The collapse
-  // control ("Collapse context panel") and the scrim ("Close context panel",
-  // tap-outside-to-dismiss) carry distinct labels; scoping kept for locality.
+  // The collapse control ("Collapse context panel") and the scrim
+  // ("Close context panel", tap-outside-to-dismiss) carry distinct labels;
+  // scoping keeps the control lookup local to the drawer.
   await panel.getByRole("button", { name: "Collapse context panel" }).click();
-  await openRightSidebar(page);
+  await expect(panel).toHaveAttribute("data-open", "false");
+  await page.getByTestId("context-open").click();
   await expect(panel).toHaveAttribute("data-open", "true");
 });

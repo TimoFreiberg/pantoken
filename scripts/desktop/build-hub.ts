@@ -19,9 +19,22 @@
 // not a real release binary. Dev and release-prepare keep the default --release.
 
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 const repoRoot = resolve(import.meta.dir, "../..");
+const cargoRoot = join(repoRoot, "server-rs");
+
+/** Resolve Cargo's effective target directory before spawning it. Cargo resolves
+ * relative CARGO_TARGET_DIR values from its working directory (cargoRoot). */
+export function cargoTargetDir(
+  targetDir = process.env.CARGO_TARGET_DIR,
+): string {
+  return targetDir
+    ? isAbsolute(targetDir)
+      ? resolve(targetDir)
+      : resolve(cargoRoot, targetDir)
+    : join(repoRoot, "target");
+}
 
 /** Rust-style target triple for the host, matching what `tauri build` expects
  *  for externalBin lookup. Extend when a new host platform actually ships. */
@@ -48,6 +61,7 @@ if (import.meta.main) {
   const debug = process.argv.includes("--debug");
   const profile = debug ? "debug" : "release";
   const outDir = join(repoRoot, "desktop", "binaries");
+  const targetDir = cargoTargetDir();
   mkdirSync(outDir, { recursive: true });
   // tauri.conf.json maps ../client/dist as a bundle resource; guarantee the dir
   // exists so a fresh checkout can `tauri dev` before any client build.
@@ -59,7 +73,8 @@ if (import.meta.main) {
   const cargoArgs = ["cargo", "build", "--bin", "pantoken-server"];
   if (!debug) cargoArgs.push("--release");
   const build = Bun.spawn(cargoArgs, {
-    cwd: join(repoRoot, "server-rs"),
+    cwd: cargoRoot,
+    env: { ...process.env, CARGO_TARGET_DIR: targetDir },
     stdout: "inherit",
     stderr: "inherit",
   });
@@ -67,13 +82,7 @@ if (import.meta.main) {
   if (code !== 0) process.exit(code);
 
   const triple = hostTriple();
-  const built = join(
-    repoRoot,
-    "server-rs",
-    "target",
-    profile,
-    "pantoken-server",
-  );
+  const built = join(targetDir, profile, "pantoken-server");
   const outfile = join(outDir, `pantoken-server-${triple}`);
   if (!existsSync(built)) {
     console.error(`cargo build succeeded but ${built} is missing`);

@@ -499,7 +499,7 @@
       inset: 0;
       /* Above the app header (z 70) — unlike the left drawer, this is a full-screen
          view with its own nav bar, so nothing behind it may stay on top. */
-      z-index: 75;
+      z-index: 80;
       width: auto;
       border-left: none;
       transform: translateX(100%);

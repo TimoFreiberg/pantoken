@@ -1602,7 +1602,9 @@
       position: fixed;
       top: 0;
       left: 0;
-      z-index: 60;
+      /* Open drawer controls must sit above the sticky header; its scrim remains
+         below both layers so the drawer receives pointer events. */
+      z-index: 80;
       width: min(82vw, 320px);
       box-shadow: var(--shadow-pop);
       transition: transform 0.18s ease;
