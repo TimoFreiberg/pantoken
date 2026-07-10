@@ -1510,7 +1510,7 @@ class PantokenStore {
       model: ns?.model,
       thinking: ns?.thinking,
       facet: ns?.facet ?? "execute",
-      permissionMonitor: ns?.permissionMonitor ?? "standard",
+      permissionMonitor: ns?.permissionMonitor ?? this.modelDefaults.defaultPermissionMonitor,
     };
     this.composerDraft = prompt.text;
     this.composerImages = prompt.images ? [...prompt.images] : [];
@@ -1979,7 +1979,9 @@ class PantokenStore {
           : undefined,
       thinking: d.thinkingLevel,
       facet: "execute",
-      permissionMonitor: "standard",
+      // Undefined lets the composer show the standard fallback until the daemon's
+      // global default arrives in the modelDefaults message.
+      permissionMonitor: this.modelDefaults.defaultPermissionMonitor,
     };
     // Restore this project's pending new-session draft, if any (key now resolves to n:cwd).
     this.loadDraft(this.composerDraftKey);

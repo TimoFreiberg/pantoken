@@ -23,9 +23,10 @@ export interface DraftConfig {
  *  the real defaults arrive later this re-seeds the still-unset fields.
  *
  *  Only fills in fields that are `undefined` — a draft where the user (or a
- *  restored `draftConfigMap` override) already set a model/thinking is left
- *  untouched. Returns the same object reference when nothing changed (so Svelte
- *  doesn't trigger a spurious re-render), or a new spread when it did. */
+ *  restored `draftConfigMap` override) already set a model/thinking/permission
+ *  monitor is left untouched. Returns the same object reference when nothing
+ *  changed (so Svelte doesn't trigger a spurious re-render), or a new spread
+ *  when it did. */
 export function reseedDraftFromDefaults(
   draft: DraftConfig,
   defaults: ModelDefaults,
@@ -36,6 +37,9 @@ export function reseedDraftFromDefaults(
   }
   if (!draft.thinking && defaults.thinkingLevel) {
     next = { ...next, thinking: defaults.thinkingLevel };
+  }
+  if (!draft.permissionMonitor && defaults.defaultPermissionMonitor) {
+    next = { ...next, permissionMonitor: defaults.defaultPermissionMonitor };
   }
   return next;
 }
