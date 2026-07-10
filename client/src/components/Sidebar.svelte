@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onDestroy, tick } from "svelte";
+  import { effectiveWidths, maxWidthFor, MIN_SIDEBAR_WIDTH } from "../lib/sidebar-width.js";
+  import SidebarResizeHandle from "./SidebarResizeHandle.svelte";
   import type { SessionListEntry } from "@pantoken/protocol";
   import { reveal } from "../lib/transitions.js";
   import { store } from "../lib/store.svelte.js";
@@ -36,6 +38,29 @@
       ? `translateX(calc(-100% + ${edge.snap.distance}px))`
       : undefined,
   );
+  let viewportWidth = $state(typeof window === "undefined" ? 1100 : window.innerWidth);
+  const widths = $derived(
+    effectiveWidths(
+      store.sidebarWidth,
+      store.rightSidebarWidth,
+      viewportWidth,
+      store.sidebarOpen,
+      store.rightSidebarOpen,
+    ),
+  );
+  const desktopWidthStyle = $derived(
+    sidebarTransform
+      ? `--desktop-sidebar-width: ${widths.left}px; transform: ${sidebarTransform}`
+      : `--desktop-sidebar-width: ${widths.left}px`,
+  );
+  $effect(() => {
+    const onResize = () => (viewportWidth = window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  });
+  function setSidebarWidth(width: number): void {
+    store.setSidebarWidth(width);
+  }
 
   // Touch-primary devices only — desktop has the Reconnect button (Alt+R).
   const isTouch =
@@ -514,7 +539,7 @@
   class:edge-drag={edgeDragging}
   data-testid="sidebar"
   data-open={store.sidebarOpen}
-  style={sidebarTransform ? `transform: ${sidebarTransform}` : undefined}
+  style={desktopWidthStyle}
 >
   <!-- data-tauri-drag-region="deep": desktop-shell window drag, same contract as
        StatusHeader (real buttons stay clickable; needs the window-drag IPC grant). -->
@@ -525,6 +550,15 @@
       onclick={() => store.closeSidebar()}>‹</IconButton
     >
   </div>
+
+  <SidebarResizeHandle
+    side="left"
+    value={widths.left}
+    min={MIN_SIDEBAR_WIDTH}
+    max={maxWidthFor("left", viewportWidth, store.rightSidebarOpen)}
+    label="Resize sessions sidebar"
+    onChange={setSidebarWidth}
+  />
 
   <div class="new">
     <button
@@ -1005,9 +1039,10 @@
 
 <style>
   .sidebar {
+    position: relative;
     display: flex;
     flex-direction: column;
-    width: 288px;
+    width: var(--desktop-sidebar-width, 288px);
     flex-shrink: 0;
     height: 100%;
     height: 100dvh;

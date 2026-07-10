@@ -1,5 +1,7 @@
 <script lang="ts">
   import { store } from "../lib/store.svelte.js";
+  import { effectiveWidths, maxWidthFor, MIN_RIGHT_SIDEBAR_WIDTH } from "../lib/sidebar-width.js";
+  import SidebarResizeHandle from "./SidebarResizeHandle.svelte";
   import IconButton from "./ui/IconButton.svelte";
   import Chevron from "./ui/Chevron.svelte";
   import TodoDetail from "./TodoDetail.svelte";
@@ -18,6 +20,24 @@
   const todos = $derived(s.todos);
   const jobs = $derived(store.jobs);
   const open = $derived(store.rightSidebarOpen);
+  let viewportWidth = $state(typeof window === "undefined" ? 1100 : window.innerWidth);
+  const widths = $derived(
+    effectiveWidths(
+      store.sidebarWidth,
+      store.rightSidebarWidth,
+      viewportWidth,
+      store.sidebarOpen,
+      store.rightSidebarOpen,
+    ),
+  );
+  $effect(() => {
+    const onResize = () => (viewportWidth = window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  });
+  function setRightSidebarWidth(width: number): void {
+    store.setRightSidebarWidth(width);
+  }
 
   const STATUS_ICON: Record<string, string> = {
     pending: "○",
@@ -61,6 +81,7 @@
   class="right-sidebar"
   data-testid="right-sidebar"
   data-open={open}
+  style={`--desktop-sidebar-width: ${widths.right}px`}
 >
   <!-- data-tauri-drag-region="deep": desktop-shell window drag, same contract as
        StatusHeader (real buttons stay clickable; needs the window-drag IPC grant). -->
@@ -73,6 +94,15 @@
       <Chevron open={false} />
     </IconButton>
   </div>
+
+  <SidebarResizeHandle
+    side="right"
+    value={widths.right}
+    min={MIN_RIGHT_SIDEBAR_WIDTH}
+    max={maxWidthFor("right", viewportWidth, store.sidebarOpen)}
+    label="Resize context panel"
+    onChange={setRightSidebarWidth}
+  />
 
   <div class="content">
     <!-- Flagged files -->
@@ -180,9 +210,10 @@
 
 <style>
   .right-sidebar {
+    position: relative;
     display: none;
     flex-direction: column;
-    width: 280px;
+    width: var(--desktop-sidebar-width, 280px);
     flex-shrink: 0;
     border-left: 1px solid var(--border);
     background: var(--bg);
