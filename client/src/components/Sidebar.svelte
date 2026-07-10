@@ -1152,7 +1152,7 @@
     /* Codex-style outer gutter (see .group-toggle/.group-head/ul below, which add the
        rest): left/right 10px here, plus each row/header's own inner padding, lands the
        header text ~16px from the sidebar edge and indents session rows a further step
-       under it — was flush-left (2px) before, per docs/TODO.md's margin complaint. */
+       under it. */
     padding: 6px 10px 14px 10px;
   }
   /* Quiet build stamp pinned at the bottom of the sidebar. */
@@ -1451,7 +1451,7 @@
     border: 1px solid color-mix(in srgb, var(--danger) 38%, transparent);
   }
   /* done — a finished-while-away run. A check badge in the accent reads "ready for
-     you", a clear step up from plain unread's neutral dot (which it used to share). */
+     you". */
   .status[data-state="done"] .attention-symbol {
     color: var(--accent);
     background: color-mix(in srgb, var(--accent) 14%, transparent);

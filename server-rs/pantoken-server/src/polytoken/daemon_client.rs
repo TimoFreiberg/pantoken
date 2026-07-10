@@ -521,7 +521,7 @@ async fn spawn_new_daemon(
 /// `daemon` subcommand resolves config differently than `new --working-dir`
 /// (it does NOT walk upward from the project dir to find the global config).
 /// Build the arg vector for `polytoken daemon --resume`. Extracted as a pure
-/// function so it can be unit-tested (AC.3) without spawning a process.
+/// function so it can be unit-tested without spawning a process.
 pub fn build_resume_args(
     cwd: &str,
     session_id: &str,
@@ -2494,7 +2494,6 @@ mod tests {
         );
     }
 
-    // AC.3 — build_resume_args includes --credential-file and the credential path.
     #[test]
     fn test_resume_args_include_credential_file() {
         let args = build_resume_args(
@@ -2631,7 +2630,6 @@ sleep 30
         }
     }
 
-    // AC.2 — auth_header returns the correct header value when a token is set.
     #[test]
     fn test_auth_header_present_when_token_set() {
         let client = DaemonClient::new("s1".into(), 1234, 1, Some("deadbeef".into()));
@@ -2642,7 +2640,6 @@ sleep 30
         assert_eq!(value, "Bearer deadbeef");
     }
 
-    // AC.2 — auth_header returns None when no token is set.
     #[test]
     fn test_auth_header_absent_when_token_none() {
         let client = DaemonClient::new("s1".into(), 1234, 1, None);
@@ -3001,8 +2998,6 @@ sleep 30
         assert!(merged_spawn_env(Some(&login_env)).is_none());
     }
 
-    // AC.4 — wait_for_daemon_startup detects early process death and includes
-    // stderr, returning within ~1s (not the full timeout).
     #[tokio::test]
     async fn test_wait_for_startup_detects_early_death() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -3046,7 +3041,6 @@ sleep 30
         );
     }
 
-    // AC.2 — read_credential_token reads the token from a credential file.
     #[test]
     fn test_read_credential_token() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -3060,14 +3054,12 @@ sleep 30
         assert_eq!(token.as_deref(), Some("abc123"));
     }
 
-    // AC.2 — read_credential_token returns None for a missing file.
     #[test]
     fn test_read_credential_token_missing_file() {
         let token = read_credential_token(Path::new("/nonexistent/credential.json"));
         assert!(token.is_none());
     }
 
-    // AC.2 — read_credential_token returns None for a malformed file.
     #[test]
     fn test_read_credential_token_malformed() {
         let dir = tempfile::tempdir().expect("tempdir");

@@ -1,8 +1,7 @@
 //! Auto-generated daemon wire types from `polytoken openapi`.
 //!
 //! This crate intentionally models the daemon's exhaustive wire vocabulary. Some
-//! generated structs/enums/variants are unused by the Rust server until the daemon
-//! bumps or a later porting phase wires that endpoint/event kind, so this generated
+//! generated structs/enums/variants are unused by the Rust server, so this generated
 //! file keeps a crate-level dead_code allowance. Do not copy this pattern into
 //! hand-written server modules; annotate those gaps at item level instead.
 //!

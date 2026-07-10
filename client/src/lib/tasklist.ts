@@ -1,11 +1,10 @@
 // Parser for the "tasklist" ambient widget.
 //
-// The tasklist extension (a daemon built-in under polytoken; historically a pantoken-owned
-// in-repo extension) pushes its state to the host as a plain `string[]` via
-// ui.setWidget("tasklist", lines) — the only channel pantoken's bridge renders remotely.
-// The item lines carry just the description now (the `#id` is internal-only —
-// the operator resolves tasks by description fragment via `findTask`, never by reading
-// an id off the widget). The lines look like:
+// The tasklist extension (a daemon built-in under polytoken) pushes its state to the host as
+// a plain `string[]` via ui.setWidget("tasklist", lines) — the only channel pantoken's bridge
+// renders remotely. The item lines carry just the description (the `#id` is internal-only —
+// the operator resolves tasks by description fragment via `findTask`, never by reading an id
+// off the widget). The lines look like:
 //
 //   Open Tasks (3):
 //     ○ first item

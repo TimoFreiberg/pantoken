@@ -5,8 +5,6 @@
 //!
 //! Port of `server/src/polytoken/config-notify.ts`.
 //!
-//! The driver's config setters used to `.catch(console.error)` only — the
-//! operator got no visible signal when a model/facet/monitor change failed.
 //! These helpers implement the same error-notify pattern `respondUi` uses inline
 //! (`hostUiRequest{kind:"notify", level:"error"}`), plus optional rollback for
 //! optimistic setters (setPermissionMonitor).

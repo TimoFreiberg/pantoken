@@ -768,7 +768,6 @@ mod tests {
         );
     }
 
-    // ---- AC.7: project config event debounces to cwd-scoped invalidation ----
 
     #[test]
     fn project_config_event_debounces_to_cwd_cache_invalidation() {
@@ -847,7 +846,6 @@ mod tests {
         );
     }
 
-    // ---- AC.6: global/binary event debounces to all-cache invalidation ----
 
     #[test]
     fn global_or_binary_event_debounces_to_all_cache_invalidation() {

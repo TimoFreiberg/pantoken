@@ -387,15 +387,11 @@
   // block's height over its own rAF passes after first paint), and a turn's "Worked for Ns"
   // block collapses. So `scrollHeight` measured once at switch/restore time is NOT the
   // settled height — a single scrollTo lands short (wrong spot, sometimes blank past the
-  // content end). The OLD code froze a pixel `target = ratio * staleHeight` and chased 4
-  // frames clamping with `Math.min`, which can never correct UPWARD as content grows.
+  // content end).
   //
-  // Instead we keep a target (a `ratio`, or `undefined` = the live bottom) and re-apply it
-  // RE-DERIVED against the CURRENT height whenever the content actually resizes, for a short
-  // window. A ResizeObserver — not a tight rAF loop — is the right tool: it fires only on real
-  // height changes, so static content is left alone (the loop version re-scrolled every frame
-  // and, because markstream nudges height sub-pixel for a while, never hit its stable-exit —
-  // locking the scroll for its whole cap and fighting any scroll the user/test did meanwhile).
+  // Keep a target (a `ratio`, or `undefined` = the live bottom) and re-apply it against the
+  // CURRENT height whenever the content actually resizes, for a short window. A ResizeObserver
+  // fires only on real height changes, so static content is left alone.
   let settleRatio: number | undefined;
   let settleUntil = 0;
   let content = $state<HTMLDivElement>();
@@ -440,8 +436,7 @@
   // session's live state — if you were at the live tail, return to the tail (even if it
   // grew while you were away); if you were scrolled up, return to that spot and let the
   // "new messages ↓" pill flag anything below. Only a session with NO saved position (or no
-  // id) defaults to the bottom. (Previously UNREAD/RUNNING/INITIALIZING force-jumped to the
-  // bottom, overriding a scrolled-up reader — that's the "I'm not where I left it" miss.)
+  // id) defaults to the bottom.
   // Keyed off the focused session id, not every snapshot: a same-session re-snapshot
   // mid-turn (rename, model change) must NOT yank the position out from under you.
   // Declared before the streaming-pin effect so it wins the flush — it rebaselines

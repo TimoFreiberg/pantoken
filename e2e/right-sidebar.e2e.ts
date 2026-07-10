@@ -43,13 +43,13 @@ test("the context panel renders flagged files and todos", async ({ page }) => {
   // Drive the context fixture → a snapshot with flags + todos lands.
   await drive(page, "context");
 
-  // Flagged files render (AC.1).
+  // Flagged files render.
   const files = page.getByTestId("flagged-files");
   await expect(files).toBeVisible();
   await expect(files).toContainText("src/app.ts");
   await expect(files).toContainText("README.md");
 
-  // Todos render with titles (AC.2).
+  // Todos render with titles.
   const todos = page.getByTestId("todos");
   await expect(todos).toBeVisible();
   await expect(todos).toContainText("Wire up the right sidebar");
@@ -96,7 +96,7 @@ test("the context panel closes via its own control and reopens via the header ar
   await expect(panel).toHaveAttribute("data-open", "true");
 });
 
-// AC.7: empty states for all three sections.
+// Empty states for all three sections.
 test("the context panel shows empty states when no flags/todos/jobs", async ({
   page,
 }) => {
@@ -112,7 +112,7 @@ test("the context panel shows empty states when no flags/todos/jobs", async ({
   );
 });
 
-// AC.1: three sections render with the context fixture (order is covered by the
+// Three sections render with the context fixture (order is covered by the
 // dedicated "sections render in order" test above).
 test("three sections all render with the context fixture", async ({ page }) => {
   await openPanel(page);
@@ -124,7 +124,7 @@ test("three sections all render with the context fixture", async ({ page }) => {
   await expect(page.getByTestId("flagged-files")).toBeVisible();
 });
 
-// AC.2: clicking a todo opens a detail view with full description + timestamp.
+// Clicking a todo opens a detail view with full description + timestamp.
 test("clicking a todo opens a detail view with full description", async ({
   page,
 }) => {
@@ -148,7 +148,7 @@ test("clicking a todo opens a detail view with full description", async ({
   await expect(detail).toContainText("Created");
 });
 
-// AC.3: deleting a todo from the detail view removes it from the list.
+// Deleting a todo from the detail view removes it from the list.
 test("deleting a todo from the detail view removes it", async ({ page }) => {
   await openPanel(page);
   await drive(page, "context");
@@ -170,7 +170,7 @@ test("deleting a todo from the detail view removes it", async ({ page }) => {
   );
 });
 
-// AC.4: background jobs render with type, status, and output summary.
+// Background jobs render with type, status, and output summary.
 test("background jobs section renders fixture jobs", async ({ page }) => {
   await openPanel(page);
   await drive(page, "context");
@@ -186,7 +186,7 @@ test("background jobs section renders fixture jobs", async ({ page }) => {
   await expect(jobs).toContainText("researcher");
 });
 
-// AC.5: clicking a job opens a detail view with the output tail.
+// Clicking a job opens a detail view with the output tail.
 test("clicking a job opens a detail view with output tail", async ({
   page,
 }) => {
@@ -206,7 +206,7 @@ test("clicking a job opens a detail view with output tail", async ({
   await expect(detail).toContainText("Reviewing src/store.svelte.ts");
 });
 
-// AC.6: copy-path button on a flagged file copies to clipboard.
+// Copy-path button on a flagged file copies to clipboard.
 test("copy-path button copies flagged file path to clipboard", async ({
   page,
 }) => {
@@ -225,7 +225,7 @@ test("copy-path button copies flagged file path to clipboard", async ({
   expect(clipboard).toBe("src/app.ts");
 });
 
-// AC.8: client-side jobs refresh updates the UI.
+// Client-side jobs refresh updates the UI.
 test("client-side jobs refresh updates UI after mock script", async ({
   page,
 }) => {

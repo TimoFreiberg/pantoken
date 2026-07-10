@@ -1,4 +1,4 @@
-// Pantoken's WS contract types (originally adapted from pi-gui's session-driver).
+// Pantoken's WS contract types.
 // This is the normalized, JSON-serializable surface of a daemon session.
 // We adopt it as pantoken's wire contract; trimmed to what pantoken consumes.
 

@@ -3129,9 +3129,6 @@ mod hub_models_tests {
         (driver, hub, rx)
     }
 
-    /// AC.4: a driver that doesn't override `login_env_status` (the mock/default)
-    /// yields the `{ok:false}` default in `pantoken_settings_msg`'s env — the trait
-    /// default holds (regression guard).
     #[tokio::test]
     async fn pantoken_settings_defaults_login_env_when_unsupported() {
         let (_driver, hub, _ops) = test_hub();
@@ -3145,8 +3142,6 @@ mod hub_models_tests {
         }
     }
 
-    /// AC.3: `pantoken_settings_msg` surfaces the active driver's `login_env_status`
-    /// verbatim.
     #[test]
     fn pantoken_settings_reports_driver_login_env() {
         let driver: Arc<dyn PantokenDriver> =
@@ -3178,8 +3173,6 @@ mod hub_models_tests {
         }
     }
 
-    /// AC.5: `OpenDataDir` with a configured data dir but a failing file-manager
-    /// spawn surfaces the error to the client instead of silently discarding it.
     #[tokio::test]
     async fn open_data_dir_surfaces_spawn_failure() {
         let driver: Arc<dyn PantokenDriver> = Arc::new(MockDriver::new());
@@ -3252,8 +3245,6 @@ mod hub_models_tests {
         }
     }
 
-    /// AC.5: `OpenDataDir` with no configured data dir surfaces the
-    /// not-configured error.
     #[tokio::test]
     async fn open_data_dir_errors_when_unconfigured() {
         let (_driver, hub, _ops) = test_hub();
@@ -3311,10 +3302,7 @@ mod hub_models_tests {
     }
 
     /// A coalesced assistantDelta run must reach viewers once delta_flush_ms
-    /// elapses, with no non-delta event required to force it out. Regression:
-    /// the port originally never armed the flush timer, so streamed text sat in
-    /// pending_deltas until the next tool/turn-end event — whole blocks arrived
-    /// as one lump.
+    /// elapses, with no non-delta event required to force it out.
     #[tokio::test]
     async fn coalesced_deltas_flush_on_the_timer_without_a_following_event() {
         let (_driver, hub, mut ops) = test_hub(); // delta_flush_ms = 10
@@ -4524,9 +4512,6 @@ mod hub_models_tests {
         let _ = ("take_swap_buffer blocker",);
     }
 
-    /// AC.2 — `handle_client(DetachSession)` enqueues the op, calls the
-    /// driver's `detach_session` (the mock/default is a no-op → `Ok(())`),
-    /// and broadcasts the session list on success. There is no error message.
     #[tokio::test]
     async fn handle_client_detach_session_calls_driver_and_broadcasts() {
         let (_driver, hub, mut hub_ops) = test_hub();

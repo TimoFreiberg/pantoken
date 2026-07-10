@@ -13,18 +13,18 @@ test.beforeEach(async ({ page }) => {
 test("the goal badge renders with the summary and a full tooltip", async ({
   page,
 }) => {
-  // Before driving `goalactive`: no goal → no badge (AC.2 baseline).
+  // Before driving `goalactive`: no goal → no badge.
   await expect(page.getByTestId("goal-badge")).toHaveCount(0);
 
   // Drive the goalactive fixture → a snapshot with goal lands.
   await drive(page, "goalactive");
 
-  // The badge appears in the StatusHeader subtitle with the summary (AC.1).
+  // The badge appears in the StatusHeader subtitle with the summary.
   const badge = page.getByTestId("goal-badge");
   await expect(badge).toBeVisible();
   await expect(badge).toContainText("Ship the goal badge feature");
 
-  // The tooltip carries the full summary + lifecycle state (AC.5).
+  // The tooltip carries the full summary + lifecycle state.
   await expect(badge).toHaveAttribute(
     "title",
     "Goal: Ship the goal badge feature (active)",
@@ -37,7 +37,7 @@ test("the goal badge hides when the goal is cleared", async ({ page }) => {
   const badge = page.getByTestId("goal-badge");
   await expect(badge).toBeVisible();
 
-  // Drive goalclear → a snapshot with goal:null clears state.goal → badge hides (AC.2).
+  // Drive goalclear → a snapshot with goal:null clears state.goal → badge hides.
   await drive(page, "goalclear");
   await expect(badge).toHaveCount(0);
 });

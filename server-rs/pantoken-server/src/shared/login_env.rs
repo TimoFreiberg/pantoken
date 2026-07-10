@@ -1,7 +1,7 @@
 //! Login-shell resolution and `env` output parsing.
 //!
 //! Pure subset of `server/src/shared/login-env.ts`; the shell-spawning capture
-//! path is intentionally deferred to the later wiring phase.
+//! The shell-spawning capture path is not implemented here.
 
 use std::collections::HashMap;
 use std::ffi::CStr;

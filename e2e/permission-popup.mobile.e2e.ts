@@ -19,7 +19,7 @@ test("mobile: permission card options are full-width tap targets", async ({
   await expect(dialog.getByText("shell_exec")).toBeVisible();
   await expect(dialog.locator(".tool-input")).toBeVisible();
 
-  // 3 pruned options (not 7) — AC.2.
+  // 3 pruned options (not 7).
   const options = dialog.getByRole("radio");
   await expect(options).toHaveCount(3);
 

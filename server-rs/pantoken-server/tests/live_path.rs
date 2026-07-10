@@ -149,14 +149,9 @@ impl MapCtx for PureCtx {
 }
 
 // ===========================================================================
-// Phase A — harness + spawn-seam smoke test (AC.1)
+// harness + spawn-seam smoke test
 // ===========================================================================
 
-/// AC.1: the fake-daemon harness serves a corpus scenario over a real ephemeral
-/// axum port, and `PolytokenDriver` reaches it via the spawn seam. `new_session`
-/// calls `spawn_daemon` (→ override → fake port) then health-poll → claim-lease
-/// → `/history`. We assert all the lifecycle endpoints hit the fake (via its
-/// recorded-call log), proving the spawn seam is exercised end-to-end.
 #[tokio::test]
 async fn harness_smoke_opens_session_and_seeds() {
     let _guard = OVERRIDE_MUTEX.lock().await;
@@ -337,9 +332,7 @@ async fn new_session_opts_failure_surfaces_notice_and_does_not_cache_mode() {
     );
 }
 
-/// docs/TODO.md bug 1 ("rename session doesn't work"), warm half: renaming a
-/// WARM session must reach the daemon's real `POST /title` (previously a
-/// dead no-op — `PolytokenDriver` never overrode the trait's default), and
+/// Renaming a WARM session must reach the daemon's real `POST /title`, and
 /// `list_sessions()` must reflect the new title IMMEDIATELY — not just once
 /// the `SessionTitleChanged` SSE echo eventually lands (it arrives
 /// asynchronously and, on its own, doesn't even refresh the cached
@@ -447,7 +440,7 @@ async fn queue_while_in_flight_produces_refetch_queue_effect() {
 }
 
 // ===========================================================================
-// Phase B — warm-session lifecycle tests (AC.2)
+// warm-session lifecycle tests
 // ===========================================================================
 
 /// Subscribe to the driver and collect emitted events into a bounded channel.
@@ -684,7 +677,7 @@ async fn warm_child_killed_on_shutdown() {
 }
 
 // ===========================================================================
-// Phase B — fake-mode boot + dev surface (AC.6, AC.7)
+// fake-mode boot + dev surface
 // ===========================================================================
 
 /// Build a fake-mode driver: install the corpus-backed spawn override, then
@@ -713,7 +706,7 @@ async fn make_fake_driver() -> (
     (driver, control, dir, clear)
 }
 
-/// AC.6: `PANTOKEN_DRIVER=fake` boots the real `PolytokenDriver` over an in-process
+/// `PANTOKEN_DRIVER=fake` boots the real `PolytokenDriver` over an in-process
 /// fake daemon — the constructor warms a bootstrap session, so `default_seed`
 /// returns its `sessionOpened` (what the hub adopts as the landing session).
 #[tokio::test]
@@ -731,7 +724,7 @@ async fn fake_mode_boots_and_bootstraps() {
     );
 }
 
-/// AC.7: `/debug/reset` → `driver.reset` keeps the bootstrap session warm so the
+/// `/debug/reset` → `driver.reset` keeps the bootstrap session warm so the
 /// hub's follow-up `seed_default` reseeds a `sessionOpened` deterministically.
 #[tokio::test]
 async fn dev_surface_reset_reseeds() {
@@ -749,10 +742,6 @@ async fn dev_surface_reset_reseeds() {
     );
 }
 
-/// AC.7: a `{type:"mock", script}` WS message → `driver.run_script` pushes the
-/// mapped corpus scenario's SSE frames onto the bootstrap session's held-open
-/// stream, which the live fold path turns into driver events. `"stream"` maps to
-/// streaming-turn, whose frames fold to a `SessionUpdated`/`AssistantDelta`.
 #[tokio::test]
 async fn dev_surface_run_script_pushes_scenario() {
     let _guard = OVERRIDE_MUTEX.lock().await;
@@ -778,8 +767,8 @@ async fn dev_surface_run_script_pushes_scenario() {
     );
 }
 
-/// AC.2: after `new_session`, the warm session is SUBSCRIBED to daemon SSE and
-/// FOLDING events — the thing that was entirely dead before Phase B. We stream
+/// after `new_session`, the warm session is SUBSCRIBED to daemon SSE and
+/// FOLDING events. We stream
 /// `streaming-turn` (whose 3rd SSE frame is `message_start`, which maps to a
 /// `SessionUpdated { status: Running }`), subscribe to the driver, and assert a
 /// `SessionUpdated` arrives from the SSE path (not from the seed).
@@ -791,9 +780,7 @@ async fn warm_session_subscribes_and_folds_sse() {
     let _guard = OVERRIDE_MUTEX.lock().await;
 
     let scenario = corpus_loader::load_named(VERSION, "streaming-turn");
-    // Small inter-frame delay so the SSE consumer has time to fold before the
-    // stream ends (the driver's per-event spawn is still in place until Phase C;
-    // a zero delay can race the consumer task shutdown).
+    // Small inter-frame delay so the SSE consumer has time to fold before the stream ends.
     let fake = Arc::new(fake_daemon::spawn(scenario.clone(), "warm-1".into(), 5).await);
     let _ovr = OverrideGuard::install(fake.clone());
 
@@ -825,14 +812,14 @@ async fn warm_session_subscribes_and_folds_sse() {
     );
 }
 
-/// AC.2: `reload_session` disposes the old warm session AND re-warms. We open a
+/// `reload_session` disposes the old warm session AND re-warms. We open a
 /// session, observe one SSE-driven emission, call `reload_session`, then assert
 /// the old warm was disposed (its SSE subscription stopped — no further
 /// emissions from it) and the call returns without deadlock.
 ///
-/// **Scope note:** with the cold-start spawn (Phase 3b), `open_session` now
-/// spawns a resume daemon via the spawn-override seam when no `startup.json`
-/// is found. The fake daemon answers the spawn, so the re-warm goes through
+/// **Scope note:** `open_session` spawns a resume daemon via the
+/// spawn-override seam when no `startup.json` is found. The fake daemon
+/// answers the spawn, so the re-warm goes through
 /// health → claim → history. The seed may be empty if the corpus has no
 /// recorded /history items (streaming-turn doesn't). This test asserts the
 /// cold-start spawn seam is hit after reload (the fake daemon's /health is
@@ -998,7 +985,7 @@ async fn multi_spawn_override_mints_fresh_fake_per_new_session() {
 // Phase 3b — cold-start spawn in open_session
 // ===========================================================================
 
-/// AC.7 — clicking a cold session (no running daemon, no startup.json) spawns
+/// Clicking a cold session (no running daemon, no startup.json) spawns
 /// a resume daemon via `spawn_daemon` → spawn-override seam. The fake daemon
 /// answers the spawn, `install_warm` runs (health → lease → state → SSE), and
 /// the cold-start path is exercised end-to-end. Asserts the spawn-override was
@@ -1186,7 +1173,7 @@ async fn open_session_warm_reopen_skips_history_fetch() {
 }
 
 // ===========================================================================
-// Phase C — SSE ordering test (AC.3)
+// SSE ordering test
 // ===========================================================================
 
 /// Build a minimal `/state` + `/history` scenario (empty SSE) for the
@@ -1221,8 +1208,7 @@ fn minimal_state_scenario(name: &str, turn_in_flight: bool) -> ScenarioFile {
 }
 
 // Consumed now by `synthetic_state_scenarios_deserialize_as_session_state`, and
-// in Phase 5 by the warm-cap in-flight-skip eviction test (AC.7 — a session
-// whose /state reports turn_in_flight:true must never be evicted).
+// by the warm-cap in-flight-skip eviction test
 fn synthetic_turn_in_flight_scenario() -> ScenarioFile {
     minimal_state_scenario("synthetic-turn-in-flight", true)
 }
@@ -1323,7 +1309,7 @@ fn synthetic_ordering_scenario(n: usize) -> ScenarioFile {
     serde_json::from_str::<ScenarioFile>(&json_str).expect("parse synthetic scenario")
 }
 
-/// AC.3: SSE events fold sequentially through ONE per-session consumer (no
+/// SSE events fold sequentially through ONE per-session consumer (no
 /// per-event `tokio::spawn`). A burst of 250 ordered text deltas yields
 /// in-order emitted `AssistantDelta` events.
 ///
@@ -1377,13 +1363,9 @@ async fn sse_burst_folds_in_order() {
 }
 
 // ===========================================================================
-// Phase D — FetchState emit + RefetchQueue → queueUpdated (AC.4, AC.5)
+// FetchState emit + RefetchQueue → queueUpdated
 // ===========================================================================
 
-/// AC.4: a `FetchState` effect (from `message_complete`) emits the post-fetch
-/// `RunCompleted` event with the threaded `prompt_id` as both entry ids, AND
-/// the driver fetched fresh state (a `GET /state` hit the fake). The
-/// streaming-turn scenario ends in `message_complete` → FetchState.
 #[tokio::test]
 async fn fetch_state_emits_run_completed_with_prompt_id() {
     let _guard = OVERRIDE_MUTEX.lock().await;
@@ -1446,10 +1428,6 @@ async fn fetch_state_emits_run_completed_with_prompt_id() {
     );
 }
 
-/// AC.5: a `RefetchQueue` effect (from `pending_turn_input_queued`) emits a
-/// `QueueUpdated` carrying the full queue, AND the driver fetched it via `GET
-/// /turn/input`. The queue-while-in-flight scenario carries
-/// `pending_turn_input_queued`.
 #[tokio::test]
 async fn refetch_queue_emits_queue_updated() {
     let _guard = OVERRIDE_MUTEX.lock().await;
@@ -1502,8 +1480,7 @@ async fn refetch_queue_emits_queue_updated() {
 /// clear_queue (the client's ⌥↑ "Edit all" restore) must return EVERY queued
 /// text and drain the daemon's queue — the daemon's only removal primitive is
 /// DELETE /turn/input/newest, so the driver snapshots first and deletes once
-/// per item. Regression: it used to dequeue a single item and return nothing,
-/// silently deleting the newest queued prompt.
+/// per item.
 #[tokio::test]
 async fn clear_queue_drains_daemon_queue_and_returns_texts() {
     let _guard = OVERRIDE_MUTEX.lock().await;
@@ -1542,28 +1519,9 @@ async fn clear_queue_drains_daemon_queue_and_returns_texts() {
 }
 
 // ===========================================================================
-// Phase 5 — new_session wiring: cwd resolution, worktree, login-env,
-//           warm-cap eviction, invalid-cwd errors (AC.7, AC.8, AC.9, AC.12)
+// new_session wiring: cwd resolution, worktree, login-env, warm-cap eviction, invalid-cwd errors
 // ===========================================================================
 
-/// AC.7: with `warm_cap = N`, warming `N+1` sessions via `new_session` evicts
-/// exactly the least-recently-focused **idle** session. The synthetic idle
-/// scenario serves `/state` with `turn_in_flight:false`, so every warmed
-/// session is evictable. The most-recently-focused session (the N+1th, just
-/// warmed) is protected; the LRU (the 1st, never re-focused) is the victim.
-///
-/// Eviction is observed two ways: (1) a `SessionClosed` event is emitted for
-/// the victim, and (2) the victim is gone from the driver's warm pool —
-/// observable via `list_sessions` (an evicted session with no on-disk
-/// `session.json` disappears from the list, since `list_sessions` merges warm
-/// + on-disk; the fake daemon writes no `session.json`).
-///
-/// **Warm-pool membership note:** there is no public `warm_session_ids()`
-/// accessor on `PolytokenDriver`. The cleanest externally-observable proxy is
-/// `list_sessions` (warm entries appear there until evicted; the fake daemon
-/// writes no on-disk `session.json`, so only warm sessions surface). This is
-/// documented here so a future refactor that adds a direct accessor can
-/// sharpen the assertion.
 #[tokio::test]
 async fn warm_cap_evicts_lru_idle_session() {
     let _guard = OVERRIDE_MUTEX.lock().await;
@@ -1634,7 +1592,7 @@ async fn warm_cap_evicts_lru_idle_session() {
     );
 }
 
-/// AC.7 (in-flight skip): a session whose `/state` reports
+/// a session whose `/state` reports
 /// `turn_in_flight:true` is NEVER evicted, even when it's the LRU. We install
 /// a multi-spawn override that serves the turn-in-flight scenario, so EVERY
 /// warmed session reports in-flight. With `warm_cap = N`, warming N+1 sessions
@@ -1697,11 +1655,6 @@ async fn warm_cap_never_evicts_in_flight() {
     );
 }
 
-/// AC.8: `new_session` with `worktree: Some(true)` creates an isolated git
-/// worktree and runs the session in it. The resulting session's cwd is a
-/// worktree path (a SIBLING of the repo, not the repo itself), and the
-/// `WorktreeStore` records it.
-///
 /// Uses a real `git init` tempdir repo (git, not jj, so it runs on CI where git
 /// is present). Skipped (not failed) if git is unavailable, mirroring the
 /// `worktree.rs` integration test convention.
@@ -1825,12 +1778,10 @@ async fn new_session_worktree_isolates_cwd() {
     );
 }
 
-/// AC.9: a driver constructed with an injected `login_env` threads that env
-/// into every daemon spawn. We build the driver via `new_with_login_env` with a
-/// known env map, install the multi-spawn override, call `new_session`, and
-/// assert the captured `SpawnDaemonOpts.login_env` equals the injected map
-/// (not `None` — the default-driver regression that AC.11's `#[expect]`
-/// removal guarded against).
+/// A driver constructed with an injected `login_env` threads that env into every
+/// daemon spawn. We build the driver via `new_with_login_env` with a known env
+/// map, install the multi-spawn override, call `new_session`, and assert the
+/// captured `SpawnDaemonOpts.login_env` equals the injected map (not `None`).
 #[tokio::test]
 async fn new_session_passes_captured_login_env_to_spawn() {
     let _guard = OVERRIDE_MUTEX.lock().await;
@@ -1869,10 +1820,6 @@ async fn new_session_passes_captured_login_env_to_spawn() {
     );
 }
 
-/// AC.12: `new_session` with a nonexistent cwd produces a **specific** error
-/// that names the bad path — not the generic empty-seed "session switch
-/// returned no session" message. The driver validates `cwd.exists()` before
-/// spawning and returns `Err(format!("no such directory: {cwd}"))`.
 #[tokio::test]
 async fn new_session_invalid_cwd_errors_specifically() {
     let _guard = OVERRIDE_MUTEX.lock().await;
@@ -1911,15 +1858,6 @@ async fn new_session_invalid_cwd_errors_specifically() {
     );
 }
 
-/// AC.5: `list_sessions` surfaces the real `archived` flag + worktree
-/// indicator from the `ArchiveStore`/`WorktreeStore` (not the old hardcoded
-/// `false`/`None`). We seed a `session.json` on disk + populate both stores
-/// (by writing their JSON files before constructing the driver — they load
-/// from disk at construction), then assert the cold session's entry carries
-/// the correct flags.
-///
-/// This is a pure driver-integration test (no daemon spawn): it exercises the
-/// `list_sessions` → `list_cold_sessions` + store-overlay path only.
 #[tokio::test]
 async fn list_sessions_overlays_archive_and_worktree_flags() {
     // No override mutex needed — no spawn override is installed, no daemon is
@@ -1987,13 +1925,13 @@ async fn list_sessions_overlays_archive_and_worktree_flags() {
         .find(|e| e.session_id == session_id)
         .unwrap_or_else(|| panic!("cold session {session_id} should appear in list_sessions"));
 
-    // AC.5: the archived flag is the real store value (true), not hardcoded false.
+    // The archived flag is the real store value (true).
     assert!(
         entry.archived,
         "archived flag should be true (sourced from ArchiveStore); got false"
     );
 
-    // AC.5: the worktree indicator is the real store value (Some), not None.
+    // The worktree indicator is the real store value (Some).
     let wt = entry
         .worktree
         .as_ref()
@@ -2005,9 +1943,6 @@ async fn list_sessions_overlays_archive_and_worktree_flags() {
     assert_eq!(wt.name, "pantoken-archive-wt");
 }
 
-/// AC.1: `set_archived` flips the archive flag on the live driver — a later
-/// `list_sessions()` overlays `archived == true`, and `archived.json` on disk
-/// records the session path. `set_archived(_, false)` clears both.
 #[tokio::test]
 async fn set_archived_persists_and_overlays() {
     // No override mutex needed — no spawn, cold-session path only.
@@ -2203,9 +2138,6 @@ async fn setup_worktree_session(label: &'static str) -> Option<WorktreeFixture> 
     })
 }
 
-/// AC.2 (clean): archiving a session whose cwd is a clean pantoken worktree reaps
-/// it — the worktree dir is removed from disk, the store tombstones it (surfaced
-/// as `worktree.reaped`), and no `worktree_retained` is returned.
 #[tokio::test]
 async fn set_archived_reaps_clean_worktree() {
     let Some(fx) = setup_worktree_session("set_archived_reaps_clean_worktree").await else {
@@ -2240,9 +2172,6 @@ async fn set_archived_reaps_clean_worktree() {
     );
 }
 
-/// AC.2 (dirty): archiving a session whose worktree has uncommitted changes
-/// retains it — `set_archived` returns `worktree_retained` with the cwd and the
-/// concrete reason, and the worktree dir stays on disk.
 #[tokio::test]
 async fn set_archived_retains_dirty_worktree() {
     let Some(fx) = setup_worktree_session("set_archived_retains_dirty_worktree").await else {
@@ -2274,9 +2203,6 @@ async fn set_archived_retains_dirty_worktree() {
 // Detach session — release the TUI attachment lease without killing the daemon
 // ===========================================================================
 
-/// AC.3 — `PolytokenDriver::detach_session` releases the lease (DELETE
-/// /tui-attachment/{lease_id}) and does NOT terminate the daemon (no POST
-/// /terminate). The warm session is removed from the warm pool.
 #[tokio::test]
 async fn detach_session_releases_lease_without_terminating() {
     let _guard = OVERRIDE_MUTEX.lock().await;
@@ -2336,7 +2262,6 @@ async fn detach_session_releases_lease_without_terminating() {
         .await
         .expect("detach_session should succeed");
 
-    // AC.3: the lease was released via DELETE /tui-attachment/{lease_id}.
     assert!(
         spawned[0].called("DELETE", "/tui-attachment/lease-1"),
         "detach should release the lease via DELETE /tui-attachment/lease-1; \
@@ -2344,7 +2269,6 @@ async fn detach_session_releases_lease_without_terminating() {
         spawned[0].recorded_calls()
     );
 
-    // AC.3: the daemon was NOT terminated (no POST /terminate).
     assert!(
         !spawned[0].called("POST", "/terminate"),
         "detach must NOT terminate the daemon (no POST /terminate); \
@@ -2353,10 +2277,6 @@ async fn detach_session_releases_lease_without_terminating() {
     );
 }
 
-/// AC.4 — After detach, re-opening the session re-claims the lease
-/// successfully (no 409 conflict). The warm session was removed but the daemon
-/// process is still alive (Pantoken just released its lease), so re-attaching
-/// should work.
 #[tokio::test]
 async fn detach_then_reopen_reclaims_lease() {
     let _guard = OVERRIDE_MUTEX.lock().await;
@@ -2367,7 +2287,6 @@ async fn detach_then_reopen_reclaims_lease() {
 
     let (driver, dir) = make_driver().await;
 
-    // Same session.json setup as AC.3.
     let session_id = "detach-reopen-1";
     let sessions_dir = dir.path().join("sessions");
     let session_dir = sessions_dir.join(session_id);
@@ -2401,9 +2320,6 @@ async fn detach_then_reopen_reclaims_lease() {
         .await
         .expect("detach_session should succeed");
 
-    // AC.4: re-open the session. The detach removed it from the warm pool, so
-    // open_session re-spawns (cold-start) and re-claims the lease. No 409, no
-    // error — the previous lease was released by the detach.
     let _seed2 = driver
         .open_session(path.clone())
         .await

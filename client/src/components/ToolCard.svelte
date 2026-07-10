@@ -162,7 +162,6 @@
   // Detect the agent's edit tool by SHAPE, not name: input is an object with a `path`
   // (string) plus either `edits: [{oldText,newText}]` or legacy top-level
   // oldText/newText strings. `file_path` is an accepted alias for `path` in the agent.
-  // Contract confirmed in the agent's edit.ts / edit-diff.ts.
   type Edit = { oldText: string; newText: string };
 
   function editFrom(input: unknown): { path: string; edits: Edit[] } | null {

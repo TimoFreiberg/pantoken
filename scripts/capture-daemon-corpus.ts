@@ -733,7 +733,7 @@ const SCENARIOS: Record<string, Scenario> = {
   "queue-while-in-flight": {
     description:
       "A prompt sent while a turn is in flight → daemon auto-queues it (202 + queued_item, NOT 409); " +
-      "the queue drains and the queued turn runs. Verifies AC.3 against real daemon behavior.",
+      "the queue drains and the queued turn runs.",
     drive: async (ctx) => {
       await ctx.call("GET", "/state");
       // A short-but-non-instant first turn: enough of a streaming window that the
@@ -751,7 +751,7 @@ const SCENARIOS: Record<string, Scenario> = {
       if (!accepted?.queued_item) {
         console.error(
           `WARN: 2nd /prompt carried no queued_item (got ${JSON.stringify(accepted)}) — ` +
-            "auto-queue (AC.3) may not be live; capturing anyway.",
+            "auto-queue may not be live; capturing anyway.",
         );
       }
       await ctx.waitForEvent("pending_turn_input_queued", 60_000);

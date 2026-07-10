@@ -10,10 +10,6 @@
 <div class="think" class:open>
   <button class="head" title={open ? "Collapse thinking" : "Expand thinking"} onclick={() => (open = !open)}>
     <Chevron {open} size={10} />
-    <!-- The label alone carries the "still streaming" signal now; the bottom
-         WorkingIndicator dropped its own "Thinking…" text and this block dropped
-         its shimmer animation, so the two no longer duplicate each other
-         (docs/TODO.md). -->
     <span class="label">{streaming ? "Thinking…" : "Thought process"}</span>
   </button>
   {#if open}
