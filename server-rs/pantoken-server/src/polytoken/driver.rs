@@ -121,19 +121,27 @@ type CommandRunnerFuture = Pin<Box<dyn Future<Output = Result<Output, String>> +
 type CommandRunner =
     dyn Fn(String, Vec<String>, Option<String>) -> CommandRunnerFuture + Send + Sync;
 
-fn default_command_runner() -> Arc<CommandRunner> {
-    Arc::new(|program: String, args: Vec<String>, cwd: Option<String>| {
-        Box::pin(async move {
-            let mut cmd = tokio::process::Command::new(program);
-            cmd.args(args);
-            if let Some(cwd) = cwd {
-                cmd.current_dir(cwd);
-            }
-            cmd.output()
-                .await
-                .map_err(|e| format!("polytoken subprocess failed: {e}"))
-        })
-    })
+fn default_command_runner(login_env: Option<HashMap<String, String>>) -> Arc<CommandRunner> {
+    Arc::new(
+        move |program: String, args: Vec<String>, cwd: Option<String>| {
+            let login_env = login_env.clone();
+            Box::pin(async move {
+                let mut cmd = tokio::process::Command::new(program);
+                cmd.args(args);
+                if let Some(cwd) = cwd {
+                    cmd.current_dir(cwd);
+                }
+                // Layer login env over inherited process env (login env wins).
+                // Mirrors daemon_client::merged_spawn_env semantics.
+                if let Some(login_env) = &login_env {
+                    cmd.envs(login_env);
+                }
+                cmd.output()
+                    .await
+                    .map_err(|e| format!("polytoken subprocess failed: {e}"))
+            })
+        },
+    )
 }
 
 /// The shared inner driver state. All fields that were on `PolytokenDriver`
@@ -235,6 +243,7 @@ impl PolytokenDriver {
         let captured = login_env::capture_login_env(login_shell.as_deref()).await;
         let CapturedLoginEnv { env, status } = captured;
         let login_env = if env.is_empty() { None } else { Some(env) };
+        let runner_env = login_env.clone();
 
         let driver = Self {
             inner: Arc::new(PolytokenInner {
@@ -259,7 +268,7 @@ impl PolytokenDriver {
                 model_cache_notify: tokio::sync::Notify::new(),
                 watch_status: Mutex::new(config_watcher::WatchStatus::Disabled),
                 watcher_handle: Mutex::new(None),
-                command_runner: default_command_runner(),
+                command_runner: default_command_runner(runner_env),
                 fake_control,
             }),
         };
@@ -295,6 +304,7 @@ impl PolytokenDriver {
             ok: login_env.is_some(),
             detail: Some("injected (test)".to_string()),
         };
+        let runner_env = login_env.clone();
         Self {
             inner: Arc::new(PolytokenInner {
                 sessions_dir,
@@ -318,7 +328,7 @@ impl PolytokenDriver {
                 model_cache_notify: tokio::sync::Notify::new(),
                 watch_status: Mutex::new(config_watcher::WatchStatus::Disabled),
                 watcher_handle: Mutex::new(None),
-                command_runner: default_command_runner(),
+                command_runner: default_command_runner(runner_env),
                 fake_control: None,
             }),
         }
@@ -646,16 +656,53 @@ impl PolytokenInner {
 
             if became_fetcher {
                 // We're the elected caller. Run the subprocess with NO lock held.
-                let result = self.run_polytoken(vec!["models".into()], None).await;
+                let models_args = vec!["models".to_string()];
+
+                // Snapshot PATH values before the call (avoid holding locks
+                // across .await). Only PATH is logged — not the full env —
+                // because PATH determines whether `polytoken` resolves and
+                // finds its config; other vars risk leaking secrets.
+                let login_env_path = self
+                    .login_env
+                    .lock()
+                    .as_ref()
+                    .and_then(|env| env.get("PATH"))
+                    .cloned();
+                let process_path = std::env::var("PATH").unwrap_or_default();
+                info!(
+                    bin_path = %self.bin_path,
+                    args = ?models_args,
+                    process_path = %process_path,
+                    login_env_path = ?login_env_path,
+                    "running polytoken models"
+                );
+
+                let result = self.run_polytoken(models_args, None).await;
                 let parsed = match result {
                     Ok(out) => {
                         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                        let exit_code = out.status.code();
+                        info!(
+                            exit_code = ?exit_code,
+                            stdout_len = stdout.len(),
+                            stderr_len = stderr.len(),
+                            stdout = %stdout.chars().take(4000).collect::<String>(),
+                            stderr = %stderr.chars().take(4000).collect::<String>(),
+                            "polytoken models completed"
+                        );
                         let parsed = parse_models(&stdout);
                         if parsed.models.is_empty() {
                             let diagnostic = if stdout.trim().is_empty() {
-                                ModelCatalogDiagnostic::EmptyOutput {
-                                    message: "polytoken models returned empty stdout".into(),
-                                }
+                                let message = if stderr.trim().is_empty() {
+                                    "polytoken models returned empty stdout".to_string()
+                                } else {
+                                    format!(
+                                        "polytoken models returned empty stdout; stderr: {}",
+                                        stderr.chars().take(500).collect::<String>()
+                                    )
+                                };
+                                ModelCatalogDiagnostic::EmptyOutput { message }
                             } else {
                                 let preview: String = stdout.chars().take(4000).collect();
                                 warn!(
@@ -675,6 +722,7 @@ impl PolytokenInner {
                         parsed
                     }
                     Err(e) => {
+                        info!(error = %e, "polytoken models subprocess failed to spawn");
                         error!("list_models failed: {e}");
                         *self.model_catalog_diagnostic.lock() =
                             Some(ModelCatalogDiagnostic::NoResponse {
@@ -3183,7 +3231,7 @@ mod tests {
             model_cache_notify: tokio::sync::Notify::new(),
             watch_status: Mutex::new(config_watcher::WatchStatus::Disabled),
             watcher_handle: Mutex::new(None),
-            command_runner: default_command_runner(),
+            command_runner: default_command_runner(None),
             fake_control: None,
         }
     }
@@ -4337,6 +4385,79 @@ mod tests {
             Some(ModelCatalogDiagnostic::NoResponse { message })
                 if message == "could not discover models; check polytoken configuration"
         ));
+    }
+
+    // ---- env threading + stderr enrichment (AC.1, AC.4) ----
+
+    /// AC.1: `default_command_runner` threads `login_env` into the subprocess
+    /// via `cmd.envs()`. We call the real `default_command_runner` (not a mock)
+    /// with a sentinel env var, run `/usr/bin/env`, and check the sentinel
+    /// appears in the output — proving the env reached the child process.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn list_models_threads_login_env() {
+        let mut login_env = HashMap::new();
+        login_env.insert(
+            "PANTOKEN_TEST_SENTINEL".to_string(),
+            "/sentinel-value".to_string(),
+        );
+        let runner = default_command_runner(Some(login_env));
+
+        // `/usr/bin/env` prints `KEY=VALUE` lines for every env var it sees.
+        let result = runner("/usr/bin/env".to_string(), vec![], None)
+            .await
+            .expect("env subprocess should succeed");
+        let stdout = String::from_utf8_lossy(&result.stdout);
+
+        assert!(
+            stdout.contains("PANTOKEN_TEST_SENTINEL=/sentinel-value"),
+            "login env should be threaded into the subprocess; got:\n{stdout}"
+        );
+    }
+
+    /// AC.1 complement: when `login_env` is `None`, the runner still works
+    /// (degraded mode — inherits process env only).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn default_command_runner_none_env_still_runs() {
+        let runner = default_command_runner(None);
+        let result = runner("/usr/bin/true".to_string(), vec![], None)
+            .await
+            .expect("subprocess should succeed");
+        assert!(result.status.success());
+    }
+
+    /// AC.4: when `polytoken models` returns empty stdout with non-empty
+    /// stderr, the `EmptyOutput` diagnostic message includes a stderr snippet.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn empty_stdout_with_stderr_includes_snippet() {
+        use std::os::unix::process::ExitStatusExt;
+        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
+            Box::pin(async {
+                Ok(Output {
+                    status: std::process::ExitStatus::from_raw(0),
+                    stdout: Vec::new(),
+                    stderr: b"config not found at /home/user/.config/polytoken".to_vec(),
+                })
+            })
+        });
+        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
+
+        assert!(driver.list_models().await.is_empty());
+        match driver.model_catalog_diagnostic() {
+            Some(ModelCatalogDiagnostic::EmptyOutput { message }) => {
+                assert!(
+                    message.contains("stderr"),
+                    "message should mention stderr; got: {message}"
+                );
+                assert!(
+                    message.contains("config not found"),
+                    "message should include stderr snippet; got: {message}"
+                );
+            }
+            other => panic!("expected EmptyOutput, got {other:?}"),
+        }
     }
 
     // ---- AC.3: model cache invalidation forces re-run ----
