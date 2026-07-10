@@ -777,17 +777,26 @@ class PantokenStore {
     }
   }
 
-  /** A terminal folded event settled the visible turn. Clear the corresponding
-   * action state too; if it arrived beyond the 500ms promise, explain that late
-   * confirmation rather than making the recovery state vanish mysteriously. */
+  /** Reconcile the stop operation with the current turn state. Called after
+   * each folded event. When the agent resumes working (turnActive true) while
+   * the stop is "unconfirmed", clear it so the user can stop again. When the
+   * turn has settled (turnActive false), clear the stop and, if it arrived
+   * beyond the 500ms promise, explain that late confirmation rather than
+   * making the recovery state vanish mysteriously. */
   private settleStopOperation(): void {
     const operation = this.stopOperation;
-    if (
-      !operation ||
-      operation.sessionId !== this.session.ref?.sessionId ||
-      this.turnActive
-    )
+    if (!operation || operation.sessionId !== this.session.ref?.sessionId) return;
+    // Progress detected: the agent resumed working. Clear the unconfirmed stop
+    // so the user can stop again.
+    if (this.turnActive) {
+      if (operation.state === "unconfirmed") {
+        this.clearStopConfirmationTimer();
+        this.stopOperation = null;
+        if (this.lastError === operation.error) this.lastError = null;
+      }
       return;
+    }
+    // Turn settled (inactive): clear the stop, explain if it was a late confirmation.
     this.clearStopConfirmationTimer();
     this.stopOperation = null;
     if (operation.state === "unconfirmed") {
