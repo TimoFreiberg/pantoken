@@ -50,7 +50,8 @@ use pantoken_protocol::session_driver::{
 };
 use pantoken_protocol::state::{SessionState, fold_all, fold_event, initial_session_state};
 use pantoken_protocol::wire::{
-    ClientMessage, ResumeToken, ServerMessage, SessionAttention, SessionAttentionPhase,
+    ClientMessage, PROTOCOL_VERSION, ResumeToken, ServerMessage, SessionAttention,
+    SessionAttentionPhase,
 };
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
@@ -1188,9 +1189,11 @@ impl SessionHub {
         self.clients.insert(client_key, conn);
         self.ever_connected = true;
 
-        // Send hello synchronously
+        // Send hello synchronously. Use the shared constant so the greeting can
+        // never drift from the client's compiled-in version (the mismatch guard
+        // is the whole point of bumping it).
         let _ = tx.try_send(ServerMessage::Hello {
-            protocol_version: 2,
+            protocol_version: PROTOCOL_VERSION,
             server_id: self.server_id.clone(),
             data_dir: self
                 .data_dir

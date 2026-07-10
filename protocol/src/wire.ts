@@ -18,7 +18,13 @@ import type {
   SessionId,
   SessionListEntry,
 } from "./session-driver.js";
-export const PROTOCOL_VERSION = 2;
+// Bump on any breaking client↔server wire change so the hello handshake fails
+// loud (client/src/lib/store.svelte.ts mismatch guard) instead of a stale bundle
+// silently dropping unparseable messages. History: 1→2 = journal-first seed
+// (2026-07-03); 2→3 = the nine settings/context ClientMessage variants collapsed
+// into the single `sessionAction` envelope (a stale client's old-shape
+// setModel/compact/… now fail serde on the server).
+export const PROTOCOL_VERSION = 3;
 
 /** Pantoken-local settings (distinct from the daemon's global/session config). Persisted
  *  server-side in `pantoken-settings.json`, broadcast to every client, edited from the
