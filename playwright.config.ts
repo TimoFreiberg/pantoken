@@ -49,7 +49,7 @@ export default defineConfig({
       `VITE_PORT=${VITE_PORT} bun run scripts/dev.ts`,
     url: `http://localhost:${VITE_PORT}`,
     reuseExistingServer: false,
-    timeout: 60_000,
+    timeout: 180_000,
   },
   projects: [
     {

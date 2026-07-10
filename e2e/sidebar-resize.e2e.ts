@@ -6,8 +6,10 @@ const RIGHT_KEY: string = "pantoken.rightSidebarWidth";
 
 async function clearWidths(page: import("@playwright/test").Page): Promise<void> {
   await page.addInitScript(({ left, right }) => {
+    if (sessionStorage.getItem("pantoken.sidebarWidthsCleared") === "1") return;
     localStorage.removeItem(left);
     localStorage.removeItem(right);
+    sessionStorage.setItem("pantoken.sidebarWidthsCleared", "1");
   }, { left: LEFT_KEY, right: RIGHT_KEY });
 }
 

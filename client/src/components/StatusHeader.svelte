@@ -247,7 +247,9 @@
     backdrop-filter: blur(8px);
     position: sticky;
     top: 0;
-    z-index: 10;
+    /* Keep the header controls above mobile drawer scrims so either drawer can be
+       opened while the other one remains visible. The drawers themselves use z 60. */
+    z-index: 70;
   }
   .left {
     min-width: 0;
