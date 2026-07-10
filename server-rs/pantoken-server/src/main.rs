@@ -444,8 +444,12 @@ struct UnsubscribeBody {
     endpoint: Option<String>,
 }
 
-async fn push_vapid(State(state): State<AppState>, Query(q): Query<PushQuery>) -> Response {
-    if !check_token(&state, &HeaderMap::new(), &q) {
+async fn push_vapid(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<PushQuery>,
+) -> Response {
+    if !check_token(&state, &headers, &q) {
         return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
     }
     let push = state.push.lock().await;
@@ -454,10 +458,11 @@ async fn push_vapid(State(state): State<AppState>, Query(q): Query<PushQuery>) -
 
 async fn push_subscribe(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(q): Query<PushQuery>,
     body: String,
 ) -> Response {
-    if !check_token(&state, &HeaderMap::new(), &q) {
+    if !check_token(&state, &headers, &q) {
         return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
     }
     // C3: parse the body manually so a malformed JSON body returns 400 (matching
@@ -473,10 +478,11 @@ async fn push_subscribe(
 
 async fn push_unsubscribe(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(q): Query<PushQuery>,
     body: String,
 ) -> Response {
-    if !check_token(&state, &HeaderMap::new(), &q) {
+    if !check_token(&state, &headers, &q) {
         return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
     }
     // C3: manual parse → 400 on malformed body (not axum's 422).
@@ -491,8 +497,12 @@ async fn push_unsubscribe(
     Json(json!({ "ok": true })).into_response()
 }
 
-async fn push_test(State(state): State<AppState>, Query(q): Query<PushQuery>) -> Response {
-    if !check_token(&state, &HeaderMap::new(), &q) {
+async fn push_test(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<PushQuery>,
+) -> Response {
+    if !check_token(&state, &headers, &q) {
         return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
     }
     // C4: capture `count` inside the same lock scope as `send_to_all` so the
@@ -528,10 +538,11 @@ struct UpdateStateBody {
 
 async fn update_state(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(q): Query<PushQuery>,
     Json(body): Json<UpdateStateBody>,
 ) -> Response {
-    if !check_token(&state, &HeaderMap::new(), &q) {
+    if !check_token(&state, &headers, &q) {
         return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
     }
     let sha = if body.available.unwrap_or(false) {
@@ -547,22 +558,30 @@ async fn update_state(
 
 // ── /debug/* ────────────────────────────────────────────────────────────
 
-async fn debug_state(State(state): State<AppState>, Query(q): Query<PushQuery>) -> Response {
+async fn debug_state(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<PushQuery>,
+) -> Response {
     if !state.config.debug {
         return (StatusCode::NOT_FOUND, "debug disabled").into_response();
     }
-    if !check_token(&state, &HeaderMap::new(), &q) {
+    if !check_token(&state, &headers, &q) {
         return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
     }
     let hub = state.hub.lock();
     Json(hub.snapshot()).into_response()
 }
 
-async fn debug_reset(State(state): State<AppState>, Query(q): Query<PushQuery>) -> Response {
+async fn debug_reset(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<PushQuery>,
+) -> Response {
     if !state.config.debug {
         return (StatusCode::NOT_FOUND, "debug disabled").into_response();
     }
-    if !check_token(&state, &HeaderMap::new(), &q) {
+    if !check_token(&state, &headers, &q) {
         return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
     }
     if !state.is_debug_driver {
@@ -617,4 +636,135 @@ async fn shutdown_signal() {
     }
 
     info!("shutdown signal received");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::extract::{Query, State};
+    use axum::http::{HeaderMap, StatusCode, header};
+
+    // A tokened AppState whose push service has an on-disk VAPID key. The hub is a
+    // real MockDriver-backed hub (the push handlers never touch it, but AppState
+    // requires the field).
+    fn tokened_state(token: &str) -> AppState {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cfg = config::Config {
+            port: 0,
+            data_dir: dir.path().to_path_buf(),
+            vapid_subject: "mailto:test@example.com".into(),
+            host: "127.0.0.1".into(),
+            token: Some(token.to_string()),
+            debug: true,
+            client_dist: dir.path().join("dist"),
+            warm_cap: 8,
+            idle_reap_ms: 0,
+            live_refresh_ms: 1000,
+            delta_flush_ms: 0,
+        };
+        let (hub_ops, _rx) = hub_op_channel();
+        let driver: Arc<dyn PantokenDriver> =
+            Arc::new(pantoken_server::mock_driver::MockDriver::new());
+        let hub = SessionHub::new(
+            driver,
+            hub_ops,
+            None,
+            1000,
+            "test-server".into(),
+            Some(dir.path().to_path_buf()),
+            String::new(),
+            0,
+        );
+        let push = PushService::new(dir.path(), "mailto:test@example.com".into());
+        // Keep the tempdir alive for the process lifetime — the push service and hub
+        // hold paths into it. Leaking is fine in a unit test.
+        std::mem::forget(dir);
+        AppState {
+            config: Arc::new(cfg),
+            static_server: Arc::new(static_serve::StaticServer::new(std::path::PathBuf::from(
+                "/nonexistent",
+            ))),
+            hub,
+            push: Arc::new(AsyncMutex::new(push)),
+            is_debug_driver: true,
+        }
+    }
+
+    fn bearer(token: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(
+            header::AUTHORIZATION,
+            format!("Bearer {token}").parse().unwrap(),
+        );
+        h
+    }
+
+    // Regression: every push/debug/update handler used to pass `&HeaderMap::new()`
+    // to check_token, so a client sending its token as `Authorization: Bearer …`
+    // (the only way client/src/lib/push.ts sends it — never `?token=`) always got
+    // 401 on a tokened deployment, killing web push on the exact phone/remote
+    // instance the token exists to protect.
+    #[tokio::test]
+    async fn push_vapid_accepts_bearer_header_and_rejects_missing() {
+        let state = tokened_state("secret-tok");
+        let q = Query(PushQuery {
+            token: None,
+            bootstrap: None,
+        });
+
+        let ok = push_vapid(State(state.clone()), bearer("secret-tok"), q).await;
+        assert_eq!(
+            ok.status(),
+            StatusCode::OK,
+            "Bearer-header auth must be accepted"
+        );
+
+        let missing = push_vapid(
+            State(state.clone()),
+            HeaderMap::new(),
+            Query(PushQuery {
+                token: None,
+                bootstrap: None,
+            }),
+        )
+        .await;
+        assert_eq!(
+            missing.status(),
+            StatusCode::UNAUTHORIZED,
+            "no token must be rejected"
+        );
+
+        let wrong = push_vapid(
+            State(state),
+            bearer("wrong-tok"),
+            Query(PushQuery {
+                token: None,
+                bootstrap: None,
+            }),
+        )
+        .await;
+        assert_eq!(
+            wrong.status(),
+            StatusCode::UNAUTHORIZED,
+            "a bad token must be rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn push_subscribe_reads_bearer_header() {
+        let state = tokened_state("tok2");
+        let body =
+            r#"{"endpoint":"https://example.com/x","keys":{"p256dh":"a","auth":"b"}}"#.to_string();
+        let resp = push_subscribe(
+            State(state),
+            bearer("tok2"),
+            Query(PushQuery {
+                token: None,
+                bootstrap: None,
+            }),
+            body,
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
 }
