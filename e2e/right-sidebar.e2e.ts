@@ -92,7 +92,7 @@ test("the context panel closes via its own control and reopens via the edge arro
   await expect(panel).toHaveAttribute("data-open", "false");
 
   // Reopen via the edge pop-in arrow.
-  await page.getByTestId("context-edge-open").click();
+  await page.getByTestId("context-open").click();
   await expect(panel).toHaveAttribute("data-open", "true");
 });
 

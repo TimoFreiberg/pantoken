@@ -48,5 +48,5 @@ test("the sidebar and context-panel edge-open arrows meet the 44px touch target"
   // showing — no driving needed. They're the only tap affordance left now that the
   // header hamburgers are gone, so a cramped hit target here would be a real regression.
   await expectTall(page.getByTestId("sidebar-edge-open"));
-  await expectTall(page.getByTestId("context-edge-open"));
+  await expectTall(page.getByTestId("context-open"));
 });

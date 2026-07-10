@@ -46,6 +46,12 @@
   --radius-sm: 9px;
   --radius-xs: 6px;
 
+  /* Height of the top chrome bar, excluding its 1px bottom border and any
+     safe-area inset. StatusHeader and the right context panel's own top bar both
+     pin to it, so their bottom borders line up and their trailing chevrons — the
+     panel's collapse and the header's expand — land on the same pixel. */
+  --header-h: 64px;
+
   --sidebar-bg: #fcfcfa;
 
   --shadow-card: 0 1px 2px rgba(31, 30, 29, 0.04), 0 4px 14px rgba(31, 30, 29, 0.05);

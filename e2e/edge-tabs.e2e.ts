@@ -45,22 +45,32 @@ test("collapsing the left sidebar reveals a left edge arrow that reopens it", as
   await expect(edgeOpen).toHaveCount(0);
 });
 
-test("collapsing the context panel reveals a right edge arrow that reopens it", async ({
+test("collapsing the context panel reveals a header arrow that reopens it, in place", async ({
   page,
 }) => {
   const panel = page.getByTestId("right-sidebar");
-  const edgeOpen = page.getByTestId("context-edge-open");
+  const collapse = page.getByRole("button", { name: "Collapse context panel" });
+  const open = page.getByTestId("context-open");
 
-  await expect(edgeOpen).toHaveCount(0);
-  await page.getByRole("button", { name: "Collapse context panel" }).click();
+  await expect(open).toHaveCount(0);
+  const collapseBox = await collapse.boundingBox();
+  await collapse.click();
   await expect(panel).toHaveAttribute("data-open", "false");
 
-  await expect(edgeOpen).toBeVisible();
-  await expect(edgeOpen).toHaveAttribute("title", /^Show context panel/);
+  await expect(open).toBeVisible();
+  await expect(open).toHaveAttribute("title", /^Show context panel/);
 
-  await edgeOpen.click();
+  // Same pixel as the collapse control it replaced — so collapse/expand/collapse
+  // is a repeatable click on one spot, not a hunt for a mid-edge tab.
+  const openBox = await open.boundingBox();
+  expect(collapseBox).not.toBeNull();
+  expect(openBox).not.toBeNull();
+  expect(Math.abs(openBox!.x - collapseBox!.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(openBox!.y - collapseBox!.y)).toBeLessThanOrEqual(1);
+
+  await open.click();
   await expect(panel).toHaveAttribute("data-open", "true");
-  await expect(edgeOpen).toHaveCount(0);
+  await expect(open).toHaveCount(0);
 });
 
 test("a collapsed left sidebar stays collapsed across a reload", async ({
