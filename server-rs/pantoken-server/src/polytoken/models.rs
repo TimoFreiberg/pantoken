@@ -286,8 +286,7 @@ pub fn default_model_ref(marker: &str) -> ModelRef {
 /// registry key) is the FULL `provider/id`, which is exactly what
 /// `ModelOption.model_id` and the default markers already carry — so the POST
 /// key IS the model_id, unmodified. Centralized here so `set_model`/`new_session`
-/// share one tested path instead of each inlining a (previously buggy)
-/// `${provider}/${modelId}` join.
+/// share one tested path for the `${provider}/${modelId}` key.
 pub fn model_post_key(model_id: &str) -> String {
     model_id.to_string()
 }

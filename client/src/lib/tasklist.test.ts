@@ -39,9 +39,6 @@ describe("parseTasklist", () => {
   });
 
   test("ignores a stray id-looking token as part of the description", () => {
-    // A legacy line still carrying `#v23gry: …` (an old extension / a different host)
-    // no longer splits id from description — the whole tail is the description now. This
-    // documents the parser simplification: there is no id to capture.
     const parsed = parseTasklist(["  ○ #v23gry: fix foo"]);
     expect(parsed).toEqual([{ description: "#v23gry: fix foo" }]);
   });

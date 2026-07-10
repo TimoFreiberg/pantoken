@@ -5,7 +5,7 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-// AC.1 — the sidebar session right-click menu shows a "Detach session" item
+// The sidebar session right-click menu shows a "Detach session" item
 // with a D hotkey badge and a tooltip explaining its purpose.
 test("the overflow menu shows a detach session item with a D hotkey", async ({
   page,
@@ -28,7 +28,7 @@ test("the overflow menu shows a detach session item with a D hotkey", async ({
   );
 });
 
-// AC.5 — the mock driver's detach_session is a no-op (trait default → Ok(())),
+// The mock driver's detach_session is a no-op (trait default → Ok(())),
 // so clicking it must not produce a toast or error.
 test("clicking detach session on the mock is a no-op (no error)", async ({
   page,
@@ -48,7 +48,7 @@ test("clicking detach session on the mock is a no-op (no error)", async ({
   await expect(sidebar.getByTestId("detach-session")).toHaveCount(0);
 });
 
-// AC.6 — the D keyboard shortcut triggers detach when the menu is open and
+// The D keyboard shortcut triggers detach when the menu is open and
 // focus is not in a text field.
 test("the D hotkey triggers detach from the menu", async ({ page }) => {
   await openSidebar(page);

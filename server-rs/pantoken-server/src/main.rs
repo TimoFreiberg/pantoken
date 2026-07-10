@@ -699,11 +699,6 @@ mod tests {
         h
     }
 
-    // Regression: every push/debug/update handler used to pass `&HeaderMap::new()`
-    // to check_token, so a client sending its token as `Authorization: Bearer …`
-    // (the only way client/src/lib/push.ts sends it — never `?token=`) always got
-    // 401 on a tokened deployment, killing web push on the exact phone/remote
-    // instance the token exists to protect.
     #[tokio::test]
     async fn push_vapid_accepts_bearer_header_and_rejects_missing() {
         let state = tokened_state("secret-tok");

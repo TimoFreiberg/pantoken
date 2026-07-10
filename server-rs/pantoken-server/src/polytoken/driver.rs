@@ -279,7 +279,7 @@ impl PolytokenDriver {
             driver.inner.clone().bootstrap_fake().await;
         }
         // Real (non-fake) mode: start the config watcher over the binary and
-        // global config directory. Fake mode stays Disabled (AC.9).
+        // global config directory. Fake mode stays Disabled.
         if !driver.inner.is_fake {
             driver.inner.clone().start_config_watcher();
         }
@@ -287,7 +287,7 @@ impl PolytokenDriver {
     }
 
     /// Test-only constructor: takes a pre-set `login_env` so the threading test
-    /// (AC.9) is deterministic — no real shell spawn in CI. `warm_cap` and
+    /// is deterministic — no real shell spawn in CI. `warm_cap` and
     /// `data_dir` are real so warm-cap eviction + store wiring are exercised.
     // Test-support only (reachable from integration tests, hence not `#[cfg(test)]`).
     #[doc(hidden)]
@@ -729,7 +729,7 @@ impl PolytokenInner {
                                 message: "could not discover models; check polytoken configuration"
                                     .into(),
                             });
-                        // Do not cache failed results (AC.3: next call retries).
+                        // Do not cache failed results; the next call retries.
                         ParsedModels::default()
                     }
                 };
@@ -2508,7 +2508,6 @@ impl PantokenDriver for PolytokenDriver {
     }
 
     async fn list_models(&self) -> Vec<ModelOption> {
-        // Cache-first: return cached models if available (AC.1).
         if let Some(cached) = self.inner.model_cache.lock().clone() {
             return cached.models;
         }
@@ -2519,7 +2518,7 @@ impl PantokenDriver for PolytokenDriver {
     }
 
     async fn get_model_defaults(&self) -> ModelDefaults {
-        // Reuse the same cached parsed models as list_models (AC.2).
+        // Reuse the same cached parsed models as list_models.
         let parsed = self.inner.get_or_fetch_parsed_models().await;
         let default = parsed.default_model.as_deref();
         // Look up the default model in the parsed list so `provider` matches
@@ -3049,7 +3048,7 @@ impl PantokenDriver for PolytokenDriver {
         // Instead we KEEP the bootstrap session warm and only reset transient
         // state: each accumulator (so a re-run script folds from a clean slate)
         // and the fake daemon's cursors/call-log + stale SSE sender. This yields
-        // the same deterministic reseed AC.7 asks for, through the sync hub flow.
+        // the same deterministic reseed through the sync hub flow.
         if !self.inner.is_fake {
             return;
         }
@@ -3236,10 +3235,7 @@ mod tests {
         }
     }
 
-    // ---- AC.6: cwd_for_session reads project_path from session.json ----
 
-    /// AC.6: `cwd_for_session` returns the `project_path` from a session's
-    /// `session.json` when it's present and non-empty.
     #[test]
     fn cwd_for_session_reads_project_path() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -3269,9 +3265,6 @@ mod tests {
         );
     }
 
-    /// AC.6 (fallback case): a missing `session.json` (or one with an empty
-    /// `project_path`) yields `None`, which the caller maps to the sessions-dir
-    /// fallback. Both sub-cases are documented behavior of the helper.
     #[test]
     fn cwd_for_session_missing_file_yields_none() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -3340,7 +3333,6 @@ mod tests {
     /// that as an `Err` rather than proceeding with a bogus id.
     #[test]
     fn session_id_from_path_returns_none_for_non_standard_path() {
-        // Wrong file name → None (previously fell back to a bogus file stem).
         assert_eq!(
             PolytokenInner::session_id_from_path("/some/path/my-session.jsonl"),
             None
@@ -3353,8 +3345,6 @@ mod tests {
 
     // ---- focus: recency order via move-to-back ----
 
-    /// AC.1 (focus unit): focusing a known id moves it to the back (most-recently
-    /// focused), preserving the relative order of the others.
     #[test]
     fn focus_moves_known_id_to_back() {
         let inner = inner_with_order(vec!["a".to_string(), "b".to_string(), "c".to_string()], 64);
@@ -3367,8 +3357,6 @@ mod tests {
         );
     }
 
-    /// AC.1 (focus unit): re-focusing an id that's already at the back is
-    /// idempotent — no duplicate, order unchanged.
     #[test]
     fn focus_idempotent_on_repeated_focus() {
         let inner = inner_with_order(vec!["a".to_string(), "b".to_string(), "c".to_string()], 64);
@@ -3386,9 +3374,6 @@ mod tests {
         );
     }
 
-    /// AC.1 (focus unit): focusing an unknown id appends it to the back (never
-    /// inserted in the middle or front). This is the documented "if absent,
-    /// append it" behavior.
     #[test]
     fn focus_unknown_id_appends_to_back() {
         let inner = inner_with_order(vec!["a".to_string(), "b".to_string()], 64);
@@ -4181,7 +4166,6 @@ mod tests {
         );
     }
 
-    // ---- AC.1: list_models caches subprocess output until invalidation ----
 
     #[tokio::test]
     async fn list_models_caches_subprocess_output_until_invalidated() {
@@ -4214,7 +4198,6 @@ mod tests {
         );
     }
 
-    // ---- AC.2: get_model_defaults reuses cached models result ----
 
     #[tokio::test]
     async fn model_defaults_reuses_cached_models_result() {
@@ -4387,12 +4370,8 @@ mod tests {
         ));
     }
 
-    // ---- env threading + stderr enrichment (AC.1, AC.4) ----
+    // ---- env threading + stderr enrichment ----
 
-    /// AC.1: `default_command_runner` threads `login_env` into the subprocess
-    /// via `cmd.envs()`. We call the real `default_command_runner` (not a mock)
-    /// with a sentinel env var, run `/usr/bin/env`, and check the sentinel
-    /// appears in the output — proving the env reached the child process.
     #[cfg(unix)]
     #[tokio::test]
     async fn list_models_threads_login_env() {
@@ -4415,8 +4394,6 @@ mod tests {
         );
     }
 
-    /// AC.1 complement: when `login_env` is `None`, the runner still works
-    /// (degraded mode — inherits process env only).
     #[cfg(unix)]
     #[tokio::test]
     async fn default_command_runner_none_env_still_runs() {
@@ -4427,8 +4404,6 @@ mod tests {
         assert!(result.status.success());
     }
 
-    /// AC.4: when `polytoken models` returns empty stdout with non-empty
-    /// stderr, the `EmptyOutput` diagnostic message includes a stderr snippet.
     #[cfg(unix)]
     #[tokio::test]
     async fn empty_stdout_with_stderr_includes_snippet() {
@@ -4460,7 +4435,6 @@ mod tests {
         }
     }
 
-    // ---- AC.3: model cache invalidation forces re-run ----
 
     #[tokio::test]
     async fn model_cache_invalidation_forces_models_rerun() {
@@ -4498,7 +4472,6 @@ mod tests {
         assert_eq!(*calls.lock(), 2, "invalidation should force a re-run");
     }
 
-    // ---- AC.3b: model cache not populated on subprocess error ----
 
     #[tokio::test]
     async fn model_cache_not_populated_on_error() {
@@ -4521,7 +4494,6 @@ mod tests {
         );
     }
 
-    // ---- AC.5: cwd-scoped invalidation clears only targeted caches ----
 
     #[tokio::test]
     async fn cwd_config_invalidation_clears_only_targeted_facet_and_command_cache() {
@@ -4590,7 +4562,6 @@ mod tests {
         );
     }
 
-    // ---- AC.5b: global invalidation clears all cwd-scoped caches ----
 
     #[tokio::test]
     async fn global_invalidation_clears_all_cwd_scoped_caches() {
@@ -4643,7 +4614,6 @@ mod tests {
         );
     }
 
-    // ---- AC.9: fake-mode construction does not start watcher ----
 
     #[tokio::test]
     async fn fake_mode_construction_does_not_start_watcher() {
@@ -4670,7 +4640,6 @@ mod tests {
         );
     }
 
-    // ---- AC.9b: non-fake with login_env also has Disabled watcher (test constructor) ----
 
     #[tokio::test]
     async fn test_constructor_does_not_start_watcher() {
@@ -4695,7 +4664,6 @@ mod tests {
         );
     }
 
-    // ---- AC.8: watcher setup failure records status and driver still lists ----
 
     #[tokio::test]
     async fn watch_setup_failure_records_status_and_driver_still_lists() {

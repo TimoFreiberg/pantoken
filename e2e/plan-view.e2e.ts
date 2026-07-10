@@ -12,23 +12,23 @@ test.beforeEach(async ({ page }) => {
 test("the plan button appears, opens the overlay, and Escape closes it", async ({
   page,
 }) => {
-  // Before driving `planview`: no activePlan → no Plan button (AC.4).
+  // Before driving `planview`: no activePlan → no Plan button.
   await expect(page.getByTestId("plan-view-toggle")).toHaveCount(0);
 
   // Drive the planview fixture → a snapshot with activePlan lands.
   await drive(page, "planview");
 
-  // The Plan button appears in the StatusHeader (AC.1).
+  // The Plan button appears in the StatusHeader.
   const planBtn = page.getByTestId("plan-view-toggle");
   await expect(planBtn).toBeVisible();
 
-  // Click it → the PlanView modal opens with the plan markdown rendered (AC.2).
+  // Click it → the PlanView modal opens with the plan markdown rendered.
   await planBtn.click();
   const modal = page.getByTestId("plan-view");
   await expect(modal).toBeVisible();
   await expect(modal).toContainText("Wire up the plan overlay");
 
-  // Escape closes the modal (AC.3).
+  // Escape closes the modal.
   await page.keyboard.press("Escape");
   await expect(modal).toHaveCount(0);
 });

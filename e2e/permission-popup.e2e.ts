@@ -19,16 +19,16 @@ test("permission card: shows tool name + input preview + pruned options", async 
   const dialog = page.getByRole("dialog", { name: "Run bash?" });
   await expect(dialog).toBeVisible();
 
-  // AC.1: the tool name renders (shell_exec).
+  // The tool name renders (shell_exec).
   await expect(dialog.getByText("shell_exec")).toBeVisible();
 
-  // AC.1: the tool input preview renders — the recognizable command string is
+  // The tool input preview renders — the recognizable command string is
   // visible inside the scrollable <pre>.
   const input = dialog.locator(".tool-input");
   await expect(input).toBeVisible();
   await expect(input).toContainText("rm -rf /tmp/test");
 
-  // AC.2: only 3 options render (Deny + Allow once + Allow for session), NOT
+  // Only 3 options render (Deny + Allow once + Allow for session), NOT
   // the full 7 — keep_targets=[session] pruned project/user grants out.
   const options = dialog.getByRole("radio");
   await expect(options).toHaveCount(3);
@@ -74,7 +74,7 @@ test("permission card: Cancel button dismisses", async ({ page }) => {
   await expect(page.getByText("Dialog cancelled.")).toBeVisible();
 });
 
-test("permission card: every element has a tooltip (AC.5)", async ({ page }) => {
+test("permission card: every element has a tooltip", async ({ page }) => {
   await drive(page, "permission");
   const dialog = page.getByRole("dialog");
 

@@ -169,12 +169,12 @@ test("qna question text scales with --font-scale; action buttons do not", async 
       await submit.evaluate((el) => getComputedStyle(el).fontSize),
     );
 
-  // AC.1 — at default scale the question text is ~15px (1em of the 15px base).
+  // At default scale the question text is ~15px (1em of the 15px base).
   const baseQ = await qSize();
   expect(baseQ).toBeCloseTo(15, 0);
   const baseBtn = await btnSize();
 
-  // AC.2 — bump the scale via the real Settings stepper; question text grows.
+  // Bump the scale via the real Settings stepper; question text grows.
   await openSettings(page, "appearance");
   const panel = page.getByTestId("settings-panel");
   await panel.getByTestId("font-larger").click();
@@ -191,7 +191,7 @@ test("qna question text scales with --font-scale; action buttons do not", async 
   const grownQ = await qSize();
   expect(grownQ).toBeGreaterThan(baseQ);
 
-  // AC.3 — the Submit button's font-size is unchanged (controls stay unscaled).
+  // The Submit button's font-size is unchanged (controls stay unscaled).
   const grownBtn = await btnSize();
   expect(grownBtn).toBeCloseTo(baseBtn, 0);
 });

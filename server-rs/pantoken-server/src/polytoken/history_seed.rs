@@ -1026,7 +1026,7 @@ mod tests {
         );
     }
 
-    // --- emitted_at adoption (daemon 0.4.0-unstable.6+, AC.2) ---
+    // --- emitted_at adoption (daemon 0.4.0-unstable.6+) ---
 
     /// Pull the seed event's timestamp regardless of variant.
     fn stamp(ev: &SessionDriverEvent) -> &str {

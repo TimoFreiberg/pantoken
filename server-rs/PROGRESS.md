@@ -57,8 +57,7 @@ review-approved.
   are generated-type gaps (4: closed enums reject unknown variants the TS
   forward-compat cases construct; `ProviderError::Transport` lacks a `kind`
   field) + 1 daemon-type collapse (`current_goal` single-Option can't
-  distinguish present-but-omitted from null). All phase-named; want richer
-  generated types (Phase 4).
+  distinguish present-but-omitted from null).
 - `hub.rs` — all 35 ClientMessage types handled; mock-e2e-validated + ~37 ported
   unit tests. I/O-shaped live-path handlers (SSE, daemon effects) covered by
   `live_path` integration tests (Phase 2).
@@ -127,12 +126,12 @@ improved-stub the driver.
 ## Phase 2 live-path validation — COMPLETE
 
 The live path (`daemon_client` → `event_map` → `driver`, ~5.7k lines) had zero
-coverage. This phase built the fake-daemon harness (axum router replaying the
-corpus over an ephemeral port + `spawn_override` seam), wired the warm-session
-lifecycle (was entirely dead-code — `#[expect(dead_code)]`), fixed SSE ordering
-(one per-session mpsc consumer task), and implemented the FetchState/RefetchQueue
-effects. The `Arc<PolytokenInner>` split resolved the `&self`-vs-`Arc<Self>`
-structural knot. 19 live-path integration tests cover the ACs.
+coverage. The fake-daemon harness replays the corpus through an axum router over
+an ephemeral port with a `spawn_override` seam. The warm-session lifecycle is
+wired, SSE ordering uses one per-session mpsc consumer task, and the
+FetchState/RefetchQueue effects are implemented. The `Arc<PolytokenInner>` split
+resolved the `&self`-vs-`Arc<Self>` structural knot. 19 live-path integration
+tests cover the live path.
 
 ## Wrong turns to undo
 

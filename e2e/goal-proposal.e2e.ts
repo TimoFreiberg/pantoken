@@ -11,9 +11,9 @@ test("goal card renders as a blocking dialog with title + message", async ({
   await drive(page, "goal");
   const dialog = page.getByRole("dialog", { name: "Ship feature X" });
   await expect(dialog).toBeVisible();
-  // The proposed summary renders as the message body (AC.1).
+  // The proposed summary renders as the message body.
   await expect(dialog.getByText("Implement the new dashboard widget")).toBeVisible();
-  // The dialog is blocking — a scrim/backdrop is present (AC.1).
+  // The dialog is blocking — a scrim/backdrop is present.
   await expect(dialog).toHaveAttribute("aria-modal", "true");
 });
 
@@ -42,7 +42,7 @@ test("unknown interrogative type renders an error card with Dismiss", async ({
     name: "⚠ Unknown request type: some_future_type",
   });
   await expect(dialog).toBeVisible();
-  // The dialog is blocking (AC.4).
+  // The dialog is blocking.
   await expect(dialog).toHaveAttribute("aria-modal", "true");
   // Either button dismisses it — both produce {kind:"cancel"} via case "unknown".
   await dialog.getByRole("button", { name: "Deny" }).click();

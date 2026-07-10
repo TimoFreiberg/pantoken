@@ -16,12 +16,12 @@ test("plan-handoff card renders the plan markdown + 3 action buttons", async ({
   await expect(dialog.getByText("plan.md")).toBeVisible();
 
   // The plan markdown body renders — a heading from the planText is visible, and the
-  // scrollable container is present (AC.1).
+  // scrollable container is present.
   await expect(dialog.getByRole("heading", { name: "Plan: Add facet indicator + plan-handoff card" })).toBeVisible();
   await expect(dialog.locator(".plan-body")).toBeVisible();
 
   // The 3 action buttons carry the daemon's action_labels (not hardcoded strings),
-  // in PlanHandoffDecision order (AC.2).
+  // in PlanHandoffDecision order.
   for (const label of [
     "Implement (new context)",
     "Implement (current context)",
@@ -67,7 +67,7 @@ test("facet badge shows 'Plan' when the active facet is plan", async ({
 }) => {
   await drive(page, "planfacet");
   // The badge shows the actual facet "Plan" (accent-tinted) while the snapshot
-  // carries facet:"plan" (AC.4).
+  // carries facet:"plan".
   const badge = page.getByTestId("facet-badge");
   await expect(badge).toBeVisible();
   await expect(badge).toHaveText("Plan");

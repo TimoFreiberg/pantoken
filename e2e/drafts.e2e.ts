@@ -254,11 +254,11 @@ test("submitting a draft carries its facet into the created session", async ({
   await expect(badge).toContainText("Plan");
 });
 
-// --- Facet + permission-monitor as draft settings (AC.4, AC.5, AC.6) ---
+// --- Facet + permission-monitor as draft settings ---
 // Facet and permission-monitor are first-class new-session draft settings (like
-// model/thinking). These tests prove: they persist across leave/reopen (AC.4), a
-// plan-facet draft produces a new session whose badge reads "Plan" (AC.5), and a
-// default (untouched) draft produces a session with "Execute"/"Standard" (AC.6).
+// model/thinking). These tests prove: they persist across leave/reopen, a
+// plan-facet draft produces a new session whose badge reads "Plan", and a
+// default (untouched) draft produces a session with "Execute"/"Standard".
 
 test("a draft's facet + permission-monitor survive leaving and reopening", async ({
   page,

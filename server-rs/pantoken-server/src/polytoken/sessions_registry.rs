@@ -258,11 +258,7 @@ fn cold_session_entry_from_meta(
             .to_string_lossy()
             .to_string(),
         cwd,
-        // Was unconditionally `None` — a cold session whose title was ever
-        // set (via a warm rename, or a prior process before this fix) showed
-        // its preview text instead, silently discarding the daemon's own
-        // durable `overridden_title`. See `write_overridden_title` below for
-        // the write side (cold-session renames, which never warm the daemon).
+        // Use the daemon's durable `overridden_title` for `display_name`.
         display_name: meta.overridden_title.clone(),
         preview,
         // The daemon doesn't expose a per-session user-message count without a

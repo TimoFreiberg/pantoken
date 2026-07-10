@@ -36,7 +36,7 @@ test("clicking the facet badge opens a picker and switching works", async ({
 test("the facet badge sits in the composer toolbar, left of the model badge", async ({
   page,
 }) => {
-  // AC.2 — the badge lives in the composer footer toolbar (.toolbar-right),
+  // The badge lives in the composer footer toolbar (.toolbar-right),
   // immediately left of the model/effort badges.
   const order = await page
     .locator(".toolbar-right [data-testid]")
@@ -111,7 +111,7 @@ test("Shift+Tab does not toggle facets", async ({ page }) => {
   await expect(badge).toHaveText("Execute");
 });
 
-// --- Draft-mode tests (AC.1, AC.2) ---
+// --- Draft-mode tests ---
 // While a new-session draft is open, store.session still points at the previously
 // focused session. The facet badge + Shift+Tab must read/write the DRAFT, not the
 // old session. These tests guard against the regression where the draft view mutated

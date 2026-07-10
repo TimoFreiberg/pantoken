@@ -101,7 +101,7 @@ pub struct PendingInterrogative {
     /// subset from `prune_approval_options`), in order. The reverse builder maps
     /// the chosen label → its index here → the grant/target pair. Absent = fall
     /// back to the full `PERMISSION_APPROVAL_CHOICES` array (backward compat for
-    /// in-flight cards from before this change — the ui-bridge tests rely on it).
+    /// backward compatibility for in-flight cards).
     pub permission_choices: Option<Vec<ApprovalChoice>>,
 }
 

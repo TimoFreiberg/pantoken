@@ -35,7 +35,7 @@ test("permission badge shows Standard by default and switches mode", async ({
 test("permission badge sits in the composer toolbar, left of the facet badge", async ({
   page,
 }) => {
-  // AC.3 — the badge lives in the composer footer toolbar (.toolbar-right),
+  // The badge lives in the composer footer toolbar (.toolbar-right),
   // left of the facet badge (row reads permission → facet → model → effort).
   const order = await page
     .locator(".toolbar-right [data-testid]")
@@ -118,7 +118,7 @@ test("permission badge round-trips all 4 modes via picker", async ({ page }) => 
   await expect(badge).toContainText("Standard");
 });
 
-// --- Draft-mode test (AC.3) ---
+// --- Draft-mode test ---
 // While a new-session draft is open, clicking the permission badge must set the
 // DRAFT's permission-monitor, not the previously focused session's.
 

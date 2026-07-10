@@ -2,7 +2,7 @@
 //! this is unused — Vite serves the client and proxies /ws + /debug here.
 //!
 //! Delivery policy (the phone-over-Tailscale reality: every uncached byte is paid
-//! for on a slow link, and every launch used to re-download the whole ~860KB bundle):
+//! for on a slow link):
 //! - `/assets/*` carries a content hash in the filename → immutable year-long
 //!   cache. A missing hashed asset is a 404, NEVER the SPA fallback — serving
 //!   index.html as a .js response after a deploy swap is the classic

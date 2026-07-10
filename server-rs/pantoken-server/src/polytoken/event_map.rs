@@ -690,7 +690,7 @@ pub fn format_missing_references_message<'a>(
 /// with `mode: steer` (the daemon doesn't distinguish steer/followUp), `text`
 /// from `content`, and the fetch-time `ts` for both `created_at`/`updated_at`.
 ///
-/// NOTE (ported from the TS comment): `PendingTurnInputItem` carries no
+/// `PendingTurnInputItem` carries no
 /// timestamp (only id + content), so the timestamps are fetch-time, not
 /// queue-time. The `items[]` order IS queue order, so the message order is
 /// preserved; time-based sort would be fetch-order. Acceptable for v1 (the queue
@@ -2152,7 +2152,6 @@ mod tests {
     };
     use serde_json::{Value, json};
 
-    // --- Phase D: queue_messages_from_snapshot unit tests (AC.5, pure helper) ---
 
     fn snap(items: Vec<(&str, &str)>) -> PendingTurnInputSnapshot {
         PendingTurnInputSnapshot {
@@ -2529,7 +2528,7 @@ mod tests {
     // ===== Chunk 1: turn boundaries, content-block streaming, tool plumbing, queue =====
     // One Rust #[test] per TS test(...) in event-map.test.ts L81–L465. Assertions
     // derive from the TS ORACLE's expected values, not from current Rust behavior;
-    // any mismatch is a source bug fixed in place (AC.7).
+    // any mismatch indicates a source bug.
 
     #[test]
     fn message_start_session_updated_running_and_clears_turn_error() {
@@ -2983,7 +2982,6 @@ mod tests {
     }
 
     // ===== Chunk 2a: errors/retries, session metadata, compaction =====
-    // TS event-map.test.ts L485–L670. Oracle-derived assertions (AC.7).
 
     #[test]
     fn model_error_rate_limited_sets_turn_error_and_notify_warning() {
@@ -3175,7 +3173,6 @@ mod tests {
     }
 
     // ===== Chunk 2b: notifications, system reminders, subagent routing, v1-ignored, permissions =====
-    // TS event-map.test.ts L672–L890. Oracle-derived assertions (AC.7).
 
     #[test]
     fn notification_queued_job_completion_uses_short_label() {
@@ -3407,7 +3404,6 @@ mod tests {
     }
 
     // ===== Chunk 3a: interrogatives (all variants) =====
-    // TS event-map.test.ts L891–L1284. Oracle-derived assertions (AC.7).
 
     #[test]
     fn interrogative_confirmation_confirm_card_and_register_interrogative() {
