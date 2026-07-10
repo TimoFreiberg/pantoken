@@ -127,7 +127,7 @@ const backendEnv = {
 // still booting — a tool like Claude_Preview returns as soon as the port listens,
 // catching the client mid-reconnect-backoff with a stale "Offline" banner and an
 // empty session list. Gating on /health makes the first WS connect succeed.
-const server = Bun.spawn(["cargo", "run"], {
+const server = Bun.spawn(["cargo", "run", "--bin", "pantoken-server"], {
   cwd: "server-rs",
   env: backendEnv,
   stdout: "inherit",

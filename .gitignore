@@ -13,3 +13,4 @@ blob-report/
 .playwright/
 tmp/
 server-rs/target/
+**/target

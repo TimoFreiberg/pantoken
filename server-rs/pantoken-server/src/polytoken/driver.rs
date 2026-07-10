@@ -3225,7 +3225,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn cwd_for_session_reads_project_path() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -4156,7 +4155,6 @@ mod tests {
         );
     }
 
-
     #[tokio::test]
     async fn list_models_caches_subprocess_output_until_invalidated() {
         let calls = Arc::new(Mutex::new(0));
@@ -4187,7 +4185,6 @@ mod tests {
             "polytoken models should run at most once until invalidation"
         );
     }
-
 
     #[tokio::test]
     async fn model_defaults_reuses_cached_models_result() {
@@ -4425,7 +4422,6 @@ mod tests {
         }
     }
 
-
     #[tokio::test]
     async fn model_cache_invalidation_forces_models_rerun() {
         let output = Arc::new(Mutex::new(
@@ -4462,7 +4458,6 @@ mod tests {
         assert_eq!(*calls.lock(), 2, "invalidation should force a re-run");
     }
 
-
     #[tokio::test]
     async fn model_cache_not_populated_on_error() {
         let calls = Arc::new(Mutex::new(0));
@@ -4483,7 +4478,6 @@ mod tests {
             "failed result should NOT be cached — each call retries"
         );
     }
-
 
     #[tokio::test]
     async fn cwd_config_invalidation_clears_only_targeted_facet_and_command_cache() {
@@ -4552,7 +4546,6 @@ mod tests {
         );
     }
 
-
     #[tokio::test]
     async fn global_invalidation_clears_all_cwd_scoped_caches() {
         let calls = Arc::new(Mutex::new(Vec::<(Vec<String>, Option<String>)>::new()));
@@ -4604,7 +4597,6 @@ mod tests {
         );
     }
 
-
     #[tokio::test]
     async fn fake_mode_construction_does_not_start_watcher() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -4630,7 +4622,6 @@ mod tests {
         );
     }
 
-
     #[tokio::test]
     async fn test_constructor_does_not_start_watcher() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -4653,7 +4644,6 @@ mod tests {
             "test constructor should have Disabled watcher status"
         );
     }
-
 
     #[tokio::test]
     async fn watch_setup_failure_records_status_and_driver_still_lists() {

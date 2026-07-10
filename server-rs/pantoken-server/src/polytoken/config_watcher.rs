@@ -768,7 +768,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn project_config_event_debounces_to_cwd_cache_invalidation() {
         let mut c = DebounceCoalescer::new(Duration::from_millis(100));
@@ -845,7 +844,6 @@ mod tests {
             "two different cwd events should escalate to All"
         );
     }
-
 
     #[test]
     fn global_or_binary_event_debounces_to_all_cache_invalidation() {
