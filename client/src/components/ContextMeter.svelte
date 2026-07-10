@@ -154,7 +154,6 @@
       class="trigger"
       aria-expanded={open}
       aria-haspopup="dialog"
-      title="Context window — hover or tap for detail"
       onclick={(e) => {
         // Only toggle pinned if the click landed on the trigger itself or the
         // ContextRing, not on a descendant action button.
