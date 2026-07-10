@@ -169,6 +169,13 @@
     store.reloadSession(s.path);
     closeMenu();
   }
+  // Detach: release Pantoken's attachment lease so the terminal polytoken CLI can
+  // take over the session. The daemon stays alive (unlike quit/reload, which kill
+  // it). Recovery move for when Pantoken wedges and you need to continue in a shell.
+  function detachSession(s: SessionListEntry): void {
+    store.detachSession(s.path);
+    closeMenu();
+  }
   // Inline rename. Holds the path of the session being renamed (one at a time), the
   // working text, and the input ref so we can focus+select on open.
   let renamingFor = $state<string | null>(null);
@@ -257,6 +264,9 @@
         } else if (k === "l" && menuSession) {
           e.preventDefault();
           reloadSession(menuSession);
+        } else if (k === "d" && menuSession) {
+          e.preventDefault();
+          detachSession(menuSession);
         }
       }
     };
@@ -907,6 +917,15 @@
         <button
           class="menu-item"
           role="menuitem"
+          data-testid="detach-session"
+          title="Release Pantoken's attachment lease so you can take over in the terminal polytoken CLI. The daemon stays running. (D)"
+          onclick={() => detachSession(menuSession)}>
+          <span>Detach session</span>
+          <kbd class="hotkey" aria-hidden="true">D</kbd>
+        </button>
+        <button
+          class="menu-item"
+          role="menuitem"
           title={menuSession.archived
             ? "Restore this session to the active list (A)"
             : "Hide this session from the active list (A)"}
@@ -1010,7 +1029,10 @@
     /* No brand wordmark — leave the top-left clear for the macOS traffic
        lights and keep the collapse control on the right. */
     justify-content: flex-end;
-    padding: 12px 14px 10px;
+    /* Same height as StatusHeader (and the context panel's top bar), so all three
+       top-row chevrons sit on one line. */
+    min-height: calc(var(--header-h) + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 14px 0;
   }
   .new {
     padding: 0 16px 8px;

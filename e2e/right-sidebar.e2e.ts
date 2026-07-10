@@ -5,8 +5,8 @@ import { drive, gotoFresh, openRightSidebar } from "./helpers.js";
 // background jobs, and todos — live session context, in that order (matches the
 // polytoken TUI). Driven by the folded session state (flags/todos) and the server's
 // JobsList broadcast (jobs). Open by default on desktop (same rule as the left
-// Sidebar); toggled by ⌘⇧J or, while collapsed, the right edge pop-in arrow
-// (App.svelte) — there's no more header button. Has no "Context" title — just the
+// Sidebar); toggled by ⌘⇧J or, while collapsed, the header's trailing-edge chevron
+// (StatusHeader) — there's no more header hamburger. Has no "Context" title — just the
 // collapse control, mirroring the left sidebar's title-less header.
 
 test.beforeEach(async ({ page }) => {
@@ -80,7 +80,7 @@ test("sections render in order: flagged files, background jobs, todos", async ({
   expect(testids).toEqual(["flagged-files", "background-jobs", "todos"]);
 });
 
-test("the context panel closes via its own control and reopens via the edge arrow", async ({
+test("the context panel closes via its own control and reopens via the header arrow", async ({
   page,
 }) => {
   const panel = page.getByTestId("right-sidebar");
@@ -91,7 +91,7 @@ test("the context panel closes via its own control and reopens via the edge arro
   await page.getByRole("button", { name: "Collapse context panel" }).click();
   await expect(panel).toHaveAttribute("data-open", "false");
 
-  // Reopen via the edge pop-in arrow.
+  // Reopen via the header chevron.
   await page.getByTestId("context-open").click();
   await expect(panel).toHaveAttribute("data-open", "true");
 });
