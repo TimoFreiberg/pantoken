@@ -8,7 +8,7 @@
 //
 // Default bump: --patch. What it does, in order:
 //   1. refuse a dirty working copy (the release commit must contain ONLY the bump)
-//   2. bump "version" in desktop/tauri.conf.json + Cargo.toml, sync Cargo.lock
+//   2. bump "version" in desktop/tauri.conf.json + Cargo.toml, sync the root Cargo.lock
 //   3. jj commit those three files ("Release vX.Y.Z")
 //   4. git tag vX.Y.Z on that commit (jj can't create tags; the colocated .git can)
 //   5. move the `main` bookmark to the release commit, `jj git push`, push the tag
@@ -129,7 +129,7 @@ if (import.meta.main) {
     "commit",
     "desktop/tauri.conf.json",
     "desktop/Cargo.toml",
-    "desktop/Cargo.lock",
+    "Cargo.lock",
     "-m",
     `Release ${tag}`,
   ]);
