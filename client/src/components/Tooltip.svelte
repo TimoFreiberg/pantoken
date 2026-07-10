@@ -91,7 +91,7 @@
   function onOver(e: MouseEvent) {
     if (!hoverCapable) return;
     const el = (e.target as Element | null)?.closest<HTMLElement>("[title]");
-    if (el) begin(el, false);
+    if (el) begin(el, true);
   }
 
   function onOut(e: MouseEvent) {
