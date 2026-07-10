@@ -11,7 +11,11 @@ use crate::session_driver::{
     ModelOption, PermissionMonitorMode, SessionDriverEvent, SessionId, SessionListEntry,
 };
 
-pub const PROTOCOL_VERSION: u32 = 2;
+// Must equal PROTOCOL_VERSION in protocol/src/wire.ts. 2→3: the nine
+// settings/context ClientMessage variants collapsed into `sessionAction`, so a
+// stale (v2) client's old-shape messages no longer deserialize — bump forces the
+// client's hello-mismatch guard to fire instead of silently dropping them.
+pub const PROTOCOL_VERSION: u32 = 3;
 
 // ── PantokenSettings (server-side persisted settings) ──────────────────────
 
