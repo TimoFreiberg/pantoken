@@ -2532,10 +2532,20 @@ impl PantokenDriver for PolytokenDriver {
             if let Some(ws) = self.inner.get_warm(sid) {
                 let res = ws.client.file_catalog().await;
                 if let Some(resp) = res.data {
-                    let paths: Vec<String> = resp.files.clone();
-                    let files = crate::polytoken::file_catalog::parse_file_catalog(&paths);
+                    let files = crate::polytoken::file_catalog::parse_file_catalog(&resp.files);
+                    // `truncated` is always false: FileCatalogResponse carries no cap
+                    // marker, so the client's project-mode server fallback (gated on
+                    // truncated) never fires on this driver — Shift+Tab is the escape
+                    // hatch. Revisit if the daemon ever bounds its catalog.
                     return (files, false);
                 }
+                // A daemon /files failure (timeout, non-200, parse error) must not
+                // masquerade as an empty project — warn like list_jobs does.
+                warn!(
+                    "GET /files failed ({}): {}; file index will be empty",
+                    res.status,
+                    res.error.as_deref().unwrap_or("no data")
+                );
             }
         }
         (Vec::new(), false)
