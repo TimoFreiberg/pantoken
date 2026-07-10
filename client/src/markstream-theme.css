@@ -23,7 +23,7 @@
   /* `1em` (not `1rem`) so the renderer inherits the transcript's scaled font-size
      (Transcript `.col` applies --font-scale); 1rem would pin it to the root and ignore
      the reader's text-size knob. */
-  font: 400 1em/1.66 var(--font-sans);
+  font: 400 1em/1.5 var(--font-sans);
 }
 
 .markstream-svelte.markdown-renderer.dark {
