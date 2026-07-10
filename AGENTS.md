@@ -129,8 +129,7 @@ This is set up so you can verify autonomously — use it.
 
 ## Conventions
 
-- A formatter runs automatically on every file write (biome/prettier-style). Don't
-  fight it; re-Read before an Edit if a region was reformatted.
+- Run an autoformatter before committing.
 - VCS is **jj** (see the `jj` skill). Commit when done; review with `jj diff --git`;
   imperative subject ≤72 chars.
 - Keep `protocol/` free of runtime/DOM deps — it's imported by both halves
