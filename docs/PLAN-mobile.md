@@ -244,23 +244,37 @@ ScheduleWakeup/cron per the times given at kickoff.
 
 - **OQ1 — Entry affordance:** one badged icon (recommended) vs three separate
   buttons. If three: where do they fit at 375px?
+  <human>yeah one icon sounds great</human>
 - **OQ2 — Context screen layout:** stacked sections with counts (recommended)
   vs segmented control (one panel at a time). Affects whether "each of the
   three items gets a full-screen view" is literal (three views) or one view
   with three sections.
+  <human>Ill take your recommendation. </human>
 - **OQ3 — Badge semantics:** proposal in D3 (unseen finished jobs + new
   flags); confirm approvals stay out of the Context badge.
+<human>Yes, approvals definitely stayed out of the out of the context badge. They can be kind of full screen. It would be neat if they could be minimized like in the desktop app, but if that's hard to do nicely, then that's not a showstopper.
+
+Um, we do not need to handle unseen finished jobs and new flags in a special way. We can just make Like I don't know, count how many things there are in the sidebar in the badge and just show all of them. We don't need to like show unread or anything. </human>
 - **OQ4 — Breakpoint semantics:** ≤859px currently means "phone". A narrow
   desktop window gets the same treatment — fine, or does desktop need the
   right sidebar back at narrow widths?
+<human>
+Yeah, we can we can just make it depend on the width. Um I'll notice if it looks bad on desktop and then I'll do something about it. Um would make it easier to test too so um I'm fine with that. 
+</human>
+
 - **OQ5 — WebKit e2e tier:** Playwright mobile project is Chromium (Pixel 7)
   by design (avoids the WebKit download). Add an optional `iphone-webkit`
   project (closest Safari proxy without a device) — worth the CI weight?
+<human>I don't know. We could try to find out but I'm fine with taking your gut feeling on this. 
+</human>
 - **OQ6 — Declarative Web Push:** timeboxed spike in phase 3, or skip and
   keep classic SW push only?
+<human>I don't know enough about that. If you have a recommendation then go with your recommendation. Otherwise Yeah, I mean trying out new stuff is nice. Go with a spike, I don't mind, but Only do autonomous stuff if you can verify it yourself, please. </human>
 - **OQ7 — Rename (Pantoken → Polyscope, TODO'd):** the home-screen install
   burns the current name/icon in. Still cheap to change later (reinstall), so
   default is *not tonight* — confirm.
+<human>Nah, there is no rename planned for this. We'll stay on Pantoken for now. </human>
 - **OQ8 — main-deploy risk:** merging gates to `main` overnight auto-deploys
   the Mini (drops live WS; your phone origin updates while you sleep). OK, or
   hold all merges until the morning checklist passes?
+<human>Um don't focus on the auto main deployment too much. I think I'm gonna move to auto deploying my tag releases from GitHub releases instead anyway. </human>
