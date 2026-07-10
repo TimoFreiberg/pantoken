@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use pantoken_protocol::session_driver::*;
-use pantoken_protocol::wire::{DeliveryMode, SessionAction};
+use pantoken_protocol::wire::{DeliveryMode, McpAction, SessionAction};
 use parking_lot::Mutex;
 use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
@@ -2741,7 +2741,6 @@ impl PantokenDriver for MockDriver {
     // One arm per SessionAction, each a faithful port of its TS MockDriver
     // method: deterministic fixture responses so Settings toggles and the
     // context actions round-trip through hub → client in dev/e2e.
-    // SetMcpServer is a mock no-op (the MCP e2e drives UI states via widgets).
     async fn session_action(&self, action: SessionAction, _session_id: Option<SessionId>) {
         match action {
             SessionAction::SetModel { provider, model_id } => {
@@ -2844,7 +2843,38 @@ impl PantokenDriver for MockDriver {
                     },
                 });
             }
-            SessionAction::SetMcpServer { .. } => {}
+            SessionAction::SetMcpServer {
+                server_name,
+                action,
+            } => {
+                // Reflect the action on the named server so the Settings round-trip
+                // is observable: enable/reconnect → connected, disable/disconnect →
+                // disconnected. Reads the payload (server_name + action) — a broken
+                // wire/hub/driver path would send the wrong name or drop the message
+                // and the emitted snapshot wouldn't change.
+                let connected = matches!(action, McpAction::Enable | McpAction::Reconnect);
+                let status = if connected {
+                    McpServerStatus::Connected
+                } else {
+                    McpServerStatus::Disconnected
+                };
+                let servers = mock_mcp_servers()
+                    .into_iter()
+                    .map(|mut s| {
+                        if s.server_name == server_name {
+                            s.status = status;
+                            s.tool_count = if connected { 5 } else { 0 };
+                        }
+                        s
+                    })
+                    .collect();
+                let mut snapshot = mock_snapshot(SessionStatus::Idle);
+                snapshot.mcp_servers = Some(servers);
+                self.emit(SessionDriverEvent::SessionUpdated {
+                    base: base(),
+                    snapshot,
+                });
+            }
         }
     }
 

@@ -27,11 +27,15 @@ test("the MCP reconnect button updates server status", async ({ page }) => {
   await page.keyboard.press("Meta+Comma");
   await page.getByTestId("settings-tab-mcp").click();
 
-  // The github server is disconnected — reconnect it.
-  const reconnectBtn = page.getByTestId("mcp-reconnect-github");
-  await expect(reconnectBtn).toBeVisible();
-  await reconnectBtn.click();
+  // The github server starts disconnected. Assert the exact status span, not a
+  // substring of the row — "disconnected" contains "connected", so a row-level
+  // toContainText("connected") passes vacuously and would never catch a broken
+  // reconnect round-trip.
+  const status = page.getByTestId("mcp-server-github").locator(".mcp-status");
+  await expect(status).toHaveText("disconnected");
 
-  // The mock updates the status to "connected" via sessionUpdated.
-  await expect(page.getByTestId("mcp-server-github")).toContainText("connected");
+  // Reconnect → the mock's SetMcpServer arm emits a sessionUpdated flipping github
+  // to connected. This exercises the whole client→wire→hub→driver→arm path.
+  await page.getByTestId("mcp-reconnect-github").click();
+  await expect(status).toHaveText("connected");
 });
