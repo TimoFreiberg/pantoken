@@ -54,9 +54,23 @@
     if (!dragging || activePointer !== event.pointerId) return;
     onChange(clamp(startWidth + deltaFor(event.clientX)));
   }
-  function onPointerUp(): void {
+  function onPointerUp(event: PointerEvent): void {
+    if (activePointer !== event.pointerId) return;
     finish();
   }
+  $effect(() => {
+    if (!dragging) return;
+    const move = (event: PointerEvent) => onPointerMove(event);
+    const up = (event: PointerEvent) => onPointerUp(event);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  })
   function onPointerCancel(): void {
     finish();
   }
@@ -96,7 +110,7 @@
   title={`${label} — use arrow keys, Home, or End`}
   onpointerdown={onPointerDown}
   onpointermove={onPointerMove}
-  onpointerup={onPointerUp}
+  onpointerup={(event) => onPointerUp(event)}
   onpointercancel={onPointerCancel}
   onlostpointercapture={onPointerCancel}
   onkeydown={onKeydown}
@@ -110,9 +124,9 @@
     position: absolute;
     top: 0;
     bottom: 0;
-    right: -6px;
-    z-index: 2;
-    width: 12px;
+    right: -1px;
+    z-index: 10;
+    width: 8px;
     cursor: col-resize;
     touch-action: none;
   }
@@ -130,7 +144,7 @@
     opacity: 0.35;
   }
   .resize-handle.right {
-    left: -6px;
+    left: -1px;
     right: auto;
   }
   @media (max-width: 859px) {

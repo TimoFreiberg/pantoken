@@ -134,7 +134,7 @@ const server = Bun.spawn(["cargo", "run", "--bin", "pantoken-server"], {
   stderr: "inherit",
 });
 
-async function waitForHealth(base: string, timeoutMs = 15_000): Promise<void> {
+async function waitForHealth(base: string, timeoutMs = 120_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
