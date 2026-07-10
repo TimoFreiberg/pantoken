@@ -9,8 +9,9 @@
   // the active session (in that order — matches the polytoken TUI). Mirrors the
   // left Sidebar's drawer pattern (scrim on mobile, fixed column on desktop).
   // No title label (the left sidebar doesn't have one either) — just the
-  // collapse control, symmetric with the left sidebar's '‹'. Toggled by ⌘⇧J or
-  // the edge pop-in arrow (App.svelte) while collapsed.
+  // collapse control, symmetric with the left sidebar's '‹'. While collapsed it's
+  // reopened by ⌘⇧J or the header's expand chevron (StatusHeader), which sits at
+  // the same pixel as this collapse control.
 
   const s = $derived(store.session);
   const flags = $derived(s.flags);
@@ -196,7 +197,11 @@
     /* No title label (mirrors the left Sidebar's .top) — just the collapse
        control, pinned to the trailing edge. */
     justify-content: flex-end;
-    padding: 10px 12px 8px;
+    /* Same box as StatusHeader (height, 16px trailing gutter, centered contents), so
+       this collapse chevron and the header's expand chevron occupy the same pixel:
+       click, click, click. Also lines the two bottom borders up. */
+    min-height: calc(var(--header-h) + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 16px 0;
     border-bottom: 1px solid var(--border);
   }
   .content {

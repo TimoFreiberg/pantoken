@@ -203,7 +203,7 @@ test("a new-session draft hides the previous session's dialogs and context panel
   ).toBeVisible();
   await expect(page.getByRole("dialog")).toBeHidden();
   await expect(page.getByTestId("right-sidebar")).toBeHidden();
-  await expect(page.getByTestId("context-edge-open")).toBeHidden();
+  await expect(page.getByTestId("context-open")).toBeHidden();
 
   // Returning to the session re-surfaces the still-pending dialog.
   await openSidebar(page);

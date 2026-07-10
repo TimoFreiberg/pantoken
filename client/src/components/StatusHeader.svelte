@@ -3,6 +3,7 @@
   import { sessionSubtitle } from "../lib/session-subtitle.js";
   import GoalBadge from "./GoalBadge.svelte";
   import IconButton from "./ui/IconButton.svelte";
+  import Chevron from "./ui/Chevron.svelte";
 
   let hotkeyN = $state(0);
 
@@ -196,6 +197,22 @@
     <span class="conn {conn}" title={conn}>
       <span class="led"></span><span class="conn-label">{connLabel[conn]}</span>
     </span>
+    <!-- Reopen the collapsed context panel. Lives flush at the header's trailing
+         edge — i.e. exactly where the panel's own collapse chevron sits once it's
+         open — so collapse/expand is the same pixel, clickable back and forth.
+         Hidden while drafting: the panel itself is unmounted there. The Chevron's
+         one shipped orientation points right (its "closed" pose); mirror it so it
+         points back toward the panel it summons. -->
+    {#if !store.rightSidebarOpen && !drafting}
+      <IconButton
+        data-testid="context-open"
+        title="Show context panel (⌘⇧J)"
+        aria-label="Show context panel"
+        onclick={() => store.openRightSidebar()}
+      >
+        <span class="chevron-mirror"><Chevron open={false} /></span>
+      </IconButton>
+    {/if}
   </div>
 </header>
 
@@ -208,6 +225,8 @@
     /* Clear the notch/status bar in PWA standalone (viewport-fit=cover). The top inset is
        0 in a normal browser tab, so this is a no-op there. */
     padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+    /* Pinned (not content-sized) so the context panel's top bar can match it. */
+    min-height: calc(var(--header-h) + env(safe-area-inset-top));
     border-bottom: 1px solid var(--border);
     background: color-mix(in srgb, var(--bg) 86%, transparent);
     backdrop-filter: blur(8px);
@@ -272,6 +291,10 @@
     align-items: center;
     gap: 10px;
     flex-shrink: 0;
+  }
+  .chevron-mirror {
+    display: inline-flex;
+    transform: scaleX(-1);
   }
   .conn {
     display: inline-flex;

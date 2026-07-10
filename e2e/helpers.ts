@@ -81,6 +81,6 @@ export async function openSidebar(page: Page): Promise<void> {
 export async function openRightSidebar(page: Page): Promise<void> {
   const panel = page.getByTestId("right-sidebar");
   if ((await panel.getAttribute("data-open")) !== "true")
-    await page.getByTestId("context-edge-open").click();
+    await page.getByTestId("context-open").click();
   await expect(panel).toHaveAttribute("data-open", "true");
 }

@@ -42,7 +42,7 @@ test("the context panel is closed by default on a phone, with a right edge arrow
   const panel = page.getByTestId("right-sidebar");
   await expect(panel).toHaveAttribute("data-open", "false");
 
-  const edgeOpen = page.getByTestId("context-edge-open");
+  const edgeOpen = page.getByTestId("context-open");
   await expect(edgeOpen).toBeVisible();
   await edgeOpen.click();
   await expect(panel).toHaveAttribute("data-open", "true");

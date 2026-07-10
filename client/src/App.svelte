@@ -373,25 +373,9 @@
       {/if}
     </div>
   </div>
-  <!-- Right edge pop-in arrow: same idea as the left one, for the collapsed context
-       panel (⌘⇧J also reopens it). The Chevron's one shipped orientation points right
-       (its "closed" pose) — mirrored horizontally here so it points back toward the
-       content, matching the left tab's inward-pointing arrow. -->
-  <!-- The context panel shows the ACTIVE session's flags/jobs/todos — while a
-       new-session draft is up that would be a different session's context, so
-       the panel and its pop-in tab hide entirely. -->
-  {#if !store.rightSidebarOpen && !store.draft}
-    <button
-      class="edge-tab edge-tab-right"
-      data-testid="context-edge-open"
-      title="Show context panel (⌘⇧J)"
-      aria-label="Show context panel"
-      onclick={() => store.openRightSidebar()}
-      transition:reveal={{ axis: "x" }}
-    >
-      <span class="edge-tab-mirror"><Chevron open={false} /></span>
-    </button>
-  {/if}
+  <!-- No right edge pop-in arrow: the collapsed context panel reopens from the header's
+       trailing-edge chevron (StatusHeader), which lands on the same pixel as the panel's
+       own collapse chevron — so collapse/expand is one repeatable click. (⌘⇧J too.) -->
   {#if !store.draft}
     <RightSidebar />
   {/if}
@@ -501,9 +485,9 @@
       height: calc(100dvh - var(--keyboard-inset, 0px));
     }
   }
-  /* Edge pop-in arrows: shown at the very screen edge whenever the corresponding
-     sidebar is collapsed, replacing the removed header hamburgers as the click
-     affordance to bring it back (⌘B / ⌘⇧J work too). Fixed to the viewport rather
+  /* Left edge pop-in arrow: shown at the very screen edge whenever the sessions
+     sidebar is collapsed, replacing the removed header hamburger as the click
+     affordance to bring it back (⌘B works too). Fixed to the viewport rather
      than laid out in the flex row, since a collapsed sidebar's own root is
      display:none (desktop) or translated off-screen (phone drawer) — either way
      not a place a persistently-visible control could live. Vertically centered,
@@ -538,18 +522,6 @@
     left: 0;
     border-left: none;
     border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  }
-  .edge-tab-right {
-    right: 0;
-    border-right: none;
-    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
-  }
-  /* The shared Chevron only ships one baked-in horizontal orientation (it points
-     right in its "closed" pose); mirror it for the right tab so the glyph points
-     back toward the content, same inward sense as the left tab's arrow. */
-  .edge-tab-mirror {
-    display: inline-flex;
-    transform: scaleX(-1);
   }
   @media (pointer: coarse) {
     .edge-tab {
