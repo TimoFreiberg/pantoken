@@ -20,23 +20,23 @@ test("opening the drawer does NOT focus the search box on a phone", async ({
 });
 
 // Both drawers default CLOSED on a phone (overlay semantics, unchanged); the header
-// hamburgers that used to open them are gone, so the edge pop-in arrow (or the
+// hamburgers that used to open them are gone, so the header chevron (or the
 // left-edge swipe, for the sessions drawer — see edge-swipe.mobile.e2e.ts) is now the
 // only tap affordance besides ⌘B / ⌘⇧J (which a soft keyboard doesn't offer anyway).
 
-test("the sessions drawer is closed by default on a phone, with a left edge arrow to open it", async ({
+test("the sessions drawer is closed by default on a phone, with a header arrow to open it", async ({
   page,
 }) => {
   const sidebar = page.getByTestId("sidebar");
   await expect(sidebar).toHaveAttribute("data-open", "false");
 
-  const edgeOpen = page.getByTestId("sidebar-edge-open");
+  const edgeOpen = page.getByTestId("sidebar-open");
   await expect(edgeOpen).toBeVisible();
   await edgeOpen.click();
   await expect(sidebar).toHaveAttribute("data-open", "true");
 });
 
-test("the context panel is closed by default on a phone, with a right edge arrow to open it", async ({
+test("the context panel is closed by default on a phone, with a header arrow to open it", async ({
   page,
 }) => {
   const panel = page.getByTestId("right-sidebar");

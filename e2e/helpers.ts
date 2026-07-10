@@ -65,19 +65,19 @@ export async function openSettings(
 }
 
 /** Ensure the session sidebar is open. Desktop opens by default; the phone drawer
- *  needs the left edge pop-in arrow (the header hamburger was removed — this is now
+ *  needs the header's leading-edge chevron (the header hamburger was removed — this is now
  *  the only click affordance, besides ⌘B). Driven off `data-open` (the drawer stays
  *  mounted off-screen, so visibility checks are unreliable). */
 export async function openSidebar(page: Page): Promise<void> {
   const sidebar = page.getByTestId("sidebar");
   if ((await sidebar.getAttribute("data-open")) !== "true")
-    await page.getByTestId("sidebar-edge-open").click();
+    await page.getByTestId("sidebar-open").click();
   await expect(sidebar).toHaveAttribute("data-open", "true");
 }
 
 /** Ensure the right context panel (flagged files, background jobs, todos) is open.
  *  Mirrors openSidebar: desktop opens by default, the phone drawer (and a
- *  user-collapsed desktop panel) needs the right edge pop-in arrow. */
+ *  user-collapsed desktop panel) needs the header's trailing-edge chevron. */
 export async function openRightSidebar(page: Page): Promise<void> {
   const panel = page.getByTestId("right-sidebar");
   if ((await panel.getAttribute("data-open")) !== "true")

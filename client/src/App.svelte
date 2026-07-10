@@ -21,14 +21,12 @@
   import { imageViewer } from "./lib/image-viewer.svelte.js";
   import { attention, type AttentionSurface } from "./lib/attention-cycle.svelte.js";
   import IconButton from "./components/ui/IconButton.svelte";
-  import Chevron from "./components/ui/Chevron.svelte";
   import { notifyIfUnfocused } from "./lib/notify.js";
   import { wakeLock } from "./lib/wake-lock.js";
   import { trackKeyboardInset } from "./lib/keyboard-inset.js";
   import { STEP as FONT_STEP } from "./lib/font-scale.js";
   import { edgeSwipe } from "./lib/edge-swipe.js";
   import { createEdgeSwipe } from "./lib/edge-swipe.svelte.js";
-  import { reveal } from "./lib/transitions.js";
   import type { PermissionMonitorMode } from "@pantoken/protocol";
 
   // Dev affordance: ?dev shows buttons that drive the mock to any UI state, so the
@@ -315,24 +313,11 @@
 {:else}
 <div class="shell">
   <Sidebar edge={edge} />
-  <!-- Left edge pop-in arrow: the only way to reopen a collapsed sessions sidebar now
-       that the header hamburger is gone (⌘B works too). Fixed to the viewport edge —
-       NOT inside <Sidebar>, whose root is `display:none`/translated off-screen while
-       closed and so can't host a persistently-visible affordance itself. Mirrors the
-       sidebar's own in-panel collapse arrow (kept as-is; "that one's good" per the
-       TODO this implements). -->
-  {#if !store.sidebarOpen}
-    <button
-      class="edge-tab edge-tab-left"
-      data-testid="sidebar-edge-open"
-      title="Show sessions (⌘B)"
-      aria-label="Show sessions"
-      onclick={() => store.openSidebar()}
-      transition:reveal={{ axis: "x" }}
-    >
-      <Chevron open={false} />
-    </button>
-  {/if}
+  <!-- No edge pop-in arrows on either side: both collapsed panels reopen from a chevron
+       in the header (StatusHeader), at the leading/trailing edge respectively — the top
+       corner each panel's own collapse control sits in. (⌘B / ⌘⇧J too.) A collapsed
+       panel's own root is display:none (desktop) or translated off-screen (phone
+       drawer), so it can't host its reopen affordance itself. -->
   <div
     class="app"
     use:edgeSwipe={{
@@ -483,50 +468,6 @@
     .shell,
     .app {
       height: calc(100dvh - var(--keyboard-inset, 0px));
-    }
-  }
-  /* Left edge pop-in arrow: shown at the very screen edge whenever the sessions
-     sidebar is collapsed, replacing the removed header hamburger as the click
-     affordance to bring it back (⌘B works too). Fixed to the viewport rather
-     than laid out in the flex row, since a collapsed sidebar's own root is
-     display:none (desktop) or translated off-screen (phone drawer) — either way
-     not a place a persistently-visible control could live. Vertically centered,
-     slim at rest, sized up to a full touch target on coarse pointers. */
-  .edge-tab {
-    position: fixed;
-    top: 50%;
-    transform: translateY(-50%);
-    z-index: 45;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    height: 64px;
-    padding: 0;
-    color: var(--text-faint);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    box-shadow: var(--shadow-card);
-    cursor: pointer;
-  }
-  .edge-tab:hover {
-    color: var(--text);
-    background: var(--surface-sunken);
-    border-color: var(--border-strong);
-  }
-  .edge-tab:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-  .edge-tab-left {
-    left: 0;
-    border-left: none;
-    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  }
-  @media (pointer: coarse) {
-    .edge-tab {
-      width: 22px;
-      height: 72px;
     }
   }
   .chat {

@@ -130,6 +130,21 @@
      start_dragging command is explicitly re-granted to this origin in
      desktop/capabilities/window-drag.json. -->
 <header class="hdr" data-tauri-drag-region="deep">
+  <!-- Reopen the collapsed sessions sidebar, from the header's leading edge — the top-left
+       corner the sidebar occupied. Unlike the context panel's chevron this can't land on the
+       exact pixel of the control that collapsed it: the sidebar keeps its own collapse
+       chevron at its trailing edge (its top-left is reserved for the macOS traffic lights),
+       ~200px right of here. Same top row, though, so it's still a click-back-and-forth. -->
+  {#if !store.sidebarOpen}
+    <IconButton
+      data-testid="sidebar-open"
+      title="Show sessions (⌘B)"
+      aria-label="Show sessions"
+      onclick={() => store.openSidebar()}
+    >
+      <Chevron open={false} />
+    </IconButton>
+  {/if}
   <div class="left">
     <span class="title-row">
       {#if initializing}
