@@ -208,9 +208,9 @@ jobs:
         with:
           name: signed-release-artifacts
           path: |
-            desktop/target/release/bundle/macos/Pantoken.app.tar.gz
-            desktop/target/release/bundle/macos/Pantoken.app.tar.gz.sig
-            desktop/target/release/bundle/macos/latest.json
+            target/release/bundle/macos/Pantoken.app.tar.gz
+            target/release/bundle/macos/Pantoken.app.tar.gz.sig
+            target/release/bundle/macos/latest.json
           retention-days: 1
 
   release:
@@ -235,7 +235,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: signed-release-artifacts
-          path: desktop/target/release/bundle/macos
+          path: target/release/bundle/macos
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}

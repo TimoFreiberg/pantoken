@@ -28,14 +28,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const repoRoot = resolve(import.meta.dir, "../..");
-const bundleDir = join(
-  repoRoot,
-  "desktop",
-  "target",
-  "release",
-  "bundle",
-  "macos",
-);
+const bundleDir = join(repoRoot, "target", "release", "bundle", "macos");
 
 function fail(msg: string): never {
   console.error(`publish: ${msg}`);
