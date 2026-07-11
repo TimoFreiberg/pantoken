@@ -1105,12 +1105,15 @@
 <style>
   .transcript-wrap {
     position: relative;
+    isolation: isolate;
     flex: 1;
     min-height: 0;
     display: flex;
     flex-direction: column;
   }
   .scroller {
+    position: relative;
+    z-index: 0;
     flex: 1;
     overflow-y: auto;
     overscroll-behavior: contain;
