@@ -461,6 +461,9 @@ test("prev/next prompt-nav buttons are visible on hover and step through prompts
   // hovered. Hover the transcript-wrap to reveal it.
   const upBtn = page.getByTestId("prompt-nav-up");
   const downBtn = page.getByTestId("prompt-nav-down");
+  await page.locator(".transcript-wrap").hover();
+  await expect(upBtn).toBeVisible();
+  await expect(downBtn).toBeVisible();
 
   // Buttons have the right tooltips (repo rule: every action names itself + shortcut).
   await expect(upBtn).toHaveAttribute("title", "Previous prompt (⌘↑)");
