@@ -9,6 +9,7 @@ function unconfirmed(): StopOperation {
     requestId: "request-under-test",
     sessionId: SESSION_ID,
     state: "unconfirmed",
+    activityVersion: 7,
     error: ERROR,
   };
 }
@@ -16,8 +17,14 @@ function unconfirmed(): StopOperation {
 describe("stop operation lifecycle", () => {
   test("leaves a stop unchanged for another session or no operation", () => {
     const operation = unconfirmed();
-    const mismatched = settleStopOperation(operation, "another-session", false, ERROR);
-    const empty = settleStopOperation(null, SESSION_ID, false, ERROR);
+    const mismatched = settleStopOperation(
+      operation,
+      "another-session",
+      false,
+      7,
+      ERROR,
+    );
+    const empty = settleStopOperation(null, SESSION_ID, false, 7, ERROR);
 
     expect(mismatched.operation).toBe(operation);
     expect(mismatched.clearError).toBe(false);
@@ -27,16 +34,37 @@ describe("stop operation lifecycle", () => {
     expect(empty.lateConfirmation).toBe(false);
   });
 
-  test("clears an unconfirmed stop when the agent resumes and the error still matches", () => {
-    const result = settleStopOperation(unconfirmed(), SESSION_ID, true, ERROR);
+  test("keeps an unconfirmed stop through passive active snapshots", () => {
+    const operation = unconfirmed();
+    const result = settleStopOperation(operation, SESSION_ID, true, 7, ERROR);
+
+    expect(result.operation).toBe(operation);
+    expect(result.clearError).toBe(false);
+    expect(result.lateConfirmation).toBe(false);
+  });
+
+  test("clears an unconfirmed stop when meaningful activity continues", () => {
+    const result = settleStopOperation(
+      unconfirmed(),
+      SESSION_ID,
+      true,
+      8,
+      ERROR,
+    );
 
     expect(result.operation).toBeNull();
     expect(result.clearError).toBe(true);
     expect(result.lateConfirmation).toBe(false);
   });
 
-  test("preserves a newer error when an unconfirmed stop clears on resume", () => {
-    const result = settleStopOperation(unconfirmed(), SESSION_ID, true, "A newer error");
+  test("preserves a newer error when an unconfirmed stop clears on continued activity", () => {
+    const result = settleStopOperation(
+      unconfirmed(),
+      SESSION_ID,
+      true,
+      8,
+      "A newer error",
+    );
 
     expect(result.operation).toBeNull();
     expect(result.clearError).toBe(false);
@@ -49,7 +77,7 @@ describe("stop operation lifecycle", () => {
       state: "stopping",
       error: undefined,
     };
-    const result = settleStopOperation(operation, SESSION_ID, true, null);
+    const result = settleStopOperation(operation, SESSION_ID, true, 7, null);
 
     expect(result.operation).toBe(operation);
     expect(result.clearError).toBe(false);
@@ -61,8 +89,20 @@ describe("stop operation lifecycle", () => {
       ...unconfirmed(),
       state: "stopping",
     };
-    const matchingError = settleStopOperation(operation, SESSION_ID, false, ERROR);
-    const newerError = settleStopOperation(operation, SESSION_ID, false, "A newer error");
+    const matchingError = settleStopOperation(
+      operation,
+      SESSION_ID,
+      false,
+      7,
+      ERROR,
+    );
+    const newerError = settleStopOperation(
+      operation,
+      SESSION_ID,
+      false,
+      7,
+      "A newer error",
+    );
 
     expect(matchingError.operation).toBeNull();
     expect(matchingError.clearError).toBe(false);
@@ -73,7 +113,13 @@ describe("stop operation lifecycle", () => {
   });
 
   test("reports a late confirmation when an unconfirmed stop finds an inactive turn", () => {
-    const result = settleStopOperation(unconfirmed(), SESSION_ID, false, ERROR);
+    const result = settleStopOperation(
+      unconfirmed(),
+      SESSION_ID,
+      false,
+      7,
+      ERROR,
+    );
 
     expect(result.operation).toBeNull();
     expect(result.clearError).toBe(true);

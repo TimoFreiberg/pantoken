@@ -6,21 +6,24 @@ export interface StopOperation {
   requestId: string;
   sessionId: string;
   state: StopState;
+  /** Meaningful turn activity observed when this stop request was sent. */
+  activityVersion: number;
   error?: string;
 }
 
 /** Purely reconcile a pending stop operation with the current turn state.
  *
- * When an unconfirmed stop sees the agent active again, treat that as progress
- * after the request rather than leaving the recovery state stuck: clear the
- * operation and only clear `lastError` when it is still this operation's error.
- * A still-confirming stop remains pending while active; an inactive turn always
- * clears the operation, reporting a late confirmation for an unconfirmed stop.
+ * An unconfirmed stop is cleared only after meaningful activity advances beyond
+ * the version captured when the request was sent. Passive active snapshots do
+ * not count as progress, so a stalled turn remains explicitly retryable.
+ * An inactive turn always clears the operation, reporting a late confirmation
+ * for an unconfirmed stop.
  */
 export function settleStopOperation(
   operation: StopOperation | null,
   sessionId: string | undefined,
   turnActive: boolean,
+  activityVersion: number,
   lastError: string | null,
 ): {
   operation: StopOperation | null;
@@ -31,10 +34,12 @@ export function settleStopOperation(
     return { operation, clearError: false, lateConfirmation: false };
   }
   if (turnActive) {
-    const clear = operation.state === "unconfirmed";
+    const continued =
+      operation.state === "unconfirmed" &&
+      activityVersion > operation.activityVersion;
     return {
-      operation: clear ? null : operation,
-      clearError: clear && lastError === operation.error,
+      operation: continued ? null : operation,
+      clearError: continued && lastError === operation.error,
       lateConfirmation: false,
     };
   }
@@ -87,7 +92,10 @@ export function reseedDraftFromDefaults(
 ): DraftConfig {
   let next = draft;
   if (!draft.model && defaults.provider && defaults.modelId) {
-    next = { ...next, model: { provider: defaults.provider, modelId: defaults.modelId } };
+    next = {
+      ...next,
+      model: { provider: defaults.provider, modelId: defaults.modelId },
+    };
   }
   if (!draft.thinking && defaults.thinkingLevel) {
     next = { ...next, thinking: defaults.thinkingLevel };
