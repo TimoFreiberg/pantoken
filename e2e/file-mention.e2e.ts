@@ -202,6 +202,12 @@ test("] clamps at the top level of a single-level model instead of wrapping", as
   await box.press("Enter");
   // No level chosen at accept time — the terminal model gets the standard trailing space.
   await expect(box).toHaveValue("@model:deepseek/deepseek-v4-flash ");
+  expect(
+    await box.evaluate((el: HTMLTextAreaElement) => ({
+      selectionStart: el.selectionStart,
+      selectionEnd: el.selectionEnd,
+    })),
+  ).toEqual({ selectionStart: 34, selectionEnd: 34 });
 });
 
 test("[ and ] on a non-model row type the character into the draft instead of being swallowed", async ({
