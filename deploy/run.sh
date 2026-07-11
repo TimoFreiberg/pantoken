@@ -35,4 +35,4 @@ echo "$$" > "$PANTOKEN_DATA_DIR/pantoken.pid"
 # --release --bin pantoken-server). Point it at the built client and exec.
 SLOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 export PANTOKEN_CLIENT_DIST="$SLOT_DIR/client/dist"
-exec "$SLOT_DIR/server-rs/target/release/pantoken-server"
+exec "$SLOT_DIR/target/release/pantoken-server"
