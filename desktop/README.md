@@ -102,7 +102,7 @@ Everything else in the environment passes through to the spawned server, so
 
 ```bash
 PANTOKEN_APP_DATA_DIR=$(mktemp -d) \
-PANTOKEN_DRIVER=mock PANTOKEN_UPDATE_DRY_RUN=1 ./target/debug/pantoken-desktop
+PANTOKEN_DRIVER=mock PANTOKEN_UPDATE_DRY_RUN=1 ../target/debug/pantoken-desktop
 ```
 
 Agent-legible probes: stderr logs `pantoken: hub healthy <N>ms after launch` and
