@@ -72,6 +72,18 @@ self.addEventListener("push", (event) => {
         icon: "/icon.svg",
         data: { url: data.url || "/" },
       });
+
+      // App-icon badge (Badging API, iOS 16.4+): the server sends the number of
+      // sessions currently needing the operator; 0 clears. Omitted = leave as-is.
+      // Best-effort — badging failures must never fail the push handler.
+      if ("setAppBadge" in self.navigator && typeof data.badge === "number") {
+        try {
+          if (data.badge > 0) await self.navigator.setAppBadge(data.badge);
+          else await self.navigator.clearAppBadge();
+        } catch {
+          /* unsupported/blocked — notification already shown */
+        }
+      }
     })(),
   );
 });
