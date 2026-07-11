@@ -272,6 +272,17 @@ ScheduleWakeup/cron per the times given at kickoff.
 
 ## PROGRESS (live, newest first)
 
+- 2026-07-11 03:50 — **Phase 3 done (gate: 743 Rust tests + clippy + fmt,
+  client unit tests + svelte-check).** App-icon badge wired end-to-end: the
+  hub computes "sessions needing the operator" (pending dialog or failed run)
+  into every push payload (`badge`, always set so pushes self-correct; Rust
+  test pins approval→1, +failure→2); the SW maps it to
+  set/clearAppBadge; new `lib/app-badge.ts` (+5 unit tests) clears the badge
+  whenever the app comes to the foreground; the dev-bar test push sends
+  badge:1 so M4 can verify on-device. Deep-links needed NO work (already
+  end-to-end). Declarative Web Push skipped per OQ6 (not self-verifiable);
+  TODO note lands in Phase 4. On-device verification of the SW badge path is
+  morning checklist M4 — the SW handler itself can't run under Playwright.
 - 2026-07-11 03:15 — **Phase 2 done (gate: 35/35 mobile specs + svelte-check).**
   Composer toolbar wraps on phone instead of clipping the model chip off-screen
   (meter shares the row; chips keep their 42vw ellipsis caps); new e2e spec

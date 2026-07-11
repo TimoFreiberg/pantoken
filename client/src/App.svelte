@@ -24,6 +24,7 @@
   import { notifyIfUnfocused } from "./lib/notify.js";
   import { wakeLock } from "./lib/wake-lock.js";
   import { trackKeyboardInset } from "./lib/keyboard-inset.js";
+  import { watchAppBadgeClear } from "./lib/app-badge.js";
   import { STEP as FONT_STEP } from "./lib/font-scale.js";
   import { edgeSwipe } from "./lib/edge-swipe.js";
   import { createEdgeSwipe } from "./lib/edge-swipe.svelte.js";
@@ -101,6 +102,10 @@
   // Publish the on-screen keyboard's overlap as --keyboard-inset so the composer stays pinned
   // above it on a phone (the CSS below applies it on touch). No-op without visualViewport.
   onMount(() => trackKeyboardInset());
+
+  // The SW sets the app-icon badge from push payloads; clear it whenever the
+  // app comes to the foreground (no-op where the Badging API is missing).
+  onMount(() => watchAppBadgeClear());
 
   // Keep the screen awake while the focused session's turn streams, so a phone you're
   // watching doesn't sleep mid-run. Released the moment the turn settles.

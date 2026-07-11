@@ -29,6 +29,10 @@ pub struct PushNotification {
     pub tag: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// App-icon badge count (Badging API). 0 means "clear the badge"; omitted
+    /// means "leave it alone" — the service worker distinguishes the two.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub badge: Option<u32>,
 }
 
 /// A web push subscription (endpoint + keys).
@@ -328,6 +332,34 @@ fn load_or_create_vapid(path: &Path) -> VapidKeys {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notification_payload_includes_badge_and_omits_none_fields() {
+        // The SW reads `badge` as a number (0 = clear); optional fields must be
+        // absent — not null — so `"tag" in data`-style checks stay meaningful.
+        let with_badge = PushNotification {
+            title: "t".into(),
+            body: "b".into(),
+            tag: Some("tag".into()),
+            url: Some("/?session=s1".into()),
+            badge: Some(2),
+        };
+        let json = serde_json::to_value(&with_badge).unwrap();
+        assert_eq!(json["badge"], 2);
+        assert_eq!(json["url"], "/?session=s1");
+
+        let bare = PushNotification {
+            title: "t".into(),
+            body: "b".into(),
+            tag: None,
+            url: None,
+            badge: None,
+        };
+        let json = serde_json::to_value(&bare).unwrap();
+        assert!(json.get("badge").is_none());
+        assert!(json.get("tag").is_none());
+        assert!(json.get("url").is_none());
+    }
 
     #[test]
     fn store_add_remove_count() {

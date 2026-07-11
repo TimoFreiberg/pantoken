@@ -140,6 +140,10 @@ pub struct HubNotification {
     pub body: String,
     pub tag: Option<String>,
     pub url: Option<String>,
+    /// App-icon badge: how many sessions currently need the operator (pending
+    /// dialog or failed run). Always set by the hub so a push self-corrects the
+    /// badge; the service worker maps 0 to clearAppBadge().
+    pub badge: Option<u32>,
 }
 
 /// Compact metadata for every warm session. Background transcripts stay private to the
@@ -963,6 +967,16 @@ impl SessionHub {
 
     // ── Notification ───────────────────────────────────────────────────────
 
+    /// Sessions currently needing the operator: a pending dialog/approval or a
+    /// failed run. Feeds the push payload's app-icon badge (runs AFTER
+    /// track_attention in the event path, so the triggering event is counted).
+    fn attention_badge_count(&self) -> u32 {
+        self.attention
+            .values()
+            .filter(|r| !r.pending.is_empty() || r.phase == AttentionPhase::Failed)
+            .count() as u32
+    }
+
     fn maybe_notify(&self, ev: &SessionDriverEvent) {
         let Some(notify) = &self.notify else { return };
         // Push only when someone has been here and then left
@@ -974,6 +988,7 @@ impl SessionHub {
                 .cloned()
                 .unwrap_or_else(|| sid.clone());
             let url = format!("/?session={}", urlencoding::encode(&sid));
+            let badge = Some(self.attention_badge_count());
             let disc = ev.type_discriminator();
             if disc == "runCompleted" {
                 notify(HubNotification {
@@ -981,6 +996,7 @@ impl SessionHub {
                     body: format!("{session} finished its turn"),
                     tag: Some(format!("pantoken-run-{sid}")),
                     url: Some(url),
+                    badge,
                 });
             } else if disc == "runFailed" {
                 let msg = ev.error_message().unwrap_or_default();
@@ -989,6 +1005,7 @@ impl SessionHub {
                     body: format!("{session} failed: {}", clipped(&msg, 72)),
                     tag: Some(format!("pantoken-run-{sid}")),
                     url: Some(url),
+                    badge,
                 });
             } else if disc == "hostUiRequest" {
                 if let E::HostUiRequest { request, .. } = ev {
@@ -999,6 +1016,7 @@ impl SessionHub {
                             body: format!("{session}: {title}"),
                             tag: Some(format!("pantoken-approval-{sid}")),
                             url: Some(url),
+                            badge,
                         });
                     }
                 }
@@ -4313,6 +4331,80 @@ mod hub_models_tests {
 
         hub.lock().remove_client(b);
         assert_eq!(hub.lock().client_count(), 0, "all clients removed");
+    }
+
+    /// Push payloads carry an app-icon badge = sessions currently needing the
+    /// operator (pending dialog or failed run). `maybe_notify` runs after
+    /// `track_attention`, so the triggering event itself is counted; a later
+    /// turn-complete push for another session still reports the total.
+    #[tokio::test]
+    async fn push_notification_badge_counts_attention_sessions() {
+        use pantoken_protocol::session_driver::HostUiRequest;
+        use std::sync::Mutex as StdMutex;
+
+        let captured: Arc<StdMutex<Vec<HubNotification>>> = Arc::new(StdMutex::new(Vec::new()));
+        let sink = captured.clone();
+        let driver = Arc::new(MockDriver::new());
+        let (tx, _ops) = hub_op_channel();
+        let hub = SessionHub::new(
+            driver.clone(),
+            tx,
+            Some(Arc::new(move |n: HubNotification| {
+                sink.lock().unwrap().push(n);
+            })),
+            250,
+            "test-server".into(),
+            None,
+            "test-sha".into(),
+            10,
+        );
+
+        // Notifications only fire once someone has connected and then left.
+        let (key, _ctx, _crx) = hub.lock().add_client(None);
+        hub.lock().remove_client(key);
+
+        // An approval dialog arrives → that session is pending → badge 1.
+        let sref = session_ref_for("badge-1");
+        hub.lock().on_event(SessionDriverEvent::HostUiRequest {
+            base: SessionEventBase {
+                session_ref: sref.clone(),
+                timestamp: ts(),
+                run_id: None,
+            },
+            request: HostUiRequest::Confirm {
+                request_id: "req-1".into(),
+                title: "Run command?".into(),
+                message: "ls".into(),
+                default_value: None,
+                timeout_ms: None,
+            },
+        });
+
+        // A second session fails its run → its push counts BOTH attention
+        // sessions (the pending approval + the fresh failure).
+        let sref2 = session_ref_for("badge-2");
+        hub.lock().on_event(SessionDriverEvent::RunFailed {
+            base: SessionEventBase {
+                session_ref: sref2.clone(),
+                timestamp: ts(),
+                run_id: None,
+            },
+            error: pantoken_protocol::session_driver::SessionErrorInfo {
+                message: "boom".into(),
+                code: None,
+                details: None,
+            },
+        });
+
+        let got = captured.lock().unwrap();
+        assert_eq!(got.len(), 2, "approval + run-failed pushes");
+        assert_eq!(got[0].title, "Approval needed");
+        assert_eq!(got[0].badge, Some(1), "the pending approval is counted");
+        assert_eq!(got[1].badge, Some(2), "pending approval + failed run");
+        assert!(
+            got[1].url.as_deref().unwrap_or("").contains("badge-2"),
+            "deep-link targets the failing session"
+        );
     }
 
     /// `activity()` + `client_count()` together produce the exact `/health` shape

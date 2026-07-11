@@ -164,6 +164,7 @@ async fn main() {
                 body: n.body,
                 tag: n.tag,
                 url: n.url,
+                badge: n.badge,
             };
             tokio::spawn(async move {
                 let mut svc = push.lock().await;
@@ -516,6 +517,9 @@ async fn push_test(
                 body: "Test push ✅ — if you see this on a closed phone, it works.".into(),
                 tag: Some("pantoken-test".into()),
                 url: None,
+                // A visible non-zero badge, so the test push also proves the
+                // Badging API path on-device (cleared on next app focus).
+                badge: Some(1),
             })
             .await;
         (sent, push.count())
