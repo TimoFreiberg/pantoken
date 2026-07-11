@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { ModelDefaults } from "@pantoken/protocol";
-import { reseedDraftFromDefaults, type DraftConfig } from "./store-helpers.js";
+import {
+  auxClickAction,
+  reseedDraftFromDefaults,
+  type DraftConfig,
+} from "./store-helpers.js";
 
 function emptyDraft(cwd = "/proj"): DraftConfig {
   return { cwd, worktree: false };
@@ -13,6 +17,20 @@ const FULL_DEFAULTS: ModelDefaults = {
   favorites: [],
   defaultPermissionMonitor: "bypass_plus",
 };
+
+describe("auxClickAction", () => {
+  test("maps browser back and forward buttons", () => {
+    expect(auxClickAction(3)).toBe("back");
+    expect(auxClickAction(4)).toBe("forward");
+  });
+
+  test("ignores other mouse buttons", () => {
+    expect(auxClickAction(0)).toBeNull();
+    expect(auxClickAction(1)).toBeNull();
+    expect(auxClickAction(2)).toBeNull();
+    expect(auxClickAction(5)).toBeNull();
+  });
+});
 
 describe("reseedDraftFromDefaults", () => {
   test("seeds model + thinking when both are unset (boot-path timing gap)", () => {
