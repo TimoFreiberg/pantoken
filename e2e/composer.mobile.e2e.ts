@@ -38,3 +38,32 @@ test("mobile: the send button submits the prompt", async ({ page }) => {
     page.locator(".row.user", { hasText: "sent from the button" }),
   ).toBeVisible();
 });
+
+test("mobile: the picker chips never overflow the viewport", async ({
+  page,
+}) => {
+  // Regression: the model chip used to clip off the right edge at phone widths
+  // (docs/PLAN-mobile.md D5). The toolbar wraps instead; nothing may poke past
+  // the viewport or make the page horizontally scrollable.
+  const modelBadge = page.getByTestId("model-badge");
+  await expect(modelBadge).toBeVisible();
+  const vw = page.viewportSize()!.width;
+  for (const testid of [
+    "model-badge",
+    "thinking-badge",
+    "permission-badge",
+    "facet-badge",
+  ]) {
+    const box = await page.getByTestId(testid).boundingBox();
+    expect(box, `${testid} should render`).not.toBeNull();
+    expect(
+      box!.x + box!.width,
+      `${testid} inside viewport`,
+    ).toBeLessThanOrEqual(vw + 0.5);
+  }
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+});

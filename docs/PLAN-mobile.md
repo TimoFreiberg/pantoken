@@ -272,6 +272,17 @@ ScheduleWakeup/cron per the times given at kickoff.
 
 ## PROGRESS (live, newest first)
 
+- 2026-07-11 03:15 — **Phase 2 done (gate: 35/35 mobile specs + svelte-check).**
+  Composer toolbar wraps on phone instead of clipping the model chip off-screen
+  (meter shares the row; chips keep their 42vw ellipsis caps); new e2e spec
+  pins "no chip outside the viewport, no horizontal scroll" at 375px.
+  Audited the rest of D5: approval sheet already ships a proper phone bottom
+  sheet WITH the minimize-to-pill affordance Timo wanted (OQ3 — zero work
+  needed); tap-target specs cover the new controls (44px ✓); header ≤480px
+  label-dropping already existed. Next: Phase 3 (app-icon badge; deep-links
+  turned out to already work end-to-end — server sends /?session=<id>, client
+  parses it at boot).
+
 - 2026-07-11 02:30 — **Gate G1 green → Phase 1 committed.** Clean full e2e:
   390 passed; the only real failures were a pre-existing tooltip regression
   from the evening commit `ozor` ("Fix sidebar e2e startup and resizing"

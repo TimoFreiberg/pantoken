@@ -1528,6 +1528,24 @@
     .composer-wrap {
       padding-inline: 16px;
     }
+    /* The chip row (permission · facet · model · effort) doesn't fit one phone
+       row next to the meter — wrap instead of clipping the model chip off the
+       right edge. Chips keep their own 42vw ellipsis caps, so a single row
+       returns whenever the labels are short enough. */
+    .toolbar {
+      flex-wrap: wrap;
+      row-gap: 6px;
+    }
+    .toolbar-right {
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      row-gap: 6px;
+      /* Share the meter's row: let the chip block take the leftover width and
+         wrap internally (chips keep natural size), instead of dropping the
+         whole block below the meter. */
+      flex: 1;
+      min-width: 0;
+    }
   }
   .toolbar {
     display: flex;
