@@ -38,7 +38,8 @@ export default defineConfig({
   use: {
     baseURL: `http://localhost:${VITE_PORT}`,
     trace: "on-first-retry",
-    permissions: ["clipboard-read", "clipboard-write"],
+    // NOTE: clipboard permissions live on the Chromium projects below — WebKit
+    // rejects those permission names at context creation.
   },
   webServer: {
     command:
@@ -57,6 +58,7 @@ export default defineConfig({
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1100, height: 850 },
+        permissions: ["clipboard-read", "clipboard-write"],
       },
       testIgnore: [/\.mobile\.e2e\.ts$/, /[\\/]live[\\/]/],
     },
@@ -64,8 +66,25 @@ export default defineConfig({
       // Pixel 7 is a Chromium-based mobile descriptor — avoids a WebKit download
       // while still exercising a phone viewport + touch.
       name: "mobile",
-      use: { ...devices["Pixel 7"] },
+      use: {
+        ...devices["Pixel 7"],
+        permissions: ["clipboard-read", "clipboard-write"],
+      },
       testMatch: /\.mobile\.e2e\.ts$/,
     },
+    // Opt-in Safari proxy (docs/PLAN-mobile.md OQ5): the closest thing to the
+    // real iPhone without a device — WebKit rendering + touch + the history/
+    // swipe-back semantics the phone UI depends on. Not in the default run or
+    // CI (WebKit download + extra minutes); enable with PANTOKEN_E2E_WEBKIT=1
+    // after `bunx playwright install webkit`.
+    ...(process.env.PANTOKEN_E2E_WEBKIT
+      ? [
+          {
+            name: "iphone-webkit",
+            use: { ...devices["iPhone 14"] },
+            testMatch: /\.mobile\.e2e\.ts$/,
+          },
+        ]
+      : []),
   ],
 });

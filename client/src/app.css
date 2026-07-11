@@ -111,6 +111,11 @@ html,
 body {
   margin: 0;
   height: 100%;
+  /* Standalone-PWA feel: the shell itself never rubber-bands (inner scrollers
+     keep their momentum + the custom pull-to-refresh), and rotating an iPhone
+     never auto-inflates text. */
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
