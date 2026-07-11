@@ -1,5 +1,51 @@
 import type { ModelDefaults, PermissionMonitorMode } from "@pantoken/protocol";
 
+export type StopState = "stopping" | "unconfirmed";
+
+export interface StopOperation {
+  requestId: string;
+  sessionId: string;
+  state: StopState;
+  error?: string;
+}
+
+/** Purely reconcile a pending stop operation with the current turn state.
+ *
+ * When an unconfirmed stop sees the agent active again, treat that as progress
+ * after the request rather than leaving the recovery state stuck: clear the
+ * operation and only clear `lastError` when it is still this operation's error.
+ * A still-confirming stop remains pending while active; an inactive turn always
+ * clears the operation, reporting a late confirmation for an unconfirmed stop.
+ */
+export function settleStopOperation(
+  operation: StopOperation | null,
+  sessionId: string | undefined,
+  turnActive: boolean,
+  lastError: string | null,
+): {
+  operation: StopOperation | null;
+  clearError: boolean;
+  lateConfirmation: boolean;
+} {
+  if (!operation || operation.sessionId !== sessionId) {
+    return { operation, clearError: false, lateConfirmation: false };
+  }
+  if (turnActive) {
+    const clear = operation.state === "unconfirmed";
+    return {
+      operation: clear ? null : operation,
+      clearError: clear && lastError === operation.error,
+      lateConfirmation: false,
+    };
+  }
+  const lateConfirmation = operation.state === "unconfirmed";
+  return {
+    operation: null,
+    clearError: lateConfirmation && lastError === operation.error,
+    lateConfirmation,
+  };
+}
+
 /** The new-session draft's configurable fields. Mirrors the inline `$state`
  *  type in `store.svelte.ts` (cwd + worktree + the model/thinking/facet/
  *  permissionMonitor overrides). Extracted here so pure helpers operating on

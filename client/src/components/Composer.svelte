@@ -600,8 +600,8 @@
   /** Replace the @-mention span (`@<query>`) with the canonical text for the picked
    *  item, keeping the cursor right after the inserted text (and trailing
    *  separator, if any — a space for terminal kinds):
-   *    - file: unchanged behavior — directories get a trailing "/" so the user can
-   *      keep typing to narrow further.
+   *    - file: directories get a trailing "/" so the user can keep typing to narrow
+   *      further.
    *    - skill/subagent: `@skill:<name>` / `@subagent:<name>`.
    *    - model: `@model:<provider>/<modelId>` — always canonical, even if the user
    *      typed the `m:` shorthand — plus a `(<level>)` suffix when a reasoning level

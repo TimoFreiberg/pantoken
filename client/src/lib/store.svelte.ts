@@ -42,7 +42,12 @@ import {
 import { dedupeConsecutive } from "./prompt-history.js";
 import { deliveryState } from "./delivery.js";
 import { ensurePermission } from "./notify.js";
-import { reseedDraftFromDefaults } from "./store-helpers.js";
+import {
+  reseedDraftFromDefaults,
+  settleStopOperation,
+  type StopOperation,
+  type StopState,
+} from "./store-helpers.js";
 import {
   applyThemeMode,
   getThemeMode,
@@ -88,14 +93,7 @@ export interface Toast {
 /** Client-visible lifecycle of one request to stop the focused turn. This is
  * deliberately separate from `turnActive`: the latter is daemon/transcript truth,
  * while this records whether the user's control action received an outcome. */
-export type StopState = "stopping" | "unconfirmed";
-
-interface StopOperation {
-  requestId: string;
-  sessionId: string;
-  state: StopState;
-  error?: string;
-}
+export { type StopState } from "./store-helpers.js";
 
 const STOP_CONFIRMATION_TIMEOUT_MS = 500;
 
@@ -778,35 +776,30 @@ class PantokenStore {
   }
 
   /** Reconcile the stop operation with the current turn state. Called after
-   * each folded event. When the agent resumes working (turnActive true) while
-   * the stop is "unconfirmed", clear it so the user can stop again. When the
-   * turn has settled (turnActive false), clear the stop and, if it arrived
-   * beyond the 500ms promise, explain that late confirmation rather than
-   * making the recovery state vanish mysteriously. */
+   * each folded event. When an unconfirmed stop sees the agent resume
+   * (`turnActive` true), clear it so the user can stop again; only clear a
+   * matching lastError, so a newer error is preserved. A still-confirming stop
+   * remains pending while active. When the turn settles, clear the operation
+   * and explain an unconfirmed stop as a late confirmation. The decision itself
+   * stays pure so it can be tested without instantiating this Svelte rune-based
+   * store. */
   private settleStopOperation(): void {
-    const operation = this.stopOperation;
-    if (!operation || operation.sessionId !== this.session.ref?.sessionId) return;
-    // Progress detected: the agent resumed working. Clear the unconfirmed stop
-    // so the user can stop again.
-    if (this.turnActive) {
-      if (operation.state === "unconfirmed") {
-        this.clearStopConfirmationTimer();
-        this.stopOperation = null;
-        if (this.lastError === operation.error) this.lastError = null;
-      }
+    const result = settleStopOperation(
+      this.stopOperation,
+      this.session.ref?.sessionId,
+      this.turnActive,
+      this.lastError,
+    );
+    if (result.operation === this.stopOperation && !result.clearError && !result.lateConfirmation) {
       return;
     }
-    // Turn settled (inactive): clear the stop, explain if it was a late confirmation.
     this.clearStopConfirmationTimer();
-    this.stopOperation = null;
-    if (operation.state === "unconfirmed") {
-      if (this.lastError === operation.error) this.lastError = null;
-      this.toast(
-        "The agent stopped after Pantoken's 500ms confirmation window.",
-        {
-          durationMs: 8000,
-        },
-      );
+    this.stopOperation = result.operation;
+    if (result.clearError) this.lastError = null;
+    if (result.lateConfirmation) {
+      this.toast("The agent stopped after Pantoken's 500ms confirmation window.", {
+        durationMs: 8000,
+      });
     }
   }
 

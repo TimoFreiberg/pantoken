@@ -1,33 +1,82 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { store } from "./store.svelte.js";
+import { describe, expect, test } from "bun:test";
+import { settleStopOperation, type StopOperation } from "./store-helpers.js";
 
 const SESSION_ID = "session-under-test";
-const SESSION = {
-  workspaceId: "workspace-under-test",
-  sessionId: SESSION_ID,
-};
+const ERROR = "Can't stop the agent while offline — it keeps running.";
+
+function unconfirmed(): StopOperation {
+  return {
+    requestId: "request-under-test",
+    sessionId: SESSION_ID,
+    state: "unconfirmed",
+    error: ERROR,
+  };
+}
 
 describe("stop operation lifecycle", () => {
-  afterEach(() => {
-    store.clearError();
+  test("leaves a stop unchanged for another session or no operation", () => {
+    const operation = unconfirmed();
+    const mismatched = settleStopOperation(operation, "another-session", false, ERROR);
+    const empty = settleStopOperation(null, SESSION_ID, false, ERROR);
+
+    expect(mismatched.operation).toBe(operation);
+    expect(mismatched.clearError).toBe(false);
+    expect(mismatched.lateConfirmation).toBe(false);
+    expect(empty.operation).toBeNull();
+    expect(empty.clearError).toBe(false);
+    expect(empty.lateConfirmation).toBe(false);
   });
 
-  test("clears an unconfirmed stop and its error when the turn resumes", () => {
-    // This test is intentionally focused on the recovery branch: an unconfirmed
-    // session-scoped stop must be cleared when a resumed turn is folded.
-    store.session.ref = SESSION;
-    store.session.status = "idle";
-    store.abort();
-    expect(store.stopState).toBe("unconfirmed");
-    expect(store.lastError).toBe("Can't stop the agent while offline — it keeps running.");
+  test("clears an unconfirmed stop when the agent resumes and the error still matches", () => {
+    const result = settleStopOperation(unconfirmed(), SESSION_ID, true, ERROR);
 
-    // A resumed assistant stream makes turnActive true. Calling the same private
-    // reconciliation hook used after each folded event keeps this test independent
-    // of WebSocket transport and timer scheduling.
-    store.session.status = "running";
-    (store as unknown as { settleStopOperation: () => void }).settleStopOperation();
+    expect(result.operation).toBeNull();
+    expect(result.clearError).toBe(true);
+    expect(result.lateConfirmation).toBe(false);
+  });
 
-    expect(store.stopState).toBeNull();
-    expect(store.lastError).toBeNull();
+  test("preserves a newer error when an unconfirmed stop clears on resume", () => {
+    const result = settleStopOperation(unconfirmed(), SESSION_ID, true, "A newer error");
+
+    expect(result.operation).toBeNull();
+    expect(result.clearError).toBe(false);
+    expect(result.lateConfirmation).toBe(false);
+  });
+
+  test("keeps a still-confirming stop while the agent remains active", () => {
+    const operation: StopOperation = {
+      ...unconfirmed(),
+      state: "stopping",
+      error: undefined,
+    };
+    const result = settleStopOperation(operation, SESSION_ID, true, null);
+
+    expect(result.operation).toBe(operation);
+    expect(result.clearError).toBe(false);
+    expect(result.lateConfirmation).toBe(false);
+  });
+
+  test("clears a stopping operation after an inactive turn without late confirmation", () => {
+    const operation: StopOperation = {
+      ...unconfirmed(),
+      state: "stopping",
+    };
+    const matchingError = settleStopOperation(operation, SESSION_ID, false, ERROR);
+    const newerError = settleStopOperation(operation, SESSION_ID, false, "A newer error");
+
+    expect(matchingError.operation).toBeNull();
+    expect(matchingError.clearError).toBe(false);
+    expect(matchingError.lateConfirmation).toBe(false);
+    expect(newerError.operation).toBeNull();
+    expect(newerError.clearError).toBe(false);
+    expect(newerError.lateConfirmation).toBe(false);
+  });
+
+  test("reports a late confirmation when an unconfirmed stop finds an inactive turn", () => {
+    const result = settleStopOperation(unconfirmed(), SESSION_ID, false, ERROR);
+
+    expect(result.operation).toBeNull();
+    expect(result.clearError).toBe(true);
+    expect(result.lateConfirmation).toBe(true);
   });
 });
