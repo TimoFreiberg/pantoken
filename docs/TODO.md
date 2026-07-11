@@ -292,12 +292,26 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
 - [ ] Keyboard shortcut cheat-sheet (`?` overlay)
 
 ### Mobile / PWA
-- [ ] Swipe gestures (edge-swipe to open/close sidebar)
-- [ ] Haptic feedback (navigator.vibrate on approval-needed / turn-complete)
-- [ ] App-icon unread badge (Badging API)
+- [ ] Swipe-to-close for the drawer + context view (edge-swipe OPEN exists; a
+      rightward swipe on the open drawer / context view should close it, mirroring
+      the back gesture that already works via lib/overlay-history.ts)
+- [x] App-icon unread badge (Badging API) — server sends an attention count in
+      every push payload; SW sets/clears, app clears on foreground (2026-07-11)
+- ~~Haptic feedback~~ — **iOS platform ceiling**: Safari never implemented
+  navigator.vibrate and the checkbox Taptic hack was patched out in 26.5.
+  Web has no haptics on iPhone; revisit only for Android or a paid-account
+  Capacitor wrapper (docs/PLAN-mobile.md).
+- [ ] Declarative Web Push (iOS 18.4+): `app_badge` + `navigate` without SW
+      execution, no permission-revocation penalty for unshown notifications.
+      NOT adoptable autonomously — it is iOS-Safari-only and can't be exercised
+      by Playwright/Chromium or the mock driver; needs a real-device test plan
+      (docs/PLAN-mobile.md D8).
 
 ### Notifications
 - [ ] Actionable push notifications (Approve/Deny on the notification itself)
+      — **iOS ceiling**: web push ignores `Notification.actions` through 26.5,
+      so this is Android/desktop-only; on iPhone the shipped flow is
+      tap-notification → deep-link to the approval card (works today)
 - [ ] Per-session notification mute
 - [ ] Distinct alert patterns (approval-needed vs turn-complete)
 - [ ] Quiet hours / DND schedule

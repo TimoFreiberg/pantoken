@@ -150,3 +150,10 @@ This is set up so you can verify autonomously — use it.
   toggles, menu items, approval actions, settings controls — must have a `title`
   attribute naming the action (and its keyboard shortcut if one exists). Reviewers:
   flag missing tooltips/hotkeys the same way you'd flag missing error handling.
+- **Touch corollary (phone, ≤859px):** `title` tooltips are inert and hotkeys don't
+  exist on touch, so on phone-reachable paths every action must ALSO be a visible,
+  labeled control: `aria-label` naming the action and a ≥44px hit target
+  (`tap-targets.mobile.e2e.ts` enforces the size). No hover-revealed or
+  hotkey-only affordances on phone paths. Full-screen phone views must integrate
+  with the back gesture via `client/src/lib/overlay-history.ts` — never leave a
+  phone overlay that the OS back gesture can't close.

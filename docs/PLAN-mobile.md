@@ -244,6 +244,11 @@ ScheduleWakeup/cron per the times given at kickoff.
 - M6 Dark mode: status bar + theme correct in both modes.
 - M7 LTE (Wi-Fi off): connect, stream a turn, background 5 min, foreground →
   reconnect + tail replay correct.
+- M8 WebKit-flagged behaviors (failed under Playwright-WebKit emulation, most
+  likely emulation artifacts — confirm on the real phone): (a) Enter on the
+  on-screen keyboard inserts a newline (send is the button), (b) the rewind
+  button on a user message is tappable, (c) the per-turn copy button is
+  visible without hover.
 
 ## ✅ Decisions from the evening review (2026-07-10, all OQs resolved)
 
@@ -255,12 +260,16 @@ ScheduleWakeup/cron per the times given at kickoff.
   (near-)full-screen on phone, desktop-style minimize is a nice-to-have only.
 - **OQ4 — Breakpoint:** pure width dependence stays; a narrow desktop window
   gets the phone treatment. (Also makes testing simpler.)
-- **OQ5 — WebKit e2e tier:** delegated to my judgment → add an **opt-in**
-  `iphone-webkit` Playwright project (env-gated, not in the default run, not
-  in CI). Rationale: the history/swipe-back work is exactly where WebKit
-  diverges from Chromium, so having the proxy is worth it; the default gate
-  stays Chromium-fast. Timeboxed — if the WebKit install/run misbehaves, drop
-  it and note here.
+- **OQ5 — WebKit e2e tier:** delegated to my judgment → added an **opt-in**
+  `iphone-webkit` Playwright project (`PANTOKEN_E2E_WEBKIT=1` +
+  `bunx playwright install webkit`; not in the default run, not in CI).
+  First run: 26/35 pass, and **all context-screen/history specs pass** —
+  the swipe-back semantics the tier exists for. The 9 fails: 6 are
+  Playwright-WebKit touch-emulation gaps (edge-swipe ×3, pull-to-refresh ×2,
+  keyboard-inset — synthetic gestures/visualViewport, not app logic), 3 are
+  worth checking against the real phone in the morning (bare-Enter newline,
+  rewind-on-touch reachability, per-turn copy button visible on touch) —
+  folded into the morning checklist as M8.
 - **OQ6 — Declarative Web Push:** **skipped** — Timo's constraint "only do
   autonomous stuff you can verify yourself" rules it out (iOS-Safari-only;
   not exercisable in Playwright/Chromium or the mock driver). Classic SW push
@@ -272,6 +281,25 @@ ScheduleWakeup/cron per the times given at kickoff.
 
 ## PROGRESS (live, newest first)
 
+- 2026-07-11 04:35 — **Phase 4 done — ALL GATES GREEN. Overnight build
+  complete.** Final verification: e2e **394/394 passed, zero flakes**
+  (desktop + mobile), live corpus tier 5/5, unit tests 343, svelte-check +
+  all TS typechecks clean, Rust 743 tests + clippy -D warnings + fmt clean.
+  Four phases committed on `mobile-v1` (+ the tooltip-regression fix).
+  Remaining work is the on-device morning checklist (M1–M8) — needs the
+  physical iPhone. Stretch items (transcript perf pass, "new since you left"
+  divider) deliberately not started: gates-green beats one more feature at
+  04:30.
+- 2026-07-11 04:25 — **Phase 4 in flight.** Landed: overscroll containment +
+  text-size-adjust (app.css), manifest description de-pi'd, AGENTS.md touch
+  corollary (aria-label + ≥44px + back-gesture rule), TODO.md Mobile/PWA &
+  Notifications cleanup (badge done; haptics = iOS ceiling; actionable
+  notifications = Android/desktop-only note; Declarative Web Push filed with
+  its verifiability caveat), opt-in `iphone-webkit` Playwright project (26/35
+  first run; all history/context specs pass; details under OQ5, real-device
+  follow-ups in M8). theme-color dark handling turned out to already exist
+  (index.html pre-paint + lib/theme.ts sync) — no work needed. Final full
+  e2e run in flight; live-tier run + commit next.
 - 2026-07-11 03:50 — **Phase 3 done (gate: 743 Rust tests + clippy + fmt,
   client unit tests + svelte-check).** App-icon badge wired end-to-end: the
   hub computes "sessions needing the operator" (pending dialog or failed run)
