@@ -3418,14 +3418,14 @@ mod tests {
         .expect("write session.json");
     }
 
-    fn warm_for(session_id: &str) -> Arc<WarmSession> {
+    fn warm_for_with_client(session_id: &str, client: Arc<DaemonClient>) -> Arc<WarmSession> {
         let workspace = WorkspaceRef {
             workspace_id: "ws".into(),
             path: "/tmp/ws".into(),
             display_name: None,
         };
         Arc::new(WarmSession {
-            client: Arc::new(DaemonClient::new(session_id.to_string(), 1, 0, None)),
+            client,
             accumulator: Mutex::new(event_map::create_accumulator()),
             last_state: RwLock::new(None),
             session_ref: SessionRef {
@@ -3441,6 +3441,13 @@ mod tests {
             sse_tx: Mutex::new(None),
             sse_consumer_handle: Mutex::new(None),
         })
+    }
+
+    fn warm_for(session_id: &str) -> Arc<WarmSession> {
+        warm_for_with_client(
+            session_id,
+            Arc::new(DaemonClient::new(session_id.to_string(), 1, 0, None)),
+        )
     }
 
     fn driver_with_runner(
@@ -4328,6 +4335,55 @@ mod tests {
             defaults.thinking_level.is_none(),
             "thinking_level should be None when the default model isn't in the parsed list"
         );
+    }
+
+    #[tokio::test]
+    async fn model_defaults_permission_monitor_from_warm_config_default() {
+        use axum::{Router, routing::get};
+        use tokio::net::TcpListener;
+
+        let app = Router::new().route(
+            "/permission-monitor",
+            get(|| async {
+                axum::Json(serde_json::json!({
+                    "config_default": { "type": "bypass_plus" },
+                    "configured_autonomous": null,
+                    "monitor": { "type": "standard" }
+                }))
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test daemon");
+        let port = listener.local_addr().expect("test daemon address").port();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve test daemon");
+        });
+
+        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
+            Box::pin(async move {
+                Ok(ok_output(
+                    "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n",
+                ))
+            })
+        });
+        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
+        driver.inner.warm.write().insert(
+            "s1".into(),
+            warm_for_with_client(
+                "s1",
+                Arc::new(DaemonClient::new("s1".into(), port, 0, None)),
+            ),
+        );
+
+        let defaults = driver.get_model_defaults().await;
+        assert_eq!(
+            defaults.default_permission_monitor,
+            Some(PermissionMonitorMode::BypassPlus),
+            "warm daemon config_default should map to the protocol permission-monitor mode"
+        );
+
+        server.abort();
     }
 
     #[tokio::test]

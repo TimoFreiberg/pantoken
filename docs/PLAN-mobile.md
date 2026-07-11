@@ -79,7 +79,7 @@ Rust with the desktop shell, so there's no synergy argument. Until then: PWA.
 | Web push end-to-end (VAPID, subscribe, send) | `lib/push.ts` + `server-rs/…/push.rs` | ported to Rust server — **needs real-device revalidation** |
 | Notification deep-links | `public/sw.js` `notificationclick` → `url` from `PushNotification.url` | plumbing exists |
 | SW update flow | `lib/sw.ts` + `public/sw.js` | working |
-| PWA manifest + icons (incl. maskable) | `client/public/manifest.webmanifest` | good; name says "pi" in description |
+| PWA manifest + icons (incl. maskable) | `client/public/manifest.webmanifest` | good; description is "Remote control for your coding agent" |
 | Tailscale + token + TLS + blue-green deploy | `deploy/` | working |
 | e2e mobile project (Pixel 7, Chromium) | `playwright.config.ts` | working; extend with new specs |
 
@@ -144,14 +144,16 @@ session + scroll-to-approval, and verify the tap→approve flow is two taps max.
   survives keyboard show/hide.
 
 ### D6. iOS standalone polish
-- `theme-color` currently light-only (`#f7f6f2`) — add media-scoped
-  `<meta name="theme-color" media="(prefers-color-scheme: dark)">` so the
-  status bar matches dark mode.
+- `theme-color` is dynamically synced to the resolved app palette in the
+  browser; audit the iOS standalone status-bar behavior, where the static
+  metadata may still need a dark-mode-safe fallback without replacing the
+  runtime sync.
 - Safe-area audit: `env(safe-area-inset-*)` on header, drawers, composer,
   Context screen (home-indicator gap), plus `viewport-fit=cover`.
 - `overscroll-behavior` containment so drawer/panel scrolling never
   rubber-bands the app shell; `-webkit-text-size-adjust: 100%`.
-- Manifest description still says "pi coding agent" — update.
+- Manifest description is already neutral; verify it remains aligned with the
+  product wording during the standalone polish pass.
 
 ### D7. Touch conventions (amends the repo convention, not replaces it)
 "Every UI action needs a hotkey and a tooltip" is a desktop convention;
@@ -163,8 +165,10 @@ on touch paths. Add this as a note to AGENTS.md conventions.
 ### D8. Push hardening
 - Re-validate the Rust server's web push from the real phone (worked in the
   Pilot/Bun era; `push.rs` is the port — morning checklist item M3).
-- On push receive: `setAppBadge(count)` (Badging API, iOS 16.4+); clear on
-  focus. Covers the TODO's "app-icon unread badge" for free.
+- App-icon badge set/clear is already wired: the service worker applies the
+  push payload count via `setAppBadge`, and the app clears it on foreground.
+  Re-validate this on the real phone and add distinct notification `tag`s if
+  needed; this covers the TODO's "app-icon unread badge" for free.
 - **Declarative Web Push: skipped for v1** (was OQ6). Timo's constraint —
   "only do autonomous stuff you can verify yourself" — rules it out: it is an
   iOS-Safari-only format that cannot be exercised in Chromium/Playwright or
