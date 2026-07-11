@@ -355,6 +355,9 @@ class PantokenStore {
    * makes the action's result visible instead of leaving the ordinary running UI stuck. */
   private stopOperation = $state<StopOperation | null>(null);
   private stopConfirmationTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Monotonic marker for meaningful transcript/turn progress. Passive snapshots do
+   * not advance it, so an unconfirmed stop is not cleared by status churn. */
+  private activityVersion = $state(0);
   private stopRequestSeq = 0;
   // Blocking-dialog requestIds this client itself answered, so an echoed `hostUiResolved`
   // for one of them isn't mistaken for a "resolved on another device" event.
@@ -789,18 +792,26 @@ class PantokenStore {
       this.stopOperation,
       this.session.ref?.sessionId,
       this.turnActive,
+      this.activityVersion,
       this.lastError,
     );
-    if (result.operation === this.stopOperation && !result.clearError && !result.lateConfirmation) {
+    if (
+      result.operation === this.stopOperation &&
+      !result.clearError &&
+      !result.lateConfirmation
+    ) {
       return;
     }
     this.clearStopConfirmationTimer();
     this.stopOperation = result.operation;
     if (result.clearError) this.lastError = null;
     if (result.lateConfirmation) {
-      this.toast("The agent stopped after Pantoken's 500ms confirmation window.", {
-        durationMs: 8000,
-      });
+      this.toast(
+        "The agent stopped after Pantoken's 500ms confirmation window.",
+        {
+          durationMs: 8000,
+        },
+      );
     }
   }
 
@@ -808,7 +819,14 @@ class PantokenStore {
     const operation = this.stopOperation;
     if (!operation || operation.requestId !== requestId) return;
     this.clearStopConfirmationTimer();
-    this.stopOperation = { ...operation, state: "unconfirmed", error: message };
+    this.stopOperation = {
+      ...operation,
+      state: "unconfirmed",
+      // Activity that arrived while the request was still within its confirmation
+      // window is not evidence that the unconfirmed state itself should reset.
+      activityVersion: this.activityVersion,
+      error: message,
+    };
     this.lastError = message;
     this.toast(message, { durationMs: 8000 });
   }
@@ -1019,6 +1037,19 @@ class PantokenStore {
         // resume replay), so a future gap may request again.
         this.seedRequested = false;
         const ev = msg.event;
+        // Only transcript/turn-progress events prove that the agent continued after a
+        // stop attempt. Session snapshots and status broadcasts can repeat or briefly
+        // fluctuate without any new work, so they deliberately do not advance this.
+        if (
+          ev.type === "assistantDelta" ||
+          ev.type === "queuedMessageStarted" ||
+          ev.type === "userMessage" ||
+          ev.type === "toolStarted" ||
+          ev.type === "toolUpdated" ||
+          ev.type === "toolFinished"
+        ) {
+          this.activityVersion++;
+        }
         // A blocking dialog this client was showing but didn't answer just vanished —
         // first-responder-wins resolved it on another device. Surface a transient notice
         // so the sheet doesn't silently disappear. (qna is inline; handled there.)
@@ -1504,7 +1535,8 @@ class PantokenStore {
       model: ns?.model,
       thinking: ns?.thinking,
       facet: ns?.facet ?? "execute",
-      permissionMonitor: ns?.permissionMonitor ?? this.modelDefaults.defaultPermissionMonitor,
+      permissionMonitor:
+        ns?.permissionMonitor ?? this.modelDefaults.defaultPermissionMonitor,
     };
     this.composerDraft = prompt.text;
     this.composerImages = prompt.images ? [...prompt.images] : [];
@@ -1578,12 +1610,18 @@ class PantokenStore {
         requestId,
         sessionId,
         state: "unconfirmed",
+        activityVersion: this.activityVersion,
         error: this.lastError ?? undefined,
       };
       this.toast(this.lastError, { durationMs: 8000 });
       return;
     }
-    this.stopOperation = { requestId, sessionId, state: "stopping" };
+    this.stopOperation = {
+      requestId,
+      sessionId,
+      state: "stopping",
+      activityVersion: this.activityVersion,
+    };
     this.stopConfirmationTimer = setTimeout(() => {
       this.markStopUnconfirmed(
         requestId,
