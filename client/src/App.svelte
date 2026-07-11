@@ -29,6 +29,7 @@
   import { edgeSwipe } from "./lib/edge-swipe.js";
   import { createEdgeSwipe } from "./lib/edge-swipe.svelte.js";
   import { PHONE_MQ } from "./lib/overlay-history.js";
+  import { auxClickAction } from "./lib/store-helpers.js";
   import type { PermissionMonitorMode } from "@pantoken/protocol";
 
   // Dev affordance: ?dev shows buttons that drive the mock to any UI state, so the
@@ -307,13 +308,11 @@
 
   function onMouseAuxClick(e: MouseEvent) {
     if (store.unauthorized) return;
-    if (e.button === 3) {
-      e.preventDefault();
-      store.navBack();
-    } else if (e.button === 4) {
-      e.preventDefault();
-      store.navForward();
-    }
+    const action = auxClickAction(e.button);
+    if (!action) return;
+    e.preventDefault();
+    if (action === "back") store.navBack();
+    else store.navForward();
   }
 </script>
 

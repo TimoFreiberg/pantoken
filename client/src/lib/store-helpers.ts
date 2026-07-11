@@ -58,7 +58,15 @@ export interface DraftConfig {
   thinking?: string;
   /** Facet to start the session in (undefined = the daemon's default, execute). */
   facet?: string;
-  permissionMonitor?: PermissionMonitorMode; // undefined/"standard" = default
+  /** Omit to use the daemon/global default. */
+  permissionMonitor?: PermissionMonitorMode;
+}
+
+/** Map a browser auxiliary mouse button to app navigation, if supported. */
+export function auxClickAction(button: number): "back" | "forward" | null {
+  if (button === 3) return "back";
+  if (button === 4) return "forward";
+  return null;
 }
 
 /** Re-seed a draft's unset model/thinking from `modelDefaults`.
