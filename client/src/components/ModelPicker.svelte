@@ -239,6 +239,7 @@
       <button
         class="badge"
         title={modelTitle + " (⌘⇧M)"}
+        aria-label={`Model: ${modelLabel}`}
         disabled={!hasModels}
         onclick={() => toggle("model")}
         data-testid="model-badge"
@@ -317,7 +318,7 @@
 
   {#if thinking}
     <div class="anchor">
-      <button class="badge" title="Thinking level (⌘⇧E)" onclick={() => toggle("thinking")} data-testid="thinking-badge">
+      <button class="badge" title="Thinking level (⌘⇧E)" aria-label={`Thinking level: ${thinking}`} onclick={() => toggle("thinking")} data-testid="thinking-badge">
         <span class="badge-text">{thinking}</span>
         {#if levels.length > 0}<Chevron open={open === "thinking"} variant="menu" size={10} />{/if}
       </button>
@@ -378,15 +379,28 @@
     font-family: var(--font-sans);
     letter-spacing: -0.01em;
     color: var(--text-muted);
-    background: var(--surface-sunken);
-    border: 1px solid var(--border);
-    padding: 3px 9px;
-    border-radius: 999px;
+    background: transparent;
+    border: 1px solid transparent;
+    padding: 4px 2px;
+    border-radius: var(--radius-xs);
     cursor: pointer;
     max-width: 42vw;
   }
   .badge:disabled {
     cursor: default;
+  }
+  .badge:hover,
+  .badge:focus-visible {
+    color: var(--text);
+    border-color: var(--border);
+    background: var(--surface-sunken);
+  }
+  @media (pointer: coarse) {
+    .badge {
+      min-width: 44px;
+      min-height: 44px;
+      justify-content: center;
+    }
   }
   .badge-text {
     white-space: nowrap;

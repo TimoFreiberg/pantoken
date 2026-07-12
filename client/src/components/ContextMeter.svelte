@@ -152,6 +152,11 @@
 
     <button
       class="trigger"
+      data-testid="context-trigger"
+      aria-label={usage.tokens === null
+        ? "Context window usage details"
+        : `Context window: ${Math.round(usage.percent ?? 0)}% used`}
+      title="Show exact context window usage"
       aria-expanded={open}
       aria-haspopup="dialog"
       onclick={(e) => {
@@ -172,7 +177,7 @@
       <!-- data-testid stays on the inner ContextRing so existing e2e tests
            (context-meter.e2e.ts, live-updates.e2e.ts) keep matching the ring's
            .meter div and its computed title/label. -->
-      <ContextRing {usage} testid="context-meter" />
+      <ContextRing {usage} testid="context-meter" showLabel={false} />
     </button>
   </div>
 {/if}
@@ -187,7 +192,9 @@
     align-items: center;
     background: none;
     border: none;
-    padding: 0;
+    padding: 4px;
+    min-width: 28px;
+    min-height: 28px;
     cursor: pointer;
     color: inherit;
     font: inherit;
@@ -201,6 +208,12 @@
     outline-offset: 2px;
     border-radius: var(--radius-xs, 4px);
   }
+  @media (pointer: coarse) {
+    .trigger {
+      min-width: 44px;
+      min-height: 44px;
+    }
+  }
 
   /* Transparent positioner: sits flush against the trigger's top edge and pads
      downward to bridge the gap to the card, so the hover region is continuous.
@@ -208,9 +221,10 @@
   .pop {
     position: absolute;
     bottom: 100%;
-    left: 0;
+    left: auto;
+    right: 0;
     padding-bottom: 7px;
-    z-index: 30;
+    z-index: 60;
   }
   .pop-card {
     min-width: 220px;

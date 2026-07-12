@@ -3,14 +3,14 @@
   import Chevron from "./Chevron.svelte";
   import { reveal } from "../../lib/transitions.js";
 
-  // Shared dropdown primitive for the badge-style pickers in the composer toolbar
+  // Shared dropdown primitive for the badge-style pickers in the composer chrome
   // (FacetBadge, PermissionBadge). Owns the open/close state, keyboard navigation
-  // (Esc/↑↓/↵), the click-away backdrop, and the panel/badge/group-title/kbd-hint
-  // chrome — the ~120 lines of near-identical panel CSS + onKeydown each picker
-  // carried. The caller passes the panel body (option buttons + any extras like
-  // FacetBadge's handoff toggle / reload) as a snippet, receiving the current
-  // keyboard-highlight index `sel` and a `close()` callback. This replaces the
-  // per-picker copies and keeps them from drifting behaviorally.
+  // (Esc/↑↓/↵), the click-away backdrop, and the panel/badge/group-title chrome.
+  // The caller passes the panel body (option buttons + any extras like FacetBadge's
+  // handoff toggle / reload) as a snippet, receiving the current keyboard-highlight
+  // index `sel` and a `close()` callback. An optional key callback receives only keys
+  // not consumed by the primitive, allowing a picker-specific modifier without
+  // duplicating listbox navigation.
   //
   // Conventions (AGENTS.md): <Chevron variant="menu"> for the glyph,
   // transition:reveal for the open/close animation. Every clickable element carries
@@ -30,6 +30,7 @@
     closeLabel = "Close menu",
     openExternal = 0,
     onSelect,
+    onKeydown: onUnhandledKeydown,
     body,
   }: {
     label: string;
@@ -45,6 +46,7 @@
     closeLabel?: string;
     openExternal?: number;
     onSelect?: (index: number) => void;
+    onKeydown?: (event: KeyboardEvent, sel: number) => void;
     body: Snippet<[{ sel: number; close: () => void }]>;
   } = $props();
 
@@ -103,6 +105,8 @@
         e.preventDefault();
         onSelect?.(num - 1);
         close();
+      } else {
+        onUnhandledKeydown?.(e, sel);
       }
     }
   }
@@ -114,6 +118,7 @@
     class:accent
     data-testid={testid}
     {title}
+    aria-label={ariaLabel}
     aria-haspopup="listbox"
     aria-expanded={open}
     onclick={toggle}
@@ -134,7 +139,6 @@
     >
       <div class="group-title">{groupTitle}</div>
       {@render body({ sel, close })}
-      <div class="kbd-hint">↑↓ move · 1-9 select · ↵ select · esc cancel</div>
     </div>
   {/if}
 </div>
@@ -177,6 +181,13 @@
   .badge:hover {
     border-color: var(--border-strong);
   }
+  @media (pointer: coarse) {
+    .badge {
+      min-width: 44px;
+      min-height: 44px;
+      justify-content: center;
+    }
+  }
   .badge:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
@@ -201,14 +212,6 @@
     letter-spacing: 0.04em;
     color: var(--text-faint);
     padding: 4px 8px 2px;
-  }
-  .kbd-hint {
-    padding: 6px 8px 3px;
-    margin-top: 2px;
-    border-top: 1px solid var(--border);
-    font-size: 11px;
-    color: var(--text-faint);
-    text-align: center;
   }
   .backdrop {
     position: fixed;

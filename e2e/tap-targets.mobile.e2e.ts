@@ -1,6 +1,11 @@
 import { expect, type Locator, test } from "@playwright/test";
 import { drive, gotoFresh, openSettings } from "./helpers.js";
 
+const PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nWQAAAAASUVORK5CYII=",
+  "base64",
+);
+
 // Runs under the "mobile" project (Pixel 7 → coarse pointer + touch).
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
@@ -49,4 +54,39 @@ test("the sidebar and context-panel header arrows meet the 44px touch target", a
   // header hamburgers are gone, so a cramped hit target here would be a real regression.
   await expectTall(page.getByTestId("sidebar-open"));
   await expectTall(page.getByTestId("context-open"));
+});
+
+test("the 2a composer controls are labeled and touch-safe", async ({ page }) => {
+  const controls = [
+    page.getByTestId("facet-badge"),
+    page.getByRole("button", { name: "Attach images" }),
+    page.getByRole("button", { name: "Send", exact: true }),
+    page.getByTestId("permission-badge"),
+    page.getByTestId("model-badge"),
+    page.getByTestId("thinking-badge"),
+    page.getByTestId("context-trigger"),
+  ];
+  for (const control of controls) {
+    await expect(control).toHaveAttribute("aria-label", /.+/);
+    await expectTall(control);
+  }
+
+  const input = page.locator('input[type="file"]');
+  await input.setInputFiles({
+    name: "touch-target.png",
+    mimeType: "image/png",
+    buffer: PNG,
+  });
+  const preview = page.getByRole("button", { name: "Preview attachment 1 full screen" });
+  const remove = page.getByRole("button", { name: "Remove attachment 1" });
+  await expectTall(preview);
+  await expectTall(remove);
+  await expect(preview).toHaveAttribute("aria-label", /Preview attachment/);
+  await expect(remove).toHaveAttribute("aria-label", /Remove attachment/);
+
+  await drive(page, "streamhold");
+  const stop = page.getByRole("button", { name: /Stop( the agent)?/ }).first();
+  await expect(stop).toBeVisible();
+  await expectTall(stop);
+  await expect(stop).toHaveAttribute("title", /Stop/);
 });

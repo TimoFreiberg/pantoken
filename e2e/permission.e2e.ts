@@ -32,17 +32,10 @@ test("permission badge shows Standard by default and switches mode", async ({
   await expect(badge).toHaveClass(/nonstandard/);
 });
 
-test("permission badge sits in the composer toolbar, left of the facet badge", async ({
-  page,
-}) => {
-  // The badge lives in the composer footer toolbar (.toolbar-right),
-  // left of the facet badge (row reads permission → facet → model → effort).
-  const order = await page
-    .locator(".toolbar-right [data-testid]")
-    .evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));
-  expect(order.indexOf("permission-badge")).toBeLessThan(
-    order.indexOf("facet-badge"),
-  );
+test("permission badge sits on the status row left", async ({ page }) => {
+  const left = page.locator("[data-testid='composer-status-row'] .status-left");
+  await expect(left.getByTestId("permission-badge")).toBeVisible();
+  await expect(page.getByTestId("composer-status-right").getByTestId("permission-badge")).toHaveCount(0);
 });
 
 test("permission panel is keyboard-navigable (Esc closes, arrows move, Enter picks)", async ({
