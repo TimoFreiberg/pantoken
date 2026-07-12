@@ -128,7 +128,23 @@ echo "=== Gate 3: Bootstrap + Kickstart ==="
 
 # Install the test daemon.
 echo "  Booting test label..."
-if sudo launchctl bootstrap system "$TEMP_PLIST" 2>&1; then
+# Boot out stale label from previous runs (ignore errors if not loaded)
+sudo launchctl bootout system/"$TEST_LABEL" 2>/dev/null || true
+sudo launchctl bootout system/com.pantoken.test-gate-long 2>/dev/null || true
+sleep 0.5
+# Retry bootstrap up to 3 times (macOS launchd can race with I/O errors)
+bootstrap_ok=false
+for attempt in 1 2 3; do
+  if sudo launchctl bootstrap system "$TEMP_PLIST" 2>&1; then
+    bootstrap_ok=true
+    break
+  else
+    echo "  Bootstrap attempt $attempt failed, retrying..."
+    sudo launchctl bootout system/"$TEST_LABEL" 2>/dev/null || true
+    sleep 1
+  fi
+done
+if [[ "$bootstrap_ok" == true ]]; then
   echo "  Bootstrap: PASS"
 else
   echo "  Bootstrap: FAIL (may need sudo)"
