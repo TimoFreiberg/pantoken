@@ -5,13 +5,14 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("the composer footer shows the context-window meter", async ({ page }) => {
-  const meter = page.getByTestId("context-meter");
-  await expect(meter).toBeVisible();
-  // MOCK_USAGE is 47,200 / 200,000 tokens → 24%.
-  await expect(meter).toHaveText(/24%/);
-  // Detail is provided only by the context menu; the ring has no competing browser tooltip.
-  await expect(meter).not.toHaveAttribute("title");
+test("the composer status row shows a ring-only context trigger", async ({ page }) => {
+  const ring = page.getByTestId("context-meter");
+  const trigger = page.getByTestId("context-trigger");
+  await expect(ring).toBeVisible();
+  // The inline trigger is intentionally quiet; exact usage remains in its popup.
+  await expect(ring).not.toHaveText(/%/);
+  await expect(trigger).toHaveAttribute("aria-label", /Context window/);
+  await expect(trigger).toHaveAttribute("title", /exact context window usage/);
 });
 
 test("a context-pressure cue surfaces once the window is nearly full", async ({
@@ -29,22 +30,17 @@ test("a context-pressure cue surfaces once the window is nearly full", async ({
   await expect(cue).toContainText("/compact");
   // Tone tracks the meter ring: 90%+ is the danger band.
   await expect(cue).toHaveClass(/danger/);
-  // The ring itself moved to 91% too.
-  await expect(page.getByTestId("context-meter")).toHaveText(/91%/);
+  // The ring remains text-free; the trigger label carries the current band for assistive tech.
+  await expect(page.getByTestId("context-trigger")).toHaveAttribute("aria-label", /91% used/);
 });
 
-test("the model and effort pickers live in the composer footer", async ({
+test("the model and effort pickers live beside the context ring", async ({
   page,
 }) => {
-  // Both pickers moved out of the header into the composer's footer toolbar.
-  const toolbar = page.locator(".composer-wrap .toolbar");
-  await expect(
-    toolbar.locator(".mp .badge").filter({ hasText: "Claude Opus 4.8" }),
-  ).toBeVisible();
-  await expect(
-    toolbar.locator(".mp .badge").filter({ hasText: "medium" }),
-  ).toBeVisible();
-  // …and no longer live in the header.
+  const right = page.getByTestId("composer-status-right");
+  await expect(right.getByTestId("model-badge")).toContainText("Claude Opus 4.8");
+  await expect(right.getByTestId("thinking-badge")).toContainText("medium");
+  await expect(right.getByTestId("context-trigger")).toBeVisible();
   await expect(page.locator(".hdr .mp")).toHaveCount(0);
 });
 
@@ -86,8 +82,8 @@ test("the Compact button uses a click-twice confirm gate", async ({ page }) => {
   await expect(compactBtn).toHaveText("Click again");
   // Second click fires.
   await compactBtn.click();
-  // The mock emits a usageUpdated — meter drops to 4%.
-  await expect(meter).toHaveText(/4%/);
+  // The mock emits a usageUpdated — the accessible trigger drops to 4%.
+  await expect(page.getByTestId("context-trigger")).toHaveAttribute("aria-label", /4% used/);
 });
 
 test("the Clear context button uses a click-twice confirm gate", async ({
@@ -104,6 +100,6 @@ test("the Clear context button uses a click-twice confirm gate", async ({
   await expect(clearBtn).toHaveText("Click again");
   // Second click fires.
   await clearBtn.click();
-  // The mock emits a usageUpdated — meter drops to 0%.
-  await expect(meter).toHaveText(/0%/);
+  // The mock emits a usageUpdated — the accessible trigger drops to 0%.
+  await expect(page.getByTestId("context-trigger")).toHaveAttribute("aria-label", /0% used/);
 });

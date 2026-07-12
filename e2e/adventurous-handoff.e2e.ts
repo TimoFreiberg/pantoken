@@ -11,6 +11,9 @@ test("adventurous handoff toggles from the facet menu and persists in the sessio
   // The toggle lives in the facet picker (it's a plan-mode modifier in spirit),
   // next to the composer — per-session config near the prompt box.
   await page.getByTestId("facet-badge").click();
+  await expect(page.getByTestId("adventurous-handoff")).toHaveCount(0);
+  await page.getByRole("option", { name: "Plan" }).click();
+  await page.getByTestId("facet-badge").click();
   const toggle = page.getByTestId("adventurous-handoff");
   await expect(toggle).toBeVisible();
 
@@ -27,6 +30,11 @@ test("adventurous handoff toggles from the facet menu and persists in the sessio
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-checked", "false");
   await expect(toggle).toContainText("Off");
+
+  // The modifier is Plan-only, not merely a generic live-session control.
+  await page.getByRole("option", { name: "Execute" }).click();
+  await page.getByTestId("facet-badge").click();
+  await expect(page.getByTestId("adventurous-handoff")).toHaveCount(0);
 });
 
 test("the handoff toggle hides while drafting a new session", async ({

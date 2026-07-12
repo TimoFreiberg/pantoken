@@ -1,7 +1,7 @@
 import { expect, type Page, test } from "@playwright/test";
 import { gotoFresh, openSidebar } from "./helpers.js";
 
-// The facet picker (in the composer toolbar) switches the active facet. Clicking
+// The facet picker (in the composer chrome) switches the active facet. Clicking
 // it sends a setFacet wire message → the mock emits a sessionUpdated snapshot
 // with the new facet → foldEvent propagates → the badge updates. The badge shows
 // the ACTUAL current facet ("Execute"/"Plan"), not the old affordance label.
@@ -33,17 +33,16 @@ test("clicking the facet badge opens a picker and switching works", async ({
   await expect(badge).not.toHaveClass(/plan/);
 });
 
-test("the facet badge sits in the composer toolbar, left of the model badge", async ({
-  page,
-}) => {
-  // The badge lives in the composer footer toolbar (.toolbar-right),
-  // immediately left of the model/effort badges.
-  const order = await page
-    .locator(".toolbar-right [data-testid]")
-    .evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));
-  expect(order.indexOf("facet-badge")).toBeLessThan(
-    order.indexOf("model-badge"),
-  );
+test("the facet badge sits on the composer box top border", async ({ page }) => {
+  const slot = page.getByTestId("composer-facet-slot");
+  const box = page.getByTestId("composer-box");
+  const slotBox = await slot.boundingBox();
+  const boxBox = await box.boundingBox();
+  expect(slotBox).not.toBeNull();
+  expect(boxBox).not.toBeNull();
+  expect(slotBox!.y).toBeLessThan(boxBox!.y + 2);
+  expect(slotBox!.x).toBeGreaterThanOrEqual(boxBox!.x);
+  expect(slotBox!.x + slotBox!.width).toBeLessThanOrEqual(boxBox!.x + boxBox!.width);
 });
 
 test("Cmd+Shift+C opens the facet dropdown even when the composer is focused", async ({
@@ -99,6 +98,44 @@ test("number key quick-selects a facet from the open dropdown", async ({
   await expect(panel).toBeVisible();
   await page.keyboard.press("3");
   await expect(badge).toHaveText("Research");
+});
+
+test("highlighting Plan while Execute is active does not expose or toggle handoff", async ({ page }) => {
+  const badge = page.getByTestId("facet-badge");
+  await badge.click();
+  const panel = page.getByRole("listbox", { name: "Facet" });
+  const plan = panel.getByRole("option", { name: /Plan/ });
+  await panel.press("ArrowDown");
+  await expect(plan).toHaveClass(/hl/);
+  await expect(badge).toHaveText("Execute");
+  await expect(page.getByTestId("adventurous-handoff")).toHaveCount(0);
+  await panel.press("ArrowRight");
+  await panel.press("ArrowLeft");
+  await expect(badge).toHaveText("Execute");
+  await expect(page.getByTestId("adventurous-handoff")).toHaveCount(0);
+  await expect(panel).toBeFocused();
+});
+
+test("Right and Left set Plan handoff from the authoritative snapshot", async ({ page }) => {
+  const badge = page.getByTestId("facet-badge");
+  await badge.click();
+  await page.getByRole("option", { name: "Plan" }).click();
+  await badge.click();
+  const panel = page.getByRole("listbox", { name: "Facet" });
+  const toggle = page.getByTestId("adventurous-handoff");
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+
+  await panel.press("ArrowRight");
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await panel.press("ArrowRight");
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await expect(panel).toBeFocused();
+
+  await panel.press("ArrowLeft");
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await panel.press("ArrowLeft");
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await expect(badge).toHaveText("Plan");
 });
 
 test("Shift+Tab does not toggle facets", async ({ page }) => {

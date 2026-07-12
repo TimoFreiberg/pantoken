@@ -51,12 +51,10 @@ test("renders the greeting conversation: user, collapsed work, final answer", as
 test("the composer footer shows the model; the header shows a live connection", async ({
   page,
 }) => {
-  // The model label lives in the composer footer now (moved out of the header).
+  // The model label lives in the composer status row (moved out of the header).
   await expect(
-    page
-      .locator(".composer-wrap .mp .badge")
-      .filter({ hasText: "Claude Opus 4.8" }),
-  ).toBeVisible();
+    page.getByTestId("composer-status-right").getByTestId("model-badge"),
+  ).toContainText("Claude Opus 4.8");
   await expect(
     page.locator(".hdr").getByText("live", { exact: true }),
   ).toBeVisible();

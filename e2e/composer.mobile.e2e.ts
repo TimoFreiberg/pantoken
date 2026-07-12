@@ -66,4 +66,12 @@ test("mobile: the picker chips never overflow the viewport", async ({
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true);
+
+  for (const id of ["composer-facet-slot", "composer-status-row", "composer-status-right"]) {
+    const landmark = page.getByTestId(id);
+    const box = await landmark.boundingBox();
+    expect(box, `${id} should render`).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(vw + 0.5);
+  }
 });

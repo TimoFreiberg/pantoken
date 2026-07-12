@@ -1020,7 +1020,7 @@
 
     {#if drafting && store.draft}
       <!-- New-session config chips (project · worktree). Model + effort live in the
-           footer toolbar below, rebound to the draft via store.composerConfig. -->
+           status row below, rebound to the draft via store.composerConfig. -->
       <div class="chips">
         <button
           class="chip"
@@ -1046,6 +1046,9 @@
     {/if}
 
     <div class="box-wrap">
+      <div class="composer-facet-slot" data-testid="composer-facet-slot">
+        <FacetBadge />
+      </div>
       {#if pickingCwd && drafting && store.draft}
         <DirPicker
           recents={recentCwds}
@@ -1088,74 +1091,128 @@
           onhover={(i) => (atSel = i)}
         />
       {/if}
-      <div class="box" class:streaming bind:this={box}>
-      <button
-        class="expand"
-        class:expanded
-        onclick={toggleExpand}
-        aria-pressed={expanded}
-        aria-label={expanded ? "Collapse composer" : "Expand composer"}
-        title={expanded ? "Collapse composer (⌥⇧↓)" : "Expand composer (⌥⇧↑)"}
-        tabindex="-1"
-      >{expanded ? "⌄" : "⌃"}</button>
-      <textarea
-        bind:this={ta}
-        bind:value={store.composerDraft}
-        oninput={onInput}
-        onkeydown={onKeydown}
-        onpaste={onPaste}
-        onclick={() => (cursorPos = ta?.selectionStart ?? 0)}
-        onkeyup={() => (cursorPos = ta?.selectionStart ?? 0)}
-        placeholder={drafting
-          ? "Describe a task or ask a question…"
-          : streaming
-            ? "Queue a message…"
-            : "Message pantoken…"}
-        rows="1"
-        role="combobox"
-        aria-expanded={slashOpen || atOpen}
-        aria-controls={atOpen ? "at-menu" : "slash-menu"}
-        aria-autocomplete="list"
-      ></textarea>
-      <div class="actions">
+      <div class="box" class:streaming bind:this={box} data-testid="composer-box">
         <button
-          class="send"
-          disabled={submitting || addingImages || (!store.composerDraft.trim() && imageCount === 0)}
-          onclick={() => submit()}
-          aria-label={drafting ? "Create session and send" : "Send"}
-          title={drafting
-            ? `Create session and send first message (${isTouch ? "⌘/Ctrl+Enter" : "Enter"})`
-            : `Send (${isTouch ? "⌘/Ctrl+Enter" : "Enter"})`}
-        >
-          ↑
-        </button>
-      </div>
+          class="expand"
+          class:expanded
+          onclick={toggleExpand}
+          aria-pressed={expanded}
+          aria-label={expanded ? "Collapse composer" : "Expand composer"}
+          title={expanded ? "Collapse composer (⌥⇧↓)" : "Expand composer (⌥⇧↑)"}
+          tabindex="-1"
+        >{expanded ? "⌄" : "⌃"}</button>
+        <div class="composer-attachments" data-testid="composer-attachments">
+          <!-- Hidden file input for image attachments. -->
+          <input
+            bind:this={fileInput}
+            type="file"
+            accept="image/*"
+            multiple
+            class="file-input-hidden"
+            onchange={onFilesSelected}
+            tabindex="-1"
+          />
+          {#if imageCount > 0}
+            <button
+              class="attach-tag"
+              disabled={addingImages}
+              onclick={openFilePicker}
+              aria-label={`Add more images (${imageCount} attached)`}
+              title={`${imageCount} image${imageCount > 1 ? "s" : ""} attached — add more (⌘⇧F)`}
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </svg>
+              {imageCount}
+            </button>
+            {#each images as img, i (i)}
+              <span class="thumb-chip">
+                <button
+                  class="thumb-preview"
+                  onclick={() => (lightboxIndex = i)}
+                  title="Preview image full screen (Enter)"
+                  aria-label={`Preview attachment ${i + 1} full screen`}
+                >
+                  <img src="data:{img.mimeType};base64,{img.data}" alt={`Attachment ${i + 1}`} />
+                </button>
+                <button
+                  class="thumb-remove"
+                  onclick={() => removeImage(i)}
+                  onkeydown={(e) => {
+                    if (e.key === "Backspace" || e.key === "Delete") {
+                      e.preventDefault();
+                      removeImage(i);
+                    }
+                  }}
+                  title="Remove this image (Delete)"
+                  aria-label={`Remove attachment ${i + 1}`}
+                >
+                  <span aria-hidden="true">×</span>
+                </button>
+              </span>
+            {/each}
+          {:else}
+            <IconButton disabled={addingImages} onclick={openFilePicker} title="Attach images (⌘⇧F)" aria-label="Attach images">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.2a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </svg>
+            </IconButton>
+          {/if}
+        </div>
+        <textarea
+          bind:this={ta}
+          bind:value={store.composerDraft}
+          oninput={onInput}
+          onkeydown={onKeydown}
+          onpaste={onPaste}
+          onclick={() => (cursorPos = ta?.selectionStart ?? 0)}
+          onkeyup={() => (cursorPos = ta?.selectionStart ?? 0)}
+          placeholder={drafting
+            ? "Describe a task or ask a question…"
+            : streaming
+              ? "Queue a message…"
+              : "Message pantoken…"}
+          rows="1"
+          role="combobox"
+          aria-expanded={slashOpen || atOpen}
+          aria-controls={atOpen ? "at-menu" : "slash-menu"}
+          aria-autocomplete="list"
+        ></textarea>
+        <div class="actions">
+          <button
+            class="send"
+            disabled={submitting || addingImages || (!store.composerDraft.trim() && imageCount === 0)}
+            onclick={() => submit()}
+            aria-label={drafting ? "Create session and send" : "Send"}
+            title={drafting
+              ? `Create session and send first message (${isTouch ? "⌘/Ctrl+Enter" : "Enter"})`
+              : `Send (${isTouch ? "⌘/Ctrl+Enter" : "Enter"})`}
+          >
+            ↑
+          </button>
+        </div>
       </div>
     </div>
 
-    <!-- Footer toolbar: the session's context fill on the left, the per-session
-         controls (attach · model · effort) on the right. Mirrors the Claude app's
-         composer chrome; permission/voice controls are intentionally omitted. -->
-    <div class="toolbar">
-      <div class="toolbar-left">
+    <div class="composer-status-row" data-testid="composer-status-row">
+      <div class="status-left">
+        <PermissionBadge />
         {#if drafting}
           <span class="draft-hint" title="A new session is created when you send">new session</span>
-        {:else}
-          <ContextMeter />
         {/if}
       </div>
       {#if streaming}
         <!-- A hint that Enter while the agent works queues a follow-up (the driver
              routes mid-turn sends to /turn/input). Lives inside the always-present
-             toolbar so finishing a turn doesn't add/remove a line and jump the
+             status row so finishing a turn doesn't add/remove a line and jump the
              layout. Hidden on touch viewports, where there's no Enter to hint at. -->
         <div class="toolbar-hint">
           <kbd>Enter</kbd> queues a follow-up
         </div>
       {/if}
-      <div class="toolbar-right">
+      <div class="composer-status-right" data-testid="composer-status-right">
         {#if streaming}
-          <!-- Keep Stop in the always-present toolbar so a turn starting/finishing
+          <!-- Keep Stop in the always-present status row so a turn starting/finishing
                never changes the composer's height. Unlike the follow-up hint, this
                remains visible on touch viewports as the primary in-flight control. -->
           <button
@@ -1176,64 +1233,10 @@
                 : "■ Stop"}</button
           >
         {/if}
-        <!-- Hidden file input for image attachments. -->
-        <input
-          bind:this={fileInput}
-          type="file"
-          accept="image/*"
-          multiple
-          class="file-input-hidden"
-          onchange={onFilesSelected}
-          tabindex="-1"
-        />
-        {#if imageCount > 0}
-          <button
-            class="attach-tag"
-            disabled={addingImages}
-            onclick={openFilePicker}
-            title={`${imageCount} image${imageCount > 1 ? "s" : ""} attached — add more (⌘⇧F)`}
-          >
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-            </svg>
-            {imageCount}
-          </button>
-          {#each images as img, i (i)}
-            <span class="thumb-chip">
-              <button
-                class="thumb-preview"
-                onclick={() => (lightboxIndex = i)}
-                title="Preview image full screen (Enter)"
-                aria-label={`Preview attachment ${i + 1} full screen`}
-              >
-                <img src="data:{img.mimeType};base64,{img.data}" alt={`Attachment ${i + 1}`} />
-              </button>
-              <button
-                class="thumb-remove"
-                onclick={() => removeImage(i)}
-                onkeydown={(e) => {
-                  if (e.key === "Backspace" || e.key === "Delete") {
-                    e.preventDefault();
-                    removeImage(i);
-                  }
-                }}
-                title="Remove this image (Delete)"
-                aria-label={`Remove attachment ${i + 1}`}
-              >
-                <span aria-hidden="true">×</span>
-              </button>
-            </span>
-          {/each}
-        {:else}
-          <IconButton disabled={addingImages} onclick={openFilePicker} title="Attach images (⌘⇧F)" aria-label="Attach images">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-            </svg>
-          </IconButton>
-        {/if}
-        <PermissionBadge />
-        <FacetBadge />
         <ModelPicker />
+        {#if !drafting}
+          <ContextMeter />
+        {/if}
         {#if store.modelCatalogDiagnostic}
           <span class="model-diagnostic" title={store.modelCatalogDiagnostic.message}>
             Model picker unavailable — {store.modelCatalogDiagnostic.message}
@@ -1414,8 +1417,30 @@
     background: var(--surface);
     border: 1px solid var(--border-strong);
     border-radius: var(--radius);
-    padding: 8px 8px 8px 14px;
+    padding: 8px 8px 8px 10px;
     transition: border-color 0.15s;
+  }
+  .composer-facet-slot {
+    position: absolute;
+    top: 0;
+    left: 14px;
+    z-index: 4;
+    transform: translateY(-50%);
+  }
+  .composer-facet-slot :global(.badge) {
+    color: var(--text-muted);
+    background: var(--surface);
+    border-color: var(--border-strong);
+    border-radius: 999px;
+    padding: 3px 9px;
+  }
+  .composer-attachments {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 5px;
+    max-width: min(30vw, 180px);
+    flex-wrap: wrap;
   }
   .box:focus-within {
     border-color: var(--accent);
@@ -1477,8 +1502,8 @@
   }
   .send {
     flex-shrink: 0;
-    width: 34px;
-    height: 34px;
+    width: 36px;
+    height: 36px;
     border-radius: 50%;
     border: none;
     background: var(--accent);
@@ -1496,8 +1521,9 @@
   .send:not(:disabled):active {
     transform: scale(0.92);
   }
-  /* Steer/follow-up hint, centered in the toolbar between the meter and the pickers.
-     Shrinks + ellipsizes before crowding them; hidden entirely on touch (below). */
+  /* Steer/follow-up hint, centered in the status row between the permission and
+     model/context controls. Shrinks + ellipsizes before crowding them; hidden entirely
+     on touch (below). */
   .toolbar-hint {
     flex-shrink: 1;
     min-width: 0;
@@ -1521,42 +1547,43 @@
     .toolbar-hint {
       display: none;
     }
-    /* Sidebars are overlay drawers here — no gutter to hold against them. */
     .composer-wrap {
       padding-inline: 16px;
     }
-    /* The chip row (permission · facet · model · effort) doesn't fit one phone
-       row next to the meter — wrap instead of clipping the model chip off the
-       right edge. Chips keep their own 42vw ellipsis caps, so a single row
-       returns whenever the labels are short enough. */
-    .toolbar {
+    .composer-status-row {
+      align-items: flex-start;
       flex-wrap: wrap;
       row-gap: 6px;
     }
-    .toolbar-right {
-      flex-wrap: wrap;
+    .composer-status-right {
+      flex: 1 1 100%;
       justify-content: flex-end;
-      row-gap: 6px;
-      /* Share the meter's row: let the chip block take the leftover width and
-         wrap internally (chips keep natural size), instead of dropping the
-         whole block below the meter. */
-      flex: 1;
+      flex-wrap: wrap;
       min-width: 0;
     }
+    .composer-attachments {
+      max-width: 42vw;
+    }
   }
-  .toolbar {
+  .composer-status-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
     padding: 0 2px;
+    min-width: 0;
   }
-  .toolbar-left,
-  .toolbar-right {
+  .status-left,
+  .composer-status-right {
     display: inline-flex;
     align-items: center;
     gap: 8px;
     min-width: 0;
+  }
+  .composer-status-right {
+    margin-left: auto;
+    justify-content: flex-end;
+    flex-wrap: wrap;
   }
   .model-diagnostic {
     max-width: 34ch;
@@ -1568,8 +1595,8 @@
     text-overflow: ellipsis;
   }
   /* The model/effort badges can grow; let them shrink + ellipsize before the
-     fixed-width context meter or attach button give up their space. */
-  .toolbar-right {
+     fixed-width context ring gives up its space. */
+  .composer-status-right {
     flex-shrink: 1;
   }
   .file-input-hidden {
@@ -1670,9 +1697,24 @@
     outline-offset: 1px;
   }
   @media (pointer: coarse) {
+    .composer-facet-slot :global(.badge),
+    .status-left :global(.badge),
+    .composer-status-right :global(.badge),
+    .attach-tag,
+    .send,
+    .stop,
+    .thumb-preview,
     .thumb-remove {
-      width: 18px;
-      height: 18px;
+      min-width: 44px;
+      min-height: 44px;
+    }
+    .thumb-chip {
+      width: 44px;
+      height: 44px;
+    }
+    .thumb-remove {
+      width: 22px;
+      height: 22px;
       opacity: 1;
     }
   }
