@@ -66,6 +66,29 @@ resolution is non-obvious or likely to bite again. Otherwise see `jj log`.
       have no live-driver test (mock e2e covers wire agreement, not the polytoken
       PermissionMonitorMode/McpAction mappings or the error-surfacing notice).
 
+## 🎨 UI explorations
+
+- [ ] **Implement exploration 2a: composer chrome and status row.** Add the facet
+      control as a small tab on the composer's top border; keep upload on the left
+      edge of the composer; put permissions at the bottom-left; combine model and
+      effort into one quiet, text-looking button at the bottom-right; and place a
+      context-usage circle immediately to its right with no percentage text. Keep
+      the exact context value available through the control's tooltip/popover and
+      preserve keyboard and touch labels/hit targets.
+- [ ] **Implement exploration 2c: sidebar top-row controls.** Keep New session as
+      the primary button, turn Search and Filter into icon buttons in the top row,
+      and pin Collapse to the left-side position it occupies in the collapsed
+      layout from exploration 1f so the collapse target does not move between
+      states. Preserve the search expansion behavior, filter-active indicator,
+      hotkeys, tooltips, and mobile-sized labeled controls.
+- [ ] **Implement exploration 1g: quieter transcript/sidebar chrome.** Minimize
+      the transcript header to a single-line session title with a muted project
+      tag (omit the tag when redundant), move Settings to the bottom-left sidebar
+      footer, and hide the connection LED while the connection is healthy; show
+      connection state only for reconnecting/offline/error states. Target the
+      compact 48px header and retain accessible labels and the existing settings
+      shortcut.
+
 
 ## 🔵 Corpus capture follow-ups (from the 2026-07-06 live-capture session)
 
