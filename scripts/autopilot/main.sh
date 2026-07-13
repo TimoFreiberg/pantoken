@@ -196,6 +196,8 @@ while true; do
   fi
 
   # 3. Triage (serial, headless)
+  # exec stdout → tee (log) → parser; stderr is captured separately
+  TRIAGE_LOG="$MARKER_DIR/triage-$(date +%Y%m%d-%H%M%S).log"
   TRIAGE_OUTPUT=$(cd "$REPO_ROOT" && polytoken exec --facet plan --max-tool-turns 30 \
     "$(cat "$SCRIPT_DIR/triage-prompt.md")" \
     | "$SCRIPT_DIR/parse-triage.sh" 2>/dev/null || echo '{"status":"error"}')
