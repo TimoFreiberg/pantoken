@@ -243,14 +243,11 @@ async function assembleTarGz(
     copyDirRecursive(clientDist, clientDistOut);
 
     // Build tar.gz (no wrapper prefix, direct root)
-    const tarCmd = await capture([
-      "tar",
-      "czf",
-      join(outputDir, HEADLESS_ASSET),
-      "-C",
-      stagingDir,
-      ".",
-    ]);
+    // COPYFILE_DISABLE=1 prevents BSD tar from adding AppleDouble (._*) metadata.
+    const tarCmd = await capture(
+      ["tar", "czf", join(outputDir, HEADLESS_ASSET), "-C", stagingDir, "."],
+      { env: { COPYFILE_DISABLE: "1" } },
+    );
     if (tarCmd.code !== 0)
       fail(`tar failed: ${tarCmd.stderr}`);
 
