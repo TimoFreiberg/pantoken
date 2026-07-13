@@ -2482,7 +2482,7 @@ impl PantokenDriver for MockDriver {
             ),
         };
         *self.config.lock() = config.clone();
-        let permission_monitor = permission_monitor.unwrap_or(PermissionMonitorMode::Standard);
+        let permission_monitor = permission_monitor.unwrap_or(PermissionMonitorMode::BypassPlus);
         let (events, snapshot) = new_session_seed(&dir, config, facet, permission_monitor);
         let session_id = snapshot.r#ref.session_id.clone();
         *self.last_created.lock() = Some(LastCreated {
@@ -2576,7 +2576,7 @@ impl PantokenDriver for MockDriver {
             model_id: default.model_id,
             thinking_level: default.thinking_level,
             favorites: Vec::new(),
-            default_permission_monitor: None,
+            default_permission_monitor: Some(PermissionMonitorMode::BypassPlus),
         }
     }
     async fn list_commands(&self, _session_id: Option<SessionId>) -> Vec<CommandInfo> {
@@ -3850,5 +3850,20 @@ mod parse_at_references_tests {
     #[test]
     fn empty_text_yields_no_references() {
         assert!(parse_at_references("").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod model_defaults_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn mock_model_defaults_has_bypass_plus_default_permission_monitor() {
+        let driver = MockDriver::new();
+        let defaults = driver.get_model_defaults().await;
+        assert_eq!(
+            defaults.default_permission_monitor,
+            Some(PermissionMonitorMode::BypassPlus)
+        );
     }
 }

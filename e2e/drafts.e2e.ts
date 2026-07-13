@@ -258,7 +258,7 @@ test("submitting a draft carries its facet into the created session", async ({
 // Facet and permission-monitor are first-class new-session draft settings (like
 // model/thinking). These tests prove: they persist across leave/reopen, a
 // plan-facet draft produces a new session whose badge reads "Plan", and a
-// default (untouched) draft produces a session with "Execute"/"Standard".
+// default (untouched) draft produces a session with "Execute"/"Bypass+".
 
 test("a draft's facet + permission-monitor survive leaving and reopening", async ({
   page,
@@ -343,15 +343,15 @@ test("submitting a plan-facet draft creates a session whose badge reads Plan", a
   await expect(page.getByTestId("facet-badge")).toHaveText("Plan");
 });
 
-test("submitting a default draft creates a session with Execute + Standard badges", async ({
+test("submitting a default draft creates a session with Execute + Bypass+ badges", async ({
   page,
 }) => {
   await openSidebar(page);
   await page.getByRole("button", { name: "New session…" }).click();
 
-  // An untouched draft: facet "Execute", permission "Standard" (the defaults).
+  // An untouched draft: facet "Execute", permission "Bypass+" (the daemon default).
   await expect(page.getByTestId("facet-badge")).toHaveText("Execute");
-  await expect(page.getByTestId("permission-badge")).toContainText("Standard");
+  await expect(page.getByTestId("permission-badge")).toContainText("Bypass+");
 
   // Submit without changing anything.
   const draftBox = page.getByPlaceholder("Describe a task or ask a question…");
@@ -361,5 +361,5 @@ test("submitting a default draft creates a session with Execute + Standard badge
   // The new session's badges reflect the defaults — no override was applied.
   await expect(page.getByText("On it — the session's up")).toBeVisible();
   await expect(page.getByTestId("facet-badge")).toHaveText("Execute");
-  await expect(page.getByTestId("permission-badge")).toContainText("Standard");
+  await expect(page.getByTestId("permission-badge")).toContainText("Bypass+");
 });

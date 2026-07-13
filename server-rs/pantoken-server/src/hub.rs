@@ -2811,6 +2811,25 @@ async fn finish_switch(
         }),
     );
 
+    // Re-broadcast model defaults so the draft view picks up the daemon's
+    // config_default permission mode once a warm daemon is available. On a
+    // cold start, the connect-time ModelDefaults had default_permission_monitor
+    // = None; after this session switch warmed a daemon, the re-fetch discovers
+    // the real default. The client's reseedDraftFromDefaults fills undefined
+    // draft fields, so an open draft updates without clobbering an explicit pick.
+    let hub_ops = { hub.lock().hub_ops.clone() };
+    let driver = { hub.lock().driver.clone() };
+    hub_ops.enqueue(
+        "switch_model_defaults",
+        Box::new(move |hub| {
+            Box::pin(async move {
+                let defaults = driver.get_model_defaults().await;
+                let h = hub.lock();
+                h.broadcast(ServerMessage::ModelDefaults { defaults });
+            })
+        }),
+    );
+
     Some(sid)
 }
 
@@ -4626,6 +4645,61 @@ mod hub_models_tests {
         match result {
             ServerMessage::SessionList { .. } => {}
             other => panic!("expected SessionList after detach, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn session_switch_rebroadcasts_model_defaults() {
+        use pantoken_protocol::session_driver::PermissionMonitorMode;
+
+        let (_driver, hub, mut hub_ops) = test_hub();
+        let (client_key, _tx, mut rx) = hub.lock().add_client(None);
+        hub.lock().spawn_connect_lists(client_key);
+
+        // Drain connect-time messages (7 tasks), matching
+        // connecting_client_receives_model_list_and_defaults.
+        for _ in 0..7 {
+            apply_one(hub.clone(), &mut hub_ops).await;
+        }
+        // Clear the connect-time ModelDefaults from the receiver.
+        let _ = drain_until(&mut rx, |msg| {
+            matches!(msg, ServerMessage::ModelDefaults { .. })
+        })
+        .await;
+
+        // Trigger a session switch (open_session on the mock).
+        hub.lock().handle_client(
+            client_key,
+            ClientMessage::OpenSession {
+                path: "/sessions/demo-session.jsonl".into(),
+            },
+        );
+        // handle_client(OpenSession) enqueues an open_session task; applying
+        // it runs switch_to → finish_switch, which enqueues the follow-up
+        // switch_* tasks (switch_session_list, switch_command_list,
+        // switch_facet_list, switch_file_index, switch_at_refs,
+        // switch_model_defaults). Drain them all with a short timeout so the
+        // test doesn't break if tasks are added/removed. When the queue is
+        // empty or the poll times out, the `while let` simply exits.
+        while let Ok(Some(op)) = timeout(Duration::from_millis(100), hub_ops.rx.recv()).await {
+            op(hub.clone()).await;
+        }
+
+        // Verify a ModelDefaults was rebroadcast after the switch.
+        let defaults = drain_until(&mut rx, |msg| {
+            matches!(msg, ServerMessage::ModelDefaults { .. })
+        })
+        .await;
+        match defaults {
+            ServerMessage::ModelDefaults { defaults } => {
+                // The mock now returns Some(BypassPlus) for
+                // default_permission_monitor.
+                assert_eq!(
+                    defaults.default_permission_monitor,
+                    Some(PermissionMonitorMode::BypassPlus)
+                );
+            }
+            other => panic!("expected ModelDefaults after switch, got {other:?}"),
         }
     }
 }
