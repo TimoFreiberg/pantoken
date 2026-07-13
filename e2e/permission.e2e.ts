@@ -143,3 +143,22 @@ test("clicking the permission badge in the draft view sets the draft's permissio
     .click();
   await expect(page.getByTestId("permission-badge")).toContainText("Standard");
 });
+
+// --- Draft default-mode test ---
+// The draft's permission badge should reflect the daemon's default permission
+// mode from modelDefaults.defaultPermissionMonitor (the mock returns
+// Some(BypassPlus), so it reads "Bypass+"). Under the broken path
+// (defaultPermissionMonitor = None → fallback), it would show "Standard" — so
+// this assertion fails if the fix is not applied.
+
+test("draft permission badge reflects modelDefaults defaultPermissionMonitor", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  // Open a new-session draft.
+  await page.getByTestId("sidebar").getByText("New session…").click();
+  await expect(page.getByTestId("new-session")).toBeVisible();
+  // The draft badge should show the daemon's default permission mode.
+  const badge = page.getByTestId("permission-badge");
+  await expect(badge).toContainText("Bypass+");
+});
