@@ -3,6 +3,10 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
+// Skip all tests in this file if jj is not installed (e.g. CI on Linux)
+const jjAvailable = spawnSync("jj", ["--version"], { encoding: "utf-8" }).status === 0;
+const describeOrSkip = jjAvailable ? describe : describe.skip;
+
 let tempDir: string;
 
 function run(cmd: string[], cwd: string, env: Record<string, string> = {}): { stdout: string; stderr: string; exitCode: number } {
@@ -46,7 +50,7 @@ afterEach(() => {
   rmSync(tempDir, { recursive: true, force: true });
 });
 
-describe("finalize.sh jj primitives", () => {
+describeOrSkip("finalize.sh jj primitives", () => {
   test("jj op log captures current op ID for rollback", () => {
     run(["git", "init"], tempDir);
     run(["jj", "git", "init", "--colocate"], tempDir);
