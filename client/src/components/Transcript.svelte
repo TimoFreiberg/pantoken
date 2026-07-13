@@ -814,7 +814,7 @@
               {/if}
             </div>
           {/if}
-          {#if item.text || item.entryId || (item.ts && !item.delivery)}
+          {#if (item.text || (item.images && item.images.length > 0)) && (item.entryId || (item.ts && !item.delivery))}
             <div class="umeta">
               {#if item.text}
                 <button

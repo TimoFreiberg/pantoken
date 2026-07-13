@@ -75,3 +75,13 @@ test("mobile: the picker chips never overflow the viewport", async ({
     expect(box!.x + box!.width).toBeLessThanOrEqual(vw + 0.5);
   }
 });
+
+test("mobile: send button is enabled when idle and the composer is empty", async ({
+  page,
+}) => {
+  // On touch, bare Enter inserts a newline, so the Send button is the only path to
+  // send an empty prompt. After the greeting settles (idle), it must be enabled.
+  const box = composer(page);
+  await expect(box).toHaveValue("");
+  await expect(page.locator("button.send")).not.toBeDisabled();
+});
