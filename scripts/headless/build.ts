@@ -390,14 +390,13 @@ if (import.meta.main) {
         PANTOKEN_BUILD_SHA: buildSha,
       },
     });
-    binaryPath = join(serverRs, "target", "release", "pantoken-server");
+    binaryPath = join(repoRoot, "target", "release", "pantoken-server");
     if (!existsSync(binaryPath))
       fail(`built binary not found: ${binaryPath}`);
   } else {
     // In skip-build mode, look for an existing binary
     binaryPath = join(
       repoRoot,
-      "server-rs",
       "target",
       "release",
       "pantoken-server",
