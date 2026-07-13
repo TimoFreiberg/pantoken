@@ -153,6 +153,26 @@ find_free_slot() {
   _release_lock
 }
 
+# Check if an issue is already claimed: is_issue_claimed <issue_number>
+# Returns 0 (claimed) or 1 (not claimed)
+is_issue_claimed() {
+  local issue_number=$1
+  _acquire_lock || return 1
+  local result
+  result=$(jq -r --argjson n "$issue_number" \
+    '.claims[] | select(.issue_number == $n) | .issue_number' \
+    "$CLAIMS_FILE")
+  _release_lock
+  [ -n "$result" ]
+}
+
+# List all claimed issue numbers (space-separated)
+list_claimed_issues() {
+  _acquire_lock || return 1
+  jq -r '[.claims[].issue_number] | join(" ")' "$CLAIMS_FILE"
+  _release_lock
+}
+
 # Helper: release a stale claim AND clean up its orphaned workspace.
 # Called from recover_stale_claims (lock already held).
 _release_stale_claim() {

@@ -114,6 +114,31 @@ describe("claims.sh", () => {
     expect(result.stdout).toBe("23");
   });
 
+  test("is_issue_claimed returns true for claimed issue", () => {
+    runClaimsFn("claim_issue", ["23", "0"]);
+    const result = runClaimsFn("is_issue_claimed", ["23"]);
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("is_issue_claimed returns false for unclaimed issue", () => {
+    runClaimsFn("claim_issue", ["23", "0"]);
+    const result = runClaimsFn("is_issue_claimed", ["99"]);
+    expect(result.exitCode).toBe(1);
+  });
+
+  test("list_claimed_issues returns all claimed issue numbers", () => {
+    runClaimsFn("claim_issue", ["23", "0"]);
+    runClaimsFn("claim_issue", ["42", "1"]);
+    const result = runClaimsFn("list_claimed_issues");
+    expect(result.stdout).toContain("23");
+    expect(result.stdout).toContain("42");
+  });
+
+  test("list_claimed_issues returns empty string when no claims", () => {
+    const result = runClaimsFn("list_claimed_issues");
+    expect(result.stdout).toBe("");
+  });
+
   test("recover_stale_claims releases claim with dead daemon PID", () => {
     runClaimsFn("claim_issue", ["23", "0"]);
     runClaimsFn("update_claim_session", ["23", "fake-session-id"]);

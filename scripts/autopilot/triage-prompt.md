@@ -17,14 +17,23 @@ gh issue list --repo TimoFreiberg/pantoken --state open --json number,title,body
 
 Only consider issues where `author.login` is `TimoFreiberg`. Skip all others.
 
-### 3. Skip issues waiting for human input
+### 3. Skip issues currently being implemented
+
+The following issues are already being worked on by the autopilot. **Skip them
+entirely** — do not evaluate, comment on, or pick them:
+
+CLAIMED_ISSUES_PLACEHOLDER
+
+(If this list is empty, all open issues are eligible.)
+
+### 4. Skip issues waiting for human input
 
 For each issue, scan its comments for the invisible HTML marker
 `<!-- autopilot -->`. If the most recent comment containing this marker has **no
 subsequent human reply** (any comment after it not containing the marker), skip
 that issue — it's waiting for the human to answer a question you already asked.
 
-### 4. Skip issues with blocking labels
+### 5. Skip issues with blocking labels
 
 Skip issues with labels: `discussion`, `wontfix`, `blocked`, `duplicate`, `epic`.
 

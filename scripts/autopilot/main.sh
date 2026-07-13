@@ -70,11 +70,14 @@ trap 'log ""; exit 130' INT TERM
 run_implementation() {
   local issue_number=$1 issue_url=$2 issue_title=$3 slot=$4
 
-  # 1. Create worktree (reuse if it already exists from a crashed run)
+  # 1. Create worktree.
+  # If a workspace directory already exists, it's from a crashed run —
+  # but we can only safely remove it if no daemon is active for this issue.
+  # The is_issue_claimed check in the main loop should have prevented us
+  # from getting here for an active issue, so this is just a safety net.
   cd "$REPO_ROOT"
   if [ -d "$REPO_ROOT/../pantoken-autopilot-$issue_number" ]; then
-    log "Workspace for issue #$issue_number already exists — reusing"
-    # Forget the old workspace registration and re-add to be safe
+    log "WARN: workspace dir for issue #$issue_number still exists — cleaning up stale workspace"
     jj workspace forget "autopilot-$issue_number" 2>/dev/null || true
     rm -rf "$REPO_ROOT/../pantoken-autopilot-$issue_number"
   fi
@@ -210,11 +213,21 @@ while true; do
   fi
 
   # 3. Triage (serial, headless)
-  # exec stdout → tee (log) → parser; stderr is captured separately
-  # shellcheck disable=SC2034 # TRIAGE_LOG is used by tee in the pipe below
-  TRIAGE_LOG="$MARKER_DIR/triage-$(date +%Y%m%d-%H%M%S).log"
+  # Build the triage prompt with currently-claimed issues injected
+  CLAIMED=$(list_claimed_issues)
+  if [ -z "$CLAIMED" ]; then
+    CLAIMED_LIST="(none)"
+  else
+    # Format as a bulleted list
+    CLAIMED_LIST=""
+    for num in $CLAIMED; do
+      CLAIMED_LIST="${CLAIMED_LIST}- #${num}"$'\n'
+    done
+  fi
+  TRIAGE_PROMPT=$(sed "s/CLAIMED_ISSUES_PLACEHOLDER/$CLAIMED_LIST/" "$SCRIPT_DIR/triage-prompt.md")
+
   TRIAGE_OUTPUT=$(cd "$REPO_ROOT" && polytoken exec --facet plan --max-tool-turns 15 \
-    "$(cat "$SCRIPT_DIR/triage-prompt.md")" \
+    "$TRIAGE_PROMPT" \
     | "$SCRIPT_DIR/parse-triage.sh" 2>/dev/null || echo '{"status":"error"}')
 
   STATUS=$(echo "$TRIAGE_OUTPUT" | jq -r '.status')
@@ -237,6 +250,19 @@ while true; do
     ISSUE_TITLE=$(echo "$TRIAGE_OUTPUT" | jq -r '.title')
 
     log "Triage picked issue #$ISSUE_NUMBER: $ISSUE_TITLE"
+
+    # Defensive check: skip if already claimed (triage agent may have ignored
+    # the claimed-issues list in the prompt)
+    if is_issue_claimed "$ISSUE_NUMBER"; then
+      log "Issue #$ISSUE_NUMBER is already claimed — skipping (triage should have filtered this)"
+      if [ "$ACTIVE_SLOTS" -gt 0 ]; then
+        FINISHED_SLOT=$(wait_for_slot_to_finish)
+        merge_and_cleanup_finished_slot "$FINISHED_SLOT" || true
+      else
+        sleep 30
+      fi
+      continue
+    fi
 
     # In dry-run mode, print the triage decision and exit
     if [ "$DRY_RUN" = true ]; then
