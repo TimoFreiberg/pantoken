@@ -76,6 +76,8 @@ test("text inputs render at >=16px on touch (guards against iOS focus-zoom)", as
   // every input to 16px. Assert it actually reaches a real input — the sidebar search,
   // which is 13px on desktop — under this hasTouch (pointer: coarse) project.
   await openSidebar(page);
+  // The search input is behind a toggle — click it to reveal the input
+  await page.getByTestId("sidebar-search-toggle").click();
   const search = page.getByRole("textbox", { name: "Search sessions" });
   await expect(search).toBeVisible();
   const fontSize = await search.evaluate((el) =>

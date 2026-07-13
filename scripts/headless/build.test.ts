@@ -116,7 +116,7 @@ describe("headless build logic", () => {
 
   test("skip-build mode requires pre-existing binary and client-dist", () => {
     // In skip-build mode, build.ts checks for:
-    // 1. Existing binary at server-rs/target/release/pantoken-server
+    // 1. Existing binary at target/release/pantoken-server
     // 2. Existing client/dist/index.html
     // This is tested indirectly via the contract test below
     const exists = true; // The actual file existence check is in build.ts
