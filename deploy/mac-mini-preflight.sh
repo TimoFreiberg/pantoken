@@ -195,7 +195,7 @@ else
 fi
 
 echo "--- Check 9: Sudoers ---"
-if "$SUDO_BIN" -n -l "/bin/launchctl kickstart -k system/$LAUNCHD_LABEL" >/dev/null 2>&1; then
+if "$SUDO_BIN" -n -l /bin/launchctl kickstart -k "system/$LAUNCHD_LABEL" >/dev/null 2>&1; then
   check_pass "sudoers allows kickstart -k system/$LAUNCHD_LABEL"
 else
   if [[ "$DO_SETUP" == true ]]; then
