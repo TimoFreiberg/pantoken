@@ -270,6 +270,7 @@ async function assembleTarGz(
 async function signWithMinisign(
   archivePath: string,
   keyText: string,
+  keyPassword: string = "",
 ): Promise<string> {
   if (!keyText)
     fail("TAURI_SIGNING_PRIVATE_KEY_TEXT is required for minisign signing");
@@ -279,18 +280,20 @@ async function signWithMinisign(
     const keyFile = join(tmpDir, "pantoken-sign.key");
     writeFileSync(keyFile, keyText, { mode: 0o600 });
 
-    const sig = await capture([
-      "minisign",
-      "-S",
-      "-s",
-      keyFile,
-      "-x",
-      `${archivePath}.sig`,
-      "-m",
-      archivePath,
+    // Pipe the password via stdin so minisign doesn't prompt interactively.
+    // Even an empty-password-encrypted key needs an empty line on stdin.
+    const proc = Bun.spawn(
+      ["minisign", "-S", "-s", keyFile, "-x", `${archivePath}.sig`, "-m", archivePath],
+      { stdout: "pipe", stderr: "pipe", stdin: "pipe" },
+    );
+    proc.stdin.write(`${keyPassword}\n`);
+    proc.stdin.end();
+    const [stderr] = await Promise.all([
+      new Response(proc.stderr).text(),
     ]);
-    if (sig.code !== 0)
-      fail(`minisign sign failed: ${sig.stderr}`);
+    const code = await proc.exited;
+    if (code !== 0)
+      fail(`minisign sign failed: ${stderr}`);
 
     return `${archivePath}.sig`;
   } finally {
@@ -451,7 +454,10 @@ if (import.meta.main) {
       "TAURI_SIGNING_PRIVATE_KEY_TEXT is required. " +
         "Export the minisign-format private key (not the Tauri plugin key).",
     );
-  const sigPath = await signWithMinisign(archivePath, keyText);
+  // The key may be password-encrypted (even with an empty password string).
+  // Pipe the password via stdin so minisign doesn't prompt interactively.
+  const keyPassword = process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ?? "";
+  const sigPath = await signWithMinisign(archivePath, keyText, keyPassword);
   console.log(`Signed archive: ${sigPath}`);
 
   // ── verify the signature locally ──
