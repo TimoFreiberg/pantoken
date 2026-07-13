@@ -51,6 +51,11 @@ pub struct SessionJson {
     /// the title we are displaying in the sidebar is the right one").
     #[serde(default)]
     pub overridden_title: Option<String>,
+    /// The daemon's auto-inferred title, persisted to disk alongside
+    /// `overridden_title`. Absent when the daemon hasn't inferred one yet.
+    /// Used as the `display_name` fallback when the operator hasn't renamed.
+    #[serde(default)]
+    pub inferred_title: Option<String>,
     /// Tagged: `{kind:"standalone"}` | `{kind:"local", session_id}`. The parent
     /// session, for subsessions. Standalone = no parent.
     #[serde(default)]
@@ -258,8 +263,13 @@ fn cold_session_entry_from_meta(
             .to_string_lossy()
             .to_string(),
         cwd,
-        // Use the daemon's durable `overridden_title` for `display_name`.
-        display_name: meta.overridden_title.clone(),
+        // Priority: operator's manual rename (`overridden_title`) > the
+        // daemon's auto-inferred title > None (falls back to preview
+        // client-side).
+        display_name: meta
+            .overridden_title
+            .clone()
+            .or_else(|| meta.inferred_title.clone()),
         preview,
         // The daemon doesn't expose a per-session user-message count without a
         // daemon; 0 is a safe default (the sidebar shows it, not a wrong number).
@@ -410,6 +420,7 @@ mod tests {
             last_user_message_preview: Some("hello".to_string()),
             initial_model_name: Some("anthropic/claude".to_string()),
             overridden_title: None,
+            inferred_title: None,
             parent_session_id: Some(ParentSessionRef::Standalone),
         };
         over(&mut m);
@@ -617,6 +628,90 @@ mod tests {
         )
         .expect("should build an entry");
         assert_eq!(entry.display_name.as_deref(), Some("My Custom Title"));
+    }
+
+    #[test]
+    fn cold_session_entry_surfaces_inferred_title_as_display_name() {
+        // A cold session the daemon has auto-titled (but the operator never
+        // renamed) should surface the daemon's `inferred_title` as
+        // `display_name` instead of falling back to the preview client-side.
+        let dir = make_sessions_dir(&[(
+            "inferred",
+            Some(base_meta(|m| {
+                m.session_id = "inferred".to_string();
+                m.inferred_title = Some("Daemon Inferred Title".to_string());
+            })),
+        )]);
+        let entry = cold_session_entry(
+            &dir.path().join("inferred"),
+            "inferred",
+            ColdSessionOpts {
+                archived: false,
+                worktree: None,
+            },
+        )
+        .expect("should build an entry");
+        assert_eq!(entry.display_name.as_deref(), Some("Daemon Inferred Title"));
+    }
+
+    #[test]
+    fn cold_session_entry_overridden_title_takes_precedence_over_inferred() {
+        // When both an operator rename and a daemon-inferred title are
+        // present, the operator's manual rename wins.
+        let dir = make_sessions_dir(&[(
+            "both",
+            Some(base_meta(|m| {
+                m.session_id = "both".to_string();
+                m.overridden_title = Some("Operator Rename".to_string());
+                m.inferred_title = Some("Daemon Inferred Title".to_string());
+            })),
+        )]);
+        let entry = cold_session_entry(
+            &dir.path().join("both"),
+            "both",
+            ColdSessionOpts {
+                archived: false,
+                worktree: None,
+            },
+        )
+        .expect("should build an entry");
+        assert_eq!(entry.display_name.as_deref(), Some("Operator Rename"));
+    }
+
+    #[test]
+    fn cold_session_entry_reads_inferred_title_from_raw_disk_json() {
+        // Guard against a serde field-name misspelling or a dropped
+        // `#[serde(default)]` attribute — a failure mode the struct-literal
+        // tests above cannot catch (they serialize via the struct, so a
+        // mismatched name would round-trip to None silently). Here we write
+        // raw JSON the way the daemon does and read it back.
+        let dir = tempfile::tempdir().unwrap();
+        let session_dir = dir.path().join("s1");
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::write(
+            session_dir.join("session.json"),
+            serde_json::json!({
+                "version": 1,
+                "session_id": "s1",
+                "project_path": "/proj",
+                "created_at": "2026-06-28T10:00:00Z",
+                "last_activity_at": "2026-06-28T11:00:00Z",
+                "inferred_title": "Some Title",
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let entry = cold_session_entry(
+            &session_dir,
+            "s1",
+            ColdSessionOpts {
+                archived: false,
+                worktree: None,
+            },
+        )
+        .expect("should build an entry");
+        assert_eq!(entry.display_name.as_deref(), Some("Some Title"));
     }
 
     #[test]
