@@ -461,12 +461,19 @@ if (import.meta.main) {
   console.log(`Signed archive: ${sigPath}`);
 
   // ── verify the signature locally ──
+  // TAURI_UPDATER_PUBLIC_KEY is base64-encoded (comment + key line).
+  // minisign -P expects the raw public key line, so decode and extract it.
+  const pubKeyDecoded = Buffer.from(TAURI_UPDATER_PUBLIC_KEY, "base64").toString("utf8");
+  const pubKeyLine = pubKeyDecoded.split("\n").find(l => l.startsWith("RW"));
+  if (!pubKeyLine)
+    fail("could not extract raw public key from TAURI_UPDATER_PUBLIC_KEY");
+  const rawPubKey: string = pubKeyLine;
   const verification = await capture([
     "minisign",
     "-Vm",
     archivePath,
     "-P",
-    TAURI_UPDATER_PUBLIC_KEY,
+    rawPubKey,
   ]);
   if (verification.code !== 0)
     fail(`local signature verification failed: ${verification.stderr}`);
