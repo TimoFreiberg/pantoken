@@ -419,7 +419,10 @@
   async function submit() {
     if (submitting) return;
     const text = store.composerDraft;
-    if (!text.trim() && images.length === 0) return;
+    // Allow an empty prompt to act as a "continue" signal when the agent is
+    // idle (parity with the polytoken TUI). Block it mid-turn (empty steer)
+    // and when drafting a new session (empty first message).
+    if (!text.trim() && images.length === 0 && (streaming || drafting)) return;
     // These are `$state` proxies; that's fine to pass on. `savePendingPrompt` is the
     // single boundary that rebuilds plain data before IndexedDB's structured clone.
     const imgs = images.length > 0 ? images : undefined;
@@ -1198,12 +1201,14 @@
         <div class="actions">
           <button
             class="send"
-            disabled={submitting || addingImages || (!store.composerDraft.trim() && imageCount === 0)}
+            disabled={submitting || addingImages || ((!store.composerDraft.trim() && imageCount === 0) && (streaming || drafting))}
             onclick={() => submit()}
-            aria-label={drafting ? "Create session and send" : "Send"}
+            aria-label={drafting ? "Create session and send" : !store.composerDraft.trim() && imageCount === 0 ? "Send empty prompt to continue" : "Send"}
             title={drafting
               ? `Create session and send first message (${isTouch ? "⌘/Ctrl+Enter" : "Enter"})`
-              : `Send (${isTouch ? "⌘/Ctrl+Enter" : "Enter"})`}
+              : !store.composerDraft.trim() && imageCount === 0
+                ? `Send empty prompt to continue (${isTouch ? "⌘/Ctrl+Enter" : "Enter"})`
+                : `Send (${isTouch ? "⌘/Ctrl+Enter" : "Enter"})`}
           >
             ↑
           </button>

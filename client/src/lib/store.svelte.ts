@@ -1563,7 +1563,11 @@ class PantokenStore {
     images?: ImageContent[],
   ): Promise<boolean> {
     const t = text.trim();
-    if (!t && (!images || images.length === 0)) return false;
+    // An empty prompt is allowed when the session is idle — it acts as a
+    // "continue" signal (parity with the polytoken TUI). Block it mid-turn
+    // (an empty steer into /turn/input is meaningless) and when there are
+    // no images either.
+    if (!t && (!images || images.length === 0) && this.turnActive) return false;
     // This call is a user gesture — the moment to ask for notification permission
     // (tab-open path) and register a Web Push subscription (closed-phone path).
     ensurePermission();
