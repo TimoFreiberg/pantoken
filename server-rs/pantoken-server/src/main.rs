@@ -246,23 +246,19 @@ async fn main() {
         });
 
     // Live-refresh ticker: polls running sessions' usage every PANTOKEN_LIVE_REFRESH_MS,
-    // mirroring the TS hub's syncLiveRefresh interval. Only runs while there are
-    // running sessions + connected clients.
+    // mirroring the TS hub's syncLiveRefresh interval. Also rebroadcasts the
+    // session list when dirty (e.g. an inferred title landing while idle).
     let hub_clone = state.hub.clone();
     let refresh_ms = cfg.live_refresh_ms;
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(refresh_ms));
         loop {
             interval.tick().await;
-            let should_tick = {
-                let h = hub_clone.lock();
-                h.sync_live_refresh()
-            };
-            if should_tick {
-                // refresh_usage is sync — no .await, so the guard is safe.
-                let mut h = hub_clone.lock();
-                h.refresh_usage();
-            }
+            // enqueue_live_refresh checks both sync_live_refresh (running sessions)
+            // and session_list_dirty (e.g. an inferred title landing while idle).
+            // It enqueues a hub_ops closure only when there's work to do; the
+            // closure fetches .await BEFORE locking.
+            hub_clone.lock().enqueue_live_refresh();
         }
     });
 
