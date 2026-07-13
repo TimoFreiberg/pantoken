@@ -327,6 +327,9 @@ test("project mode: a query matching only a hidden fixture shows nothing until S
   await expect(menu(page)).toBeVisible();
   await expect(row(page, "file:.env")).toBeVisible();
   await expect(menu(page)).toContainText("ignored files shown");
+  // Coexist (issue #19): the ignore-toggle consumed Shift+Tab, so the facet
+  // must NOT have also rotated.
+  await expect(page.getByTestId("facet-badge")).toHaveText("Execute");
 
   // Shift+Tab again hides it — back to zero matches, menu gone.
   await box.press("Shift+Tab");
@@ -346,6 +349,9 @@ test("@~/ then Shift+Tab reveals the hidden ~/.secrets fixture; Shift+Tab again 
   await box.press("Shift+Tab");
   await expect(row(page, "file:~/.secrets")).toBeVisible();
   await expect(menu(page)).toContainText("ignored files shown");
+  // Coexist (issue #19): the ignore-toggle consumed Shift+Tab, so the facet
+  // must NOT have also rotated.
+  await expect(page.getByTestId("facet-badge")).toHaveText("Execute");
 
   await box.press("Shift+Tab");
   await expect(row(page, "file:~/.secrets")).toHaveCount(0);
@@ -372,12 +378,16 @@ test("plain Tab still accepts the highlighted row after Shift+Tab has toggled ig
   await expect(box).toHaveValue("@~/.secrets ");
 });
 
-test("Shift+Tab in a skill takeover falls through to browser focus-nav (no toggle, no accept)", async ({
+test("Shift+Tab in a skill takeover rotates facets (no toggle, no accept)", async ({
   page,
 }) => {
   // Skill/subagent/model takeovers have no notion of "ignored files", so the footer
-  // omits the ⇧Tab hint and the key must NOT be swallowed — neither as an invisible
-  // ignoreOff flip nor as an accept. Browser default: backward focus navigation.
+  // omits the ⇧Tab hint and the ignore-toggle doesn't apply. Shift+Tab now rotates
+  // facets instead of falling through to browser focus-nav (issue #19). The draft
+  // text is unchanged — no accept happened.
+  const badge = page.getByTestId("facet-badge");
+  await expect(badge).toHaveText("Execute");
+
   const box = ta(page);
   await box.click();
   await page.keyboard.type("@skill:");
@@ -387,8 +397,8 @@ test("Shift+Tab in a skill takeover falls through to browser focus-nav (no toggl
   await box.press("Shift+Tab");
   // Not accepted (the draft would read "@skill:debug"), not modified at all…
   await expect(box).toHaveValue("@skill:");
-  // …and the browser's default backward focus-move actually happened.
-  await expect(box).not.toBeFocused();
+  // …and the facet rotated instead of browser backward focus-nav.
+  await expect(badge).toHaveText("Plan");
 });
 
 test("Escape still dismisses the menu after the ignore toggle has been used", async ({

@@ -138,13 +138,50 @@ test("Right and Left set Plan handoff from the authoritative snapshot", async ({
   await expect(badge).toHaveText("Plan");
 });
 
-test("Shift+Tab does not toggle facets", async ({ page }) => {
+test("Shift+Tab rotates through facets when the composer is focused", async ({
+  page,
+}) => {
   const badge = page.getByTestId("facet-badge");
   await expect(badge).toHaveText("Execute");
 
-  // Shift+Tab should perform normal browser reverse-focus traversal — it must
-  // NOT cycle facets anymore. Press it and confirm the badge is unchanged.
+  // Focus the composer textarea — Shift+Tab must rotate facets, not do
+  // browser reverse-focus traversal.
+  await page.getByPlaceholder("Message pantoken…").focus();
+
   await page.keyboard.press("Shift+Tab");
+  await expect(badge).toHaveText("Plan");
+
+  await page.keyboard.press("Shift+Tab");
+  await expect(badge).toHaveText("Research");
+
+  // Wraps around.
+  await page.keyboard.press("Shift+Tab");
+  await expect(badge).toHaveText("Execute");
+});
+
+test("FacetBadge tooltip names the Shift+Tab hotkey", async ({ page }) => {
+  const badge = page.getByTestId("facet-badge");
+  await expect(badge).toHaveAttribute("title", /⇧Tab rotates/);
+});
+
+test("Shift+Tab does not fire when the slash menu is open", async ({
+  page,
+}) => {
+  const badge = page.getByTestId("facet-badge");
+  await expect(badge).toHaveText("Execute");
+
+  // Focus the composer and open the slash menu.
+  const box = page.getByPlaceholder("Message pantoken…");
+  await box.focus();
+  await box.press("/");
+  // The slash menu should be visible.
+  await expect(page.locator("#slash-menu")).toBeVisible();
+
+  // Shift+Tab while the slash menu is open — the slash block matches
+  // `e.key === "Tab"` (no shift guard) and returns early (accepts the slash
+  // command), so the facet-rotate branch is never reached. The facet must NOT
+  // rotate.
+  await box.press("Shift+Tab");
   await expect(badge).toHaveText("Execute");
 });
 
@@ -174,6 +211,31 @@ test("⌘⇧C in the new-session draft opens the dropdown for the DRAFT's facet,
   const panel = page.locator(".panel[role='listbox']");
   await expect(panel).toBeVisible();
   await page.keyboard.press("2");
+  await expect(draftBadge).toHaveText("Plan");
+
+  // Navigate back to the old session — its facet must be unchanged ("Execute").
+  await openSidebar(page);
+  await row(page, "Wire up the WebSocket bridge").click();
+  await expect(page.getByTestId("facet-badge")).toHaveText("Execute");
+});
+
+test("Shift+Tab in the new-session draft rotates the DRAFT's facet, not the old session's", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  // The greeting session is focused — its facet badge reads "Execute".
+  const liveBadge = page.getByTestId("facet-badge");
+  await expect(liveBadge).toHaveText("Execute");
+
+  // Open a new-session draft.
+  await page.getByTestId("sidebar").getByText("New session…").click();
+  await expect(page.getByTestId("new-session")).toBeVisible();
+  const draftBadge = page.getByTestId("facet-badge");
+  await expect(draftBadge).toHaveText("Execute");
+
+  // Focus the composer textarea and Shift+Tab to rotate the draft's facet.
+  await page.getByPlaceholder("Describe a task or ask a question…").focus();
+  await page.keyboard.press("Shift+Tab");
   await expect(draftBadge).toHaveText("Plan");
 
   // Navigate back to the old session — its facet must be unchanged ("Execute").

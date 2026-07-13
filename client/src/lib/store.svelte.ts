@@ -2350,6 +2350,19 @@ class PantokenStore {
     send({ type: "sessionAction", action: { kind: "setFacet", facet } });
   }
 
+  /** Shift+Tab — rotate to the next (`dir:1`) or previous (`dir:-1`) facet in
+   *  `store.facets` order, wrapping. Draft-aware: writes the draft's pick while
+   *  a draft is open (applied at creation), else sends setFacet over the wire
+   *  for the active session. No-op when there are fewer than 2 facets. */
+  cycleFacet(dir: 1 | -1): void {
+    const facets = this.facets;
+    if (facets.length < 2) return;
+    const cur = this.composerFacet;
+    const idx = facets.indexOf(cur);
+    const next = facets[(idx + dir + facets.length) % facets.length] ?? "execute";
+    this.setFacet(next);
+  }
+
   /** Ask the server to re-read the available facets (reload affordance for when
    *  facet files change on disk while a session is open). */
   refreshFacets(): void {
