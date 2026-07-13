@@ -175,6 +175,21 @@ fn prefix_allowed(path: &str) -> bool {
     if path.starts_with(schema::ASSET_PREFIX) {
         return true;
     }
+    // PWA static files at client-dist/ root level (icons, manifest, etc.)
+    // Must match the build script's copyDirRecursive allowlist.
+    if let Some(name) = path.strip_prefix("client-dist/") {
+        if !name.contains('/')
+            && (name == "index.html"
+                || name.starts_with("apple-touch-icon")
+                || name.starts_with("icon")
+                || name.starts_with("favicon")
+                || name.starts_with("manifest")
+                || name.starts_with("sw")
+                || name.starts_with("registerSW"))
+        {
+            return true;
+        }
+    }
     false
 }
 
@@ -696,6 +711,33 @@ mod tests {
 
         let result = validate_tar(Cursor::new(tar_bytes));
         assert!(result.is_ok(), "expected valid archive: {:?}", result);
+    }
+
+    #[test]
+    fn valid_pwa_root_files() {
+        let tar_bytes = build_test_tar(&[
+            ("VERSION", b"1.0.0"),
+            ("BUILD_SHA", b"abcd1234abcd1234abcd1234abcd1234abcd1234"),
+            ("bin/pantoken-server", b"#!rust"),
+            ("bin/pantoken-tar-validate", b"#!rust"),
+            ("run.sh", b"#!/bin/sh"),
+            ("update.sh", b"#!/bin/sh"),
+            ("client-dist/index.html", b"<!DOCTYPE html>"),
+            ("client-dist/apple-touch-icon.png", b"PNG"),
+            ("client-dist/icon-192.png", b"PNG"),
+            ("client-dist/icon-512.png", b"PNG"),
+            ("client-dist/icon-maskable-512.png", b"PNG"),
+            ("client-dist/icon.svg", b"<svg></svg>"),
+            ("client-dist/manifest.webmanifest", b"{}"),
+            ("client-dist/sw.js", b"// sw"),
+        ]);
+
+        let result = validate_tar(Cursor::new(tar_bytes));
+        assert!(
+            result.is_ok(),
+            "expected valid archive with PWA files: {:?}",
+            result
+        );
     }
 
     #[test]
