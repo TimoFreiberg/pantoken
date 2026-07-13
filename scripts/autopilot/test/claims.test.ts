@@ -61,9 +61,9 @@ describe("claims.sh", () => {
     runClaimsFn("claim_issue", ["23", "0"]);
     const claims = readClaims() as { claims: Array<{ issue_number: number; slot: number; session_id: string }> };
     expect(claims.claims).toHaveLength(1);
-    expect(claims.claims[0].issue_number).toBe(23);
-    expect(claims.claims[0].slot).toBe(0);
-    expect(claims.claims[0].session_id).toBe("");
+    expect(claims.claims[0]!.issue_number).toBe(23);
+    expect(claims.claims[0]!.slot).toBe(0);
+    expect(claims.claims[0]!.session_id).toBe("");
   });
 
   test("release_claim removes a claim", () => {
@@ -72,14 +72,14 @@ describe("claims.sh", () => {
     runClaimsFn("release_claim", ["23"]);
     const claims = readClaims() as { claims: Array<{ issue_number: number }> };
     expect(claims.claims).toHaveLength(1);
-    expect(claims.claims[0].issue_number).toBe(24);
+    expect(claims.claims[0]!.issue_number).toBe(24);
   });
 
   test("update_claim_session sets session_id", () => {
     runClaimsFn("claim_issue", ["23", "0"]);
     runClaimsFn("update_claim_session", ["23", "abc-123"]);
     const claims = readClaims() as { claims: Array<{ issue_number: number; session_id: string }> };
-    expect(claims.claims[0].session_id).toBe("abc-123");
+    expect(claims.claims[0]!.session_id).toBe("abc-123");
   });
 
   test("count_active_slots returns correct count", () => {
@@ -142,7 +142,7 @@ describe("claims.sh", () => {
 
     const claims = readClaims() as { claims: Array<{ issue_number: number }> };
     expect(claims.claims).toHaveLength(1);
-    expect(claims.claims[0].issue_number).toBe(23);
+    expect(claims.claims[0]!.issue_number).toBe(23);
   });
 
   test("recover_stale_claims keeps claim with empty session_id (daemon not yet spawned)", () => {
