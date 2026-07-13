@@ -8,7 +8,7 @@ export const RELEASE_BASE_URL = `https://github.com/${RELEASE_REPO}`;
 
 /** Existing Tauri updater key; do not regenerate without an explicit migration. */
 export const TAURI_UPDATER_PUBLIC_KEY =
-  "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEyMTk1NTU5NzAyRDFERTAKUldUZ0hTMXdXVlVaRWlKQXdVSEc5OFRKSlNMOWpEM0h2YklTYlRNNnU4ZWF0TGpOM2xLckR4bk0K";
+  "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVGN0MyNTBERDA5RDg3ODUKUldTRmg1M1FEU1Y4Nys2TTc1UjFZcTJuMzJianQ4SnpkV3NKOGEzVmFzZDJLc2FNUUExdUpGVTkK";
 
 export const HEADLESS_ASSET = "pantoken-headless-macos-aarch64.tar.gz";
 export const HEADLESS_SIGNATURE = `${HEADLESS_ASSET}.sig`;
