@@ -14,6 +14,8 @@ SESSION_ID="${1:?usage: seed-session.sh <session_id> <port> <issue_url> <issue_t
 PORT="${2:?port required}"
 ISSUE_URL="${3:?issue_url required}"
 ISSUE_TITLE="${4:?issue_title required}"
+# Extract issue number from URL (e.g. .../issues/21 → 21)
+ISSUE_NUMBER="${ISSUE_URL##*/}"
 
 SESSION_DIR="$HOME/.local/share/polytoken/sessions/$SESSION_ID"
 STARTUP="$SESSION_DIR/startup.json"
@@ -52,7 +54,9 @@ curl -sf -X POST -H "$AUTH" -H "Content-Type: application/json" \
   "$BASE/goal" >/dev/null
 
 # 6. Seed the initial prompt
-PROMPT="Implement GitHub issue $ISSUE_URL as described in the issue.
+PROMPT="Implement GitHub issue #$ISSUE_NUMBER: $ISSUE_TITLE
+
+Issue URL: $ISSUE_URL
 Read the issue with \`gh issue view <N> --repo TimoFreiberg/pantoken\` (use the issue number from the URL).
 Follow AGENTS.md conventions.
 Plan the implementation, review the plan, hand off to execute, implement,
