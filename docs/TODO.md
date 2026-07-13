@@ -236,6 +236,19 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
       connection/seed/resume, outbox, and drafts modules. Same caveat as the
       hub: its own change, e2e as the net.
 
+## 🤖 Automation
+
+- [ ] **Autopilot loop** (`scripts/autopilot.sh`) — continuously triages open
+      GitHub issues, picks implementable ones, runs a plan→review→handoff→
+      execute loop in a visible Polytoken TUI (adventurous handoff enabled),
+      and pushes to `main` when the TUI closes. Issues needing clarification
+      get a comment with an `<!-- autopilot -->` marker and are skipped until
+      the human replies. Supports up to `MAX_CONCURRENT` (default 2) concurrent
+      implementers in separate zellij tabs + jj workspaces. Serial triage,
+      serial merge, concurrent implementers. See `scripts/autopilot/README.md`.
+      Status: implemented, unit tests pass (25/25); manual integration tests
+      pending (AC.4–AC.8 require live gh + polytoken + zellij).
+
 ## 🧹 Minor
 
 - [ ] add `x` delete button on queued prompts (if not there already)

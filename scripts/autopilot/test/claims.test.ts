@@ -1,0 +1,157 @@
+import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdir } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const CLAIMS_SH = join(__dirname, "..", "claims.sh");
+
+let tempHome: string;
+let claimsDir: string;
+let claimsFile: string;
+
+/**
+ * Source claims.sh with a custom HOME so all paths resolve to temp dirs.
+ * Runs a function from claims.sh and returns stdout.
+ */
+function runClaimsFn(fn: string, args: string[] = [], extraEnv: Record<string, string> = {}): { stdout: string; stderr: string; exitCode: number } {
+  const script = `set -euo pipefail
+source "${CLAIMS_SH}"
+${extraEnv["MAX_CONCURRENT"] ? `MAX_CONCURRENT=${extraEnv["MAX_CONCURRENT"]}` : `MAX_CONCURRENT=2`}
+${fn} ${args.join(" ")}
+`;
+  const result = spawnSync("bash", ["-c", script], {
+    env: { ...process.env, HOME: tempHome, ...extraEnv },
+    encoding: "utf-8",
+    timeout: 10_000,
+  });
+  return {
+    stdout: result.stdout?.trim() ?? "",
+    stderr: result.stderr?.trim() ?? "",
+    exitCode: result.status ?? -1,
+  };
+}
+
+function readClaims(): unknown {
+  return JSON.parse(readFileSync(claimsFile, "utf-8"));
+}
+
+beforeEach(() => {
+  tempHome = mkdtempSync(join(process.env.TMPDIR || "/tmp", "claims-test-"));
+  claimsDir = join(tempHome, ".local", "share", "pantoken-autopilot");
+  claimsFile = join(claimsDir, "claims.json");
+  mkdirSync(claimsDir, { recursive: true });
+  writeFileSync(claimsFile, '{"claims":[]}');
+});
+
+afterEach(() => {
+  rmSync(tempHome, { recursive: true, force: true });
+});
+
+describe("claims.sh", () => {
+  test("init_claims creates the claims file if missing", () => {
+    rmSync(claimsFile);
+    runClaimsFn("init_claims");
+    expect(existsSync(claimsFile)).toBe(true);
+    expect(readClaims()).toEqual({ claims: [] });
+  });
+
+  test("claim_issue adds a claim", () => {
+    runClaimsFn("claim_issue", ["23", "0"]);
+    const claims = readClaims() as { claims: Array<{ issue_number: number; slot: number; session_id: string }> };
+    expect(claims.claims).toHaveLength(1);
+    expect(claims.claims[0].issue_number).toBe(23);
+    expect(claims.claims[0].slot).toBe(0);
+    expect(claims.claims[0].session_id).toBe("");
+  });
+
+  test("release_claim removes a claim", () => {
+    runClaimsFn("claim_issue", ["23", "0"]);
+    runClaimsFn("claim_issue", ["24", "1"]);
+    runClaimsFn("release_claim", ["23"]);
+    const claims = readClaims() as { claims: Array<{ issue_number: number }> };
+    expect(claims.claims).toHaveLength(1);
+    expect(claims.claims[0].issue_number).toBe(24);
+  });
+
+  test("update_claim_session sets session_id", () => {
+    runClaimsFn("claim_issue", ["23", "0"]);
+    runClaimsFn("update_claim_session", ["23", "abc-123"]);
+    const claims = readClaims() as { claims: Array<{ issue_number: number; session_id: string }> };
+    expect(claims.claims[0].session_id).toBe("abc-123");
+  });
+
+  test("count_active_slots returns correct count", () => {
+    runClaimsFn("claim_issue", ["23", "0"]);
+    runClaimsFn("claim_issue", ["24", "1"]);
+    const result = runClaimsFn("count_active_slots");
+    expect(result.stdout).toBe("2");
+  });
+
+  test("find_free_slot returns first free slot", () => {
+    runClaimsFn("claim_issue", ["23", "0"]);
+    const result = runClaimsFn("find_free_slot");
+    expect(result.stdout).toBe("1");
+  });
+
+  test("find_free_slot returns 0 when no slots are taken", () => {
+    const result = runClaimsFn("find_free_slot");
+    expect(result.stdout).toBe("0");
+  });
+
+  test("find_free_slot returns -1 when all slots are taken", () => {
+    runClaimsFn("claim_issue", ["23", "0"]);
+    runClaimsFn("claim_issue", ["24", "1"]);
+    const result = runClaimsFn("find_free_slot");
+    expect(result.stdout).toBe("-1");
+  });
+
+  test("get_claim_issue returns issue number for slot", () => {
+    runClaimsFn("claim_issue", ["23", "0"]);
+    runClaimsFn("claim_issue", ["42", "1"]);
+    const result = runClaimsFn("get_claim_issue", ["0"]);
+    expect(result.stdout).toBe("23");
+  });
+
+  test("recover_stale_claims releases claim with dead daemon PID", () => {
+    runClaimsFn("claim_issue", ["23", "0"]);
+    runClaimsFn("update_claim_session", ["23", "fake-session-id"]);
+
+    // The session dir doesn't exist, so startup.json won't be found → stale
+    const result = runClaimsFn("recover_stale_claims");
+    expect(result.exitCode).toBe(0);
+
+    const claims = readClaims() as { claims: unknown[] };
+    expect(claims.claims).toHaveLength(0);
+  });
+
+  test("recover_stale_claims keeps claim with alive daemon PID", () => {
+    runClaimsFn("claim_issue", ["23", "0"]);
+    runClaimsFn("update_claim_session", ["23", "alive-session"]);
+
+    // Create a fake startup.json with the current process's PID (which is alive)
+    const sessionDir = join(tempHome, ".local", "share", "polytoken", "sessions", "alive-session");
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(
+      join(sessionDir, "startup.json"),
+      JSON.stringify({ state: "ready", pid: process.pid, port: 12345 }),
+    );
+
+    runClaimsFn("recover_stale_claims");
+
+    const claims = readClaims() as { claims: Array<{ issue_number: number }> };
+    expect(claims.claims).toHaveLength(1);
+    expect(claims.claims[0].issue_number).toBe(23);
+  });
+
+  test("recover_stale_claims keeps claim with empty session_id (daemon not yet spawned)", () => {
+    runClaimsFn("claim_issue", ["23", "0"]);
+    // Don't call update_claim_session — session_id stays ""
+
+    runClaimsFn("recover_stale_claims");
+
+    const claims = readClaims() as { claims: unknown[] };
+    expect(claims.claims).toHaveLength(1);
+  });
+});
