@@ -117,11 +117,8 @@ describe("claims.sh", () => {
   test("recover_stale_claims releases claim with dead daemon PID", () => {
     runClaimsFn("claim_issue", ["23", "0"]);
     runClaimsFn("update_claim_session", ["23", "fake-session-id"]);
-
-    // The session dir doesn't exist, so startup.json won't be found → stale
     const result = runClaimsFn("recover_stale_claims");
     expect(result.exitCode).toBe(0);
-
     const claims = readClaims() as { claims: unknown[] };
     expect(claims.claims).toHaveLength(0);
   });
@@ -129,17 +126,10 @@ describe("claims.sh", () => {
   test("recover_stale_claims keeps claim with alive daemon PID", () => {
     runClaimsFn("claim_issue", ["23", "0"]);
     runClaimsFn("update_claim_session", ["23", "alive-session"]);
-
-    // Create a fake startup.json with the current process's PID (which is alive)
     const sessionDir = join(tempHome, ".local", "share", "polytoken", "sessions", "alive-session");
     mkdirSync(sessionDir, { recursive: true });
-    writeFileSync(
-      join(sessionDir, "startup.json"),
-      JSON.stringify({ state: "ready", pid: process.pid, port: 12345 }),
-    );
-
+    writeFileSync(join(sessionDir, "startup.json"), JSON.stringify({ state: "ready", pid: process.pid, port: 12345 }));
     runClaimsFn("recover_stale_claims");
-
     const claims = readClaims() as { claims: Array<{ issue_number: number }> };
     expect(claims.claims).toHaveLength(1);
     expect(claims.claims[0]!.issue_number).toBe(23);
@@ -147,10 +137,7 @@ describe("claims.sh", () => {
 
   test("recover_stale_claims keeps claim with empty session_id (daemon not yet spawned)", () => {
     runClaimsFn("claim_issue", ["23", "0"]);
-    // Don't call update_claim_session — session_id stays ""
-
     runClaimsFn("recover_stale_claims");
-
     const claims = readClaims() as { claims: unknown[] };
     expect(claims.claims).toHaveLength(1);
   });
