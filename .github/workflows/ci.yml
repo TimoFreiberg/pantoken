@@ -226,7 +226,11 @@ jobs:
           PANTOKEN_TAR_VALIDATOR: ${{ github.workspace }}/target/release/pantoken-tar-validate
         run: bun scripts/headless/validate-artifact.ts target/release/headless/pantoken-headless-macos-aarch64.tar.gz
       - name: Smoke-test compiled headless artifact
-        run: bun scripts/headless/smoke-test.ts target/release/headless/payload
+        run: |
+          mkdir -p target/release/headless/payload
+          tar -xzf target/release/headless/pantoken-headless-macos-aarch64.tar.gz \
+            -C target/release/headless/payload
+          bun scripts/headless/smoke-test.ts target/release/headless/payload
       - name: Mandatory macOS launchd platform gate
         run: |
           set -e
