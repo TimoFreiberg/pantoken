@@ -308,7 +308,7 @@ sed \
   -e "s|@@@HOME@@@|$HOME_DIR|g" \
   -e "s|@@@LIVE@@@|${VERSIONS_DIR}/${SETUP_VERSION}|g" \
   -e "s|@@@LOGDIR@@@|$LOG_DIR|g" \
-  -e "s|@@@POLYTOKEN_BIN@@@|/usr/local/bin/polytoken|g" \
+  -e "s|@@@POLYTOKEN_BIN@@@|${PANTOKEN_POLYTOKEN_BIN:-$(command -v "$POLYTOKEN_BIN" 2>/dev/null || echo /usr/local/bin/polytoken)}|g" \
   -e "s|@@@XDG_CONFIG@@@|$HOME_DIR/.config|g" \
   -e "s|@@@XDG_DATA@@@|$HOME_DIR/.local/share|g" \
   "$PLIST_TEMPLATE" > "$rendered_plist"
