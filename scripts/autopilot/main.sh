@@ -42,11 +42,24 @@ init_claims
 # Track spawned daemon PIDs for cleanup on exit
 SPAWNED_DAEMON_PIDS=()
 
+# Track background implementation subshell PIDs so we can kill them on exit.
+# Without this, Ctrl+C kills the main loop but the background subshells
+# (and their zellij tabs + daemons) keep running as orphans.
+BG_PIDS=()
+
 # ─── Signal handling ─────────────────────────────────────────────────────────
 
 cleanup_on_exit() {
   log ""
   log "Autopilot shutting down..."
+
+  # Kill background implementation subshells first (they hold zellij tabs open)
+  for pid in "${BG_PIDS[@]:-}"; do
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      log "Killing implementation subshell PID $pid"
+      kill "$pid" 2>/dev/null || true
+    fi
+  done
 
   # Kill any daemons we spawned
   for pid in "${SPAWNED_DAEMON_PIDS[@]:-}"; do
@@ -213,7 +226,11 @@ while true; do
   fi
 
   # 3. Triage (serial, headless)
-  # Build the triage prompt with currently-claimed issues injected
+  # Build the triage prompt with currently-claimed issues injected.
+  # We avoid sed for the substitution because BSD sed (macOS) errors on
+  # unescaped newlines in the replacement pattern. Instead, we read the
+  # prompt file, replace the placeholder line with awk, and capture the
+  # result. awk handles multi-line replacements natively.
   CLAIMED=$(list_claimed_issues)
   if [ -z "$CLAIMED" ]; then
     CLAIMED_LIST="(none)"
@@ -221,14 +238,29 @@ while true; do
     # Format as a bulleted list
     CLAIMED_LIST=""
     for num in $CLAIMED; do
-      CLAIMED_LIST="${CLAIMED_LIST}- #${num}"$'\n'
+      CLAIMED_LIST="${CLAIMED_LIST}- #${num}
+"
     done
   fi
-  TRIAGE_PROMPT=$(sed "s/CLAIMED_ISSUES_PLACEHOLDER/$CLAIMED_LIST/" "$SCRIPT_DIR/triage-prompt.md")
 
+  # Use awk to replace the placeholder line with the claimed-issues list.
+  # We pass the replacement via ENVIRON (not -v) because BSD awk (macOS)
+  # can't handle newlines in -v values. ENVIRON handles them fine.
+  export CLAIMED_LIST
+  TRIAGE_PROMPT=$(awk '
+    $0 == "CLAIMED_ISSUES_PLACEHOLDER" { print ENVIRON["CLAIMED_LIST"]; next }
+    { print }
+  ' "$SCRIPT_DIR/triage-prompt.md") || {
+    log "ERROR: failed to build triage prompt"
+    TRIAGE_OUTPUT='{"status":"error"}'
+    STATUS="error"
+  }
+
+  if [ "${STATUS:-}" != "error" ]; then
   TRIAGE_OUTPUT=$(cd "$REPO_ROOT" && polytoken exec --facet plan --max-tool-turns 15 \
     "$TRIAGE_PROMPT" \
     | "$SCRIPT_DIR/parse-triage.sh" 2>/dev/null || echo '{"status":"error"}')
+  fi
 
   STATUS=$(echo "$TRIAGE_OUTPUT" | jq -r '.status')
 
@@ -283,7 +315,8 @@ while true; do
     # Claim the issue (serial — no race)
     claim_issue "$ISSUE_NUMBER" "$SLOT"
 
-    # Kick off implementation in a background process
+    # Kick off implementation in a background process.
+    # Track the PID so cleanup_on_exit can kill it on Ctrl+C.
     (
       if run_implementation "$ISSUE_NUMBER" "$ISSUE_URL" "$ISSUE_TITLE" "$SLOT"; then
         touch "$MARKER_DIR/done-$SLOT"
@@ -291,5 +324,6 @@ while true; do
         touch "$MARKER_DIR/failed-$SLOT"
       fi
     ) &
+    BG_PIDS+=("$!")
   fi
 done
