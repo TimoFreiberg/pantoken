@@ -71,16 +71,17 @@ describe("smoke-test.ts", () => {
 
   // ── WS hello message format ──
 
-  test("WS hello must have build_sha as a 40-char hex string", () => {
-    const validHello = { build_sha: "0123456789abcdef0123456789abcdef01234567" };
-    const invalidHello = { build_sha: 123 };
+  test("WS hello must have buildSha as a 40-char hex string", () => {
+    // The Rust server serializes with camelCase (buildSha)
+    const validHello = { buildSha: "0123456789abcdef0123456789abcdef01234567" };
+    const invalidHello = { buildSha: 123 };
     const missingHello = { type: "hello" };
 
-    expect(typeof validHello.build_sha).toBe("string");
-    expect(/^[0-9a-f]{40}$/.test(validHello.build_sha)).toBe(true);
+    expect(typeof validHello.buildSha).toBe("string");
+    expect(/^[0-9a-f]{40}$/.test(validHello.buildSha)).toBe(true);
 
-    expect(typeof invalidHello.build_sha).not.toBe("string");
-    expect("build_sha" in missingHello).toBe(false);
+    expect(typeof invalidHello.buildSha).not.toBe("string");
+    expect("buildSha" in missingHello).toBe(false);
   });
 
   // ── /health response format ──

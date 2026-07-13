@@ -166,8 +166,14 @@ async function main(): Promise<void> {
     console.log(`  / served ${rootResp.text.length} bytes of HTML`);
 
     // ── WebSocket hello with build_sha ──
+    // The Rust server requires a client hello message (with type:"hello")
+    // before it sends the server hello. When PANTOKEN_TOKEN is not set, auth
+    // is disabled and any auth value is accepted.
     console.log("Connecting via WebSocket to check hello message...");
     const ws = await connectWS(`ws://127.0.0.1:${port}/ws`);
+
+    // Send client hello to trigger the server hello response
+    ws.send(JSON.stringify({ type: "hello", auth: "smoke-test" }));
 
     const helloPromise = new Promise<any>((resolve) => {
       let resolved = false;
@@ -197,22 +203,24 @@ async function main(): Promise<void> {
     if (hello.timeout)
       fail("WebSocket did not receive a hello message within 3 seconds");
 
-    if (!hello.build_sha)
-      fail("WebSocket hello missing 'build_sha' field");
+    // The Rust server serializes with camelCase (buildSha, not build_sha)
+    const buildSha: string | undefined = hello.buildSha ?? hello.build_sha;
+    if (!buildSha)
+      fail("WebSocket hello missing 'buildSha' field");
 
-    if (typeof hello.build_sha !== "string")
-      fail(`WebSocket hello build_sha is not a string: ${typeof hello.build_sha}`);
+    if (typeof buildSha !== "string")
+      fail(`WebSocket hello buildSha is not a string: ${typeof buildSha}`);
 
-    if (!/^[0-9a-f]{40}$/.test(hello.build_sha))
-      fail(`WebSocket hello build_sha has invalid format: ${hello.build_sha}`);
+    if (!/^[0-9a-f]{40}$/.test(buildSha))
+      fail(`WebSocket hello buildSha has invalid format: ${buildSha}`);
 
-    if (hello.build_sha !== expectedBuildSha)
+    if (buildSha !== expectedBuildSha)
       fail(
-        `build_sha mismatch: WS hello has ${hello.build_sha}, ` +
+        `build_sha mismatch: WS hello has ${buildSha}, ` +
         `expected ${expectedBuildSha} from BUILD_SHA file`,
       );
 
-    console.log(`  WS hello build_sha: ${hello.build_sha.slice(0, 12)}...${hello.build_sha.slice(-4)}`);
+    console.log(`  WS hello buildSha: ${buildSha.slice(0, 12)}...${buildSha.slice(-4)}`);
     console.log("  build_sha matches BUILD_SHA file ✓");
 
     // ── success ──
