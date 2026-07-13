@@ -423,7 +423,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     expect(script).toContain("TimoFreiberg/polytoken-gui");
     expect(script).toContain("releases/download/");
     expect(script).toContain("pantoken-headless-macos-aarch64.tar.gz");
-    expect(script).toContain("dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEyMTk1NTU5NzAyRDFERTAKUldUZ0hTMXdXVlVaRWlKQXdVSEc5OFRKSlNMOWpEM0h2YklTYlRNNnU4ZWF0TGpOM2xLckR4bk0K");
+    expect(script).toContain("dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVGN0MyNTBERDA5RDg3ODUKUldTRmg1M1FEU1Y4Nys2TTc1UjFZcTJuMzJianQ4SnpkV3NKOGEzVmFzZDJLc2FNUUExdUpGVTkK");
   });
 
   // GAP: Static assertion that test-mode env vars are gated. The actual
