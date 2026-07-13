@@ -46,7 +46,7 @@
 
 <MenuBadge
   {label}
-  title={`Facet: ${facet} — click to switch (⌘⇧C opens this menu)`}
+  title={`Facet: ${facet} — ⇧Tab rotates, ⌘⇧C opens this menu`}
   testid="facet-badge"
   ariaLabel="Facet"
   groupTitle="Facet"

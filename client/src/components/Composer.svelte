@@ -743,15 +743,14 @@
     // Shift+Tab: toggle the ignore-rules picker state (polytoken TUI parity) — hidden
     // dotfiles and gitignored entries join the candidates while on. Gated on
     // `ignoreToggleApplies` (project/external file modes only): skill/subagent/model
-    // takeovers have no notion of "ignored", so Shift+Tab there must fall through to the
-    // browser's normal backward focus-nav instead of being swallowed by an invisible
-    // state flip. Deliberately checked ahead of (and independent of) the `atOpen`-gated
-    // block below: a project-mode query that matches ONLY a currently-hidden dotfile has
-    // zero local candidates, so `atOpen` (which additionally requires
-    // `atItems.length > 0`) is still false at this point — the menu hasn't rendered
-    // yet — but the toggle must still work here, since it's the only way to ever reveal
-    // that candidate and make the menu open. MUST also be checked before the atOpen
-    // block's own Enter/Tab accept branch below: that branch matches on
+    // takeovers have no notion of "ignored", so Shift+Tab there is NOT consumed here —
+    // it falls through to the facet-rotate branch below instead. Deliberately checked
+    // ahead of (and independent of) the `atOpen`-gated block below: a project-mode query
+    // that matches ONLY a currently-hidden dotfile has zero local candidates, so `atOpen`
+    // (which additionally requires `atItems.length > 0`) is still false at this point —
+    // the menu hasn't rendered yet — but the toggle must still work here, since it's the
+    // only way to ever reveal that candidate and make the menu open. MUST also be checked
+    // before the atOpen block's own Enter/Tab accept branch below: that branch matches on
     // `e.key === "Tab"` alone, so without this earlier, shift-guarded check it would
     // swallow Shift+Tab as an accept instead of a toggle. Plain Tab (no shift) still
     // falls through to that block's accept, unaffected.
@@ -766,6 +765,24 @@
     ) {
       e.preventDefault();
       ignoreOff = !ignoreOff;
+      return;
+    }
+    // Shift+Tab — rotate through facets (issue #19). Fires only when no contextual
+    // menu owns Shift+Tab: the @-file ignore-toggle block above already returned for
+    // project/external @-mentions, and the slash menu (checked earlier) returns on its
+    // own keys. Skill/subagent/model @-takeovers have no ignore-toggle
+    // (ignoreToggleApplies is false), so Shift+Tab reaches here and rotates facets
+    // instead of the old browser backward-focus-nav fallthrough. ⌘⇧C still opens the
+    // full dropdown picker for keyboard selection; this is the quick-rotate shortcut.
+    if (
+      e.key === "Tab" &&
+      e.shiftKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey
+    ) {
+      e.preventDefault();
+      store.cycleFacet(1);
       return;
     }
     // @-reference keyboard handling (after slash, so slash takes priority if both
@@ -803,10 +820,10 @@
         return;
       }
       // Accept requires an UNSHIFTED Tab: in the file modes Shift+Tab was already
-      // consumed by the ignore-toggle branch above, but in skill/subagent/model
-      // takeovers (where that branch doesn't apply) a bare `e.key === "Tab"` match
-      // would swallow Shift+Tab as an accept — it must fall through to the
-      // browser's backward focus-nav instead.
+      // consumed by the ignore-toggle branch above, and in skill/subagent/model
+      // takeovers (where that branch doesn't apply) Shift+Tab was consumed by the
+      // facet-rotate branch above this block. The `!e.shiftKey` guard is belt-and-
+      // suspenders: by the time we reach here, Shift+Tab has already been handled.
       if (e.key === "Enter" || (e.key === "Tab" && !e.shiftKey)) {
         e.preventDefault();
         const item = atItems[atSel];
