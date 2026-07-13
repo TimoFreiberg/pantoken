@@ -9,7 +9,7 @@ let tempDir: string;
  * Run a command in the given directory, return {stdout, stderr, exitCode}.
  */
 function run(cmd: string[], cwd: string, env: Record<string, string> = {}): { stdout: string; stderr: string; exitCode: number } {
-  const result = spawnSync(cmd[0], cmd.slice(1), {
+  const result = spawnSync(cmd[0] ?? "", cmd.slice(1), {
     cwd,
     env: { ...process.env, ...env },
     encoding: "utf-8",
