@@ -8,21 +8,39 @@ use pantoken_protocol::session_driver::SessionListEntry;
 
 /// Combine warm (in-memory) and on-disk session entries, deduped by session id.
 /// A warm session that's also on disk keeps its richer disk entry; warm-only
-/// entries come first.
+/// entries come first. The warm entry's `display_name` is overlaid onto the
+/// disk entry when present, since it reflects the live `session_title` — which
+/// may be newer than what the daemon has flushed to `session.json` on disk.
 pub fn merge_session_lists(
     on_disk: &[SessionListEntry],
     warm: &[SessionListEntry],
 ) -> Vec<SessionListEntry> {
+    use std::collections::HashMap;
     let on_disk_ids: HashSet<&str> = on_disk
         .iter()
         .map(|entry| entry.session_id.as_str())
+        .collect();
+    let warm_by_id: HashMap<&str, &SessionListEntry> = warm
+        .iter()
+        .filter(|entry| on_disk_ids.contains(entry.session_id.as_str()))
+        .map(|entry| (entry.session_id.as_str(), entry))
         .collect();
     let mut merged: Vec<SessionListEntry> = warm
         .iter()
         .filter(|entry| !on_disk_ids.contains(entry.session_id.as_str()))
         .cloned()
         .collect();
-    merged.extend(on_disk.iter().cloned());
+    merged.extend(
+        on_disk
+            .iter()
+            .map(|e| match warm_by_id.get(e.session_id.as_str()) {
+                Some(w) if w.display_name.is_some() => SessionListEntry {
+                    display_name: w.display_name.clone(),
+                    ..e.clone()
+                },
+                _ => e.clone(),
+            }),
+    );
     merged
 }
 
@@ -50,6 +68,12 @@ mod tests {
             archived: false,
             worktree: None,
         }
+    }
+
+    fn entry_with_title(session_id: &str, display_name: Option<&str>) -> SessionListEntry {
+        let mut e = entry(session_id);
+        e.display_name = display_name.map(|s| s.to_string());
+        e
     }
 
     #[test]
@@ -92,5 +116,32 @@ mod tests {
             .map(|entry| entry.session_id.as_str())
             .collect();
         assert_eq!(ids, vec!["warm1", "warm2", "disk1", "disk2"]);
+    }
+
+    #[test]
+    fn warm_title_overlays_disk_entry_when_disk_has_no_title() {
+        let on_disk = vec![entry_with_title("s1", None)];
+        let warm = vec![entry_with_title("s1", Some("Live Title"))];
+        let merged = merge_session_lists(&on_disk, &warm);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].display_name.as_deref(), Some("Live Title"));
+    }
+
+    #[test]
+    fn warm_title_overlays_disk_entry_when_disk_title_is_stale() {
+        let on_disk = vec![entry_with_title("s1", Some("Old Title"))];
+        let warm = vec![entry_with_title("s1", Some("New Title"))];
+        let merged = merge_session_lists(&on_disk, &warm);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].display_name.as_deref(), Some("New Title"));
+    }
+
+    #[test]
+    fn warm_entry_without_title_keeps_disk_title() {
+        let on_disk = vec![entry_with_title("s1", Some("Disk Title"))];
+        let warm = vec![entry_with_title("s1", None)];
+        let merged = merge_session_lists(&on_disk, &warm);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].display_name.as_deref(), Some("Disk Title"));
     }
 }

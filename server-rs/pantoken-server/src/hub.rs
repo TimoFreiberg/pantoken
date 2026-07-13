@@ -579,7 +579,12 @@ impl SessionHub {
         let disc = ev.type_discriminator();
         if matches!(
             disc.as_str(),
-            "userMessage" | "runCompleted" | "runFailed" | "sessionOpened" | "sessionClosed"
+            "userMessage"
+                | "runCompleted"
+                | "runFailed"
+                | "sessionOpened"
+                | "sessionClosed"
+                | "sessionUpdated"
         ) {
             self.session_list_dirty = true;
         }
@@ -2301,6 +2306,45 @@ impl SessionHub {
             self.broadcast_session_list().await;
         }
         self.refresh_usage();
+    }
+
+    /// Whether the session list needs rebroadcast (title change, etc.).
+    /// Used by the periodic ticker to decide whether to run `live_tick` even
+    /// when no sessions are running (e.g. an inferred title landing while idle).
+    pub fn session_list_dirty(&self) -> bool {
+        self.session_list_dirty
+    }
+
+    /// Enqueue a live-refresh pass: rebroadcast the session list if dirty, then
+    /// refresh usage for running sessions. Called by the periodic ticker in
+    /// main.rs. Follows the same hub_ops pattern as `spawn_connect_lists` and
+    /// `switch_to` — fetches `list_sessions().await` BEFORE acquiring the lock,
+    /// then calls the sync `broadcast_session_list_with()` under it.
+    /// (parking_lot::Mutex is blocking — never hold its guard across .await.)
+    pub fn enqueue_live_refresh(&self) {
+        let dirty = self.session_list_dirty;
+        let refresh_usage = self.sync_live_refresh();
+        if !dirty && !refresh_usage {
+            return;
+        }
+        let driver = self.driver.clone();
+        self.hub_ops.enqueue(
+            "live_refresh",
+            Box::new(move |hub| {
+                Box::pin(async move {
+                    if dirty {
+                        let sessions = driver.list_sessions().await;
+                        let default_cwd = std::env::var("HOME").unwrap_or_default();
+                        let mut h = hub.lock();
+                        h.broadcast_session_list_with(sessions, default_cwd);
+                    }
+                    if refresh_usage {
+                        let mut h = hub.lock();
+                        h.refresh_usage();
+                    }
+                })
+            }),
+        );
     }
 
     pub fn refresh_usage(&mut self) {
@@ -4701,5 +4745,122 @@ mod hub_models_tests {
             }
             other => panic!("expected ModelDefaults after switch, got {other:?}"),
         }
+    }
+
+    /// AC.1: emitting a `SessionUpdated` event marks `session_list_dirty`.
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn session_updated_marks_session_list_dirty() {
+        use pantoken_protocol::session_driver::{SessionStatus, WorkspaceRef};
+
+        let (_driver, hub, _ops) = test_hub();
+        let sref = session_ref_for("title-test");
+        let workspace = WorkspaceRef {
+            workspace_id: sref.workspace_id.clone(),
+            path: "/repo".into(),
+            display_name: None,
+        };
+        let snap = crate::polytoken::event_map::snapshot_from_state(
+            None,
+            &sref,
+            &workspace,
+            SessionStatus::Idle,
+            &ts(),
+            None,
+            None,
+        );
+
+        // Clear the initial dirty flag (set true by SessionHub::new) by
+        // calling live_tick once — it broadcasts + clears.
+        hub.lock().live_tick().await;
+        assert!(
+            !hub.lock().session_list_dirty(),
+            "dirty flag should be clear after live_tick"
+        );
+
+        // Emit SessionUpdated — should set the dirty flag.
+        hub.lock().on_event(SessionDriverEvent::SessionUpdated {
+            base: SessionEventBase {
+                session_ref: sref.clone(),
+                timestamp: ts(),
+                run_id: None,
+            },
+            snapshot: snap,
+        });
+
+        assert!(
+            hub.lock().session_list_dirty(),
+            "SessionUpdated must mark session_list_dirty"
+        );
+    }
+
+    /// AC.2: `live_tick` rebroadcasts the session list when dirty and clears the flag.
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn live_tick_rebroadcasts_and_clears_dirty_flag() {
+        use pantoken_protocol::session_driver::{SessionStatus, WorkspaceRef};
+
+        let (_driver, hub, _ops) = test_hub();
+        let (_client_key, _tx, mut rx) = hub.lock().add_client(None);
+
+        // Drain the Hello message sent by add_client.
+        let _ = drain_until(&mut rx, |msg| matches!(msg, ServerMessage::Hello { .. })).await;
+
+        // The hub starts with session_list_dirty = true (from new()).
+        // Call live_tick once to broadcast + clear it, then drain that SessionList.
+        hub.lock().live_tick().await;
+        let _ = drain_until(&mut rx, |msg| {
+            matches!(msg, ServerMessage::SessionList { .. })
+        })
+        .await;
+        assert!(
+            !hub.lock().session_list_dirty(),
+            "dirty flag should be clear after initial live_tick"
+        );
+
+        // Now mark it dirty again via a SessionUpdated event.
+        let sref = session_ref_for("title-test");
+        let workspace = WorkspaceRef {
+            workspace_id: sref.workspace_id.clone(),
+            path: "/repo".into(),
+            display_name: None,
+        };
+        let snap = crate::polytoken::event_map::snapshot_from_state(
+            None,
+            &sref,
+            &workspace,
+            SessionStatus::Idle,
+            &ts(),
+            None,
+            None,
+        );
+        hub.lock().on_event(SessionDriverEvent::SessionUpdated {
+            base: SessionEventBase {
+                session_ref: sref.clone(),
+                timestamp: ts(),
+                run_id: None,
+            },
+            snapshot: snap,
+        });
+        assert!(
+            hub.lock().session_list_dirty(),
+            "dirty flag should be set after SessionUpdated"
+        );
+
+        // live_tick should rebroadcast the session list and clear the flag.
+        hub.lock().live_tick().await;
+
+        let msg = drain_until(&mut rx, |msg| {
+            matches!(msg, ServerMessage::SessionList { .. })
+        })
+        .await;
+        assert!(
+            matches!(msg, ServerMessage::SessionList { .. }),
+            "expected a SessionList broadcast after live_tick"
+        );
+        assert!(
+            !hub.lock().session_list_dirty(),
+            "dirty flag should be clear after live_tick rebroadcast"
+        );
     }
 }
