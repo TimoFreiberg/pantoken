@@ -1,0 +1,54 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="80"
+  height="72"
+  viewBox="0 0 40 36"
+>
+  <!-- Monochrome macOS template image. AppKit supplies the visible color from
+       this image's alpha channel for light, dark, pressed, and inactive states. -->
+  <defs>
+    <mask id="token-hole">
+      <rect width="40" height="36" fill="white" />
+      <rect
+        x="14.5"
+        y="14.5"
+        width="3.8"
+        height="3.8"
+        rx="1"
+        fill="black"
+        transform="rotate(-7 16.4 16.4)"
+      />
+    </mask>
+    <mask id="handle-hole">
+      <rect width="40" height="36" fill="white" />
+      <circle cx="35" cy="31.7" r="1.15" fill="black" />
+    </mask>
+  </defs>
+
+  <path
+    d="M23.6 23.6 35 31.7"
+    fill="none"
+    stroke="black"
+    stroke-width="5"
+    stroke-linecap="round"
+    mask="url(#handle-hole)"
+  />
+  <circle
+    cx="15.8"
+    cy="15.8"
+    r="11.6"
+    fill="none"
+    stroke="black"
+    stroke-width="4.4"
+  />
+  <rect
+    x="11.9"
+    y="11.9"
+    width="9"
+    height="9"
+    rx="2.4"
+    fill="black"
+    mask="url(#token-hole)"
+    transform="rotate(-7 16.4 16.4)"
+  />
+</svg>

@@ -300,9 +300,17 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .items(&[&quit])
         .build()?;
 
-    TrayIconBuilder::with_id("pantoken-tray")
-        .icon(app.default_window_icon().expect("bundled icon").clone())
-        .tooltip("Pantoken")
+    let tray = TrayIconBuilder::with_id("pantoken-tray");
+    #[cfg(target_os = "macos")]
+    let tray = tray
+        .icon(tauri::image::Image::from_bytes(include_bytes!(
+            "../icons/tray-template.png"
+        ))?)
+        .icon_as_template(true);
+    #[cfg(not(target_os = "macos"))]
+    let tray = tray.icon(app.default_window_icon().expect("bundled icon").clone());
+
+    tray.tooltip("Pantoken")
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| {
