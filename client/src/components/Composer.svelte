@@ -1590,8 +1590,8 @@
     height: 36px;
     border-radius: 50%;
     border: none;
-    background: var(--accent);
-    color: var(--accent-text);
+    background: var(--highlight);
+    color: var(--highlight-text);
     font-size: 17px;
     line-height: 1;
     display: grid;
@@ -1604,6 +1604,9 @@
   }
   .send:not(:disabled):active {
     transform: scale(0.92);
+  }
+  .send:not(:disabled):hover {
+    background: var(--highlight-hover);
   }
   /* Steer/follow-up hint, centered in the status row between the permission and
      model/context controls. Shrinks + ellipsizes before crowding them; hidden entirely

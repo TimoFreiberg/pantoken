@@ -1550,12 +1550,12 @@
     background: var(--danger-soft);
     border: 1px solid color-mix(in srgb, var(--danger) 38%, transparent);
   }
-  /* done — a finished-while-away run. A check badge in the accent reads "ready for
+  /* done — a finished-while-away run. A gold check badge reads "ready for
      you". */
   .status[data-state="done"] .attention-symbol {
-    color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 14%, transparent);
-    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    color: var(--highlight);
+    background: var(--highlight-soft);
+    border: 1px solid color-mix(in srgb, var(--highlight) 45%, transparent);
   }
   /* Top-level draft rows — pending new sessions whose cwd isn't a known project yet,
      pinned above the project groups. Project-targeted drafts nest inside their group's

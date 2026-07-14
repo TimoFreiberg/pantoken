@@ -48,14 +48,17 @@
   }
   .action {
     flex-shrink: 0;
-    background: var(--accent);
-    color: var(--accent-text);
+    background: var(--highlight);
+    color: var(--highlight-text);
     border: none;
     border-radius: 999px;
     padding: 5px 13px;
     font-size: 12.5px;
     font-weight: 550;
     cursor: pointer;
+  }
+  .action:hover {
+    background: var(--highlight-hover);
   }
   @keyframes notice-rise {
     from {

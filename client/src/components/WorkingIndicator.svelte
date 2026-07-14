@@ -159,7 +159,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--accent);
+    color: var(--highlight);
   }
   .ring {
     position: absolute;
