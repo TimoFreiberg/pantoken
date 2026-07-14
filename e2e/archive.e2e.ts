@@ -60,8 +60,12 @@ test("archiving offers an Undo toast that restores the session", async ({
   await sidebar.getByRole("menuitem", { name: "Archive", exact: true }).click();
 
   // The row vanishes from the active view AND a toast offers a one-tap undo.
-  await expect(sidebar.getByText("Explore the fold reducer")).toHaveCount(0);
-  const toast = page.getByTestId("toast").filter({ hasText: "Archived" });
+  await expect(
+    sidebar
+      .locator(".row-wrap")
+      .filter({ hasText: "Explore the fold reducer" }),
+  ).toHaveCount(0);
+  const toast = sidebar.getByTestId("toast").filter({ hasText: "Archived" });
   await expect(toast).toBeVisible();
 
   // Undo restores it (un-archives), and the toast clears.
@@ -97,7 +101,11 @@ test("right-clicking a session row opens its overflow menu", async ({
 
   // And it drives the same action.
   await sidebar.getByRole("menuitem", { name: "Archive", exact: true }).click();
-  await expect(sidebar.getByText("Explore the fold reducer")).toHaveCount(0);
+  await expect(
+    sidebar
+      .locator(".row-wrap")
+      .filter({ hasText: "Explore the fold reducer" }),
+  ).toHaveCount(0);
 });
 
 test("the overflow menu copies the session id to the clipboard", async ({
@@ -144,7 +152,11 @@ test("pressing 'a' while the menu is open archives the targeted session", async 
   await page.keyboard.press("a");
 
   // Archived → gone from the active list, and the menu closed itself.
-  await expect(sidebar.getByText("Explore the fold reducer")).toHaveCount(0);
+  await expect(
+    sidebar
+      .locator(".row-wrap")
+      .filter({ hasText: "Explore the fold reducer" }),
+  ).toHaveCount(0);
   await expect(
     sidebar.getByRole("menuitem", { name: "Archive", exact: true }),
   ).toHaveCount(0);
@@ -171,15 +183,21 @@ test("archiving the focused session drops its row and opens a new-session draft"
   // Archiving what you're reading is an explicit "put this away" gesture, so the row
   // drops from the active view and the main pane flips to a new-session draft for the
   // same project (rather than leaving you staring at the archived transcript).
-  await expect(sidebar.getByText("Wire up the WebSocket bridge")).toHaveCount(
-    0,
-  );
+  await expect(
+    sidebar
+      .locator(".row-wrap")
+      .filter({ hasText: "Wire up the WebSocket bridge" }),
+  ).toHaveCount(0);
   await expect(page.getByTestId("new-session")).toBeVisible();
 
   // Undo restores both: the session un-archives AND we're put back on its transcript.
-  const toast = page.getByTestId("toast").filter({ hasText: "Archived" });
+  const toast = sidebar.getByTestId("toast").filter({ hasText: "Archived" });
   await toast.getByRole("button", { name: "Undo", exact: true }).click();
-  await expect(sidebar.getByText("Wire up the WebSocket bridge")).toBeVisible();
+  await expect(
+    sidebar
+      .locator(".row-wrap")
+      .filter({ hasText: "Wire up the WebSocket bridge" }),
+  ).toBeVisible();
   await expect(page.getByTestId("new-session")).toHaveCount(0);
 });
 
@@ -201,7 +219,11 @@ test("the overflow menu archives a session, hiding it from the active list", asy
   await sidebar.getByRole("menuitem", { name: "Archive", exact: true }).click();
 
   // It disappears from the active view (optimistic + server reconcile).
-  await expect(sidebar.getByText("Explore the fold reducer")).toHaveCount(0);
+  await expect(
+    sidebar
+      .locator(".row-wrap")
+      .filter({ hasText: "Explore the fold reducer" }),
+  ).toHaveCount(0);
 
   // Under "show all" it's back, marked archived, and the menu now offers Unarchive.
   await sidebar.getByTestId("filter-toggle").click();

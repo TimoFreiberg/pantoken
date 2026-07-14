@@ -1,0 +1,101 @@
+import { expect, test } from "@playwright/test";
+import { drive, gotoFresh, openSidebar } from "./helpers.js";
+
+// Mobile-only: when the sidebar is closed and a sidebar-scoped notice exists,
+// the sidebar-open control shows an unread badge. Sidebar and chat notices stay
+// on their own surfaces (no duplication).
+
+test.beforeEach(async ({ page }) => {
+  await gotoFresh(page);
+});
+
+test("sidebar notice shows an unread badge when the sidebar is closed", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  const sidebar = page.getByTestId("sidebar");
+
+  // Archive a session — this creates a sidebar-scoped notice.
+  const row = sidebar
+    .locator(".row-wrap")
+    .filter({ hasText: "Explore the fold reducer" });
+  await expect(row).toBeVisible();
+  await row.locator(".row").click({ button: "right" });
+  await sidebar.getByRole("menuitem", { name: "Archive", exact: true }).click();
+
+  // The notice is visible inside the sidebar.
+  await expect(
+    sidebar.getByTestId("toast").filter({ hasText: "Archived" }),
+  ).toBeVisible();
+
+  // Close the sidebar (phone drawer: the collapse toggle inside the sidebar closes it).
+  await page
+    .getByTestId("sidebar")
+    .getByRole("button", { name: "Collapse sidebar" })
+    .click();
+  await expect(sidebar).toHaveAttribute("data-open", "false");
+
+  // The sidebar-open control now shows the unread badge.
+  const badge = page.getByTestId("sidebar-notice-badge");
+  await expect(badge).toBeVisible();
+  await expect(badge).toHaveText("1");
+
+  // Reopening the sidebar shows the notice.
+  await page.getByTestId("sidebar-open").click();
+  await expect(sidebar).toHaveAttribute("data-open", "true");
+  await expect(
+    sidebar.getByTestId("toast").filter({ hasText: "Archived" }),
+  ).toBeVisible();
+});
+
+test("sidebar and chat notices stay on their own surfaces (no duplication)", async ({
+  page,
+}) => {
+  // Trigger a chat-scoped notice (stop confirmation timeout).
+  await drive(page, "slowabort");
+  await drive(page, "streamhold");
+  const stop = page.locator(".composer-wrap .stop");
+  await stop.click();
+
+  // The chat notice appears in the chat-notice container.
+  await expect(
+    page
+      .getByTestId("chat-notice")
+      .getByTestId("toast")
+      .filter({ hasText: "Couldn't confirm the stop within 500ms" }),
+  ).toBeVisible();
+
+  // Open the sidebar and archive a session (sidebar-scoped notice).
+  await openSidebar(page);
+  const sidebar = page.getByTestId("sidebar");
+  const row = sidebar
+    .locator(".row-wrap")
+    .filter({ hasText: "Wire up the WebSocket bridge" });
+  await expect(row).toBeVisible();
+  await row.locator(".row").click({ button: "right" });
+  await sidebar.getByRole("menuitem", { name: "Archive", exact: true }).click();
+
+  // The sidebar notice is in the sidebar-notice container only.
+  await expect(
+    sidebar.getByTestId("toast").filter({ hasText: "Archived" }),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByTestId("chat-notice")
+      .getByTestId("toast")
+      .filter({ hasText: "Archived" }),
+  ).toHaveCount(0);
+
+  // The chat notice is in the chat-notice container only, not in the sidebar.
+  await expect(
+    page
+      .getByTestId("chat-notice")
+      .getByTestId("toast")
+      .filter({ hasText: "Couldn't confirm the stop within 500ms" }),
+  ).toBeVisible();
+  await expect(
+    sidebar
+      .getByTestId("toast")
+      .filter({ hasText: "Couldn't confirm the stop within 500ms" }),
+  ).toHaveCount(0);
+});

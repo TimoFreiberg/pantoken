@@ -25,11 +25,16 @@ test("a lease conflict surfaces a sticky Retry toast; retrying opens the session
   await sidebar.getByText("Explore the fold reducer").click();
 
   // The toast appears with the lease-conflict message.
-  const toast = page.getByTestId("toast").filter({ hasText: "another TUI is attached" });
+  const toast = page
+    .getByTestId("chat-notice")
+    .getByTestId("toast")
+    .filter({ hasText: "another TUI is attached" });
   await expect(toast).toBeVisible();
 
   // The Retry action button is present (sticky — no auto-dismiss).
-  await expect(toast.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+  await expect(
+    toast.getByRole("button", { name: "Retry", exact: true }),
+  ).toBeVisible();
 
   // The toast is sticky: it persists past the 8s auto-dismiss window (the operator
   // may be detaching in the TUI). Use a generous poll + a short wait to prove it.
@@ -78,13 +83,15 @@ test("a non-lease session-switch error does NOT get a Retry button", async ({
 
   // Reconnect -> the queued newSession flushes and fails → recovery toast appears.
   await page.getByRole("button", { name: "Reconnect" }).click();
-  const toast = page.getByTestId("toast").filter({
+  const toast = page.getByTestId("chat-notice").getByTestId("toast").filter({
     hasText: "New session couldn't start",
   });
   await expect(toast).toBeVisible();
 
   // The recovery toast has a Restore button, NOT a Retry button. The Retry action
   // is exclusive to lease conflicts — non-lease session failures use Restore.
-  await expect(toast.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
+  await expect(
+    toast.getByRole("button", { name: "Restore", exact: true }),
+  ).toBeVisible();
   await expect(toast.getByRole("button", { name: "Retry" })).toHaveCount(0);
 });
