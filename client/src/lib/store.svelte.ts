@@ -83,10 +83,16 @@ import {
   setResumeProvider,
 } from "./ws.svelte.js";
 
-/** A transient snackbar. `action` is an optional one-shot affordance (e.g. Undo). */
+/** Which surface a notice belongs to. Sidebar notices render at the top of the
+ * sidebar (session-list operations); chat notices render in-flow above the
+ * transcript (current-session / Pantoken-level events). */
+export type NoticeScope = "sidebar" | "chat";
+
+/** A transient notice. `action` is an optional one-shot affordance (e.g. Undo). */
 export interface Toast {
   id: number;
   message: string;
+  scope: NoticeScope;
   action?: { label: string; run: () => void };
 }
 
@@ -347,10 +353,13 @@ class PantokenStore {
   // match the client's. A hard error: the client must not fold events from an
   // incompatible server. The UI shows a full-screen error directing a hard refresh.
   protocolMismatch = $state<string | null>(null);
-  // Transient snackbars (archive undo, "resolved on another device", …). Client-only,
+  // Transient notices, split by surface. Sidebar notices render at the top of
+  // the sidebar (session-list operations); chat notices render in-flow above
+  // the transcript (current-session / Pantoken-level events). Client-only,
   // never sent upstream; each carries an optional one-shot action and auto-dismisses.
-  toasts = $state<Toast[]>([]);
-  private toastSeq = 0;
+  sidebarToasts = $state<Toast[]>([]);
+  chatToasts = $state<Toast[]>([]);
+  private noticeSeq = 0;
   /** The outstanding stop action, if any. This never changes daemon state itself: it
    * makes the action's result visible instead of leaving the ordinary running UI stuck. */
   private stopOperation = $state<StopOperation | null>(null);
@@ -806,7 +815,7 @@ class PantokenStore {
     this.stopOperation = result.operation;
     if (result.clearError) this.lastError = null;
     if (result.lateConfirmation) {
-      this.toast(
+      this.chatNotice(
         "The agent stopped after Pantoken's 500ms confirmation window.",
         {
           durationMs: 8000,
@@ -828,7 +837,7 @@ class PantokenStore {
       error: message,
     };
     this.lastError = message;
-    this.toast(message, { durationMs: 8000 });
+    this.chatNotice(message, { durationMs: 8000 });
   }
 
   /** Estimated tokens the model has streamed into the focused session's CURRENT turn —
@@ -1058,7 +1067,7 @@ class PantokenStore {
             (r) => r.requestId === ev.requestId && r.kind !== "qna",
           );
           if (wasShowing && !this.locallyResolved.has(ev.requestId))
-            this.toast("Resolved on another device");
+            this.chatNotice("Resolved on another device");
           this.locallyResolved.delete(ev.requestId);
         }
         foldEvent(this.session, ev);
@@ -1188,7 +1197,7 @@ class PantokenStore {
           // A retry or a session switch superseded this attempt. Success is already
           // visible through the terminal event; failures must still not disappear.
           if (!msg.accepted)
-            this.toast(
+            this.chatNotice(
               `A late stop request failed: ${msg.error ?? "unknown error"}`,
               {
                 durationMs: 8000,
@@ -1202,7 +1211,7 @@ class PantokenStore {
             msg.error ?? "Pantoken couldn't send the stop request.",
           );
         } else if (operation.state === "unconfirmed") {
-          this.toast(
+          this.chatNotice(
             "Pantoken accepted the stop request after 500ms; waiting for the agent to settle.",
             { durationMs: 8000 },
           );
@@ -1241,7 +1250,7 @@ class PantokenStore {
         } else if (msg.kind === "abort") {
           console.error("[server error]", msg.message);
           this.lastError = msg.message;
-          this.toast(msg.message, { durationMs: 8000 });
+          this.chatNotice(msg.message, { durationMs: 8000 });
         } else if (msg.kind === "session-switch") {
           // A known, common session-open failure (daemon didn't start, lease
           // conflict, port didn't bind). These aren't unexpected crashes — render
@@ -1267,7 +1276,7 @@ class PantokenStore {
             this.lastAttemptedSessionPath
           ) {
             const retryPath = this.lastAttemptedSessionPath;
-            this.toast(msg.message, {
+            this.chatNotice(msg.message, {
               action: {
                 label: "Retry",
                 run: () => this.openSession(retryPath),
@@ -1277,7 +1286,7 @@ class PantokenStore {
           } else {
             // Non-lease-conflict session-switch errors (daemon didn't start, port
             // didn't bind) aren't blindly retryable — keep the existing 8s toast.
-            this.toast(msg.message, { durationMs: 8000 });
+            this.chatNotice(msg.message, { durationMs: 8000 });
           }
         } else {
           console.error("[server error]", msg.message);
@@ -1296,7 +1305,7 @@ class PantokenStore {
         // Archive reaped the session but kept its worktree (dirty). Explain the leftover
         // and offer a force-delete so it isn't a mystery directory on disk.
         const path = msg.path;
-        this.toast(`Worktree kept — ${msg.reason}`, {
+        this.sidebarNotice(`Worktree kept — ${msg.reason}`, {
           action: {
             label: "Delete anyway",
             run: () => this.cleanupWorktree(path, true),
@@ -1490,7 +1499,7 @@ class PantokenStore {
       } catch (e) {
         this.lastError = `couldn't persist the failed prompt: ${errorText(e)}`;
       }
-      this.toast("New session couldn't start — restore your prompt?", {
+      this.chatNotice("New session couldn't start — restore your prompt?", {
         action: {
           label: "Restore",
           run: () => void this.restoreFailedDraft(stranded),
@@ -1593,12 +1602,12 @@ class PantokenStore {
     const sessionId = this.session.ref?.sessionId;
     if (!sessionId) {
       this.lastError = "Can't stop — there is no active session.";
-      this.toast(this.lastError, { durationMs: 8000 });
+      this.chatNotice(this.lastError, { durationMs: 8000 });
       return;
     }
     const prior = this.stopOperation;
     if (prior?.sessionId === sessionId && prior.state === "stopping") {
-      this.toast("Stop already requested — waiting for Pantoken.", {
+      this.chatNotice("Stop already requested — waiting for Pantoken.", {
         durationMs: 2500,
       });
       return;
@@ -1617,7 +1626,7 @@ class PantokenStore {
         activityVersion: this.activityVersion,
         error: this.lastError ?? undefined,
       };
-      this.toast(this.lastError, { durationMs: 8000 });
+      this.chatNotice(this.lastError, { durationMs: 8000 });
       return;
     }
     this.stopOperation = {
@@ -2363,7 +2372,8 @@ class PantokenStore {
     if (facets.length < 2) return;
     const cur = this.composerFacet;
     const idx = facets.indexOf(cur);
-    const next = facets[(idx + dir + facets.length) % facets.length] ?? "execute";
+    const next =
+      facets[(idx + dir + facets.length) % facets.length] ?? "execute";
     this.setFacet(next);
   }
 
@@ -2481,18 +2491,42 @@ class PantokenStore {
   }
   /** Archive or unarchive a session by path. Optimistic — flips the local flag now so
    *  the row reacts instantly; the server's `sessionList` re-broadcast reconciles. */
-  /** Push a transient snackbar; auto-dismisses after `durationMs` (0 = sticky). */
-  toast(
+  /** Push a transient sidebar notice; auto-dismisses after `durationMs` (0 = sticky). */
+  sidebarNotice(
     message: string,
     opts?: { action?: { label: string; run: () => void }; durationMs?: number },
   ): void {
-    const id = ++this.toastSeq;
-    this.toasts = [...this.toasts, { id, message, action: opts?.action }];
+    const id = ++this.noticeSeq;
+    this.sidebarToasts = [
+      ...this.sidebarToasts,
+      { id, message, scope: "sidebar", action: opts?.action },
+    ];
     const ms = opts?.durationMs ?? 6000;
-    if (ms > 0) setTimeout(() => this.dismissToast(id), ms);
+    if (ms > 0) setTimeout(() => this.dismissNotice("sidebar", id), ms);
   }
-  dismissToast(id: number): void {
-    this.toasts = this.toasts.filter((t) => t.id !== id);
+  /** Push a transient chat notice; auto-dismisses after `durationMs` (0 = sticky). */
+  chatNotice(
+    message: string,
+    opts?: { action?: { label: string; run: () => void }; durationMs?: number },
+  ): void {
+    const id = ++this.noticeSeq;
+    this.chatToasts = [
+      ...this.chatToasts,
+      { id, message, scope: "chat", action: opts?.action },
+    ];
+    const ms = opts?.durationMs ?? 6000;
+    if (ms > 0) setTimeout(() => this.dismissNotice("chat", id), ms);
+  }
+  dismissNotice(scope: NoticeScope, id: number): void {
+    if (scope === "sidebar") {
+      this.sidebarToasts = this.sidebarToasts.filter((t) => t.id !== id);
+    } else {
+      this.chatToasts = this.chatToasts.filter((t) => t.id !== id);
+    }
+  }
+  /** Count of active sidebar notices — drives the mobile unread badge. */
+  get sidebarNoticeCount(): number {
+    return this.sidebarToasts.length;
   }
 
   setArchived(path: string, archived: boolean): void {
@@ -2514,7 +2548,7 @@ class PantokenStore {
       const viewedId = this.session.ref?.sessionId ?? this.activeSessionId;
       const archivingFocused = s != null && s.sessionId === viewedId;
       if (archivingFocused) this.startDraft(s.worktree?.base ?? s.cwd);
-      this.toast(`Archived “${label}”`, {
+      this.sidebarNotice(`Archived “${label}”`, {
         action: {
           label: "Undo",
           run: () => {

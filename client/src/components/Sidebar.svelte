@@ -17,6 +17,7 @@
   import IconButton from "./ui/IconButton.svelte";
   import Chevron from "./ui/Chevron.svelte";
   import PullIndicator from "./PullIndicator.svelte";
+  import SidebarNotice from "./SidebarNotice.svelte";
   import { pullToRefresh } from "../lib/pull-to-refresh.js";
   import { createPullRefresh } from "../lib/pull-to-refresh.svelte.js";
   import type { EdgeSwipe } from "../lib/edge-swipe.svelte.js";
@@ -633,6 +634,8 @@
     label="Resize sessions sidebar"
     onChange={setSidebarWidth}
   />
+
+  <SidebarNotice />
 
   <div class="new" data-testid="sidebar-new-session">
     <button

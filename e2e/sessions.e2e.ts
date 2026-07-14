@@ -530,7 +530,9 @@ test("archiving a dirty worktree session keeps it and explains why in a toast", 
   await sidebar.getByRole("menuitem", { name: "Archive" }).click();
 
   // The retained-worktree toast explains the leftover instead of leaving a mystery dir.
-  const toast = page.getByTestId("toast").filter({ hasText: "Worktree kept" });
+  const toast = sidebar
+    .getByTestId("toast")
+    .filter({ hasText: "Worktree kept" });
   await expect(toast).toBeVisible();
 
   // It offers a one-tap force-delete; clicking it reaps the worktree (indicator clears).

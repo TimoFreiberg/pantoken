@@ -59,7 +59,7 @@ test("a slow stop becomes an explicit retry state, then reports late settlement"
     "Stop unconfirmed",
   );
   await expect(
-    page.getByTestId("toast").filter({
+    page.getByTestId("chat-notice").getByTestId("toast").filter({
       hasText: "Couldn't confirm the stop within 500ms",
     }),
   ).toBeVisible();
@@ -76,7 +76,7 @@ test("a slow stop becomes an explicit retry state, then reports late settlement"
       }),
   ).toHaveCount(0);
   await expect(
-    page.getByTestId("toast").filter({
+    page.getByTestId("chat-notice").getByTestId("toast").filter({
       hasText: "The agent stopped after Pantoken's 500ms confirmation window.",
     }),
   ).toBeVisible();

@@ -15,7 +15,7 @@
   import Settings from "./components/Settings.svelte";
   import PlanView from "./components/PlanView.svelte";
   import Tooltip from "./components/Tooltip.svelte";
-  import Toast from "./components/Toast.svelte";
+  import ChatNotice from "./components/ChatNotice.svelte";
   import ImageLightbox from "./components/ImageLightbox.svelte";
   import { untrack } from "svelte";
   import { imageViewer } from "./lib/image-viewer.svelte.js";
@@ -348,6 +348,7 @@
     <StatusHeader />
     <div class="chat">
       <ConnectionBanner />
+      <ChatNotice />
       {#if store.draft}
         <NewSession />
       {:else}
@@ -418,8 +419,6 @@
 
 <!-- Transient snackbars (archive undo, resolved-elsewhere). Outside the gate so it overlays
      the whole app. -->
-<Toast />
-
 <!-- Themed tooltip override for every `title` in the app; works behind the gate too. -->
 <Tooltip />
 

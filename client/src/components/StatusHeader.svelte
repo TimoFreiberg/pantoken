@@ -144,16 +144,25 @@
        chevron at its trailing edge (its top-left is reserved for the macOS traffic lights),
        ~200px right of here. Same top row, though, so it's still a click-back-and-forth. -->
   {#if !store.sidebarOpen}
-    <IconButton
-      class="sidebar-open"
-      data-testid="sidebar-open"
-      title="Show sessions (⌘B)"
-      aria-label="Show sessions"
-      onclick={() => store.openSidebar()}
-    >
-      <Chevron open={false} />
-      <span class="sidebar-open-label">Show sessions</span>
-    </IconButton>
+    <div class="sidebar-open-wrap">
+      <IconButton
+        class="sidebar-open"
+        data-testid="sidebar-open"
+        title="Show sessions (⌘B)"
+        aria-label="Show sessions"
+        onclick={() => store.openSidebar()}
+      >
+        <Chevron open={false} />
+        <span class="sidebar-open-label">Show sessions</span>
+      </IconButton>
+      {#if store.sidebarNoticeCount > 0}
+        <span
+          class="notice-badge"
+          data-testid="sidebar-notice-badge"
+          aria-label="{store.sidebarNoticeCount} unread notification{store.sidebarNoticeCount === 1 ? '' : 's'} in sidebar"
+        >{store.sidebarNoticeCount}</span>
+      {/if}
+    </div>
   {/if}
   <div class="left">
     <span class="title-row">
@@ -278,6 +287,27 @@
   .sidebar-open {
     margin-left: var(--shell-leading-inset);
     gap: 6px;
+  }
+  .sidebar-open-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+  }
+  .notice-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--accent-text);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+    pointer-events: none;
   }
   .sidebar-open-label {
     display: none;
