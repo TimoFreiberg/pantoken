@@ -126,8 +126,8 @@
     font-size: 12.5px;
     font-family: var(--font-sans);
     color: var(--text-muted);
-    background: var(--surface-sunken);
-    border: 1px solid var(--border);
+    background: var(--highlight-soft);
+    border: 1px solid color-mix(in srgb, var(--highlight) 42%, var(--border));
     padding: 4px 10px;
     border-radius: 999px;
     cursor: pointer;
@@ -139,7 +139,7 @@
   }
   .attention-pill:hover {
     color: var(--text);
-    border-color: var(--border-strong);
+    border-color: var(--highlight);
   }
   .attention-pill:focus-visible {
     outline: none;

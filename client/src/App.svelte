@@ -457,13 +457,14 @@
     font-size: 14px;
     padding: 8px 20px;
     border-radius: var(--radius-sm);
-    border: 1px solid var(--accent);
-    background: var(--accent);
-    color: var(--bg);
+    border: 1px solid var(--highlight);
+    background: var(--highlight);
+    color: var(--highlight-text);
     cursor: pointer;
   }
   .fatal button:hover {
-    background: var(--accent-hover);
+    border-color: var(--highlight-hover);
+    background: var(--highlight-hover);
   }
   .shell {
     display: flex;

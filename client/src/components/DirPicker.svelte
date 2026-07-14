@@ -592,9 +592,9 @@
   }
   .use {
     flex: 1;
-    background: var(--accent);
-    color: var(--accent-text);
-    border: 1px solid var(--accent);
+    background: var(--highlight);
+    color: var(--highlight-text);
+    border: 1px solid var(--highlight);
     border-radius: var(--radius-sm);
     padding: 7px 12px;
     font-size: 13px;
@@ -603,6 +603,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .use:hover {
+    background: var(--highlight-hover);
+    border-color: var(--highlight-hover);
   }
   .cancel {
     background: transparent;

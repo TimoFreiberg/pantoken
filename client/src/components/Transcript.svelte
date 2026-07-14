@@ -1131,8 +1131,8 @@
     gap: 5px;
     font-size: 12.5px;
     font-weight: 550;
-    color: var(--accent-text);
-    background: var(--accent);
+    color: var(--highlight-text);
+    background: var(--highlight);
     border: none;
     border-radius: 999px;
     padding: 7px 14px;
@@ -1141,7 +1141,7 @@
     animation: pillIn 0.16s ease;
   }
   .new-pill:hover {
-    background: var(--accent-hover);
+    background: var(--highlight-hover);
   }
   @keyframes pillIn {
     from {

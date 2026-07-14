@@ -61,9 +61,12 @@
 
   /* Emphasis — promoted verbatim from Settings' btn / ghost / danger. */
   .primary {
-    background: var(--accent);
-    color: var(--accent-text);
+    background: var(--highlight);
+    color: var(--highlight-text);
     border-color: transparent;
+  }
+  .primary:not(:disabled):hover {
+    background: var(--highlight-hover);
   }
   .secondary {
     background: var(--surface);
