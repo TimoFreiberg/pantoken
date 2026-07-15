@@ -1121,35 +1121,7 @@
 
     <QueueTray />
 
-    {#if drafting && store.draft}
-      <!-- New-session location controls (project · worktree). Model + effort live in
-           the status row below, rebound to the draft via store.composerConfig. -->
-      <div class="chips">
-        <button
-          class="chip"
-          data-testid="draft-project-control"
-          aria-haspopup="dialog"
-          aria-expanded={pickingCwd}
-          title={`Project: ${store.draft.cwd || "home"} — click to browse for a directory (⌥P)`}
-          onclick={() => (pickingCwd = !pickingCwd)}
-        >
-          {cwdBase}
-          <Chevron open={pickingCwd} variant="menu" size={10} />
-        </button>
-        <button
-          class="chip toggle-chip"
-          data-testid="draft-worktree-control"
-          class:on={store.draft.worktree}
-          aria-pressed={store.draft.worktree}
-          title="Isolate this session in a jj/git worktree of the project, leaving the main tree clean (⌥W)"
-          onclick={() => store.toggleDraftWorktree()}
-        >
-          worktree
-          {#if store.draft.worktree}<span class="chip-check" aria-hidden="true">✓</span>{/if}
-        </button>
-      </div>
-    {/if}
-
+    <div class="composer-surface" data-testid="composer-surface">
     <div class="box-wrap">
       {#if pickingCwd && drafting && store.draft}
         <DirPicker
@@ -1300,6 +1272,32 @@
 
     <div class="composer-status-row" data-testid="composer-status-row">
       <div class="status-left">
+        {#if drafting && store.draft}
+          <!-- Draft location belongs with the remaining composer configuration, below
+               the text row. Model + effort are rebound to the draft via composerConfig. -->
+          <button
+            class="chip"
+            data-testid="draft-project-control"
+            aria-haspopup="dialog"
+            aria-expanded={pickingCwd}
+            title={`Project: ${store.draft.cwd || "home"} — click to browse for a directory (⌥P)`}
+            onclick={() => (pickingCwd = !pickingCwd)}
+          >
+            {cwdBase}
+            <Chevron open={pickingCwd} variant="menu" size={10} />
+          </button>
+          <button
+            class="chip toggle-chip"
+            data-testid="draft-worktree-control"
+            class:on={store.draft.worktree}
+            aria-pressed={store.draft.worktree}
+            title="Isolate this session in a jj/git worktree of the project, leaving the main tree clean (⌥W)"
+            onclick={() => store.toggleDraftWorktree()}
+          >
+            worktree
+            {#if store.draft.worktree}<span class="chip-check" aria-hidden="true">✓</span>{/if}
+          </button>
+        {/if}
         <PermissionBadge />
         <FacetBadge />
       </div>
@@ -1346,6 +1344,7 @@
         {/if}
       </div>
     </div>
+    </div>
 
   </div>
 </div>
@@ -1362,10 +1361,7 @@
 <style>
   .composer-wrap {
     position: relative;
-    border-top: 1px solid var(--border);
-    background: color-mix(in srgb, var(--bg) 86%, transparent);
-    backdrop-filter: blur(8px);
-    padding: 10px 44px calc(12px + env(safe-area-inset-bottom));
+    padding: 10px 44px calc(18px + env(safe-area-inset-bottom));
   }
   .composer-wrap.drag-active {
     background: color-mix(in srgb, var(--accent) 10%, var(--bg));
@@ -1454,12 +1450,6 @@
     opacity: 0.5;
     cursor: not-allowed;
   }
-  .chips {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-  }
   .chip {
     display: inline-flex;
     align-items: center;
@@ -1507,16 +1497,28 @@
     /* Anchor for the slash menu, which pops upward from just above the box. */
     position: relative;
   }
+  .composer-surface {
+    overflow: visible;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-card);
+    transition:
+      border-color 0.15s,
+      box-shadow 0.15s;
+  }
+  .composer-surface:focus-within {
+    border-color: var(--accent);
+  }
   .box {
     position: relative;
     display: flex;
     align-items: flex-end;
     gap: 8px;
-    background: var(--surface);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius);
-    padding: 8px 8px 8px 10px;
-    transition: border-color 0.15s;
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+    padding: 9px 9px 7px 11px;
   }
   .composer-attachments {
     flex: 0 0 auto;
@@ -1525,9 +1527,6 @@
     gap: 5px;
     max-width: min(30vw, 180px);
     flex-wrap: wrap;
-  }
-  .box:focus-within {
-    border-color: var(--accent);
   }
   /* Drag-handle-style expand toggle, straddling the top border. Greyed out at
      rest; revealed on hover (desktop) or focus-within (touch, which has no hover). */
@@ -1540,7 +1539,7 @@
     height: 16px;
     display: grid;
     place-items: center;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-strong);
     border-radius: 999px;
     background: var(--surface);
     color: var(--text-faint);
@@ -1589,21 +1588,34 @@
     width: 36px;
     height: 36px;
     border-radius: 50%;
-    border: none;
-    background: var(--highlight);
-    color: var(--highlight-text);
+    border: 1px solid transparent;
+    background: var(--accent-soft);
+    color: var(--accent-hover);
     font-size: 17px;
     line-height: 1;
     display: grid;
     place-items: center;
-    transition: opacity 0.15s, transform 0.1s;
+    transition:
+      background 0.15s,
+      color 0.15s,
+      border-color 0.15s,
+      opacity 0.15s,
+      transform 0.1s;
   }
   .send:disabled {
-    opacity: 0.35;
+    background: var(--surface-sunken);
+    border-color: var(--border);
+    color: var(--text-faint);
+    opacity: 0.55;
     cursor: default;
   }
   .send:not(:disabled):active {
     transform: scale(0.92);
+  }
+  .composer-surface:focus-within .send:not(:disabled),
+  .send:not(:disabled):hover {
+    background: var(--highlight);
+    color: var(--highlight-text);
   }
   .send:not(:disabled):hover {
     background: var(--highlight-hover);
@@ -1642,6 +1654,10 @@
       flex-wrap: wrap;
       row-gap: 6px;
     }
+    .status-left {
+      flex: 1 1 100%;
+      flex-wrap: wrap;
+    }
     .composer-status-right {
       flex: 1 1 100%;
       justify-content: flex-end;
@@ -1657,7 +1673,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    padding: 0 2px;
+    padding: 1px 11px 9px;
     min-width: 0;
   }
   .status-left,
