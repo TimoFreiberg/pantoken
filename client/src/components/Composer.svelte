@@ -1273,8 +1273,7 @@
     <div class="composer-status-row" data-testid="composer-status-row">
       <div class="status-left">
         {#if drafting && store.draft}
-          <!-- Draft location belongs with the remaining composer configuration, below
-               the text row. Model + effort are rebound to the draft via composerConfig. -->
+          <!-- Model + effort are rebound to the draft via composerConfig. -->
           <button
             class="chip"
             data-testid="draft-project-control"
