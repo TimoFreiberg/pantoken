@@ -3,23 +3,19 @@
 **Issue:** {{ISSUE_TITLE}}
 **URL:** {{ISSUE_URL}}
 
+## Issue body
+
+{{ISSUE_BODY}}
+
+## Screenshots
+
+{{ISSUE_IMAGES}}
+
 ## Your task
 
-You are an autonomous agent implementing a GitHub issue. Follow these steps
-in order. Do NOT skip steps.
+You are an autonomous agent implementing a GitHub issue. The issue body and screenshots above have been pre-fetched for you. In normal mode, screenshots are available at the listed local paths; do not download or retrieve them again. In dry-run, the listed image references are source URLs only and will be materialized by normal mode. Follow these steps in order. Do NOT skip steps.
 
-## Step 1: Read the issue
-
-Read the issue with:
-
-```
-gh issue view {{ISSUE_NUMBER}} --repo TimoFreiberg/pantoken
-```
-
-All `gh` commands MUST include `--repo TimoFreiberg/pantoken` — this workspace
-is a jj workspace without a `.git` directory, so `gh` cannot auto-detect the repo.
-
-## Step 2: Evaluate implementability
+## Step 1: Evaluate implementability
 
 If the issue is ambiguous or you cannot implement it without a human answer:
 
@@ -33,7 +29,7 @@ If the issue is ambiguous or you cannot implement it without a human answer:
 2. Do NOT commit or make any code changes.
 3. Stop. The outer script will handle cleanup.
 
-## Step 3: Plan
+## Step 2: Plan
 
 If the issue is implementable:
 
@@ -43,7 +39,7 @@ If the issue is implementable:
    Repeat until there are no critical or high findings.
 4. Call `handoff_plan` to hand off to the execute facet.
 
-## Step 4: Execute
+## Step 3: Execute
 
 After handoff approval:
 
@@ -52,7 +48,7 @@ After handoff approval:
 3. Commit with `Fixes #{{ISSUE_NUMBER}}` in the commit message (on its own
    line, after the subject). This links the commit to the GitHub issue.
 
-## Step 5: Review implementation
+## Step 4: Review implementation
 
 1. Use the `quality-review` skill to review your implementation.
    The skill file is at `.agents/skills/quality-review/SKILL.md`.
@@ -60,7 +56,7 @@ After handoff approval:
 3. Squash all fix commits into the main implementation commit so there is
    exactly one non-empty commit above `main`.
 
-## Step 6: Integrate
+## Step 5: Integrate
 
 Run the integration command from the workspace root directory:
 
@@ -88,7 +84,7 @@ shell timeout), just call it again — the lock is a file (`.merge-lock`)
 keyed by PID + session_id, not an flock. Same-session re-acquisition is
 immediate.
 
-## Step 7: Done
+## Step 6: Done
 
 After successful integration, you can stop. The outer script cleans up the
 workspace automatically.

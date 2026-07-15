@@ -15,6 +15,10 @@
 set -euo pipefail
 
 ISSUE_NUMBER="${1:?usage: integrate-into-main.sh <issue_number>}"
+if ! [[ "$ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+  echo "ERROR: issue_number must be a positive integer" >&2
+  exit 1
+fi
 
 REPO_ROOT="${PANTOKEN_REPO_ROOT:-/Users/timo/src/pantoken}"
 LOCK_FILE="$REPO_ROOT/.merge-lock"
@@ -70,11 +74,16 @@ acquire_lock() {
       return 0
     fi
 
-    # File exists — read and evaluate the existing lock
+    # File exists — malformed metadata is conservative: never steal it.
     local existing_pid existing_sid existing_ts
-    existing_pid=$(jq -r '.pid // 0' "$LOCK_FILE" 2>/dev/null || echo 0)
-    existing_sid=$(jq -r '.session_id // ""' "$LOCK_FILE" 2>/dev/null || echo "")
-    existing_ts=$(jq -r '.timestamp // 0' "$LOCK_FILE" 2>/dev/null || echo 0)
+    if ! jq -e '.pid|type=="number" and . >= 1 and (.|floor)==. and .session_id|type=="string" and .timestamp|type=="number" and .timestamp >= 1 and (.timestamp|floor)==.' "$LOCK_FILE" >/dev/null 2>&1; then
+      log "Malformed or unsafe lock metadata in $LOCK_FILE; recover it manually"
+      sleep "$POLL_INTERVAL"
+      continue
+    fi
+    existing_pid=$(jq -r '.pid' "$LOCK_FILE")
+    existing_sid=$(jq -r '.session_id' "$LOCK_FILE")
+    existing_ts=$(jq -r '.timestamp' "$LOCK_FILE")
 
     if _pid_alive "$existing_pid"; then
       # PID is alive — another integration is in progress
@@ -112,6 +121,11 @@ acquire_lock() {
 }
 
 release_lock() {
+  if [ ! -f "$LOCK_FILE" ]; then return 0; fi
+  if ! jq -e --argjson pid "$$" --arg sid "$CURRENT_SESSION" '.pid == $pid and .session_id == $sid' "$LOCK_FILE" >/dev/null 2>&1; then
+    log "Not removing merge lock: on-disk owner does not match PID $$ and session $CURRENT_SESSION"
+    return 0
+  fi
   rm -f "$LOCK_FILE" 2>/dev/null || true
 }
 
@@ -150,16 +164,23 @@ fi
 
 # 4. Rebase new commits onto main@origin
 log "Rebasing main..@ onto main@origin..."
-jj rebase -s 'main..@' -d main@origin 2>/dev/null || true
+REBASE_STATUS=0
+jj rebase -s 'main..@' -d main@origin 2>/dev/null || REBASE_STATUS=$?
 
-# 5. Check for conflicts
+# 5. Classify rebase failures before running tests.
 CONFLICTS=$(jj resolve --list 2>/dev/null | head -1 || true)
 if [ -n "$CONFLICTS" ]; then
   log "CONFLICTS DETECTED — resolve them using the jj-resolve-conflicts skill,"
   log "then call 'just integrate-into-main $ISSUE_NUMBER' again. The lock is still held."
-  # Keep the lock — don't release it
   RELEASE_ON_EXIT=false
   exit 2
+fi
+if [ "$REBASE_STATUS" -ne 0 ]; then
+  log "ERROR: rebase failed without conflicts — rolling back to pre-rebase state"
+  jj op restore "$PRE_REBASE_OP" || log "WARN: failed to restore pre-rebase operation"
+  release_lock
+  RELEASE_ON_EXIT=false
+  exit 1
 fi
 
 # 6. Run tests
