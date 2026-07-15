@@ -46,6 +46,11 @@ test("hovering a titled control shows a themed tooltip, then restores the title"
 test("tooltip survives a re-render of the element under a resting pointer", async ({
   page,
 }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
   // A warm session re-renders tracked nodes (tool progress, status changes) while
   // the pointer rests on them. The browser fires mouseout for the removed node but
   // no mouseover for its replacement; the tooltip must re-acquire the fresh node
@@ -105,4 +110,27 @@ test("tooltip survives a re-render of the element under a resting pointer", asyn
   });
   await expect(page.locator(".tip")).toHaveCount(0);
   await expect(fresh).toHaveAttribute("title", title);
+  expect(errors).toEqual([]);
+});
+
+test("keyboard tooltip closes cleanly when its focused control unmounts", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+
+  const btn = page.getByRole("button", { name: "Collapse sidebar" });
+  await btn.focus();
+  await expect(page.locator(".tip")).toBeVisible();
+
+  // Activating this focused button replaces the expanded sidebar (and the
+  // button itself), which dispatches focusout synchronously during teardown.
+  await page.keyboard.press("Enter");
+
+  await expect(btn).toHaveCount(0);
+  await expect(page.locator(".tip")).toHaveCount(0);
+  expect(errors).toEqual([]);
 });
