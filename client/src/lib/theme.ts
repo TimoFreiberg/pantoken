@@ -47,6 +47,7 @@ export function resolveThemeMode(
 export function applyThemeMode(mode: ThemeMode): void {
   if (typeof document === "undefined") return;
   document.documentElement.setAttribute("data-theme", resolveTheme(mode));
+  document.documentElement.style.colorScheme = resolveTheme(mode);
   syncThemeColor();
 }
 
