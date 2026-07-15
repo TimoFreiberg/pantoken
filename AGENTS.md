@@ -19,6 +19,15 @@ See `docs/DESIGN.md` for architecture, `docs/DECISIONS.md` for settled calls, `d
   server.** Never `kill` or `lsof -ti:8787 | xargs kill` them — that nukes the
   harness you're talking through, and the session dies. If `EADDRINUSE` on 8787,
   something else is holding the port; find and stop it, not the harness's process.
+- **sccache is required for Rust builds.** `.cargo/config.toml` sets
+  `build.rustc-wrapper = "sccache"`. Install it with `brew install sccache`
+  (macOS). In CI, `mozilla-actions/sccache-action` installs it automatically.
+  A shared `CARGO_TARGET_DIR` is set in `.envrc` (direnv) so all jj worktrees
+  share compiled artifacts — switching worktrees goes from "recompile
+  everything" to instant. Requires direnv (`brew install direnv`, then
+  `direnv allow`). CI overrides this with
+  `CARGO_TARGET_DIR: ${{ github.workspace }}/target` since direnv isn't
+  active there.
 
 ## Stack & layout
 

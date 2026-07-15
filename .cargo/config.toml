@@ -1,0 +1,19 @@
+# Shared build configuration — applies in every jj worktree and in CI.
+#
+# sccache caches rustc compiler results. It survives `cargo clean` (unlike a
+# shared target dir) and is the primary cross-worktree compile-time win for
+# dependency crates. Requires sccache installed locally (`brew install
+# sccache`) and in CI (via mozilla-actions/sccache-action).
+[build]
+rustc-wrapper = "sccache"
+
+# Normalize source paths to be relative to the worktree root so sccache gets
+# cache hits across jj worktrees. `relative = true` resolves to the parent of
+# .cargo/ (the worktree root) in each worktree, so all worktrees produce the
+# same relative paths for the same source files.
+[env]
+SCCACHE_BASEDIRS = { value = ".", relative = true }
+
+# Faster crate index fetches (default since Cargo 1.68, explicit for clarity).
+[registries.crates-io]
+protocol = "sparse"

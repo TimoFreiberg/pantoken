@@ -43,5 +43,5 @@ notify = "8"
 
 [profile.release]
 strip = true
-lto = true
+lto = "thin"
 codegen-units = 1
