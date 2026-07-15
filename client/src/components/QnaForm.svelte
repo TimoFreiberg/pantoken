@@ -37,6 +37,7 @@
     // the collapsed state survives this component remounting on request change.
     collapsed?: boolean;
     onMinimize?: () => void;
+    fullScreen?: boolean;
   }
   let {
     request,
@@ -46,6 +47,7 @@
     onchange,
     collapsed = false,
     onMinimize,
+    fullScreen = false,
   }: Props = $props();
 
   const questions = $derived(request.questions);
@@ -230,6 +232,7 @@
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
   class="qna"
+  class:full-screen={fullScreen}
   bind:this={root}
   onkeydown={onkeydown}
   role="group"
@@ -250,10 +253,11 @@
           class="min"
           onclick={onMinimize}
           aria-expanded={!collapsed}
-          aria-label={collapsed ? "Expand the questions" : "Minimize to the title"}
-          title={collapsed ? "Expand the questions" : "Minimize to the title"}
+          aria-label={fullScreen ? "Minimize questions" : collapsed ? "Expand the questions" : "Minimize to the title"}
+          title={fullScreen ? "Minimize questions" : collapsed ? "Expand the questions" : "Minimize to the title"}
         >
           <Chevron open={!collapsed} size={11} />
+          {#if fullScreen}<span>Minimize</span>{/if}
         </button>
       {/if}
     </div>
@@ -426,6 +430,7 @@
     line-height: 1;
     cursor: pointer;
   }
+  .min span { display: none; }
   .min :global(.chevron) {
     color: inherit;
   }
@@ -576,5 +581,18 @@
   }
   .actions :global(.btn) {
     flex: 1 1 0;
+  }
+  @media (max-width: 859px) {
+    .qna.full-screen { height: 100%; min-height: 0; }
+    .full-screen .head { align-items: flex-start; margin-bottom: 12px; }
+    .full-screen .head-right { flex-direction: column-reverse; align-items: flex-end; }
+    .full-screen .min { width: auto; min-width: 96px; height: 44px; gap: 8px; padding: 0 12px; }
+    .full-screen .min span { display: inline; }
+    .full-screen .card { flex: 1; min-height: 0; max-height: none; overflow-y: auto; }
+    .full-screen .dot { width: 44px; height: 44px; background: transparent; border: 0; position: relative; }
+    .full-screen .dot::after { content: ""; position: absolute; width: 9px; height: 9px; border-radius: 99px; background: var(--surface-sunken); border: 1px solid var(--border-strong); inset: 50% auto auto 50%; transform: translate(-50%, -50%); }
+    .full-screen .dot.done::after { background: color-mix(in srgb, var(--text) 35%, var(--surface-sunken)); }
+    .full-screen .dot.active::after { background: var(--text); border-color: var(--text); transform: translate(-50%, -50%) scale(1.25); }
+    .full-screen .actions { padding-bottom: env(safe-area-inset-bottom); flex-shrink: 0; }
   }
 </style>
