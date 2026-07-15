@@ -10,6 +10,10 @@
   --bg-elevated: #ffffff;
   --surface: #ffffff;
   --surface-sunken: #efece4;
+  /* Code gets its own quiet neutral plane. It should scan as technical content without
+     borrowing the stronger elevation/selection semantics of the shared surfaces. */
+  --surface-code: #f1efe9;
+  --border-code: #dedad1;
   --text: #1f1e1d;
   --text-muted: #73706b;
   --text-faint: #9a968f;
@@ -51,9 +55,18 @@
     ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas,
     "Liberation Mono", monospace;
 
+  /* One shared corner vocabulary: containers, controls, and compact chips. */
   --radius: 14px;
   --radius-sm: 9px;
   --radius-xs: 6px;
+  --radius-pill: 999px;
+
+  /* Type rhythm. Component chrome can stay dense; prose and code use these explicit
+     roles so their hierarchy does not depend on the browser's inherited defaults. */
+  --leading-ui: 1.5;
+  --leading-prose: 1.52;
+  --leading-code: 1.55;
+  --leading-heading: 1.25;
 
   /* Height of the top chrome bar, excluding its 1px bottom border and any
      safe-area inset. StatusHeader and the right context panel's own top bar both
@@ -86,6 +99,8 @@
   --bg-elevated: #1d1b19;
   --surface: #24211e;
   --surface-sunken: #121110;
+  --surface-code: #11100f;
+  --border-code: #2c2926;
   --text: #eee9e1;
   --text-muted: #aaa39a;
   --text-faint: #77716a;
@@ -139,7 +154,7 @@ body {
   color: var(--text);
   font-family: var(--font-sans);
   font-size: 16px;
-  line-height: 1.62;
+  line-height: var(--leading-ui);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;

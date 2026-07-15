@@ -134,7 +134,7 @@
     display: inline-flex;
     background: var(--surface-sunken);
     border: 1px solid var(--border);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     padding: 2px;
     flex-shrink: 0;
   }
@@ -147,7 +147,7 @@
     bottom: 2px;
     left: 0;
     background: var(--surface);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     box-shadow: var(--shadow-card);
     pointer-events: none;
     z-index: 0;
@@ -171,7 +171,7 @@
     border: none;
     background: transparent;
     color: var(--text-muted);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     cursor: pointer;
     font-family: inherit;
     white-space: nowrap;
