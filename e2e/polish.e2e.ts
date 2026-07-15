@@ -175,6 +175,54 @@ test("large line matrix omits counts and still renders its bounded preview promp
     .toContain("GUARD_OLD_START");
 });
 
+test("one-sided edits count safe creations exactly and guard pathological deletions", async ({
+  page,
+}) => {
+  await drive(page, "editemptyguards");
+
+  const creation = page.locator(".tool", { hasText: "Large file creation" });
+  await expect(creation).toBeVisible({ timeout: 2_000 });
+  await expect(creation.locator(".counts")).toHaveAccessibleName(
+    "601 added, 0 removed",
+  );
+  await expect(creation.locator(".counts-omitted")).toHaveCount(0);
+  await creation.locator(".head").click();
+  await expect
+    .poll(
+      () =>
+        creation.evaluate((el) => {
+          const host = [...el.querySelectorAll<HTMLElement>("*")].find(
+            (node) => node.shadowRoot,
+          );
+          return host?.shadowRoot?.textContent ?? "";
+        }),
+      { timeout: 5_000 },
+    )
+    .toContain("CREATE_PREVIEW_START");
+
+  const deletion = page.locator(".tool", {
+    hasText: "Pathological file deletion",
+  });
+  await expect(deletion).toBeVisible({ timeout: 2_000 });
+  await expect(deletion.locator(".counts")).toHaveCount(0);
+  await expect(deletion.locator(".counts-omitted")).toHaveAccessibleName(
+    "Line counts omitted for large edit",
+  );
+  await deletion.locator(".head").click();
+  await expect
+    .poll(
+      () =>
+        deletion.evaluate((el) => {
+          const host = [...el.querySelectorAll<HTMLElement>("*")].find(
+            (node) => node.shadowRoot,
+          );
+          return host?.shadowRoot?.textContent ?? "";
+        }),
+      { timeout: 5_000 },
+    )
+    .toContain("DELETE_PREVIEW_START");
+});
+
 test("message timestamps render with an exact-time tooltip", async ({
   page,
 }) => {

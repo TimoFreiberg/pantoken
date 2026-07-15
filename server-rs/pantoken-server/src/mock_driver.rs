@@ -3285,6 +3285,37 @@ impl PantokenDriver for MockDriver {
                     0, 0, 1,
                 )
             }
+            "editemptyguards" => {
+                let created_text = format!(
+                    "CREATE_PREVIEW_START\n{}CREATE_PREVIEW_TAIL",
+                    "created line\n".repeat(599)
+                );
+                let pathological_delete = format!(
+                    "DELETE_PREVIEW_START\n{}DELETE_PREVIEW_TAIL",
+                    "deleted line\n".repeat(20_000)
+                );
+                let mut s = tool_span(
+                    "edit-create-safe-1", "edit", "Large file creation", Some("Exercise exact one-sided creation counts"),
+                    serde_json::json!({
+                        "path": "src/created.ts",
+                        "edits": [{ "oldText": "", "newText": created_text }]
+                    }),
+                    true,
+                    serde_json::json!("large file created"),
+                    0, 0, 1,
+                );
+                s.extend(tool_span(
+                    "edit-delete-guarded-1", "edit", "Pathological file deletion", Some("Exercise guarded one-sided deletion counts"),
+                    serde_json::json!({
+                        "path": "src/deleted.ts",
+                        "edits": [{ "oldText": pathological_delete, "newText": "" }]
+                    }),
+                    true,
+                    serde_json::json!("large file deleted"),
+                    0, 0, 1,
+                ));
+                s
+            }
             // ── Compat ─────────────────────────────────────────────────────
             "compat" => vec![
                 ScriptStep { wait_ms: 0, event: SessionDriverEvent::ExtensionCompatibilityIssue { base: base(), issue: ExtensionCompatibilityIssue {
