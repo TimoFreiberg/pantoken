@@ -573,7 +573,12 @@ test("resize handles paint a centered stripe for focus and drag feedback", async
   await page.mouse.move(box!.x + box!.width / 2, box!.y + 120);
   await page.mouse.down();
   await expect(handle).toHaveClass(/\bdragging\b/);
-  expect(colorAlpha((await stripeStyle(handle)).background)).toBeGreaterThan(0);
+  // The ::after stripe has transition: background 120ms ease, so the computed
+  // background can still read transparent before the dragging color applies.
+  // Poll until the accent stripe paints, mirroring the focus check above.
+  await expect
+    .poll(async () => colorAlpha((await stripeStyle(handle)).background))
+    .toBeGreaterThan(0);
   await expect
     .poll(() => page.evaluate(() => document.documentElement.style.cursor))
     .toBe("col-resize");
