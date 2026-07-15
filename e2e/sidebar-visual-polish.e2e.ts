@@ -265,6 +265,16 @@ test("short desktop rails share their surface and retain compact scrolling geome
   expect(leftStyle.background).toBe(rightStyle.background);
   expect(leftStyle.outerBorder).toBe("0px");
   expect(rightStyle.outerBorder).toBe("0px");
+  const contextHeaderDivider = await rightRail
+    .locator(".top")
+    .evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        style: style.borderBottomStyle,
+        width: style.borderBottomWidth,
+      };
+    });
+  expect(contextHeaderDivider).toEqual({ style: "none", width: "0px" });
 
   const leftScroller = leftRail.locator(".list");
   const rightScroller = rightRail.locator(".content");
