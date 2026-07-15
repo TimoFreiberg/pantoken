@@ -141,8 +141,17 @@ async function declaredWebkitStyle(
   pseudo: string,
 ): Promise<{ background: string; borderRadius: string; width: string }> {
   return locator.evaluate((element, pseudoSelector) => {
-    const effective = { background: "", borderRadius: "", width: "" };
-    let matched = false;
+    const probeAttribute = "data-scrollbar-cascade-probe";
+    const probeValue = Math.random().toString(36).slice(2);
+    const probeSuffix = `[${probeAttribute}="${probeValue}"]`;
+    const translatedRules: string[] = [];
+    const declaration = (
+      name: string,
+      value: string,
+      priority: string,
+    ): string =>
+      value ? `${name}: ${value}${priority ? " !important" : ""};` : "";
+
     const visit = (rules: CSSRuleList): void => {
       for (const rule of Array.from(rules)) {
         if (
@@ -156,24 +165,38 @@ async function declaredWebkitStyle(
         )
           continue;
         if (rule instanceof CSSStyleRule) {
-          const applies = rule.selectorText.split(",").some((selector) => {
+          for (const selector of rule.selectorText.split(",")) {
             const exact = selector.trim();
-            if (!exact.endsWith(pseudoSelector)) return false;
+            if (!exact.endsWith(pseudoSelector)) continue;
             const base = exact.slice(0, -pseudoSelector.length).trim();
             try {
-              return element.matches(base);
+              if (!element.matches(base)) continue;
             } catch {
-              return false;
+              continue;
             }
-          });
-          if (applies) {
-            matched = true;
-            const background =
-              rule.style.backgroundColor || rule.style.background;
-            if (background) effective.background = background;
-            if (rule.style.borderRadius)
-              effective.borderRadius = rule.style.borderRadius;
-            if (rule.style.width) effective.width = rule.style.width;
+
+            const backgroundProperty = rule.style.backgroundColor
+              ? "background-color"
+              : "background";
+            const declarations = [
+              declaration(
+                "--scrollbar-probe-background",
+                rule.style.getPropertyValue(backgroundProperty),
+                rule.style.getPropertyPriority(backgroundProperty),
+              ),
+              declaration(
+                "--scrollbar-probe-radius",
+                rule.style.borderRadius,
+                rule.style.getPropertyPriority("border-radius"),
+              ),
+              declaration(
+                "--scrollbar-probe-width",
+                rule.style.width,
+                rule.style.getPropertyPriority("width"),
+              ),
+            ].join("");
+            if (declarations)
+              translatedRules.push(`${base}${probeSuffix} { ${declarations} }`);
           }
         }
         if ("cssRules" in rule) {
@@ -182,8 +205,28 @@ async function declaredWebkitStyle(
       }
     };
     for (const sheet of Array.from(document.styleSheets)) visit(sheet.cssRules);
-    if (matched) return effective;
-    throw new Error(`No scoped WebKit scrollbar rule for ${pseudoSelector}`);
+    if (translatedRules.length === 0)
+      throw new Error(`No scoped WebKit scrollbar rule for ${pseudoSelector}`);
+
+    const probeStyle = document.createElement("style");
+    probeStyle.textContent = translatedRules.join("\n");
+    element.setAttribute(probeAttribute, probeValue);
+    document.head.append(probeStyle);
+    try {
+      const computed = getComputedStyle(element);
+      return {
+        background: computed
+          .getPropertyValue("--scrollbar-probe-background")
+          .trim(),
+        borderRadius: computed
+          .getPropertyValue("--scrollbar-probe-radius")
+          .trim(),
+        width: computed.getPropertyValue("--scrollbar-probe-width").trim(),
+      };
+    } finally {
+      probeStyle.remove();
+      element.removeAttribute(probeAttribute);
+    }
   }, pseudo);
 }
 
@@ -286,8 +329,7 @@ test("short desktop rails share their surface and retain compact scrolling geome
     expect(expectedHoverThumb).not.toBe(expectedThumb);
   }
 
-  // Prove the CSSOM oracle follows selector applicability and source order: a later
-  // lookalike selector is ignored, while a later equally-specific rail override wins.
+  // Prove the CSSOM oracle follows selector applicability and the author cascade.
   const expectedLeftThumb = await normalizedColor(
     leftScroller,
     "color-mix(in srgb, var(--accent) 42%, transparent)",
@@ -314,19 +356,40 @@ test("short desktop rails share their surface and retain compact scrolling geome
     const exactBase = Array.from(element.classList)
       .map((name) => `.${CSS.escape(name)}`)
       .join("");
-    style.dataset.scrollbarOracle = "override";
-    style.textContent = `${exactBase}::-webkit-scrollbar-thumb { background: rgb(1, 2, 3); }`;
+    style.dataset.scrollbarOracle = "specificity";
+    style.textContent = `
+      .sidebar ${exactBase}::-webkit-scrollbar-thumb { background: rgb(4, 5, 6); }
+      ${exactBase}::-webkit-scrollbar-thumb { background: rgb(1, 2, 3); }
+    `;
     document.head.append(style);
   });
-  const overridden = await declaredWebkitStyle(
+  const specificityWinner = await declaredWebkitStyle(
     leftScroller,
     "::-webkit-scrollbar-thumb",
   );
-  expect(await normalizedColor(leftScroller, overridden.background)).toBe(
-    "rgb(1, 2, 3)",
+  expect(
+    await normalizedColor(leftScroller, specificityWinner.background),
+  ).toBe("rgb(4, 5, 6)");
+  // A partial winning declaration retains the effective radius from another rule.
+  expect(specificityWinner.borderRadius).toBe("999px");
+
+  await leftScroller.evaluate((element) => {
+    const style = document.createElement("style");
+    const exactBase = Array.from(element.classList)
+      .map((name) => `.${CSS.escape(name)}`)
+      .join("");
+    style.dataset.scrollbarOracle = "important";
+    style.textContent = `${exactBase}::-webkit-scrollbar-thumb { background: rgb(7, 8, 9) !important; }`;
+    document.head.append(style);
+  });
+  const importantWinner = await declaredWebkitStyle(
+    leftScroller,
+    "::-webkit-scrollbar-thumb",
   );
-  // A partial later declaration inherits the still-effective radius.
-  expect(overridden.borderRadius).toBe("999px");
+  expect(await normalizedColor(leftScroller, importantWinner.background)).toBe(
+    "rgb(7, 8, 9)",
+  );
+  expect(importantWinner.borderRadius).toBe("999px");
   await page.locator("style[data-scrollbar-oracle]").evaluateAll((styles) => {
     for (const style of styles) style.remove();
   });
