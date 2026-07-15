@@ -2,7 +2,9 @@ export const DEFAULT_SIDEBAR_WIDTH = 288;
 export const DEFAULT_RIGHT_SIDEBAR_WIDTH = 280;
 export const MIN_SIDEBAR_WIDTH = 200;
 export const MIN_RIGHT_SIDEBAR_WIDTH = 200;
-export const MAIN_MIN_WIDTH = 360;
+// Desktop reading column protected before either resizable rail gets more room.
+// Phone layouts are overlays and do not use this flex budget.
+export const MAIN_MIN_WIDTH = 520;
 export const MAX_STORED_SIDEBAR_WIDTH = 2000;
 
 /** Widths are persisted in CSS pixels. Rendering clamps them against the current CSS viewport. */

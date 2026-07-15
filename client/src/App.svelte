@@ -321,6 +321,7 @@
 </script>
 
 <svelte:window
+  onresize={() => store.setViewportWidth(window.innerWidth)}
   onkeydown={(e) => { onZoomKey(e); onGlobalKeydown(e); }}
   onauxclick={onMouseAuxClick}
 />
@@ -339,7 +340,7 @@
        in the header (StatusHeader), at the leading/trailing edge respectively — the top
        corner each panel's own collapse control sits in. (⌘B / ⌘⇧J too.) A collapsed
        panel's own root is display:none (desktop) or translated off-screen (phone
-       drawer), so it can't host its reopen affordance itself. -->
+       sessions view), so it can't host its reopen affordance itself. -->
   <div
     class="app"
     use:edgeSwipe={{

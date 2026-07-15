@@ -38,7 +38,7 @@ test.describe("desktop sidebar resize", () => {
     expect(await width(page, "right-sidebar")).toBeGreaterThan(0);
   });
 
-  test("dragging the context panel handle changes only the right width", async ({ page }) => {
+  test("dragging the context panel changes only the right width", async ({ page }) => {
     const leftBefore = await width(page, "sidebar");
     const rightBefore = await width(page, "right-sidebar");
     const handle = page.getByRole("separator", { name: "Resize context panel" });
@@ -77,6 +77,13 @@ test.describe("desktop sidebar resize", () => {
     expect(stored.left).toBeCloseTo(chosen.left, 0);
     expect(stored.right).toBeCloseTo(chosen.right, 0);
     await page.reload();
+    // At this viewport the larger combined preferences make auto hide Context.
+    // Widening must restore both raw choices without having overwritten them.
+    await expect(page.getByTestId("right-sidebar")).toHaveAttribute(
+      "data-open",
+      "false",
+    );
+    await page.setViewportSize({ width: 1500, height: 850 });
     await expect.poll(() => width(page, "sidebar")).toBeCloseTo(chosen.left, 0);
     await expect.poll(() => width(page, "right-sidebar")).toBeCloseTo(chosen.right, 0);
   });
@@ -128,4 +135,3 @@ test.describe("desktop sidebar resize", () => {
     await expect.poll(() => page.evaluate(() => ({ cursor: document.documentElement.style.cursor, select: document.documentElement.style.userSelect }))).toEqual({ cursor: "", select: "" });
   });
 });
-

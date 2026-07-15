@@ -46,7 +46,7 @@
       store.rightSidebarWidth,
       viewportWidth,
       store.sidebarOpen,
-      store.rightSidebarOpen,
+      store.rightSidebarOpen && !store.rightSidebarOverlay,
     ),
   );
   const desktopWidthStyle = $derived(
@@ -535,7 +535,7 @@
   }
 </script>
 
-<!-- Backdrop only matters on the phone overlay; harmless (transparent, behind) on desktop. -->
+<!-- The scrim stays hidden for the full-screen phone sessions view. -->
 {#if store.sidebarOpen}
   <button
     class="scrim"
@@ -561,7 +561,7 @@
       aria-label="Collapse sidebar"
       onclick={() => store.closeSidebar()}>
       <Chevron open={true} />
-      <span class="control-label">Collapse</span>
+      <span class="control-label">Back</span>
     </IconButton>
     {#if store.sessions.length > 0}
       <div class="top-actions">
@@ -630,7 +630,7 @@
     side="left"
     value={widths.left}
     min={MIN_SIDEBAR_WIDTH}
-    max={maxWidthFor("left", viewportWidth, store.rightSidebarOpen)}
+    max={maxWidthFor("left", viewportWidth, store.rightSidebarOpen && !store.rightSidebarOverlay)}
     label="Resize sessions sidebar"
     onChange={setSidebarWidth}
   />
@@ -1660,17 +1660,16 @@
     cursor: help;
   }
 
-  /* Phone: the sidebar becomes a slide-over drawer above the transcript. */
+  /* Phone: sessions are a mutually-exclusive full-screen navigation view. */
   @media (max-width: 859px) {
     .sidebar {
       position: fixed;
       top: 0;
       left: 0;
-      /* Open drawer controls must sit above the sticky header; its scrim remains
-         below both layers so the drawer receives pointer events. */
+      /* Full-screen sessions controls must sit above the sticky app header. */
       z-index: 80;
-      width: min(82vw, 320px);
-      box-shadow: var(--shadow-pop);
+      width: 100vw;
+      box-shadow: none;
       transition: transform 0.18s ease;
     }
     .sidebar[data-open="false"] {
@@ -1695,14 +1694,7 @@
     .row {
       min-height: 44px;
     }
-    .scrim {
-      display: block;
-      position: fixed;
-      inset: 0;
-      z-index: 55;
-      background: rgba(0, 0, 0, 0.34);
-      border: none;
-    }
+    .scrim { display: none; }
     /* No hover on touch — keep the ⋯ trigger in the flow (a reserved column rather than
        a hover overlay) and always visible, so the timestamp stays readable beside it. */
     :global(.row-menu) {

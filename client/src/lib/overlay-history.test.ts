@@ -17,6 +17,7 @@ function fakeEnv(opts?: { phone?: boolean }) {
       entries++;
       log.push("push");
     },
+    replaceState: () => log.push("replace"),
     back: () => {
       entries--;
       log.push("back");
@@ -79,16 +80,16 @@ describe("overlay history", () => {
     expect(f.entryCount()).toBe(0);
   });
 
-  test("stacked overlays close top-first on back gestures", () => {
+  test("switching phone views reuses one entry and back returns to transcript", () => {
     const f = fakeEnv();
     const oh = createOverlayHistory(f.env);
     const closed: string[] = [];
     oh.opened("drawer", () => closed.push("drawer"));
     oh.opened("ctx", () => closed.push("ctx"));
-    expect(f.entryCount()).toBe(2);
+    expect(f.entryCount()).toBe(1);
+    expect(f.log).toEqual(["push", "replace"]);
     f.userBack();
-    f.userBack();
-    expect(closed).toEqual(["ctx", "drawer"]);
+    expect(closed).toEqual(["ctx"]);
     expect(f.entryCount()).toBe(0);
   });
 
@@ -115,19 +116,5 @@ describe("overlay history", () => {
     oh.closed("ctx");
     expect(f.log).toEqual([]);
     expect(oh.depth()).toBe(0);
-  });
-
-  test("out-of-order UI close drops bookkeeping but keeps the top overlay backed", () => {
-    const f = fakeEnv();
-    const oh = createOverlayHistory(f.env);
-    const closed: string[] = [];
-    oh.opened("drawer", () => closed.push("drawer"));
-    oh.opened("ctx", () => closed.push("ctx"));
-    oh.closed("drawer"); // closed under the top — entry stays (2 pushed, 0 backed)
-    expect(oh.depth()).toBe(1);
-    f.userBack(); // closes ctx (the top)
-    expect(closed).toEqual(["ctx"]);
-    f.userBack(); // stale drawer entry — harmless no-op pop
-    expect(closed).toEqual(["ctx"]);
   });
 });
