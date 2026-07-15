@@ -78,7 +78,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
-      - uses: mozilla-actions/sccache-action@v0
+      - uses: mozilla-actions/sccache-action@v0.0.10
       - run: cargo build -p pantoken-server
       - name: Cache Playwright browsers
         uses: actions/cache@v4
@@ -121,7 +121,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
-      - uses: mozilla-actions/sccache-action@v0
+      - uses: mozilla-actions/sccache-action@v0.0.10
       - run: bun install --frozen-lockfile
       # Pre-warm the Rust binary so dev.ts's `cargo run` answers /health quickly (the
       # webServer timeout budgets a cold compile, but warming keeps it comfortable).
@@ -164,7 +164,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
-      - uses: mozilla-actions/sccache-action@v0
+      - uses: mozilla-actions/sccache-action@v0.0.10
       - run: bun scripts/desktop/build-hub.ts --debug
       - run: cargo fmt --check -p pantoken-desktop
       - run: cargo clippy --locked -p pantoken-desktop --all-targets -- -D warnings
@@ -184,7 +184,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
-      - uses: mozilla-actions/sccache-action@v0
+      - uses: mozilla-actions/sccache-action@v0.0.10
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked -p pantoken-protocol -p pantoken-daemon-types -p pantoken-server --all-targets -- -D warnings
       - run: cargo test -p pantoken-protocol -p pantoken-daemon-types -p pantoken-server
@@ -216,7 +216,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
-      - uses: mozilla-actions/sccache-action@v0
+      - uses: mozilla-actions/sccache-action@v0.0.10
       - name: Install minisign
         run: brew install minisign
       - name: Check minisign
