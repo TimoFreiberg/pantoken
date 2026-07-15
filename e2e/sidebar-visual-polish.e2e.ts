@@ -29,15 +29,30 @@ async function boxMetrics(locator: Locator): Promise<BoxMetrics> {
 
 async function stripeStyle(handle: Locator): Promise<{
   background: string;
+  centerOffset: number;
   width: number;
 }> {
   return handle.evaluate((element) => {
     const style = getComputedStyle(element, "::after");
+    const width = parseFloat(style.width);
+    const transform = new DOMMatrixReadOnly(style.transform);
+    const stripeCenter = parseFloat(style.left) + transform.m41 + width / 2;
     return {
       background: style.backgroundColor,
-      width: parseFloat(style.width),
+      centerOffset: stripeCenter - element.clientWidth / 2,
+      width,
     };
   });
+}
+
+function scrollbarColors(value: string): [string, string] {
+  const colors = value.match(
+    /(?:rgba?|color)\([^)]*\)|transparent|#[\da-f]+/gi,
+  );
+  expect(colors, `expected a thumb and track color in ${value}`).toHaveLength(
+    2,
+  );
+  return colors as [string, string];
 }
 
 function expectTransparent(color: string): void {
@@ -64,11 +79,25 @@ test("short desktop rails share their surface and retain compact scrolling geome
 
   const leftRail = page.getByTestId("sidebar");
   const rightRail = page.getByTestId("right-sidebar");
-  const [leftBackground, rightBackground] = await Promise.all([
-    leftRail.evaluate((element) => getComputedStyle(element).backgroundColor),
-    rightRail.evaluate((element) => getComputedStyle(element).backgroundColor),
+  const [leftStyle, rightStyle] = await Promise.all([
+    leftRail.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        background: style.backgroundColor,
+        outerBorder: style.borderRightWidth,
+      };
+    }),
+    rightRail.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        background: style.backgroundColor,
+        outerBorder: style.borderLeftWidth,
+      };
+    }),
   ]);
-  expect(leftBackground).toBe(rightBackground);
+  expect(leftStyle.background).toBe(rightStyle.background);
+  expect(leftStyle.outerBorder).toBe("0px");
+  expect(rightStyle.outerBorder).toBe("0px");
 
   const leftScroller = leftRail.locator(".list");
   const rightScroller = rightRail.locator(".content");
@@ -80,13 +109,29 @@ test("short desktop rails share their surface and retain compact scrolling geome
   for (const metrics of [left, right]) {
     expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
     expect(metrics.scrollbarWidth).toBe("thin");
-    expect(metrics.scrollbarColor).toContain("rgba(0, 0, 0, 0)");
+    const [thumb, track] = scrollbarColors(metrics.scrollbarColor);
+    expectPainted(thumb);
+    expectTransparent(track);
   }
 
-  // Both rails keep a compact but non-zero content gutter without relying on a hard
-  // divider. Use ranges so token refinements do not make this a screenshot test.
-  expect(left.padding[3]).toBeGreaterThanOrEqual(6);
-  expect(left.padding[3]).toBeLessThanOrEqual(12);
+  // Assert the deliberate compact geometry, including the shallow nesting step. These
+  // relationships distinguish it from the previous 10px list gutter / 12px rail pad.
+  expect(left.padding[1]).toBe(9);
+  expect(left.padding[3]).toBe(9);
+  const nesting = await leftRail
+    .locator(".group ul")
+    .first()
+    .evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        left: parseFloat(style.paddingLeft),
+        right: parseFloat(style.paddingRight),
+      };
+    });
+  expect(nesting.left).toBe(7);
+  expect(nesting.left).toBeLessThan(left.padding[3]);
+  expect(nesting.right).toBe(3);
+
   const sectionPadding = await rightRail
     .locator(".section")
     .first()
@@ -94,10 +139,7 @@ test("short desktop rails share their surface and retain compact scrolling geome
       const style = getComputedStyle(element);
       return [parseFloat(style.paddingLeft), parseFloat(style.paddingRight)];
     });
-  for (const value of sectionPadding) {
-    expect(value).toBeGreaterThanOrEqual(12);
-    expect(value).toBeLessThanOrEqual(20);
-  }
+  expect(sectionPadding).toEqual([16, 16]);
 
   const projectHeight = await height(leftRail.locator(".group-toggle").first());
   const rowHeight = await height(leftRail.locator(".row").first());
@@ -118,8 +160,8 @@ test("resize handles paint a centered stripe for focus and drag feedback", async
 
   for (const handle of handles) {
     const resting = await stripeStyle(handle);
-    expect(resting.width).toBeGreaterThanOrEqual(1);
-    expect(resting.width).toBeLessThanOrEqual(2);
+    expect(resting.width).toBe(2);
+    expect(Math.abs(resting.centerOffset)).toBeLessThanOrEqual(0.01);
     expectTransparent(resting.background);
 
     await handle.focus();
