@@ -135,13 +135,13 @@
     position: absolute;
     inset: 0 5px;
     background: transparent;
+    border-radius: 999px;
     transition: background 120ms ease;
   }
   .resize-handle:hover::after,
   .resize-handle:focus-visible::after,
   .resize-handle.dragging::after {
-    background: var(--accent);
-    opacity: 0.35;
+    background: color-mix(in srgb, var(--accent) 42%, transparent);
   }
   .resize-handle.right {
     left: -1px;

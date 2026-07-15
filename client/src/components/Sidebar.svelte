@@ -659,15 +659,6 @@
       </div>
     {/if}
   </div>
-  {#if store.sessions.length > 0 && !store.showArchived && hiddenCount > 0}
-    <button
-      class="hidden-count"
-      data-testid="hidden-count"
-      title="{hiddenCount} archived or inactive session{hiddenCount === 1 ? '' : 's'} hidden — click to show all"
-      onclick={() => store.toggleShowArchived()}>{hiddenCount} hidden</button
-    >
-  {/if}
-
   <div class="list-wrap">
   <PullIndicator snap={pull.snap} refreshing={pull.refreshing} testid="ptr-sidebar" />
   <nav
@@ -1091,7 +1082,6 @@
     height: 100%;
     height: 100dvh;
     background: var(--sidebar-bg);
-    border-right: 1px solid var(--border);
     overflow: hidden;
   }
   /* Collapsed on desktop: removed from the flex flow entirely. */
@@ -1160,28 +1150,47 @@
     background: var(--accent);
   }
   .new {
-    padding: 0 16px 8px;
+    padding: 2px 14px 8px;
   }
   .new-btn {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 9px;
     width: 100%;
     text-align: left;
     font-size: 13px;
-    color: var(--text-muted);
-    background: var(--surface);
-    border: 1px solid var(--border);
+    color: var(--text);
+    font-weight: 550;
+    background: color-mix(in srgb, var(--surface) 78%, var(--sidebar-bg));
+    border: 1px solid color-mix(in srgb, var(--border-strong) 70%, transparent);
     border-radius: var(--radius-sm);
-    padding: 8px 10px;
+    padding: 8px 11px;
+    box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 5%, transparent);
+    transition:
+      background 120ms ease,
+      border-color 120ms ease,
+      color 120ms ease;
   }
   .new-btn:hover {
     color: var(--text);
+    background: var(--accent-soft);
     border-color: var(--border-strong);
   }
+  .new-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 65%, transparent);
+  }
   .plus {
-    color: var(--accent);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    color: var(--accent-hover);
+    background: var(--accent-soft);
+    border-radius: var(--radius-xs);
     font-weight: 700;
+    line-height: 1;
   }
   .err {
     display: flex;
@@ -1217,26 +1226,6 @@
     color: var(--text-faint);
   }
 
-  .hidden-count {
-    font-size: 11px;
-    color: var(--text-faint);
-    background: none;
-    border: 0;
-    padding: 2px 4px;
-    cursor: pointer;
-    text-decoration: underline dotted;
-    text-underline-offset: 2px;
-  }
-  .hidden-count:hover {
-    color: var(--text-muted);
-  }
-  .hidden-count:focus-visible {
-    outline: none;
-    color: var(--text);
-    border-radius: var(--radius-xs);
-    box-shadow: 0 0 0 1.5px var(--accent);
-  }
-
   .list-wrap {
     position: relative;
     flex: 1;
@@ -1249,11 +1238,24 @@
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    /* Codex-style outer gutter (see .group-toggle/.group-head/ul below, which add the
-       rest): left/right 10px here, plus each row/header's own inner padding, lands the
-       header text ~16px from the sidebar edge and indents session rows a further step
-       under it. */
-    padding: 6px 10px 14px 10px;
+    /* Compact outer gutter; the group and row padding below add one shallow nesting
+       step without pushing session titles deep into the narrow column. */
+    padding: 4px 9px 14px;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--accent) 45%, transparent) transparent;
+  }
+  .list::-webkit-scrollbar {
+    width: 6px;
+  }
+  .list::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .list::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--accent) 42%, transparent);
+    border-radius: 999px;
+  }
+  .list::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--accent) 62%, transparent);
   }
   /* Quiet build stamp pinned at the bottom of the sidebar. */
   .app-update {
@@ -1292,16 +1294,15 @@
     text-align: center;
   }
   .group {
-    margin-bottom: 2px;
+    margin-bottom: 4px;
   }
   .group-head {
     display: flex;
     align-items: center;
     gap: 2px;
-    /* The project title sits at the sidebar's outer gutter (.list's 10px + this
-       button's own left padding below = ~16px, Codex's outer margin); the small right
-       pad just keeps the + button off the scrollbar. */
-    padding: 0 6px 0 0;
+    /* Project title sits at the outer gutter; the small right pad keeps the + button
+       clear of the narrow overlay-style scrollbar. */
+    padding: 0 4px 0 1px;
   }
   .group-toggle {
     display: flex;
@@ -1311,7 +1312,8 @@
     min-width: 0;
     background: transparent;
     border: none;
-    padding: 8px 6px;
+    min-height: 32px;
+    padding: 6px 7px;
     color: var(--text-muted);
     font-size: 11.5px;
     text-transform: uppercase;
@@ -1364,13 +1366,9 @@
   }
   ul {
     list-style: none;
-    /* Indent session rows a step further than their project header (Codex-style
-       hierarchy): this 10px left padding shifts each row's own box that much further
-       right than the header's box (10px from the sidebar edge -> 20px), so the row
-       pill reads as nested under the project name above it. The small right padding
-       keeps the (already edge-inset) pill off the scrollbar too. */
+    /* Indent session rows one restrained step beneath their project header. */
     margin: 0 0 2px;
-    padding: 0 4px 0 10px;
+    padding: 0 3px 0 7px;
   }
   /* A row plus its overflow (⋯) trigger. The ⋯ overlays the row's right edge on hover
      rather than reserving a column, so the title keeps the full width. */
@@ -1394,13 +1392,14 @@
        shape. Shared by :hover and .active below (same box, just a background swap), so the
        corner radius never jumps between hover and selected. */
     border-radius: var(--radius);
-    padding: 7px 8px 7px 4px;
+    min-height: 32px;
+    padding: 6px 8px 6px 4px;
   }
   .row:hover {
     background: var(--surface);
   }
   .row.active {
-    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    background: color-mix(in srgb, var(--accent) 13%, transparent);
   }
   /* Leading gutter: the session indent, and the home of the row's standing markers —
      the unread dot (priority) or the high-context ring. Empty (but reserved) otherwise,
@@ -1624,7 +1623,7 @@
     text-overflow: ellipsis;
   }
   .row.active .name {
-    color: var(--accent);
+    color: var(--text);
     font-weight: 600;
   }
   /* Right-edge cluster: worktree glyph, optional tag, and the status/time slot. Shrinks
@@ -1690,6 +1689,11 @@
     }
     .search-input {
       font-size: 16px;
+    }
+    .new-btn,
+    .group-toggle,
+    .row {
+      min-height: 44px;
     }
     .scrim {
       display: block;

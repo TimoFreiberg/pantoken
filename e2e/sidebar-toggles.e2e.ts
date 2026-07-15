@@ -74,7 +74,7 @@ test("collapsing the context panel reveals a header arrow that reopens it, in pl
   await expect(panel).toHaveAttribute("data-open", "false");
 
   await expect(open).toBeVisible();
-  await expect(open).toHaveAttribute("title", /^Show context panel/);
+  await expect(open).toHaveAttribute("data-tip-title", /^Show context panel/);
 
   // Same pixel as the collapse control it replaced — so collapse/expand/collapse
   // is a repeatable click on one spot, not a hunt for a mid-edge tab.
