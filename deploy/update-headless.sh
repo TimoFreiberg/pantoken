@@ -67,17 +67,21 @@ _TEST_PROCESS_PATH=""
 
 resolve_test_overrides() {
   if [[ "${PANTOKEN_UPDATE_TEST_MODE:-}" == "1" ]]; then
-    [[ -n "${PANTOKEN_TEST_ASSET_URL:-}" ]] && _TEST_ASSET_URL="$PANTOKEN_TEST_ASSET_URL"
-    [[ -n "${PANTOKEN_TEST_SIG_URL:-}" ]] && _TEST_SIG_URL="$PANTOKEN_TEST_SIG_URL"
-    [[ -n "${PANTOKEN_TEST_KICKSTART_CMD:-}" ]] && _TEST_KICKSTART_CMD="$PANTOKEN_TEST_KICKSTART_CMD"
-    [[ -n "${PANTOKEN_TEST_HEALTH_URL:-}" ]] && _TEST_HEALTH_URL="$PANTOKEN_TEST_HEALTH_URL"
-    [[ -n "${PANTOKEN_TEST_MINISIGN:-}" ]] && _TEST_MINISIGN="$PANTOKEN_TEST_MINISIGN"
-    [[ -n "${PANTOKEN_TEST_VALIDATOR:-}" ]] && _TEST_VALIDATOR="$PANTOKEN_TEST_VALIDATOR"
-    [[ -n "${PANTOKEN_TEST_LAUNCHCTL:-}" ]] && _TEST_LAUNCHCTL="$PANTOKEN_TEST_LAUNCHCTL"
-    [[ -n "${PANTOKEN_TEST_PROCESS_PATH:-}" ]] && _TEST_PROCESS_PATH="$PANTOKEN_TEST_PROCESS_PATH"
+    if [[ -n "${PANTOKEN_TEST_ASSET_URL:-}" ]]; then _TEST_ASSET_URL="$PANTOKEN_TEST_ASSET_URL"; fi
+    if [[ -n "${PANTOKEN_TEST_SIG_URL:-}" ]]; then _TEST_SIG_URL="$PANTOKEN_TEST_SIG_URL"; fi
+    if [[ -n "${PANTOKEN_TEST_KICKSTART_CMD:-}" ]]; then _TEST_KICKSTART_CMD="$PANTOKEN_TEST_KICKSTART_CMD"; fi
+    if [[ -n "${PANTOKEN_TEST_HEALTH_URL:-}" ]]; then _TEST_HEALTH_URL="$PANTOKEN_TEST_HEALTH_URL"; fi
+    if [[ -n "${PANTOKEN_TEST_MINISIGN:-}" ]]; then _TEST_MINISIGN="$PANTOKEN_TEST_MINISIGN"; fi
+    if [[ -n "${PANTOKEN_TEST_VALIDATOR:-}" ]]; then _TEST_VALIDATOR="$PANTOKEN_TEST_VALIDATOR"; fi
+    if [[ -n "${PANTOKEN_TEST_LAUNCHCTL:-}" ]]; then _TEST_LAUNCHCTL="$PANTOKEN_TEST_LAUNCHCTL"; fi
+    if [[ -n "${PANTOKEN_TEST_PROCESS_PATH:-}" ]]; then _TEST_PROCESS_PATH="$PANTOKEN_TEST_PROCESS_PATH"; fi
   fi
-  [[ -n "${_TEST_HEALTH_URL:-}" ]] && HEALTH_URL="$_TEST_HEALTH_URL"
-  [[ -n "${_TEST_VALIDATOR:-}" ]] && TRUSTED_VALIDATOR="$_TEST_VALIDATOR"
+  if [[ -n "${_TEST_HEALTH_URL:-}" ]]; then
+    HEALTH_URL="$_TEST_HEALTH_URL"
+  fi
+  if [[ -n "${_TEST_VALIDATOR:-}" ]]; then
+    TRUSTED_VALIDATOR="$_TEST_VALIDATOR"
+  fi
 }
 
 is_test_mode() {
@@ -139,7 +143,7 @@ preflight() {
 
   # 4. Check sudoers authorization (before downloading anything)
   if [[ -z "${_TEST_KICKSTART_CMD:-}" ]]; then
-    if ! sudo -n -l "$_KICKSTART_CMD" >/dev/null 2>&1; then
+    if ! sudo -n -l /bin/launchctl kickstart -k "system/${LAUNCHD_LABEL}" >/dev/null 2>&1; then
       die "Unauthorized: cannot run ${_KICKSTART_CMD} without password" 1
     fi
   fi
