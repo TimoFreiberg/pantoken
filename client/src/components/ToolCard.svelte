@@ -64,6 +64,7 @@
   const EDIT_PREVIEW_CHAR_LIMIT = 20_000;
   const EDIT_PREVIEW_LINE_LIMIT = 160;
   const EDIT_COUNT_WORK_LIMIT = 500_000;
+  const EDIT_COUNT_CHAR_LIMIT = 200_000;
 
   function bound(text: string, limit: number): string {
     return text.length <= limit
@@ -350,7 +351,12 @@
     };
   });
 
-  type ExactLineCounts = { added: number; removed: number; work: number };
+  type ExactLineCounts = {
+    added: number;
+    removed: number;
+    work: number;
+    chars: number;
+  };
 
   function lineCount(text: string): number {
     if (!text.length) return 0;
@@ -366,9 +372,22 @@
     oldText: string,
     newText: string,
     workBudget: number,
+    charBudget: number,
   ): ExactLineCounts | null {
+    const chars = oldText.length + newText.length;
+    if (chars > charBudget) return null;
     const oldLines = lineCount(oldText);
     const newLines = lineCount(newText);
+    // Creation/deletion counts need no LCS. Return directly before split() so a
+    // safe, large one-sided edit stays linear in both allocation and CPU.
+    if (oldLines === 0 || newLines === 0) {
+      return {
+        added: newLines,
+        removed: oldLines,
+        work: 0,
+        chars,
+      };
+    }
     const work = oldLines * newLines;
     if (work > workBudget) return null;
     const a = oldText.length ? oldText.split("\n") : [];
@@ -392,6 +411,7 @@
       added: b.length - common,
       removed: a.length - common,
       work,
+      chars,
     };
   }
 
@@ -400,12 +420,19 @@
     let added = 0;
     let removed = 0;
     let workRemaining = EDIT_COUNT_WORK_LIMIT;
+    let charsRemaining = EDIT_COUNT_CHAR_LIMIT;
     for (const e of edit.edits) {
-      const count = lineCounts(e.oldText, e.newText, workRemaining);
+      const count = lineCounts(
+        e.oldText,
+        e.newText,
+        workRemaining,
+        charsRemaining,
+      );
       if (!count) return { kind: "omitted" } as const;
       added += count.added;
       removed += count.removed;
       workRemaining -= count.work;
+      charsRemaining -= count.chars;
     }
     return { kind: "exact", added, removed } as const;
   });
