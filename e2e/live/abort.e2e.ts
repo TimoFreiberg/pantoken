@@ -16,7 +16,7 @@ test("an aborted turn clears the running affordances", async ({ page }) => {
   // clear once the cancel lands. (A tighter assertion — the Stop pill visible mid-turn
   // then cleared — would need a hold scenario the frozen corpus doesn't carry; tighten
   // if such a capture is added.)
-  await expect(page.locator(".composer-wrap .stop")).toHaveCount(0, {
+  await expect(page.getByTestId("stop-button")).toHaveCount(0, {
     timeout: 10_000,
   });
   await expect(page.getByTestId("working-indicator")).toHaveCount(0);

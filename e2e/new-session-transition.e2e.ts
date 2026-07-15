@@ -35,9 +35,14 @@ test("a new session's first prompt never flashes the previously focused transcri
   await expect(oldPrompt).toHaveCount(0);
 
   // We're in the in-session view (the draft hero is gone) and the warm-up / turn indicator
-  // is up — "Starting session…" while the session warms, then "Working…" once the run streams.
+  // is up — the climbing timer carries liveness feedback through warm-up; no stop button yet
+  // (there's no turn to abort), then the turn's own streaming takes over.
   await expect(page.getByTestId("new-session")).toHaveCount(0);
   await expect(page.getByTestId("working-indicator")).toBeVisible();
+  // AC.4(a): the elapsed timer is visible during warm-up (before the first turn starts).
+  await expect(page.getByTestId("working-elapsed")).toBeVisible();
+  // AC.6: no stop button during warm-up — there's no turn to abort yet.
+  await expect(page.getByTestId("stop-button")).toHaveCount(0);
 
   // The new session's OWN reply streams into ITS transcript (not the demo session's), and
   // the optimistic prompt row has handed off to the authoritative one without duplicating.

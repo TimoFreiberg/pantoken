@@ -107,7 +107,7 @@ test("the 2a composer controls are labeled and touch-safe", async ({
   await expect(remove).toHaveAttribute("aria-label", /Remove attachment/);
 
   await drive(page, "streamhold");
-  const stop = page.getByRole("button", { name: /Stop( the agent)?/ }).first();
+  const stop = page.getByTestId("stop-button");
   await expect(stop).toBeVisible();
   await expectTall(stop);
   await expect(stop).toHaveAttribute("title", /Stop/);

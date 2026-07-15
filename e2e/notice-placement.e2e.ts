@@ -48,7 +48,7 @@ test("stop error notice appears in the chat area, not in the sidebar", async ({
   // Trigger a stop confirmation timeout (chat-scoped notice).
   await drive(page, "slowabort");
   await drive(page, "streamhold");
-  const stop = page.locator(".composer-wrap .stop");
+  const stop = page.getByTestId("stop-button");
   await stop.click();
 
   // The unconfirmed-stop notice appears in the chat-notice container.

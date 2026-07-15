@@ -54,7 +54,7 @@ test("sidebar and chat notices stay on their own surfaces (no duplication)", asy
   // Trigger a chat-scoped notice (stop confirmation timeout).
   await drive(page, "slowabort");
   await drive(page, "streamhold");
-  const stop = page.locator(".composer-wrap .stop");
+  const stop = page.getByTestId("stop-button");
   await stop.click();
 
   // The chat notice appears in the chat-notice container.
