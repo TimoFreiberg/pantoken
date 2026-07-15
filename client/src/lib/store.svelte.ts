@@ -39,6 +39,12 @@ import {
   parseStoredWidth,
   sanitizeStoredWidth,
 } from "./sidebar-width.js";
+import {
+  canShowAutoRightSidebar,
+  parseRightSidebarPreference,
+  type MobileView,
+  type RightSidebarPreference,
+} from "./panel-layout.js";
 import { dedupeConsecutive } from "./prompt-history.js";
 import { deliveryState } from "./delivery.js";
 import { ensurePermission } from "./notify.js";
@@ -331,17 +337,51 @@ class PantokenStore {
     images?: ImageContent[];
     createdAt: string;
   } | null>(null);
-  // Sidebar open/collapsed. Default open on a roomy viewport, closed on a phone
-  // (where it's an overlay drawer). Persisted per-device in localStorage.
-  sidebarOpen = $state(initialSidebarOpen());
-  // Right sidebar (context panel: flagged files, background jobs, todos). Same
-  // default-visible-on-desktop / default-hidden-on-phone rule as the left sidebar,
-  // and persisted the same way — a collapsed choice should stick.
-  rightSidebarOpen = $state(initialRightSidebarOpen());
+  // Desktop panel preferences and phone navigation are deliberately separate:
+  // resizing through the breakpoint never rewrites either desktop preference,
+  // and returning to phone restores the full-screen view that was focused there.
+  private desktopSidebarOpen = $state(initialSidebarOpen());
+  rightSidebarPreference = $state<RightSidebarPreference>(
+    initialRightSidebarPreference(),
+  );
+  mobileView = $state<MobileView>("transcript");
+  viewportWidth = $state(initialViewportWidth());
+  private desktopContextOverlay = $state(false);
   // Desktop panel widths are CSS-pixel preferences. Effective rendering clamps these
   // against the current viewport; the persisted values are never viewport-clamped.
   sidebarWidth = $state(initialSidebarWidth());
   rightSidebarWidth = $state(initialRightSidebarWidth());
+
+  get phoneLayout(): boolean {
+    return this.viewportWidth <= 859;
+  }
+  get sidebarOpen(): boolean {
+    return this.phoneLayout
+      ? this.mobileView === "sessions"
+      : this.desktopSidebarOpen;
+  }
+  get rightSidebarOpen(): boolean {
+    if (this.phoneLayout) return this.mobileView === "context";
+    return (
+      this.rightSidebarPreference === "auto" &&
+      (this.rightSidebarFits || this.desktopContextOverlay)
+    );
+  }
+  get rightSidebarFits(): boolean {
+    return canShowAutoRightSidebar(
+      this.viewportWidth,
+      this.desktopSidebarOpen,
+      this.sidebarWidth,
+      this.rightSidebarWidth,
+    );
+  }
+  get rightSidebarOverlay(): boolean {
+    return (
+      !this.phoneLayout &&
+      this.desktopContextOverlay &&
+      !this.rightSidebarFits
+    );
+  }
   // Sidebar filter: false = active only (hide archived + sessions untouched >7d),
   // true = show everything. Per-device, persisted in localStorage; defaults to
   // active-only (the decluttering is the point).
@@ -2231,19 +2271,26 @@ class PantokenStore {
     else this.openSidebar();
   }
   closeSidebar(): void {
-    this.sidebarOpen = false;
-    persistSidebarOpen(false);
-    overlayHistory.closed("sidebar");
+    if (this.phoneLayout) {
+      if (this.mobileView === "sessions") this.mobileView = "transcript";
+      overlayHistory.closed("sidebar");
+    } else {
+      this.desktopSidebarOpen = false;
+      persistSidebarOpen(false);
+    }
   }
-  /** Open the drawer. Pair of closeSidebar; used by the left-edge swipe gesture. */
+  /** Open the sessions view. Pair of closeSidebar; used by the left-edge swipe gesture. */
   openSidebar(): void {
-    this.sidebarOpen = true;
-    persistSidebarOpen(true);
-    // Phone: the drawer is an overlay — let the back gesture close it. The close
+    if (!this.phoneLayout) {
+      this.desktopSidebarOpen = true;
+      persistSidebarOpen(true);
+      return;
+    }
+    this.mobileView = "sessions";
+    // Phone: the sessions view is an overlay — let the back gesture close it. The close
     // callback skips overlayHistory.closed() (the entry is already popped).
     overlayHistory.opened("sidebar", () => {
-      this.sidebarOpen = false;
-      persistSidebarOpen(false);
+      if (this.mobileView === "sessions") this.mobileView = "transcript";
     });
   }
   /** Toggle the right context panel (flagged files, background jobs, todos). */
@@ -2252,31 +2299,56 @@ class PantokenStore {
     else this.openRightSidebar();
   }
   closeRightSidebar(): void {
-    this.rightSidebarOpen = false;
-    persistRightSidebarOpen(false);
-    overlayHistory.closed("context");
+    if (this.phoneLayout) {
+      if (this.mobileView === "context") this.mobileView = "transcript";
+      overlayHistory.closed("context");
+    } else if (this.rightSidebarOverlay) {
+      // A narrow-desktop peek is transient: dismiss it back to auto-hidden
+      // without turning an inspection into a durable "closed" preference.
+      this.desktopContextOverlay = false;
+    } else {
+      this.desktopContextOverlay = false;
+      this.rightSidebarPreference = "closed";
+      persistRightSidebarPreference("closed");
+    }
   }
   /** Open the right context panel. Pair of closeRightSidebar; used by the
    *  edge pop-in arrow shown while it's collapsed. */
   openRightSidebar(): void {
-    this.rightSidebarOpen = true;
-    persistRightSidebarOpen(true);
+    if (!this.phoneLayout) {
+      this.rightSidebarPreference = "auto";
+      this.desktopContextOverlay = !this.rightSidebarFits;
+      persistRightSidebarPreference("auto");
+      return;
+    }
+    this.mobileView = "context";
     overlayHistory.opened("context", () => {
-      this.rightSidebarOpen = false;
-      persistRightSidebarOpen(false);
+      if (this.mobileView === "context") this.mobileView = "transcript";
     });
   }
   setSidebarWidth(width: number): void {
     const sanitized = sanitizeStoredWidth(width);
     if (sanitized === null) return;
+    const contextWasOpen = this.rightSidebarOpen;
     this.sidebarWidth = sanitized;
     persistSidebarWidth(sanitized);
+    if (!this.phoneLayout && contextWasOpen && !this.rightSidebarFits)
+      this.desktopContextOverlay = true;
   }
   setRightSidebarWidth(width: number): void {
     const sanitized = sanitizeStoredWidth(width);
     if (sanitized === null) return;
+    const contextWasOpen = this.rightSidebarOpen;
     this.rightSidebarWidth = sanitized;
     persistRightSidebarWidth(sanitized);
+    if (!this.phoneLayout && contextWasOpen && !this.rightSidebarFits)
+      this.desktopContextOverlay = true;
+  }
+  setViewportWidth(width: number): void {
+    if (!Number.isFinite(width) || width <= 0) return;
+    this.viewportWidth = width;
+    if (!this.phoneLayout && this.rightSidebarFits)
+      this.desktopContextOverlay = false;
   }
   /** Flip the active-only ↔ all filter; persisted per-device. */
   toggleShowArchived(): void {
@@ -2688,15 +2760,18 @@ function isPhoneViewport(): boolean {
   return typeof window !== "undefined" && window.matchMedia(PHONE_MQ).matches;
 }
 
-/** Default the sidebar open on a desktop-width viewport, closed on a phone (where
- *  it's a drawer); a stored preference wins on desktop only. Guarded for SSR/test
- *  environments. */
+function initialViewportWidth(): number {
+  return typeof window === "undefined" ? 1280 : window.innerWidth;
+}
+
+/** The desktop sessions preference is independent of the current responsive
+ * layout. A fresh phone visit still remembers the roomy-desktop default for a
+ * later breakpoint crossing; the effective phone view comes from mobileView. */
 function initialSidebarOpen(): boolean {
   if (typeof window === "undefined") return true;
-  if (isPhoneViewport()) return false;
   const stored = localStorage.getItem(SIDEBAR_KEY);
   if (stored !== null) return stored === "1";
-  return window.matchMedia("(min-width: 860px)").matches;
+  return true;
 }
 
 function persistSidebarOpen(open: boolean): void {
@@ -2704,21 +2779,40 @@ function persistSidebarOpen(open: boolean): void {
   localStorage.setItem(SIDEBAR_KEY, open ? "1" : "0");
 }
 
-const RIGHT_SIDEBAR_KEY = "pantoken.rightSidebarOpen";
+const RIGHT_SIDEBAR_PREFERENCE_KEY = "pantoken.rightSidebarPreference";
+const LEGACY_RIGHT_SIDEBAR_KEY = "pantoken.rightSidebarOpen";
 
-/** Same rule as initialSidebarOpen: open on a desktop-width viewport (stored
- *  preference wins there), always closed on a phone (full-screen context view). */
-function initialRightSidebarOpen(): boolean {
-  if (typeof window === "undefined") return true;
-  if (isPhoneViewport()) return false;
-  const stored = localStorage.getItem(RIGHT_SIDEBAR_KEY);
-  if (stored !== null) return stored === "1";
-  return window.matchMedia("(min-width: 860px)").matches;
+function initialRightSidebarPreference(): RightSidebarPreference {
+  if (typeof window === "undefined") return "auto";
+  let preference: RightSidebarPreference;
+  try {
+    preference = parseRightSidebarPreference(
+      localStorage.getItem(RIGHT_SIDEBAR_PREFERENCE_KEY),
+      localStorage.getItem(LEGACY_RIGHT_SIDEBAR_KEY),
+    );
+  } catch {
+    return "auto";
+  }
+  // Best-effort migration makes the state model explicit while leaving the
+  // legacy key harmless for rollback to an older build. A failed write must not
+  // discard the preference we successfully read.
+  try {
+    localStorage.setItem(RIGHT_SIDEBAR_PREFERENCE_KEY, preference);
+  } catch {
+    // Storage may be read-only or full; keep the preference in memory.
+  }
+  return preference;
 }
 
-function persistRightSidebarOpen(open: boolean): void {
-  if (typeof window === "undefined" || isPhoneViewport()) return;
-  localStorage.setItem(RIGHT_SIDEBAR_KEY, open ? "1" : "0");
+function persistRightSidebarPreference(
+  preference: RightSidebarPreference,
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(RIGHT_SIDEBAR_PREFERENCE_KEY, preference);
+  } catch {
+    // Storage unavailable — keep the in-memory preference for this visit.
+  }
 }
 
 const SIDEBAR_WIDTH_KEY = "pantoken.sidebarWidth";

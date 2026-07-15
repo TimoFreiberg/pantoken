@@ -24,12 +24,16 @@ describe("sidebar width contract", () => {
     expect(parseStoredWidth("1200", 288)).toBe(1200);
   });
   test("clamps one open panel without rewriting the preference", () => {
-    expect(effectiveWidths(1200, 280, 1100, true, false).left).toBe(740);
-    expect(effectiveWidths(1200, 1200, 1100, false, true).right).toBe(740);
+    expect(effectiveWidths(1200, 280, 1100, true, false).left).toBe(
+      1100 - MAIN_MIN_WIDTH,
+    );
+    expect(effectiveWidths(1200, 1200, 1100, false, true).right).toBe(
+      1100 - MAIN_MIN_WIDTH,
+    );
   });
   test("reduces both oversized panels proportionally", () => {
     const result = effectiveWidths(800, 700, 1100, true, true);
-    expect(result.left + result.right).toBe(MAIN_MIN_WIDTH + 380);
+    expect(result.left + result.right).toBe(1100 - MAIN_MIN_WIDTH);
     expect(result.left).toBeGreaterThan(MIN_SIDEBAR_WIDTH);
     expect(result.right).toBeGreaterThan(MIN_RIGHT_SIDEBAR_WIDTH);
   });

@@ -113,11 +113,11 @@ test("a phone cold load never restores a persisted-open panel", async ({
   );
 });
 
-test("phone toggles do not clobber the desktop's persisted preference", async ({
+test("phone navigation does not clobber the desktop context preference", async ({
   page,
 }) => {
   await page.addInitScript(() => {
-    localStorage.setItem("pantoken.rightSidebarOpen", "1");
+    localStorage.setItem("pantoken.rightSidebarPreference", "auto");
   });
   await gotoFresh(page);
   // Open + close the context view on the phone…
@@ -128,7 +128,66 @@ test("phone toggles do not clobber the desktop's persisted preference", async ({
     .click();
   // …and the desktop preference is untouched.
   const stored = await page.evaluate(() =>
-    localStorage.getItem("pantoken.rightSidebarOpen"),
+    localStorage.getItem("pantoken.rightSidebarPreference"),
   );
-  expect(stored).toBe("1");
+  expect(stored).toBe("auto");
+});
+
+test("sessions and context are mutually exclusive and Back returns to transcript", async ({
+  page,
+}) => {
+  await page.getByTestId("context-open").click();
+  await expect(page.getByTestId("right-sidebar")).toHaveAttribute(
+    "data-open",
+    "true",
+  );
+
+  // The hotkey remains available even though the full-screen context view covers
+  // the header, and switches rather than stacking the two mobile views.
+  await page.keyboard.press("Control+b");
+  await expect(page.getByTestId("right-sidebar")).toHaveAttribute(
+    "data-open",
+    "false",
+  );
+  await expect(page.getByTestId("sidebar")).toHaveAttribute(
+    "data-open",
+    "true",
+  );
+
+  await page.goBack();
+  await expect(page.getByTestId("sidebar")).toHaveAttribute(
+    "data-open",
+    "false",
+  );
+  await expect(page.getByTestId("work-toggle")).toBeVisible();
+});
+
+test("mobile focus survives a desktop breakpoint round trip", async ({
+  page,
+}) => {
+  await page.getByTestId("context-open").click();
+  await expect(page.getByTestId("right-sidebar")).toHaveAttribute(
+    "data-open",
+    "true",
+  );
+
+  await page.setViewportSize({ width: 1280, height: 850 });
+  await expect(page.getByTestId("sidebar")).toHaveAttribute(
+    "data-open",
+    "true",
+  );
+  await expect(page.getByTestId("right-sidebar")).toHaveAttribute(
+    "data-open",
+    "true",
+  );
+
+  await page.setViewportSize({ width: 412, height: 915 });
+  await expect(page.getByTestId("sidebar")).toHaveAttribute(
+    "data-open",
+    "false",
+  );
+  await expect(page.getByTestId("right-sidebar")).toHaveAttribute(
+    "data-open",
+    "true",
+  );
 });

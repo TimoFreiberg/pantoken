@@ -28,7 +28,7 @@
       store.sidebarWidth,
       store.rightSidebarWidth,
       viewportWidth,
-      store.sidebarOpen,
+      store.sidebarOpen && !store.rightSidebarOverlay,
       store.rightSidebarOpen,
     ),
   );
@@ -75,6 +75,7 @@
   class="right-sidebar"
   data-testid="right-sidebar"
   data-open={open}
+  data-overlay={store.rightSidebarOverlay}
   style={`--desktop-sidebar-width: ${widths.right}px`}
 >
   <!-- data-tauri-drag-region="deep": desktop-shell window drag, same contract as
@@ -98,7 +99,7 @@
     side="right"
     value={widths.right}
     min={MIN_RIGHT_SIDEBAR_WIDTH}
-    max={maxWidthFor("right", viewportWidth, store.sidebarOpen)}
+    max={maxWidthFor("right", viewportWidth, store.sidebarOpen && !store.rightSidebarOverlay)}
     label="Resize context panel"
     onChange={setRightSidebarWidth}
   />
@@ -219,6 +220,13 @@
   }
   .right-sidebar[data-open="true"] {
     display: flex;
+  }
+  .right-sidebar[data-overlay="true"] {
+    position: fixed;
+    inset: 0 0 0 auto;
+    z-index: 80;
+    box-shadow: var(--shadow-pop);
+    border-left: 1px solid var(--border);
   }
   .top {
     display: flex;

@@ -23,6 +23,7 @@ export interface OverlayHistoryEnv {
   /** Whether overlay↔history coupling applies (phone-sized viewport). */
   isPhone(): boolean;
   pushState(marker: unknown): void;
+  replaceState(marker: unknown): void;
   back(): void;
   /** Register the popstate listener once; return an unsubscribe. */
   onPop(handler: () => void): () => void;
@@ -65,6 +66,14 @@ export function createOverlayHistory(env: OverlayHistoryEnv) {
         existing.close = close;
         return;
       }
+      // Phone navigation is mutually exclusive. Switching directly between the
+      // sessions and context views reuses the current history entry so one Back
+      // always returns to the transcript (and never exposes the other panel).
+      if (stack.length > 0) {
+        stack[stack.length - 1] = { id, close };
+        env.replaceState({ pantokenOverlay: id });
+        return;
+      }
       stack.push({ id, close });
       env.pushState({ pantokenOverlay: id });
     },
@@ -96,6 +105,7 @@ function browserEnv(): OverlayHistoryEnv {
     isPhone: () =>
       typeof window !== "undefined" && window.matchMedia(PHONE_MQ).matches,
     pushState: (marker) => history.pushState(marker, "", location.href),
+    replaceState: (marker) => history.replaceState(marker, "", location.href),
     back: () => history.back(),
     onPop: (handler) => {
       window.addEventListener("popstate", handler);
