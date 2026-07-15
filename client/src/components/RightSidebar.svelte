@@ -214,8 +214,7 @@
     flex-direction: column;
     width: var(--desktop-sidebar-width, 280px);
     flex-shrink: 0;
-    border-left: 1px solid var(--border);
-    background: var(--bg);
+    background: var(--sidebar-bg);
     overflow: hidden;
   }
   .right-sidebar[data-open="true"] {
@@ -229,10 +228,9 @@
     justify-content: flex-end;
     /* Same box as StatusHeader (height, 16px trailing gutter, centered contents), so
        this collapse chevron and the header's expand chevron occupy the same pixel:
-       click, click, click. Also lines the two bottom borders up. */
+       click, click, click. */
     min-height: calc(var(--header-h) + env(safe-area-inset-top));
     padding: env(safe-area-inset-top) 16px 0;
-    border-bottom: 1px solid var(--border);
   }
   .collapse-glyph {
     display: inline-flex;
@@ -246,19 +244,34 @@
   .content {
     flex: 1;
     overflow-y: auto;
-    padding: 8px 0;
+    padding: 6px 0 12px;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--accent) 45%, transparent) transparent;
+  }
+  .content::-webkit-scrollbar {
+    width: 6px;
+  }
+  .content::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .content::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--accent) 42%, transparent);
+    border-radius: 999px;
+  }
+  .content::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--accent) 62%, transparent);
   }
   .section {
-    padding: 8px 12px;
+    padding: 10px 16px 12px;
   }
   .section + .section {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid color-mix(in srgb, var(--border) 52%, transparent);
   }
   .section-head {
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-bottom: 6px;
+    margin-bottom: 5px;
   }
   .section-title {
     font-size: 12px;
@@ -274,8 +287,9 @@
   }
   .empty {
     font-size: 12px;
-    color: var(--text-faint);
-    padding: 4px 0;
+    color: color-mix(in srgb, var(--text-muted) 82%, var(--text-faint));
+    padding: 3px 0 2px;
+    margin: 0;
   }
   .file-list,
   .todo-list,

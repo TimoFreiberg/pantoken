@@ -16,34 +16,42 @@ test("active-only filter hides archived + stale sessions; show-all reveals them"
   await expect(sidebar.getByText("Old spike")).toHaveCount(0);
   // The stale session is alone in its project, so the whole group drops out too.
   await expect(sidebar.getByText("stale-proj", { exact: true })).toHaveCount(0);
-  // The hint tells you something's tucked away (1 archived + 1 stale = 2).
-  await expect(sidebar.getByText(/2 hidden/)).toBeVisible();
+  // The top-right filter remains the only archived-session affordance. Its tooltip
+  // carries the hidden count without spending a standalone line in the sidebar.
+  await expect(sidebar.getByTestId("hidden-count")).toHaveCount(0);
+  await expect(sidebar.getByTestId("filter-toggle")).toHaveAttribute(
+    "title",
+    /2 hidden/,
+  );
 
   // Flip to "show all" — everything appears, including its own project group.
   await sidebar.getByTestId("filter-toggle").click();
   await expect(sidebar.getByText("Archived experiment")).toBeVisible();
   await expect(sidebar.getByText("Old spike")).toBeVisible();
   await expect(sidebar.getByText("stale-proj", { exact: true })).toBeVisible();
-  // The hidden hint is gone once nothing is filtered out.
-  await expect(sidebar.getByText(/hidden/)).toHaveCount(0);
+  await expect(sidebar.getByTestId("hidden-count")).toHaveCount(0);
 });
 
-test("the '{N} hidden' count is itself clickable to reveal everything", async ({
+test("the filter replaces the standalone hidden-count control", async ({
   page,
 }) => {
   await openSidebar(page);
   const sidebar = page.getByTestId("sidebar");
 
-  // Default active-only view hides the archived + stale fixtures behind the count.
-  const hint = sidebar.getByTestId("hidden-count");
-  await expect(hint).toHaveText(/2 hidden/);
+  // Default active-only view hides the archived + stale fixtures, with no extra row.
+  await expect(sidebar.getByTestId("hidden-count")).toHaveCount(0);
   await expect(sidebar.getByText("Archived experiment")).toHaveCount(0);
 
-  // Clicking the count (not the separate filter toggle) reveals them.
-  await hint.click();
+  // The existing top-right filter reveals them and remains accessible.
+  const filter = sidebar.getByTestId("filter-toggle");
+  await expect(filter).toHaveAttribute("aria-label", "Show all sessions");
+  await filter.click();
   await expect(sidebar.getByText("Archived experiment")).toBeVisible();
   await expect(sidebar.getByText("Old spike")).toBeVisible();
-  await expect(sidebar.getByTestId("hidden-count")).toHaveCount(0);
+  await expect(filter).toHaveAttribute(
+    "aria-label",
+    "Show active sessions only",
+  );
 });
 
 test("archiving offers an Undo toast that restores the session", async ({
