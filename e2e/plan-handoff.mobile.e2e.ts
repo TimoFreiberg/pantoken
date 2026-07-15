@@ -41,12 +41,14 @@ test("plan-handoff card: 3 buttons stack full-width and the body scrolls on mobi
 
 test("facet badge renders on mobile when the facet is plan", async ({ page }) => {
   await drive(page, "planfacet");
-  const badge = page.getByTestId("facet-badge");
-  await expect(badge).toBeVisible();
-  await expect(badge).toHaveText("Plan");
-  // Reverts to execute after the dwell → badge stays visible (always-visible state
-  // readout) and shows the actual facet "Execute". (The old toBeHidden() assertion
-  // was stale — it predated the always-visible change and was failing.)
-  await expect(badge).toBeVisible();
-  await expect(badge).toHaveText("Execute");
+  // On mobile, the desktop facet-badge is hidden (display:none inside
+  // .desktop-config-left at max-width:859px). The facet surfaces in the
+  // mobile session-controls summary button — its second span is the
+  // facetSummary (capitalized facet name).
+  const summary = page.getByTestId("mobile-session-controls-trigger");
+  await expect(summary).toBeVisible();
+  const facetSpan = summary.locator("span").nth(1);
+  await expect(facetSpan).toHaveText("Plan");
+  // Reverts to execute after the 1500ms dwell → summary updates to "Execute".
+  await expect(facetSpan).toHaveText("Execute");
 });
