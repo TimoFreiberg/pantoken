@@ -27,6 +27,11 @@ test("a mixed run of tools each renders as its own card (no prose summary)", asy
   // Each card carries its own header + status (settled-ok shows no error dot).
   const okCards = work.locator(":scope > .tool.ok");
   await expect(okCards).toHaveCount(6);
+  await expect(okCards.locator(":scope > .head > .status")).toHaveCount(0);
+  await expect(okCards.first().locator(":scope > .head")).toHaveAttribute(
+    "aria-label",
+    /completed/,
+  );
   // No summary rows exist anymore.
   await expect(work.locator(":scope > .tool.summary")).toHaveCount(0);
 });
@@ -44,10 +49,7 @@ test("a skill load (read of a SKILL.md) renders as its own card, not a prose lab
 
   // The skill-loading read is just another tool card — no prose "loaded skill" label.
   // Scope to THIS turn's work block: the greeting turn also renders tool cards.
-  const work = page
-    .locator(".turn-work")
-    .last()
-    .getByTestId("work-body");
+  const work = page.locator(".turn-work").last().getByTestId("work-body");
   const cards = work.locator(":scope > .tool");
   await expect(cards).toHaveCount(3); // SKILL.md read + a normal read + a bash
   await expect(work.locator(":scope > .tool.summary")).toHaveCount(0);

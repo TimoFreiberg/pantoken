@@ -52,16 +52,42 @@
   // within 1.5s); clear it on teardown so the timer never fires into a destroyed instance.
   onDestroy(() => clearTimeout(copyTimer));
 
+  const HEADER_PREVIEW_LIMIT = 320;
+  const DETAIL_VALUE_LIMIT = 20_000;
+  const OUTPUT_LIMIT = 50_000;
+  const ARG_LIMIT = 40;
+
+  function bound(text: string, limit: number): string {
+    return text.length <= limit
+      ? text
+      : `${text.slice(0, limit)}\n… output truncated by pantoken`;
+  }
+
+  function inlineBound(text: string, limit: number): string {
+    return text.length <= limit ? text : `${text.slice(0, limit)}…`;
+  }
+
+  function stringify(value: unknown, pretty = false): string {
+    try {
+      return JSON.stringify(value, null, pretty ? 2 : undefined) ?? "";
+    } catch {
+      return "[unserializable value]";
+    }
+  }
+
   function preview(input: unknown): string {
     if (input == null) return "";
+    let text: string;
     if (typeof input === "object") {
       const o = input as Record<string, unknown>;
-      if (typeof o.command === "string") return o.command;
-      if (typeof o.path === "string") return o.path;
-      if (typeof o.file_path === "string") return o.file_path;
-      return JSON.stringify(input);
+      if (typeof o.command === "string") text = o.command;
+      else if (typeof o.path === "string") text = o.path;
+      else if (typeof o.file_path === "string") text = o.file_path;
+      else text = stringify(input);
+    } else {
+      text = String(input);
     }
-    return String(input);
+    return inlineBound(text, HEADER_PREVIEW_LIMIT);
   }
 
   // Full argument view for the expanded body. The collapsed header only shows a
@@ -70,11 +96,23 @@
   // commands keep their newlines instead of becoming JSON-escaped "\n".
   function argEntries(input: unknown): { key: string; value: string }[] {
     if (input == null) return [];
-    if (typeof input !== "object") return [{ key: "", value: String(input) }];
-    return Object.entries(input as Record<string, unknown>).map(([key, v]) => ({
+    if (typeof input !== "object")
+      return [{ key: "", value: bound(String(input), DETAIL_VALUE_LIMIT) }];
+    const entries = Object.entries(input as Record<string, unknown>);
+    const rows = entries.slice(0, ARG_LIMIT).map(([key, v]) => ({
       key,
-      value: typeof v === "string" ? v : JSON.stringify(v, null, 2),
+      value: bound(
+        typeof v === "string" ? v : stringify(v, true),
+        DETAIL_VALUE_LIMIT,
+      ),
     }));
+    if (entries.length > ARG_LIMIT) {
+      rows.push({
+        key: "",
+        value: `… ${entries.length - ARG_LIMIT} more arguments omitted`,
+      });
+    }
+    return rows;
   }
 
   // Live tool results arrive as the daemon's raw object { content: [{type:"text",text}|{type:"image",data,mimeType}], details? },
@@ -85,15 +123,18 @@
     if (out && typeof out === "object") {
       const content = (out as { content?: unknown }).content;
       if (Array.isArray(content)) {
-        return content
-          .map((b) =>
-            b &&
-            typeof b === "object" &&
-            typeof (b as { text?: unknown }).text === "string"
-              ? (b as { text: string }).text
-              : "",
-          )
-          .join("");
+        let text = "";
+        for (const block of content) {
+          if (
+            block &&
+            typeof block === "object" &&
+            typeof (block as { text?: unknown }).text === "string"
+          ) {
+            text += (block as { text: string }).text;
+            if (text.length > OUTPUT_LIMIT) return bound(text, OUTPUT_LIMIT);
+          }
+        }
+        return text;
       }
     }
     return "";
@@ -101,10 +142,10 @@
 
   function outputText(out: unknown): string {
     if (out == null) return "";
-    if (typeof out === "string") return out;
+    if (typeof out === "string") return bound(out, OUTPUT_LIMIT);
     const text = contentText(out);
-    if (text) return text;
-    return JSON.stringify(out, null, 2);
+    if (text) return bound(text, OUTPUT_LIMIT);
+    return bound(stringify(out, true), OUTPUT_LIMIT);
   }
 
   // Images the tool returned, lifted into a typed field by the driver (event-map on the
@@ -117,16 +158,16 @@
     if (item.output === undefined) return "";
     if (outImages.length)
       return typeof item.output === "string"
-        ? item.output
-        : contentText(item.output);
+        ? bound(item.output, OUTPUT_LIMIT)
+        : bound(contentText(item.output), OUTPUT_LIMIT);
     return outputText(item.output);
   });
 
-  const statusIcon: Record<ToolItem["status"], string> = {
-    running: "○",
-    ok: "●",
-    error: "✕",
-    interrupted: "–",
+  const statusLabel: Record<ToolItem["status"], string> = {
+    running: "running",
+    ok: "completed",
+    error: "failed",
+    interrupted: "interrupted",
   };
 
   // Elapsed wall-clock for the call, derived from the toolStarted→toolFinished
@@ -351,8 +392,18 @@
 </script>
 
 <div class="tool {item.status}" class:flat class:open>
-  <button class="head" title={open ? "Collapse tool details" : "Expand tool details"} onclick={() => (open = !open)} aria-expanded={open}>
-    <span class="status">{statusIcon[item.status]}</span>
+  <button
+    class="head"
+    title={open ? "Collapse tool details" : "Expand tool details"}
+    onclick={() => (open = !open)}
+    aria-expanded={open}
+    aria-label={`${item.label ?? item.name}, ${statusLabel[item.status]}. ${open ? "Collapse" : "Expand"} tool details`}
+  >
+    {#if item.status === "running"}
+      <span class="status" aria-hidden="true">○</span>
+    {:else if item.status === "error"}
+      <span class="status" aria-hidden="true">✕</span>
+    {/if}
     <span class="name" title={item.description || undefined}>{item.label ?? item.name}</span>
     <span class="arg">{preview(item.input)}</span>
     {#if counts}
@@ -452,6 +503,8 @@
     border-radius: var(--radius-sm);
     background: none;
     overflow: hidden;
+    width: 100%;
+    max-width: 680px;
   }
   /* Flat variant (merged-run children): no box of its own — just a row whose only chrome
      is a subtle rounded hover, so successive calls read as a tight list rather than a
@@ -503,21 +556,17 @@
     box-shadow: inset 0 0 0 1.5px var(--accent);
   }
   .status {
-    font-size: 9px;
+    flex: 0 0 13px;
+    font-size: 12px;
     line-height: 1;
+    text-align: center;
   }
   .tool.running .status {
     color: var(--accent);
     animation: blink 1s ease-in-out infinite;
   }
-  .tool.ok .status {
-    color: var(--ok);
-  }
   .tool.error .status {
     color: var(--danger);
-  }
-  .tool.interrupted .status {
-    color: var(--text-faint);
   }
   @keyframes blink {
     50% {
@@ -538,6 +587,7 @@
     text-overflow: ellipsis;
     flex: 1;
     min-width: 0;
+    max-width: 52ch;
   }
   .counts {
     display: inline-flex;

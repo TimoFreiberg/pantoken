@@ -1104,6 +1104,10 @@
 
 <style>
   .transcript-wrap {
+    /* A prose line stays in the comfortable 65–80 character range at the default
+       transcript scale. Code and tables retain a wider breakout lane. */
+    --maxw: 760px;
+    --maxw-wide: 1100px;
     position: relative;
     isolation: isolate;
     flex: 1;
@@ -1446,7 +1450,8 @@
   .assistant {
     gap: 8px;
   }
-  /* tiny relative timestamp under each turn */
+  /* The complete turn footer (actions + time) follows one visibility rule. Desktop
+     reveals it on hover/focus; touch pins the whole group visible below. */
   .ts {
     font-size: 11px;
     line-height: 1;
@@ -1470,6 +1475,9 @@
        `.row.assistant > *` suppress flex stretch, shrink-wrapping `.meta` and then
        centering that small box in the wide row. */
     width: 100%;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
   }
   .copy {
     appearance: none;
@@ -1481,9 +1489,7 @@
     color: var(--text-muted);
     padding: 4px;
     border-radius: var(--radius-xs);
-    opacity: 0;
     transition:
-      opacity 0.12s ease,
       color 0.12s ease,
       border-color 0.12s ease;
   }
@@ -1492,14 +1498,18 @@
     width: 13px;
     height: 13px;
   }
-  .assistant:hover .copy,
-  .row.user:hover .copy,
-  .copy:focus-visible {
+  .assistant:hover .meta,
+  .assistant:focus-within .meta,
+  .row.user:hover .umeta,
+  .row.user:focus-within .umeta {
     opacity: 1;
+    pointer-events: auto;
   }
-  /* Touch devices have no hover; pin the copy button visible so it stays reachable. */
-  .scroller.touch .copy {
+  /* Touch devices have no hover; pin the complete footer visible. */
+  .scroller.touch .meta,
+  .scroller.touch .umeta {
     opacity: 1;
+    pointer-events: auto;
   }
   .copy:hover {
     color: var(--text);
@@ -1520,6 +1530,9 @@
     align-items: center;
     gap: 8px;
     margin-top: 4px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
   }
   .row.user .umeta .ts {
     margin-top: 0;
@@ -1535,10 +1548,8 @@
     color: var(--text-muted);
     padding: 4px;
     border-radius: var(--radius-xs);
-    opacity: 0;
     cursor: pointer;
     transition:
-      opacity 0.12s ease,
       color 0.12s ease,
       border-color 0.12s ease;
   }
@@ -1546,11 +1557,6 @@
     display: block;
     width: 13px;
     height: 13px;
-  }
-  .assistant:hover .branch,
-  .row.user:hover .branch,
-  .branch:focus-visible {
-    opacity: 1;
   }
   .branch:hover {
     color: var(--text);
@@ -1570,12 +1576,18 @@
   .branch.armed:hover {
     background: color-mix(in srgb, var(--danger) 12%, transparent);
   }
-  /* Touch devices have no hover — keep branch + the user-prompt copy reachable (phone is
-     the primary target). The assistant copy is pinned via .scroller.touch .copy above. */
+  /* Touch devices have no hover — keep every footer action reachable with a 44px target. */
   @media (max-width: 859px) {
-    .branch,
-    .row.user .copy {
+    .scroller.touch .meta,
+    .scroller.touch .umeta {
       opacity: 1;
+      pointer-events: auto;
+    }
+    .copy,
+    .branch {
+      width: 44px;
+      height: 44px;
+      padding: 0;
     }
     /* Sidebars are overlay drawers here — no gutter to hold against them. */
     .col {

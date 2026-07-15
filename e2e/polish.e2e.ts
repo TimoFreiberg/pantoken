@@ -53,6 +53,28 @@ test("message timestamps render with an exact-time tooltip", async ({
   await expect(times.first()).toHaveAttribute("datetime", /.+/);
 });
 
+test("desktop turn actions and timestamps reveal as one footer", async ({
+  page,
+}) => {
+  await waitForSettledWorkBlocks(page, 1);
+  await page.mouse.move(0, 0);
+  const user = page.locator(".row.user").first();
+  const assistant = page.locator(".row.assistant").last();
+
+  for (const [row, footer] of [
+    [user, user.locator(".umeta")],
+    [assistant, assistant.locator(".meta")],
+  ] as const) {
+    await expect(footer).toHaveCSS("opacity", "0");
+    await row.hover();
+    await expect(footer).toHaveCSS("opacity", "1");
+    const tags = await footer
+      .locator(":scope > *")
+      .evaluateAll((nodes) => nodes.map((node) => node.tagName.toLowerCase()));
+    expect(tags.at(-1)).toBe("time");
+  }
+});
+
 test("copy + timestamp show only on the turn-final paragraph", async ({
   page,
 }) => {
@@ -134,18 +156,19 @@ test("copy button fades back out once the pointer leaves the message", async ({
     "false",
   );
   const assistant = page.locator(".row.assistant").last();
+  const footer = assistant.locator(".meta");
   const copy = assistant.getByRole("button", { name: "Copy message" });
-  // Hover reveals it (opacity animates to 1).
+  // Hover reveals the entire action/timestamp footer as one unit.
   await assistant.hover();
   await expect
-    .poll(() => copy.evaluate((el) => getComputedStyle(el).opacity))
+    .poll(() => footer.evaluate((el) => getComputedStyle(el).opacity))
     .toBe("1");
   // Clicking copies but must not pin it visible via lingering :focus-visible;
   // leaving the row in any direction fades it back out.
   await copy.click();
   await page.mouse.move(0, 0);
   await expect
-    .poll(() => copy.evaluate((el) => getComputedStyle(el).opacity))
+    .poll(() => footer.evaluate((el) => getComputedStyle(el).opacity))
     .toBe("0");
 });
 
