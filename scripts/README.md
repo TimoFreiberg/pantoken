@@ -17,8 +17,8 @@ just implement-issue 42
 1. **`just implement-issue <url>`** → `scripts/implement-issue.ts`
    - Fetches and validates the issue title/body with `gh --repo TimoFreiberg/pantoken`
    - Extracts image references and, in normal mode, downloads valid images into a unique owned context directory with a manifest
-   - Creates a jj workspace, spawns a headless polytoken daemon, and seeds it via authenticated HTTP: bypass_plus permissions, plan facet, adventurous handoff, goal, and the single rendered prompt
-   - Opens a zellij tab with the TUI and retains the workspace when integration needs manual recovery
+   - Creates a jj workspace, spawns a headless polytoken daemon, and seeds it via authenticated HTTP: bypass_plus permissions, plan facet, adventurous handoff, and the single rendered prompt; the daemon's plan-handoff setting creates the goal at the configured point
+   - Opens a zellij tab with the TUI and returns immediately; the tab owns cleanup after the TUI exits, while the workspace is retained when integration needs manual recovery
    - `--dry-run` performs only the read-only issue query; it creates no claims, files, downloads, processes, daemon requests, or workspaces
 
 2. **The agent** (inside the TUI) starts with an interactive clarification phase:
@@ -80,6 +80,6 @@ scripts/
 - `just` — command runner
 - Bun — runs `scripts/implement-issue.ts` and the repository test suite
 
-The launcher owns a unique `.pantoken-issue-context-*` directory under the repository during normal execution. It stores `issue-body.md`, downloaded images, and `manifest.json`; it removes that context after the run. A workspace is retained with a recovery command when integration is incomplete. Screenshot downloads are bounded, content-type checked, and failed downloads are never listed as local screenshots.
+The launcher owns a unique `issue-*` directory under `.pantoken-issue-context/` during normal execution. It stores `issue-body.md`, downloaded images, and `manifest.json`; the zellij tab removes that context after the TUI exits. The parent directory is gitignored. A workspace is retained with a recovery command when integration is incomplete. Screenshot downloads are bounded, content-type checked, and failed downloads are never listed as local screenshots.
 
 `integrate-into-main.sh` exits `0` on success, `2` on conflicts with the lock retained for the resolving session, and `1` for other failures. `INTEGRATE_DRY_RUN=1` skips push and issue close but still exercises the local integration decision path.
