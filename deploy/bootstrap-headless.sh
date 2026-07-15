@@ -140,7 +140,7 @@ render_plist() {
     -e "s|@@@HOME@@@|$HOME_DIR|g" \
     -e "s|@@@LIVE@@@|$LIVE_DIR|g" \
     -e "s|@@@LOGDIR@@@|$LOG_DIR|g" \
-    -e "s|@@@POLYTOKEN_BIN@@@|/usr/local/bin/polytoken|g" \
+    -e "s|@@@POLYTOKEN_BIN@@@|$(command -v polytoken)|g" \
     -e "s|@@@XDG_CONFIG@@@|$HOME_DIR/.config|g" \
     -e "s|@@@XDG_DATA@@@|$HOME_DIR/.local/share|g" \
     "$PLIST_TEMPLATE"
@@ -201,7 +201,7 @@ if ! validate_archive "$ARCHIVE"; then
 fi
 
 # Step 2: Create version directory and install release contents.
-echo "Step 2: Installing release to $LIVE_DIR…"
+echo "Step 2: Installing release to ${LIVE_DIR}…"
 if [[ -d "$LIVE_DIR" ]]; then
   echo "  Version directory already exists ($LIVE_DIR) — skipping copy"
 else
