@@ -60,6 +60,14 @@
     border-radius: var(--radius-xs);
     cursor: pointer;
   }
+  /* Callers provide different SVG icon sets. Normalize their occupied box here while
+     leaving each icon's intentional stroke/fill styling intact. */
+  .icon-btn :global(svg) {
+    display: block;
+    width: 1em;
+    height: 1em;
+    flex: none;
+  }
   .icon-btn:hover,
   .icon-btn.active {
     background: var(--surface);
@@ -89,12 +97,12 @@
   .md {
     width: 26px;
     height: 26px;
-    font-size: 17px;
+    font-size: 16px;
   }
   .lg {
     width: 32px;
     height: 32px;
-    font-size: 19px;
+    font-size: 18px;
   }
 
   /* danger — destructive tint (dismiss/clear). */

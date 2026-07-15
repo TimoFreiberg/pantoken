@@ -23,7 +23,7 @@
   /* `1em` (not `1rem`) so the renderer inherits the transcript's scaled font-size
      (Transcript `.col` applies --font-scale); 1rem would pin it to the root and ignore
      the reader's text-size knob. */
-  font: 400 1em/1.5 var(--font-sans);
+  font: 400 1em / var(--leading-prose) var(--font-sans);
 }
 
 .markstream-svelte.markdown-renderer.dark {
@@ -47,18 +47,25 @@
 
 .markstream-svelte.markdown-renderer :where(code) {
   font-family: var(--font-mono);
-  font-size: 0.86em;
-  background: var(--surface-sunken);
-  border: 1px solid var(--border);
+  font-size: 0.875em;
+  line-height: inherit;
+  font-variant-ligatures: none;
+  background: var(--surface-code);
+  border: 1px solid var(--border-code);
   border-radius: var(--radius-xs);
-  padding: 0.1em 0.36em;
+  padding: 0.08em 0.34em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 .markstream-svelte.markdown-renderer :where(pre) {
-  background: var(--surface-sunken);
-  border: 1px solid var(--border);
+  background: var(--surface-code);
+  border: 1px solid var(--border-code);
   border-radius: var(--radius-sm);
-  padding: 12px 14px;
-  overflow-x: auto;
+  padding: 14px 16px;
+  max-height: min(60vh, 720px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   /* the library tints plain code blocks with a fixed light editor color; re-point it
      at the theme foreground so it reads on the sunken surface in both themes. */
   color: var(--text);
@@ -83,8 +90,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 5px;
-  border: 1px solid var(--border);
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border-code);
   border-radius: var(--radius-xs);
   background: var(--surface);
   color: var(--text-muted);
@@ -98,8 +107,8 @@
 }
 .markstream-svelte.markdown-renderer .code-block > .code-copy svg {
   display: block;
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
 }
 .markstream-svelte.markdown-renderer .code-block:hover > .code-copy,
 .markstream-svelte.markdown-renderer .code-block > .code-copy:focus-visible {
@@ -123,6 +132,8 @@
 @media (pointer: coarse) {
   .markstream-svelte.markdown-renderer .code-block > .code-copy {
     opacity: 1;
+    width: 44px;
+    height: 44px;
   }
 }
 .markstream-svelte.markdown-renderer :where(pre code) {
@@ -130,6 +141,11 @@
   border: 0;
   padding: 0;
   color: var(--text);
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  line-height: var(--leading-code);
+  tab-size: 2;
 }
 
 .markstream-svelte.markdown-renderer :where(table) {
@@ -178,8 +194,8 @@
   }
   .markstream-svelte.markdown-renderer :where(pre) {
     background-image:
-      linear-gradient(to right, var(--surface-sunken), transparent),
-      linear-gradient(to left, var(--surface-sunken), transparent),
+      linear-gradient(to right, var(--surface-code), transparent),
+      linear-gradient(to left, var(--surface-code), transparent),
       radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, 0.16), transparent),
       radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, 0.16), transparent);
   }
@@ -201,7 +217,7 @@
 
 .markstream-svelte.markdown-renderer :where(h1, h2, h3, h4, h5, h6) {
   font-weight: 650;
-  line-height: 1.3;
+  line-height: var(--leading-heading);
   margin: 1.1em 0 0.5em;
 }
 .markstream-svelte.markdown-renderer :where(h1) {
