@@ -542,10 +542,9 @@ struct ToolResultExtract {
 ///
 /// `content` is the short-form truncated string; `content_full` carries the rich
 /// display content (ToolLiveDisplayContent = ToolResultContent | {diff_preview}).
-/// ToolResultContent has three variants: {text}, {blocks}, {image}. We lift the
-/// image into the typed `images` field (like the original driver's splitToolResult) and extract the
-/// rich/full text for `output`. The client owns display bounding; keeping the richer value here is
-/// what makes its explicit full-output Copy escape hatch truthful.
+/// Recognized non-empty rich text is preferred, image data is lifted into `images`,
+/// and unrecognized non-empty rich variants are preserved. Empty rich values fall
+/// back to the short-form content.
 fn extract_tool_result(
     content: Option<&str>,
     content_full: Option<&ToolLiveDisplayContent>,
@@ -632,9 +631,8 @@ fn extract_tool_result(
                 };
             }
         }
-        // Preserve an unrecognized future rich variant rather than silently replacing it
-        // with the daemon's truncated summary. ToolCard bounds raw objects before display
-        // and retains the complete serialized value behind its explicit Copy action.
+        // Preserve an unrecognized future rich variant rather than replacing it with
+        // the short-form summary.
         if !cf.is_null() && !cf.as_object().is_some_and(serde_json::Map::is_empty) {
             return ToolResultExtract {
                 output: Some(cf.clone()),
