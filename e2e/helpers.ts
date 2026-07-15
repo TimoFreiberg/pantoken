@@ -51,14 +51,17 @@ export async function expandWork(
     await toggle.click();
 }
 
-/** Open the settings panel and (optionally) jump to a section via its left-rail tab.
- *  With the section-nav refactor only the active section renders, so a test that
- *  touches a section's controls must navigate to that tab first — this does both in
- *  one call. Omit `section` to open on whatever section was last active (persisted
- *  in localStorage); pass a SectionId to land on a specific one. */
+/** Open Settings and optionally choose a section through the current navigation
+ *  (desktop rail or phone index). Only the chosen detail renders. */
 export async function openSettings(
   page: Page,
-  section?: "appearance" | "notifications" | "models" | "environment" | "token",
+  section?:
+    | "appearance"
+    | "notifications"
+    | "models"
+    | "environment"
+    | "mcp"
+    | "token",
 ): Promise<void> {
   const settings = page.getByTestId("settings-toggle");
   if (

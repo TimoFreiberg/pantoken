@@ -4,7 +4,10 @@
   import Button from "./ui/Button.svelte";
   import IconButton from "./ui/IconButton.svelte";
   import SegmentedControl from "./ui/SegmentedControl.svelte";
+  import Chevron from "./ui/Chevron.svelte";
   import { MAX_SCALE, MIN_SCALE, STEP } from "../lib/font-scale.js";
+  import { onMount, tick } from "svelte";
+  import { overlayHistory, PHONE_MQ } from "../lib/overlay-history.js";
 
   // The settings panel. Per-client view state (theme, notifications, this device's
   // access token) sits next to server-side global agent config (provider credentials,
@@ -12,18 +15,15 @@
 
   const open = $derived(store.settingsOpen);
 
-  // Section navigation. The panel is a left-rail of section tabs + a content pane
-  // showing only the active section — so the long lists (Providers, Models+Favorites,
-  // Extensions) each get their own scroll instead of crowding one. The rail labels ARE
-  // the seven top-level section names, so every name stays visible (and reachable) the
-  // moment the panel opens. On the phone bottom-sheet the rail reflows to a horizontal
-  // scrollable strip (see the media query). Tabs are flat — not a drill-in stack — so
-  // Escape closes the panel as before (section searches still clear on the first Esc).
+  // Desktop uses a left rail of section tabs and one scrollable content pane. Phone
+  // Settings opens on a full-screen section index; choosing a row drills into one
+  // full-screen detail, where Back or Escape returns to the index before Settings closes.
   //
   // Active section persists across close/reopen AND reload, mirroring the app's other
-  // per-device localStorage prefs (pantoken.sidebarOpen, pantoken.theme, …). So reopening
-  // lands you on the section you last viewed — e.g. tweak an API key, Esc, reopen →
-  // back on Providers. Defaults to Appearance when no pref is stored (or on SSR/tests).
+  // per-device localStorage prefs (pantoken.sidebarOpen, pantoken.theme, …). Desktop
+  // reopens on the section last viewed; phone still opens its section index, with that
+  // section ready when selected. Defaults to Appearance without a stored pref (or on
+  // SSR/tests).
   type SectionId =
     | "appearance"
     | "notifications"
@@ -48,10 +48,61 @@
       : "appearance";
   }
   let activeSection = $state<SectionId>(initialSection());
+  let phone = $state(false);
+  let mobileDetail = $state<SectionId | null>(null);
+  let panelEl = $state<HTMLDivElement>();
+  let previousFocus: HTMLElement | null = null;
+  let settingsHistoryTracked = false;
+
+  onMount(() => {
+    const mq = window.matchMedia(PHONE_MQ);
+    const update = () => {
+      const wasPhone = phone;
+      phone = mq.matches;
+      if (!phone && wasPhone) {
+        if (mobileDetail) overlayHistory.closed("settings-detail");
+        mobileDetail = null;
+      } else if (phone && !wasPhone && open && !settingsHistoryTracked) {
+        overlayHistory.opened("settings", closeFromHistory);
+        settingsHistoryTracked = true;
+      }
+    };
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  });
+
   function setSection(id: SectionId): void {
     activeSection = id;
     if (typeof window !== "undefined")
       localStorage.setItem(ACTIVE_SECTION_KEY, id);
+    if (phone && mobileDetail !== id) {
+      mobileDetail = id;
+      overlayHistory.openedNested("settings-detail", () => {
+        mobileDetail = null;
+        void focusPanel();
+      });
+      void focusPanel();
+    }
+  }
+
+  async function focusPanel(): Promise<void> {
+    await tick();
+    panelEl?.focus();
+  }
+
+  function restoreFocus(): void {
+    const target = phone
+      ? document.querySelector<HTMLElement>(".composer-surface textarea")
+      : previousFocus;
+    target?.focus();
+  }
+
+  function closeFromHistory(): void {
+    settingsHistoryTracked = false;
+    mobileDetail = null;
+    store.closeSettings();
+    restoreFocus();
   }
 
   // Transcript text-size, shown as a percentage of the default. The hotkeys (⌘=/⌘-/⌘0)
@@ -111,44 +162,46 @@
     store.setLoginShell(null);
   }
 
-  // Background model: the cheap model spec pantoken's own extensions run their out-of-band
-  // LLM calls against (session auto-naming, the answer tool's structured-extraction).
-  // A `provider/model[:thinking]` spec OR a `script:`-prefixed path. Draft seeded from
-  // the server's configured value each open; the resolved `warning` (bad/unresolvable
-  // spec) surfaces as a loud red error under the field.
-  let bgModelDraft = $state("");
-  const bgModelDirty = $derived(
-    bgModelDraft.trim() !== (store.pantokenSettings.backgroundModel ?? ""),
-  );
-  const bgModelWarning = $derived(store.backgroundModelWarning);
-  function saveBackgroundModel(): void {
-    store.setBackgroundModel(bgModelDraft.trim() || null);
-  }
-  function clearBackgroundModel(): void {
-    bgModelDraft = "";
-    store.setBackgroundModel(null);
-  }
-
-  // Re-seed the shell + background-model drafts on each open transition.
+  // Re-seed the shell draft on each open transition.
   let prevOpen = false;
   $effect(() => {
     if (open && !prevOpen) {
-      // Seed the login-shell field from the server's configured value each open.
+      previousFocus = document.activeElement as HTMLElement | null;
       shellDraft = store.pantokenSettings.loginShell ?? "";
-      // Seed the background-model field likewise.
-      bgModelDraft = store.pantokenSettings.backgroundModel ?? "";
+      mobileDetail = null;
+      overlayHistory.opened("settings", closeFromHistory);
+      settingsHistoryTracked = phone;
+      void focusPanel();
     }
     prevOpen = open;
   });
 
   let tokenDraft = $state("");
 
+  function consumeSettingsHistory(): void {
+    if (phone && mobileDetail && settingsHistoryTracked)
+      overlayHistory.closed("settings-detail");
+    overlayHistory.closed("settings");
+    settingsHistoryTracked = false;
+  }
+
   function close(): void {
+    consumeSettingsHistory();
+    mobileDetail = null;
     store.closeSettings();
+    restoreFocus();
+  }
+  function backToIndex(): void {
+    if (!mobileDetail) return;
+    overlayHistory.closed("settings-detail");
+    mobileDetail = null;
+    void focusPanel();
   }
   function onKey(e: KeyboardEvent): void {
     if (e.key === "Escape" && open) {
-      close();
+      e.preventDefault();
+      if (phone && mobileDetail) backToIndex();
+      else close();
       return;
     }
     // Alt+1..6 — jump straight to a section tab (the rail order). Read e.code
@@ -161,7 +214,7 @@
     // instead — so the shortcut never corrupts field text. noUncheckedIndexedAccess
     // makes SECTIONS[idx] `T | undefined`; the guard narrows it at runtime but not to
     // TS, so capture the element after the bound check.
-    if (open && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+    if (open && !phone && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
       const m = /^Digit([1-6])$/.exec(e.code);
       const target = m ? SECTIONS[Number(m[1]) - 1] : undefined;
       if (target) {
@@ -177,6 +230,27 @@
       if (open) close();
       else store.openSettings();
     }
+    if (e.key === "Tab" && open && panelEl) {
+      const candidates = Array.from(
+        panelEl.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => element.getClientRects().length > 0);
+      if (candidates.length === 0) {
+        e.preventDefault();
+        panelEl.focus();
+        return;
+      }
+      const first = candidates[0];
+      const last = candidates[candidates.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === panelEl)) {
+        e.preventDefault();
+        last?.focus();
+      } else if (!e.shiftKey && (document.activeElement === last || document.activeElement === panelEl)) {
+        e.preventDefault();
+        first?.focus();
+      }
+    }
   }
   function saveToken(): void {
     const t = tokenDraft.trim();
@@ -184,55 +258,72 @@
     store.changeToken(t);
     tokenDraft = "";
   }
+  function forgetToken(): void {
+    consumeSettingsHistory();
+    mobileDetail = null;
+    store.signOut();
+  }
 </script>
 
 <svelte:window onkeydown={onKey} />
 
 {#if open}
-  <div class="scrim" onclick={close} role="presentation"></div>
+  <div class="scrim" onclick={() => close()} role="presentation"></div>
   <div
+    bind:this={panelEl}
     class="panel"
     role="dialog"
     aria-modal="true"
     aria-label="Settings"
     data-testid="settings-panel"
+    tabindex="-1"
   >
     <header class="phead">
-      <h2>Settings</h2>
-      <IconButton title="Close settings" aria-label="Close settings" onclick={close}>✕</IconButton>
+      {#if phone && mobileDetail}
+        <button class="mobile-back" type="button" title="Back to Settings" aria-label="Back to Settings" onclick={() => backToIndex()}><span class="back-chevron"><Chevron size={14} /></span><span>Back</span></button>
+        <h2>{SECTIONS.find((section) => section.id === mobileDetail)?.label}</h2>
+        <span class="header-spacer" aria-hidden="true"></span>
+      {:else}
+        <h2>Settings</h2>
+        <IconButton title="Close settings" aria-label="Close settings" onclick={() => close()}>✕</IconButton>
+      {/if}
     </header>
 
     <div class="settings-shell">
-      <!-- ARIA tabs: the rail is the tablist, each tab aria-controls the shared panel
-           body below (which aria-labelledby points back to the active tab). Matches
-           QnaForm's dot-tab pattern, completed with the panel-side wiring. -->
+      <!-- Desktop ARIA tabs: the rail controls the shared panel body. Phone renders
+           these same entries as ordinary navigation buttons into a detail page. -->
+      {#if !phone || mobileDetail === null}
       <div
         class="settings-nav"
-        role="tablist"
+        role={phone ? undefined : "tablist"}
         aria-label="Settings sections"
+        data-testid="settings-index"
       >
         {#each SECTIONS as s, i (s.id)}
           <button
             class="tab"
             type="button"
             id="settings-tab-{s.id}"
-            role="tab"
-            aria-selected={activeSection === s.id}
-            aria-controls="settings-panel-body"
+            role={phone ? undefined : "tab"}
+            aria-selected={phone ? undefined : activeSection === s.id}
+            aria-controls={phone ? undefined : "settings-panel-body"}
             data-testid="settings-tab-{s.id}"
-            title={`${s.label} section (Alt+${i + 1})`}
+            title={phone ? `Open ${s.label}` : `${s.label} section (Alt+${i + 1})`}
             onclick={() => setSection(s.id)}
           >
             <span class="tab-label">{s.label}</span>
+            {#if phone}<Chevron size={14} />{/if}
           </button>
         {/each}
       </div>
+      {/if}
 
+      {#if !phone || mobileDetail !== null}
       <div
         class="body"
         id="settings-panel-body"
-        role="tabpanel"
-        aria-labelledby="settings-tab-{activeSection}"
+        role={phone ? undefined : "tabpanel"}
+        aria-labelledby={phone ? undefined : `settings-tab-${activeSection}`}
       >
       <!-- Appearance -->
       {#if activeSection === "appearance"}
@@ -363,57 +454,12 @@
       <!-- Models -->
       {#if activeSection === "models"}
       <section class="group">
-        <div class="row" data-testid="background-model-row">
-          <div class="rinfo">
-            <div class="rlabel">Background model</div>
-            <div class="rdesc">
-              The cheap model pantoken's own extensions use for out-of-band tasks (session
-              auto-naming, the answer tool's extraction) — separate from the session's
-              primary model. A <code>provider/model[:thinking]</code> spec, or a
-              <code>script:</code>-prefixed path whose stdout is one. Blank = unset
-              (extensions fall back).
-            </div>
-          </div>
-        </div>
-        <form
-          class="shellform"
-          onsubmit={(e) => {
-            e.preventDefault();
-            saveBackgroundModel();
-          }}
-        >
-          <input
-            bind:value={bgModelDraft}
-            type="text"
-            placeholder="e.g. anthropic/claude-haiku-4-5:low"
-            title="Background model spec — provider/model[:thinking], or script:<path> (blank = unset)"
-            aria-label="Background model spec"
-            spellcheck="false"
-            autocapitalize="off"
-            autocorrect="off"
-            autocomplete="off"
-            data-testid="background-model-input"
-          />
-          <Button
-            variant="primary"
-            type="submit"
-            title="Save the background model spec"
-            disabled={!bgModelDirty}>Save</Button
-          >
-          {#if store.pantokenSettings.backgroundModel}
-            <Button
-              type="button"
-              title="Clear the background model spec (extensions fall back)"
-              onclick={clearBackgroundModel}>Clear</Button
-            >
-          {/if}
-        </form>
-        {#if bgModelWarning}
+        <p class="section-empty">Session models and effort are selected from the composer.</p>
+        {#if store.backgroundModelWarning}
           <p class="note warn" data-testid="background-model-warning">
-            ⚠ {bgModelWarning}
+            ⚠ Background model configuration is invalid; extensions will use their fallback.
           </p>
         {/if}
-
       </section>
       {/if}
 
@@ -554,7 +600,7 @@
             </div>
           </div>
           {#if store.hasToken}
-            <Button variant="danger" title="Forget the access token saved on this device" onclick={() => store.signOut()}>Forget</Button>
+            <Button variant="danger" title="Forget the access token saved on this device" onclick={forgetToken}>Forget</Button>
           {/if}
         </div>
         <form
@@ -601,6 +647,7 @@
       </section>
       {/if}
       </div>
+      {/if}
     </div>
   </div>
 {/if}
@@ -630,6 +677,9 @@
     box-shadow: var(--shadow-pop);
     animation: rise 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
+  .panel:focus {
+    outline: none;
+  }
   @media (min-width: 600px) {
     .panel {
       top: 50%;
@@ -652,16 +702,20 @@
     font-size: 16px;
     font-weight: 600;
   }
+  .mobile-back {
+    display: none;
+  }
+  .header-spacer {
+    display: none;
+  }
   .body {
     flex: 1 1 auto;
     min-width: 0;
     overflow-y: auto;
     padding: 4px 20px calc(20px + env(safe-area-inset-bottom));
   }
-  /* Section nav: a left-rail of section tabs whose labels ARE the seven top-level
-     section names, so every name stays visible the instant the panel opens. Only the
-     active section renders, keeping the long lists from sharing one scroll. On the
-     phone bottom-sheet the rail reflows to a horizontal scrollable strip (below). */
+  /* Desktop section navigation is a left rail beside the active detail. On phone the
+     same six entries become the full-screen index and only the chosen detail renders. */
   .settings-shell {
     display: flex;
     flex: 1 1 auto;
@@ -690,8 +744,7 @@
     font-size: 13px;
     color: var(--text-muted);
     cursor: pointer;
-    /* A comfortable tap target on the mobile bottom-sheet (coarse pointer bumps it
-       to a full 44px via the media query below, matching .gtitle-toggle). */
+    /* Coarse pointers bump this to the shared 44px minimum below. */
     min-height: 34px;
   }
   .tab:hover {
@@ -712,34 +765,134 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .tab :global(.chevron) {
+    margin-left: auto;
+  }
   @media (pointer: coarse) {
     .tab {
       min-height: 44px;
     }
   }
-  /* Phone bottom-sheet (matches the <600px panel-is-a-sheet breakpoint): the rail
-     reflows from a left column to a horizontal scrollable strip pinned under the
-     header, so the narrow sheet keeps its full width for the active section's
-     content. All section names stay visible/reachable by scrolling the strip. */
-  @media (max-width: 599px) {
+  /* Phone Settings is a full-screen navigation surface: an index first, then one
+     scrollable detail page. Desktop keeps the compact rail-and-pane dialog. */
+  @media (max-width: 859px) {
+    .scrim {
+      display: none;
+    }
+    .panel {
+      z-index: 95;
+      inset: 0;
+      left: 0;
+      bottom: 0;
+      transform: none;
+      width: 100dvw;
+      height: 100dvh;
+      max-height: none;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      animation: none;
+    }
+    .phead {
+      display: grid;
+      grid-template-columns: minmax(72px, 1fr) auto minmax(72px, 1fr);
+      min-height: calc(52px + env(safe-area-inset-top));
+      box-sizing: border-box;
+      padding: env(safe-area-inset-top) 8px 0;
+    }
+    .phead h2 {
+      grid-column: 2;
+      text-align: center;
+    }
+    .phead > :global(.icon-btn) {
+      grid-column: 3;
+      justify-self: end;
+    }
+    .mobile-back {
+      display: inline-flex;
+      grid-column: 1;
+      align-items: center;
+      justify-self: start;
+      min-width: 72px;
+      min-height: 44px;
+      padding: 0 8px 0 2px;
+      border: 0;
+      background: transparent;
+      color: var(--accent);
+      font: inherit;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .back-chevron {
+      display: inline-flex;
+      transform: rotate(180deg);
+    }
+    .mobile-back:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: -2px;
+      border-radius: var(--radius-sm);
+    }
+    .header-spacer {
+      display: block;
+      grid-column: 3;
+      width: 72px;
+    }
     .settings-shell {
       flex-direction: column;
     }
     .settings-nav {
-      flex-direction: row;
-      overflow-x: auto;
-      overflow-y: hidden;
+      flex: 1 1 auto;
+      flex-direction: column;
+      overflow-x: hidden;
+      overflow-y: auto;
       border-right: none;
-      border-bottom: 1px solid var(--border);
-      padding: 6px 10px;
-      gap: 4px;
-      /* The strip never wraps; excess tabs scroll horizontally. */
-      flex-wrap: nowrap;
+      border-bottom: none;
+      padding: 8px 12px calc(16px + env(safe-area-inset-bottom));
+      gap: 0;
     }
     .tab {
-      width: auto;
+      width: 100%;
+      min-height: 52px;
       flex-shrink: 0;
-      padding: 8px 12px;
+      padding: 0 12px;
+      border-radius: 0;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+      font-size: 15px;
+    }
+    .tab:hover,
+    .tab:active {
+      background: var(--surface);
+    }
+    .body {
+      padding: 0 16px calc(24px + env(safe-area-inset-bottom));
+      overscroll-behavior: contain;
+    }
+    .group {
+      padding-top: 16px;
+    }
+    .row {
+      min-height: 52px;
+      padding-block: 6px;
+    }
+    .step-btn,
+    .seg-btn,
+    .mcp-btn {
+      min-height: 44px;
+    }
+    .shellform {
+      flex-wrap: wrap;
+    }
+    .shellform input {
+      flex-basis: 100%;
+      min-height: 44px;
+    }
+    .mcp-row {
+      min-height: 52px;
+      flex-wrap: wrap;
+    }
+    .mcp-btn {
+      padding-inline: 14px;
     }
   }
   .group {
@@ -856,15 +1009,14 @@
     background: none;
     border: 0;
     /* A comfortable click target — the bare 11px label was a ~13px-tall hit area,
-       fiddly to tap on the mobile bottom-sheet. Padding adds the height; the 6px
+       fiddly to tap in the phone detail. Padding adds the height; the 6px
        bottom margin replaces .gtitle's 10px (the padding now carries that gap). */
     padding: 6px 0;
     margin-bottom: 6px;
     text-align: left;
     cursor: pointer;
   }
-  /* Touch: section headers become a full 44px tap target (the panel is a phone
-     bottom-sheet there). align-items:center keeps the label/chevron/count centred. */
+  /* Touch: section headers become a full 44px tap target. */
   @media (pointer: coarse) {
     .gtitle-toggle {
       min-height: 44px;
@@ -969,6 +1121,12 @@
     color: var(--text-faint);
     line-height: 1.5;
     margin: 10px 0 0;
+  }
+  .section-empty {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.5;
   }
   /* Pill toggle for the hide-thinking switch. The theme control moved to
      <SegmentedControl>, which scopes its own .seg-btn; this row still needs it. */

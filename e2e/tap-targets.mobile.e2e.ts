@@ -33,17 +33,15 @@ test("non-binary select options meet the 44px touch target", async ({
   for (let i = 0; i < 3; i++) await expectTall(options.nth(i));
 });
 
-test("settings collapse headers meet the 44px touch target", async ({
+test("settings navigation meets the 44px touch target", async ({
   page,
 }) => {
-  // Only the active section renders, so navigate to each one before checking its
-  // disclosure header. The section-nav rail tabs themselves are also touch targets.
-  await openSettings(page, "appearance");
+  await openSettings(page);
   await expect(page.getByTestId("settings-panel")).toBeVisible();
-  // The rail tabs reflow to a horizontal strip on the phone bottom-sheet but stay
-  // comfortably tappable (coarse pointer bumps them to a full 44px).
   for (const id of ["appearance", "models", "environment", "token"])
     await expectTall(page.getByTestId(`settings-tab-${id}`));
+  await page.getByTestId("settings-tab-appearance").click();
+  await expectTall(page.getByRole("button", { name: "Back to Settings" }));
 });
 
 test("the mobile header and sidebar destinations meet the 44px touch target", async ({

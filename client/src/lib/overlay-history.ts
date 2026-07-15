@@ -40,7 +40,15 @@ export function createOverlayHistory(env: OverlayHistoryEnv) {
   // Set while we unwind our own history.back() from a UI close: that pop is
   // already accounted for and must not close the (new) top overlay.
   let pendingOwnPops = 0;
-  let deferredOpen: Entry | null = null;
+  // When a peer replaces a hierarchy (parent + nested child), the extra child
+  // entries must be traversed before the surviving parent entry can be rewritten
+  // as the peer. The peer lives in `stack[0]` while those traversals serialize.
+  let pendingReplacementId: string | null = null;
+  // Opens requested while a UI-driven Back is still traversing. Usually this is one
+  // peer overlay, but a fast drill-in can enqueue a parent plus its nested child before
+  // the parent's entry is active. Preserve that hierarchy instead of replacing and
+  // closing the deferred parent.
+  let deferredStack: Entry[] = [];
 
   function ensureInstalled(): void {
     if (installed) return;
@@ -48,10 +56,23 @@ export function createOverlayHistory(env: OverlayHistoryEnv) {
     env.onPop(() => {
       if (pendingOwnPops > 0) {
         pendingOwnPops--;
-        if (pendingOwnPops === 0 && deferredOpen) {
-          stack.push(deferredOpen);
-          env.pushState({ pantokenOverlay: deferredOpen.id });
-          deferredOpen = null;
+        if (pendingOwnPops > 0) {
+          // Serialize multiple UI closes. Calling history.back() twice before the
+          // first traversal completes can be coalesced by browsers, stranding the
+          // bookkeeping and any deferred open.
+          env.back();
+        } else {
+          if (pendingReplacementId) {
+            if (stack[0]?.id === pendingReplacementId)
+              env.replaceState({ pantokenOverlay: pendingReplacementId });
+            pendingReplacementId = null;
+          }
+          if (deferredStack.length === 0) return;
+          for (const entry of deferredStack) {
+            stack.push(entry);
+            env.pushState({ pantokenOverlay: entry.id });
+          }
+          deferredStack = [];
         }
         return;
       }
@@ -69,8 +90,25 @@ export function createOverlayHistory(env: OverlayHistoryEnv) {
       // that traversal would push an entry that the delayed Back immediately skips
       // over, so defer activation until the owned pop arrives.
       if (pendingOwnPops > 0) {
-        if (deferredOpen?.id !== id) deferredOpen?.close();
-        deferredOpen = { id, close };
+        if (pendingReplacementId && stack.length === 1) {
+          if (stack[0]?.id === id) {
+            stack[0].close = close;
+            return;
+          }
+          for (const entry of deferredStack.reverse()) entry.close();
+          deferredStack = [];
+          stack[0]?.close();
+          stack[0] = { id, close };
+          pendingReplacementId = id;
+          return;
+        }
+        const existing = deferredStack.find((entry) => entry.id === id);
+        if (existing) {
+          existing.close = close;
+        } else {
+          for (const entry of deferredStack.reverse()) entry.close();
+          deferredStack = [{ id, close }];
+        }
         return;
       }
       // Re-opening an already-tracked overlay (e.g. rapid toggles) must not
@@ -81,9 +119,21 @@ export function createOverlayHistory(env: OverlayHistoryEnv) {
         return;
       }
       // Phone navigation is mutually exclusive. Switching directly between the
-      // sessions and context views reuses the current history entry so one Back
-      // always returns to the transcript (and never exposes the other panel). Close
-      // the displaced visual synchronously before handing the entry to its successor.
+      // sessions and context views reuses one root history entry so one Back always
+      // returns to the transcript. If the current view has nested children, close the
+      // whole hierarchy and serialize traversal of the extra entries before rewriting
+      // the surviving root marker as the peer.
+      if (stack.length > 1) {
+        for (let i = stack.length - 1; i >= 0; i--) stack[i]?.close();
+        const extraEntries = stack.length - 1;
+        stack.splice(1);
+        stack[0] = { id, close };
+        pendingReplacementId = id;
+        const wasIdle = pendingOwnPops === 0;
+        pendingOwnPops += extraEntries;
+        if (wasIdle) env.back();
+        return;
+      }
       if (stack.length > 0) {
         stack[stack.length - 1]?.close();
         stack[stack.length - 1] = { id, close };
@@ -101,8 +151,9 @@ export function createOverlayHistory(env: OverlayHistoryEnv) {
       if (!env.isPhone()) return;
       ensureInstalled();
       if (pendingOwnPops > 0) {
-        if (deferredOpen?.id !== id) deferredOpen?.close();
-        deferredOpen = { id, close };
+        const existing = deferredStack.find((entry) => entry.id === id);
+        if (existing) existing.close = close;
+        else deferredStack.push({ id, close });
         return;
       }
       const existing = stack.find((e) => e.id === id);
@@ -117,17 +168,19 @@ export function createOverlayHistory(env: OverlayHistoryEnv) {
      *  matching history entry when it's the top one. No-op for untracked ids, so
      *  desktop close paths can call this unconditionally. */
     closed(id: string): void {
-      if (deferredOpen?.id === id) {
-        deferredOpen = null;
+      const deferredIdx = deferredStack.findIndex((entry) => entry.id === id);
+      if (deferredIdx !== -1) {
+        deferredStack.splice(deferredIdx, 1);
         return;
       }
       const idx = stack.findIndex((e) => e.id === id);
       if (idx === -1) return;
+      if (pendingReplacementId === id) pendingReplacementId = null;
       const wasTop = idx === stack.length - 1;
       stack.splice(idx, 1);
       if (wasTop) {
         pendingOwnPops++;
-        env.back();
+        if (pendingOwnPops === 1) env.back();
       }
       // Out-of-order close: the entry's pop will arrive on a future back and be
       // treated as a real pop; with its bookkeeping gone it closes the then-top
@@ -135,7 +188,7 @@ export function createOverlayHistory(env: OverlayHistoryEnv) {
     },
     /** Test/introspection hook. */
     depth(): number {
-      return stack.length + (deferredOpen ? 1 : 0);
+      return stack.length + deferredStack.length;
     },
   };
 }
