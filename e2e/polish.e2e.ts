@@ -284,14 +284,40 @@ test("transcript: long code blocks stay bounded with all content reachable", asy
   expect(initial.scrollHeight).toBeGreaterThan(initial.clientHeight);
   expect(initial.clientHeight).toBeLessThanOrEqual(initial.viewportBound + 1);
 
-  await pre.evaluate((el) => {
-    el.scrollTop = el.scrollHeight;
-  });
+  await pre.focus();
+  await page.keyboard.press("PageDown");
+  await expect.poll(() => pre.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  // Keep paging through the focused region exactly as a keyboard user would. `End`
+  // is platform-dependent on a non-editable <pre> (horizontal on WebKit), while
+  // PageDown consistently advances this vertical scroll container.
+  for (let pageN = 0; pageN < 20; pageN += 1) {
+    const atBottom = await pre.evaluate(
+      (el) => Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) <= 1,
+    );
+    if (atBottom) break;
+    await page.keyboard.press("PageDown");
+    // Native keyboard scrolling is animated; let each page movement settle so the
+    // browser does not coalesce a burst of synthetic key presses.
+    await page.waitForTimeout(100);
+  }
   const reachedBottom = await pre.evaluate((el) =>
     Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) <= 1,
   );
   expect(reachedBottom).toBe(true);
   await expect(pre.getByTestId("last-code-line")).toBeInViewport();
+});
+
+test("shared IconButton normalizes a direct raw SVG to its medium 1em size", async ({
+  page,
+}) => {
+  await drive(page, "planview");
+  const icon = page.getByTestId("plan-view-toggle").locator(":scope > svg");
+  // This source icon asks for 15px, while medium IconButton defines 1em as 16px.
+  // The computed size proves direct raw icons are normalized; the Chevron regression
+  // separately proves nested shared primitives keep their explicit size API.
+  await expect(icon).toHaveAttribute("width", "15");
+  await expect(icon).toHaveCSS("width", "16px");
+  await expect(icon).toHaveCSS("height", "16px");
 });
 
 test("type-to-focus: a printable key focuses the composer", async ({
