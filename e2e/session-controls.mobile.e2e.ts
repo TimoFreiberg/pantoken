@@ -95,14 +95,34 @@ test("browser Back closes the full-screen controls without leaving the app", asy
   page,
 }) => {
   await page.getByTestId("mobile-session-controls-trigger").click();
-  await expect(
-    page.getByRole("dialog", { name: "Session controls" }),
-  ).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Session controls" })).toBeVisible();
   await page.evaluate(() => history.back());
   await expect(
     page.getByRole("dialog", { name: "Session controls" }),
   ).toBeHidden();
   await expect(page.getByPlaceholder("Message pantoken…")).toBeVisible();
+});
+
+test("replacing the composer consumes an open controls history entry", async ({
+  page,
+}) => {
+  await page.getByTestId("mobile-session-controls-trigger").click();
+  await expect(
+    page.getByRole("dialog", { name: "Session controls" }),
+  ).toBeVisible();
+
+  await page.keyboard.press("Control+n");
+  await expect(page.getByPlaceholder("Describe a task or ask a question…")).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Session controls" })).toBeHidden();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (history.state as { pantokenOverlay?: string } | null)
+            ?.pantokenOverlay ?? null,
+      ),
+    )
+    .toBeNull();
 });
 
 test("crossing to desktop closes controls without changing desktop composer chrome", async ({

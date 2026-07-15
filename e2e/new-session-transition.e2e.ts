@@ -1,12 +1,9 @@
 import { expect, test } from "@playwright/test";
 import { gotoFresh, openSidebar } from "./helpers.js";
 
-// Sending the first prompt of a deferred new session used to flash the PREVIOUSLY focused
-// session's transcript for a beat — the draft hero cleared instantly, but `store.session`
-// still held the old session until the daemon finished warming up and its snapshot landed. The fix
-// resets the session to an empty slate on submit and overlays the just-sent prompt, so the
-// view goes straight from "draft hero + composer" to "the new prompt at the top + the
-// in-session composer", with the working indicator carrying the warm-up gap.
+// The transition from a deferred draft to its new transcript must never expose the
+// previously focused session. The optimistic prompt and working indicator carry the
+// warm-up gap until the new session's snapshot lands.
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
@@ -34,7 +31,7 @@ test("a new session's first prompt never flashes the previously focused transcri
   await expect(firstBubble).toHaveText("kick off the brand new session please");
   await expect(oldPrompt).toHaveCount(0);
 
-  // We're in the in-session view (the draft hero is gone) and the warm-up / turn indicator
+  // We're in the in-session view (the draft composition is gone) and the warm-up / turn indicator
   // is up — the climbing timer carries liveness feedback through warm-up; no stop button yet
   // (there's no turn to abort), then the turn's own streaming takes over.
   await expect(page.getByTestId("new-session")).toHaveCount(0);

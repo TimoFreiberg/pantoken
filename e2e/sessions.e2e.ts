@@ -264,14 +264,15 @@ test("a project's + button opens a new-session draft for that dir", async ({
     .getByTestId("sidebar")
     .getByRole("button", { name: "New session in pantoken" })
     .click();
-  // Deferred creation: the draft hero shows (nothing is created until you send), and
-  // it's prefilled with that group's dir + the default model.
-  const hero = page.getByTestId("new-session");
-  await expect(hero).toBeVisible();
-  await expect(hero).toContainText("/Users/timo/src/pantoken");
-  await expect(
-    page.getByText("Nothing is created until you send"),
-  ).toBeVisible();
+  // Deferred creation: the centred real composer carries the chosen project +
+  // default model without creating a session until its first send.
+  await expect(page.getByTestId("new-session")).toBeVisible();
+  await expect(page.getByText("What would you like to work on?")).toBeVisible();
+  await expect(page.getByText("Created when you send")).toBeVisible();
+  await expect(page.getByTestId("draft-project-control")).toHaveAttribute(
+    "title",
+    /\/Users\/timo\/src\/pantoken/,
+  );
   await expect(
     page.getByRole("button", { name: /Claude Opus 4\.8/ }),
   ).toBeVisible();
