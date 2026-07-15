@@ -69,7 +69,7 @@
   overscroll-behavior-y: auto;
   scrollbar-gutter: stable;
   /* the library tints plain code blocks with a fixed light editor color; re-point it
-     at the theme foreground so it reads on the sunken surface in both themes. */
+     at the theme foreground so it reads on the code surface in both themes. */
   color: var(--text);
 }
 .markstream-svelte.markdown-renderer :where(pre:focus-visible) {
