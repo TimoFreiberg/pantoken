@@ -10,14 +10,16 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("2a composer chrome keeps the box and status landmarks in place", async ({
+test("2a composer chrome groups the text and status rows in one floating surface", async ({
   page,
 }) => {
+  const surface = page.getByTestId("composer-surface");
   const box = page.getByTestId("composer-box");
   const attachments = page.getByTestId("composer-attachments");
   const status = page.getByTestId("composer-status-row");
   const right = page.getByTestId("composer-status-right");
 
+  await expect(surface).toBeVisible();
   await expect(box).toBeVisible();
   await expect(
     attachments.getByRole("button", { name: "Attach images" }),
@@ -29,6 +31,7 @@ test("2a composer chrome keeps the box and status landmarks in place", async ({
   await expect(right.getByTestId("context-trigger")).toBeVisible();
 
   const boxRect = await box.boundingBox();
+  const surfaceRect = await surface.boundingBox();
   const facetRect = await status.getByTestId("facet-badge").boundingBox();
   const permissionRect = await status
     .getByTestId("permission-badge")
@@ -46,6 +49,7 @@ test("2a composer chrome keeps the box and status landmarks in place", async ({
   const thinkingRect = await right.getByTestId("thinking-badge").boundingBox();
 
   expect(boxRect).not.toBeNull();
+  expect(surfaceRect).not.toBeNull();
   expect(facetRect).not.toBeNull();
   expect(permissionRect).not.toBeNull();
   expect(attachRect).not.toBeNull();
@@ -66,6 +70,21 @@ test("2a composer chrome keeps the box and status landmarks in place", async ({
   expect(contextRect!.x).toBeGreaterThan(modelRect!.x);
   expect(contextRect!.x + contextRect!.width).toBeLessThanOrEqual(
     statusRect!.x + statusRect!.width + 1,
+  );
+
+  // Text, attachments, and all status controls are children of one inset surface;
+  // the status row sits below the text row rather than in a full-width footer.
+  await expect(surface.getByTestId("composer-box")).toHaveCount(1);
+  await expect(surface.getByTestId("composer-status-row")).toHaveCount(1);
+  expect(statusRect!.y).toBeGreaterThanOrEqual(
+    boxRect!.y + boxRect!.height - 1,
+  );
+  expect(surfaceRect!.x).toBeLessThanOrEqual(boxRect!.x);
+  expect(surfaceRect!.x + surfaceRect!.width).toBeGreaterThanOrEqual(
+    boxRect!.x + boxRect!.width,
+  );
+  expect(surfaceRect!.y + surfaceRect!.height).toBeLessThan(
+    await page.evaluate(() => innerHeight),
   );
 });
 
@@ -90,7 +109,7 @@ test("model and thinking remain separate popup controls", async ({ page }) => {
   ).not.toBeVisible();
 });
 
-test("new-session controls use calm chrome and the footer pairs permission with facet", async ({
+test("new-session controls use calm chrome and pair permission with facet", async ({
   page,
 }) => {
   await openSidebar(page);
@@ -155,6 +174,49 @@ test("send button is enabled when idle and the composer is empty", async ({
   // After gotoFresh the greeting has settled (idle). The composer is empty.
   await expect(composerTextarea(page)).toHaveValue("");
   await expect(sendButton(page)).not.toBeDisabled();
+});
+
+test("enabled send uses quiet inactive chrome and highlights on composer focus", async ({
+  page,
+}) => {
+  const textarea = composerTextarea(page);
+  const send = sendButton(page);
+  const visualStyle = () =>
+    send.evaluate((el) => {
+      const css = getComputedStyle(el);
+      return {
+        backgroundColor: css.backgroundColor,
+        color: css.color,
+        borderColor: css.borderColor,
+        opacity: Number(css.opacity),
+      };
+    });
+
+  await textarea.evaluate((el) => el.blur());
+  await expect(send).not.toBeDisabled();
+  const inactive = await visualStyle();
+
+  await textarea.focus();
+  await expect
+    .poll(async () => (await visualStyle()).backgroundColor)
+    .not.toBe(inactive.backgroundColor);
+  const focused = await visualStyle();
+  expect(focused.color).not.toBe(inactive.color);
+
+  await textarea.evaluate((el) => el.blur());
+  await send.hover();
+  await expect
+    .poll(async () => (await visualStyle()).backgroundColor)
+    .not.toBe(inactive.backgroundColor);
+
+  await drive(page, "streamhold");
+  await expect(send).toBeDisabled();
+  await expect
+    .poll(async () => (await visualStyle()).opacity)
+    .toBeLessThan(inactive.opacity);
+  const disabled = await visualStyle();
+  expect(disabled.backgroundColor).not.toBe(inactive.backgroundColor);
+  expect(disabled.borderColor).not.toBe(inactive.borderColor);
 });
 
 test("Enter on an empty idle composer sends a prompt and starts a turn", async ({
