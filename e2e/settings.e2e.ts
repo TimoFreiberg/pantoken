@@ -76,10 +76,14 @@ test("theme toggle drives the data-theme override and persists it", async ({
   const themeColor = page.locator('meta[name="theme-color"]');
   await page.getByTestId("theme-dark").click();
   await expect(html).toHaveAttribute("data-theme", "dark");
+  // color-scheme drives native UA widgets (scrollbars, form controls); it must
+  // track the active palette, not the OS scheme.
+  await expect(html).toHaveCSS("color-scheme", "dark");
   await expect(themeColor).toHaveAttribute("content", "#171614");
 
   await page.getByTestId("theme-light").click();
   await expect(html).toHaveAttribute("data-theme", "light");
+  await expect(html).toHaveCSS("color-scheme", "light");
   await expect(themeColor).toHaveAttribute("content", "#f4f1e9");
 
   // Back to dark, then reload: the inline pre-paint script must restore both the
@@ -88,6 +92,9 @@ test("theme toggle drives the data-theme override and persists it", async ({
   await expect(html).toHaveAttribute("data-theme", "dark");
   await page.reload();
   await expect(html).toHaveAttribute("data-theme", "dark");
+  // The inline pre-paint script sets color-scheme as an inline style (before CSS
+  // loads), which is what prevents a flash of wrong-theme native scrollbar.
+  expect(await html.evaluate((el) => el.style.colorScheme)).toBe("dark");
   await expect(themeColor).toHaveAttribute("content", "#171614");
 
   // "System" clears the override and re-resolves to the emulated light scheme.

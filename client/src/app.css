@@ -6,6 +6,9 @@
    copy of the dark tokens to keep in sync. */
 
 :root {
+  /* Tell the browser which palette to use for native UA widgets (scrollbars, form
+     controls) so they track the active theme instead of the OS scheme. */
+  color-scheme: light;
   /* Warm paper is the canvas; cream cards and nickel-tinted structural planes build
      elevation without falling back to a generic white-and-cool-grey application. */
   --bg: #f4f1e9;
@@ -98,6 +101,7 @@
 }
 
 :root[data-theme="dark"] {
+  color-scheme: dark;
   /* Charcoal is the canvas, with progressively lighter nickel-charcoal planes for
      structure, cards, and overlays. Gold remains reserved for decisive actions and
      operator attention. */
