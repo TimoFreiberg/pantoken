@@ -70,20 +70,12 @@ test("gold actions stay distinct from nickel structure in both themes", async ({
   }
 });
 
-test("working and ready states combine gold attention with nickel progress", async ({
+test("working indicator is visible and ready states keep gold attention distinct", async ({
   page,
 }) => {
   await drive(page, "staleidle");
   const working = page.getByTestId("working-indicator");
   await expect(working).toBeVisible();
-  await expect(working.locator(".coin")).toHaveCSS(
-    "color",
-    await resolvedToken(page, "--highlight"),
-  );
-  await expect(working.locator(".dot")).toHaveCSS(
-    "background-color",
-    await resolvedToken(page, "--accent"),
-  );
 
   await gotoFresh(page);
   await openSidebar(page);

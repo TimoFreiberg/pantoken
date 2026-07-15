@@ -13,7 +13,7 @@ async function tokenCount(
   return Number(text.replace(/[^\d]/g, ""));
 }
 
-test("the working spinner shows a token counter that climbs as text streams", async ({
+test("the working indicator shows a token counter that climbs as text streams", async ({
   page,
 }) => {
   await drive(page, "streamhold"); // goes running and streams answer TEXT, stays open
@@ -33,7 +33,7 @@ test("the token counter also climbs while the model is only thinking", async ({
 }) => {
   await drive(page, "pendinghold"); // streams THINKING deltas, no answer text yet
   // The word "Thinking" appears once — in the (collapsed) thinking block above —
-  // not duplicated in the bottom indicator, which shows spinner + timer + token
+  // not duplicated in the bottom indicator, which shows stop button + timer + token
   // count only while thinking (docs/TODO.md dedupe).
   await expect(page.getByTestId("working-indicator")).not.toContainText(
     "Thinking",

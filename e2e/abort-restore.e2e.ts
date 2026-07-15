@@ -7,7 +7,7 @@ test.beforeEach(async ({ page }) => {
 
 test("the Stop button names the Escape hotkey", async ({ page }) => {
   await drive(page, "pendinghold");
-  await expect(page.locator(".composer-wrap .stop")).toHaveAttribute(
+  await expect(page.getByTestId("stop-button")).toHaveAttribute(
     "title",
     "Stop the agent (Esc)",
   );
@@ -21,7 +21,7 @@ test("Escape aborts a pending turn and restores the sent prompt to the composer"
   await drive(page, "pendinghold");
   await expect(page.getByText("Refactor the auth middleware")).toBeVisible();
 
-  const stop = page.locator(".composer-wrap .stop");
+  const stop = page.getByTestId("stop-button");
   await expect(stop).toBeVisible();
 
   const ta = page.locator(".composer-wrap textarea");
@@ -41,7 +41,7 @@ test("Escape while typing a follow-up aborts but does not clobber the draft", as
   page,
 }) => {
   await drive(page, "pendinghold");
-  const stop = page.locator(".composer-wrap .stop");
+  const stop = page.getByTestId("stop-button");
   await expect(stop).toBeVisible();
 
   const ta = page.locator(".composer-wrap textarea");

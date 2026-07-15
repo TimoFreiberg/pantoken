@@ -10,7 +10,11 @@ test("the Stop pill + working indicator show while a normal turn streams", async
 }) => {
   await drive(page, "streamhold"); // goes running and stays running
   await expect(page.getByTestId("working-indicator")).toBeVisible();
-  await expect(page.locator(".composer-wrap .stop")).toBeVisible();
+  // AC.1: no spinner (orbiting dot/coin) renders — the stop button replaced it.
+  await expect(
+    page.getByTestId("working-indicator").locator(".coin, .dot, .ring, .mark"),
+  ).toHaveCount(0);
+  await expect(page.getByTestId("stop-button")).toBeVisible();
   // The toolbar hint signals that Enter queues a follow-up mid-turn (the driver
   // routes mid-turn sends to /turn/input). Enter clears the box (the message is
   // queued) — guards the composer-side behavior the removed toggle tests covered.
@@ -25,7 +29,7 @@ test("the Stop pill disables while offline (a remote turn can't be stopped)", as
   page,
 }) => {
   await drive(page, "streamhold"); // goes running and stays running
-  const stop = page.locator(".composer-wrap .stop");
+  const stop = page.getByTestId("stop-button");
   await expect(stop).toBeEnabled();
 
   // Drop the socket: the turn keeps running server-side, so the pill stays visible but
@@ -46,18 +50,14 @@ test("a slow stop becomes an explicit retry state, then reports late settlement"
   // The mock delays this one abort beyond the client's 500ms confirmation window.
   await drive(page, "slowabort");
   await drive(page, "streamhold");
-  const stop = page.locator(".composer-wrap .stop");
+  const stop = page.getByTestId("stop-button");
   await stop.click();
 
   await expect(stop).toHaveText("■ Stopping…");
   await expect(stop).toBeDisabled();
-  await expect(page.getByTestId("working-label")).toHaveText("Stopping…");
 
   await expect(stop).toHaveText("↻ Retry stop", { timeout: 1_500 });
   await expect(stop).toBeEnabled();
-  await expect(page.getByTestId("working-label")).toHaveText(
-    "Stop unconfirmed",
-  );
   await expect(
     page.getByTestId("chat-notice").getByTestId("toast").filter({
       hasText: "Couldn't confirm the stop within 500ms",
@@ -118,7 +118,7 @@ test("the Stop pill survives a stray mid-turn idle snapshot (turn still in fligh
     .toBe("idle");
 
   // …yet the stop pill + working indicator stay visible because a tool is still running.
-  const stop = page.locator(".composer-wrap .stop");
+  const stop = page.getByTestId("stop-button");
   await expect(stop).toBeVisible();
   await expect(page.getByTestId("working-indicator")).toBeVisible();
 

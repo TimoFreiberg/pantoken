@@ -79,10 +79,6 @@
   // "A turn is in flight" — the robust signal (see store.turnActive), so the stop pill +
   // steer/queue affordances stay correct even if the folded status glitches mid-turn.
   const streaming = $derived(store.turnActive);
-  // The stop action has its own acknowledgement lifecycle. Keep it distinct from
-  // `streaming`: a broken daemon can still be running while the ordinary Stop pill
-  // has become an explicit recovery action.
-  const stopState = $derived(store.stopState);
   // Drafting a brand-new session: the composer doubles as the new-session form (config
   // chips above, first prompt below). Send creates the session + delivers the prompt.
   const drafting = $derived(store.draft != null);
@@ -1400,28 +1396,6 @@
         </div>
       {/if}
       <div class="composer-status-right" data-testid="composer-status-right">
-        {#if streaming}
-          <!-- Keep Stop in the always-present status row so a turn starting/finishing
-               never changes the composer's height. Unlike the follow-up hint, this
-               remains visible on touch viewports as the primary in-flight control. -->
-          <button
-            class="stop"
-            onclick={() => store.abort()}
-            disabled={store.connection !== "connected" || stopState === "stopping"}
-            title={store.connection === "connected"
-              ? stopState === "stopping"
-                ? "Stop requested — waiting for Pantoken"
-                : stopState === "unconfirmed"
-                  ? "Retry stopping the agent (Esc)"
-                  : "Stop the agent (Esc)"
-              : "Can't stop while offline — the agent keeps running"}
-            >{stopState === "stopping"
-              ? "■ Stopping…"
-              : stopState === "unconfirmed"
-                ? "↻ Retry stop"
-                : "■ Stop"}</button
-          >
-        {/if}
         <ModelPicker />
         {#if !drafting}
           <ContextMeter />
@@ -1523,21 +1497,6 @@
     background: color-mix(in srgb, currentColor 12%, transparent);
     padding: 0 4px;
     border-radius: var(--radius-xs);
-  }
-  .stop {
-    border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
-    background: var(--danger-soft);
-    color: var(--danger);
-    font-size: 13px;
-    font-weight: 550;
-    padding: 5px 14px;
-    border-radius: 999px;
-  }
-  /* Offline: a remote turn can't be stopped from a dead socket, so the pill reads inert
-     rather than inviting a dead click (the offline banner explains the agent keeps going). */
-  .stop:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
   .chip {
     display: inline-flex;
@@ -1893,7 +1852,6 @@
     .composer-status-right :global(.badge),
     .attach-tag,
     .send,
-    .stop,
     .thumb-preview,
     .thumb-remove {
       min-width: 44px;

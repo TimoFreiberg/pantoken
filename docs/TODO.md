@@ -32,23 +32,23 @@ discussion before becoming a gate (or being rejected).
 ## 🔴 Open bugs
 
 - ~~[x]~~ pantoken supports all the `@` references like polytoken does (files,
-      `@~/`/`@/`/`@../` external paths, `@skill:`, `@subagent:`,
-      `@model:p/m(level)` with `[`/`]` reasoning, Shift+Tab ignore toggle,
-      resolved-ref chips + missing-ref warnings). Known limits, accepted:
-      chips don't survive history replay (daemon `.jsonl` doesn't persist
-      `resolved_references`); external paths with spaces can't be referenced
-      (mention token ends at whitespace — TUI parity).
+  `@~/`/`@/`/`@../` external paths, `@skill:`, `@subagent:`,
+  `@model:p/m(level)` with `[`/`]` reasoning, Shift+Tab ignore toggle,
+  resolved-ref chips + missing-ref warnings). Known limits, accepted:
+  chips don't survive history replay (daemon `.jsonl` doesn't persist
+  `resolved_references`); external paths with spaces can't be referenced
+  (mention token ends at whitespace — TUI parity).
 - ~~[x]~~ tops of both sidebars are now window-drag surfaces
-      (`data-tauri-drag-region="deep"`, same contract as StatusHeader).
+  (`data-tauri-drag-region="deep"`, same contract as StatusHeader).
 - ~~[x]~~ sidebar build stamp now leads with the nearest release tag
-      (`v0.2.15 · <hash> · <date>`); tag resolves via `git describe` with a
-      jj fallback, hides when unresolvable.
+  (`v0.2.15 · <hash> · <date>`); tag resolves via `git describe` with a
+  jj fallback, hides when unresolvable.
 - ~~[x]~~ Subagent-completion notice dumped the whole report as a giant
-      ellipse-shaped pill. Fixed at both ends: `notification_message` in
-      `event_map.rs` builds a short label from `notification_type`
-      (summary passes through only for `HookResult`/`ExtensionMessage`/
-      `Unknown`), and `.notice` CSS is hardened (`--radius-sm`, `flex-start`,
-      `pre-wrap`) so any future long notice wraps instead of ellipsing.
+  ellipse-shaped pill. Fixed at both ends: `notification_message` in
+  `event_map.rs` builds a short label from `notification_type`
+  (summary passes through only for `HookResult`/`ExtensionMessage`/
+  `Unknown`), and `.notice` CSS is hardened (`--radius-sm`, `flex-start`,
+  `pre-wrap`) so any future long notice wraps instead of ellipsing.
 - [ ] **e2e live-tier coverage gap** (was "e2e suite asserts mock behaviors the
       live driver never produces"): the corpus-backed live tier exists
       (`e2e/live/`, 5 spec files vs `PANTOKEN_DRIVER=fake`, real recorded
@@ -64,11 +64,11 @@ discussion before becoming a gate (or being rejected).
       a blocking gate (drop the `if:` per the comment in ci.yml).
 - [ ] move "archived" popups elsewhere (top of sidebar? still middle of transcript but top instead of bottom? discuss first)
 - ~~[x]~~ The "new session" view leaked the previous session's state:
-      ApprovalLayer/QnaInline dialogs, PlanView, the right context panel
-      (+ its edge tab), and the composer's context-pressure cue all read
-      `store.session` (still the old session while drafting). All now gate on
-      `!store.draft` — the pattern QueueTray already used. If a NEW surface
-      reads `store.session`, it must decide what drafting means for it.
+  ApprovalLayer/QnaInline dialogs, PlanView, the right context panel
+  (+ its edge tab), and the composer's context-pressure cue all read
+  `store.session` (still the old session while drafting). All now gate on
+  `!store.draft` — the pattern QueueTray already used. If a NEW surface
+  reads `store.session`, it must decide what drafting means for it.
 - [ ] **Branch (`/rewind`) live-path gaps** (found 2026-07-10 by the frontend→daemon
       trace; the request shape + entry-id→prompt_id mapping are correct, these are
       error-handling/coverage holes): (a) `branch_from` returns a bare
@@ -115,7 +115,6 @@ discussion before becoming a gate (or being rejected).
       compact 48px header and retain accessible labels and the existing settings
       shortcut.
 
-
 ## 🔵 Corpus capture follow-ups (from the 2026-07-06 live-capture session)
 
 Full detail in `server-rs/PROGRESS.md` → "Live corpus capture (2026-07-06)". The
@@ -145,22 +144,22 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
 ## ⚡ Performance
 
 - ~~[x]~~ **Server-side coalescing of streamed `assistantDelta`s (N1).** Done.
-      The hub buffers at most one pending merged `assistantDelta` per session and
-      flushes it as ONE journal append + one WS frame on a timer, reusing the
-      journal's `tryMerge` rule so the frame is byte-identical to what coalescing
-      would have produced (no wire change, fold unaffected). Any non-delta event
-      flushes the session's pending delta first (the per-session ordering
-      invariant the fold depends on); a channel switch flushes then re-buffers;
-      journal-identity changes (reseed/reload, `sessionClosed` deletion,
-      `reset()`) DROP the pending delta rather than leak it into a new epoch.
-      Tunable at runtime via **`PANTOKEN_DELTA_FLUSH_MS`** (config `deltaFlushMs`):
-      default **50**, **0 disables** (every delta ships immediately — the exact
-      pre-N1 behavior, and the default the unit tests construct with). The knob
-      exists precisely because "chunkier reveal vs token-smooth" was the feel
-      question that got N1 deferred — now it's a live dial, not a rebuild.
-      Buffering lives in `SessionHub.ingest` (wrapping the un-buffered
-      `ingestNow`); see `server-rs/pantoken-server/src/hub.rs` + the "assistantDelta coalescing (N1)"
-      block in `hub.test.ts`.
+  The hub buffers at most one pending merged `assistantDelta` per session and
+  flushes it as ONE journal append + one WS frame on a timer, reusing the
+  journal's `tryMerge` rule so the frame is byte-identical to what coalescing
+  would have produced (no wire change, fold unaffected). Any non-delta event
+  flushes the session's pending delta first (the per-session ordering
+  invariant the fold depends on); a channel switch flushes then re-buffers;
+  journal-identity changes (reseed/reload, `sessionClosed` deletion,
+  `reset()`) DROP the pending delta rather than leak it into a new epoch.
+  Tunable at runtime via **`PANTOKEN_DELTA_FLUSH_MS`** (config `deltaFlushMs`):
+  default **50**, **0 disables** (every delta ships immediately — the exact
+  pre-N1 behavior, and the default the unit tests construct with). The knob
+  exists precisely because "chunkier reveal vs token-smooth" was the feel
+  question that got N1 deferred — now it's a live dial, not a rebuild.
+  Buffering lives in `SessionHub.ingest` (wrapping the un-buffered
+  `ingestNow`); see `server-rs/pantoken-server/src/hub.rs` + the "assistantDelta coalescing (N1)"
+  block in `hub.test.ts`.
 - [ ] **Client markdown re-parse is O(n²) per streamed message (C1) — measured
       2026-07-09, verdict: acceptable, revisit only for ≥50KB messages.**
       Numbers (scripts/perf-streaming*.ts, now working again): full re-parse per
@@ -186,7 +185,7 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
       deflate stream whenever a message's compressed output is small (observed
       ≤ ~1.6KB; bigger output gets the normal open-ended sync-flush form), and
       WKWebView (macOS 26.5) fails the whole connection — 1006 in JS, 1002 on
-      the wire — the moment an *uncompressed* frame follows such a message.
+      the wire — the moment an _uncompressed_ frame follows such a message.
       The greeting is a guaranteed trigger (sessionList ≈30KB compressed-big →
       modelList ≈2.5KB compressed-small/BFINAL → small status frames follow),
       so the Tauri webview died ~10ms after every connect, in a reconnect
@@ -284,20 +283,20 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
       existing "Edit all (⌥↑)" restore-to-composer flow. Product call needed.
 
 - ~~[x]~~ The two perf scripts work again under Bun isolated `node_modules`
-      (two-hop `Bun.resolveSync` through the store — Bun ignores
-      `require.resolve`'s `paths` option, which is what broke them).
+  (two-hop `Bun.resolveSync` through the store — Bun ignores
+  `require.resolve`'s `paths` option, which is what broke them).
 - ~~[x]~~ `maybe_notify` (hub.rs) re-implemented the blocking-dialog kind list by
-      hand — and had already drifted (missed `plan` + `permission` pushes; the
-      hub's local `is_dialog_request` also missed `plan`, so plan proposals
-      never registered attention). All three copies now unified on
-      `pantoken_protocol::session_driver::is_dialog_request`.
+  hand — and had already drifted (missed `plan` + `permission` pushes; the
+  hub's local `is_dialog_request` also missed `plan`, so plan proposals
+  never registered attention). All three copies now unified on
+  `pantoken_protocol::session_driver::is_dialog_request`.
 - [ ] Journal epochs are `Date.now()`-seeded per process; a fast restart could in
       principle re-mint an epoch a stale resume token still holds (needs more
       epoch bumps than elapsed ms — effectively unreachable). Revisit only if
       phantom-resume bugs ever show up.
 - ~~[x]~~ `bun run check` enforcement — resolved in favor of CI: the `web-check`
-      job runs `bun run check` + `bun test` on every PR and push to main
-      (`.github/workflows/ci.yml`).
+  job runs `bun run check` + `bun test` on every PR and push to main
+  (`.github/workflows/ci.yml`).
 - [ ] `sse_loop` retries forever even on permanent failures (401 included) —
       its own comment admits it. Post-warm liveness needs a "this session
       died" client signal before fail-fast is honest there (the restore path
@@ -310,11 +309,11 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
       compilation overhead, or switching minifiers. Keep the timings report
       visible so improvements can be measured.
 - ~~[x]~~ `spawn_new_daemon`/`spawn_resume_daemon` flattened `io::Error` into
-      bare OS strings — a missing binary read as "No such file or directory".
-      `spawn_error_message` now names the binary path while the `ErrorKind` is
-      in hand. (Full structured errors across the `Result<_, String>` driver
-      seam judged not worth it: classify() is already centralized + tested,
-      and MissingCwd has a pre-flight `is_dir()` guard.)
+  bare OS strings — a missing binary read as "No such file or directory".
+  `spawn_error_message` now names the binary path while the `ErrorKind` is
+  in hand. (Full structured errors across the `Result<_, String>` driver
+  seam judged not worth it: classify() is already centralized + tested,
+  and MissingCwd has a pre-flight `is_dir()` guard.)
 - [ ] Restore fail-fast treats an unmounted volume as permanent `MissingCwd`
       (deliberate: the toast says move it back; re-clicking re-checks).
       Revisit only if external-volume projects become a real workflow.
@@ -322,10 +321,11 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
       `session.json` lacks `created_at` — render-hidden by `relative-time`'s
       2020 plausibility floor. Make the wire timestamp nullable instead if it
       ever matters.
-- [ ] The bottom working indicator no longer announces the thinking phase to
-      screen readers (label removed for dedupe; timer/tokens are aria-hidden;
-      the ThinkingBlock label isn't in a live region). Add sr-only text if
-      a11y ever matters here.
+- [ ] The bottom working indicator no longer announces any state to screen readers
+      (all text labels were removed — the stop button moved in here from the composer
+      and its own visible text/title is the only state carry; timer/tokens are
+      aria-hidden). The `aria-live="polite"` region now announces nothing. Add sr-only
+      text if a11y ever matters here.
 - [ ] Warm-rename durability leans on the daemon flushing `overridden_title`
       to `session.json` on its own cadence (empirically true; not
       contractual).
@@ -336,6 +336,7 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
 ## 💡 Brainstorm (unfiltered — triage into the lanes above)
 
 ### Agent interaction
+
 - [ ] Per-turn token + cost readout
 - [ ] Compaction / summary / activity rows
 - [ ] Files-changed-this-turn rollup (collapsed card, expandable to per-file diffs)
@@ -344,14 +345,17 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
       idle-session affordance)
 
 ### Composer & input
+
 - [ ] Voice dictation on mobile (Web Speech API mic button)
 
 ### Transcript reading
+
 - [ ] code-block language label
 - [ ] "New since you left" divider (marker at first message while unfocused)
 - [ ] Inline image rendering (markdown image / screenshot path → inline)
 
 ### Sessions & navigation
+
 - [ ] Command palette (⌘K) — fuzzy switcher over sessions + actions
 - [ ] Pinned / favorite sessions
 - [ ] Session emoji / color label
@@ -360,6 +364,7 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
 - [ ] Keyboard shortcut cheat-sheet (`?` overlay)
 
 ### Mobile / PWA
+
 - [ ] Swipe-to-close for the drawer + context view (edge-swipe OPEN exists; a
       rightward swipe on the open drawer / context view should close it, mirroring
       the back gesture that already works via lib/overlay-history.ts)
@@ -376,6 +381,7 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
       (docs/PLAN-mobile.md D8).
 
 ### Notifications
+
 - [ ] Actionable push notifications (Approve/Deny on the notification itself)
       — **iOS ceiling**: web push ignores `Notification.actions` through 26.5,
       so this is Android/desktop-only; on iPhone the shipped flow is
@@ -385,6 +391,7 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
 - [ ] Quiet hours / DND schedule
 
 ### Observability & debug
+
 - [ ] In-UI raw event drawer (dev-only, streams raw SessionDriverEvents)
 - [ ] Font-size / density control
 
