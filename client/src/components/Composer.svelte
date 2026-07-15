@@ -1279,7 +1279,7 @@
             data-testid="draft-project-control"
             aria-haspopup="dialog"
             aria-expanded={pickingCwd}
-            aria-label="Browse to change project directory"
+            aria-label={`${cwdBase} — browse to change project directory`}
             title={`Project: ${store.draft.cwd || "home"} — click to browse for a directory (⌥P)`}
             onclick={() => (pickingCwd = !pickingCwd)}
           >
