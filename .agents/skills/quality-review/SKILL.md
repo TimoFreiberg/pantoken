@@ -1,10 +1,8 @@
 ---
 description: >-
-  Project-specific quality-gate review for the pantoken repo. Runs the global
-  review-subagent skill (correctness, security, design, docs, tests) AND a
-  separate quality-invariant pass that checks the diff against QUALITY.md.
-  Use when asked to review changes, run a quality gate, or verify a diff
-  respects pantoken product invariants.
+  Project-specific quality-gate review for the pantoken repo. Use this instead
+  of the global review-subagent skill, this enriches that skill with
+  project-specific details.
 ---
 
 # quality-review — pantoken quality-gate review
@@ -54,28 +52,9 @@ uv run $HOME/dotfiles/agents/skills/review-subagent/scope.py [<subcommand> [<arg
 
 Keep the `diff` file path for the quality reviewer prompt.
 
-## Step 3: Determine applicable quality criteria
-
-Read `QUALITY.md` and determine which criteria apply to the diff based on the
-files touched. Each criterion in `QUALITY.md` carries applicability tags:
-
-- `[UI]` — applies when `client/` files are in the diff (Svelte, CSS, DOM).
-- `[server]` — applies when `server-rs/` files are in the diff (Rust).
-- `[proto]` — applies when `protocol/` files are in the diff.
-- `[cross]` — applies regardless of which layer changed.
-
-Only check the criteria whose tags match the diff. A CSS-only change must not
-be judged against `[server]` criteria like "no `unsafe`" or "avoid unnecessary
-clones." A server-only change must not be judged against `[UI]` criteria like
-"hotkeys and tooltips."
-
-Record the applicable criterion IDs (Q1–Q21) so the reviewer can report
-against them explicitly.
-
 ## Step 4: Spawn the quality reviewer
 
-Spawn one `general-purpose` subagent with this prompt (fill `$DIFF_PATH` and
-`$APPLICABLE_CRITERIA`):
+Spawn one `general-purpose` subagent with this prompt (fill `$DIFF_PATH`):
 
 ```
 You are a quality-gate reviewer for the pantoken repo. Your job is to check
@@ -85,10 +64,9 @@ First, Read QUALITY.md at the repo root. Then read the diff file at:
 
 $DIFF_PATH
 
-Only check the criteria that are applicable to this diff. The applicable
-criteria are:
-
-$APPLICABLE_CRITERIA
+Only check the criteria that are applicable to this diff (e.g. a css change
+doesn't need to consider unsafe rust, and a rust performance optimization likely
+won't impact UI guidelines, except maybe by impacting performancer).
 
 For each applicable criterion, determine whether the diff satisfies it. Report
 findings using the CONTRACT.md severity format from the global review (B/M/S).
@@ -145,3 +123,5 @@ reviewer sees the cumulative diff at a definite state. Keep going until both
 the global review and the quality pass are clean. If you keep looping on the
 same issue without converging, stop and escalate to the operator with the
 outstanding findings.
+When the implementation passes review, squash the fix commits into the main
+implementation review.

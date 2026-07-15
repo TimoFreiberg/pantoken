@@ -1,13 +1,11 @@
 ---
 name: dep-bump
 description: >-
-  Bump this repo's dependencies in a controlled, supply-chain-aware way. Two
-  modes: "pi" aggressively bumps the @earendil-works/pi-* packages immediately
-  (new-model support ships via pi releases), "general" bumps everything else
-  behind a release-age cooldown. Use when asked to update dependencies, bump pi,
-  take a new pi release, or refresh deps. Audits before AND after, runs the full
-  verification gate, commits with jj. Stops loudly on any audit regression.
+  Bump this repo's dependencies in a controlled, supply-chain-aware way. Currently outdated, was written against the previous version which used the pi coding agent, we're not on polytoken. This skill needs updating
 ---
+
+
+# EVERYTHING BELOW OUTDATED
 
 # dep-bump
 
