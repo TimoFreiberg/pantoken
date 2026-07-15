@@ -34,6 +34,8 @@ describe("implement-issue helpers", () => {
     expect(wsAdd).toContain("/repo/root/.workspaces/pantoken-issue-42");
     expect(wsAdd).toContain("--revision");
     expect(wsAdd).toContain("main");
+    const zellij = cmds[3]!;
+    expect(zellij).not.toContain("--block-until-exit");
   });
 
   test("renders hostile multiline issue data without shell interpolation", () => {
