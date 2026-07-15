@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { gotoFresh } from "./helpers.js";
+import { gotoFresh, openSidebar } from "./helpers.js";
 
 // Touch-device composer behavior (Pixel 7 project → hasTouch). On a phone a bare Enter
 // must insert a newline so multi-line prompts are typeable; send is the button (or a
@@ -74,6 +74,53 @@ test("mobile: the picker chips never overflow the viewport", async ({
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(vw + 0.5);
   }
+
+  const left = await page
+    .locator("[data-testid='composer-status-row'] .status-left")
+    .boundingBox();
+  const right = await page.getByTestId("composer-status-right").boundingBox();
+  expect(left, "left status group should render").not.toBeNull();
+  expect(right, "right status group should render").not.toBeNull();
+  expect(right!.y).toBeGreaterThanOrEqual(left!.y + left!.height - 1);
+});
+
+test("mobile: new-session controls stay tappable inside the wrapped status row", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await page.getByRole("button", { name: "New session…" }).click();
+
+  const status = page.getByTestId("composer-status-row");
+  const left = status.locator(".status-left");
+  const right = page.getByTestId("composer-status-right");
+  const project = page.getByTestId("draft-project-control");
+  const worktree = page.getByTestId("draft-worktree-control");
+  const vw = page.viewportSize()!.width;
+
+  await expect(left.getByTestId("draft-project-control")).toHaveCount(1);
+  await expect(left.getByTestId("draft-worktree-control")).toHaveCount(1);
+  for (const control of [project, worktree]) {
+    await expect(control).toBeVisible();
+    const box = await control.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(vw + 0.5);
+  }
+
+  const leftBox = await left.boundingBox();
+  const rightBox = await right.boundingBox();
+  expect(leftBox).not.toBeNull();
+  expect(rightBox).not.toBeNull();
+  expect(rightBox!.y).toBeGreaterThanOrEqual(leftBox!.y + leftBox!.height - 1);
+
+  await project.click();
+  await expect(project).toHaveAttribute("aria-expanded", "true");
+  await project.click();
+  await expect(project).toHaveAttribute("aria-expanded", "false");
+  await worktree.click();
+  await expect(worktree).toHaveAttribute("aria-pressed", "true");
 });
 
 test("mobile: send button is enabled when idle and the composer is empty", async ({

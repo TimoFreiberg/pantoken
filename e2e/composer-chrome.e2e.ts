@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import {
   drive,
   gotoFresh,
@@ -9,6 +9,20 @@ import {
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
+
+async function resolvedToken(page: Page, property: string, token: string) {
+  return page.evaluate(
+    ({ property, token }) => {
+      const probe = document.createElement("div");
+      probe.style.setProperty(property, `var(${token})`);
+      document.body.append(probe);
+      const resolved = getComputedStyle(probe).getPropertyValue(property);
+      probe.remove();
+      return resolved;
+    },
+    { property, token },
+  );
+}
 
 test("2a composer chrome groups the text and status rows in one floating surface", async ({
   page,
@@ -66,6 +80,13 @@ test("2a composer chrome groups the text and status rows in one floating surface
   expect(attachRect!.x).toBeLessThan(textareaRect!.x);
   expect(attachRect!.x).toBeGreaterThanOrEqual(boxRect!.x);
   expect(leftRect!.x).toBeLessThan(rightRect!.x);
+  expect(
+    Math.abs(
+      leftRect!.y +
+        leftRect!.height / 2 -
+        (rightRect!.y + rightRect!.height / 2),
+    ),
+  ).toBeLessThanOrEqual(1);
   expect(contextRect!.x).toBeGreaterThan(thinkingRect!.x);
   expect(contextRect!.x).toBeGreaterThan(modelRect!.x);
   expect(contextRect!.x + contextRect!.width).toBeLessThanOrEqual(
@@ -86,6 +107,33 @@ test("2a composer chrome groups the text and status rows in one floating surface
   expect(surfaceRect!.y + surfaceRect!.height).toBeLessThan(
     await page.evaluate(() => innerHeight),
   );
+
+  const surfaceStyle = () =>
+    surface.evaluate((el) => {
+      const css = getComputedStyle(el);
+      return {
+        backgroundColor: css.backgroundColor,
+        borderColor: css.borderColor,
+        borderRadius: css.borderRadius,
+        boxShadow: css.boxShadow,
+      };
+    });
+  const expectedRest = {
+    backgroundColor: await resolvedToken(page, "background-color", "--surface"),
+    borderColor: await resolvedToken(page, "border-color", "--border-strong"),
+    borderRadius: await resolvedToken(page, "border-radius", "--radius"),
+    boxShadow: await resolvedToken(page, "box-shadow", "--shadow-card"),
+  };
+
+  await page.evaluate(() =>
+    (document.activeElement as HTMLElement | null)?.blur(),
+  );
+  await expect.poll(surfaceStyle).toEqual(expectedRest);
+
+  await composerTextarea(page).focus();
+  await expect
+    .poll(async () => (await surfaceStyle()).borderColor)
+    .toBe(await resolvedToken(page, "border-color", "--accent"));
 });
 
 test("model and thinking remain separate popup controls", async ({ page }) => {
@@ -191,32 +239,61 @@ test("enabled send uses quiet inactive chrome and highlights on composer focus",
         opacity: Number(css.opacity),
       };
     });
+  const expected = {
+    inactiveBackground: await resolvedToken(
+      page,
+      "background-color",
+      "--accent-soft",
+    ),
+    inactiveColor: await resolvedToken(page, "color", "--accent-hover"),
+    focusedBackground: await resolvedToken(
+      page,
+      "background-color",
+      "--highlight",
+    ),
+    focusedColor: await resolvedToken(page, "color", "--highlight-text"),
+    hoveredBackground: await resolvedToken(
+      page,
+      "background-color",
+      "--highlight-hover",
+    ),
+    disabledBackground: await resolvedToken(
+      page,
+      "background-color",
+      "--surface-sunken",
+    ),
+    disabledColor: await resolvedToken(page, "color", "--text-faint"),
+    disabledBorder: await resolvedToken(page, "border-color", "--border"),
+  };
 
   await textarea.evaluate((el) => el.blur());
   await expect(send).not.toBeDisabled();
   const inactive = await visualStyle();
+  expect(inactive.backgroundColor).toBe(expected.inactiveBackground);
+  expect(inactive.color).toBe(expected.inactiveColor);
+  expect(inactive.opacity).toBe(1);
 
   await textarea.focus();
   await expect
     .poll(async () => (await visualStyle()).backgroundColor)
-    .not.toBe(inactive.backgroundColor);
+    .toBe(expected.focusedBackground);
   const focused = await visualStyle();
-  expect(focused.color).not.toBe(inactive.color);
+  expect(focused.color).toBe(expected.focusedColor);
 
   await textarea.evaluate((el) => el.blur());
   await send.hover();
   await expect
     .poll(async () => (await visualStyle()).backgroundColor)
-    .not.toBe(inactive.backgroundColor);
+    .toBe(expected.hoveredBackground);
 
   await drive(page, "streamhold");
   await expect(send).toBeDisabled();
-  await expect
-    .poll(async () => (await visualStyle()).opacity)
-    .toBeLessThan(inactive.opacity);
-  const disabled = await visualStyle();
-  expect(disabled.backgroundColor).not.toBe(inactive.backgroundColor);
-  expect(disabled.borderColor).not.toBe(inactive.borderColor);
+  await expect.poll(visualStyle).toEqual({
+    backgroundColor: expected.disabledBackground,
+    color: expected.disabledColor,
+    borderColor: expected.disabledBorder,
+    opacity: 0.55,
+  });
 });
 
 test("Enter on an empty idle composer sends a prompt and starts a turn", async ({
