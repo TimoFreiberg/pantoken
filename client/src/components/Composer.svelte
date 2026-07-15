@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import type { CommandInfo } from "@pantoken/protocol";
   import { store } from "../lib/store.svelte.js";
   import {
@@ -146,6 +146,13 @@
     mobileControlsOpen = false;
     overlayHistory.closed("session-controls");
   }
+
+  // Draft/session navigation can replace the Composer while its phone controls
+  // are open. Consume that overlay's history entry before this instance and its
+  // close callback disappear, just as an explicit Back close would.
+  onDestroy(() => {
+    if (mobileControlsOpen) overlayHistory.closed("session-controls");
+  });
 
   $effect(() => {
     if (mobileControlsOpen && !store.phoneLayout) closeMobileControls();
