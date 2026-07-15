@@ -356,6 +356,26 @@ test("short desktop rails share their surface and retain compact scrolling geome
     const exactBase = Array.from(element.classList)
       .map((name) => `.${CSS.escape(name)}`)
       .join("");
+    style.dataset.scrollbarOracle = "source-order";
+    style.textContent = `
+      ${exactBase}::-webkit-scrollbar-thumb { background: rgb(10, 11, 12); }
+      ${exactBase}::-webkit-scrollbar-thumb { background: rgb(13, 14, 15); }
+    `;
+    document.head.append(style);
+  });
+  const sourceOrderWinner = await declaredWebkitStyle(
+    leftScroller,
+    "::-webkit-scrollbar-thumb",
+  );
+  expect(
+    await normalizedColor(leftScroller, sourceOrderWinner.background),
+  ).toBe("rgb(13, 14, 15)");
+
+  await leftScroller.evaluate((element) => {
+    const style = document.createElement("style");
+    const exactBase = Array.from(element.classList)
+      .map((name) => `.${CSS.escape(name)}`)
+      .join("");
     style.dataset.scrollbarOracle = "specificity";
     style.textContent = `
       .sidebar ${exactBase}::-webkit-scrollbar-thumb { background: rgb(4, 5, 6); }
