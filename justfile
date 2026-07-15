@@ -4,8 +4,9 @@ default:
 
 # Spawn a polytoken TUI agent to implement a GitHub issue.
 # Usage: just implement-issue <issue-url>
-implement-issue issue-url:
-    scripts/implement-issue.sh {{issue-url}}
+#        just implement-issue --dry-run <issue-url>  (print commands, don't execute)
+implement-issue *args:
+    bun run scripts/implement-issue.ts {{args}}
 
 # Integrate the current workspace's commits onto main.
 # Acquires a repo-local lock, pulls, rebases, tests, pushes.

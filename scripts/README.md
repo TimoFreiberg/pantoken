@@ -14,16 +14,15 @@ just implement-issue 42
 
 ## How it works
 
-1. **`just implement-issue <url>`** → `scripts/implement-issue.sh`
-   - Creates a jj workspace (`pantoken-issue-<N>`)
-   - Spawns a headless polytoken daemon
-   - Seeds it via HTTP: bypass_plus permissions, plan facet, adventurous
-     handoff, goal, and the seed prompt
-   - Opens a zellij tab with the TUI (blocks until TUI closes)
-   - After TUI closes: checks if integration succeeded, cleans up workspace
+1. **`just implement-issue <url>`** → `scripts/implement-issue.ts`
+   - Fetches and validates the issue title/body with `gh --repo TimoFreiberg/pantoken`
+   - Extracts image references and, in normal mode, downloads valid images into a unique owned context directory with a manifest
+   - Creates a jj workspace, spawns a headless polytoken daemon, and seeds it via authenticated HTTP: bypass_plus permissions, plan facet, adventurous handoff, goal, and the single rendered prompt
+   - Opens a zellij tab with the TUI and retains the workspace when integration needs manual recovery
+   - `--dry-run` performs only the read-only issue query; it creates no claims, files, downloads, processes, daemon requests, or workspaces
 
 2. **The agent** (inside the TUI) runs autonomously:
-   - Reads the issue via `gh`
+   - Uses the prefetched issue context and local screenshots; it does not refetch them
    - Plans → plan-reviewer review → handoff
    - Executes → implements → commits (with `Fixes #N`)
    - Reviews via `quality-review` skill → fixes → squashes
@@ -56,8 +55,8 @@ Manual override: `rm .merge-lock`
 ```
 justfile                          — entry points (implement-issue, integrate-into-main)
 scripts/
-  implement-issue.sh              — per-issue launcher (workspace, daemon, seed, zellij)
-  seed-session.sh                 — HTTP seeds a headless daemon (facet, permissions, handoff, goal, prompt)
+  implement-issue.ts              — typed launcher, context downloader, renderer, and daemon seeder
+  implement-issue.sh               — compatibility wrapper (`exec bun run scripts/implement-issue.ts "$@"`)
   seed-prompt.md                  — the agent's initial prompt template
   integrate-into-main.sh          — jj linearize + push (lock, fetch, rebase, test, bookmark, push)
   claims.sh                       — issue claim/release/stale-recovery
@@ -74,5 +73,9 @@ scripts/
 - `gh` — GitHub CLI (authenticated as `TimoFreiberg`)
 - `jq` — JSON processing
 - `zellij` — terminal multiplexer (for TUI tab management)
-- `curl` — HTTP requests to the daemon
 - `just` — command runner
+- Bun — runs `scripts/implement-issue.ts` and the repository test suite
+
+The launcher owns a unique `.pantoken-issue-context-*` directory under the repository during normal execution. It stores `issue-body.md`, downloaded images, and `manifest.json`; it removes that context after the run. A workspace is retained with a recovery command when integration is incomplete. Screenshot downloads are bounded, content-type checked, and failed downloads are never listed as local screenshots.
+
+`integrate-into-main.sh` exits `0` on success, `2` on conflicts with the lock retained for the resolving session, and `1` for other failures. `INTEGRATE_DRY_RUN=1` skips push and issue close but still exercises the local integration decision path.
