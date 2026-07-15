@@ -6,7 +6,7 @@
   //
   // Mounted once (in App.svelte); it listens on `document`, so no component needs
   // to opt in — existing `title=` attributes "just work".
-  import { onMount, tick } from "svelte";
+  import { onMount } from "svelte";
 
   const DELAY = 250; // ms a pointer must rest before a tooltip appears
 
@@ -23,7 +23,8 @@
 
   let tipEl = $state<HTMLDivElement>();
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let raf: number | undefined; // pending mouseout decision (see onOut)
+  let outRaf: number | undefined; // pending mouseout decision (see onOut)
+  let placeRaf: number | undefined; // waits for the rendered tip before measuring it
   let current: HTMLElement | null = null; // element we're showing/scheduling for
   let single = $state(false); // source has data-tip-single → clamp to 1 line
   let suppressed = false; // did we strip current's native `title`?
@@ -48,12 +49,16 @@
     timer = setTimeout(reveal, DELAY);
   }
 
-  function end() {
+  function resetTrackedElement() {
     clearTimeout(timer);
     timer = undefined;
-    if (raf != null) {
-      cancelAnimationFrame(raf);
-      raf = undefined;
+    if (outRaf != null) {
+      cancelAnimationFrame(outRaf);
+      outRaf = undefined;
+    }
+    if (placeRaf != null) {
+      cancelAnimationFrame(placeRaf);
+      placeRaf = undefined;
     }
     if (suppressed && current) {
       const t = current.getAttribute("data-tip-title");
@@ -62,30 +67,41 @@
     }
     current = null;
     suppressed = false;
+  }
+
+  function end() {
+    resetTrackedElement();
     visible = false;
     placed = false;
   }
 
-  async function reveal() {
+  function reveal() {
     if (!current) return;
     visible = true;
-    await tick(); // wait for the tip to render so we can measure it
-    if (!current || !tipEl) return;
-    const r = current.getBoundingClientRect();
-    const tip = tipEl.getBoundingClientRect();
-    const gap = 8;
-    const edge = 6;
-    let top = r.top - tip.height - gap;
-    placement = "top";
-    if (top < edge) {
-      top = r.bottom + gap;
-      placement = "bottom";
-    }
-    let left = r.left + r.width / 2 - tip.width / 2;
-    left = Math.max(edge, Math.min(left, innerWidth - tip.width - edge));
-    x = Math.round(left);
-    y = Math.round(top);
-    placed = true;
+    // Measure on the next frame, after Svelte has rendered the tooltip. Avoid an
+    // `await tick()` continuation here: a focusout caused by the tracked control
+    // being removed can otherwise interleave reactive teardown with the resumed
+    // positioning writes and trigger Svelte's `state_unsafe_mutation` guard.
+    if (placeRaf != null) cancelAnimationFrame(placeRaf);
+    placeRaf = requestAnimationFrame(() => {
+      placeRaf = undefined;
+      if (!current || !tipEl) return;
+      const r = current.getBoundingClientRect();
+      const tip = tipEl.getBoundingClientRect();
+      const gap = 8;
+      const edge = 6;
+      let top = r.top - tip.height - gap;
+      placement = "top";
+      if (top < edge) {
+        top = r.bottom + gap;
+        placement = "bottom";
+      }
+      let left = r.left + r.width / 2 - tip.width / 2;
+      left = Math.max(edge, Math.min(left, innerWidth - tip.width - edge));
+      x = Math.round(left);
+      y = Math.round(top);
+      placed = true;
+    });
   }
 
   function onOver(e: MouseEvent) {
@@ -112,9 +128,9 @@
     const px = e.clientX;
     const py = e.clientY;
     const leaving = current;
-    if (raf != null) cancelAnimationFrame(raf);
-    raf = requestAnimationFrame(() => {
-      raf = undefined;
+    if (outRaf != null) cancelAnimationFrame(outRaf);
+    outRaf = requestAnimationFrame(() => {
+      outRaf = undefined;
       // Pointer already moved onto another titled element, which started its own
       // tooltip — let that path own the state.
       if (current !== leaving) return;
@@ -156,7 +172,14 @@
   }
 
   function onFocusOut(e: FocusEvent) {
-    if (current && e.target === current) end();
+    if (!current || e.target !== current) return;
+    const leaving = current;
+    // Removing a focused Svelte control dispatches focusout synchronously during
+    // its teardown. Close after that reaction has finished. If focus moved to a
+    // new titled control in the meantime, its focusin owns the tooltip state.
+    queueMicrotask(() => {
+      if (current === leaving) end();
+    });
   }
 
   onMount(() => {
@@ -171,7 +194,10 @@
     window.addEventListener("blur", end);
     document.addEventListener("keydown", onKey);
     return () => {
-      end();
+      // Component teardown does not need to render another state. Only cancel
+      // external work and restore a title we may have suppressed; mutating the
+      // component's reactive state here is both redundant and lifecycle-unsafe.
+      resetTrackedElement();
       document.removeEventListener("mouseover", onOver);
       document.removeEventListener("mouseout", onOut);
       document.removeEventListener("focusin", onFocusIn);
