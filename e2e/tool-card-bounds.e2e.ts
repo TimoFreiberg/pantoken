@@ -1,6 +1,9 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { gotoFresh } from "./helpers.js";
 
+const OUTPUT_LIMIT = 50_000;
+const TRUNCATION_MARKER = "\n… output truncated by pantoken";
+
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
   await page.evaluate(() => {
@@ -48,6 +51,14 @@ test("header and detailed arguments stop at every configured boundary", async ({
   await expect(exactValue).not.toContainText("output truncated by pantoken");
   await expect(overValue).toContainText("output truncated by pantoken");
   await expect(overValue).not.toContainText("ARG_TAIL");
+  const renderedKeys = args.locator(".arg-key");
+  await expect(renderedKeys).toHaveCount(40);
+  await expect(args.locator(".arg-key", { hasText: "z_field_37" })).toHaveCount(
+    1,
+  );
+  await expect(args.locator(".arg-key", { hasText: "z_field_38" })).toHaveCount(
+    0,
+  );
   await expect(args.locator(".args")).toContainText(
     "… 1 more arguments omitted",
   );
@@ -62,21 +73,23 @@ test("plain and multi-block output stay bounded while Copy retains every byte", 
   expect((await exactOut.textContent())?.length).toBe(50_000);
   await expect(exactOut).not.toContainText("output truncated by pantoken");
 
-  for (const [label, tail] of [
-    ["Output over", "OUTPUT_TAIL"],
-    ["Output blocks", "MULTI_TAIL"],
+  for (const [label, expected] of [
+    ["Output over", `${"P".repeat(OUTPUT_LIMIT)}OUTPUT_TAIL`],
+    ["Output blocks", `${"A".repeat(30_000)}${"B".repeat(20_000)}MULTI_TAIL`],
   ] as const) {
     const bounded = card(page, label);
     await open(bounded);
     const output = bounded.locator(".out");
     await expect(output).toContainText("output truncated by pantoken");
-    await expect(output).not.toContainText(tail);
+    expect(await output.textContent()).toBe(
+      `${expected.slice(0, OUTPUT_LIMIT)}${TRUNCATION_MARKER}`,
+    );
     const copy = bounded.getByRole("button", { name: "Copy", exact: true });
     await expect(copy).toHaveAttribute("title", /full output/i);
     await copy.click();
     await expect
       .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-      .toMatch(new RegExp(`${tail}$`));
+      .toBe(expected);
   }
 });
 
@@ -86,8 +99,9 @@ test("streamed tool text is bounded without changing the tool state", async ({
   const running = card(page, "Running tool");
   await open(running);
   const stream = running.locator(".stream");
-  await expect(stream).toContainText("output truncated by pantoken");
-  await expect(stream).not.toContainText("STREAM_TAIL");
+  expect(await stream.textContent()).toBe(
+    `${"S".repeat(OUTPUT_LIMIT)}${TRUNCATION_MARKER}`,
+  );
   await expect(running).toHaveClass(/running/);
   const state = await (await page.request.get("/debug/state")).text();
   expect(state).toContain("STREAM_TAIL");
