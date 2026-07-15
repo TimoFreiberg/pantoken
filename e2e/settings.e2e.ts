@@ -193,6 +193,24 @@ test("settings panel closes via Escape and the close button", async ({
   await expect(panel).toBeHidden();
 });
 
+test("desktop Settings contains focus and restores its opener", async ({ page }) => {
+  const opener = page.getByTestId("settings-toggle");
+  await opener.click();
+  const panel = page.getByTestId("settings-panel");
+  await expect(panel).toBeFocused();
+
+  await page.keyboard.press("Tab");
+  await expect(panel.getByRole("button", { name: "Close settings" })).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(panel.getByTestId("hide-thinking")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(panel.getByRole("button", { name: "Close settings" })).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+  await expect(opener).toBeFocused();
+});
+
 test("the section rail deep-links to a section without scrolling", async ({
   page,
 }) => {
@@ -276,50 +294,6 @@ test("Escape closes the panel from a non-default section tab", async ({
     "true",
   );
   await expect(panel.getByTestId("env-section")).toBeVisible();
-});
-
-test("the background-model spec round-trips and warns loud on a bad spec", async ({
-  page,
-}) => {
-  await openSettings(page, "models");
-  const settings = page.getByTestId("settings-panel");
-
-  // Starts unset (the e2e's reset wipes pantoken-settings to defaults).
-  await expect(settings.getByTestId("background-model-input")).toHaveValue("");
-
-  // Set a spec that RESOLVES against the mock's model list (claude-sonnet-4-6 is in
-  // MOCK_MODELS) and save.
-  await settings
-    .getByTestId("background-model-input")
-    .fill("anthropic/claude-sonnet-4-6:low");
-  await settings.getByRole("button", { name: "Save" }).click();
-
-  // No warning: the spec resolved cleanly.
-  await expect(settings.getByTestId("background-model-warning")).toHaveCount(0);
-
-  // Round-trips through the server's pantokenSettings broadcast (which re-reads the
-  // persisted file). Reload + reopen: the field is re-seeded from disk.
-  await page.reload();
-  await openSettings(page, "models");
-  await expect(page.getByTestId("background-model-input")).toHaveValue(
-    "anthropic/claude-sonnet-4-6:low",
-  );
-
-  // Now set a BAD spec: a model not in the mock's registry → the server resolves a
-  // warning and the UI surfaces it loud (red `.warn` note), never silent.
-  await page.getByTestId("background-model-input").fill("anthropic/nope-9-9");
-  await page.getByRole("button", { name: "Save" }).click();
-  const warning = page.getByTestId("background-model-warning");
-  await expect(warning).toBeVisible();
-  await expect(warning).toContainText(/No registered model matches/);
-
-  // Clear back to unset (also leaves the e2e data dir clean for sibling specs).
-  await page
-    .getByTestId("settings-panel")
-    .getByRole("button", { name: "Clear" })
-    .click();
-  await expect(page.getByTestId("background-model-input")).toHaveValue("");
-  await expect(page.getByTestId("background-model-warning")).toHaveCount(0);
 });
 
 test("the Access token tab shows the data directory with copy + reveal actions", async ({

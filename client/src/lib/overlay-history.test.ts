@@ -105,6 +105,205 @@ describe("overlay history", () => {
     expect(attentionOpen).toBe(false);
   });
 
+  test("reopening an ordinary deferred overlay only refreshes its callback", () => {
+    let popHandler: (() => void) | null = null;
+    const log: string[] = [];
+    const closed: string[] = [];
+    const oh = createOverlayHistory({
+      isPhone: () => true,
+      pushState: () => log.push("push"),
+      replaceState: () => log.push("replace"),
+      back: () => log.push("back"),
+      onPop: (handler) => {
+        popHandler = handler;
+        return () => (popHandler = null);
+      },
+    });
+
+    oh.opened("sidebar", () => closed.push("sidebar"));
+    oh.closed("sidebar");
+    oh.opened("attention", () => closed.push("stale-attention"));
+    oh.opened("attention", () => closed.push("attention"));
+    expect(log).toEqual(["push", "back"]);
+
+    (popHandler as (() => void) | null)?.();
+    expect(log).toEqual(["push", "back", "push"]);
+    (popHandler as (() => void) | null)?.();
+    expect(closed).toEqual(["attention"]);
+  });
+
+  test("a nested open queues behind its deferred parent", () => {
+    let popHandler: (() => void) | null = null;
+    const log: string[] = [];
+    const closed: string[] = [];
+    const oh = createOverlayHistory({
+      isPhone: () => true,
+      pushState: (marker) =>
+        log.push(
+          `push:${(marker as { pantokenOverlay: string }).pantokenOverlay}`,
+        ),
+      replaceState: () => log.push("replace"),
+      back: () => log.push("back"),
+      onPop: (handler) => {
+        popHandler = handler;
+        return () => (popHandler = null);
+      },
+    });
+
+    oh.opened("sidebar", () => closed.push("sidebar"));
+    oh.closed("sidebar");
+    oh.opened("settings", () => closed.push("settings"));
+    oh.openedNested("settings-detail", () => closed.push("detail"));
+    expect(oh.depth()).toBe(2);
+    expect(closed).toEqual([]);
+
+    (popHandler as (() => void) | null)?.();
+    expect(log).toEqual([
+      "push:sidebar",
+      "back",
+      "push:settings",
+      "push:settings-detail",
+    ]);
+    expect(oh.depth()).toBe(2);
+
+    (popHandler as (() => void) | null)?.();
+    expect(closed).toEqual(["detail"]);
+    (popHandler as (() => void) | null)?.();
+    expect(closed).toEqual(["detail", "settings"]);
+  });
+
+  test("multiple UI closes serialize their asynchronous Back traversals", () => {
+    let popHandler: (() => void) | null = null;
+    const log: string[] = [];
+    const oh = createOverlayHistory({
+      isPhone: () => true,
+      pushState: () => log.push("push"),
+      replaceState: () => log.push("replace"),
+      back: () => log.push("back"),
+      onPop: (handler) => {
+        popHandler = handler;
+        return () => (popHandler = null);
+      },
+    });
+
+    oh.opened("settings", () => {});
+    oh.openedNested("settings-detail", () => {});
+    oh.closed("settings-detail");
+    oh.closed("settings");
+    expect(log).toEqual(["push", "push", "back"]);
+
+    (popHandler as (() => void) | null)?.();
+    expect(log).toEqual(["push", "push", "back", "back"]);
+    (popHandler as (() => void) | null)?.();
+    expect(oh.depth()).toBe(0);
+  });
+
+  test("a peer replaces an active parent and nested child with one entry", () => {
+    let popHandler: (() => void) | null = null;
+    const log: string[] = [];
+    const closed: string[] = [];
+    const oh = createOverlayHistory({
+      isPhone: () => true,
+      pushState: (marker) =>
+        log.push(
+          `push:${(marker as { pantokenOverlay: string }).pantokenOverlay}`,
+        ),
+      replaceState: (marker) =>
+        log.push(
+          `replace:${(marker as { pantokenOverlay: string }).pantokenOverlay}`,
+        ),
+      back: () => log.push("back"),
+      onPop: (handler) => {
+        popHandler = handler;
+        return () => (popHandler = null);
+      },
+    });
+
+    oh.opened("settings", () => closed.push("settings"));
+    oh.openedNested("settings-detail", () => closed.push("detail"));
+    oh.opened("attention", () => closed.push("attention"));
+    expect(closed).toEqual(["detail", "settings"]);
+    expect(log).toEqual(["push:settings", "push:settings-detail", "back"]);
+    expect(oh.depth()).toBe(1);
+
+    (popHandler as (() => void) | null)?.();
+    expect(log).toEqual([
+      "push:settings",
+      "push:settings-detail",
+      "back",
+      "replace:attention",
+    ]);
+    (popHandler as (() => void) | null)?.();
+    expect(closed).toEqual(["detail", "settings", "attention"]);
+    expect(oh.depth()).toBe(0);
+  });
+
+  test("a newer peer drops the pending replacement's deferred child", () => {
+    let popHandler: (() => void) | null = null;
+    const markers: string[] = [];
+    const closed: string[] = [];
+    const oh = createOverlayHistory({
+      isPhone: () => true,
+      pushState: () => {},
+      replaceState: (marker) =>
+        markers.push((marker as { pantokenOverlay: string }).pantokenOverlay),
+      back: () => {},
+      onPop: (handler) => {
+        popHandler = handler;
+        return () => (popHandler = null);
+      },
+    });
+
+    oh.opened("settings", () => closed.push("settings"));
+    oh.openedNested("settings-detail", () => closed.push("settings-detail"));
+    oh.opened("attention", () => closed.push("attention"));
+    oh.openedNested("attention-child", () => closed.push("attention-child"));
+    oh.opened("context", () => closed.push("context"));
+    expect(closed).toEqual([
+      "settings-detail",
+      "settings",
+      "attention-child",
+      "attention",
+    ]);
+
+    (popHandler as (() => void) | null)?.();
+    expect(markers).toEqual(["context"]);
+    expect(oh.depth()).toBe(1);
+    (popHandler as (() => void) | null)?.();
+    expect(closed).toEqual([
+      "settings-detail",
+      "settings",
+      "attention-child",
+      "attention",
+      "context",
+    ]);
+  });
+
+  test("reopening a pending replacement only refreshes its callback", () => {
+    let popHandler: (() => void) | null = null;
+    const closed: string[] = [];
+    const oh = createOverlayHistory({
+      isPhone: () => true,
+      pushState: () => {},
+      replaceState: () => {},
+      back: () => {},
+      onPop: (handler) => {
+        popHandler = handler;
+        return () => (popHandler = null);
+      },
+    });
+
+    oh.opened("settings", () => closed.push("settings"));
+    oh.openedNested("settings-detail", () => closed.push("settings-detail"));
+    oh.opened("attention", () => closed.push("stale-attention"));
+    oh.opened("attention", () => closed.push("attention"));
+    expect(closed).toEqual(["settings-detail", "settings"]);
+
+    (popHandler as (() => void) | null)?.();
+    (popHandler as (() => void) | null)?.();
+    expect(closed).toEqual(["settings-detail", "settings", "attention"]);
+  });
+
   test("switching phone views reuses one entry and back returns to transcript", () => {
     const f = fakeEnv();
     const oh = createOverlayHistory(f.env);
