@@ -99,8 +99,10 @@ test("mobile: new-session controls stay tappable inside the wrapped status row",
 
   await expect(left.getByTestId("draft-project-control")).toHaveCount(1);
   await expect(left.getByTestId("draft-worktree-control")).toHaveCount(1);
+  const visibleProjectBase = (await project.innerText()).trim();
+  expect(visibleProjectBase).not.toBe("");
   await expect(project).toHaveAccessibleName(
-    "Browse to change project directory",
+    `${visibleProjectBase} — browse to change project directory`,
   );
   await expect(worktree).toHaveAccessibleName("Enable worktree isolation");
   for (const control of [project, worktree]) {
