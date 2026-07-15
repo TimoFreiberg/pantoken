@@ -11,6 +11,7 @@
   import Composer from "./components/Composer.svelte";
   import QnaInline from "./components/QnaInline.svelte";
   import ApprovalLayer from "./components/ApprovalLayer.svelte";
+  import AttentionShelf from "./components/AttentionShelf.svelte";
   import TokenGate from "./components/TokenGate.svelte";
   import Settings from "./components/Settings.svelte";
   import PlanView from "./components/PlanView.svelte";
@@ -28,7 +29,7 @@
   import { STEP as FONT_STEP } from "./lib/font-scale.js";
   import { edgeSwipe } from "./lib/edge-swipe.js";
   import { createEdgeSwipe } from "./lib/edge-swipe.svelte.js";
-  import { PHONE_MQ } from "./lib/overlay-history.js";
+  import { overlayHistory, PHONE_MQ } from "./lib/overlay-history.js";
   import { auxClickAction } from "./lib/store-helpers.js";
   import type { PermissionMonitorMode } from "@pantoken/protocol";
 
@@ -79,6 +80,48 @@
     if (store.session.pendingApprovals.some((r) => r.kind !== "qna"))
       surfaces.push("approval");
     return surfaces;
+  });
+
+  // Phone attention occupies one full-screen overlay. Back minimizes it, and a
+  // deliberate minimize remains sticky while more requests arrive in this session.
+  let attentionHistoryOpen = false;
+  let attentionSessionId: string | undefined;
+  $effect(() => {
+    const sessionId = store.session.ref?.sessionId;
+    const pending = store.draft ? [] : store.session.pendingApprovals;
+    if (sessionId !== attentionSessionId) {
+      attentionSessionId = sessionId;
+      attention.resetMobile();
+    }
+    if (pending.length === 0) attention.resetMobile();
+    else if (!pending.some((r) => r.requestId === attention.mobileRequestId))
+      attention.selectMobile(pending[0]!.requestId);
+
+    const shouldTrack =
+      store.phoneLayout && pending.length > 0 && !attention.mobileMinimized;
+    if (
+      shouldTrack &&
+      attentionHistoryOpen &&
+      store.mobileView !== "transcript"
+    ) {
+      // Navigation's opened() call already replaced our shared history entry. Minimize
+      // without consuming it; Back closes navigation and reveals transcript + shelf.
+      attentionHistoryOpen = false;
+      attention.minimizeMobile();
+    } else if (shouldTrack && !attentionHistoryOpen) {
+      // Phone navigation overlays are mutually exclusive. Move their visual state to
+      // transcript without consuming history; opened() then replaces that entry with
+      // attention, so one Back still closes exactly what is visible.
+      if (store.mobileView !== "transcript") store.mobileView = "transcript";
+      attentionHistoryOpen = true;
+      overlayHistory.opened("attention", () => {
+        attentionHistoryOpen = false;
+        attention.minimizeMobile();
+      });
+    } else if (!shouldTrack && attentionHistoryOpen) {
+      attentionHistoryOpen = false;
+      overlayHistory.closed("attention");
+    }
   });
 
   onMount(() => store.start());
@@ -354,6 +397,9 @@
            points at them). -->
       {#if !store.draft}
         <QnaInline />
+      {/if}
+      {#if !store.draft}
+        <AttentionShelf />
       {/if}
       <Composer />
       {#if !store.draft}

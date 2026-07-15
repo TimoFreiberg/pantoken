@@ -6,9 +6,18 @@
   // The Q&A form renders inline in the chat column (above the composer), not as a
   // floating sheet like the other dialogs — matching the chat-native placement the
   // Claude app uses. ApprovalLayer deliberately skips `qna` so this owns it; the two
-  // can show at once (a floating confirm over the inline form) without fighting.
+  // can show at once on desktop (a floating confirm over the inline form) without fighting.
+  const pending = $derived(store.session.pendingApprovals);
+  const mobileCurrent = $derived(
+    pending.find((r) => r.requestId === attention.mobileRequestId) ?? pending[0] ?? null,
+  );
   const current = $derived(
-    store.session.pendingApprovals.find((r) => r.kind === "qna") ?? null,
+    store.phoneLayout
+      ? mobileCurrent?.kind === "qna" ? mobileCurrent : null
+      : pending.find((r) => r.kind === "qna") ?? null,
+  );
+  const mobileIndex = $derived(
+    current ? pending.findIndex((r) => r.requestId === current.requestId) : -1,
   );
 
   // Q&A answers are local drafts until Submit. Keyed by session/request so focusing
@@ -32,11 +41,13 @@
   //    small pill (the ⌘\ cycle). Owned by the controller.
   // When the controller minimizes to a pill, QnaForm isn't rendered at all; when
   // QnaForm collapses to its title bar, the form is still visible (just shorter).
-  const pillMinimized = $derived(attention.minimized.qna);
+  const pillMinimized = $derived(
+    store.phoneLayout ? attention.mobileMinimized : attention.minimized.qna,
+  );
   let bodyCollapsed = $state(false);
 
-  // Per-request reset: a fresh question always starts un-pill-minimized and
-  // with the body expanded.
+  // Per-request reset: desktop clears its per-surface pill; both layouts expand the
+  // question body. Phone's shared minimized shelf intentionally remains sticky.
   let lastRequestId: string | undefined;
   $effect(() => {
     const id = current?.requestId;
@@ -62,6 +73,12 @@
     attention.clear("qna");
     store.respondUi({ requestId, cancelled: true });
   }
+
+  function moveMobile(delta: number): void {
+    if (pending.length < 2 || mobileIndex < 0) return;
+    const next = pending[(mobileIndex + delta + pending.length) % pending.length];
+    if (next) attention.selectMobile(next.requestId);
+  }
 </script>
 
 {#if current}
@@ -80,13 +97,21 @@
       </div>
     </div>
   {:else}
-    <div class="qna-inline-wrap">
+    <div class="qna-inline-wrap" class:phone-full={store.phoneLayout}>
       <div class="qna-inline">
+        {#if store.phoneLayout && pending.length > 1}
+          <nav class="request-nav" aria-label="Pending requests">
+            <button type="button" onclick={() => moveMobile(-1)} title="Previous pending request" aria-label="Previous pending request">Previous</button>
+            <span>{mobileIndex + 1} of {pending.length}</span>
+            <button type="button" onclick={() => moveMobile(1)} title="Next pending request" aria-label="Next pending request">Next</button>
+          </nav>
+        {/if}
         {#key current.requestId}
           <QnaForm
             request={current}
             collapsed={bodyCollapsed}
-            onMinimize={() => (bodyCollapsed = !bodyCollapsed)}
+            fullScreen={store.phoneLayout}
+            onMinimize={() => store.phoneLayout ? attention.minimizeMobile() : (bodyCollapsed = !bodyCollapsed)}
             initialDraft={qnaDrafts.get(draftKey)}
             onchange={(draft) => rememberQna(draftKey, draft)}
             onsubmit={(answers) => {
@@ -118,6 +143,27 @@
     box-shadow: var(--shadow-pop);
     font-size: calc(15px * var(--font-scale, 1));
   }
+  .request-nav { display: none; }
+  @media (max-width: 859px) {
+    .qna-inline-wrap.phone-full {
+      position: absolute; inset: 0; z-index: 45; padding: 0;
+      background: var(--bg-elevated);
+    }
+    .phone-full .qna-inline {
+      max-width: none; height: 100%; margin: 0; padding: max(8px, env(safe-area-inset-top)) 16px max(12px, env(safe-area-inset-bottom));
+      border: 0; border-radius: 0; box-shadow: none; display: flex; flex-direction: column;
+    }
+    .request-nav {
+      display: flex; min-height: 44px; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid var(--border); margin-bottom: 8px;
+      color: var(--text-faint); font-size: 12px;
+    }
+    .request-nav button {
+      min-width: 72px; min-height: 44px; border: 0; background: transparent;
+      color: var(--text-muted); font: inherit;
+    }
+    .phone-full :global(.qna) { min-height: 0; flex: 1; }
+  }
   /* Minimized pill — reuses TaskList's .pill visual language. */
   .attention-pill {
     display: inline-flex;
@@ -137,6 +183,7 @@
       border-color 0.12s,
       background 0.12s;
   }
+  @media (max-width: 859px) { .attention-pill { display: none; } }
   .attention-pill:hover {
     color: var(--text);
     border-color: var(--highlight);

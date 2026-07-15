@@ -80,6 +80,31 @@ describe("overlay history", () => {
     expect(f.entryCount()).toBe(0);
   });
 
+  test("an open waits for an asynchronous UI-close Back to finish", () => {
+    let popHandler: (() => void) | null = null;
+    const log: string[] = [];
+    const oh = createOverlayHistory({
+      isPhone: () => true,
+      pushState: () => log.push("push"),
+      replaceState: () => log.push("replace"),
+      back: () => log.push("back"),
+      onPop: (handler) => {
+        popHandler = handler;
+        return () => (popHandler = null);
+      },
+    });
+    let attentionOpen = true;
+    oh.opened("sidebar", () => {});
+    oh.closed("sidebar");
+    oh.opened("attention", () => (attentionOpen = false));
+    expect(log).toEqual(["push", "back"]);
+    expect(oh.depth()).toBe(1);
+    (popHandler as (() => void) | null)?.();
+    expect(log).toEqual(["push", "back", "push"]);
+    (popHandler as (() => void) | null)?.();
+    expect(attentionOpen).toBe(false);
+  });
+
   test("switching phone views reuses one entry and back returns to transcript", () => {
     const f = fakeEnv();
     const oh = createOverlayHistory(f.env);
@@ -88,8 +113,9 @@ describe("overlay history", () => {
     oh.opened("ctx", () => closed.push("ctx"));
     expect(f.entryCount()).toBe(1);
     expect(f.log).toEqual(["push", "replace"]);
+    expect(closed).toEqual(["drawer"]);
     f.userBack();
-    expect(closed).toEqual(["ctx"]);
+    expect(closed).toEqual(["drawer", "ctx"]);
     expect(f.entryCount()).toBe(0);
   });
 

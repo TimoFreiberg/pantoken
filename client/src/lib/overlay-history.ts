@@ -40,6 +40,7 @@ export function createOverlayHistory(env: OverlayHistoryEnv) {
   // Set while we unwind our own history.back() from a UI close: that pop is
   // already accounted for and must not close the (new) top overlay.
   let pendingOwnPops = 0;
+  let deferredOpen: Entry | null = null;
 
   function ensureInstalled(): void {
     if (installed) return;
@@ -47,6 +48,11 @@ export function createOverlayHistory(env: OverlayHistoryEnv) {
     env.onPop(() => {
       if (pendingOwnPops > 0) {
         pendingOwnPops--;
+        if (pendingOwnPops === 0 && deferredOpen) {
+          stack.push(deferredOpen);
+          env.pushState({ pantokenOverlay: deferredOpen.id });
+          deferredOpen = null;
+        }
         return;
       }
       const top = stack.pop();
@@ -59,6 +65,14 @@ export function createOverlayHistory(env: OverlayHistoryEnv) {
     opened(id: string, close: () => void): void {
       if (!env.isPhone()) return;
       ensureInstalled();
+      // A UI close consumes history asynchronously in real browsers. Opening during
+      // that traversal would push an entry that the delayed Back immediately skips
+      // over, so defer activation until the owned pop arrives.
+      if (pendingOwnPops > 0) {
+        if (deferredOpen?.id !== id) deferredOpen?.close();
+        deferredOpen = { id, close };
+        return;
+      }
       // Re-opening an already-tracked overlay (e.g. rapid toggles) must not
       // duplicate its entry — refresh the close callback instead.
       const existing = stack.find((e) => e.id === id);
@@ -68,8 +82,10 @@ export function createOverlayHistory(env: OverlayHistoryEnv) {
       }
       // Phone navigation is mutually exclusive. Switching directly between the
       // sessions and context views reuses the current history entry so one Back
-      // always returns to the transcript (and never exposes the other panel).
+      // always returns to the transcript (and never exposes the other panel). Close
+      // the displaced visual synchronously before handing the entry to its successor.
       if (stack.length > 0) {
+        stack[stack.length - 1]?.close();
         stack[stack.length - 1] = { id, close };
         env.replaceState({ pantokenOverlay: id });
         return;
@@ -81,6 +97,10 @@ export function createOverlayHistory(env: OverlayHistoryEnv) {
      *  matching history entry when it's the top one. No-op for untracked ids, so
      *  desktop close paths can call this unconditionally. */
     closed(id: string): void {
+      if (deferredOpen?.id === id) {
+        deferredOpen = null;
+        return;
+      }
       const idx = stack.findIndex((e) => e.id === id);
       if (idx === -1) return;
       const wasTop = idx === stack.length - 1;
@@ -95,7 +115,7 @@ export function createOverlayHistory(env: OverlayHistoryEnv) {
     },
     /** Test/introspection hook. */
     depth(): number {
-      return stack.length;
+      return stack.length + (deferredOpen ? 1 : 0);
     },
   };
 }

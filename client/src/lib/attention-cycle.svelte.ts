@@ -21,6 +21,10 @@ class AttentionController {
     qna: false,
     approval: false,
   });
+  // Phone attention is one full-screen surface shared by every pending request.
+  // Once minimized, new requests update its shelf without stealing the screen back.
+  mobileMinimized = $state(false);
+  mobileRequestId = $state<string | null>(null);
 
   cycle(activeSurfaces: AttentionSurface[]): void {
     const plan = planCycle(this.focused, activeSurfaces);
@@ -43,6 +47,25 @@ class AttentionController {
   clear(surface: AttentionSurface): void {
     if (this.focused === surface) this.focused = null;
     this.minimized[surface] = false;
+  }
+
+  minimizeMobile(): void {
+    this.mobileMinimized = true;
+    this.focused = null;
+  }
+
+  restoreMobile(requestId: string): void {
+    this.mobileRequestId = requestId;
+    this.mobileMinimized = false;
+  }
+
+  selectMobile(requestId: string): void {
+    this.mobileRequestId = requestId;
+  }
+
+  resetMobile(): void {
+    this.mobileMinimized = false;
+    this.mobileRequestId = null;
   }
 }
 

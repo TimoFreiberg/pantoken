@@ -1,6 +1,6 @@
 <script lang="ts">
   import { reveal } from "../lib/transitions.js";
-  import { isDialogRequest } from "@pantoken/protocol";
+  import { isDialogRequest, type HostUiRequest } from "@pantoken/protocol";
   import { store } from "../lib/store.svelte.js";
   import { attention } from "../lib/attention-cycle.svelte.js";
   import Button from "./ui/Button.svelte";
@@ -9,27 +9,106 @@
 
   // Show one dialog at a time — the oldest pending. `qna` is rendered inline in the
   // chat column by QnaInline, not as a floating sheet, so skip it here (the two can
-  // coexist: a floating confirm over the inline form).
+  // coexist on desktop: a floating confirm over the inline form).
+  const pending = $derived(store.session.pendingApprovals);
+  const mobileCurrent = $derived(
+    pending.find((r) => r.requestId === attention.mobileRequestId) ?? pending[0] ?? null,
+  );
   const current = $derived(
-    store.session.pendingApprovals.find((r) => r.kind !== "qna") ?? null,
+    store.phoneLayout
+      ? mobileCurrent?.kind !== "qna" ? mobileCurrent : null
+      : pending.find((r) => r.kind !== "qna") ?? null,
+  );
+  const mobileIndex = $derived(
+    current ? pending.findIndex((r) => r.requestId === current.requestId) : -1,
   );
 
   let inputValue = $state("");
   let selectedOption = $state<string | null>(null);
+  type ApprovalDraft = { inputValue: string; selectedOption: string | null };
+  const APPROVAL_DRAFTS_KEY = "pantoken.approvalDrafts";
+  function loadApprovalDrafts(): Map<string, ApprovalDraft> {
+    if (typeof localStorage === "undefined") return new Map();
+    try {
+      const parsed: unknown = JSON.parse(localStorage.getItem(APPROVAL_DRAFTS_KEY) ?? "[]");
+      if (!Array.isArray(parsed)) return new Map();
+      return new Map(
+        parsed.filter(
+          (entry): entry is [string, ApprovalDraft] =>
+            Array.isArray(entry) &&
+            typeof entry[0] === "string" &&
+            typeof entry[1]?.inputValue === "string" &&
+            (entry[1]?.selectedOption === null ||
+              typeof entry[1]?.selectedOption === "string"),
+        ),
+      );
+    } catch {
+      return new Map();
+    }
+  }
+  const approvalDrafts = loadApprovalDrafts();
+  function persistApprovalDrafts(): void {
+    if (typeof localStorage === "undefined") return;
+    try {
+      localStorage.setItem(
+        APPROVAL_DRAFTS_KEY,
+        JSON.stringify([...approvalDrafts.entries()]),
+      );
+    } catch {
+      // Best effort: private mode/quota failures must not break an approval flow.
+    }
+  }
+  const approvalDeadlines = new Map<string, number>();
+  function draftKey(requestId: string): string {
+    return `${store.session.ref?.sessionId ?? "unknown"}:${requestId}`;
+  }
+  function rememberDraft(): void {
+    if (!current) return;
+    approvalDrafts.set(draftKey(current.requestId), {
+      inputValue,
+      selectedOption,
+    });
+    if (approvalDrafts.size > 20) {
+      const oldest = approvalDrafts.keys().next().value;
+      if (oldest) approvalDrafts.delete(oldest);
+    }
+    persistApprovalDrafts();
+  }
 
-  // reset local field state whenever the active dialog changes
+  // Prune drafts for resolved requests whenever their owning session is active.
+  $effect(() => {
+    const sessionId = store.session.ref?.sessionId;
+    if (!sessionId) return;
+    const prefix = `${sessionId}:`;
+    const live = new Set(pending.map((request) => draftKey(request.requestId)));
+    let changed = false;
+    for (const key of approvalDrafts.keys()) {
+      if (key.startsWith(prefix) && !live.has(key)) {
+        approvalDrafts.delete(key);
+        changed = true;
+      }
+    }
+    if (changed) persistApprovalDrafts();
+  });
+
+  // Restore per-request state when navigating; initialize untouched requests from
+  // their daemon-provided defaults.
   $effect(() => {
     const c = current;
+    const saved = c ? approvalDrafts.get(draftKey(c.requestId)) : undefined;
     if (c && (c.kind === "input" || c.kind === "editor")) {
-      inputValue = c.initialValue ?? "";
+      inputValue = saved?.inputValue ?? c.initialValue ?? "";
     } else {
       inputValue = "";
     }
-    selectedOption = null;
+    selectedOption = saved?.selectedOption ?? null;
   });
 
   function cancel() {
     if (!current) return;
+    approvalDrafts.delete(draftKey(current.requestId));
+    persistApprovalDrafts();
+    approvalDeadlines.delete(draftKey(current.requestId));
     attention.clear("approval");
     store.respondUi({ requestId: current.requestId, cancelled: true });
   }
@@ -46,18 +125,38 @@
     if (isDirty) return;
     cancel();
   }
-  // Effective minimized state: the controller owns the flag, but a dirty input/editor
-  // vetoes the pill (edge case #7) — minimizing a dirty sheet would lose typed text the
-  // same way a stray backdrop tap would. The controller still advances `focused` so
-  // focus moves to the next surface; the dirty sheet just stays open behind it.
-  const minimized = $derived(attention.minimized.approval && !isDirty);
+  // Desktop's attention cycle leaves a dirty input/editor open instead of pill-minimizing
+  // it. Phone minimization is safe because the per-request draft map restores its text.
+  const minimized = $derived(
+    store.phoneLayout
+      ? attention.mobileMinimized
+      : attention.minimized.approval && !isDirty,
+  );
+
+  function minimize(): void {
+    if (store.phoneLayout) attention.minimizeMobile();
+    else attention.minimize("approval");
+  }
+
+  function moveMobile(delta: number): void {
+    if (pending.length < 2 || mobileIndex < 0) return;
+    rememberDraft();
+    const next = pending[(mobileIndex + delta + pending.length) % pending.length];
+    if (next) attention.selectMobile(next.requestId);
+  }
   function confirm(value: boolean) {
     if (!current) return;
+    approvalDrafts.delete(draftKey(current.requestId));
+    persistApprovalDrafts();
+    approvalDeadlines.delete(draftKey(current.requestId));
     attention.clear("approval");
     store.respondUi({ requestId: current.requestId, confirmed: value });
   }
   function submitValue(v: string) {
     if (!current) return;
+    approvalDrafts.delete(draftKey(current.requestId));
+    persistApprovalDrafts();
+    approvalDeadlines.delete(draftKey(current.requestId));
     attention.clear("approval");
     store.respondUi({ requestId: current.requestId, value: v });
   }
@@ -109,17 +208,49 @@
   // Deny-safe auto-resolution: confirm → confirm(false); plan → the cancel label
   // (a typed plan_handoff_answer, matching the visible Cancel button's wire shape —
   // not the universal {cancelled} that other kinds use); everything else → cancel().
-  function autoResolve() {
-    const c = current;
-    if (!c) return;
-    if (c.kind === "confirm") confirm(false);
-    else if (c.kind === "plan") submitValue(c.actionLabels[2]);
-    else cancel();
+  function autoResolve(c: HostUiRequest): void {
+    const key = draftKey(c.requestId);
+    approvalDrafts.delete(key);
+    persistApprovalDrafts();
+    approvalDeadlines.delete(key);
+    attention.clear("approval");
+    if (c.kind === "confirm")
+      store.respondUi({ requestId: c.requestId, confirmed: false });
+    else if (c.kind === "plan")
+      store.respondUi({ requestId: c.requestId, value: c.actionLabels[2] });
+    else store.respondUi({ requestId: c.requestId, cancelled: true });
   }
+
+  // Phone deadlines belong to requests, not the visible card, so navigating cannot
+  // suspend denial. Desktop retains its established current-card-only clock.
+  $effect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const liveKeys = new Set<string>();
+    const scheduled = store.phoneLayout ? pending : current ? [current] : [];
+    for (const request of scheduled) {
+      if (
+        request.kind === "qna" ||
+        !("timeoutMs" in request) ||
+        typeof request.timeoutMs !== "number"
+      )
+        continue;
+      const key = draftKey(request.requestId);
+      liveKeys.add(key);
+      const deadline =
+        approvalDeadlines.get(key) ?? Date.now() + request.timeoutMs;
+      approvalDeadlines.set(key, deadline);
+      timers.push(
+        setTimeout(() => autoResolve(request), Math.max(0, deadline - Date.now())),
+      );
+    }
+    for (const key of approvalDeadlines.keys())
+      if (!liveKeys.has(key)) approvalDeadlines.delete(key);
+    return () => timers.forEach(clearTimeout);
+  });
 
   // Keyed on requestId so the timer restarts for each new dialog and is torn
   // down on change/unmount. We tick every 250ms (smoother bar than 1s) and
-  // clear the interval at zero before resolving to avoid a double-fire.
+  // stop at zero; the per-request scheduler above owns auto-resolution.
   $effect(() => {
     // track these so the effect re-runs when the active dialog changes
     const id = current?.requestId;
@@ -128,14 +259,15 @@
       remainingMs = 0;
       return;
     }
-    const startedAt = Date.now();
-    remainingMs = total;
+    const key = draftKey(id);
+    const deadline = approvalDeadlines.get(key) ?? Date.now() + total;
+    approvalDeadlines.set(key, deadline);
+    remainingMs = Math.max(0, deadline - Date.now());
     const tick = () => {
-      const left = total - (Date.now() - startedAt);
+      const left = deadline - Date.now();
       if (left <= 0) {
         remainingMs = 0;
         clearInterval(interval);
-        autoResolve();
       } else {
         remainingMs = left;
       }
@@ -281,15 +413,23 @@
       onkeydown={onSheetKeydown}
     >
       <div class="grip"></div>
+      {#if store.phoneLayout && pending.length > 1}
+        <nav class="request-nav" aria-label="Pending requests">
+          <button type="button" onclick={() => moveMobile(-1)} title="Previous pending request" aria-label="Previous pending request">Previous</button>
+          <span>{mobileIndex + 1} of {pending.length}</span>
+          <button type="button" onclick={() => moveMobile(1)} title="Next pending request" aria-label="Next pending request">Next</button>
+        </nav>
+      {/if}
       <button
         type="button"
         class="min"
-        onclick={() => attention.minimize("approval")}
+        onclick={minimize}
         aria-expanded="true"
-        aria-label="Minimize to pill"
-        title="Minimize to pill (⌘\)"
+        aria-label={store.phoneLayout ? "Minimize approval" : "Minimize to pill"}
+        title={store.phoneLayout ? "Minimize approval" : "Minimize to pill (⌘\\)"}
       >
         <Chevron open={true} size={11} />
+        {#if store.phoneLayout}<span>Minimize</span>{/if}
       </button>
 
     {#if current.kind === "confirm"}
@@ -325,7 +465,7 @@
               tabindex={(selectedOption ?? current.options[0]) === opt ? 0 : -1}
               title={`Choose: ${opt}`}
               onclick={() => submitValue(opt)}
-              onfocus={() => (selectedOption = opt)}>{opt}</button
+              onfocus={() => { selectedOption = opt; rememberDraft(); }}>{opt}</button
             >
           {/each}
         </div>
@@ -346,14 +486,14 @@
       </div>
     {:else if current.kind === "input"}
       <h2 id="approval-title">{current.title}</h2>
-      <input class="field" bind:value={inputValue} placeholder={current.placeholder ?? ""} />
+      <input class="field" value={inputValue} oninput={(e) => { inputValue = e.currentTarget.value; rememberDraft(); }} placeholder={current.placeholder ?? ""} />
       <div class="actions two">
         <Button variant="secondary" size="lg" block title="Cancel this request" onclick={cancel}>Cancel</Button>
         <Button variant="primary" size="lg" block title="Submit your input" onclick={() => submitValue(inputValue)}>Submit</Button>
       </div>
     {:else if current.kind === "editor"}
       <h2 id="approval-title">{current.title}</h2>
-      <textarea class="editor" bind:value={inputValue} rows="6"></textarea>
+      <textarea class="editor" value={inputValue} oninput={(e) => { inputValue = e.currentTarget.value; rememberDraft(); }} rows="6"></textarea>
       <div class="actions two">
         <Button variant="secondary" size="lg" block title="Cancel this request" onclick={cancel}>Cancel</Button>
         <Button variant="primary" size="lg" block title="Save your edits" onclick={() => submitValue(inputValue)}>Save</Button>
@@ -382,7 +522,7 @@
             tabindex={(selectedOption ?? current.options[0]) === opt ? 0 : -1}
             title={`Choose: ${opt}`}
             onclick={() => submitValue(opt)}
-            onfocus={() => (selectedOption = opt)}>{opt}</button
+            onfocus={() => { selectedOption = opt; rememberDraft(); }}>{opt}</button
           >
         {/each}
       </div>
@@ -446,6 +586,27 @@
     box-shadow: var(--shadow-pop);
     padding: 14px 20px calc(22px + env(safe-area-inset-bottom));
     animation: rise 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .request-nav { display: none; }
+  @media (max-width: 859px) {
+    .scrim { display: none; }
+    .sheet, .sheet.plan {
+      position: absolute; inset: 0; left: 0; bottom: 0; transform: none;
+      width: 100%; max-height: none; border: 0; border-radius: 0; box-shadow: none;
+      padding: max(64px, calc(52px + env(safe-area-inset-top))) 18px max(16px, env(safe-area-inset-bottom));
+      overflow-y: auto; overscroll-behavior: contain; animation: fade 0.15s ease;
+      background: var(--bg-elevated);
+    }
+    .grip { display: none; }
+    .request-nav {
+      position: absolute; top: env(safe-area-inset-top); left: 8px; right: 116px;
+      display: flex; min-height: 52px; align-items: center; justify-content: space-between;
+      color: var(--text-faint); font-size: 12px;
+    }
+    .request-nav button {
+      min-width: 72px; min-height: 44px; border: 0; background: transparent;
+      color: var(--text-muted); font: inherit;
+    }
   }
   @media (min-width: 600px) {
     .sheet {
@@ -685,6 +846,14 @@
     line-height: 1;
     cursor: pointer;
   }
+  .min span { display: none; }
+  @media (max-width: 859px) {
+    .min {
+      top: env(safe-area-inset-top); right: 8px; width: auto; min-width: 104px;
+      height: 52px; border: 0; gap: 8px; padding: 0 12px;
+    }
+    .min span { display: inline; }
+  }
   .min :global(.chevron) {
     color: inherit;
   }
@@ -717,6 +886,7 @@
       border-color 0.12s,
       background 0.12s;
   }
+  @media (max-width: 859px) { .attention-pill { display: none; } }
   .attention-pill:hover {
     color: var(--text);
     border-color: var(--highlight);
