@@ -7,7 +7,7 @@
   import { store } from "../lib/store.svelte.js";
   import { filterSessions, splitGroup, SESSIONS_PER_GROUP } from "../lib/session-filter.js";
   import { compactTime, relativeTime } from "../lib/relative-time.js";
-  import { buildHash, buildDate, buildLabel } from "../lib/build-info.js";
+  import { buildHash, buildDate, buildVersion } from "../lib/build-info.js";
   import ContextRing from "./ContextRing.svelte";
   import Button from "./ui/Button.svelte";
 
@@ -412,99 +412,68 @@
     };
   });
 
-  // Build-stamp context menu (the bottom-left version text). Right-click to copy the build
-  // hash or force an app update — reuses the .menu/.menu-item popover styling. A desktop
-  // affordance: right-click only, so it's keyboard-reachable via the menu's own C/U hotkeys
-  // once open, but there's no touch long-press (the stamp is a desktop sidebar footer).
-  let buildMenuPos = $state<MenuPos | null>(null);
-  let buildMenuEl = $state<HTMLDivElement | null>(null);
-  let buildClamped = false;
-  function openBuildMenu(e: MouseEvent): void {
-    e.preventDefault();
-    buildClamped = false;
-    buildMenuPos = { top: e.clientY, left: e.clientX };
-  }
-  function closeBuildMenu(): void {
-    buildMenuPos = null;
-  }
-  async function copyBuildHash(): Promise<void> {
-    await store.copyToClipboard(buildHash);
-    closeBuildMenu();
-  }
-  function forceUpdate(): void {
-    store.requestForceUpdate();
-    closeBuildMenu();
-  }
+  // Build-stamp hover pop-up: shows version + commit hash + date. Mirrors the
+  // ContextMeter/TaskList hover+pin pattern. The hash line is click-to-copy.
+  let buildHovered = $state(false);
+  let buildPinned = $state(false);
+  const buildOpen = $derived(buildHovered || buildPinned);
+  let buildCopied = $state(false);
+  let copyTimer: ReturnType<typeof setTimeout> | null = null;
+  let labelEl = $state<HTMLButtonElement | null>(null);
+  // Fixed position for the pop-up (sidebar has overflow: hidden, so absolute
+  // positioning would clip the card). Computed from the label element's rect
+  // (not the padded wrapper) so the transparent bridge connects to the visible
+  // label text, not the wrapper's padding edge.
+  let popPos = $state<{ top: number; left: number } | null>(null);
 
-  // Pull the build menu back inside the viewport once mounted: it opens at the cursor near
-  // the bottom-left edge, so it almost always needs lifting up. One-shot per open (buildClamped
-  // resets in openBuildMenu) so this self-write doesn't loop.
-  $effect(() => {
-    const el = buildMenuEl;
-    if (!buildMenuPos || !el || buildClamped) return;
-    const m = 8;
-    const r = el.getBoundingClientRect();
-    const next: MenuPos = { ...buildMenuPos };
-    if (next.top + r.height > window.innerHeight - m)
-      next.top = Math.max(m, window.innerHeight - m - r.height);
-    if (next.left != null && next.left + r.width > window.innerWidth - m)
-      next.left = Math.max(m, window.innerWidth - m - r.width);
-    buildClamped = true;
-    if (next.top !== buildMenuPos.top || next.left !== buildMenuPos.left)
-      buildMenuPos = next;
+  // Clean up the copy-feedback timer on teardown (mirrors ContextMeter's
+  // onDestroy(() => disarm()) and the existing onDestroy(() => pull.dispose())).
+  onDestroy(() => {
+    if (copyTimer) clearTimeout(copyTimer);
   });
 
-  // Dismiss the build menu on an outside click, Escape, or scroll/resize (which would
-  // detach the fixed popover). The click listener is deferred so the opening interaction
-  // doesn't immediately re-close it. While open, C copies the hash and U forces an update
-  // (mirroring the kbd hints) — unless focus is in a text field, where they should type.
+  async function copyBuildHash(): Promise<void> {
+    if (!(await store.copyToClipboard(buildHash))) return;
+    buildCopied = true;
+    if (copyTimer) clearTimeout(copyTimer);
+    copyTimer = setTimeout(() => (buildCopied = false), 1500);
+  }
+
+  // Compute fixed position when the pop-up opens. Re-measures on each hover-in
+  // (buildOpen transitions false→true). Uses the label element's rect so the
+  // transparent bridge (padding-bottom on .build-pop) connects flush to the
+  // label's top edge — no gap from wrapper padding to cause flicker.
   $effect(() => {
-    if (!buildMenuPos) return;
-    const onClick = (e: MouseEvent): void => {
-      const t = e.target as HTMLElement;
-      if (!t.isConnected) return;
-      if (!t.closest(".menu") && !t.closest(".version")) closeBuildMenu();
-    };
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") {
-        closeBuildMenu();
-        return;
-      }
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const t = e.target as HTMLElement;
-      if (
-        t.tagName === "INPUT" ||
-        t.tagName === "TEXTAREA" ||
-        t.isContentEditable
-      )
-        return;
-      // Case-insensitive: the kbd badges show uppercase C/U, and CapsLock makes e.key
-      // uppercase too — match both so the advertised shortcut never silently no-ops.
-      const k = e.key.toLowerCase();
-      if (k === "c") {
-        e.preventDefault();
-        void copyBuildHash();
-      } else if (k === "u") {
-        e.preventDefault();
-        forceUpdate();
-      }
-    };
-    // Same scoping as the session menu: only a sidebar-internal scroll detaches the
-    // anchored popover, not the transcript auto-scrolling in the other pane.
+    if (!buildOpen || !labelEl) {
+      popPos = null;
+      return;
+    }
+    const r = labelEl.getBoundingClientRect();
+    // Position the pop-up's top at the label's top; CSS transform: translateY(-100%)
+    // lifts the card (plus its padding-bottom bridge) above. The bridge lands
+    // flush against the label's top edge so mouseleave never fires mid-crossing.
+    popPos = { top: r.top, left: r.left };
+  });
+
+  // A fixed-position pop-up detaches from its anchor on scroll/resize. Close it
+  // on sidebar-internal scroll (not transcript auto-scroll) or any window resize,
+  // mirroring the session menu's dismiss pattern and the Tooltip component.
+  $effect(() => {
+    if (!buildOpen) return;
     const onScroll = (e: Event): void => {
       const t = e.target as HTMLElement | null;
-      if (t && typeof t.closest === "function" && t.closest(".sidebar"))
-        closeBuildMenu();
+      if (t && typeof t.closest === "function" && t.closest(".sidebar")) {
+        buildHovered = false;
+        buildPinned = false;
+      }
     };
-    const onResize = (): void => closeBuildMenu();
-    const id = setTimeout(() => document.addEventListener("click", onClick), 0);
-    document.addEventListener("keydown", onKey);
+    const onResize = (): void => {
+      buildHovered = false;
+      buildPinned = false;
+    };
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onResize);
     return () => {
-      clearTimeout(id);
-      document.removeEventListener("click", onClick);
-      document.removeEventListener("keydown", onKey);
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onResize);
     };
@@ -1225,9 +1194,7 @@
     </div>
   {/if}
 
-  <!-- Build stamp: last commit hash + date, baked in at build time. Quiet footer so
-       you can tell which version is live without it competing with the session list.
-       Right-click for build actions (copy hash / force-update). -->
+  <!-- Sidebar footer: Context + Settings buttons, then the build stamp below. -->
   <div class="sidebar-footer" data-testid="sidebar-footer">
     {#if !store.draft}
     <button
@@ -1258,47 +1225,63 @@
       <kbd aria-hidden="true">⌘,</kbd>
     </button>
   </div>
+  <!-- Build stamp: version label with a hover pop-up showing the commit hash + date.
+       Mirrors the ContextMeter/TaskList hover+pin pattern. The hash line is click-to-copy. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
-    class="version"
+    class="version-wrap"
     data-testid="version"
-    title={(buildDate
-      ? `pantoken build ${buildHash} · committed ${buildDate}`
-      : `pantoken build ${buildHash}`) + " — right-click for build actions"}
-    oncontextmenu={openBuildMenu}
+    onmouseenter={() => (buildHovered = true)}
+    onmouseleave={() => (buildHovered = false)}
+    onfocusin={() => (buildHovered = true)}
+    onfocusout={() => (buildHovered = false)}
   >
-    {buildLabel}
-  </div>
-  {#if buildMenuPos}
-    <div
-      class="menu"
-      role="menu"
-      data-testid="build-menu"
-      bind:this={buildMenuEl}
-      style={`top:${buildMenuPos.top}px;${buildMenuPos.left != null ? `left:${buildMenuPos.left}px` : `right:${buildMenuPos.right}px`}`}
+    <button
+      class="version-label"
+      bind:this={labelEl}
+      aria-expanded={buildOpen}
+      aria-haspopup="dialog"
+      aria-label={`Build version: ${buildVersion}`}
+      onclick={() => (buildPinned = !buildPinned)}
+      onkeydown={(e) => {
+        if (e.key === "Escape" && buildPinned) {
+          e.preventDefault();
+          buildPinned = false;
+        }
+      }}
     >
-      <button
-        class="menu-item"
-        role="menuitem"
-        data-testid="copy-build-hash"
-        title={`Copy the build commit hash to the clipboard: ${buildHash}`}
-        onclick={copyBuildHash}
+      {buildVersion}
+    </button>
+    {#if buildOpen && popPos}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="build-pop"
+        style={`top:${popPos.top}px;left:${popPos.left}px`}
+        data-testid="build-pop"
+        role="dialog"
+        aria-label="Build details"
       >
-        <span>Copy build hash</span>
-        <kbd class="hotkey" aria-hidden="true">C</kbd>
-      </button>
-      <button
-        class="menu-item"
-        role="menuitem"
-        data-testid="force-update"
-        title="Force an update check and install now — for clicking right after publishing a release"
-        onclick={forceUpdate}
-      >
-        <span>Force-update</span>
-        <kbd class="hotkey" aria-hidden="true">U</kbd>
-      </button>
-    </div>
-  {/if}
+        <div class="build-pop-card">
+          <div class="build-line build-version-line">{buildVersion}</div>
+          <button
+            class="build-line build-hash-line"
+            data-testid="copy-build-hash"
+            title={`Copy commit hash: ${buildHash}`}
+            aria-label={`Copy commit hash ${buildHash} to clipboard`}
+            onclick={copyBuildHash}
+          >
+            <span class="hash-text">{buildHash}</span>
+            <span class="copy-icon" aria-hidden="true">
+              {#if buildCopied}✓{:else}⎘{/if}
+            </span>
+          </button>
+          {#if buildDate}
+            <div class="build-line build-date-line">{buildDate}</div>
+          {/if}
+        </div>
+      </div>
+    {/if}
+  </div>
 </aside>
 
 <style>
@@ -1523,17 +1506,111 @@
     color: var(--text);
     white-space: nowrap;
   }
-  .version {
+  .version-wrap {
     flex-shrink: 0;
+    position: relative;
     padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
+    cursor: default;
+    outline: none;
+  }
+  .version-label {
+    display: block;
     font-family: var(--font-mono);
     font-size: 10.5px;
     color: var(--text-faint);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    cursor: default;
     user-select: none;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: default;
+    font: inherit;
+    text-align: left;
+    width: 100%;
+  }
+  .version-label:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs, 4px);
+  }
+
+  /* Fixed-position pop-up (sidebar has overflow: hidden, so absolute would clip). */
+  .build-pop {
+    position: fixed;
+    z-index: 70; /* same as .menu */
+    transform: translateY(-100%);
+    /* Transparent bridge so the hover region is continuous from label to card. */
+    padding-bottom: 7px;
+  }
+  .build-pop-card {
+    min-width: 160px;
+    max-width: min(280px, calc(100vw - 40px));
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-pop);
+    padding: 8px 10px;
+    animation: pop-rise 0.14s ease;
+  }
+  @keyframes pop-rise {
+    from { opacity: 0; transform: translateY(3px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .build-pop-card { animation: none; }
+  }
+  .build-line {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text);
+    padding: 2px 4px;
+    /* Text is selectable/copyable inside the pop-up. */
+    user-select: text;
+  }
+  .build-version-line {
+    font-weight: 600;
+    color: var(--text);
+  }
+  .build-hash-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-xs);
+    cursor: pointer;
+    text-align: left;
+    /* Subtle hover highlight on the hash line. */
+    transition: background 0.1s ease;
+  }
+  .build-hash-line:hover {
+    background: var(--surface-sunken);
+  }
+  .build-hash-line:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .hash-text {
+    font-family: var(--font-mono);
+  }
+  .copy-icon {
+    flex-shrink: 0;
+    font-size: 12px;
+    color: var(--text-faint);
+    opacity: 0;
+    transition: opacity 0.1s ease;
+  }
+  .build-hash-line:hover .copy-icon {
+    opacity: 1;
+  }
+  .build-date-line {
+    color: var(--text-muted);
+    font-size: 11px;
   }
   .sidebar-footer {
     flex-shrink: 0;
@@ -2072,6 +2149,12 @@
     .group-toggle,
     .footer-action {
       min-height: 44px;
+    }
+    .version-label {
+      min-height: 44px;
+      /* Keep the text visually small but the tap target large. */
+      display: flex;
+      align-items: center;
     }
     :global(.project-new),
     :global(.row-menu) {
