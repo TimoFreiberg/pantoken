@@ -5,7 +5,7 @@
   import type { SessionListEntry } from "@pantoken/protocol";
   import { reveal } from "../lib/transitions.js";
   import { store } from "../lib/store.svelte.js";
-  import { filterSessions } from "../lib/session-filter.js";
+  import { filterSessions, splitGroup, SESSIONS_PER_GROUP } from "../lib/session-filter.js";
   import { compactTime, relativeTime } from "../lib/relative-time.js";
   import { buildHash, buildDate, buildLabel } from "../lib/build-info.js";
   import ContextRing from "./ContextRing.svelte";
@@ -572,6 +572,62 @@
     }
   });
 
+  // Per-project "Show more" expansion state, keyed by cwd. Empty = all collapsed
+  // (showing only the per-group cap). Only `true` entries are stored; toggling
+  // back removes the key. Persisted per-device in localStorage (Q6), mirroring the
+  // collapse map above. The cap is display-only — the full list stays in
+  // `group.items`; this just controls whether the "Show N more" rows render.
+  const EXPANDED_GROUPS_KEY = "pantoken.sidebarExpandedGroups";
+  function loadExpandedGroups(): Record<string, boolean> {
+    if (typeof window === "undefined") return {};
+    try {
+      const raw = localStorage.getItem(EXPANDED_GROUPS_KEY);
+      if (!raw) return {};
+      const parsed: unknown = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return {};
+      const out: Record<string, boolean> = {};
+      for (const [cwd, v] of Object.entries(parsed as Record<string, unknown>))
+        if (v === true) out[cwd] = true;
+      return out;
+    } catch {
+      return {};
+    }
+  }
+  function persistExpandedGroups(map: Record<string, boolean>): void {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(EXPANDED_GROUPS_KEY, JSON.stringify(map));
+    } catch {
+      // Storage full / unavailable (private mode) — expansion stays in-memory
+      // this session only.
+    }
+  }
+  let expandedGroups = $state<Record<string, boolean>>(loadExpandedGroups());
+  function toggleExpanded(cwd: string): void {
+    const next = { ...expandedGroups };
+    if (next[cwd]) delete next[cwd];
+    else next[cwd] = true;
+    expandedGroups = next;
+    persistExpandedGroups(expandedGroups);
+  }
+
+  // Prune expansion entries for projects that no longer have any session on disk
+  // — same rationale as the collapse-prune above.
+  $effect(() => {
+    if (store.sessions.length === 0) return;
+    const known = new Set(store.sessions.map((s) => s.cwd));
+    let changed = false;
+    const next: Record<string, boolean> = {};
+    for (const cwd of Object.keys(expandedGroups)) {
+      if (known.has(cwd)) next[cwd] = true;
+      else changed = true;
+    }
+    if (changed) {
+      expandedGroups = next;
+      persistExpandedGroups(expandedGroups);
+    }
+  });
+
   // Re-scan disk whenever the sidebar opens, so a session another client created
   // (or the agent itself) shows up without a reload.
   $effect(() => {
@@ -813,6 +869,8 @@
     {:else}
       {#each filteredGroups as g (g.cwd)}
         {@const groupState = store.groupAttention(g.items.map((i) => i.sessionId))}
+        {@const split = splitGroup(g.items, query.trim() ? 0 : SESSIONS_PER_GROUP, store.pinnedSidebarIds)}
+        {@const isExpanded = !!expandedGroups[g.cwd] || !split.hidden.length}
         <section class="group">
           <div class="group-head">
             <button
@@ -846,7 +904,7 @@
               {#each groupDraftsFor(g.cwd) as d (d.key)}
                 <li class="row-wrap">{@render draftRow(d, false)}</li>
               {/each}
-              {#each g.items as s (s.path)}
+              {#each (isExpanded ? g.items : split.visible) as s (s.path)}
                 {@const st = store.sessionStatus(s.sessionId)}
                 {@const activity = store.sessionActivity(s.sessionId)}
                 {@const rel = compactTime(s.updatedAt, now)}
@@ -997,6 +1055,28 @@
                   {/if}
                 </li>
               {/each}
+              {#if split.hidden.length && !isExpanded}
+                <li class="row-wrap">
+                  <button
+                    class="show-more"
+                    data-testid="show-more-sessions"
+                    onclick={() => toggleExpanded(g.cwd)}
+                  >
+                    Show {split.hidden.length} more
+                  </button>
+                </li>
+              {/if}
+              {#if isExpanded && split.hidden.length}
+                <li class="row-wrap">
+                  <button
+                    class="show-more"
+                    data-testid="show-less-sessions"
+                    onclick={() => toggleExpanded(g.cwd)}
+                  >
+                    Show less
+                  </button>
+                </li>
+              {/if}
             </ul>
           {/if}
         </section>
@@ -1573,6 +1653,29 @@
     margin: 0 0 2px;
     padding: 0 3px 0 7px;
   }
+  /* "Show N more" / "Show less" — plain text, no border/background; dimmed at rest,
+     brighter on hover (per issue #35). Aligns its text with session titles: the .row
+     leading gutter is padding-left:4px + .lead width:15px + gap:7px = 26px, and the
+     <ul> already contributes 7px of that via its own padding-left. */
+  .show-more {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    padding: 4px 8px 4px 26px;
+    color: var(--text-faint);
+    font-size: 11.5px;
+    cursor: pointer;
+  }
+  .show-more:hover {
+    color: var(--text-muted);
+  }
+  .show-more:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    border-radius: var(--radius-xs);
+  }
   /* A row plus its overflow (⋯) trigger. The ⋯ overlays the row's right edge on hover
      rather than reserving a column, so the title keeps the full width. */
   .row-line {
@@ -1967,6 +2070,11 @@
     .row {
       min-height: 48px;
       border: 0;
+    }
+    .show-more {
+      min-height: 44px;
+      display: flex;
+      align-items: center;
     }
     .rename :global(button) {
       min-height: 44px;
