@@ -2,10 +2,10 @@ import { expect, test } from "@playwright/test";
 import { gotoFresh } from "./helpers.js";
 
 // The header hamburgers (sidebar-toggle / context-toggle) were removed, and so were the
-// mid-edge pop-in tabs that replaced them; a collapsed sidebar now reopens from a chevron
-// in the header's own top row (StatusHeader) or its hotkey (⌘B / ⌘⇧J). Both sidebars
+// mid-edge pop-in tabs that replaced them; a collapsed sidebar now reopens from a panel
+// icon in the header's own top row (StatusHeader) or its hotkey (⌘B / ⌘⇧J). Both sidebars
 // default OPEN on desktop, so these tests collapse one first via its own in-panel control,
-// then exercise the header chevron.
+// then exercise the header panel icon.
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
@@ -27,7 +27,7 @@ test("both sidebars are visible by default on desktop", async ({ page }) => {
   );
 });
 
-test("collapsing the left sidebar reveals a header arrow that reopens it", async ({
+test("collapsing the left sidebar reveals a header panel icon that reopens it", async ({
   page,
 }) => {
   const sidebar = page.getByTestId("sidebar");
@@ -35,19 +35,23 @@ test("collapsing the left sidebar reveals a header arrow that reopens it", async
   const open = page.getByTestId("sidebar-open");
 
   await expect(open).toHaveCount(0);
-  // IconButton normalizes raw SVG children, but a nested Chevron owns its explicit
-  // size and must not be expanded to the button's inherited icon font-size.
-  const collapseChevron = collapse.locator(".chevron svg");
-  await expect(collapseChevron).toHaveAttribute("width", "11");
-  await expect(collapseChevron).toHaveCSS("width", "11px");
+  // The panel icon is wrapped in a span (not a direct child of .icon-btn), so it
+  // keeps its explicit size and isn't expanded to the button's inherited font-size.
+  // AC.1: the left-sidebar collapse button shows a panel-left icon (divider at x=9).
+  const collapseIcon = collapse.locator("svg");
+  await expect(collapseIcon).toHaveAttribute("width", "15");
+  await expect(collapseIcon).toHaveCSS("width", "15px");
+  await expect(collapse.locator("line")).toHaveAttribute("x1", "9");
   const collapseBox = await collapse.boundingBox();
   await collapse.click();
   await expect(sidebar).toHaveAttribute("data-open", "false");
 
   await expect(open).toBeVisible();
   await expect(open).toHaveAttribute("title", /^Show sessions/);
+  // AC.2: the "Show sessions" reopen button shows a panel-left icon (divider at x=9).
+  await expect(open.locator("line")).toHaveAttribute("x1", "9");
 
-  // The sidebar's collapse chevron sits at its trailing edge, so this one can't share
+  // The sidebar's collapse toggle sits at its trailing edge, so this one can't share
   // its x — but it shares the top row, which is what makes collapse/expand a click
   // back and forth near the same corner rather than a hunt down the screen edge.
   const openBox = await open.boundingBox();
@@ -57,11 +61,11 @@ test("collapsing the left sidebar reveals a header arrow that reopens it", async
 
   await open.click();
   await expect(sidebar).toHaveAttribute("data-open", "true");
-  // The arrow itself disappears again once its sidebar is open.
+  // The toggle itself disappears again once its sidebar is open.
   await expect(open).toHaveCount(0);
 });
 
-test("collapsing the context panel reveals a header arrow that reopens it, in place", async ({
+test("collapsing the context panel reveals a header panel icon that reopens it, in place", async ({
   page,
 }) => {
   const panel = page.getByTestId("right-sidebar");
@@ -69,12 +73,22 @@ test("collapsing the context panel reveals a header arrow that reopens it, in pl
   const open = page.getByTestId("context-open");
 
   await expect(open).toHaveCount(0);
+  // AC.3 (desktop): the right-sidebar collapse button shows a panel-right icon
+  // (divider at x=15).
+  await expect(collapse.locator("line")).toHaveAttribute("x1", "15");
   const collapseBox = await collapse.boundingBox();
   await collapse.click();
   await expect(panel).toHaveAttribute("data-open", "false");
 
   await expect(open).toBeVisible();
   await expect(open).toHaveAttribute("data-tip-title", /^Show context panel/);
+  // AC.4 (desktop): the context-open reopen button shows a panel-right icon (x=15).
+  await expect(open.locator(".chevron-desktop line")).toHaveAttribute("x1", "15");
+  // AC.6: the desktop icon wrapper is not mirrored (no scaleX(-1) transform).
+  await expect(open.locator(".chevron-desktop")).not.toHaveCSS(
+    "transform",
+    /matrix/,
+  );
 
   // Same pixel as the collapse control it replaced — so collapse/expand/collapse
   // is a repeatable click on one spot, not a hunt for a mid-edge tab.

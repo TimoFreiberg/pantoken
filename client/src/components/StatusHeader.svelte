@@ -3,7 +3,7 @@
   import { sessionSubtitle } from "../lib/session-subtitle.js";
   import GoalBadge from "./GoalBadge.svelte";
   import IconButton from "./ui/IconButton.svelte";
-  import Chevron from "./ui/Chevron.svelte";
+  import SidebarPanelIcon from "./ui/SidebarPanelIcon.svelte";
 
   let hotkeyN = $state(0);
 
@@ -120,9 +120,9 @@
      desktop/capabilities/window-drag.json. -->
 <header class="hdr" data-tauri-drag-region="deep">
   <!-- Reopen the collapsed sessions sidebar, from the header's leading edge — the top-left
-       corner the sidebar occupied. Unlike the context panel's chevron this can't land on the
+       corner the sidebar occupied. Unlike the context panel's toggle this can't land on the
        exact pixel of the control that collapsed it: the sidebar keeps its own collapse
-       chevron at its trailing edge (its top-left is reserved for the macOS traffic lights),
+       toggle at its trailing edge (its top-left is reserved for the macOS traffic lights),
        ~200px right of here. Same top row, though, so it's still a click-back-and-forth. -->
   {#if !store.sidebarOpen}
     <div class="sidebar-open-wrap">
@@ -133,7 +133,7 @@
         aria-label="Show sessions"
         onclick={() => store.openSidebar()}
       >
-        <Chevron open={false} />
+        <SidebarPanelIcon side="left" />
         <span class="sidebar-open-label">Show sessions</span>
       </IconButton>
       {#if store.sidebarNoticeCount > 0}
@@ -209,11 +209,10 @@
     </span>
     {/if}
     <!-- Reopen the collapsed context panel. Lives flush at the header's trailing
-         edge — i.e. exactly where the panel's own collapse chevron sits once it's
+         edge — i.e. exactly where the panel's own collapse control sits once it's
          open — so collapse/expand is the same pixel, clickable back and forth.
-         Hidden while drafting: the panel itself is unmounted there. The Chevron's
-         one shipped orientation points right (its "closed" pose); mirror it so it
-         points back toward the panel it summons. -->
+         Hidden while drafting: the panel itself is unmounted there. The
+         panel-right icon faces the panel it summons. -->
     {#if !store.rightSidebarOpen && !drafting}
       <IconButton
         class={contextCount === 0 ? "context-entry context-empty" : "context-entry"}
@@ -223,17 +222,12 @@
         aria-label="Show context panel"
         onclick={() => store.openRightSidebar()}
       >
-        <!-- Desktop: the trailing-edge chevron, same pixel as the panel's collapse
-             control. Phone: a panel glyph + count bubble — the chevron reads as
-             "nudge something in from the edge", which is wrong for a full-screen
-             view, and the badge is the whole point of the entry. CSS swaps them
-             on the 859px breakpoint. -->
-        <span class="chevron-mirror"><Chevron open={false} /></span>
+        <!-- Desktop: the trailing-edge panel icon, same pixel as the panel's collapse
+             control. Phone: a panel glyph + count bubble — the badge is the whole
+             point of the entry. CSS swaps them on the 859px breakpoint. -->
+        <span class="chevron-desktop"><SidebarPanelIcon side="right" /></span>
         <span class="ctx-glyph">
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <line x1="15" y1="3" x2="15" y2="21" />
-          </svg>
+          <SidebarPanelIcon side="right" />
           {#if contextCount > 0}
             <span class="ctx-badge" data-testid="context-badge">{contextCount}</span>
           {/if}
@@ -351,11 +345,10 @@
     gap: 10px;
     flex-shrink: 0;
   }
-  .chevron-mirror {
+  .chevron-desktop {
     display: inline-flex;
-    transform: scaleX(-1);
   }
-  /* Context entry: chevron on desktop, panel glyph + count bubble on phone. */
+  /* Context entry: panel icon on desktop (no badge), panel glyph + count bubble on phone. */
   .ctx-glyph {
     display: none;
     position: relative;
@@ -403,7 +396,7 @@
     :global(.context-entry.context-empty) {
       display: none;
     }
-    .chevron-mirror {
+    .chevron-desktop {
       display: none;
     }
     .ctx-glyph {

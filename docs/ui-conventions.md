@@ -42,6 +42,11 @@ Two primitives, shared everywhere — don't hand-roll alternatives.
     plain class can't reach a child component's scoped element without
     `:global`.
   - Reference design: the sidebar project caret.
+- **Panel toggle glyph:** `client/src/components/ui/SidebarPanelIcon.svelte`
+  (stroked SVG). A static, directionless panel-left/panel-right icon for the
+  sidebar *show/hide* toggle buttons (not inline disclosure — that's `Chevron`
+  above). The `side` prop controls divider position (`"left"` for sessions,
+  `"right"` for context).
 - **Open/close animation:** `transition:reveal` from
   `client/src/lib/transitions.js` — a `slide` wrapper that honours
   `prefers-reduced-motion`. Don't call `slide` directly; always go

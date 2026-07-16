@@ -94,7 +94,7 @@ test("the context panel closes via its own control and reopens via the header ar
   await page.getByRole("button", { name: "Collapse context panel" }).click();
   await expect(panel).toHaveAttribute("data-open", "false");
 
-  // Reopen via the header chevron.
+  // Reopen via the header panel icon.
   await page.getByTestId("context-open").click();
   await expect(panel).toHaveAttribute("data-open", "true");
 });

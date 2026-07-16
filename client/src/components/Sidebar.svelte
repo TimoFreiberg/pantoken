@@ -16,6 +16,7 @@
   const RING_THRESHOLD = 66;
   import IconButton from "./ui/IconButton.svelte";
   import Chevron from "./ui/Chevron.svelte";
+  import SidebarPanelIcon from "./ui/SidebarPanelIcon.svelte";
   import PullIndicator from "./PullIndicator.svelte";
   import SidebarNotice from "./SidebarNotice.svelte";
   import { pullToRefresh } from "../lib/pull-to-refresh.js";
@@ -705,7 +706,7 @@
       title="Collapse sidebar (⌘B)"
       aria-label="Collapse sidebar"
       onclick={() => store.closeSidebar()}>
-      <Chevron open={true} />
+      <SidebarPanelIcon side="left" />
     </IconButton>
     <IconButton
       class="collapse-toggle mobile-close"

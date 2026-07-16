@@ -73,7 +73,7 @@ export async function openSettings(
 }
 
 /** Ensure the session sidebar is open. Desktop opens by default; the phone view
- *  needs the header's leading-edge chevron (the header hamburger was removed — this is now
+ *  needs the header's leading-edge panel icon (the header hamburger was removed — this is now
  *  the only click affordance, besides ⌘B). Driven off `data-open` (the view stays
  *  mounted off-screen, so visibility checks are unreliable). */
 export async function openSidebar(page: Page): Promise<void> {
