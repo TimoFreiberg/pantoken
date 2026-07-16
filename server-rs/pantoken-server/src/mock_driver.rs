@@ -4056,6 +4056,18 @@ impl PantokenDriver for MockDriver {
                 });
                 return;
             }
+            // Simulate a session arriving externally (e.g. the daemon creates one
+            // out-of-band) WITHOUT emitting a SessionDriverEvent — emitting would set
+            // `session_list_dirty` and trigger a live-refresh rebroadcast, so only a
+            // client-side `listSessions` poll surfaces the new row.
+            "newsession" => {
+                let mut sessions = self.sessions.lock();
+                sessions.insert(0, SessionListEntry {
+                    display_name: Some("External session".into()),
+                    ..new_session_entry("external-session", WORKSPACE_PATH)
+                });
+                return;
+            }
             _ => {
                 warn!("[mock] run_script: {name} (not yet implemented)");
                 return;

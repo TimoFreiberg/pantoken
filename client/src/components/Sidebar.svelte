@@ -635,6 +635,16 @@
     if (store.sidebarOpen) store.refreshSessions();
   });
 
+  // Periodically re-fetch the session list while the sidebar is open, so new
+  // sessions (created externally or by the daemon) and title changes appear
+  // without a click. The server's dirty-flag ticker only fires for events on
+  // pantoken's own SSE stream, so a client-side poll closes the gap.
+  $effect(() => {
+    if (!store.sidebarOpen) return;
+    const id = setInterval(() => store.refreshSessions(), 10_000);
+    return () => clearInterval(id);
+  });
+
   // A reactive clock for the relative row timestamps ("7m ago"). Minute-resolution
   // labels go stale as the minute rolls over, so re-stamp `now` once a minute. Gated
   // on the sidebar being open (no point re-rendering a hidden drawer) and refreshed
