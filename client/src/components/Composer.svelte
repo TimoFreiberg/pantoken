@@ -1725,7 +1725,9 @@
     flex-shrink: 0;
     width: 36px;
     height: 36px;
-    border-radius: 50%;
+    /* Squircle: a percentage (not a fixed-px token) so the corner radius
+       scales proportionally with the button (36px desktop → 44px touch). */
+    border-radius: 35%;
     border: 1px solid transparent;
     background: var(--accent-soft);
     color: var(--accent-hover);
