@@ -65,42 +65,61 @@ pub fn detect_vcs(repo_dir: impl AsRef<Path>) -> Option<Vcs> {
 }
 
 /// Pure: plan the worktree path + the command to create it. The worktree is a
-/// sibling dir of the repo.
-pub fn plan_worktree(repo_dir: impl AsRef<Path>, vcs: Vcs, id: &str) -> WorktreePlan {
+/// sibling dir of the repo. When `base_branch` is `Some`, the worktree is based
+/// on that branch: jj uses `-r <branch>`, git appends the branch as a commit-ish.
+pub fn plan_worktree(
+    repo_dir: impl AsRef<Path>,
+    vcs: Vcs,
+    id: &str,
+    base_branch: Option<&str>,
+) -> WorktreePlan {
     let base = resolve_lexical(repo_dir.as_ref());
     let name = format!("pantoken-{id}");
     let path = format!("{base}-{id}");
 
     match vcs {
-        Vcs::Jj => WorktreePlan {
-            path: path.clone(),
-            command: "jj".to_string(),
-            args: vec![
+        Vcs::Jj => {
+            let mut args = vec![
                 "-R".to_string(),
                 base.clone(),
                 "workspace".to_string(),
                 "add".to_string(),
                 "--name".to_string(),
                 name.clone(),
+            ];
+            if let Some(branch) = base_branch {
+                args.push("-r".to_string());
+                args.push(branch.to_string());
+            }
+            args.push(path.clone());
+            WorktreePlan {
                 path,
-            ],
-            name,
-            base,
-        },
-        Vcs::Git => WorktreePlan {
-            path: path.clone(),
-            command: "git".to_string(),
-            args: vec![
+                command: "jj".to_string(),
+                args,
+                name,
+                base,
+            }
+        }
+        Vcs::Git => {
+            let mut args = vec![
                 "-C".to_string(),
                 base.clone(),
                 "worktree".to_string(),
                 "add".to_string(),
                 "--detach".to_string(),
+                path.clone(),
+            ];
+            if let Some(branch) = base_branch {
+                args.push(branch.to_string());
+            }
+            WorktreePlan {
                 path,
-            ],
-            name,
-            base,
-        },
+                command: "git".to_string(),
+                args,
+                name,
+                base,
+            }
+        }
     }
 }
 
@@ -139,21 +158,30 @@ pub fn plan_worktree_removal(meta: &WorktreeMeta, force: bool) -> WorktreeRemova
 }
 
 /// Pick a worktree plan whose sibling dir doesn't already exist.
-pub fn plan_fresh_worktree(repo_dir: impl AsRef<Path>, vcs: Vcs) -> WorktreePlan {
+pub fn plan_fresh_worktree(
+    repo_dir: impl AsRef<Path>,
+    vcs: Vcs,
+    base_branch: Option<&str>,
+) -> WorktreePlan {
     let repo_dir = repo_dir.as_ref();
     for _ in 0..10 {
-        let plan = plan_worktree(repo_dir, vcs.clone(), &random_worktree_name());
+        let plan = plan_worktree(repo_dir, vcs.clone(), &random_worktree_name(), base_branch);
         if !Path::new(&plan.path).exists() {
             return plan;
         }
     }
 
     let fallback = format!("{}-{}", random_worktree_name(), now_base36());
-    plan_worktree(repo_dir, vcs, &fallback)
+    plan_worktree(repo_dir, vcs, &fallback, base_branch)
 }
 
 /// Create an isolated worktree of `repo_dir` and return its metadata.
-pub async fn create(repo_dir: impl AsRef<Path>, id: Option<&str>) -> Result<WorktreeMeta, String> {
+/// When `base_branch` is `Some`, the worktree is based on that branch.
+pub async fn create(
+    repo_dir: impl AsRef<Path>,
+    id: Option<&str>,
+    base_branch: Option<&str>,
+) -> Result<WorktreeMeta, String> {
     let repo_dir = repo_dir.as_ref();
     let vcs = detect_vcs(repo_dir).ok_or_else(|| {
         format!(
@@ -162,8 +190,8 @@ pub async fn create(repo_dir: impl AsRef<Path>, id: Option<&str>) -> Result<Work
         )
     })?;
     let plan = match id {
-        Some(id) => plan_worktree(repo_dir, vcs.clone(), id),
-        None => plan_fresh_worktree(repo_dir, vcs.clone()),
+        Some(id) => plan_worktree(repo_dir, vcs.clone(), id, base_branch),
+        None => plan_fresh_worktree(repo_dir, vcs.clone(), base_branch),
     };
 
     run(&plan.command, &plan.args).await?;
@@ -228,6 +256,84 @@ pub async fn remove(meta: &WorktreeMeta, force: bool) -> Result<RemoveResult, St
         removed: true,
         reason: None,
     })
+}
+
+/// Pure: plan the command to list local branches of a repo.
+/// Jj: `jj -R <repo> bookmark list -T 'name ++ "\n"'` (bookmarks = branches).
+/// Git: `git -C <repo> branch --format='%(refname:short)'` (clean short names).
+pub fn plan_list_branches(repo_dir: impl AsRef<Path>, vcs: Vcs) -> (String, Vec<String>) {
+    let base = resolve_lexical(repo_dir.as_ref());
+    match vcs {
+        Vcs::Jj => (
+            "jj".to_string(),
+            vec![
+                "-R".to_string(),
+                base,
+                "bookmark".to_string(),
+                "list".to_string(),
+                "-T".to_string(),
+                "name ++ \"\\n\"".to_string(),
+            ],
+        ),
+        Vcs::Git => (
+            "git".to_string(),
+            vec![
+                "-C".to_string(),
+                base,
+                "branch".to_string(),
+                "--format=%(refname:short)".to_string(),
+            ],
+        ),
+    }
+}
+
+/// List local branches of a repo at `repo_dir`. Returns `Ok(vec![])` if the
+/// path isn't a repo (no error — just empty). Branch names are sorted and
+/// capped at 100 entries.
+pub async fn list_branches(repo_dir: impl AsRef<Path>) -> Result<Vec<String>, String> {
+    let repo_dir = repo_dir.as_ref();
+    let vcs = match detect_vcs(repo_dir) {
+        Some(vcs) => vcs,
+        None => return Ok(vec![]),
+    };
+
+    let (command, args) = plan_list_branches(repo_dir, vcs);
+    let mut cmd = Command::new(&command);
+    cmd.args(&args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let output = cmd
+        .output()
+        .await
+        .map_err(|err| format!("failed to run {command}: {err}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(format!(
+            "{command} {} failed with status {}{}{}",
+            args.join(" "),
+            output.status,
+            if stderr.is_empty() { "" } else { ": " },
+            stderr
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut branches: Vec<String> = stdout
+        .lines()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty() && line != "(no branch)")
+        .collect();
+    branches.sort();
+    branches.dedup();
+
+    // Cap at 100 entries (Q8 bound displayed data).
+    if branches.len() > 100 {
+        branches.truncate(100);
+    }
+
+    Ok(branches)
 }
 
 async fn run(command: &str, args: &[String]) -> Result<(), String> {
@@ -327,7 +433,7 @@ mod tests {
 
     #[test]
     fn plan_worktree_jj_workspace_add_at_sibling_path_with_unique_name() {
-        let p = plan_worktree("/Users/x/repo", Vcs::Jj, "abc");
+        let p = plan_worktree("/Users/x/repo", Vcs::Jj, "abc", None);
 
         assert_eq!(p.path, "/Users/x/repo-abc");
         assert_eq!(p.command, "jj");
@@ -347,7 +453,7 @@ mod tests {
 
     #[test]
     fn plan_worktree_git_detached_worktree_at_sibling_path() {
-        let p = plan_worktree("/Users/x/repo/", Vcs::Git, "xy");
+        let p = plan_worktree("/Users/x/repo/", Vcs::Git, "xy", None);
 
         assert_eq!(p.path, "/Users/x/repo-xy");
         assert_eq!(p.command, "git");
@@ -365,8 +471,48 @@ mod tests {
     }
 
     #[test]
+    fn plan_worktree_jj_with_base_branch_includes_revision_flag() {
+        let p = plan_worktree("/Users/x/repo", Vcs::Jj, "abc", Some("develop"));
+
+        assert_eq!(p.command, "jj");
+        assert_eq!(
+            p.args,
+            strings(&[
+                "-R",
+                "/Users/x/repo",
+                "workspace",
+                "add",
+                "--name",
+                "pantoken-abc",
+                "-r",
+                "develop",
+                "/Users/x/repo-abc",
+            ])
+        );
+    }
+
+    #[test]
+    fn plan_worktree_git_with_base_branch_appends_commit_ish() {
+        let p = plan_worktree("/Users/x/repo", Vcs::Git, "xy", Some("feature-x"));
+
+        assert_eq!(p.command, "git");
+        assert_eq!(
+            p.args,
+            strings(&[
+                "-C",
+                "/Users/x/repo",
+                "worktree",
+                "add",
+                "--detach",
+                "/Users/x/repo-xy",
+                "feature-x",
+            ])
+        );
+    }
+
+    #[test]
     fn plan_worktree_exposes_name_and_base_for_worktree_index() {
-        let p = plan_worktree("/Users/x/repo", Vcs::Jj, "abc");
+        let p = plan_worktree("/Users/x/repo", Vcs::Jj, "abc", None);
 
         assert_eq!(p.name, "pantoken-abc");
         assert_eq!(p.base, "/Users/x/repo");
@@ -447,7 +593,7 @@ mod tests {
         )
         .await;
 
-        let meta = create(&repo, Some("spawn")).await.unwrap();
+        let meta = create(&repo, Some("spawn"), None).await.unwrap();
         assert_eq!(meta.vcs, Vcs::Git);
         assert!(Path::new(&meta.path).is_dir());
         assert!(is_clean(&meta).await);
@@ -508,5 +654,118 @@ mod tests {
             vcs: Vcs::Git,
             name: "pantoken-xy".to_string(),
         }
+    }
+
+    #[test]
+    fn plan_list_branches_jj_command() {
+        let (cmd, args) = plan_list_branches("/Users/x/repo", Vcs::Jj);
+        assert_eq!(cmd, "jj");
+        assert_eq!(
+            args,
+            strings(&[
+                "-R",
+                "/Users/x/repo",
+                "bookmark",
+                "list",
+                "-T",
+                "name ++ \"\\n\"",
+            ])
+        );
+    }
+
+    #[test]
+    fn plan_list_branches_git_command() {
+        let (cmd, args) = plan_list_branches("/Users/x/repo", Vcs::Git);
+        assert_eq!(cmd, "git");
+        assert_eq!(
+            args,
+            strings(&["-C", "/Users/x/repo", "branch", "--format=%(refname:short)",])
+        );
+    }
+
+    #[tokio::test]
+    async fn list_branches_on_non_repo_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let branches = list_branches(dir.path()).await.unwrap();
+        assert!(branches.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_branches_git_integration_lists_sorted_branches() {
+        if Command::new("git").arg("--version").output().await.is_err() {
+            eprintln!("skipping git integration test: git executable is unavailable");
+            return;
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        git(&repo, &["init"]).await;
+        std::fs::write(repo.join("README.md"), "hello\n").unwrap();
+        git(&repo, &["add", "README.md"]).await;
+        git(
+            &repo,
+            &[
+                "-c",
+                "user.email=pantoken@example.test",
+                "-c",
+                "user.name=Pantoken Test",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        )
+        .await;
+        // Create branches. We're on the default branch (main/master).
+        git(&repo, &["branch", "develop"]).await;
+        git(&repo, &["branch", "feature-test"]).await;
+
+        let branches = list_branches(&repo).await.unwrap();
+        // Should contain the default branch + the two we created, sorted.
+        // The default branch name varies (main vs master), so just check
+        // the created ones are present and the list is sorted.
+        assert!(branches.contains(&"develop".to_string()));
+        assert!(branches.contains(&"feature-test".to_string()));
+        assert_eq!(branches, {
+            let mut sorted = branches.clone();
+            sorted.sort();
+            sorted
+        });
+    }
+
+    #[tokio::test]
+    async fn list_branches_truncates_at_100() {
+        if Command::new("git").arg("--version").output().await.is_err() {
+            eprintln!("skipping git integration test: git executable is unavailable");
+            return;
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        git(&repo, &["init"]).await;
+        std::fs::write(repo.join("README.md"), "hello\n").unwrap();
+        git(&repo, &["add", "README.md"]).await;
+        git(
+            &repo,
+            &[
+                "-c",
+                "user.email=pantoken@example.test",
+                "-c",
+                "user.name=Pantoken Test",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        )
+        .await;
+
+        // Create 101 branches (plus the default branch).
+        for i in 0..101 {
+            git(&repo, &["branch", &format!("b{i:03}")]).await;
+        }
+
+        let branches = list_branches(&repo).await.unwrap();
+        assert_eq!(branches.len(), 100);
     }
 }

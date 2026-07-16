@@ -1768,6 +1768,9 @@ pub struct MockDriver {
     /// One-shot: when set, the next `new_session()` returns no seed events then clears
     /// (armed via `run_script("failnewsession")`). Mirrors TS `failNextNewSession`.
     fail_next_new_session: Arc<AtomicBool>,
+    /// One-shot list_branches() error injector (armed via
+    /// `run_script("failbranchlist")`). The next `list_branches` returns an error.
+    fail_next_branch_list: Arc<AtomicBool>,
     /// One-shot openSession() 409 lease-conflict injector (armed via
     /// `run_script("failsession")`). Mirrors TS `failNextSession`. The next
     /// `open_session` throws the lease-conflict message (matching the real
@@ -1895,6 +1898,7 @@ impl MockDriver {
             generation: Arc::new(AtomicU64::new(0)),
             last_created: Mutex::new(None),
             fail_next_new_session: Arc::new(AtomicBool::new(false)),
+            fail_next_branch_list: Arc::new(AtomicBool::new(false)),
             fail_next_session: Arc::new(AtomicBool::new(false)),
             abort_delay_ms: AtomicU64::new(0),
             abort_settle_delay_ms: AtomicU64::new(0),
@@ -2484,11 +2488,15 @@ impl PantokenDriver for MockDriver {
         let NewSessionOptsData {
             cwd,
             worktree,
+            base_branch,
             model,
             thinking,
             facet,
             permission_monitor,
         } = opts;
+        // base_branch is accepted but unused by the mock — the mock doesn't call
+        // worktree::create; it just suffixes "-worktree" to the dir.
+        let _ = &base_branch;
         // base = cwd?.trim() || NEW_SESSION_ENTRY.cwd  (== WORKSPACE_PATH)
         let base = cwd
             .as_deref()
@@ -2772,6 +2780,28 @@ impl PantokenDriver for MockDriver {
             path: abs,
             exists,
             is_dir: exists,
+        }
+    }
+
+    async fn list_branches(&self, path: String) -> BranchList {
+        // One-shot failure injection (armed via run_script("failbranchlist")).
+        if self.fail_next_branch_list.swap(false, Ordering::SeqCst) {
+            return BranchList {
+                path,
+                branches: vec![],
+                error: Some(true),
+            };
+        }
+        // Synthetic branch list for any non-empty path (the mock's repos are
+        // fixture paths, not real repos). Gives e2e tests branches to select.
+        BranchList {
+            path,
+            branches: vec![
+                "develop".to_string(),
+                "feature-test".to_string(),
+                "main".to_string(),
+            ],
+            error: None,
         }
     }
 
@@ -3992,6 +4022,10 @@ impl PantokenDriver for MockDriver {
                 self.fail_next_new_session.store(true, Ordering::SeqCst);
                 return;
             }
+            "failbranchlist" => {
+                self.fail_next_branch_list.store(true, Ordering::SeqCst);
+                return;
+            }
             "failsession" => {
                 // Arm a one-shot openSession() 409 lease-conflict (consumed by the
                 // next switch). Faithful port of TS `runScript("failsession")`
@@ -4037,6 +4071,7 @@ impl PantokenDriver for MockDriver {
         reset_ts();
         *self.last_created.lock() = None;
         self.fail_next_new_session.store(false, Ordering::SeqCst);
+        self.fail_next_branch_list.store(false, Ordering::SeqCst);
         self.fail_next_session.store(false, Ordering::SeqCst);
         self.abort_delay_ms.store(0, Ordering::SeqCst);
         self.abort_settle_delay_ms.store(0, Ordering::SeqCst);

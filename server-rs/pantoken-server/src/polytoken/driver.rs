@@ -50,11 +50,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use pantoken_daemon_types::*;
 use pantoken_protocol::session_driver::{
-    AtRefs, BackgroundJob, CommandInfo, DirListing, FileInfo, HostUiRequest, HostUiResponse,
-    ImageContent, JobKind, JobStatusKind, ModelDefaults, ModelOption, NotifyLevel, PathStat,
-    PermissionMonitorMode, SessionClosedReason, SessionDriverEvent, SessionEventBase, SessionId,
-    SessionListEntry, SessionRef, SessionSnapshot, SessionStatus, SessionUsage, WorkspaceId,
-    WorkspaceRef, WorktreeInfo,
+    AtRefs, BackgroundJob, BranchList, CommandInfo, DirListing, FileInfo, HostUiRequest,
+    HostUiResponse, ImageContent, JobKind, JobStatusKind, ModelDefaults, ModelOption, NotifyLevel,
+    PathStat, PermissionMonitorMode, SessionClosedReason, SessionDriverEvent, SessionEventBase,
+    SessionId, SessionListEntry, SessionRef, SessionSnapshot, SessionStatus, SessionUsage,
+    WorkspaceId, WorkspaceRef, WorktreeInfo,
 };
 use pantoken_protocol::wire::{DeliveryMode, LoginEnvStatus, McpAction, SessionAction};
 use parking_lot::{Mutex, RwLock};
@@ -2299,7 +2299,7 @@ impl PantokenDriver for PolytokenDriver {
         // worktree dir + store entry leak).
         let mut created_worktree: Option<WorktreeMeta> = None;
         if opts.worktree.unwrap_or(false) {
-            let meta = worktree::create(&cwd, None).await?;
+            let meta = worktree::create(&cwd, None, opts.base_branch.as_deref()).await?;
             self.inner.worktree_store.lock().add(meta.clone());
             cwd = meta.path.clone();
             created_worktree = Some(meta);
@@ -2810,6 +2810,24 @@ impl PantokenDriver for PolytokenDriver {
             exists: p.exists(),
             is_dir: p.is_dir(),
             path: resolved,
+        }
+    }
+
+    async fn list_branches(&self, path: String) -> BranchList {
+        match worktree::list_branches(&path).await {
+            Ok(branches) => BranchList {
+                path,
+                branches,
+                error: None,
+            },
+            Err(e) => {
+                warn!("list_branches failed for {path}: {e}");
+                BranchList {
+                    path,
+                    branches: vec![],
+                    error: Some(true),
+                }
+            }
         }
     }
 
