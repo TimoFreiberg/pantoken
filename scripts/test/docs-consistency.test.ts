@@ -14,4 +14,6 @@ test("launcher, wrapper, and documentation contracts stay aligned", () => {
   expect(readme).toContain("clarification phase");
   expect(readme).toContain("merge and push");
   expect(readme).toContain("Exit codes: 0=success, 2=conflicts, 1=error");
+  expect(justfile).toContain("scripts/cleanup-workspace.sh {{workspace-name}}");
+  expect(readme).toContain("cleanup-workspace");
 });

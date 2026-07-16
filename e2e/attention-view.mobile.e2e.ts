@@ -74,6 +74,13 @@ test("opening phone navigation minimizes attention without stranding history", a
   page,
 }) => {
   await drive(page, "confirm");
+  // Wait for the approval to land before opening the sidebar: the mock streams
+  // asynchronously, and if the sidebar opens first, the late-arriving approval
+  // fires the attention effect which resets mobileView to "transcript" and
+  // closes the sidebar.
+  await expect(
+    page.getByRole("dialog", { name: "Run destructive command?" }),
+  ).toBeVisible();
   await page
     .getByTestId("sidebar-open")
     .evaluate((button) => (button as HTMLButtonElement).click());

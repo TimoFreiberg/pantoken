@@ -13,3 +13,8 @@ implement-issue *args:
 # Exit codes: 0=success, 2=conflicts (lock held, resolve and retry), 1=error
 integrate-into-main issue-number:
     scripts/integrate-into-main.sh {{issue-number}}
+
+# Forget a jj workspace and delete its directory (guards against dirty/unpushed).
+# Usage: just cleanup-workspace <workspace-name>
+cleanup-workspace workspace-name:
+    scripts/cleanup-workspace.sh {{workspace-name}}

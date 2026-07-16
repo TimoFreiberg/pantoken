@@ -155,7 +155,7 @@ _release_stale_claim() {
   # Clean up orphaned workspace (lock already held — safe to do I/O here)
   local repo_root="${PANTOKEN_REPO_ROOT:-/Users/timo/src/pantoken}"
   local ws_name="issue-$issue_number"
-  local ws_dir="$repo_root/../pantoken-issue-$issue_number"
+  local ws_dir="$repo_root/.workspaces/issue-$issue_number"
   if [ -d "$ws_dir" ]; then
     # Forget the workspace from jj, then remove the directory
     cd "$repo_root" 2>/dev/null && jj workspace forget "$ws_name" 2>/dev/null || true
