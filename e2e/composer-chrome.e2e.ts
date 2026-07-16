@@ -294,6 +294,22 @@ test("send button is enabled when idle and the composer is empty", async ({
   await expect(sendButton(page)).not.toBeDisabled();
 });
 
+test("send button is a squircle, not a perfect circle", async ({ page }) => {
+  const send = sendButton(page);
+  const { widthPx, borderRadius } = await send.evaluate((el) => {
+    const css = getComputedStyle(el);
+    return { widthPx: css.width, borderRadius: css.borderRadius };
+  });
+  // A perfect circle is border-radius: 50% (= width/2 in px). A squircle is
+  // strictly less. Chromium keeps the percentage as-is in computed style
+  // (e.g. "35%") rather than resolving to px, so handle both forms.
+  const radius = parseFloat(borderRadius);
+  const circleThreshold = borderRadius.endsWith("%")
+    ? 50
+    : parseFloat(widthPx) / 2;
+  expect(radius).toBeLessThan(circleThreshold);
+});
+
 test("enabled send uses quiet inactive chrome and highlights on composer focus", async ({
   page,
 }) => {
