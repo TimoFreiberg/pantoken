@@ -108,7 +108,7 @@
     max-width: var(--maxw);
     width: 100%;
     margin: 0 auto;
-    padding: 4px 18px 10px;
+    padding: 4px 44px 10px;
     animation: fade 0.2s ease;
     display: flex;
     align-items: center;
@@ -123,6 +123,21 @@
     padding: 5px 14px;
     border-radius: 999px;
     flex-shrink: 0;
+    transition:
+      background 0.15s,
+      border-color 0.15s,
+      transform 0.1s;
+  }
+  .stop:not(:disabled):hover {
+    border-color: color-mix(in srgb, var(--danger) 65%, transparent);
+    background: color-mix(in srgb, var(--danger) 18%, transparent);
+  }
+  .stop:not(:disabled):active {
+    transform: scale(0.96);
+  }
+  .stop:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
   /* Offline: a remote turn can't be stopped from a dead socket, so the pill reads inert
      rather than inviting a dead click (the offline banner explains the agent keeps going). */
@@ -140,7 +155,7 @@
     user-select: none;
   }
   .tokens::before,
-  .elapsed::before {
+  .stop + .elapsed::before {
     content: "·";
     margin: 0 7px 0 3px;
     opacity: 0.6;
@@ -154,6 +169,11 @@
     .stop {
       min-width: 44px;
       min-height: 44px;
+    }
+  }
+  @media (max-width: 859px) {
+    .wrap {
+      padding-inline: 16px;
     }
   }
 </style>
