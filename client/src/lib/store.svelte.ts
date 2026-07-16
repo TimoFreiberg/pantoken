@@ -1785,15 +1785,6 @@ class PantokenStore {
   requestAppUpdate(): void {
     if (send({ type: "applyUpdate" })) notifyNativeUpdateStarting();
   }
-  /** Force an update check now (the build-stamp right-click menu) — for clicking right
-   *  after publishing a release, before the updater's next periodic check has noticed.
-   *  Unlike requestAppUpdate this isn't a no-op when nothing is staged: the updater
-   *  checks and applies on its next poll if a new version exists. Feedback is the
-   *  restart/reconnect (and a new build hash); a no-op force (already current) shows
-   *  nothing. */
-  requestForceUpdate(): void {
-    send({ type: "forceUpdate" });
-  }
   /** Resume after a run-failed: send a minimal "continue" signal. The prior prompt
    *  was already accepted by the daemon (runFailed only fires after the turn
    *  started — message_start → message_complete with a turn error), so re-sending

@@ -10,8 +10,6 @@ export const buildFullHash = __BUILD_FULL_HASH__;
 // tag was resolvable at build time.
 export const buildTag = __BUILD_TAG__;
 
-// Compact version label for the sidebar footer, e.g. "v0.2.15 · 4b56b3b · 2026-06-18".
-// Drops the tag/date pieces that weren't resolvable at build time (hash is then "dev").
-export const buildLabel = [buildTag, buildHash, buildDate]
-  .filter(Boolean)
-  .join(" · ");
+// Compact version label for the sidebar footer: the release tag, or the short
+// hash when no tag is resolvable (feature branches, detached HEAD, etc.).
+export const buildVersion = buildTag || buildHash;
