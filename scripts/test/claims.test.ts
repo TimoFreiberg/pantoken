@@ -141,4 +141,29 @@ describe("claims.sh", () => {
     const claims = readClaims() as { claims: unknown[] };
     expect(claims.claims).toHaveLength(1);
   });
+
+  test("recover_stale_claims removes workspace dir at .workspaces/issue-<N> (AC.8)", () => {
+    // Use a temp dir as PANTOKEN_REPO_ROOT so we can verify the path fix
+    // ($repo_root/.workspaces/issue-$N instead of the old
+    //  $repo_root/../pantoken-issue-$N).
+    const repoRoot = mkdtempSync(join(process.env.TMPDIR || "/tmp", "stale-ws-test-"));
+    const wsDir = join(repoRoot, ".workspaces", "issue-23");
+    mkdirSync(wsDir, { recursive: true });
+    writeFileSync(join(wsDir, "marker.txt"), "stale\n");
+    expect(existsSync(wsDir)).toBe(true);
+
+    runClaimsFn("claim_issue", ["23"]);
+    runClaimsFn("update_claim_session", ["23", "dead-session"]);
+    const result = runClaimsFn("recover_stale_claims", [], { PANTOKEN_REPO_ROOT: repoRoot });
+    expect(result.exitCode).toBe(0);
+
+    // The claim is released
+    const claims = readClaims() as { claims: unknown[] };
+    expect(claims.claims).toHaveLength(0);
+
+    // The workspace directory was removed
+    expect(existsSync(wsDir)).toBe(false);
+
+    rmSync(repoRoot, { recursive: true, force: true });
+  });
 });

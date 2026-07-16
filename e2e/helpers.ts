@@ -11,7 +11,15 @@ export async function gotoFresh(page: Page): Promise<void> {
   // session-switch assertions. Scoped to this one key (drafts/theme/etc. persist).
   // addInitScript runs before each navigation in this page's lifetime — once per test,
   // no extra reload.
-  page.addInitScript(() => localStorage.removeItem("pantoken.scrollPositions"));
+  page.addInitScript(() => {
+    localStorage.removeItem("pantoken.scrollPositions");
+    // Prior tests push overlay history entries (pantokenOverlay markers) via
+    // history.pushState. page.goto to the same URL doesn't discard those entries,
+    // so a subsequent page.goBack() can land on a stale marker or about:blank.
+    // Replace the current entry with a clean state so the app boots from a known
+    // history position.
+    history.replaceState(null, "", location.href);
+  });
   await page.goto("/?dev");
   // The final text starts rendering before the fixture emits runCompleted. Wait for
   // the settled work block instead: its appearance proves the turn finished and the
@@ -78,6 +86,12 @@ export async function openSettings(
  *  mounted off-screen, so visibility checks are unreliable). */
 export async function openSidebar(page: Page): Promise<void> {
   const sidebar = page.getByTestId("sidebar");
+  // A just-changed viewport can briefly toggle the sidebar state: on phone→desktop
+  // the sidebarOpen getter switches from mobileView to the persisted desktop
+  // preference, which may open or close it. Wait one frame for the resize handler
+  // to settle before deciding whether the button is needed, so it doesn't detach
+  // mid-click.
+  await page.waitForTimeout(50);
   if ((await sidebar.getAttribute("data-open")) !== "true")
     await page.getByTestId("sidebar-open").click();
   await expect(sidebar).toHaveAttribute("data-open", "true");

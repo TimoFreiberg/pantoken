@@ -71,7 +71,10 @@ test("opening a draft highlights only the draft — the previously focused sessi
   await expect(sidebar.locator("button.row.active")).toHaveCount(1);
 
   // Canceling the draft (back to the focused session) restores its highlight.
-  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  // Drafts are canceled with Escape (the old hero Cancel button was removed when
+  // the new-session composer was centered — see mvzutsvywlkt).
+  await draftBox(page).focus();
+  await page.keyboard.press("Escape");
   await expect(focusedRow).toHaveClass(/\bactive\b/);
   await expect(sidebar.locator("button.row.active")).toHaveCount(1);
 });

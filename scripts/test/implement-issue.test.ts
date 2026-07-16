@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractImageUrls, imageExtension, parseDaemonOutput, parseIssueReference, plannedCommands, renderPrompt } from "../implement-issue";
+import { extractImageUrls, imageExtension, parseDaemonOutput, parseIssueReference, plannedCommands, renderPrompt, zellijCleanupCommand } from "../implement-issue";
 
 describe("implement-issue helpers", () => {
   test("parses supported issue references and rejects ambiguity", () => {
@@ -31,7 +31,7 @@ describe("implement-issue helpers", () => {
     const cmds = plannedCommands({ number: 42, url: "x", input: "42" }, "/repo/root");
     const wsAdd = cmds[0]!;
     expect(wsAdd.slice(0, 3)).toEqual(["jj", "workspace", "add"]);
-    expect(wsAdd).toContain("/repo/root/.workspaces/pantoken-issue-42");
+    expect(wsAdd).toContain("/repo/root/.workspaces/issue-42");
     expect(wsAdd).toContain("--revision");
     expect(wsAdd).toContain("main");
     const polytokenNew = cmds[2]!;
@@ -45,5 +45,37 @@ describe("implement-issue helpers", () => {
   test("renders hostile multiline issue data without shell interpolation", () => {
     const issue = { number: 4, input: "4", url: "https://github.com/TimoFreiberg/pantoken/issues/4", title: "quotes ' \" \\", body: "line 1\n{{ISSUE_TITLE}}\n日本語" };
     expect(renderPrompt("{{ISSUE_TITLE}}\n{{ISSUE_BODY}}\n{{ISSUE_IMAGES}}", issue, [], false)).toContain(issue.body);
+  });
+
+  test("zellijCleanupCommand builds correct cleanup string and args (AC.6)", () => {
+    const result = zellijCleanupCommand("abc", "/path/to/claims.sh", 42, "123", "/tmp/context", "/scripts");
+    expect(result.command).toBe("sh");
+    // args[0] = -c, args[1] = sh -c string, args[2] = "--", args[3..] = positional params
+    const shString = result.args[1]!;
+    // Invokes the cleanup script via bash "$6"
+    expect(shString).toContain('bash "$6"');
+    // Correct workspace name
+    expect(shString).toContain("issue-42");
+    // Cleanup failure is non-fatal
+    expect(shString).toContain("|| echo");
+    // Exits with the TUI's original status
+    expect(shString).toContain("exit $status");
+    // exit $status is the final command
+    expect(shString.lastIndexOf("exit $status")).toBe(shString.length - "exit $status".length);
+
+    // Positional args: $1..$6
+    const positional = result.args.slice(3);
+    expect(positional[0]).toBe("abc");           // $1 = sessionId
+    expect(positional[1]).toBe("/path/to/claims.sh"); // $2 = claims.sh
+    expect(positional[2]).toBe("42");            // $3 = issue number
+    expect(positional[3]).toBe("123");           // $4 = daemon PID
+    expect(positional[4]).toBe("/tmp/context");  // $5 = context path
+    expect(positional[5]).toBe("/scripts/cleanup-workspace.sh"); // $6 = script path
+  });
+
+  test("zellijCleanupCommand handles undefined daemonPid as 0 (AC.6)", () => {
+    const result = zellijCleanupCommand("s", "/c", 7, undefined, "/ctx", "/sd");
+    const positional = result.args.slice(3);
+    expect(positional[3]).toBe("0"); // $4 = daemon PID defaults to "0"
   });
 });

@@ -244,8 +244,20 @@ test("short desktop rails share their surface and retain compact scrolling geome
 }) => {
   await drive(page, "context");
 
-  const leftRail = page.getByTestId("sidebar");
+  // The context script pushes flags/jobs/todos over the WS asynchronously, and the
+  // right rail auto-opens once that data lands. Wait for the content to actually
+  // render before measuring geometry — otherwise an empty .content (scrollHeight
+  // === clientHeight) can race the assertion when this test runs in a batch.
   const rightRail = page.getByTestId("right-sidebar");
+  await expect(rightRail).toHaveAttribute("data-open", "true");
+  // Wait for the list items, not just the section shells: a <section> can be
+  // "visible" (displayed, empty) before its WS data renders. The items prove the
+  // flags (3 files), jobs (3), and todos (3) all arrived and laid out.
+  await expect(rightRail.locator(".file-item")).toHaveCount(3);
+  await expect(rightRail.locator(".job-item")).toHaveCount(3);
+  await expect(rightRail.locator(".todo-item")).toHaveCount(3);
+
+  const leftRail = page.getByTestId("sidebar");
   const [leftStyle, rightStyle] = await Promise.all([
     leftRail.evaluate((element) => {
       const style = getComputedStyle(element);

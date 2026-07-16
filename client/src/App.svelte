@@ -415,7 +415,9 @@
       {#if !store.draft}
         <AttentionShelf />
       {/if}
-      <Composer />
+      {#if !store.draft}
+        <Composer />
+      {/if}
       {#if !store.draft}
         <ApprovalLayer />
       {/if}

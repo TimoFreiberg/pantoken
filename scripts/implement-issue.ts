@@ -68,8 +68,47 @@ export function parseDaemonOutput(output: string, structured?: { session_id?: st
 }
 
 export function plannedCommands(issue: IssueReference, repoRoot: string): string[][] {
-  const ws = resolve(repoRoot, ".workspaces", `pantoken-issue-${issue.number}`);
+  const ws = resolve(repoRoot, ".workspaces", `issue-${issue.number}`);
   return [["jj", "workspace", "add", ws, "--name", `issue-${issue.number}`, "--revision", "main"], ["bun", "install"], ["polytoken", "new", "--no-attach"], ["zellij", "action", "new-tab", "--cwd", ws, "--", "polytoken", "attach", "<session_id>"]];
+}
+
+/**
+ * Build the zellij post-exit cleanup command as a pure function (unit-testable).
+ *
+ * The `sh -c` string runs after the TUI exits ($? is captured into $status):
+ *   1. Attach to the polytoken session (the TUI itself — exit code captured).
+ *   2. Release the issue claim.
+ *   3. Kill the daemon if a PID was provided.
+ *   4. Remove the context directory ($5).
+ *   5. Attempt workspace cleanup via cleanup-workspace.sh ($6); if it fails
+ *      (dirty/unpushed), print a message but do NOT alter $status (the TUI
+ *      exit code) — the `|| echo` guard ensures cleanup failure is non-fatal.
+ *   6. Exit with the TUI's original status.
+ *
+ * Positional args ($1..$6):
+ *   $1 = sessionId
+ *   $2 = claims.sh path (sourced for init_claims + release_claim)
+ *   $3 = issue number
+ *   $4 = daemon PID (or "0" if none)
+ *   $5 = context directory path
+ *   $6 = cleanup-workspace.sh path
+ */
+export function zellijCleanupCommand(
+  sessionId: string,
+  claimsPath: string,
+  issueNumber: number,
+  daemonPid: string | undefined,
+  contextPath: string,
+  scriptDir: string,
+): { command: string; args: string[] } {
+  const wsName = `issue-${issueNumber}`;
+  const cleanupScript = join(scriptDir, "cleanup-workspace.sh");
+  const cleanupPart = `bash "$6" "${wsName}" || echo "Workspace retained (uncommitted or unpushed changes). Clean up later: just cleanup-workspace ${wsName}" >&2`;
+  const shString = `polytoken attach "$1"; status=$?; source "$2"; init_claims; release_claim "$3"; if [ "$4" != 0 ]; then kill "$4" 2>/dev/null || true; fi; rm -rf "$5"; ${cleanupPart}; exit $status`;
+  return {
+    command: "sh",
+    args: ["-c", shString, "--", sessionId, claimsPath, String(issueNumber), daemonPid ?? "0", contextPath, cleanupScript],
+  };
 }
 
 export const bunCommandRunner: CommandRunner = async (command, args, options = {}) => {
@@ -115,8 +154,8 @@ export async function runLauncher(args: string[], options: LauncherOptions = {})
   const runner = options.runner ?? bunCommandRunner; const http = options.http ?? fetch; const print = options.print ?? console.log; const dryRun = args.includes("--dry-run");
   const issue = parseIssueReference(args); const repoRoot = resolve(options.env?.PANTOKEN_REPO_ROOT ?? process.env.PANTOKEN_REPO_ROOT ?? resolve(SCRIPT_DIR, "..")); const data = await fetchIssue(issue, runner); const urls = extractImageUrls(data.body); const template = await readFile(TEMPLATE_PATH, "utf8");
   if (dryRun) { const prompt = renderPrompt(template, { ...issue, ...data }, urls.map((sourceUrl) => ({ sourceUrl, status: "failed" as const })), true); print(`DRY RUN — no filesystem, claims, downloads, or mutating commands\n\nIssue #${issue.number}: ${data.title}\n${issue.url}\n\nPlanned commands:\n${plannedCommands(issue, repoRoot).map((c) => `  ${c.join(" ")}`).join("\n")}\n\nPrompt:\n${prompt}`); return; }
-  const contextRoot = join(repoRoot, ".pantoken-issue-context"); await mkdir(contextRoot, { recursive: true }); const context = await mkdtemp(join(contextRoot, "issue-")); let claimed = false; let handedOff = false; let workspace = resolve(repoRoot, ".workspaces", `pantoken-issue-${issue.number}`); let daemonPid: string | undefined;
-  try { await claimCommand(runner, "claim_issue", issue.number); claimed = true; await mkdir(join(context, "images")); const screenshots = await downloadScreenshots(urls, join(context, "images"), http); await writeFile(join(context, "issue-body.md"), data.body); await writeFile(join(context, "manifest.json"), JSON.stringify(screenshots, null, 2)); await mkdir(join(repoRoot, ".workspaces"), { recursive: true }); await command(runner, "jj", ["workspace", "add", workspace, "--name", `issue-${issue.number}`, "--revision", "main"], { cwd: repoRoot }); await command(runner, "bun", ["install"], { cwd: workspace }); await mkdir(join(workspace, ".polytoken"), { recursive: true }); await writeFile(join(workspace, ".polytoken", "hooks.json"), await readFile(HOOKS_CONFIG_PATH, "utf8")); const spawned = await command(runner, "polytoken", ["new", "--no-attach"], { cwd: workspace }); const parsed = parseDaemonOutput(spawned.stdout); const startup = join(process.env.HOME ?? "", ".local/share/polytoken/sessions", parsed.sessionId, "startup.json"); const startupData = await waitForDaemonReady(startup); daemonPid = typeof startupData.pid === "number" ? String(startupData.pid) : undefined; await writeFile(join(workspace, ".autopilot-session-id"), parsed.sessionId); await writeFile(join(workspace, ".autopilot-issue-number"), String(issue.number)); await writeFile(join(workspace, ".autopilot-config-dir"), POLYTOKEN_CONFIG_DIR); const tokenPath = typeof startupData.credential_file_path === "string" ? startupData.credential_file_path : undefined; const token = tokenPath ? JSON.parse(await readFile(tokenPath, "utf8")).token : startupData.token; if (typeof token !== "string" || !token) throw new Error("daemon startup did not provide a credential"); const connection = { sessionId: parsed.sessionId, port: parsed.port, token, baseUrl: `http://localhost:${parsed.port}` }; await claimCommand(runner, "update_claim_session", issue.number, parsed.sessionId); await daemonRequest(connection, "/facet", { method: "POST", body: JSON.stringify({ facet: "plan" }) }, http); await daemonRequest(connection, "/permission-monitor", { method: "POST", body: JSON.stringify({ mode: "bypass_plus" }) }, http); const handoff = await daemonRequest(connection, "/adventurous-handoff", {}, http) as any; if (!handoff?.enabled) await daemonRequest(connection, "/adventurous-handoff", { method: "POST" }, http); const prompt = renderPrompt(template, { ...issue, ...data }, screenshots); await daemonRequest(connection, "/prompt", { method: "POST", body: JSON.stringify({ content: prompt }) }, http); await command(runner, "zellij", ["action", "new-tab", "--cwd", workspace, "--name", `#${issue.number}`, "--", "sh", "-c", "polytoken attach \"$1\"; status=$?; source \"$2\"; init_claims; release_claim \"$3\"; if [ \"$4\" != 0 ]; then kill \"$4\" 2>/dev/null || true; fi; rm -rf \"$5\"; exit $status", "--", parsed.sessionId, join(SCRIPT_DIR, "claims.sh"), String(issue.number), daemonPid ?? "0", context]); handedOff = true; print(`TUI started in a new zellij tab. Workspace retained for integration check: ${workspace}`); } finally { if (!handedOff) { if (claimed) await claimCommand(runner, "release_claim", issue.number).catch(() => undefined); if (daemonPid) await runner("kill", [daemonPid]).catch(() => undefined); await rm(context, { recursive: true, force: true }).catch(() => undefined); } }
+  const contextRoot = join(repoRoot, ".pantoken-issue-context"); await mkdir(contextRoot, { recursive: true }); const context = await mkdtemp(join(contextRoot, "issue-")); let claimed = false; let handedOff = false; let workspace = resolve(repoRoot, ".workspaces", `issue-${issue.number}`); let daemonPid: string | undefined;
+  try { await claimCommand(runner, "claim_issue", issue.number); claimed = true; await mkdir(join(context, "images")); const screenshots = await downloadScreenshots(urls, join(context, "images"), http); await writeFile(join(context, "issue-body.md"), data.body); await writeFile(join(context, "manifest.json"), JSON.stringify(screenshots, null, 2)); await mkdir(join(repoRoot, ".workspaces"), { recursive: true }); await command(runner, "jj", ["workspace", "add", workspace, "--name", `issue-${issue.number}`, "--revision", "main"], { cwd: repoRoot }); await command(runner, "bun", ["install"], { cwd: workspace }); await mkdir(join(workspace, ".polytoken"), { recursive: true }); await writeFile(join(workspace, ".polytoken", "hooks.json"), await readFile(HOOKS_CONFIG_PATH, "utf8")); const spawned = await command(runner, "polytoken", ["new", "--no-attach"], { cwd: workspace }); const parsed = parseDaemonOutput(spawned.stdout); const startup = join(process.env.HOME ?? "", ".local/share/polytoken/sessions", parsed.sessionId, "startup.json"); const startupData = await waitForDaemonReady(startup); daemonPid = typeof startupData.pid === "number" ? String(startupData.pid) : undefined; await writeFile(join(workspace, ".autopilot-session-id"), parsed.sessionId); await writeFile(join(workspace, ".autopilot-issue-number"), String(issue.number)); await writeFile(join(workspace, ".autopilot-config-dir"), POLYTOKEN_CONFIG_DIR); const tokenPath = typeof startupData.credential_file_path === "string" ? startupData.credential_file_path : undefined; const token = tokenPath ? JSON.parse(await readFile(tokenPath, "utf8")).token : startupData.token; if (typeof token !== "string" || !token) throw new Error("daemon startup did not provide a credential"); const connection = { sessionId: parsed.sessionId, port: parsed.port, token, baseUrl: `http://localhost:${parsed.port}` }; await claimCommand(runner, "update_claim_session", issue.number, parsed.sessionId); await daemonRequest(connection, "/facet", { method: "POST", body: JSON.stringify({ facet: "plan" }) }, http); await daemonRequest(connection, "/permission-monitor", { method: "POST", body: JSON.stringify({ mode: "bypass_plus" }) }, http); const handoff = await daemonRequest(connection, "/adventurous-handoff", {}, http) as any; if (!handoff?.enabled) await daemonRequest(connection, "/adventurous-handoff", { method: "POST" }, http); const prompt = renderPrompt(template, { ...issue, ...data }, screenshots); await daemonRequest(connection, "/prompt", { method: "POST", body: JSON.stringify({ content: prompt }) }, http); const cleanup = zellijCleanupCommand(parsed.sessionId, join(SCRIPT_DIR, "claims.sh"), issue.number, daemonPid, context, SCRIPT_DIR); await command(runner, "zellij", ["action", "new-tab", "--cwd", workspace, "--name", `#${issue.number}`, "--", cleanup.command, ...cleanup.args]); handedOff = true; print(`TUI started in a new zellij tab. Workspace retained for integration check: ${workspace}`); } finally { if (!handedOff) { if (claimed) await claimCommand(runner, "release_claim", issue.number).catch(() => undefined); if (daemonPid) await runner("kill", [daemonPid]).catch(() => undefined); await rm(context, { recursive: true, force: true }).catch(() => undefined); } }
 }
 
 if (import.meta.main) { runLauncher(Bun.argv.slice(2)).catch((error) => { console.error(`ERROR: ${error instanceof Error ? error.message : String(error)}`); process.exit(1); }); }

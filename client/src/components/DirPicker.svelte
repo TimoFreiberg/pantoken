@@ -155,6 +155,18 @@
     // deliberately remain native input behavior.
   }
 
+  // Escape closes the picker from anywhere — the dialog's own onkeydown only fires
+  // when focus is inside it, but focus may still be on the trigger button (the
+  // input is focused in a requestAnimationFrame on mount, which can race with a
+  // fast Escape). The window-level handler is a reliable catch-all.
+  function onWindowKeydown(event: KeyboardEvent): void {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeFromUi();
+    }
+  }
+
   function onDialogKeydown(event: KeyboardEvent): void {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -191,6 +203,8 @@
     return null;
   });
 </script>
+
+<svelte:window onkeydown={onWindowKeydown} />
 
 <div
   class="scrim"

@@ -899,6 +899,7 @@
                       class="row"
                       class:active={s.sessionId === store.viewedSessionId &&
                         !store.draft}
+                      data-status={st}
                       onclick={() => pick(s)}
                       oncontextmenu={(e) => openMenu(e, s.path)}
                     >
@@ -1835,6 +1836,12 @@
   .row.active .name {
     color: var(--text);
     font-weight: 600;
+  }
+  /* Idle (read) sessions fade to secondary text so running/unread/waiting rows
+     stand out. The viewed session (.active) is exempt — :not(.active) excludes
+     it from this selector entirely. */
+  .row[data-status="read"]:not(.active) .name {
+    color: var(--text-muted);
   }
   /* Right-edge cluster: worktree glyph, optional tag, and the status/time slot. Shrinks
      to its content so the title takes the rest of the line. */
