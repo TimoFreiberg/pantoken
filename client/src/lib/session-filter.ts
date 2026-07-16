@@ -13,6 +13,58 @@ export interface SessionGroup {
   items: SessionListEntry[];
 }
 
+/** Maximum sessions shown per project group before a "Show N more" button appears.
+ *  Mirrors Codex Desktop's per-project cap. The limit is display-only — the full
+ *  list is still in `group.items`; clicking "Show N more" reveals the rest. */
+export const SESSIONS_PER_GROUP = 5;
+
+export interface GroupSplit {
+  visible: SessionListEntry[];
+  hidden: SessionListEntry[];
+}
+
+/** Split a group's sorted items into the visible cap and the hidden remainder.
+ *  The viewed/running session (in `pinnedIds`) is always kept visible even if it
+ *  falls outside the first `limit` — it's pulled into the visible slice and the
+ *  next-highest non-pinned session is pushed into the remainder instead. This
+ *  prevents the limit from hiding the session you're currently looking at (Q4).
+ *  When `limit` is 0 or items.length <= limit, all items are visible. */
+export function splitGroup(
+  items: readonly SessionListEntry[],
+  limit: number,
+  pinnedIds?: ReadonlySet<string>,
+): GroupSplit {
+  if (limit <= 0 || items.length <= limit) {
+    return { visible: [...items], hidden: [] };
+  }
+  // First `limit` items are visible by default.
+  const visible = items.slice(0, limit);
+  const hidden = items.slice(limit);
+  // If a pinned session fell into the hidden slice, swap it with the
+  // lowest-priority visible non-pinned session so the pinned one stays shown.
+  const pinnedInHiddenIdx = hidden.findIndex((s) => pinnedIds?.has(s.sessionId));
+  if (pinnedInHiddenIdx !== -1) {
+    // Find the last visible session that isn't pinned — swap it down.
+    let swapIdx = -1;
+    for (let i = visible.length - 1; i >= 0; i--) {
+      const v = visible[i];
+      if (v && !pinnedIds?.has(v.sessionId)) {
+        swapIdx = i;
+        break;
+      }
+    }
+    if (swapIdx !== -1) {
+      // swapIdx and pinnedInHiddenIdx are both valid indices here.
+      const tmp = visible[swapIdx]!;
+      visible[swapIdx] = hidden[pinnedInHiddenIdx]!;
+      hidden[pinnedInHiddenIdx] = tmp;
+    }
+    // If every visible session is pinned (rare), the pinned one stays hidden —
+    // acceptable degenerate edge; all are pinned so visibility is maximized.
+  }
+  return { visible, hidden };
+}
+
 export interface FilterOptions {
   query: string;
   /** false = active-only (hide archived + stale); true = show everything. */

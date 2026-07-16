@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { gotoFresh, openSidebar } from "./helpers.js";
+import { drive, gotoFresh, openSidebar } from "./helpers.js";
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
@@ -299,14 +299,16 @@ test("a session can be started in a directory chosen via the browser", async ({
   ).toBeVisible();
 });
 
-test("a project group's session list is a plain, un-capped list", async ({
+test("a project group's session list has no per-group CSS height cap", async ({
   page,
 }) => {
   await openSidebar(page);
   const ul = page.getByTestId("sidebar").locator(".group ul").first();
   await expect(ul).toBeVisible();
-  // Plain list: no per-group height cap or inner scroll — the whole sidebar list
-  // scrolls instead, and archiving keeps the length manageable.
+  // No per-group height cap or inner scroll — the whole sidebar list scrolls
+  // instead, and archiving keeps the length manageable. (The rendered row count
+  // is capped at 5 per group with a "Show more" button — that's a row-count
+  // limit, not a CSS height limit, so it doesn't affect this assertion.)
   const styles = await ul.evaluate((el) => {
     const cs = getComputedStyle(el);
     return { overflowY: cs.overflowY, maxHeight: cs.maxHeight };
@@ -527,4 +529,79 @@ test("archiving a dirty worktree session keeps it and explains why in a toast", 
   await expect(sidebar.locator(".wt")).toHaveCount(1);
   await toast.getByRole("button", { name: "Delete anyway" }).click();
   await expect(sidebar.locator(".wt")).toHaveCount(0);
+});
+
+test("a project with >5 sessions shows a 'Show more' button that reveals the rest", async ({
+  page,
+}) => {
+  await gotoFresh(page);
+  // Clear any expanded-groups state a prior test may have left in localStorage —
+  // gotoFresh's addInitScript only clears scrollPositions, not this key (the
+  // persistence test below deliberately leaves it set and verifies it survives
+  // a reload, so it can't be cleared globally).
+  await page.evaluate(() =>
+    localStorage.removeItem("pantoken.sidebarExpandedGroups"),
+  );
+  await openSidebar(page);
+  const sidebar = page.getByTestId("sidebar");
+  const list = sidebar.locator(".list");
+
+  // Inject 6 extra sessions into the pantoken project via the mock dev-bar script.
+  await drive(page, "manysessions");
+  // The Mock handler doesn't broadcast the session list — close + reopen the
+  // sidebar to trigger store.refreshSessions() (the sidebar-open $effect).
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  await openSidebar(page);
+
+  const pantokenGroup = list
+    .locator(".group")
+    .filter({ has: page.locator(".proj", { hasText: "pantoken" }) });
+
+  // Only 5 session rows visible initially (2 existing + 6 injected = 8; cap hides 3).
+  // Use [data-testid="session-status"] (on every session row button) to count rows
+  // precisely — avoids matching draft rows or the show-more button.
+  await expect(pantokenGroup.locator("[data-testid='session-status']")).toHaveCount(5);
+
+  // The "Show more" button appears and reports the hidden count (3).
+  const showMore = pantokenGroup.getByTestId("show-more-sessions");
+  await expect(showMore).toBeVisible();
+  await expect(showMore).toContainText("Show 3 more");
+
+  // Per the issue: plain text, no border or background.
+  await expect(showMore).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(showMore).toHaveCSS("border-top-style", "none");
+
+  // Clicking reveals all sessions.
+  await showMore.click();
+  await expect(pantokenGroup.locator("[data-testid='session-status']")).toHaveCount(8);
+  // "Show less" button appears.
+  await expect(pantokenGroup.getByTestId("show-less-sessions")).toBeVisible();
+
+  // Clicking "Show less" re-caps to 5.
+  await pantokenGroup.getByTestId("show-less-sessions").click();
+  await expect(pantokenGroup.locator("[data-testid='session-status']")).toHaveCount(5);
+});
+
+test("expanded 'Show more' state persists across a reload", async ({ page }) => {
+  await gotoFresh(page);
+  await openSidebar(page);
+  await drive(page, "manysessions");
+  // Refresh: close + reopen to pick up the injected sessions.
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  await openSidebar(page);
+  const sidebar = page.getByTestId("sidebar");
+  const pantokenGroup = sidebar
+    .locator(".group")
+    .filter({ has: page.locator(".proj", { hasText: "pantoken" }) });
+  await pantokenGroup.getByTestId("show-more-sessions").click();
+  await expect(pantokenGroup.locator("[data-testid='session-status']")).toHaveCount(8);
+
+  await page.reload();
+  await openSidebar(page);
+  // Still expanded after reload.
+  const reloadedGroup = sidebar
+    .locator(".group")
+    .filter({ has: page.locator(".proj", { hasText: "pantoken" }) });
+  await expect(reloadedGroup.getByTestId("show-less-sessions")).toBeVisible();
+  await expect(reloadedGroup.locator("[data-testid='session-status']")).toHaveCount(8);
 });

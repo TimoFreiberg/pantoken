@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionListEntry } from "@pantoken/protocol";
-import { STALE_MS, filterSessions, isStale } from "./session-filter.js";
+import {
+  STALE_MS,
+  SESSIONS_PER_GROUP,
+  filterSessions,
+  isStale,
+  splitGroup,
+} from "./session-filter.js";
 
 const NOW = 1_700_000_000_000;
 const isoAgo = (ms: number) => new Date(NOW - ms).toISOString();
@@ -243,5 +249,69 @@ describe("filterSessions", () => {
     expect(
       byPath.groups.flatMap((g) => g.items.map((i) => i.path)).sort(),
     ).toEqual(["/b", "/c"]);
+  });
+});
+
+describe("splitGroup", () => {
+  // Build N sessions s0..sN-1, sorted newest-first by index 0 = newest.
+  function items(n: number): SessionListEntry[] {
+    return Array.from({ length: n }, (_, i) =>
+      entry({ sessionId: `s${i}`, path: `/s${i}` }),
+    );
+  }
+
+  test("≤5 items → all visible, hidden empty", () => {
+    for (const n of [0, 1, 5]) {
+      const it = items(n);
+      const { visible, hidden } = splitGroup(it, SESSIONS_PER_GROUP);
+      expect(visible).toHaveLength(n);
+      expect(hidden).toHaveLength(0);
+    }
+  });
+
+  test("8 items → 5 visible, 3 hidden", () => {
+    const { visible, hidden } = splitGroup(items(8), SESSIONS_PER_GROUP);
+    expect(visible.map((s) => s.sessionId)).toEqual([
+      "s0",
+      "s1",
+      "s2",
+      "s3",
+      "s4",
+    ]);
+    expect(hidden.map((s) => s.sessionId)).toEqual(["s5", "s6", "s7"]);
+  });
+
+  test("a pinned session beyond position 5 is rescued into visible", () => {
+    // s6 (position 6, index 6) is pinned → it must stay visible, displacing the
+    // lowest-priority visible non-pinned session (s4) into hidden.
+    const it = items(8);
+    const pinned = new Set(["s6"]);
+    const { visible, hidden } = splitGroup(it, SESSIONS_PER_GROUP, pinned);
+    expect(visible.map((s) => s.sessionId)).toContain("s6");
+    expect(hidden.map((s) => s.sessionId)).toContain("s4");
+    expect(visible).toHaveLength(5);
+    expect(hidden).toHaveLength(3);
+  });
+
+  test("limit=0 → no splitting (all visible) — the search-bypass path", () => {
+    const { visible, hidden } = splitGroup(items(8), 0);
+    expect(visible).toHaveLength(8);
+    expect(hidden).toHaveLength(0);
+  });
+
+  test("multi-pinned edge case: only the first pinned-in-hidden is rescued", () => {
+    // Two pinned sessions (s6, s7) both beyond position 5. Only one is pulled
+    // into visible; the other stays hidden. Documents the limitation: with 1-2
+    // pinned entries in practice (viewed + running), at most one is beyond the
+    // cap, so this degenerate edge is acceptable.
+    const it = items(8);
+    const pinned = new Set(["s6", "s7"]);
+    const { visible, hidden } = splitGroup(it, SESSIONS_PER_GROUP, pinned);
+    expect(visible).toHaveLength(5);
+    expect(hidden).toHaveLength(3);
+    // Exactly one of the two pinned ones made it into visible.
+    const pinnedVisible = visible.filter((s) => pinned.has(s.sessionId));
+    expect(pinnedVisible).toHaveLength(1);
+    expect(hidden.some((s) => pinned.has(s.sessionId))).toBe(true);
   });
 });

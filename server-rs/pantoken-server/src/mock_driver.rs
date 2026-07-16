@@ -3091,6 +3091,37 @@ impl PantokenDriver for MockDriver {
                 self.abort_settle_delay_ms.store(1000, Ordering::SeqCst);
                 return;
             }
+            // Inject 6 extra sessions into the WORKSPACE_PATH project so the
+            // sidebar's per-group cap (5) triggers a "Show more" button. Used by
+            // the e2e test (drive(page, "manysessions")). Mutates session state
+            // directly, like `new_session` — a return-early script with no
+            // ScriptStep. The client re-reads the list on the next sidebar open.
+            "manysessions" => {
+                let mut sessions = self.sessions.lock();
+                let now = chrono::Utc::now();
+                let iso_ago = |ms: i64| {
+                    (now - chrono::Duration::milliseconds(ms))
+                        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+                };
+                for i in 0..6 {
+                    sessions.push(SessionListEntry {
+                        session_id: format!("extra-session-{i}"),
+                        path: format!("/sessions/extra-session-{i}.jsonl"),
+                        cwd: WORKSPACE_PATH.into(),
+                        display_name: Some(format!("Extra task #{i}")),
+                        preview: format!("Extra session number {i} for testing the cap."),
+                        user_message_count: 1,
+                        usage: None,
+                        updated_at: iso_ago((i + 1) * 60_000),
+                        created_at: iso_ago((i + 1) * 60_000),
+                        last_user_message_at: iso_ago((i + 1) * 60_000),
+                        parent_session_path: None,
+                        archived: false,
+                        worktree: None,
+                    });
+                }
+                return;
+            }
             // ── Approval dialogs ────────────────────────────────────────────
             "confirm" => vec![
                 ScriptStep { wait_ms: 0, event: SessionDriverEvent::HostUiRequest { base: base(), request: HostUiRequest::Confirm {
