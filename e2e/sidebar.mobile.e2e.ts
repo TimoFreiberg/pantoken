@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { gotoFresh, openSidebar } from "./helpers.js";
+import { drive, gotoFresh, openSidebar } from "./helpers.js";
 
 // Runs under the "mobile" project (Pixel 7 viewport).
 test.beforeEach(async ({ page }) => {
@@ -22,11 +22,11 @@ test("opening the drawer does NOT focus the search box on a phone", async ({
 });
 
 // Both drawers default CLOSED on a phone (overlay semantics, unchanged); the header
-// hamburgers that used to open them are gone, so the header chevron (or the
+// hamburgers that used to open them are gone, so the header panel icon (or the
 // left-edge swipe, for the sessions drawer — see edge-swipe.mobile.e2e.ts) is now the
 // only tap affordance besides ⌘B / ⌘⇧J (which a soft keyboard doesn't offer anyway).
 
-test("the sessions drawer is closed by default on a phone, with a header arrow to open it", async ({
+test("the sessions drawer is closed by default on a phone, with a header panel icon to open it", async ({
   page,
 }) => {
   const sidebar = page.getByTestId("sidebar");
@@ -50,12 +50,34 @@ test("the context panel is closed by default and reachable from Sessions", async
   await expect(sidebarEntry).toBeVisible();
   await sidebarEntry.click();
   await expect(panel).toHaveAttribute("data-open", "true");
+  // AC.3 (mobile): the right-sidebar collapse button shows a panel-right icon (x=15).
+  const collapse = panel.getByRole("button", { name: "Collapse context panel" });
+  await expect(collapse.locator("line")).toHaveAttribute("x1", "15");
+  // AC.7: the mobile collapse glyph is not mirrored (no scaleX(-1) transform).
+  await expect(collapse.locator(".collapse-glyph")).not.toHaveCSS(
+    "transform",
+    /matrix/,
+  );
   // The collapse control ("Collapse context panel") and the scrim
   // ("Close context panel", tap-outside-to-dismiss) carry distinct labels;
   // scoping keeps the control lookup local to the drawer.
-  await panel.getByRole("button", { name: "Collapse context panel" }).click();
+  await collapse.click();
   await expect(panel).toHaveAttribute("data-open", "false");
   await openSidebar(page);
   await page.getByTestId("sidebar-context").click();
   await expect(panel).toHaveAttribute("data-open", "true");
+});
+
+test("the header context entry shows a panel-right icon and count badge on a phone", async ({
+  page,
+}) => {
+  // The context fixture: 3 flagged files + 3 jobs + 3 todos = 9 context items.
+  await drive(page, "context");
+  const open = page.getByTestId("context-open");
+  await expect(open).toBeVisible();
+  // AC.4 (mobile): the ctx-glyph shows a panel-right icon (x=15) + a visible badge.
+  await expect(open.locator(".ctx-glyph line")).toHaveAttribute("x1", "15");
+  const badge = open.getByTestId("context-badge");
+  await expect(badge).toBeVisible();
+  await expect(badge).toHaveText("9");
 });

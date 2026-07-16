@@ -3,19 +3,20 @@
   import { effectiveWidths, maxWidthFor, MIN_RIGHT_SIDEBAR_WIDTH } from "../lib/sidebar-width.js";
   import SidebarResizeHandle from "./SidebarResizeHandle.svelte";
   import IconButton from "./ui/IconButton.svelte";
-  import Chevron from "./ui/Chevron.svelte";
+  import SidebarPanelIcon from "./ui/SidebarPanelIcon.svelte";
   import TodoDetail from "./TodoDetail.svelte";
   import JobDetail from "./JobDetail.svelte";
 
   // The right context panel: flagged files, background jobs, and todos from
   // the active session (in that order — matches the polytoken TUI).
   // Desktop: a fixed column with no title label (the left sidebar doesn't have
-  // one either) — just the collapse control, symmetric with the left sidebar's
-  // '‹'. While collapsed it's reopened by ⌘⇧J or the header's expand chevron
+  // one either) — just the collapse control, symmetric with the left sidebar's.
+  // While collapsed it's reopened by ⌘⇧J or the header's expand panel icon
   // (StatusHeader), which sits at the same pixel as this collapse control.
-  // Phone (≤859px): a FULL-SCREEN context view (not a drawer) — back arrow +
-  // "Context" title up top, opened from the header's badged entry, closed by
-  // the back arrow or the OS back gesture (lib/overlay-history.ts).
+  // Phone (≤859px): a FULL-SCREEN context view (not a drawer) — panel-right
+  // icon + "Context" title up top, opened from the header's badged entry,
+  // closed by the collapse toggle or the OS back gesture
+  // (lib/overlay-history.ts).
 
   const s = $derived(store.session);
   const flags = $derived(s.flags);
@@ -86,9 +87,8 @@
       aria-label="Collapse context panel"
       onclick={() => store.closeRightSidebar()}
     >
-      <!-- Desktop: '›' pointing at the edge it collapses to. Phone: mirrored to a
-           '‹' back arrow (the view is full-screen; leading edge, iOS-style). -->
-      <span class="collapse-glyph"><Chevron open={false} /></span>
+      <!-- Desktop + mobile: a panel-right glyph (directionless toggle). -->
+      <span class="collapse-glyph"><SidebarPanelIcon side="right" /></span>
     </IconButton>
     <!-- Phone-only (display gated in CSS): full-screen views need a name; the
          desktop column stays title-less to mirror the left sidebar. -->
@@ -233,7 +233,7 @@
        collapse control, pinned to the trailing edge. */
     justify-content: flex-end;
     /* Same box as StatusHeader (height, 16px trailing gutter, centered contents), so
-       this collapse chevron and the header's expand chevron occupy the same pixel:
+       this collapse control and the header's expand control occupy the same pixel:
        click, click, click. */
     min-height: calc(var(--header-h) + env(safe-area-inset-top));
     padding: env(safe-area-inset-top) 16px 0;
@@ -531,14 +531,11 @@
     .right-sidebar[data-open="false"] {
       display: flex;
     }
-    /* Full-screen nav bar: back arrow at the leading edge, title beside it. */
+    /* Full-screen nav bar: collapse toggle at the leading edge, title beside it. */
     .top {
       justify-content: flex-start;
       gap: 2px;
       padding-left: 8px;
-    }
-    .collapse-glyph {
-      transform: scaleX(-1);
     }
     .panel-title {
       display: block;
