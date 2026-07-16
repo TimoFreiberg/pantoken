@@ -27,6 +27,7 @@
   import SlashMenu from "./SlashMenu.svelte";
   import AtMenu from "./AtMenu.svelte";
   import DirPicker from "./DirPicker.svelte";
+  import BranchPicker from "./BranchPicker.svelte";
   import ImageLightbox from "./ImageLightbox.svelte";
   import ModelPicker from "./ModelPicker.svelte";
   import FacetBadge from "./FacetBadge.svelte";
@@ -109,10 +110,26 @@
   // server's filesystem because the agent runs server-side; a native picker would see the client.
   let pickingCwd = $state(false);
   let projectControlRef = $state<HTMLButtonElement>();
+  let pickingBranch = $state(false);
+  let branchControlRef = $state<HTMLButtonElement>();
   let mobileControlsOpen = $state(false);
   // Never carry an open picker across drafts (it would auto-pop on the next new session).
   $effect(() => {
-    if (!drafting) pickingCwd = false;
+    if (!drafting) {
+      pickingCwd = false;
+      pickingBranch = false;
+    }
+  });
+  // Fetch branches when worktree is toggled on and we haven't loaded them yet.
+  $effect(() => {
+    if (
+      store.draft?.worktree &&
+      !store.branchList &&
+      !store.branchLoading &&
+      store.draft.cwd
+    ) {
+      store.queryBranches(store.draft.cwd);
+    }
   });
   // Starting a draft unmounts this Composer (App.svelte guards it with {#if !store.draft}).
   // Clean up the mobile controls overlay entry on teardown so the overlay-history stack
@@ -144,6 +161,7 @@
 
   function openMobileControls(): void {
     pickingCwd = false;
+    pickingBranch = false;
     mobileControlsOpen = true;
     overlayHistory.opened("session-controls", () => {
       mobileControlsOpen = false;
@@ -650,6 +668,7 @@
     }
     if (!queued) return;
     pickingCwd = false;
+    pickingBranch = false;
     attachmentStatus = null;
     // Restart history navigation so the next ArrowUp recalls the just-sent prompt.
     histIndex = null;
@@ -1339,6 +1358,20 @@
           }}
         />
       {/if}
+      {#if pickingBranch && drafting && store.draft}
+        <BranchPicker
+          selected={store.draft.baseBranch}
+          onpick={(branch: string | undefined) => {
+            store.setDraftBaseBranch(branch);
+            pickingBranch = false;
+            requestAnimationFrame(() => branchControlRef?.focus());
+          }}
+          onclose={() => {
+            pickingBranch = false;
+            requestAnimationFrame(() => branchControlRef?.focus());
+          }}
+        />
+      {/if}
       {#if slashOpen}
         <SlashMenu
           items={slashItems}
@@ -1471,6 +1504,51 @@
 
     <div class="composer-status-row" data-testid="composer-status-row">
       <div class="status-left">
+        {#if drafting && store.draft}
+          <!-- Model + effort are rebound to the draft via composerConfig. -->
+          <button
+            bind:this={projectControlRef}
+            class="chip"
+            data-testid="draft-project-control"
+            aria-haspopup="dialog"
+            aria-expanded={pickingCwd}
+            aria-label={`${cwdBase} — browse to change project directory`}
+            title={`Project: ${store.draft.cwd || "home"} — click to browse for a directory (⌥P)`}
+            onclick={() => { pickingBranch = false; pickingCwd = !pickingCwd; }}
+          >
+            {cwdBase}
+            <Chevron open={pickingCwd} variant="menu" size={10} />
+          </button>
+          <button
+            class="chip toggle-chip"
+            data-testid="draft-worktree-control"
+            class:on={store.draft.worktree}
+            aria-pressed={store.draft.worktree}
+            aria-label={store.draft.worktree
+              ? "Disable worktree isolation"
+              : "Enable worktree isolation"}
+            title="Isolate this session in a jj/git worktree of the project, leaving the main tree clean (⌥W)"
+            onclick={() => store.toggleDraftWorktree()}
+          >
+            worktree
+            {#if store.draft.worktree}<span class="chip-check" aria-hidden="true">✓</span>{/if}
+          </button>
+          {#if store.draft.worktree}
+            <button
+              bind:this={branchControlRef}
+              class="chip"
+              data-testid="draft-branch-control"
+              aria-haspopup="listbox"
+              aria-expanded={pickingBranch}
+              aria-label={`Base branch: ${store.draft.baseBranch || "default"}`}
+              title={`Base branch: ${store.draft.baseBranch || "default (auto-detected)"} — click to change`}
+              onclick={() => { pickingCwd = false; pickingBranch = !pickingBranch; }}
+            >
+              {store.draft.baseBranch || "default"}
+              <Chevron open={pickingBranch} variant="menu" size={10} />
+            </button>
+          {/if}
+        {/if}
         <span class="desktop-config-left"><PermissionBadge /><FacetBadge /></span>
       </div>
       <div class="composer-status-right desktop-config-right" data-testid="composer-status-right">

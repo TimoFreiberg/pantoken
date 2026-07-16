@@ -1612,6 +1612,7 @@ impl SessionHub {
             ClientMessage::NewSession {
                 cwd,
                 worktree,
+                base_branch,
                 model,
                 thinking,
                 facet,
@@ -1633,6 +1634,7 @@ impl SessionHub {
                 let opts = NewSessionOptsData {
                     cwd: cwd.clone(),
                     worktree: *worktree,
+                    base_branch: base_branch.clone(),
                     model: model.as_ref().map(|m| crate::driver::NewSessionModel {
                         provider: m.provider.clone(),
                         model_id: m.model_id.clone(),
@@ -2014,6 +2016,27 @@ impl SessionHub {
                             h.send_to_client(
                                 client_key,
                                 ServerMessage::PathStat { stat, request_id },
+                            );
+                        })
+                    }),
+                );
+            }
+            ClientMessage::ListBranches { path, request_id } => {
+                let driver = self.driver.clone();
+                let path = path.clone();
+                let request_id = *request_id;
+                self.hub_ops.enqueue(
+                    "list_branches",
+                    Box::new(move |hub| {
+                        Box::pin(async move {
+                            let listing = driver.list_branches(path.clone()).await;
+                            let h = hub.lock();
+                            h.send_to_client(
+                                client_key,
+                                ServerMessage::BranchList {
+                                    listing,
+                                    request_id,
+                                },
                             );
                         })
                     }),
@@ -3523,6 +3546,7 @@ mod hub_models_tests {
             ClientMessage::NewSession {
                 cwd: Some("/workspace".into()),
                 worktree: None,
+                base_branch: None,
                 model: None,
                 thinking: None,
                 facet: None,
@@ -3579,6 +3603,7 @@ mod hub_models_tests {
             ClientMessage::NewSession {
                 cwd: Some("/workspace".into()),
                 worktree: None,
+                base_branch: None,
                 model: None,
                 thinking: None,
                 facet: None,

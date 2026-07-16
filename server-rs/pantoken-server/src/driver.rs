@@ -7,9 +7,9 @@
 use async_trait::async_trait;
 use pantoken_protocol::session_driver::ModelCatalogDiagnostic;
 use pantoken_protocol::session_driver::{
-    AtRefs, BackgroundJob, CommandInfo, DirListing, FileInfo, HostUiResponse, ImageContent,
-    ModelDefaults, ModelOption, PathStat, PermissionMonitorMode, SessionDriverEvent, SessionId,
-    SessionListEntry, SessionUsage,
+    AtRefs, BackgroundJob, BranchList, CommandInfo, DirListing, FileInfo, HostUiResponse,
+    ImageContent, ModelDefaults, ModelOption, PathStat, PermissionMonitorMode, SessionDriverEvent,
+    SessionId, SessionListEntry, SessionUsage,
 };
 use pantoken_protocol::wire::{DeliveryMode, LoginEnvStatus, SessionAction};
 
@@ -20,6 +20,8 @@ use pantoken_protocol::wire::{DeliveryMode, LoginEnvStatus, SessionAction};
 pub struct NewSessionOptsData {
     pub cwd: Option<String>,
     pub worktree: Option<bool>,
+    /// Base branch for worktree creation (jj `-r` / git commit-ish). None = auto-detect.
+    pub base_branch: Option<String>,
     pub model: Option<NewSessionModel>,
     pub thinking: Option<String>,
     /// Facet to apply at creation (the draft's pick, e.g. start straight in plan).
@@ -226,6 +228,16 @@ pub trait PantokenDriver: Send + Sync {
 
     /// Quick existence + type check for a path.
     async fn stat_path(&self, path: String) -> PathStat;
+
+    /// List local branches of a repo at `path` for the worktree branch selector.
+    /// Returns empty branches + `error: Some(true)` when not supported.
+    async fn list_branches(&self, _path: String) -> BranchList {
+        BranchList {
+            path: _path,
+            branches: vec![],
+            error: Some(true),
+        }
+    }
 
     /// Background jobs (subagent + shell) running in the daemon. The hub calls
     /// this on every snapshot refresh and broadcasts `JobsList`.

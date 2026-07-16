@@ -14,7 +14,8 @@ use crate::session_driver::{
 
 // Must equal PROTOCOL_VERSION in protocol/src/wire.ts. 3→4 adds request correlation
 // to directory-picker queries so remote replies cannot replace newer results.
-pub const PROTOCOL_VERSION: u32 = 4;
+// 4→5 adds listBranches/branchList for the worktree branch selector.
+pub const PROTOCOL_VERSION: u32 = 5;
 
 // ── PantokenSettings (server-side persisted settings) ──────────────────────
 
@@ -60,7 +61,7 @@ pub struct TrustRequest {
 // These are in session_driver.rs already. wire.ts defines them locally but
 // they're the same types — re-export from session_driver for the ServerMessage
 // variants that flatten them.
-pub use crate::session_driver::{DirListing, PathStat};
+pub use crate::session_driver::{BranchList, DirListing, PathStat};
 
 // ── SessionAttention ────────────────────────────────────────────────────
 
@@ -216,6 +217,15 @@ pub enum ServerMessage {
         #[serde(rename = "requestId")]
         request_id: u64,
     },
+    /// Local branch names for the worktree branch selector, in reply to
+    /// `ListBranches`. Flattened so `requestId` sits alongside the struct
+    /// fields in the JSON, matching `DirListing`/`PathStat`.
+    BranchList {
+        #[serde(flatten)]
+        listing: BranchList,
+        #[serde(rename = "requestId")]
+        request_id: u64,
+    },
     ModelDefaults {
         defaults: ModelDefaults,
     },
@@ -358,6 +368,12 @@ pub enum ClientMessage {
         cwd: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         worktree: Option<bool>,
+        #[serde(
+            skip_serializing_if = "Option::is_none",
+            default,
+            rename = "baseBranch"
+        )]
+        base_branch: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         model: Option<NewSessionModel>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -426,6 +442,13 @@ pub enum ClientMessage {
         request_id: u64,
     },
     StatPath {
+        path: String,
+        #[serde(rename = "requestId")]
+        request_id: u64,
+    },
+    /// List local branches of a repo at `path` for the worktree branch
+    /// selector. The server responds with `BranchList`.
+    ListBranches {
         path: String,
         #[serde(rename = "requestId")]
         request_id: u64,
@@ -1195,6 +1218,79 @@ mod tests {
                 assert_eq!(follow_up, vec!["msg2"]);
             }
             _ => panic!("expected QueueRestored"),
+        }
+    }
+
+    #[test]
+    fn list_branches_roundtrip() {
+        let json_str = r#"{"type":"listBranches","path":"/home/project","requestId":42}"#;
+        let msg = parse_client_message(json_str).unwrap();
+        match msg {
+            ClientMessage::ListBranches { path, request_id } => {
+                assert_eq!(path, "/home/project");
+                assert_eq!(request_id, 42);
+            }
+            _ => panic!("expected ListBranches"),
+        }
+    }
+
+    #[test]
+    fn branch_list_roundtrip() {
+        let json_str = r#"{"type":"branchList","path":"/home/project","branches":["main","develop"],"requestId":42}"#;
+        let msg: ServerMessage = serde_json::from_str(json_str).unwrap();
+        match msg {
+            ServerMessage::BranchList {
+                listing,
+                request_id,
+            } => {
+                assert_eq!(listing.path, "/home/project");
+                assert_eq!(listing.branches, vec!["main", "develop"]);
+                assert_eq!(listing.error, None);
+                assert_eq!(request_id, 42);
+            }
+            _ => panic!("expected BranchList"),
+        }
+    }
+
+    #[test]
+    fn branch_list_with_error_roundtrip() {
+        let json_str = r#"{"type":"branchList","path":"/not/a/repo","branches":[],"error":true,"requestId":7}"#;
+        let msg: ServerMessage = serde_json::from_str(json_str).unwrap();
+        match msg {
+            ServerMessage::BranchList {
+                listing,
+                request_id,
+            } => {
+                assert_eq!(listing.path, "/not/a/repo");
+                assert!(listing.branches.is_empty());
+                assert_eq!(listing.error, Some(true));
+                assert_eq!(request_id, 7);
+            }
+            _ => panic!("expected BranchList"),
+        }
+    }
+
+    #[test]
+    fn new_session_with_base_branch_roundtrip() {
+        let json_str = r#"{
+            "type": "newSession",
+            "cwd": "/home/project",
+            "worktree": true,
+            "baseBranch": "develop"
+        }"#;
+        let msg = parse_client_message(json_str).unwrap();
+        match msg {
+            ClientMessage::NewSession {
+                cwd,
+                worktree,
+                base_branch,
+                ..
+            } => {
+                assert_eq!(cwd, Some("/home/project".to_string()));
+                assert_eq!(worktree, Some(true));
+                assert_eq!(base_branch, Some("develop".to_string()));
+            }
+            _ => panic!("expected NewSession"),
         }
     }
 }

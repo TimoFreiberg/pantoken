@@ -254,6 +254,17 @@ pub struct DirListing {
     pub error: Option<bool>,
 }
 
+/// Local branch names of a repo at a given path, for the worktree branch
+/// selector. `branches` is sorted and capped at 100 entries server-side.
+/// `error` is `Some(true)` when the path isn't a repo or the command failed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchList {
+    pub path: String,
+    pub branches: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub error: Option<bool>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathStat {
     pub path: String,

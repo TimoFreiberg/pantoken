@@ -25,8 +25,9 @@ import type {
 // (2026-07-03); 2→3 = the nine settings/context ClientMessage variants collapsed
 // into the single `sessionAction` envelope (a stale client's old-shape
 // setModel/compact/… now fail serde on the server); 3→4 = correlated directory
-// picker queries, preventing stale remote replies from replacing newer results.
-export const PROTOCOL_VERSION = 4;
+// picker queries, preventing stale remote replies from replacing newer results;
+// 4→5 = listBranches/branchList worktree branch selector.
+export const PROTOCOL_VERSION = 5;
 
 /** Pantoken-local settings (distinct from the daemon's global/session config). Persisted
  *  server-side in `pantoken-settings.json`, broadcast to every client, edited from the
@@ -83,6 +84,23 @@ export interface DirListing {
   /** True when `path` couldn't be read (missing / not a directory / no permission).
    *  `entries` is then empty and the client surfaces the failure instead of showing
    *  it as an empty folder. */
+  readonly error?: boolean;
+}
+
+/** Local branch names of a repo at a given path, for the new-session worktree
+ *  branch selector. The server shells out to `git branch` / `jj bookmark list`
+ *  on its own filesystem (the agent runs server-side). The client sends
+ *  {@link listBranches} and renders this as the branch picker dropdown.
+ *  Capped server-side at 100 entries; `branches.length === 100` signals potential
+ *  truncation. Empty when the path isn't a repo or the command failed (`error`). */
+export interface BranchList {
+  /** Echoes the query request so clients can discard out-of-order remote replies. */
+  readonly requestId: number;
+  /** The resolved absolute path that was queried. Echoes the request. */
+  readonly path: string;
+  /** Local branch names, sorted. Empty if not a repo or error. Capped at 100. */
+  readonly branches: readonly string[];
+  /** True when the path isn't a jj/git repo or the command failed. */
   readonly error?: boolean;
 }
 
@@ -228,6 +246,10 @@ export type ServerMessage =
    *  Carries the resolved `path` so a client that navigated on can drop a stale response.
    *  See {@link DirListing}. */
   | ({ type: "dirListing" } & DirListing)
+  /** Local branch names for the new-session worktree branch selector, in reply to
+   *  {@link listBranches}. Carries the resolved `path` so a client that navigated
+   *  on can drop a stale response. See {@link BranchList}. */
+  | ({ type: "branchList" } & BranchList)
   /** A path-existence check for the new-session dir picker's inline validation hint,
    *  in reply to {@link statPath}. Echoes the request `path` so the client can drop a
    *  stale response. See {@link PathStat}. */
@@ -414,6 +436,9 @@ export type ClientMessage =
       type: "newSession";
       cwd?: string;
       worktree?: boolean;
+      /** When worktree is on, base the new worktree on this branch (jj `-r` /
+       *  git commit-ish). Omitted = auto-detect (main → master → first branch). */
+      baseBranch?: string;
       model?: { provider: string; modelId: string };
       thinking?: string;
       /** Apply this facet at creation (draft-picked, e.g. start straight in plan). */
@@ -481,6 +506,10 @@ export type ClientMessage =
    *  dir picker's inline validation hint (debounced). The server responds with
    *  {@link pathStat}. */
   | { type: "statPath"; path: string; requestId: number }
+  /** List local branches of a repo on the SERVER's filesystem for the new-session
+   *  worktree branch selector. `path` is the repo directory (required — branches
+   *  are always repo-scoped). The server responds with {@link branchList}. */
+  | { type: "listBranches"; path: string; requestId: number }
   /** Apply the staged desktop update now (the sidebar card's button). The server marks
    *  it applying and the shell's updater picks it up on its next /update/state poll —
    *  install the bundle, relaunch. No-op if nothing is staged. */

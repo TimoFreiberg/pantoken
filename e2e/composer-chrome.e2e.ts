@@ -276,6 +276,83 @@ test("new-session controls use calm chrome and pair permission with facet", asyn
   ).toBe(true);
 });
 
+test("worktree branch selector chip appears when worktree is enabled", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await page.getByRole("button", { name: "New session…" }).click();
+
+  // Before enabling worktree, no branch chip.
+  await expect(page.getByTestId("draft-branch-control")).toHaveCount(0);
+
+  // Enable worktree — branch chip appears.
+  await page.getByTestId("draft-worktree-control").click();
+  const branchChip = page.getByTestId("draft-branch-control");
+  await expect(branchChip).toBeVisible({ timeout: 5000 });
+  // Auto-detects "main" (mock fixture has main, develop, feature-test).
+  await expect(branchChip).toContainText("main");
+
+  // Disable worktree — branch chip disappears.
+  await page.getByTestId("draft-worktree-control").click();
+  await expect(page.getByTestId("draft-branch-control")).toHaveCount(0);
+});
+
+test("branch selector dropdown lists branches and updates the chip", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("draft-worktree-control").click();
+
+  const branchChip = page.getByTestId("draft-branch-control");
+  await expect(branchChip).toBeVisible({ timeout: 5000 });
+
+  // Open the picker — the mock's branches are listed.
+  await branchChip.click();
+  await expect(page.getByRole("listbox", { name: "Select base branch" })).toBeVisible();
+  await expect(page.getByRole("option", { name: "main" })).toBeVisible();
+  await expect(page.getByRole("option", { name: "develop" })).toBeVisible();
+  await expect(page.getByRole("option", { name: "feature-test" })).toBeVisible();
+  await expect(page.getByRole("option", { name: "default (auto)" })).toBeVisible();
+
+  // Select "feature-test" — the chip updates.
+  await page.getByRole("option", { name: "feature-test" }).click();
+  await expect(branchChip).toContainText("feature-test");
+
+  // Reopen and select "default (auto)" — the chip shows "default".
+  await branchChip.click();
+  await page.getByRole("option", { name: "default (auto)" }).click();
+  await expect(branchChip).toContainText("default");
+});
+
+test("branch selector shows error state on failbranchlist script", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("draft-worktree-control").click();
+
+  const branchChip = page.getByTestId("draft-branch-control");
+  // Wait for the initial branch list to arrive.
+  await expect(branchChip).toBeVisible({ timeout: 5000 });
+
+  // Arm the one-shot failure via the mock WS hook.
+  await page.evaluate(() => {
+    const w = window as unknown as { __pantokenMock?: (s: string) => void };
+    w.__pantokenMock?.("failbranchlist");
+  });
+
+  // Toggle worktree off and on to trigger a fresh list_branches call.
+  await page.getByTestId("draft-worktree-control").click();
+  await page.getByTestId("draft-worktree-control").click();
+
+  // Open the picker — it shows the error message.
+  await branchChip.click();
+  await expect(
+    page.getByText("Couldn't list branches"),
+  ).toBeVisible({ timeout: 5000 });
+});
+
 // --- Empty prompt as a "continue" signal (issue #21) ---
 // When the session is idle, an empty prompt (Enter or Send button with an empty
 // composer) acts as a "continue" signal, mirroring the polytoken TUI. An empty

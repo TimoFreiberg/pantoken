@@ -5,6 +5,7 @@
 
 import {
   type BackgroundJob,
+  type BranchList,
   type CommandInfo,
   type DirListing,
   type PathStat,
@@ -89,6 +90,7 @@ import {
   setResumeProvider,
 } from "./ws.svelte.js";
 import { applyCorrelatedResponse } from "./correlated-response.js";
+import { pickDefaultBranch } from "./branch-default.js";
 
 /** Which surface a notice belongs to. Sidebar notices render at the top of the
  * sidebar (session-list operations); chat notices render in-flow above the
@@ -270,6 +272,12 @@ class PantokenStore {
   pathStat = $state<PathStat | null>(null);
   private dirRequestId = 0;
   private statRequestId = 0;
+  // New-session worktree branch selector: local branches for the draft's cwd.
+  // Null until branches are first queried. Capped at 100 entries server-side.
+  branchList = $state<BranchList | null>(null);
+  // True while a `listBranches` is in flight, for the picker's loading hint.
+  branchLoading = $state(false);
+  private branchRequestId = 0;
   // Settings panel: the agent's global model defaults + favorites. Server-authoritative,
   // delivered like `models`.
   modelDefaults = $state<ModelDefaults>({ favorites: [] });
@@ -327,6 +335,8 @@ class PantokenStore {
   draft = $state<{
     cwd: string;
     worktree: boolean;
+    /** Base branch for worktree creation (jj `-r` / git commit-ish). Undefined = auto-detect. */
+    baseBranch?: string;
     model?: { provider: string; modelId: string };
     thinking?: string;
     /** Facet to start the session in (undefined = the daemon's default, execute). */
@@ -680,6 +690,7 @@ class PantokenStore {
     const def = this.modelDefaults;
     const cfg: StoredDraftConfig = {};
     if (this.draft.worktree) cfg.worktree = true;
+    if (this.draft.baseBranch) cfg.baseBranch = this.draft.baseBranch;
     const m = this.draft.model;
     if (m && (m.provider !== def.provider || m.modelId !== def.modelId))
       cfg.model = m;
@@ -695,6 +706,7 @@ class PantokenStore {
       cfg.permissionMonitor = this.draft.permissionMonitor;
     if (
       cfg.worktree ||
+      cfg.baseBranch ||
       cfg.model ||
       cfg.thinking ||
       cfg.facet ||
@@ -1253,6 +1265,28 @@ class PantokenStore {
         if (!stat.accepted) break;
         this.pathStat = stat.value;
         break;
+      case "branchList": {
+        const result = applyCorrelatedResponse(
+          this.branchRequestId,
+          this.branchList,
+          msg.requestId,
+          {
+            requestId: msg.requestId,
+            path: msg.path,
+            branches: [...msg.branches],
+            error: msg.error,
+          },
+        );
+        if (!result.accepted) break;
+        this.branchList = result.value;
+        this.branchLoading = false;
+        // Auto-select the default branch when none is explicitly set.
+        if (this.draft && !this.draft.baseBranch && result.value) {
+          const def = pickDefaultBranch(result.value.branches);
+          if (def) this.draft.baseBranch = def;
+        }
+        break;
+      }
       case "editorPrefill":
         // A branch landed on a user prompt — its text comes back to re-edit. Per-client
         // (only the requester), so it's handled here, not in the shared foldEvent. The
@@ -1470,6 +1504,7 @@ class PantokenStore {
             promptId: prompt.promptId,
             cwd: prompt.newSession?.cwd,
             worktree: prompt.newSession?.worktree,
+            baseBranch: prompt.newSession?.baseBranch,
             model: prompt.newSession?.model,
             thinking: prompt.newSession?.thinking,
             facet: prompt.newSession?.facet,
@@ -1632,6 +1667,7 @@ class PantokenStore {
     this.draft = {
       cwd: ns?.cwd ?? "",
       worktree: ns?.worktree ?? false,
+      baseBranch: ns?.baseBranch,
       model: ns?.model,
       thinking: ns?.thinking,
       facet: ns?.facet ?? "execute",
@@ -1857,6 +1893,14 @@ class PantokenStore {
     const requestId = ++this.statRequestId;
     this.pathStat = null;
     send({ type: "statPath", path, requestId });
+  }
+  /** List local branches of a repo on the SERVER's filesystem for the new-session
+   *  worktree branch selector. The reply arrives as a `branchList` message (it
+   *  echoes a request ID so the picker can drop a stale response). */
+  queryBranches(path: string): void {
+    this.branchLoading = true;
+    const requestId = ++this.branchRequestId;
+    send({ type: "listBranches", path, requestId });
   }
   /** Rewind the session to a prior tree entry (the daemon's /rewind — destructive:
    *  drops the target entry and everything after). The server re-seeds every
@@ -2147,6 +2191,7 @@ class PantokenStore {
       this.draft = {
         ...this.draft,
         worktree: saved.worktree ?? this.draft.worktree,
+        baseBranch: saved.baseBranch ?? this.draft.baseBranch,
         model: saved.model ?? this.draft.model,
         thinking: saved.thinking ?? this.draft.thinking,
         facet: saved.facet ?? this.draft.facet,
@@ -2198,11 +2243,29 @@ class PantokenStore {
       // The worktree pref follows the draft to its new project key.
       if (oldKey in this.draftConfigMap) delete this.draftConfigMap[oldKey];
       this.persistDraftConfig(); // re-writes the live config under newKey (+ persists)
+      // Clear stale branch list from the old repo; the picker re-fetches for the new cwd.
+      this.branchList = null;
     }
   }
   toggleDraftWorktree(): void {
     if (this.draft) {
-      this.draft = { ...this.draft, worktree: !this.draft.worktree };
+      const worktree = !this.draft.worktree;
+      this.draft = { ...this.draft, worktree };
+      if (worktree) {
+        // Turning ON: reset baseBranch so auto-detection runs when branches load.
+        this.draft.baseBranch = undefined;
+      } else {
+        // Turning OFF: clear branch selection + cached list.
+        this.draft.baseBranch = undefined;
+        this.branchList = null;
+      }
+      this.persistDraftConfig();
+    }
+  }
+  /** Set the worktree base branch (undefined = auto-detect). Persists immediately. */
+  setDraftBaseBranch(branch: string | undefined): void {
+    if (this.draft) {
+      this.draft.baseBranch = branch;
       this.persistDraftConfig();
     }
   }
@@ -2224,6 +2287,7 @@ class PantokenStore {
       newSession: {
         cwd: d.cwd.trim() || undefined,
         worktree: d.worktree || undefined,
+        baseBranch: d.baseBranch,
         model: d.model,
         thinking: d.thinking,
         facet: d.facet && d.facet !== "execute" ? d.facet : undefined,
@@ -3102,6 +3166,7 @@ function persistDraftMap(map: Record<string, string>): void {
  *  field is optional — absence means "fall back to the global default at draft-open". */
 type StoredDraftConfig = {
   worktree?: boolean;
+  baseBranch?: string;
   model?: { provider: string; modelId: string };
   thinking?: string;
   facet?: string;
@@ -3123,6 +3188,7 @@ function loadDraftConfigMap(): Record<string, StoredDraftConfig> {
       if (!v || typeof v !== "object") continue;
       const rec = v as {
         worktree?: unknown;
+        baseBranch?: unknown;
         model?: unknown;
         thinking?: unknown;
         facet?: unknown;
@@ -3130,6 +3196,8 @@ function loadDraftConfigMap(): Record<string, StoredDraftConfig> {
       };
       const cfg: StoredDraftConfig = {};
       if (rec.worktree === true) cfg.worktree = true;
+      if (typeof rec.baseBranch === "string" && rec.baseBranch !== "")
+        cfg.baseBranch = rec.baseBranch;
       const m = rec.model as { provider?: unknown; modelId?: unknown } | null;
       if (m && typeof m.provider === "string" && typeof m.modelId === "string")
         cfg.model = { provider: m.provider, modelId: m.modelId };
@@ -3150,6 +3218,7 @@ function loadDraftConfigMap(): Record<string, StoredDraftConfig> {
         cfg.permissionMonitor = pm;
       if (
         cfg.worktree ||
+        cfg.baseBranch ||
         cfg.model ||
         cfg.thinking ||
         cfg.facet ||

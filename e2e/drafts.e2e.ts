@@ -94,6 +94,37 @@ test("a pending new-session draft's worktree toggle survives a reload", async ({
   );
 });
 
+test("the worktree base branch selection survives leaving and reopening", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await page.getByRole("button", { name: "New session…" }).click();
+  // Enable worktree so the branch selector appears.
+  await page.getByRole("button", { name: "worktree" }).click();
+
+  // Wait for the branch list to load, then the chip auto-selects "main" (mock fixture).
+  const branchChip = page.getByTestId("draft-branch-control");
+  await expect(branchChip).toBeVisible({ timeout: 5000 });
+  await expect(branchChip).toContainText("main");
+
+  // Open the picker and select "develop".
+  await branchChip.click();
+  await page.getByRole("option", { name: "develop" }).click();
+  await expect(branchChip).toContainText("develop");
+
+  // Navigate to an existing session — exits the draft.
+  await row(page, "Explore the fold reducer").click();
+  await openSidebar(page);
+
+  // Reopen the new-session view (same project) — the branch is still selected.
+  await page.getByRole("button", { name: "New session…" }).click();
+  await expect(page.getByRole("button", { name: "worktree" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByTestId("draft-branch-control")).toContainText("develop");
+});
+
 // Pick a non-default model (Sonnet) and a non-default thinking level (high)
 // using the combined picker, then assert the badge reflects both.
 async function pickNonDefaultModelAndThinking(page: Page): Promise<void> {
