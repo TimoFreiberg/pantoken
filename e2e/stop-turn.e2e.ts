@@ -14,7 +14,16 @@ test("the Stop pill + working indicator show while a normal turn streams", async
   await expect(
     page.getByTestId("working-indicator").locator(".coin, .dot, .ring, .mark"),
   ).toHaveCount(0);
-  await expect(page.getByTestId("stop-button")).toBeVisible();
+  const stop = page.getByTestId("stop-button");
+  await expect(stop).toBeVisible();
+
+  // The stop affordance belongs to the same bottom chrome as the composer, so their
+  // surfaces share one left edge rather than making the stop pill float in the gutter.
+  const stopBox = await stop.boundingBox();
+  const composerBox = await page.getByTestId("composer-surface").boundingBox();
+  expect(stopBox).not.toBeNull();
+  expect(composerBox).not.toBeNull();
+  expect(stopBox!.x).toBeCloseTo(composerBox!.x, 1);
   // Enter while streaming queues a follow-up (the driver routes mid-turn sends to
   // /turn/input). Enter clears the box (the message is queued) — guards the
   // composer-side behavior the removed toggle tests covered.
