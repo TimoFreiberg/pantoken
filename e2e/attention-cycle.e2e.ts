@@ -32,6 +32,11 @@ test("⌘\\ cycles through qna + approval: transcript → qna → approval → t
   await page.keyboard.press("Control+\\");
   await expect(page.locator(".attention-pill")).toHaveCount(1);
   await expect(page.getByRole("dialog", { name: "Run destructive command?" })).toBeVisible();
+  // The minimized pill stays compact (content-sized), not stretched to the
+  // full container width by .qna-inline's flex column.
+  const pillBox = await page.locator(".attention-pill").boundingBox();
+  const inlineBox = await page.locator(".qna-inline").boundingBox();
+  expect(pillBox!.width).toBeLessThan(inlineBox!.width);
 
   // Press 3: approval → transcript. Approval also minimizes to a pill.
   await page.keyboard.press("Control+\\");

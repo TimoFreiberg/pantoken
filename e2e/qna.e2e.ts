@@ -195,3 +195,72 @@ test("qna question text scales with --font-scale; action buttons do not", async 
   const grownBtn = await btnSize();
   expect(grownBtn).toBeCloseTo(baseBtn, 0);
 });
+
+test("qna form: context scrolls, options and actions stay in viewport, form caps at 70vh", async ({
+  page,
+}) => {
+  await drive(page, "qna");
+  const form = qnaForm(page);
+
+  // The card itself does NOT scroll on desktop (overflow is hidden,
+  // not auto/scroll — only .ctx scrolls).
+  const card = form.locator(".card");
+  const cardOverflow = await card.evaluate(
+    (el) => getComputedStyle(el).overflowY,
+  );
+  expect(cardOverflow).toBe("hidden");
+
+  // ── Q1: single-select with context ──────────────────────────
+  // The context (.ctx) is the sole scroll region on desktop.
+  const ctx = form.locator(".ctx");
+  await expect(ctx).toBeVisible();
+  const ctxOverflow = await ctx.evaluate(
+    (el) => getComputedStyle(el).overflowY,
+  );
+  expect(["auto", "scroll"]).toContain(ctxOverflow);
+
+  // All option buttons (radios for Q1) are in the viewport — not scrolled away.
+  // toBeInViewport() verifies actual viewport intersection, not just DOM presence.
+  await expect(form.getByRole("radio", { name: /bun/ })).toBeInViewport();
+  await expect(form.getByRole("radio", { name: /\bnpm\b/ })).toBeInViewport();
+  await expect(form.getByRole("radio", { name: /pnpm/ })).toBeInViewport();
+
+  // Action buttons are in the viewport.
+  await expect(form.getByRole("button", { name: "Cancel" })).toBeInViewport();
+  await expect(form.getByRole("button", { name: "Next" })).toBeInViewport();
+
+  // ── Q2: multi-select, no context ────────────────────────────
+  await form.getByRole("button", { name: "Next" }).click();
+  // No .ctx on Q2 — .card is just .q + .opts. Card still doesn't scroll.
+  const cardOverflowQ2 = await card.evaluate(
+    (el) => getComputedStyle(el).overflowY,
+  );
+  expect(cardOverflowQ2).toBe("hidden");
+  // All four checkboxes are in the viewport.
+  await expect(form.getByRole("checkbox", { name: /Typecheck/ })).toBeInViewport();
+  await expect(form.getByRole("checkbox", { name: /Unit tests/ })).toBeInViewport();
+  await expect(form.getByRole("checkbox", { name: /Lint/ })).toBeInViewport();
+  await expect(form.getByRole("checkbox", { name: /e2e/ })).toBeInViewport();
+  // Back button appears on Q2 (current > 0) — assert it's in viewport too.
+  await expect(form.getByRole("button", { name: "Back" })).toBeInViewport();
+
+  // ── Q3: free-text textarea, no context, no options ─────────
+  await form.getByRole("button", { name: "Next" }).click();
+  // No .ctx, no .opts — .card is just .q + .field.area textarea.
+  const cardOverflowQ3 = await card.evaluate(
+    (el) => getComputedStyle(el).overflowY,
+  );
+  expect(cardOverflowQ3).toBe("hidden");
+  // The textarea is in the viewport (not clipped by .card's overflow:hidden).
+  await expect(form.getByRole("textbox")).toBeInViewport();
+  await expect(form.getByRole("button", { name: "Submit" })).toBeInViewport();
+
+  // ── Form height cap ─────────────────────────────────────────
+  // getComputedStyle resolves vh to px, so compute the expected px from
+  // the viewport height and compare. The form's rendered height must not
+  // exceed 70vh.
+  const inline = page.locator(".qna-inline");
+  const vh = await page.evaluate(() => window.innerHeight);
+  const box = await inline.boundingBox();
+  expect(box!.height).toBeLessThanOrEqual(vh * 0.7 + 1); // +1px tolerance
+});

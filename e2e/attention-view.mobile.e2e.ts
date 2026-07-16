@@ -193,3 +193,27 @@ test("resolving the final request removes the overlay and shelf", async ({ page 
   await expect(shelf(page)).toBeHidden();
   await expect(page.getByPlaceholder("Message pantoken…")).toBeVisible();
 });
+
+test("qna mobile: whole card scrolls, .ctx does not scroll independently", async ({
+  page,
+}) => {
+  await drive(page, "qna");
+  const form = qna(page);
+  await expect(form).toBeVisible();
+
+  // On mobile full-screen, the whole card scrolls (overflow-y: auto).
+  const card = form.locator(".card");
+  const cardOverflow = await card.evaluate(
+    (el) => getComputedStyle(el).overflowY,
+  );
+  expect(["auto", "scroll"]).toContain(cardOverflow);
+
+  // .ctx does NOT scroll independently on mobile (overflow: visible,
+  // avoiding nested scroll containers).
+  const ctx = form.locator(".ctx");
+  await expect(ctx).toBeVisible();
+  const ctxOverflow = await ctx.evaluate(
+    (el) => getComputedStyle(el).overflowY,
+  );
+  expect(ctxOverflow).toBe("visible");
+});

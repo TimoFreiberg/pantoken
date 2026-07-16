@@ -142,6 +142,13 @@
     border-radius: var(--radius);
     box-shadow: var(--shadow-pop);
     font-size: calc(15px * var(--font-scale, 1));
+    /* Cap the form so it grows to fill content but never exceeds 70vh —
+       leaves ~30vh of transcript visible above. The form is a flex column
+       so .qna can flex within this cap and .ctx can absorb overflow. */
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
   .request-nav { display: none; }
   @media (max-width: 859px) {
@@ -152,6 +159,7 @@
     .phone-full .qna-inline {
       max-width: none; height: 100%; margin: 0; padding: max(8px, env(safe-area-inset-top)) 16px max(12px, env(safe-area-inset-bottom));
       border: 0; border-radius: 0; box-shadow: none; display: flex; flex-direction: column;
+      max-height: none; /* full-screen takes 100% height, not the 70vh desktop cap */
     }
     .request-nav {
       display: flex; min-height: 44px; align-items: center; justify-content: space-between;
@@ -168,6 +176,7 @@
   .attention-pill {
     display: inline-flex;
     align-items: center;
+    align-self: flex-start;
     gap: 6px;
     font-size: 12.5px;
     font-family: var(--font-sans);
