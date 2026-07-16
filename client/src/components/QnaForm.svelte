@@ -391,6 +391,8 @@
     outline: none;
     display: flex;
     flex-direction: column;
+    flex: 1;       /* fill the capped .qna-inline */
+    min-height: 0; /* allow shrinking so .ctx can absorb overflow */
   }
   .head {
     display: flex;
@@ -398,6 +400,7 @@
     justify-content: space-between;
     gap: 10px;
     margin-bottom: 12px;
+    flex-shrink: 0;
   }
   h2 {
     font-size: 1.0667em;
@@ -439,25 +442,36 @@
     border-color: var(--accent);
   }
   .card {
-    max-height: min(48vh, 420px);
-    overflow-y: auto;
+    /* Flex column so .ctx can shrink+scroll while .q and .opts stay pinned.
+       overflow: hidden prevents double scrollbars; .ctx is the sole scroll
+       region. */
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
   .q {
     font-size: 1em;
     font-weight: 550;
     margin: 0 0 6px;
     line-height: 1.4;
+    flex-shrink: 0;
   }
   .ctx {
     color: var(--text-muted);
     font-size: 0.8667em;
     margin: 0 0 12px;
     line-height: 1.5;
+    flex: 0 1 auto;    /* don't grow, can shrink to make room for options */
+    min-height: 0;     /* allow shrinking below content size */
+    overflow-y: auto;  /* scroll only the context, not the options */
   }
   .opts {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    flex-shrink: 0;
   }
   .opt {
     display: flex;
@@ -550,12 +564,14 @@
   .field.area {
     resize: vertical;
     line-height: 1.5;
+    flex-shrink: 0;
   }
   .dots {
     display: flex;
     justify-content: center;
     gap: 8px;
     margin: 14px 0 2px;
+    flex-shrink: 0;
   }
   .dot {
     width: 9px;
@@ -578,6 +594,7 @@
     display: flex;
     gap: 10px;
     margin-top: 16px;
+    flex-shrink: 0;
   }
   .actions :global(.btn) {
     flex: 1 1 0;
@@ -589,6 +606,7 @@
     .full-screen .min { width: auto; min-width: 96px; height: 44px; gap: 8px; padding: 0 12px; }
     .full-screen .min span { display: inline; }
     .full-screen .card { flex: 1; min-height: 0; max-height: none; overflow-y: auto; }
+    .full-screen .ctx { flex: none; min-height: 0; overflow: visible; }
     .full-screen .dot { width: 44px; height: 44px; background: transparent; border: 0; position: relative; }
     .full-screen .dot::after { content: ""; position: absolute; width: 9px; height: 9px; border-radius: 99px; background: var(--surface-sunken); border: 1px solid var(--border-strong); inset: 50% auto auto 50%; transform: translate(-50%, -50%); }
     .full-screen .dot.done::after { background: color-mix(in srgb, var(--text) 35%, var(--surface-sunken)); }
