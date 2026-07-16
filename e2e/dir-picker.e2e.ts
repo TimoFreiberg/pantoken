@@ -161,7 +161,11 @@ test("Backspace and Option+Backspace remain ordinary text editing", async ({
   await input.fill("/Users/timo/src/pantoken");
   await input.press("Backspace");
   await expect(input).toHaveValue("/Users/timo/src/pantoke");
-  await input.press("Alt+Backspace");
+  // Word-delete is platform-specific: Option+Backspace on macOS, Ctrl+Backspace on
+  // Linux/Windows. CI runs Chromium on Linux (see hotkeys.e2e.ts), so pick the
+  // modifier that actually deletes a word on the host.
+  const wordDelete = process.platform === "darwin" ? "Alt+Backspace" : "Control+Backspace";
+  await input.press(wordDelete);
   await expect(input).not.toHaveValue("/Users/timo/src/pantoke");
   await expect(picker(page)).toBeVisible();
 });
