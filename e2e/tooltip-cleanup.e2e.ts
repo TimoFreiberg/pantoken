@@ -96,7 +96,8 @@ test("tool card duration span has no title but retains aria-label", async ({
   const toggle = page.getByTestId("work-toggle").first();
   await toggle.click();
   const duration = page.locator(".tool .duration").first();
-  await expect(duration).toBeVisible();
+  // Duration is visually hidden at rest (opacity 0) but still in the DOM and a11y tree.
+  await expect(duration).toHaveCSS("opacity", "0");
   await expect(duration).not.toHaveAttribute("title", /.+/);
   await expect(duration).toHaveAttribute("aria-label", /.+/);
 });

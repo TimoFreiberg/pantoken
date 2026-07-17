@@ -526,28 +526,32 @@
     aria-expanded={open}
   >
     <span class="status-accessible">{statusLabel[item.status]}. </span>
-    {#if item.status === "running"}
-      <span class="status" aria-hidden="true">○</span>
-    {:else if item.status === "error"}
-      <span class="status" aria-hidden="true">✕</span>
-    {/if}
+    <span class="status-slot">
+      {#if item.status === "running"}
+        <span class="status" aria-hidden="true">○</span>
+      {:else if item.status === "error"}
+        <span class="status" aria-hidden="true">✕</span>
+      {/if}
+    </span>
     <span class="name" title={item.description || undefined}>{item.label ?? item.name}</span>
     <span class="arg" class:arg-warning={item.name === "block_goal"}>{argPreview}</span>
-    {#if item.status === "interrupted"}
-      <span class="status-text" aria-hidden="true">interrupted</span>
-    {/if}
-    {#if counts?.kind === "exact"}
-      <span class="counts" aria-label="{counts.added} added, {counts.removed} removed">
-        <span class="add">+{counts.added}</span>
-        <span class="del">−{counts.removed}</span>
-      </span>
-    {:else if counts?.kind === "omitted"}
-      <span
-        class="counts-omitted"
-        title="Line counts omitted for large edit"
-        aria-label="Line counts omitted for large edit">large edit</span
-      >
-    {/if}
+    <span class="trailing">
+      {#if item.status === "interrupted"}
+        <span class="status-text" aria-hidden="true">interrupted</span>
+      {/if}
+      {#if counts?.kind === "exact"}
+        <span class="counts" aria-label="{counts.added} added, {counts.removed} removed">
+          <span class="add">+{counts.added}</span>
+          <span class="del">−{counts.removed}</span>
+        </span>
+      {:else if counts?.kind === "omitted"}
+        <span
+          class="counts-omitted"
+          title="Line counts omitted for large edit"
+          aria-label="Line counts omitted for large edit">large edit</span
+        >
+      {/if}
+    </span>
     {#if durationLabel}
       <span class="duration" aria-label={`took ${durationLabel}`}>{durationLabel}</span>
     {/if}
@@ -681,10 +685,13 @@
 
 <style>
   .tool {
+    --tool-status-width: 13px;
+    --tool-chevron-width: 10px;
+    --tool-column-gap: 9px;
     border: none;
     border-radius: var(--radius-sm);
     background: none;
-    overflow: hidden;
+    overflow: visible;
     width: 100%;
     max-width: 680px;
   }
@@ -705,6 +712,7 @@
   .tool.flat .body {
     border-top: none;
     padding: 2px 7px 6px;
+    padding-left: calc(7px + var(--tool-status-width) + var(--tool-column-gap));
   }
   /* When a flat row is expanded, tint the whole card so header + its output read as one
      unit — without the box border, the detail would otherwise float ambiguously between
@@ -712,18 +720,30 @@
   .tool.flat.open {
     background: var(--surface-sunken);
   }
+  .tool.open {
+    background: var(--surface-sunken);
+    border-radius: var(--radius-sm);
+  }
   .head {
     width: 100%;
-    display: flex;
+    display: grid;
+    grid-template-columns:
+      var(--tool-status-width)
+      max-content
+      minmax(0, 1fr)
+      auto
+      var(--tool-chevron-width);
+    column-gap: var(--tool-column-gap);
     align-items: center;
-    gap: 9px;
+    position: relative;
     background: none;
     border: none;
-    padding: 9px 12px;
+    padding: 7px 12px;
     text-align: left;
     color: var(--text);
     cursor: pointer;
     transition: background 0.12s ease;
+    min-height: 34px;
   }
   .head:hover {
     background: var(--surface-sunken);
@@ -737,8 +757,12 @@
     background: var(--surface-sunken);
     box-shadow: inset 0 0 0 1.5px var(--accent);
   }
+  .status-slot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
   .status {
-    flex: 0 0 13px;
     font-size: 12px;
     line-height: 1;
     text-align: center;
@@ -762,7 +786,6 @@
     border: 0;
   }
   .status-text {
-    flex-shrink: 0;
     color: var(--text-faint);
     font-size: 11.5px;
     font-weight: 500;
@@ -775,7 +798,6 @@
   .name {
     font-weight: 550;
     font-size: 13.5px;
-    flex-shrink: 0;
   }
   .arg {
     font-family: var(--font-mono);
@@ -784,13 +806,17 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    flex: 1;
     min-width: 0;
-    max-width: 52ch;
   }
   /* block_goal's terminal_reason is a warning — render it amber. */
   .arg.arg-warning {
     color: var(--warning);
+  }
+  .trailing {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
   }
   .counts {
     display: inline-flex;
@@ -798,7 +824,6 @@
     font-family: var(--font-mono);
     font-size: 11.5px;
     font-weight: 550;
-    flex-shrink: 0;
     letter-spacing: -0.01em;
   }
   .counts .add {
@@ -811,20 +836,39 @@
     color: var(--text-faint);
     font-family: var(--font-mono);
     font-size: 11.5px;
-    flex-shrink: 0;
   }
-  /* Elapsed-duration badge — muted + monospace so it reads as metadata, not status. */
+  /* Elapsed-duration badge — a hover/focus-only tooltip. Visually hidden at rest
+     (opacity 0) but kept in the DOM + a11y tree so its aria-label still
+     contributes to the button's accessible name. Do NOT use visibility:hidden —
+     that removes it from the a11y tree. */
   .duration {
+    position: absolute;
+    right: calc(var(--tool-chevron-width) + var(--tool-column-gap) + 12px);
+    top: 100%;
+    margin-top: 2px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    padding: 2px 6px;
     font-family: var(--font-mono);
-    font-size: 11.5px;
-    color: var(--text-faint);
-    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--text-muted);
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.01em;
+    white-space: nowrap;
+    z-index: 20;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+  }
+  .head:hover .duration,
+  .head:focus-visible .duration {
+    opacity: 1;
   }
   .body {
     border-top: none;
     padding: 10px 12px;
+    padding-left: calc(12px + var(--tool-status-width) + var(--tool-column-gap));
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -889,6 +933,7 @@
     flex-wrap: wrap;
     gap: 8px;
     padding: 10px 12px;
+    padding-left: calc(12px + var(--tool-status-width) + var(--tool-column-gap));
     border-top: none;
   }
   /* The image is wrapped in a button so it's keyboard-reachable and opens the
@@ -940,6 +985,12 @@
     color: var(--text);
   }
   @media (max-width: 859px) {
+    .head {
+      min-height: 44px;
+    }
+    .duration {
+      display: none;
+    }
     .out-action {
       min-height: 44px;
       padding-inline: 12px;
