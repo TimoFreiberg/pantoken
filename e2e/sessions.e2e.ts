@@ -132,7 +132,7 @@ test("a pantoken-created worktree session groups under its parent project, inter
   const sidebar = page.getByTestId("sidebar");
   // Start a new session in a worktree of the pantoken project (the active session's cwd is
   // the pantoken repo). The mock isolates it as a sibling "-worktree" dir.
-  await sidebar.getByText("New session…").click();
+  await sidebar.getByTestId("sidebar-new-session").getByText("New session").click();
   await page.getByRole("button", { name: "worktree" }).click();
   const composer = page.getByPlaceholder("Describe a task or ask a question…");
   await composer.fill("isolate me");
@@ -284,7 +284,7 @@ test("a session can be started in a directory chosen via the browser", async ({
   await openSidebar(page);
   const sidebar = page.getByTestId("sidebar");
 
-  await sidebar.getByText("New session…").click();
+  await sidebar.getByTestId("sidebar-new-session").getByText("New session").click();
   // The project lives as a chip in the composer; click it to browse for the directory.
   await chooseProjectDir(page, "elsewhere");
   // Sending the first prompt is what actually creates the session (atomic).
@@ -393,7 +393,7 @@ test("clicking the project chip opens the directory browser", async ({
   page,
 }) => {
   await openSidebar(page);
-  await page.getByTestId("sidebar").getByText("New session…").click();
+  await page.getByTestId("sidebar").getByTestId("sidebar-new-session").getByText("New session").click();
   await page.getByTestId("draft-project-control").click();
   // The chip opens a server-side directory browser (the full browse/pick flow lives in
   // dir-picker.e2e.ts); here we only assert the chip is what surfaces it.
@@ -405,7 +405,7 @@ test("the worktree chip creates the session in an isolated worktree dir, grouped
 }) => {
   await openSidebar(page);
   const sidebar = page.getByTestId("sidebar");
-  await sidebar.getByText("New session…").click();
+  await sidebar.getByTestId("sidebar-new-session").getByText("New session").click();
   // Toggle the worktree chip on, then choose the project via the directory browser.
   await page.getByRole("button", { name: "worktree" }).click();
   await expect(page.getByRole("button", { name: "worktree" })).toHaveAttribute(
@@ -440,7 +440,7 @@ async function createWorktreeSession(
   project = "demo",
 ) {
   await openSidebar(page);
-  await page.getByTestId("sidebar").getByText("New session…").click();
+  await page.getByTestId("sidebar").getByTestId("sidebar-new-session").getByText("New session").click();
   await page.getByRole("button", { name: "worktree" }).click();
   await chooseProjectDir(page, project);
   const composer = page.getByPlaceholder("Describe a task or ask a question…");

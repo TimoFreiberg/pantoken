@@ -17,6 +17,14 @@ test("new-session button has no title, but shows a ⌘N kbd hint on hover", asyn
   const btn = page.getByTestId("sidebar-new-session").locator(".new-btn");
   await expect(btn).not.toHaveAttribute("title", /.+/);
 
+  // The accessible name is exactly "New session" (the decorative + is aria-hidden).
+  // exact: true avoids matching the project "+" buttons ("New session in pantoken", etc.).
+  await expect(
+    page.getByRole("button", { name: "New session", exact: true }),
+  ).toBeVisible();
+  const plus = btn.locator(".plus");
+  await expect(plus).toHaveAttribute("aria-hidden", "true");
+
   // The kbd hint exists and is hidden (opacity 0) at rest.
   const hint = btn.locator(".hotkey-hint");
   await expect(hint).toHaveText("⌘N");

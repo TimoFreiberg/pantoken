@@ -335,7 +335,7 @@ test("the facet menu does not auto-open after a draft remount", async ({
   // reducer" still has the default Execute facet, so the post-remount rotation
   // trace is clean.
   await openSidebar(page);
-  await page.getByTestId("sidebar").getByText("New session…").click();
+  await page.getByTestId("sidebar").getByTestId("sidebar-new-session").getByText("New session").click();
   await expect(page.getByPlaceholder("Describe a task or ask a question…")).toBeVisible();
   await openSidebar(page);
   await page
@@ -372,7 +372,7 @@ test("clicking the facet badge in the draft opens the dropdown for the DRAFT's f
   await expect(liveBadge).toHaveText("Execute");
 
   // Open a new-session draft.
-  await page.getByTestId("sidebar").getByText("New session…").click();
+  await page.getByTestId("sidebar").getByTestId("sidebar-new-session").getByText("New session").click();
   await expect(page.getByTestId("new-session")).toBeVisible();
   // The draft's facet badge also reads "Execute" (the draft default).
   const draftBadge = page.getByTestId("facet-badge");
@@ -400,7 +400,7 @@ test("Shift+Tab in the new-session draft rotates the DRAFT's facet, not the old 
   await expect(liveBadge).toHaveText("Execute");
 
   // Open a new-session draft.
-  await page.getByTestId("sidebar").getByText("New session…").click();
+  await page.getByTestId("sidebar").getByTestId("sidebar-new-session").getByText("New session").click();
   await expect(page.getByTestId("new-session")).toBeVisible();
   const draftBadge = page.getByTestId("facet-badge");
   await expect(draftBadge).toHaveText("Execute");
@@ -426,7 +426,7 @@ test("clicking the facet badge in the draft view toggles the draft, not the old 
   page,
 }) => {
   await openSidebar(page);
-  await page.getByTestId("sidebar").getByText("New session…").click();
+  await page.getByTestId("sidebar").getByTestId("sidebar-new-session").getByText("New session").click();
   await expect(page.getByTestId("new-session")).toBeVisible();
 
   const draftBadge = page.getByTestId("facet-badge");

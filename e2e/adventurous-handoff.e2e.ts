@@ -42,7 +42,7 @@ test("the handoff toggle hides while drafting a new session", async ({
 }) => {
   // A draft has no live daemon session, so the per-session flag can't apply yet.
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await page.getByTestId("facet-badge").click();
   await expect(page.getByRole("listbox", { name: "Facet" })).toBeVisible();
   await expect(page.getByTestId("adventurous-handoff")).toHaveCount(0);

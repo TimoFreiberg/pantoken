@@ -4,7 +4,7 @@ import { gotoFresh, openSidebar } from "./helpers.js";
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
 });
 
 test("mobile centres the deferred draft and keeps its controls usable", async ({
@@ -74,7 +74,7 @@ test("mobile navigation leaves the draft without discarding its text", async ({
   await openSidebar(page);
   await page.getByText("Wire up the WebSocket bridge", { exact: true }).click();
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await expect(
     page.getByPlaceholder("Describe a task or ask a question…"),
   ).toHaveValue("keep this idea");

@@ -205,7 +205,7 @@ test("the model picker does not auto-open after a draft remount", async ({
   // remounts it against the existing session (store.draft cleared) — resetting
   // ModelPicker's local state.
   await openSidebar(page);
-  await page.getByTestId("sidebar").getByText("New session…").click();
+  await page.getByTestId("sidebar").getByTestId("sidebar-new-session").getByText("New session").click();
   await expect(page.getByPlaceholder("Describe a task or ask a question…")).toBeVisible();
   await openSidebar(page);
   await page

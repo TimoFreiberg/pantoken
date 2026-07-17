@@ -18,7 +18,7 @@ test("a new session's first prompt never flashes the previously focused transcri
 
   // Start a fresh new-session draft (deferred creation: nothing exists until we send).
   await openSidebar(page);
-  await page.getByTestId("sidebar").getByText("New session…").click();
+  await page.getByTestId("sidebar").getByTestId("sidebar-new-session").getByText("New session").click();
   await expect(page.getByTestId("new-session")).toBeVisible();
 
   const composer = page.getByPlaceholder("Describe a task or ask a question…");

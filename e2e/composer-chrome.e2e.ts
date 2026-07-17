@@ -187,7 +187,7 @@ test("new-session controls use calm chrome and pair permission with facet", asyn
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
 
   const project = page.getByTestId("draft-project-control");
   const worktree = page.getByTestId("draft-worktree-control");
@@ -297,7 +297,7 @@ test("worktree branch selector chip appears when worktree is enabled", async ({
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
 
   // Before enabling worktree, no branch chip.
   await expect(page.getByTestId("draft-branch-control")).toHaveCount(0);
@@ -318,7 +318,7 @@ test("branch selector dropdown lists branches and updates the chip", async ({
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await page.getByTestId("draft-worktree-control").click();
 
   const branchChip = page.getByTestId("draft-branch-control");
@@ -352,7 +352,7 @@ test("branch selector shows error state on failbranchlist script", async ({
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await page.getByTestId("draft-worktree-control").click();
 
   const branchChip = page.getByTestId("draft-branch-control");

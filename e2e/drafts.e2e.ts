@@ -39,7 +39,7 @@ test("a pending new-session draft is restored when you reopen the new view", asy
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   const draftBox = page.getByPlaceholder("Describe a task or ask a question…");
   await draftBox.fill("a brand-new idea");
 
@@ -49,7 +49,7 @@ test("a pending new-session draft is restored when you reopen the new view", asy
   await expect(composer(page)).toHaveValue("");
 
   // Reopen the new-session view (same project) — the idea is still there.
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await expect(
     page.getByPlaceholder("Describe a task or ask a question…"),
   ).toHaveValue("a brand-new idea");
@@ -59,7 +59,7 @@ test("a pending new-session draft's worktree toggle survives leaving and reopeni
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   const worktree = page.getByRole("button", { name: "worktree" });
   await expect(worktree).toHaveAttribute("aria-pressed", "false");
   await worktree.click();
@@ -71,7 +71,7 @@ test("a pending new-session draft's worktree toggle survives leaving and reopeni
   await expect(composer(page)).toHaveValue("");
 
   // Reopen the new-session view (same project) — the toggle is still on.
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await expect(page.getByRole("button", { name: "worktree" })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -82,12 +82,12 @@ test("a pending new-session draft's worktree toggle survives a reload", async ({
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await page.getByRole("button", { name: "worktree" }).click();
   await page.reload();
   // Boot restores the focused session, not the draft, so reopen the new view.
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await expect(page.getByRole("button", { name: "worktree" })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -98,7 +98,7 @@ test("the worktree base branch selection survives leaving and reopening", async 
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   // Enable worktree so the branch selector appears.
   await page.getByRole("button", { name: "worktree" }).click();
 
@@ -117,7 +117,7 @@ test("the worktree base branch selection survives leaving and reopening", async 
   await openSidebar(page);
 
   // Reopen the new-session view (same project) — the branch is still selected.
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await expect(page.getByRole("button", { name: "worktree" })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -153,7 +153,7 @@ test("a pending new-session draft's model + thinking survive leaving and reopeni
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await pickNonDefaultModelAndThinking(page);
 
   // Navigate to an existing session — exits the draft.
@@ -162,7 +162,7 @@ test("a pending new-session draft's model + thinking survive leaving and reopeni
   await expect(composer(page)).toHaveValue("");
 
   // Reopen the new-session view (same project) — the picks are still there.
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await expectNonDefaultModelAndThinking(page);
 });
 
@@ -170,13 +170,13 @@ test("a pending new-session draft's model + thinking survive a reload", async ({
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await pickNonDefaultModelAndThinking(page);
 
   await page.reload();
   // Boot restores the focused session, not the draft, so reopen the new view.
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await expectNonDefaultModelAndThinking(page);
 });
 
@@ -207,7 +207,7 @@ test("a new-session draft hides the focused session's tasklist pill", async ({
   // Opening the new-session view is a client overlay over the focused session;
   // that session's tasklist must not bleed into the fresh draft (which has none).
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await expect(
     page.getByPlaceholder("Describe a task or ask a question…"),
   ).toBeVisible();
@@ -235,7 +235,7 @@ test("a new-session draft hides the previous session's goal badge and ambient st
   // Open a new-session draft — the previous session's goal badge, ambient
   // statuses, and title must not bleed into the fresh draft view.
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await expect(
     page.getByPlaceholder("Describe a task or ask a question…"),
   ).toBeVisible();
@@ -262,7 +262,7 @@ test("a new-session draft hides the previous session's dialogs and context panel
   // The draft view must not show the OTHER session's approval popup, nor its
   // context panel (flags/jobs/todos) or the panel's pop-in tab.
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await expect(
     page.getByPlaceholder("Describe a task or ask a question…"),
   ).toBeVisible();
@@ -283,7 +283,7 @@ test("facet badge click in a new-session draft changes the DRAFT's facet, not th
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   const badge = page.getByTestId("facet-badge");
   await expect(badge).toContainText("Execute");
 
@@ -298,7 +298,7 @@ test("facet badge click in a new-session draft changes the DRAFT's facet, not th
 
   // Reopen the draft — the plan pick survived (rides draftConfigMap).
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await expect(badge).toContainText("Plan");
 });
 
@@ -306,7 +306,7 @@ test("submitting a draft carries its facet into the created session", async ({
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   const badge = page.getByTestId("facet-badge");
   await expect(badge).toContainText("Execute");
   await badge.click();
@@ -332,7 +332,7 @@ test("a draft's facet + permission-monitor survive leaving and reopening", async
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
 
   // Pick non-defaults: Plan facet + Bypass permission.
   await page.getByTestId("facet-badge").click();
@@ -350,7 +350,7 @@ test("a draft's facet + permission-monitor survive leaving and reopening", async
   await expect(composer(page)).toHaveValue("");
 
   // Reopen the new-session view — the picks are still there.
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await expect(page.getByTestId("facet-badge")).toHaveText("Plan");
   await expect(page.getByTestId("permission-badge")).toContainText("Bypass");
 });
@@ -364,7 +364,7 @@ test("a draft's CUSTOM facet survives leaving/reopening and a reload", async ({
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
 
   // Pick the custom facet (not a builtin) via the facet badge picker.
   await page.getByTestId("facet-badge").click();
@@ -377,7 +377,7 @@ test("a draft's CUSTOM facet survives leaving/reopening and a reload", async ({
   await expect(composer(page)).toHaveValue("");
 
   // Reopen the new-session view (same project) — the custom pick rides draftConfigMap.
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await expect(page.getByTestId("facet-badge")).toHaveText("Research");
 
   // And survives a full reload: pagehide flushes draftConfigMap to localStorage, boot
@@ -385,7 +385,7 @@ test("a draft's CUSTOM facet survives leaving/reopening and a reload", async ({
   // to "Execute".
   await page.reload();
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await expect(page.getByTestId("facet-badge")).toHaveText("Research");
 });
 
@@ -393,7 +393,7 @@ test("submitting a plan-facet draft creates a session whose badge reads Plan", a
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
 
   // Set the draft facet to Plan.
   await page.getByTestId("facet-badge").click();
@@ -415,7 +415,7 @@ test("submitting a default draft creates a session with Execute + Bypass+ badges
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
 
   // An untouched draft: facet "Execute", permission "Bypass+" (the daemon default).
   await expect(page.getByTestId("facet-badge")).toHaveText("Execute");

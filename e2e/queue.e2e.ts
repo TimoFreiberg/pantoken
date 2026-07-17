@@ -20,7 +20,7 @@ test("queued modes survive reconnect and session refocus", async ({ page }) => {
   );
 
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await expect(page.getByTestId("queue-tray")).toHaveCount(0);
   await openSidebar(page);
   await page.getByTestId("sidebar").locator(".row", { hasText: ACTIVE }).click();

@@ -63,7 +63,7 @@ test("mobile: new-session scope-row chips stay tappable above the composer surfa
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
 
   const scope = page.getByTestId("scope-row");
   const project = page.getByTestId("draft-project-control");

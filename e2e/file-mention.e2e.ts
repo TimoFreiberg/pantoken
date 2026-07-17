@@ -30,7 +30,7 @@ test("a draft's @-mention searches the draft cwd via the server; a real session 
 
   // A new-session draft searches via the server fallback scoped to its target cwd, so the
   // cwd-derived marker appears — and ordinary fixture files still resolve too.
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   // The draft renders its own Composer inside the sidebar's .new-session — target that
   // one specifically (the main bottom composer is also still in the DOM).
   const draftBox = page.locator(".new-session .composer-wrap textarea");
