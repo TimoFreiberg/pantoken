@@ -23,6 +23,14 @@ test("the combined badge shows model and effort", async ({ page }) => {
 test("the picker lists models and switches the active one", async ({
   page,
 }) => {
+  // AC.4 — focus the composer first, then click-open the picker. After
+  // selecting a model, the composer must NOT be refocused: click-open keeps
+  // openedViaKeyboard=false, so closePicker never calls store.focusComposer().
+  // (The hotkey-open path does refocus; this proves the click path is separate.)
+  const composer = page.getByPlaceholder("Message pantoken…");
+  await composer.click();
+  await expect(composer).toBeFocused();
+
   const badge = page.getByTestId("model-badge");
   await badge.click();
 
@@ -35,6 +43,20 @@ test("the picker lists models and switches the active one", async ({
   await expect(
     page.getByTestId("model-badge"),
   ).toContainText("DeepSeek V4 Flash");
+
+  // Click-open deliberately does NOT refocus the composer (unlike hotkey-open).
+  await expect(composer).not.toBeFocused();
+});
+
+test("clicking the badge focuses the filter on desktop", async ({ page }) => {
+  // AC.1 — opening the picker by clicking the badge (not via hotkey) focuses
+  // the "Type to filter…" input, mirroring the hotkey-open behavior. The
+  // desktop project runs at a viewport wider than 859px, so isPhone is false
+  // and focus fires.
+  await page.getByTestId("model-badge").click();
+  const panel = page.locator(".mp .panel");
+  await expect(panel).toBeVisible();
+  await expect(panel.getByPlaceholder("Type to filter…")).toBeFocused();
 });
 
 test("the filter fuzzy-matches models", async ({ page }) => {
