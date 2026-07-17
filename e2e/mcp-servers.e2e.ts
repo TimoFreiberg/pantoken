@@ -1,8 +1,45 @@
 import { expect, test } from "@playwright/test";
-import { gotoFresh } from "./helpers.js";
+import { gotoFresh, openRightSidebar } from "./helpers.js";
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
+});
+
+test("the right sidebar shows an MCP servers section with both mock servers", async ({
+  page,
+}) => {
+  await openRightSidebar(page);
+  const section = page.getByTestId("mcp-servers");
+  await expect(section).toBeVisible();
+
+  // The mock fixture has 2 servers: filesystem (connected) + github (disconnected).
+  await expect(section).toContainText("filesystem");
+  await expect(section).toContainText("github");
+
+  // Status dots reflect the mock's initial state.
+  const fsRow = section.locator(".mcp-item").filter({ hasText: "filesystem" });
+  const ghRow = section.locator(".mcp-item").filter({ hasText: "github" });
+  await expect(fsRow.locator(".mcp-dot")).toHaveClass(/mcp-connected/);
+  await expect(ghRow.locator(".mcp-dot")).toHaveClass(/mcp-disconnected/);
+
+  // filesystem has 11 tools; github has 0.
+  await expect(fsRow).toContainText("11 tools");
+});
+
+test("a /mcp round-trip updates the right-sidebar status dot", async ({ page }) => {
+  await openRightSidebar(page);
+  const section = page.getByTestId("mcp-servers");
+  const ghRow = section.locator(".mcp-item").filter({ hasText: "github" });
+  // github starts disconnected.
+  await expect(ghRow.locator(".mcp-dot")).toHaveClass(/mcp-disconnected/);
+
+  // Dispatch via the composer /mcp command.
+  const box = page.locator(".composer-wrap textarea");
+  await box.fill("/mcp github enable");
+  await box.press("Enter");
+
+  // The mock maps enable → Connected; the sidebar dot flips.
+  await expect(ghRow.locator(".mcp-dot")).toHaveClass(/mcp-connected/);
 });
 
 test("the MCP settings tab shows configured servers", async ({ page }) => {

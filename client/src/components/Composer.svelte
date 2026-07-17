@@ -17,7 +17,16 @@
     IMAGE_LIMITS,
     prepareImageFiles,
   } from "../lib/image-attachments.js";
-  import { filterCommands, parseSlashCommand, slashQuery } from "../lib/slash.js";
+  import {
+    filterCommands,
+    filterMcpActions,
+    filterMcpServers,
+    mcpArgStage,
+    parseSlashCommand,
+    slashQuery,
+  } from "../lib/slash.js";
+  import type { McpActionItem } from "../lib/slash.js";
+  import type { McpServerInfo } from "@pantoken/protocol";
   import { nextHistoryIndex } from "../lib/prompt-history.js";
   import {
     caretOnFirstVisualLine,
@@ -25,6 +34,7 @@
   } from "../lib/caret-visual-line.js";
   import { contextTone } from "../lib/context-tone.js";
   import SlashMenu from "./SlashMenu.svelte";
+  import McpArgMenu from "./McpArgMenu.svelte";
   import AtMenu from "./AtMenu.svelte";
   import DirPicker from "./DirPicker.svelte";
   import BranchPicker from "./BranchPicker.svelte";
@@ -195,6 +205,16 @@
     if (slashSel >= slashItems.length) slashSel = 0;
   });
 
+  // --- `/mcp` argument typeahead. Two stages after the command name settles:
+  //   first a server-name menu, then (once a server is chosen) an action menu.
+  //   Mirrors the slash menu's shape (selection + dismissal + open-when-non-empty).
+  //   The action stage is gated on the typed server exact-matching a configured
+  //   server — a nonexistent server shows no action candidates (the submit path
+  //   surfaces the "Unknown MCP server" error instead). The `mcpArg` derived
+  //   itself is declared below `cursorPos` (it depends on it).
+  let mcpArgSel = $state(0);
+  let mcpArgDismissed = $state(false);
+
   // --- Ctrl+R prompt-history popup. Shows recent prompts above the textarea;
   //   arrow-key navigate, Enter fills the composer. Mirrors the polytoken TUI.
   let historyOpen = $state(false);
@@ -228,6 +248,17 @@
   // --- Cursor tracking (textarea). Needed so @-mentions work inline, not just at
   // the end of the draft. Updated on every input/click/keyboard event.
   let cursorPos = $state(0);
+
+  // `/mcp` arg-stage derived — must follow cursorPos (it depends on it).
+  const mcpArg = $derived(mcpArgStage(store.composerDraft, cursorPos));
+  const mcpArgItems = $derived(mcpArgCandidates(mcpArg, store.session.mcpServers));
+  const mcpArgOpen = $derived(
+    mcpArg !== null && !mcpArgDismissed && mcpArgItems.length > 0,
+  );
+  // Keep the highlighted index in range as the filtered list shrinks.
+  $effect(() => {
+    if (mcpArgSel >= mcpArgItems.length) mcpArgSel = 0;
+  });
 
   // --- Readline-style prompt history (ArrowUp/ArrowDown). `histIndex` is the navigation
   // cursor: null = showing the live draft, otherwise an index into store.currentPromptHistory.
@@ -507,6 +538,24 @@
     return () => clearTimeout(stashTimer);
   });
 
+  /** Resolve the `/mcp` arg-menu candidates from the current stage + known
+   *  servers. Server stage: filtered server names. Action stage: the four
+   *  actions, but ONLY when the typed server exact-matches a configured server
+   *  (a nonexistent server shows no candidates). Returns [] when not in the
+   *  `/mcp` arg position. Pure so the `$derived` recomputes on draft/cursor/
+   *  server-list changes. */
+  function mcpArgCandidates(
+    arg: ReturnType<typeof mcpArgStage>,
+    servers: readonly McpServerInfo[],
+  ): McpServerInfo[] | McpActionItem[] {
+    if (arg === null) return [];
+    if (arg.stage === "server") {
+      return filterMcpServers(servers, arg.partial);
+    }
+    const known = servers.some((s) => s.serverName === arg.serverName);
+    return known ? filterMcpActions(arg.partial) : [];
+  }
+
   /** Slash commands intercepted client-side (routed to native store methods
    *  instead of sent as text). Compared case-insensitively to match the
    *  daemon's case-insensitive command recognition. */
@@ -518,6 +567,7 @@
     "daemon-reload",
     "goal",
     "title",
+    "mcp",
   ]);
 
   /** Builtins that require arguments — when accepted from the menu, they
@@ -525,7 +575,7 @@
    *  instead of dispatching immediately. No-arg builtins dispatch right away.
    *  `/title` with no args clears the title override (daemon semantics), so
    *  it dispatches immediately like other no-arg builtins. */
-  const BUILTINS_REQUIRING_ARGS = new Set(["facet", "goal"]);
+  const BUILTINS_REQUIRING_ARGS = new Set(["facet", "goal", "mcp"]);
 
   /** Whether a command name is a client-intercepted builtin (case-insensitive). */
   function isBuiltin(name: string): boolean {
@@ -602,6 +652,37 @@
             };
             return false;
         }
+      }
+      case "mcp": {
+        const parts = args.split(/\s+/).filter(Boolean);
+        const server = parts[0] ?? "";
+        const action = parts[1]?.toLowerCase() ?? "";
+        if (!server || !action) {
+          attachmentStatus = {
+            kind: "error",
+            text: "Usage: /mcp <server> <action>",
+          };
+          return false;
+        }
+        // Client-side guard: don't send a doomed request for an unknown server
+        // (the daemon-side error path is untested for MCP).
+        if (!store.session.mcpServers.some((s) => s.serverName === server)) {
+          attachmentStatus = {
+            kind: "error",
+            text: `Unknown MCP server: ${server}`,
+          };
+          return false;
+        }
+        const valid = new Set(["enable", "disable", "disconnect", "reconnect"]);
+        if (!valid.has(action)) {
+          attachmentStatus = {
+            kind: "error",
+            text: `Unknown /mcp action: ${action}`,
+          };
+          return false;
+        }
+        store.setMcpServer(server, action as "enable" | "disable" | "disconnect" | "reconnect");
+        return true;
       }
     }
     return false;
@@ -812,6 +893,8 @@
     if (slashQuery(store.composerDraft) === null) slashDismissed = false;
     atSel = 0;
     if (extractAtQuery(store.composerDraft, cursorPos) === null) atDismissed = false;
+    mcpArgSel = 0;
+    if (mcpArgStage(store.composerDraft, cursorPos) === null) mcpArgDismissed = false;
   }
 
   // Replace the bare slash token with `/name ` and keep focus so the user types args
@@ -825,6 +908,45 @@
       ta?.focus();
       autosize();
     });
+  }
+
+  /** Accept a `/mcp` arg-menu item.
+   *  - Server stage: replace the partial with the server name + trailing space,
+   *    advancing to the action stage (same mechanic as acceptSlash's `/name `).
+   *  - Action stage: dispatch immediately via store.setMcpServer and clear the
+   *    composer (no two-Enter), mirroring how no-arg builtins dispatch on accept. */
+  function acceptMcpArg(item: McpServerInfo | McpActionItem) {
+    const stage = mcpArg?.stage;
+    if (!stage) return;
+    if (stage === "server" && "serverName" in item) {
+      store.composerDraft = `/mcp ${item.serverName} `;
+      mcpArgDismissed = false;
+      mcpArgSel = 0;
+      queueMicrotask(() => {
+        ta?.focus();
+        autosize();
+        if (ta) {
+          const end = store.composerDraft.length;
+          ta.selectionStart = ta.selectionEnd = end;
+          cursorPos = end;
+        }
+      });
+      return;
+    }
+    if (stage === "action" && "action" in item) {
+      const serverName = mcpArg?.serverName ?? "";
+      store.setMcpServer(serverName, item.action);
+      store.composerDraft = "";
+      mcpArgDismissed = false;
+      mcpArgSel = 0;
+      attachmentStatus = null;
+      histIndex = null;
+      histWip = "";
+      queueMicrotask(() => {
+        ta?.focus();
+        autosize();
+      });
+    }
   }
 
   /** Replace the @-mention span (`@<query>`) with the canonical text for the picked
@@ -899,7 +1021,7 @@
     // abandons the draft. ⌥P / ⌥W are handled by the window keydown listener so they
     // also work before the textarea is focused (⌘N leaves it blurred).
     if (drafting) {
-      if (e.key === "Escape" && !slashOpen && !atOpen && !store.composerDraft.trim()) {
+      if (e.key === "Escape" && !slashOpen && !mcpArgOpen && !atOpen && !store.composerDraft.trim()) {
         e.preventDefault();
         store.cancelDraft();
         return;
@@ -992,6 +1114,34 @@
       if (e.key === "Escape") {
         e.preventDefault();
         slashDismissed = true;
+        return;
+      }
+    }
+    // `/mcp` arg-menu keyboard handling (after slash, before @-mention). Once a
+    // space follows `/mcp`, slashQuery is null so slashOpen is false — the two
+    // menus are mutually exclusive. Placed before the @-mention block so `/mcp `
+    // argument completion takes precedence over an accidental `@`.
+    if (mcpArgOpen) {
+      const n = mcpArgItems.length;
+      if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
+        e.preventDefault();
+        mcpArgSel = (mcpArgSel + 1) % n;
+        return;
+      }
+      if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) {
+        e.preventDefault();
+        mcpArgSel = (mcpArgSel - 1 + n) % n;
+        return;
+      }
+      if (e.key === "Enter" || (e.key === "Tab" && !e.shiftKey)) {
+        e.preventDefault();
+        const item = mcpArgItems[mcpArgSel];
+        if (item) acceptMcpArg(item);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        mcpArgDismissed = true;
         return;
       }
     }
@@ -1395,6 +1545,15 @@
           onhover={(i) => (slashSel = i)}
         />
       {/if}
+      {#if mcpArgOpen && mcpArg}
+        <McpArgMenu
+          stage={mcpArg.stage}
+          items={mcpArgItems}
+          selected={mcpArgSel}
+          onpick={acceptMcpArg}
+          onhover={(i) => (mcpArgSel = i)}
+        />
+      {/if}
       {#if historyOpen}
         <PromptHistoryMenu
           items={historyItems}
@@ -1495,8 +1654,8 @@
               : "Message pantoken…"}
           rows="1"
           role="combobox"
-          aria-expanded={slashOpen || atOpen}
-          aria-controls={atOpen ? "at-menu" : "slash-menu"}
+          aria-expanded={slashOpen || mcpArgOpen || atOpen}
+          aria-controls={atOpen ? "at-menu" : mcpArgOpen ? "mcp-arg-menu" : "slash-menu"}
           aria-autocomplete="list"
         ></textarea>
         <div class="actions">

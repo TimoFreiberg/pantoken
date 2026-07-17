@@ -22,6 +22,7 @@
   const flags = $derived(s.flags);
   const todos = $derived(s.todos);
   const jobs = $derived(store.jobs);
+  const mcpServers = $derived(s.mcpServers);
   const open = $derived(store.rightSidebarOpen);
   let viewportWidth = $state(typeof window === "undefined" ? 1100 : window.innerWidth);
   const widths = $derived(
@@ -195,6 +196,34 @@
                   {/if}
                 </div>
               </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+
+    <!-- MCP servers -->
+    <section class="section" data-testid="mcp-servers">
+      <div class="section-head">
+        <span class="section-title">MCP servers</span>
+        {#if mcpServers.length > 0}
+          <span class="section-count">{mcpServers.length}</span>
+        {/if}
+      </div>
+      {#if mcpServers.length === 0}
+        <p class="empty">No MCP servers</p>
+      {:else}
+        <ul class="mcp-list">
+          {#each mcpServers as srv (srv.serverName)}
+            <li
+              class="mcp-item"
+              title={`${srv.status}${srv.toolCount > 0 ? ` · ${srv.toolCount} tool${srv.toolCount === 1 ? "" : "s"}` : ""}`}
+            >
+              <span class="mcp-dot mcp-{srv.status}" aria-hidden="true"></span>
+              <span class="mcp-name">{srv.serverName}</span>
+              {#if srv.toolCount > 0}
+                <span class="mcp-tools">{srv.toolCount} tool{srv.toolCount === 1 ? "" : "s"}</span>
+              {/if}
             </li>
           {/each}
         </ul>
@@ -508,6 +537,54 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .mcp-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .mcp-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+    font-size: 12px;
+  }
+  .mcp-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .mcp-dot.mcp-connected {
+    background: var(--ok);
+  }
+  .mcp-dot.mcp-disconnected {
+    background: var(--text-faint);
+  }
+  .mcp-dot.mcp-reconnecting {
+    background: var(--warning);
+  }
+  .mcp-dot.mcp-disabled {
+    background: var(--danger);
+  }
+  .mcp-name {
+    color: var(--text);
+    font-family: var(--font-mono, monospace);
+    font-size: 11.5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+  }
+  .mcp-tools {
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--text-faint);
   }
   /* Phone: a full-screen context view that slides in from the right (an iOS
      "push", not a drawer — no scrim, nothing peeks out behind it). Stays mounted

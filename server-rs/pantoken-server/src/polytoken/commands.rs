@@ -94,9 +94,10 @@ struct RawCategory {
 /// `aliases` array, not the `commands` array — only canonical names are
 /// matched here.
 const OMITTED_CANONICALS: &[&str] = &[
-    "/model",       // native ModelPicker
-    "/jobs",        // interactive job list (no UI)
-    "/mcp",         // interactive server selection (no UI)
+    "/model", // native ModelPicker
+    "/jobs",  // interactive job list (no UI)
+    // `/mcp` is client-implemented in pantoken: the composer's `/mcp` arg-menu
+    // dispatches to the already-wired store.setMcpServer, so it is NOT omitted.
     "/permissions", // interactive choice (Settings panel covers it)
     "/todo",        // interactive choice (Todos panel covers it)
     "/theme",       // interactive theme picker (no UI)
@@ -155,10 +156,12 @@ mod tests {
     #[test]
     fn parses_the_real_observed_output() {
         let cmds = parse_slash_commands(REAL_OUTPUT);
-        // 19 canonicals total, minus 13 omitted (interactive/TUI-only builtins
-        // with no pantoken UI). The 7 remaining are client-intercepted builtins:
-        // clear, reset-shell, daemon-reload, goal, facet, compact, title.
-        assert_eq!(cmds.len(), 7);
+        // 19 canonicals total, minus 11 omitted (interactive/TUI-only builtins
+        // with no pantoken UI). The 8 remaining are client-intercepted builtins:
+        // clear, reset-shell, daemon-reload, goal, facet, compact, title, mcp.
+        // (/mcp is client-implemented in pantoken — its arg-menu dispatches to
+        // store.setMcpServer — so it is NOT omitted.)
+        assert_eq!(cmds.len(), 8);
         let clear = cmds.iter().find(|c| c.name == "clear").unwrap();
         assert!(
             clear
@@ -168,6 +171,11 @@ mod tests {
                 .contains("Clears the working context")
         );
         assert_eq!(clear.source, CommandSource::Builtin);
+        // /mcp now passes through to the client.
+        assert!(
+            cmds.iter().any(|c| c.name == "mcp"),
+            "/mcp should appear in parsed output (client-implemented)"
+        );
     }
 
     #[test]

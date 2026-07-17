@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { drive, gotoFresh } from "./helpers.js";
+import { drive, gotoFresh, openRightSidebar } from "./helpers.js";
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
@@ -371,4 +371,152 @@ test("new builtins appear in the slash menu", async ({ page }) => {
   await expect(row(page, "goal")).toBeVisible();
   await expect(row(page, "title")).toBeVisible();
   await expect(row(page, "facet")).toBeVisible();
+  // /mcp is now client-implemented (no longer omitted).
+  await expect(row(page, "mcp")).toBeVisible();
+});
+
+// --- /mcp arg-menu (server + action typeahead) ---
+
+const mcpMenu = (page: Page) => page.getByTestId("mcp-arg-menu");
+const mcpServerRow = (page: Page, name: string) =>
+  mcpMenu(page).locator(`[data-server="${name}"]`);
+const mcpActionRow = (page: Page, name: string) =>
+  mcpMenu(page).locator(`[data-action="${name}"]`);
+
+test("/mcp appears in the slash menu and is not filtered", async ({ page }) => {
+  await ta(page).fill("/m");
+  await expect(page.getByTestId("slash-menu")).toBeVisible();
+  await expect(row(page, "mcp")).toBeVisible();
+});
+
+test("typing /mcp<space> opens the server arg menu with both mock servers", async ({
+  page,
+}) => {
+  const box = ta(page);
+  await box.fill("/mcp ");
+  await expect(mcpMenu(page)).toBeVisible();
+  // The mock fixture has 2 servers: filesystem + github.
+  await expect(mcpServerRow(page, "filesystem")).toBeVisible();
+  await expect(mcpServerRow(page, "github")).toBeVisible();
+});
+
+test("the server arg menu filters by substring", async ({ page }) => {
+  const box = ta(page);
+  await box.fill("/mcp file");
+  await expect(mcpMenu(page)).toBeVisible();
+  await expect(mcpServerRow(page, "filesystem")).toBeVisible();
+  await expect(mcpServerRow(page, "github")).toHaveCount(0);
+});
+
+test("selecting a server advances to the action menu listing all four actions", async ({
+  page,
+}) => {
+  const box = ta(page);
+  await box.fill("/mcp file");
+  await expect(mcpServerRow(page, "filesystem")).toBeVisible();
+  await box.press("Enter");
+  // Draft now holds the server name + trailing space, action menu opens.
+  await expect(box).toHaveValue("/mcp filesystem ");
+  await expect(mcpMenu(page)).toBeVisible();
+  await expect(mcpActionRow(page, "enable")).toBeVisible();
+  await expect(mcpActionRow(page, "disable")).toBeVisible();
+  await expect(mcpActionRow(page, "disconnect")).toBeVisible();
+  await expect(mcpActionRow(page, "reconnect")).toBeVisible();
+});
+
+test("selecting disable dispatches, clears the composer, and flips the sidebar status", async ({
+  page,
+}) => {
+  // Open the right sidebar so the MCP section is visible (it's the test oracle).
+  await openRightSidebar(page);
+  // filesystem starts connected.
+  await expect(
+    page.getByTestId("mcp-servers").locator(".mcp-item").first().locator(".mcp-dot"),
+  ).toHaveClass(/mcp-connected/);
+
+  const box = ta(page);
+  await box.fill("/mcp filesystem ");
+  await expect(mcpActionRow(page, "disable")).toBeVisible();
+  await box.press("Enter");
+
+  // Composer is cleared (immediate dispatch, no two-Enter).
+  await expect(box).toHaveValue("");
+  // No user message with "/mcp" is sent.
+  await expect(page.locator(".row.user .btext")).toHaveText(
+    /^((?!\/mcp).)*$/s,
+  );
+  // The mock maps disable → Disconnected; the sidebar dot flips.
+  await expect(
+    page.getByTestId("mcp-servers").locator(".mcp-item").first().locator(".mcp-dot"),
+  ).toHaveClass(/mcp-disconnected/);
+});
+
+test("submitting /mcp <server> <action> typed (not menu) dispatches", async ({
+  page,
+}) => {
+  await openRightSidebar(page);
+  // github starts disconnected — an observable transition.
+  const githubRow = page
+    .getByTestId("mcp-servers")
+    .locator(".mcp-item")
+    .filter({ hasText: "github" });
+  await expect(githubRow.locator(".mcp-dot")).toHaveClass(/mcp-disconnected/);
+
+  const box = ta(page);
+  await box.fill("/mcp github enable");
+  await box.press("Enter");
+
+  await expect(box).toHaveValue("");
+  await expect(page.locator(".row.user .btext")).toHaveText(
+    /^((?!\/mcp).)*$/s,
+  );
+  // The mock maps enable → Connected; the sidebar dot flips.
+  await expect(githubRow.locator(".mcp-dot")).toHaveClass(/mcp-connected/);
+});
+
+test("/mcp with no args shows a usage error and does not send", async ({ page }) => {
+  const box = ta(page);
+  await box.fill("/mcp ");
+  // The server arg menu is open — dismiss it so Enter submits the draft
+  // (instead of accepting a server). This exercises the submit-path guard.
+  await box.press("Escape");
+  await expect(page.getByTestId("mcp-arg-menu")).toHaveCount(0);
+  await box.press("Enter");
+
+  await expect(page.getByTestId("attachment-status")).toContainText(
+    "Usage: /mcp <server> <action>",
+  );
+  await expect(box).toHaveValue("/mcp ");
+  await expect(page.locator(".row.user .btext")).toHaveText(
+    /^((?!\/mcp).)*$/s,
+  );
+});
+
+test("/mcp with an unknown action shows an error and does not send", async ({
+  page,
+}) => {
+  const box = ta(page);
+  await box.fill("/mcp filesystem bogus");
+  await box.press("Enter");
+
+  await expect(page.getByTestId("attachment-status")).toContainText(
+    "Unknown /mcp action: bogus",
+  );
+  await expect(box).toHaveValue("/mcp filesystem bogus");
+  await expect(page.locator(".row.user .btext")).toHaveText(
+    /^((?!\/mcp).)*$/s,
+  );
+});
+
+test("/mcp with an unknown server shows an error and does not send", async ({
+  page,
+}) => {
+  const box = ta(page);
+  await box.fill("/mcp nosuchserver enable");
+  await box.press("Enter");
+
+  await expect(page.getByTestId("attachment-status")).toContainText(
+    "Unknown MCP server: nosuchserver",
+  );
+  await expect(box).toHaveValue("/mcp nosuchserver enable");
 });
