@@ -21,13 +21,11 @@ test("edit-tool card: collapsed +N/−M badge, expands to a @pierre/diffs render
   const counts = card.locator(".counts");
   await expect(counts).toContainText("+1");
   await expect(counts).toContainText("1");
+  await expect(counts).toBeVisible();
 
   // The collapse/expand toggle is a disclosure control — no tooltip needed
   // (chevron + tool name make the function obvious). It keeps aria-expanded.
-  await expect(card.locator(".head")).toHaveAttribute(
-    "aria-expanded",
-    "false",
-  );
+  await expect(card.locator(".head")).toHaveAttribute("aria-expanded", "false");
   await expect(card.locator(".head")).toHaveAccessibleName(
     /completed.*Edit file.*1 added.*1 removed.*took \d+ms/i,
   );
@@ -508,7 +506,9 @@ test("transcript: long code blocks stay bounded with all content reachable", asy
 
   await pre.focus();
   await page.keyboard.press("PageDown");
-  await expect.poll(() => pre.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  await expect
+    .poll(() => pre.evaluate((el) => el.scrollTop))
+    .toBeGreaterThan(0);
   // Keep paging through the focused region exactly as a keyboard user would. `End`
   // is platform-dependent on a non-editable <pre> (horizontal on WebKit), while
   // PageDown consistently advances this vertical scroll container.
@@ -522,8 +522,8 @@ test("transcript: long code blocks stay bounded with all content reachable", asy
     // browser does not coalesce a burst of synthetic key presses.
     await page.waitForTimeout(100);
   }
-  const reachedBottom = await pre.evaluate((el) =>
-    Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) <= 1,
+  const reachedBottom = await pre.evaluate(
+    (el) => Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) <= 1,
   );
   expect(reachedBottom).toBe(true);
   await expect(pre.getByTestId("last-code-line")).toBeInViewport();

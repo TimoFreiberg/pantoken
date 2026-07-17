@@ -27,7 +27,7 @@ test("a mixed run of tools each renders as its own card (no prose summary)", asy
   // Each card carries its own header + status (settled-ok shows no error dot).
   const okCards = work.locator(":scope > .tool.ok");
   await expect(okCards).toHaveCount(6);
-  await expect(okCards.locator(":scope > .head > .status")).toHaveCount(0);
+  await expect(okCards.locator(":scope > .head .status")).toHaveCount(0);
   await expect(okCards.first().locator(":scope > .head")).toHaveAccessibleName(
     /completed/,
   );
