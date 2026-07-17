@@ -9,7 +9,7 @@ test("scope controls render once in a compact row above the composer", async ({
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
 
   const scope = page.getByTestId("scope-row");
   const surface = page.getByTestId("composer-surface");
@@ -57,7 +57,7 @@ test("scope controls preserve picker exclusion and worktree branch behavior", as
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
 
   const project = page.getByTestId("draft-project-control");
   const worktree = page.getByTestId("draft-worktree-control");

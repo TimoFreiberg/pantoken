@@ -166,7 +166,7 @@ test("new-session project controls remain available and config survives reload",
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   const composer = page.getByPlaceholder("Describe a task or ask a question…");
   await composer.fill("Persist the new-session draft");
   await expect(page.getByTestId("draft-project-control")).toBeVisible();
@@ -181,7 +181,7 @@ test("new-session project controls remain available and config survives reload",
 
   await page.reload();
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await expect(
     page.getByPlaceholder("Describe a task or ask a question…"),
   ).toHaveValue("Persist the new-session draft");

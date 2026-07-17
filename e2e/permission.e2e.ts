@@ -164,7 +164,7 @@ test("clicking the permission badge in the draft view sets the draft's permissio
   await expect(liveBadge).toContainText("Standard");
 
   // Open a new-session draft.
-  await page.getByTestId("sidebar").getByText("New session…").click();
+  await page.getByTestId("sidebar").getByTestId("sidebar-new-session").getByText("New session").click();
   await expect(page.getByTestId("new-session")).toBeVisible();
 
   // Open the panel + pick Bypass — this should write to the draft.
@@ -196,7 +196,7 @@ test("draft permission badge reflects modelDefaults defaultPermissionMonitor", a
 }) => {
   await openSidebar(page);
   // Open a new-session draft.
-  await page.getByTestId("sidebar").getByText("New session…").click();
+  await page.getByTestId("sidebar").getByTestId("sidebar-new-session").getByText("New session").click();
   await expect(page.getByTestId("new-session")).toBeVisible();
   // The draft badge should show the daemon's default permission mode.
   const badge = page.getByTestId("permission-badge");

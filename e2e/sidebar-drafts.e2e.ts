@@ -141,3 +141,92 @@ test("a draft hides when its project group is collapsed", async ({ page }) => {
   await pantoken.locator(".group-toggle").click();
   await expect(pantoken.getByTestId("draft-row")).toBeHidden();
 });
+
+test("a draft row shows a Draft label and no plus marker", async ({ page }) => {
+  await openSidebar(page);
+  await newDraftIn(page, "pantoken");
+
+  const draft = group(page, "pantoken").getByTestId("draft-row");
+  await expect(draft).toBeVisible();
+  // The visible "Draft" text label is present.
+  await expect(draft.locator(".draft-label")).toHaveText("Draft");
+  // The old leading + draft marker is gone.
+  await expect(draft.locator(".draft-marker")).toHaveCount(0);
+});
+
+test("Draft label remains visible after navigating away from an active draft", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await newDraftIn(page, "pantoken");
+  await draftBox(page).fill("persist label");
+
+  const draft = group(page, "pantoken").getByTestId("draft-row");
+  await expect(draft.locator(".draft-label")).toHaveText("Draft");
+
+  // Navigate to an existing session — the draft row is now inactive but the
+  // Draft label is still visible.
+  await sessionRow(page, "Explore the fold reducer").click();
+  await openSidebar(page);
+  await expect(draft).toBeVisible();
+  await expect(draft).not.toHaveClass(/\bactive\b/);
+  await expect(draft.locator(".draft-label")).toHaveText("Draft");
+});
+
+test("a nested draft shows Draft with no location tag", async ({ page }) => {
+  await openSidebar(page);
+  await newDraftIn(page, "pantoken");
+
+  const draft = group(page, "pantoken").getByTestId("draft-row");
+  await expect(draft).toBeVisible();
+  // Nested drafts (showTag === false) show only "Draft", no location tag.
+  await expect(draft.locator(".draft-label")).toHaveText("Draft");
+  await expect(draft.locator(".tag")).toHaveCount(0);
+});
+
+test("a top-level draft shows its location tag and Draft separated by a middot", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await newDraftIn(page, "pantoken");
+  await draftBox(page).fill("retarget to top-level");
+
+  // Stash the draft, then retarget it to a non-project cwd so it floats at the
+  // top level (showTag === true) instead of nesting under a project group.
+  await sessionRow(page, "Explore the fold reducer").click();
+  await openSidebar(page);
+  await group(page, "pantoken").getByTestId("draft-row").click();
+
+  await page.getByTestId("draft-project-control").click();
+  const picker = page.getByTestId("dir-picker");
+  const input = picker.getByLabel("Project directory path");
+  await input.fill("/Users/timo/src/elsewhere/");
+  await picker.getByTestId("use-current-directory").click();
+
+  // The top-level draft row shows both the location tag and "Draft".
+  const topDraft = page
+    .getByTestId("sidebar")
+    .locator(".draft-top")
+    .getByTestId("draft-row");
+  await expect(topDraft).toBeVisible();
+  await expect(topDraft.locator(".tag")).toHaveText("elsewhere");
+  await expect(topDraft.locator(".draft-label")).toHaveText("Draft");
+  await expect(topDraft.locator(".meta-sep")).toHaveText("·");
+});
+
+test("hovering a draft row does not shift its height", async ({ page }) => {
+  await openSidebar(page);
+  await newDraftIn(page, "pantoken");
+
+  const draft = group(page, "pantoken").getByTestId("draft-row");
+  await expect(draft).toBeVisible();
+
+  const before = await draft.boundingBox();
+  expect(before).not.toBeNull();
+
+  await draft.hover();
+  // The discard × overlays the meta (which fades) without changing the row height.
+  const after = await draft.boundingBox();
+  expect(after).not.toBeNull();
+  expect(after!.height).toBe(before!.height);
+});

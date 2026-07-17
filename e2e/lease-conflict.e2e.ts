@@ -72,13 +72,13 @@ test("a non-lease session-switch error does NOT get a Retry button", async ({
   ).toBeVisible();
 
   // Draft A: submit offline -> queued, draft cleared.
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   const composer = page.getByPlaceholder("Describe a task or ask a question…");
   await composer.fill("the doomed session");
   await composer.press("Enter");
 
   // Draft B: start a different draft so recovery offers a toast (not auto-restore).
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await composer.fill("a different idea I'm typing");
 
   // Reconnect -> the queued newSession flushes and fails → recovery toast appears.

@@ -773,9 +773,10 @@
   <div class="new" data-testid="sidebar-new-session">
     <button
       class="new-btn"
+      aria-label="New session"
       onclick={() => startDraft(activeCwd)}
     >
-      <span class="plus">+</span> New session…
+      <span class="plus" aria-hidden="true">+</span> New session
       <kbd class="hotkey-hint">⌘N</kbd>
     </button>
     {#if store.lastError}
@@ -805,7 +806,7 @@
     {#snippet draftRow(d: (typeof pendingDrafts)[number], showTag: boolean)}
       <div class="row-line">
         <button
-          class="row"
+          class="row draft-row"
           class:active={d.active}
           data-testid="draft-row"
           title={d.active
@@ -813,14 +814,13 @@
             : `Resume new-session draft in ${d.cwd || "home"}`}
           onclick={() => startDraft(d.cwd)}
         >
-          <span class="lead">
-            <span class="draft-marker" aria-label="draft">+</span>
-          </span>
           <span class="name">New session</span>
           <span class="meta">
             {#if showTag}
               <span class="tag">{d.cwd ? basename(d.cwd) : "home"}</span>
+              <span class="meta-sep" aria-hidden="true">·</span>
             {/if}
+            <span class="draft-label">Draft</span>
           </span>
         </button>
         <IconButton
@@ -1377,8 +1377,8 @@
     font-size: 13px;
     color: var(--text);
     font-weight: 550;
-    background: color-mix(in srgb, var(--surface) 78%, var(--sidebar-bg));
-    border: 1px solid color-mix(in srgb, var(--border-strong) 70%, transparent);
+    background: var(--highlight-soft);
+    border: 1px solid color-mix(in srgb, var(--highlight) 30%, transparent);
     border-radius: var(--radius-sm);
     padding: 8px 11px;
     box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 5%, transparent);
@@ -1388,9 +1388,12 @@
       color 120ms ease;
   }
   .new-btn:hover {
-    color: var(--text);
-    background: var(--accent-soft);
-    border-color: var(--border-strong);
+    color: var(--highlight-text);
+    background: var(--highlight-hover);
+    border-color: color-mix(in srgb, var(--highlight) 45%, transparent);
+  }
+  .new-btn:hover .plus {
+    color: var(--highlight-text);
   }
   .new-btn:focus-visible {
     outline: none;
@@ -1400,11 +1403,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 18px;
-    height: 18px;
-    color: var(--accent-hover);
-    background: var(--accent-soft);
-    border-radius: var(--radius-xs);
+    color: var(--highlight);
     font-weight: 700;
     line-height: 1;
   }
@@ -1960,22 +1959,30 @@
   }
   /* Top-level draft rows — pending new sessions whose cwd isn't a known project yet,
      pinned above the project groups. Project-targeted drafts nest inside their group's
-     <ul> instead and need no wrapper. Each draft row reuses .row + .row.active; only the
-     leading marker is custom. */
+     <ul> instead and need no wrapper. Each draft row reuses .row + .row.active; the
+     trailing "Draft" label is the only custom piece. */
   .draft-top {
     margin-bottom: 6px;
     padding: 0 6px;
   }
-  .draft-marker {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 14px;
-    height: 14px;
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--accent);
-    line-height: 1;
+  .draft-label {
+    flex-shrink: 0;
+    color: var(--text-faint);
+    font-size: 11.5px;
+  }
+  .meta-sep {
+    color: var(--text-faint);
+    opacity: 0.6;
+  }
+  /* Draft rows fade their trailing meta (incl. the Draft label) on hover so the
+     discard × overlays cleanly without competing for the same space — mirroring the
+     .status fade for session rows. Scoped to .draft-row only to avoid fading .meta
+     on regular session rows (which carry worktree glyphs and tags). */
+  .row.draft-row .meta {
+    transition: opacity 0.1s ease;
+  }
+  .row-wrap:hover .row.draft-row .meta {
+    opacity: 0;
   }
   /* in-progress — a small rotating ring in the timestamp slot, for both a warming-up
      session and a live turn. Same glyph for both phases; the tooltip carries the detail. */

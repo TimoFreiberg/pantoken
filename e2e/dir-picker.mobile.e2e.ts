@@ -8,7 +8,7 @@ const draftBox = (page: Page) => page.getByPlaceholder("Describe a task or ask a
 async function openPicker(page: Page, draft?: string): Promise<void> {
   await gotoFresh(page);
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   if (draft !== undefined) {
     await draftBox(page).fill(draft);
   }

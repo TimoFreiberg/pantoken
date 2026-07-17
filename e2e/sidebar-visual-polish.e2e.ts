@@ -477,28 +477,24 @@ test("New session CTA has clear resting, hover, and focus treatment", async ({
   const button = page.getByTestId("sidebar-new-session").locator(".new-btn");
   const icon = button.locator(".plus");
   const expected = {
-    background: await normalizedColor(
-      button,
-      "color-mix(in srgb, var(--surface) 78%, var(--sidebar-bg))",
-    ),
+    background: await normalizedColor(button, "var(--highlight-soft)"),
     border: await normalizedColor(
       button,
-      "color-mix(in srgb, var(--border-strong) 70%, transparent)",
+      "color-mix(in srgb, var(--highlight) 30%, transparent)",
     ),
     focusRing: await normalizedProperty(
       button,
       "box-shadow",
       "0 0 0 2px color-mix(in srgb, var(--accent) 65%, transparent)",
     ),
-    hoverBackground: await normalizedColor(button, "var(--accent-soft)"),
-    hoverBorder: await normalizedColor(button, "var(--border-strong)"),
-    iconBackground: await normalizedColor(icon, "var(--accent-soft)"),
-    iconColor: await normalizedColor(icon, "var(--accent-hover)"),
-    iconRadius: await normalizedProperty(
-      icon,
-      "border-radius",
-      "var(--radius-xs)",
+    hoverBackground: await normalizedColor(button, "var(--highlight-hover)"),
+    hoverBorder: await normalizedColor(
+      button,
+      "color-mix(in srgb, var(--highlight) 45%, transparent)",
     ),
+    hoverText: await normalizedColor(button, "var(--highlight-text)"),
+    iconColor: await normalizedColor(icon, "var(--highlight)"),
+    iconHoverColor: await normalizedColor(icon, "var(--highlight-text)"),
     restingShadow: await normalizedProperty(
       button,
       "box-shadow",
@@ -506,6 +502,11 @@ test("New session CTA has clear resting, hover, and focus treatment", async ({
     ),
     text: await normalizedColor(button, "var(--text)"),
   };
+
+  // The visible label is "New session" (no ellipsis) with a leading +.
+  await expect(button).toContainText("New session");
+  await expect(button).not.toContainText("…");
+  await expect(icon).toHaveText("+");
 
   const resting = await button.evaluate((element) => {
     const style = getComputedStyle(element);
@@ -525,22 +526,17 @@ test("New session CTA has clear resting, hover, and focus treatment", async ({
     fontWeight: "550",
   });
 
+  // The plus is inline text now — no boxed background, no fixed dimensions.
   const iconStyle = await icon.evaluate((element) => {
     const style = getComputedStyle(element);
     return {
       background: style.backgroundColor,
-      borderRadius: style.borderRadius,
       color: style.color,
-      height: style.height,
-      width: style.width,
     };
   });
   expect(iconStyle).toEqual({
-    background: expected.iconBackground,
-    borderRadius: expected.iconRadius,
+    background: "rgba(0, 0, 0, 0)",
     color: expected.iconColor,
-    height: "18px",
-    width: "18px",
   });
 
   await button.hover();
@@ -550,6 +546,10 @@ test("New session CTA has clear resting, hover, and focus treatment", async ({
     )
     .toBe(expected.hoverBackground);
   await expect(button).toHaveCSS("border-top-color", expected.hoverBorder);
+  await expect(button).toHaveCSS("color", expected.hoverText);
+  await expect
+    .poll(() => icon.evaluate((element) => getComputedStyle(element).color))
+    .toBe(expected.iconHoverColor);
 
   await page.keyboard.press("Tab");
   await button.focus();

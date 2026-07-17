@@ -9,7 +9,7 @@ test("deferred new sessions centre the real composer without the old hero", asyn
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
 
   const view = page.getByTestId("new-session");
   const composer = view.getByRole("group", { name: "Message composer" });
@@ -37,7 +37,7 @@ test("draft chips live in one scope row above the composer surface, not in the s
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
 
   const scope = page.getByTestId("scope-row");
   const surface = page.getByTestId("composer-surface");
@@ -64,7 +64,7 @@ test("scope row preserves a quiet rounded surface and slim controls", async ({
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
 
   const scope = page.getByTestId("scope-row");
   const surface = page.getByTestId("composer-surface");
@@ -102,7 +102,7 @@ test("keyboard shortcuts toggle picker and worktree while drafting", async ({
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
 
   // ⌥P opens the DirPicker.
   await page.keyboard.press("Alt+p");
@@ -141,7 +141,7 @@ test("first send moves directly from centred draft to transcript layout", async 
 }) => {
   const oldPrompt = page.getByText("Add a /health route to the server");
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await page
     .getByPlaceholder("Describe a task or ask a question…")
     .fill("start from the centre");
@@ -169,7 +169,7 @@ test("draft Escape remains available after removing the central Cancel button", 
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   const input = page.getByPlaceholder("Describe a task or ask a question…");
   await input.focus();
   await input.press("Escape");

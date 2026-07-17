@@ -55,7 +55,7 @@ test("a new-session draft hides the plan button and makes ⌘P inert", async ({
   // In the draft view store.session still holds the previous session's plan, but
   // PlanView is unmounted — the button must hide and ⌘P must not flip its state.
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await expect(
     page.getByPlaceholder("Describe a task or ask a question…"),
   ).toBeVisible();

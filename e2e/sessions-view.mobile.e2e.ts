@@ -31,7 +31,10 @@ test("Sessions has a deliberate touch-safe top bar and flat list rows", async ({
   );
   await expectTapTarget(sidebar.getByTestId("sidebar-search-toggle"));
   await expectTapTarget(sidebar.getByTestId("filter-toggle"));
-  await expectTapTarget(sidebar.getByText("New session…"), 48);
+  await expectTapTarget(
+    sidebar.getByTestId("sidebar-new-session").locator(".new-btn"),
+    48,
+  );
 
   const project = sidebar
     .locator(".group")
@@ -177,7 +180,10 @@ test("worktree cleanup keeps its destructive two-step confirmation", async ({
   page,
 }) => {
   const sidebar = page.getByTestId("sidebar");
-  await sidebar.getByText("New session…").click();
+  await sidebar
+    .getByTestId("sidebar-new-session")
+    .getByText("New session")
+    .click();
   await page.getByRole("button", { name: "Enable worktree isolation" }).click();
   const composer = page.getByPlaceholder(
     "Describe a task or ask a question…",

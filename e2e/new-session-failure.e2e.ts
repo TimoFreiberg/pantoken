@@ -18,7 +18,7 @@ test("a failed new session auto-restores its draft when the pane is free", async
   page,
 }) => {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
 
   await drive(page, "failnewsession"); // arm the one-shot creation failure
   const prompt = "build the worktree and start hacking";
@@ -44,12 +44,12 @@ test("a failed new session offers a restore toast when another draft is in progr
   ).toBeVisible();
 
   // Draft A: submit offline -> queued, draft cleared.
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await draftBox(page).fill("the doomed session");
   await draftBox(page).press("Enter");
 
   // Draft B: start a different draft and type into it (the one we must not clobber).
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await draftBox(page).fill("a different idea I'm typing");
 
   // Reconnect -> the queued newSession flushes and fails. Draft B is non-empty, so the
@@ -78,12 +78,12 @@ test("a failed new session overwrites an empty competing draft without a toast",
   ).toBeVisible();
 
   // Draft A: submit offline -> queued, draft cleared.
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await draftBox(page).fill("the doomed session");
   await draftBox(page).press("Enter");
 
   // Draft B: opened but left empty — nothing to lose, so recovery overwrites it.
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await expect(draftBox(page)).toHaveValue("");
 
   await page.getByRole("button", { name: "Reconnect" }).click();

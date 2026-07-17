@@ -11,7 +11,7 @@ const draftBox = (page: Page) =>
 
 async function openDraft(page: Page): Promise<void> {
   await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
   await expect(draftBox(page)).toBeVisible();
 }
 
