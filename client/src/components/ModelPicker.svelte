@@ -122,7 +122,15 @@
   }
 
   // React to global hotkeys dispatched from StatusHeader via the store.
-  let lastHotkeyN = $state(0);
+  // Snapshot the store value at mount so a remount with a stale counter
+  // doesn't fire toggle on the first observation. Mirrors Transcript's
+  // lastSendN = store.promptSentN pattern (which comments: "initialized to the
+  // current value so a remount never scroll-jumps on its own"). Without this,
+  // opening then closing a new-session draft unmounts Composer (App.svelte
+  // `{#if !store.draft}`), resetting this local to 0; on remount a still-high
+  // store counter (hotkeyAction is monotonic, never reset) would re-fire
+  // toggle(true) and pop the picker open unbidden.
+  let lastHotkeyN = $state(store.hotkeyAction?.n ?? 0);
   $effect(() => {
     const hk = store.hotkeyAction;
     if (hk && hk.n !== lastHotkeyN) {

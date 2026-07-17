@@ -306,6 +306,57 @@ test("Shift+Tab does not fire when the slash menu is open", async ({
   await expect(badge).toHaveText("Execute");
 });
 
+// Regression: opening the facet menu via Shift+Tab and closing it, then opening
+// and closing a new-session draft (which unmounts + remounts Composer via
+// App.svelte `{#if !store.draft}`), must NOT auto-pop the facet menu. Root
+// cause: MenuBadge's lastOpenN was reset to 0 on remount while store.
+// facetMenuOpenN (monotonic, never reset) still held a prior value > 0, so the
+// effect re-fired open=true. Fixed by making lastOpenN a null sentinel that
+// syncs on the first post-(re)mount observation without opening.
+test("the facet menu does not auto-open after a draft remount", async ({
+  page,
+}) => {
+  // AC.2 — open the facet menu once via Shift+Tab, then close it.
+  const badge = page.getByTestId("facet-badge");
+  await expect(badge).toHaveText("Execute");
+  await page.getByPlaceholder("Message pantoken…").focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(badge).toHaveText("Plan");
+  const panel = page.getByRole("listbox", { name: "Facet" });
+  await expect(panel).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+
+  // Open a new-session draft, then abandon it by switching to an existing
+  // session in the sidebar. This unmounts Composer (store.draft set) and
+  // remounts it against the existing session (store.draft cleared) — resetting
+  // MenuBadge's local state. Switch to a DIFFERENT session than the greeting
+  // (whose facet the Shift+Tab above rotated to Plan): "Explore the fold
+  // reducer" still has the default Execute facet, so the post-remount rotation
+  // trace is clean.
+  await openSidebar(page);
+  await page.getByTestId("sidebar").getByText("New session…").click();
+  await expect(page.getByPlaceholder("Describe a task or ask a question…")).toBeVisible();
+  await openSidebar(page);
+  await page
+    .getByTestId("sidebar")
+    .locator(".row", { hasText: "Explore the fold reducer" })
+    .click();
+  // Composer is remounted against the existing session (Execute facet).
+  await expect(page.getByPlaceholder("Message pantoken…")).toBeVisible();
+  await expect(badge).toHaveText("Execute");
+
+  // The facet menu must NOT have auto-popped on the remount.
+  await expect(page.getByRole("listbox", { name: "Facet" })).toHaveCount(0);
+
+  // AC.4 (post-remount variant) — a fresh Shift+Tab still rotates + opens the
+  // menu, proving the hotkey path works after a remount. Execute → Plan.
+  await page.getByPlaceholder("Message pantoken…").focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(badge).toHaveText("Plan");
+  await expect(page.getByRole("listbox", { name: "Facet" })).toBeVisible();
+});
+
 // --- Draft-mode tests ---
 // While a new-session draft is open, store.session still points at the previously
 // focused session. The facet badge + Shift+Tab must read/write the DRAFT, not the

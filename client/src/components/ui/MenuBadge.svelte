@@ -64,8 +64,22 @@
   // External open trigger (e.g. Shift+Tab rotate-and-open). A counter so each
   // request re-fires even if the menu was already open — re-opening resets sel
   // + focuses the panel.
-  let lastOpenN = 0;
+  //
+  // `lastOpenN` starts null so the first effect run after a (re)mount syncs to
+  // the current counter value WITHOUT opening: openExternal (e.g. store.
+  // facetMenuOpenN) is monotonic and never reset, so a remount — caused by
+  // opening then closing a new-session draft (App.svelte `{#if !store.draft}`
+  // unmounts Composer and its badge children) — must not re-fire open=true on
+  // a stale-but-high counter. This is safe for PermissionBadge too, which
+  // passes no openExternal (defaults to 0): lastOpenN becomes 0 on mount and
+  // `0 > 0` never fires — unchanged behavior.
+  let lastOpenN: number | null = null;
   $effect(() => {
+    if (lastOpenN === null) {
+      // First observation after (re)mount: sync without opening.
+      lastOpenN = openExternal;
+      return;
+    }
     if (openExternal > lastOpenN) {
       lastOpenN = openExternal;
       sel = initialSel;
