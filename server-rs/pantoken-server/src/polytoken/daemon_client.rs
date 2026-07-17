@@ -2109,10 +2109,11 @@ impl DaemonClient {
         Ok(())
     }
 
-    /// `POST /goal/pause` — pause the active goal.
+    /// `POST /goal/pause` — pause the active goal. Accepts 200 or 204 (the
+    /// daemon returns 204 No Content for this idempotent, no-body endpoint).
     pub async fn goal_pause(&self) -> Result<(), String> {
         let res = self.post::<serde_json::Value>("/goal/pause", None).await;
-        if res.status != 200 {
+        if res.status != 200 && res.status != 204 {
             return Err(format!(
                 "POST /goal/pause failed ({}): {}",
                 res.status,
@@ -2122,10 +2123,11 @@ impl DaemonClient {
         Ok(())
     }
 
-    /// `POST /goal/resume` — resume a paused goal.
+    /// `POST /goal/resume` — resume a paused goal. Accepts 200 or 204 (the
+    /// daemon returns 204 No Content for this idempotent, no-body endpoint).
     pub async fn goal_resume(&self) -> Result<(), String> {
         let res = self.post::<serde_json::Value>("/goal/resume", None).await;
-        if res.status != 200 {
+        if res.status != 200 && res.status != 204 {
             return Err(format!(
                 "POST /goal/resume failed ({}): {}",
                 res.status,
@@ -2135,10 +2137,11 @@ impl DaemonClient {
         Ok(())
     }
 
-    /// `POST /goal/clear` — clear the current goal (idempotent).
+    /// `POST /goal/clear` — clear the current goal (idempotent). Accepts 200 or
+    /// 204 (the daemon returns 204 No Content for this no-body endpoint).
     pub async fn goal_clear(&self) -> Result<(), String> {
         let res = self.post::<serde_json::Value>("/goal/clear", None).await;
-        if res.status != 200 {
+        if res.status != 200 && res.status != 204 {
             return Err(format!(
                 "POST /goal/clear failed ({}): {}",
                 res.status,
