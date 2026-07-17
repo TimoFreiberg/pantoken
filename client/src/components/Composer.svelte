@@ -1768,7 +1768,11 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    width: 100%;
+    /* Inset by the composer's corner radius so the row's outer edges meet the
+       composer's top border on its straight segment (where the curve ends),
+       not over the curved corners. */
+    width: calc(100% - 2 * var(--radius));
+    margin: 0 auto;
     padding: 3px 8px;
     background: var(--surface-sunken);
     border-radius: var(--radius) var(--radius) 0 0;
