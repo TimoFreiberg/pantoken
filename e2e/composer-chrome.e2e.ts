@@ -194,7 +194,9 @@ test("new-session controls use calm chrome and pair permission with facet", asyn
   const permission = page.getByTestId("permission-badge");
   const facet = page.getByTestId("facet-badge");
   const model = page.getByTestId("model-badge");
-  const controls = [project, worktree, permission, facet, model];
+  const scopeControls = [project, worktree];
+  const statusControls = [permission, facet, model];
+  const controls = [...scopeControls, ...statusControls];
 
   await expect(page.getByTestId("composer-facet-slot")).toHaveCount(0);
   await expect(
@@ -221,20 +223,34 @@ test("new-session controls use calm chrome and pair permission with facet", asyn
       }),
     ),
   );
-  // Typography is uniform across all controls.
-  const base = styles[0]!;
-  for (const style of styles.slice(1)) {
-    expect(style.fontFamily).toEqual(base.fontFamily);
-    expect(style.fontSize).toEqual(base.fontSize);
-    expect(style.letterSpacing).toEqual(base.letterSpacing);
+  // Typography is uniform within each surface. Scope controls intentionally use
+  // compact 12px type while the status controls retain their existing size.
+  for (const group of [scopeControls, statusControls]) {
+    const groupStyles = group.map(
+      (control) => styles[controls.indexOf(control)]!,
+    );
+    const base = groupStyles[0]!;
+    for (const style of groupStyles.slice(1)) {
+      expect(style.fontFamily).toEqual(base.fontFamily);
+      expect(style.fontSize).toEqual(base.fontSize);
+      expect(style.letterSpacing).toEqual(base.letterSpacing);
+    }
   }
-  // Color/background/border are uniform across non-facet controls.
-  const nonFacet = styles.filter((_, i) => controls[i] !== facet);
-  const neutralBase = nonFacet[0]!;
-  for (const style of nonFacet.slice(1)) {
-    expect(style.color).toEqual(neutralBase.color);
-    expect(style.backgroundColor).toEqual(neutralBase.backgroundColor);
-    expect(style.borderColor).toEqual(neutralBase.borderColor);
+  // Color/background/border are uniform within each surface, with the facet
+  // badge's state tint excluded from the status comparison.
+  for (const group of [
+    scopeControls,
+    statusControls.filter((control) => control !== facet),
+  ]) {
+    const groupStyles = group.map(
+      (control) => styles[controls.indexOf(control)]!,
+    );
+    const neutralBase = groupStyles[0]!;
+    for (const style of groupStyles.slice(1)) {
+      expect(style.color).toEqual(neutralBase.color);
+      expect(style.backgroundColor).toEqual(neutralBase.backgroundColor);
+      expect(style.borderColor).toEqual(neutralBase.borderColor);
+    }
   }
   // The facet badge has a non-neutral color (execute = amber tint).
   const facetStyle = styles[controls.indexOf(facet)]!;
@@ -244,8 +260,9 @@ test("new-session controls use calm chrome and pair permission with facet", asyn
   expect(facetStyle.color).not.toEqual(neutralColor);
 
   // AC.1: the facet badge background is now neutral (transparent), matching the
-  // other composer badges — no colored tint.
-  expect(facetStyle.backgroundColor).toEqual(neutralBase.backgroundColor);
+  // other status badges — no colored tint.
+  const statusNeutralBase = styles[controls.indexOf(permission)]!;
+  expect(facetStyle.backgroundColor).toEqual(statusNeutralBase.backgroundColor);
 
   // AC.3: on hover, the facet badge background is the neutral --surface-sunken
   // (same as the other badges), not a colored tint.
@@ -309,11 +326,17 @@ test("branch selector dropdown lists branches and updates the chip", async ({
 
   // Open the picker — the mock's branches are listed.
   await branchChip.click();
-  await expect(page.getByRole("listbox", { name: "Select base branch" })).toBeVisible();
+  await expect(
+    page.getByRole("listbox", { name: "Select base branch" }),
+  ).toBeVisible();
   await expect(page.getByRole("option", { name: "main" })).toBeVisible();
   await expect(page.getByRole("option", { name: "develop" })).toBeVisible();
-  await expect(page.getByRole("option", { name: "feature-test" })).toBeVisible();
-  await expect(page.getByRole("option", { name: "default (auto)" })).toBeVisible();
+  await expect(
+    page.getByRole("option", { name: "feature-test" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("option", { name: "default (auto)" }),
+  ).toBeVisible();
 
   // Select "feature-test" — the chip updates.
   await page.getByRole("option", { name: "feature-test" }).click();
@@ -348,9 +371,9 @@ test("branch selector shows error state on failbranchlist script", async ({
 
   // Open the picker — it shows the error message.
   await branchChip.click();
-  await expect(
-    page.getByText("Couldn't list branches"),
-  ).toBeVisible({ timeout: 5000 });
+  await expect(page.getByText("Couldn't list branches")).toBeVisible({
+    timeout: 5000,
+  });
 });
 
 // --- Empty prompt as a "continue" signal (issue #21) ---
