@@ -165,6 +165,7 @@ fn mock_commands() -> Vec<CommandInfo> {
         ("daemon-reload", "Reload daemon configuration"),
         ("goal", "Set, pause, resume, or clear the goal"),
         ("title", "Set the session title"),
+        ("mcp", "Manage MCP servers"),
     ];
     let builtin_cmds: Vec<CommandInfo> = builtins
         .iter()

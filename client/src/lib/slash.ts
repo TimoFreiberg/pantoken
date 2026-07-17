@@ -49,6 +49,103 @@ export function parseSlashCommand(
 }
 
 /**
+ * The active `/mcp` argument stage, or null when the draft isn't in `/mcp`'s
+ * argument position. Returns the stage + the partial being typed:
+ *   - `/mcp `           → { stage: "server", partial: "" }
+ *   - `/mcp play`       → { stage: "server", partial: "play" }
+ *   - `/mcp playwright ` → { stage: "action", partial: "" }
+ *   - `/mcp playwright en` → { stage: "action", partial: "en" }
+ *   - `/mcp` (no space) → null (name still being typed — the slash menu owns it)
+ *   - anything else     → null
+ *
+ * `mcpArgStage` is pure and stateless — it does NOT know the configured server
+ * list, so it returns `stage: "action"` for any `/mcp <name> <partial>`. The
+ * Composer gates the action menu on the server name exact-matching a known
+ * server (a nonexistent server shows no action candidates).
+ *
+ * Parsing is cursor-aware (mirrors `extractAtQuery`): the active token is the
+ * one containing the cursor. Consecutive whitespace collapses to a single
+ * separator (matches `parseSlashCommand`'s trim behavior). Server names are
+ * identifiers, so the partial/serverName preserve case; only the command name
+ * is matched case-insensitively.
+ */
+export function mcpArgStage(
+  draft: string,
+  cursorPos = draft.length,
+): { stage: "server" | "action"; partial: string; serverName: string } | null {
+  // Must start with "/mcp" (case-insensitive); "/mcpx" does not match.
+  if (draft.length < 4 || draft.slice(0, 4).toLowerCase() !== "/mcp") return null;
+  // A separating whitespace must follow the command name — without it the name
+  // is still being typed and the slash menu owns completion.
+  if (draft.length < 5 || !/\s/.test(draft[4]!)) return null;
+
+  const pos = Math.min(cursorPos, draft.length);
+  // Cursor still within the command-name token (before the separator) → slash menu.
+  if (pos <= 4) return null;
+
+  // Everything after "/mcp" up to the cursor (begins with the separator whitespace).
+  const afterCmd = draft.slice(4, pos);
+  const endsWithWs = /\s/.test(afterCmd[afterCmd.length - 1] ?? "");
+  const tokens = afterCmd.trim().length === 0 ? [] : afterCmd.trim().split(/\s+/);
+
+  if (endsWithWs) {
+    // Cursor sits in a fresh (possibly empty) token after `tokens.length` settled
+    // tokens. 0 settled → server stage (empty partial); 1 settled → action stage.
+    if (tokens.length === 0) return { stage: "server", partial: "", serverName: "" };
+    if (tokens.length === 1) return { stage: "action", partial: "", serverName: tokens[0]! };
+    // 2+ settled tokens → past the action stage, no further completion.
+    return null;
+  }
+  // Cursor mid-token: the last token is the partial being typed.
+  if (tokens.length === 1) return { stage: "server", partial: tokens[0]!, serverName: "" };
+  if (tokens.length === 2) return { stage: "action", partial: tokens[1]!, serverName: tokens[0]! };
+  return null;
+}
+
+/** Rank a list of names against a substring query: prefix matches first, then
+ *  interior matches, ties alphabetical. Empty query returns everything. Shared
+ *  by the `/mcp` server-name and action typeaheads so ranking matches the slash
+ *  command menu's `filterCommands` exactly. */
+function filterNames<T>(items: readonly T[], query: string, nameOf: (t: T) => string): T[] {
+  const q = query.toLowerCase();
+  return items
+    .map((it) => ({ it, at: nameOf(it).toLowerCase().indexOf(q) }))
+    .filter((s) => s.at !== -1)
+    .sort((a, b) => {
+      const ap = a.at === 0 ? 0 : 1;
+      const bp = b.at === 0 ? 0 : 1;
+      if (ap !== bp) return ap - bp;
+      return nameOf(a.it).localeCompare(nameOf(b.it));
+    })
+    .map((s) => s.it);
+}
+
+/** The four `/mcp` actions (mirrors `McpAction` / `store.setMcpServer`). */
+export interface McpActionItem {
+  readonly action: "enable" | "disable" | "disconnect" | "reconnect";
+  readonly description: string;
+}
+const MCP_ACTIONS: readonly McpActionItem[] = [
+  { action: "enable", description: "Start the server and its tools" },
+  { action: "disable", description: "Stop the server; tools unavailable" },
+  { action: "disconnect", description: "Drop the active connection" },
+  { action: "reconnect", description: "Re-establish the connection" },
+];
+
+/** Filter `/mcp` actions by a partial (empty → all four). */
+export function filterMcpActions(partial: string): McpActionItem[] {
+  return filterNames(MCP_ACTIONS, partial, (a) => a.action);
+}
+
+/** Filter MCP server names by a partial substring (empty → all). */
+export function filterMcpServers<T extends { serverName: string }>(
+  servers: readonly T[],
+  partial: string,
+): T[] {
+  return filterNames(servers, partial, (s) => s.serverName);
+}
+
+/**
  * Filter + rank commands for a query (the text after the leading slash, no slash).
  * Case-insensitive substring match on the command name; prefix matches rank above
  * interior ones (so `"re"` surfaces `review` before `core-review`), ties broken
