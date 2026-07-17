@@ -18,7 +18,7 @@ server-rs/target/
 .pantoken-issue-context/
 grindbot-config.toml
 .grindbot
-.polytoken
+.polytoken/hooks/
 .merge-lock
 .autopilot-session-id
 .autopilot-issue-number
