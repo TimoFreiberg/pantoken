@@ -59,19 +59,20 @@ test("mobile: the session-controls summary never overflows the viewport", async 
   await expect(page.getByTestId("model-badge")).toBeHidden();
 });
 
-test("mobile: new-session draft-setup chips stay tappable above the composer surface", async ({
+test("mobile: new-session scope-row chips stay tappable above the composer surface", async ({
   page,
 }) => {
   await openSidebar(page);
   await page.getByRole("button", { name: "New session…" }).click();
 
-  const setup = page.getByTestId("draft-setup");
+  const scope = page.getByTestId("scope-row");
   const project = page.getByTestId("draft-project-control");
   const worktree = page.getByTestId("draft-worktree-control");
   const vw = page.viewportSize()!.width;
 
-  await expect(setup.getByTestId("draft-project-control")).toHaveCount(1);
-  await expect(setup.getByTestId("draft-worktree-control")).toHaveCount(1);
+  await expect(scope).toHaveCount(1);
+  await expect(scope.getByTestId("draft-project-control")).toHaveCount(1);
+  await expect(scope.getByTestId("draft-worktree-control")).toHaveCount(1);
   const visibleProjectBase = (await project.innerText()).trim();
   expect(visibleProjectBase).not.toBe("");
   await expect(project).toHaveAccessibleName(

@@ -33,49 +33,66 @@ test("deferred new sessions centre the real composer without the old hero", asyn
   expect(relativeCentre).toBeLessThan(0.55);
 });
 
-test("draft chips live in .draft-setup above the composer surface, not in the status row", async ({
+test("draft chips live in one scope row above the composer surface, not in the status row", async ({
   page,
 }) => {
   await openSidebar(page);
   await page.getByRole("button", { name: "New session…" }).click();
 
-  const setup = page.getByTestId("draft-setup");
-  await expect(setup).toHaveCount(1);
-  await expect(setup.getByTestId("draft-project-control")).toHaveCount(1);
-  await expect(setup.getByTestId("draft-worktree-control")).toHaveCount(1);
-
-  // The status row's left side must not contain the draft chips.
-  const statusLeft = page.locator(
-    "[data-testid='composer-status-row'] .status-left",
-  );
-  await expect(statusLeft.getByTestId("draft-project-control")).toHaveCount(0);
-  await expect(statusLeft.getByTestId("draft-worktree-control")).toHaveCount(0);
-});
-
-test("draft-setup header attaches to the composer card with squared top corners", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  await page.getByRole("button", { name: "New session…" }).click();
-
-  const setup = page.getByTestId("draft-setup");
-  await expect(setup).toHaveCount(1);
-
-  // Header has rounded top corners only, no bottom border.
-  await expect(setup).toHaveCSS("border-top-left-radius", "14px");
-  await expect(setup).toHaveCSS("border-bottom-width", "0px");
-
-  // Composer surface's top corners are squared when the header is present.
+  const scope = page.getByTestId("scope-row");
   const surface = page.getByTestId("composer-surface");
-  await expect(surface).toHaveCSS("border-top-left-radius", "0px");
-  await expect(surface).toHaveCSS("border-top-right-radius", "0px");
+  await expect(scope).toHaveCount(1);
+  await expect(scope.getByTestId("draft-project-control")).toHaveCount(1);
+  await expect(scope.getByTestId("draft-worktree-control")).toHaveCount(1);
+  await expect(scope.getByTestId("draft-branch-control")).toHaveCount(0);
+
+  const scopeBox = await scope.boundingBox();
+  const surfaceBox = await surface.boundingBox();
+  expect(scopeBox).not.toBeNull();
+  expect(surfaceBox).not.toBeNull();
+  expect(scopeBox!.y + scopeBox!.height).toBeLessThanOrEqual(
+    surfaceBox!.y + 0.5,
+  );
+
+  const status = page.getByTestId("composer-status-row");
+  await expect(status.getByTestId("draft-project-control")).toHaveCount(0);
+  await expect(status.getByTestId("draft-worktree-control")).toHaveCount(0);
+  await expect(status.getByTestId("permission-badge")).toBeVisible();
 });
 
-test("non-drafting state has no draft-setup and composer surface keeps rounded corners", async ({
+test("scope row preserves a quiet rounded surface and slim controls", async ({
   page,
 }) => {
-  // Default state — no draft.
-  await expect(page.getByTestId("draft-setup")).toHaveCount(0);
+  await openSidebar(page);
+  await page.getByRole("button", { name: "New session…" }).click();
+
+  const scope = page.getByTestId("scope-row");
+  const surface = page.getByTestId("composer-surface");
+  const styles = await scope.evaluate((element) => {
+    const css = getComputedStyle(element);
+    return {
+      background: css.backgroundColor,
+      pageBackground: getComputedStyle(document.body).backgroundColor,
+      radius: css.borderTopLeftRadius,
+      border: css.border,
+      marginBottom: css.marginBottom,
+      height: element.getBoundingClientRect().height,
+    };
+  });
+  expect(styles.background).not.toBe("rgba(0, 0, 0, 0)");
+  expect(styles.background).not.toBe(styles.pageBackground);
+  expect(styles.radius).not.toBe("0px");
+  expect(styles.border).toMatch(/0px|none/);
+  expect(styles.marginBottom).toBe("0px");
+  expect(styles.height).toBeLessThanOrEqual(34);
+  await expect(scope.locator(".chip").first()).toHaveCSS("font-size", "12px");
+  await expect(surface).not.toHaveCSS("border-top-left-radius", "0px");
+});
+
+test("non-drafting state has no scope row and composer surface keeps rounded corners", async ({
+  page,
+}) => {
+  await expect(page.getByTestId("scope-row")).toHaveCount(0);
 
   const surface = page.getByTestId("composer-surface");
   await expect(surface).not.toHaveCSS("border-top-left-radius", "0px");

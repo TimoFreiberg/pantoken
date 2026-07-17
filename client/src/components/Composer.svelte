@@ -1310,7 +1310,7 @@
     <QueueTray />
 
     {#if drafting && store.draft}
-      <div class="draft-setup" data-testid="draft-setup">
+      <div class="scope-row" data-testid="scope-row">
         <button
           bind:this={projectControlRef}
           class="chip"
@@ -1319,7 +1319,7 @@
           aria-expanded={pickingCwd}
           aria-label={`${cwdBase} — browse to change project directory`}
           title={`Project: ${store.draft.cwd || "home"} — click to browse for a directory (⌥P)`}
-          onclick={() => (pickingCwd = !pickingCwd)}
+          onclick={() => { pickingBranch = false; pickingCwd = !pickingCwd; }}
         >
           {cwdBase}
           <Chevron open={pickingCwd} variant="menu" size={10} />
@@ -1338,6 +1338,21 @@
           worktree
           {#if store.draft.worktree}<span class="chip-check" aria-hidden="true">✓</span>{/if}
         </button>
+        {#if store.draft.worktree}
+          <button
+            bind:this={branchControlRef}
+            class="chip"
+            data-testid="draft-branch-control"
+            aria-haspopup="listbox"
+            aria-expanded={pickingBranch}
+            aria-label={`Base branch: ${store.draft.baseBranch || "default"}`}
+            title={`Base branch: ${store.draft.baseBranch || "default (auto-detected)"} — click to change`}
+            onclick={() => { pickingCwd = false; pickingBranch = !pickingBranch; }}
+          >
+            {store.draft.baseBranch || "default"}
+            <Chevron open={pickingBranch} variant="menu" size={10} />
+          </button>
+        {/if}
       </div>
     {/if}
 
@@ -1504,51 +1519,7 @@
 
     <div class="composer-status-row" data-testid="composer-status-row">
       <div class="status-left">
-        {#if drafting && store.draft}
-          <!-- Model + effort are rebound to the draft via composerConfig. -->
-          <button
-            bind:this={projectControlRef}
-            class="chip"
-            data-testid="draft-project-control"
-            aria-haspopup="dialog"
-            aria-expanded={pickingCwd}
-            aria-label={`${cwdBase} — browse to change project directory`}
-            title={`Project: ${store.draft.cwd || "home"} — click to browse for a directory (⌥P)`}
-            onclick={() => { pickingBranch = false; pickingCwd = !pickingCwd; }}
-          >
-            {cwdBase}
-            <Chevron open={pickingCwd} variant="menu" size={10} />
-          </button>
-          <button
-            class="chip toggle-chip"
-            data-testid="draft-worktree-control"
-            class:on={store.draft.worktree}
-            aria-pressed={store.draft.worktree}
-            aria-label={store.draft.worktree
-              ? "Disable worktree isolation"
-              : "Enable worktree isolation"}
-            title="Isolate this session in a jj/git worktree of the project, leaving the main tree clean (⌥W)"
-            onclick={() => store.toggleDraftWorktree()}
-          >
-            worktree
-            {#if store.draft.worktree}<span class="chip-check" aria-hidden="true">✓</span>{/if}
-          </button>
-          {#if store.draft.worktree}
-            <button
-              bind:this={branchControlRef}
-              class="chip"
-              data-testid="draft-branch-control"
-              aria-haspopup="listbox"
-              aria-expanded={pickingBranch}
-              aria-label={`Base branch: ${store.draft.baseBranch || "default"}`}
-              title={`Base branch: ${store.draft.baseBranch || "default (auto-detected)"} — click to change`}
-              onclick={() => { pickingCwd = false; pickingBranch = !pickingBranch; }}
-            >
-              {store.draft.baseBranch || "default"}
-              <Chevron open={pickingBranch} variant="menu" size={10} />
-            </button>
-          {/if}
-        {/if}
+        <!-- Model + effort are rebound to the draft via composerConfig. -->
         <span class="desktop-config-left"><PermissionBadge /><FacetBadge /></span>
       </div>
       <div class="composer-status-right desktop-config-right" data-testid="composer-status-right">
@@ -1626,28 +1597,22 @@
     flex-direction: column;
     gap: 8px;
   }
-  /* Draft-setup header: a narrow tab above the composer card, visible only while
-     drafting. Its bottom border merges into the composer surface's top border via
-     margin-bottom: -8px (negating .col's gap) and border-bottom: 0. No box-shadow
-     here — the surface's own shadow provides the card depth, and a second shadow
-     at the seam would render darker at the overlap. */
-  .draft-setup {
+  .col:has(.scope-row) {
+    gap: 0;
+  }
+  .scope-row {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 11px 6px;
-    background: var(--surface);
-    border: 1px solid var(--border-strong);
-    border-bottom: 0;
-    border-radius: var(--radius) var(--radius) 0 0;
+    gap: 4px;
     width: 100%;
-    margin-bottom: -8px;
+    padding: 3px 8px;
+    background: var(--surface-sunken);
+    border-radius: var(--radius) var(--radius) 0 0;
   }
-  /* When the header is present, square the composer surface's top corners so the
-     borders merge seamlessly into one card. */
-  .draft-setup + .composer-surface {
-    border-top-left-radius: 0;
-    border-top-right-radius: 0;
+  .scope-row .chip {
+    min-height: 28px;
+    padding: 2px 6px;
+    font-size: 12px;
   }
   .widget {
     background: var(--surface-sunken);
@@ -1715,9 +1680,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  /* Touch: keep the small config pills reliably tappable (≥44px) on coarse pointers. */
+  /* Touch: keep scope-row controls reliably tappable (≥44px) on coarse pointers. */
   @media (pointer: coarse) {
-    .chip {
+    .chip,
+    .scope-row .chip {
       min-height: 44px;
     }
   }
