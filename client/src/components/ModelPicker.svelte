@@ -107,7 +107,15 @@
       const key = effortKey(activeModel);
       stagedEffort = { [key]: cfg.thinkingLevel };
     }
-    if (viaKeyboard) tick().then(() => searchEl?.focus());
+    // Focus the filter on open — by hotkey (always) or by click (desktop only).
+    // On a phone tap, skip focus so the soft keyboard doesn't pop; matches the
+    // Sidebar's `if (!isPhone()) searchInput?.focus()` convention. The badge is
+    // display:none under 859px, so this guard is defensive for a narrow viewport
+    // where it could somehow still be clickable.
+    const isPhone =
+      typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 859px)").matches;
+    if (viaKeyboard || !isPhone) tick().then(() => searchEl?.focus());
   }
 
   function closePicker(refocus: boolean): void {
