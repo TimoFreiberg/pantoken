@@ -2348,3 +2348,102 @@ async fn detach_then_reopen_reclaims_lease() {
         spawned[0].recorded_calls()
     );
 }
+
+/// Verify all three no-body goal endpoints (`/goal/clear`, `/goal/pause`,
+/// `/goal/resume`) accept a 204 response from the daemon WITHOUT producing a
+/// spurious "Goal X failed" warning notice.
+///
+/// Before the fix, the daemon's 204 (No Content) tripped each method's
+/// `!= 200` guard and `report_action_error` emitted a `Notify { level:
+/// Warning }`. The daemon returns 204 for these idempotent no-body endpoints,
+/// so 204 is a success that must be silent.
+///
+/// Parameterized over the three `(SessionAction, path, label)` triples so each
+/// endpoint gets executable coverage in one test.
+#[tokio::test]
+async fn goal_no_body_actions_accept_204_without_warning() {
+    let _guard = OVERRIDE_MUTEX.lock().await;
+
+    // Each (action, path, label-for-warning-match) triple. The fake daemon
+    // serves a 204 recording for each path. The warning label matches the
+    // `what` string `session_action` passes to `report_action_error` (e.g.
+    // "Goal clear failed: …").
+    let cases: &[(pantoken_protocol::wire::SessionAction, &str, &str)] = &[
+        (
+            pantoken_protocol::wire::SessionAction::GoalClear,
+            "/goal/clear",
+            "goal clear",
+        ),
+        (
+            pantoken_protocol::wire::SessionAction::GoalPause,
+            "/goal/pause",
+            "goal pause",
+        ),
+        (
+            pantoken_protocol::wire::SessionAction::GoalResume,
+            "/goal/resume",
+            "goal resume",
+        ),
+    ];
+
+    for (action, path, warning_label) in cases {
+        let mut scenario = corpus_loader::load_named(VERSION, "streaming-turn");
+        scenario.http.push(support::corpus::HttpEntry {
+            method: "POST".into(),
+            path: (*path).into(),
+            request_body: None,
+            status: 204,
+            response_body: None,
+        });
+        let fake = Arc::new(fake_daemon::spawn(scenario, "goal-204".into(), 0).await);
+        let _ovr = OverrideGuard::install(fake.clone());
+
+        let (driver, _dir) = make_driver().await;
+        let (_sub_id, mut rx) = collect_events(&driver, 256);
+
+        let _seed = driver
+            .new_session(NewSessionOptsData::default())
+            .await
+            .expect("new_session");
+
+        driver
+            .session_action(action.clone(), Some(fake.session_id.clone()))
+            .await;
+
+        // The driver POSTed to the goal endpoint.
+        assert!(
+            fake.called("POST", path),
+            "{:?} should POST {}; calls: {:?}",
+            action,
+            path,
+            fake.recorded_calls()
+        );
+
+        // Drain events for a short window. A 204 must NOT produce a warning
+        // notice mentioning the action. `report_action_error` emits
+        // `Notify { message: "{what} failed: {err}", level: Warning }`, where
+        // `what` is e.g. "Goal clear" — so a spurious warning's message
+        // lowercases to contain `warning_label`.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut saw_warning = false;
+        while let Ok(Some(ev)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+            if let SessionDriverEvent::HostUiRequest {
+                request:
+                    pantoken_protocol::session_driver::HostUiRequest::Notify { message, level, .. },
+                ..
+            } = &ev
+            {
+                if message.to_lowercase().contains(warning_label)
+                    && *level == Some(pantoken_protocol::session_driver::NotifyLevel::Warning)
+                {
+                    saw_warning = true;
+                }
+            }
+        }
+        assert!(
+            !saw_warning,
+            "a 204 from {} must not produce a warning notice",
+            path
+        );
+    }
+}
