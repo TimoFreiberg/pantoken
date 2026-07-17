@@ -1,0 +1,19 @@
+# Project-local Polytoken configuration.
+#
+# The Playwright MCP server is intentionally opt-in at startup: enable it with
+# `/mcp` when interactive browser control is needed.
+mcp_servers:
+  playwright:
+    transport: stdio
+    command: npx
+    args:
+      - --yes
+      - '@playwright/mcp@latest'
+      - --browser
+      - chromium
+      - --isolated
+      - --output-mode
+      - stdout
+    default_enabled: false
+    default_timeout_seconds: 60
+    log_stderr: true
