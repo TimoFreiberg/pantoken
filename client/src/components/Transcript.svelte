@@ -1490,10 +1490,10 @@
   }
   /* Resolution-feedback chips: subtle pills under the sent prompt naming the
      `@`-references the daemon resolved. Right-aligned like the bubble (the row is
-     flex-end); non-interactive, so no hover/focus treatment — just a tooltip. Kind
-     badge styling echoes AtMenu.svelte's `.kind-badge` (a separate Svelte component's
-     scoped styles can't be shared directly, so this mirrors the look rather than the
-     rule). */
+     flex-end); non-interactive, so no hover/focus treatment — just a tooltip. The
+     `.ref-kind` label mirrors the look AtMenu's front `kind:` prefix used to share
+     when it had a `.kind-badge` (a separate Svelte component's scoped styles can't
+     be shared directly, so this mirrors the look rather than the rule). */
   .ref-chips {
     display: flex;
     flex-wrap: wrap;

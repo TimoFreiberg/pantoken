@@ -22,10 +22,12 @@ test("a draft's @-mention searches the draft cwd via the server; a real session 
   const box = ta(page);
 
   // A real (focused) session never fires the server fallback — its small index isn't
-  // truncated — so the cwd-only marker is absent.
+  // truncated — so the cwd-only marker is absent. The menu stays open with "No matches"
+  // (issue #53: always-visible in @-context) rather than hiding entirely.
   await box.click();
   await page.keyboard.type("@DRAFT-CWD");
-  await expect(menu(page)).toHaveCount(0);
+  await expect(menu(page)).toBeVisible();
+  await expect(menu(page)).toContainText("No matches");
   await box.fill("");
 
   // A new-session draft searches via the server fallback scoped to its target cwd, so the
@@ -321,10 +323,12 @@ test("project mode: a query matching only a hidden fixture shows nothing until S
   const box = ta(page);
   await box.click();
   await page.keyboard.type("@env");
-  // Zero local matches — no visible fixture path contains "env" — so the menu doesn't
-  // even render yet. This is the case Shift+Tab must still work from: there's no open
-  // menu to press it "inside" of.
-  await expect(menu(page)).toHaveCount(0);
+  // Zero local matches — no visible fixture path contains "env" — but the menu stays
+  // open with "No matches" (issue #53: always-visible in @-context, so the footer/
+  // hotkeys — including ⇧Tab — are reachable without a "surprise" reveal). This is
+  // the case Shift+Tab must work from: the menu is already open.
+  await expect(menu(page)).toBeVisible();
+  await expect(menu(page)).toContainText("No matches");
 
   await box.press("Shift+Tab");
   await expect(menu(page)).toBeVisible();
@@ -334,9 +338,10 @@ test("project mode: a query matching only a hidden fixture shows nothing until S
   // must NOT have also rotated.
   await expect(page.getByTestId("facet-badge")).toHaveText("Execute");
 
-  // Shift+Tab again hides it — back to zero matches, menu gone.
+  // Shift+Tab again hides it — back to zero matches, menu still open with "No matches".
   await box.press("Shift+Tab");
-  await expect(menu(page)).toHaveCount(0);
+  await expect(menu(page)).toBeVisible();
+  await expect(menu(page)).toContainText("No matches");
 });
 
 test("@~/ then Shift+Tab reveals the hidden ~/.secrets fixture; Shift+Tab again hides it", async ({
@@ -358,6 +363,125 @@ test("@~/ then Shift+Tab reveals the hidden ~/.secrets fixture; Shift+Tab again 
 
   await box.press("Shift+Tab");
   await expect(row(page, "file:~/.secrets")).toHaveCount(0);
+});
+
+// Issue #53: the @-menu is always visible while the cursor is inside an @-token, even
+// when the query matches nothing — showing a "No matches" body and the pinned hotkey
+// footer, so there's no "surprise Shift+Tab" from a hidden menu.
+
+test("menu stays open with 'No matches' when a project query matches nothing", async ({
+  page,
+}) => {
+  const box = ta(page);
+  await box.click();
+  await page.keyboard.type("@zzz");
+  await expect(menu(page)).toBeVisible();
+  await expect(menu(page)).toContainText("No matches");
+  // The footer/hotkeys stay visible below the empty body.
+  await expect(menu(page)).toContainText("↑↓ navigate");
+  // Escape dismisses the always-open empty menu.
+  await box.press("Escape");
+  await expect(menu(page)).toHaveCount(0);
+});
+
+test("menu stays open with 'No matches' in a takeover mode", async ({ page }) => {
+  const box = ta(page);
+  await box.click();
+  await page.keyboard.type("@model:zzz");
+  await expect(menu(page)).toBeVisible();
+  await expect(menu(page)).toContainText("No matches");
+  await expect(menu(page)).toContainText("↑↓ navigate");
+});
+
+test("Enter on an empty @-menu falls through to submit (does not swallow)", async ({
+  page,
+}) => {
+  const box = ta(page);
+  await box.click();
+  await page.keyboard.type("@zzz");
+  await expect(menu(page)).toContainText("No matches");
+  // Enter must NOT be swallowed by the empty menu — it falls through to normal
+  // submit. The draft (with the literal @zzz) is sent: the composer clears and
+  // the prompt text appears in the transcript, ending the @-context.
+  await box.press("Enter");
+  await expect(box).toHaveValue("");
+  await expect(page.getByText("@zzz").first()).toBeVisible();
+  await expect(menu(page)).toHaveCount(0);
+});
+
+test("ArrowUp/ArrowDown on an empty @-menu is a no-op (no crash, menu stays open)", async ({
+  page,
+}) => {
+  const box = ta(page);
+  await box.click();
+  await page.keyboard.type("@zzz");
+  await expect(menu(page)).toContainText("No matches");
+  await box.press("ArrowDown");
+  await expect(menu(page)).toBeVisible();
+  await expect(menu(page)).toContainText("No matches");
+  await box.press("ArrowUp");
+  await expect(menu(page)).toBeVisible();
+  await expect(menu(page)).toContainText("No matches");
+});
+
+test("skill/subagent/model rows render a front kind: prefix; no right-edge badge", async ({
+  page,
+}) => {
+  const box = ta(page);
+  await box.click();
+  await page.keyboard.type("@skill:");
+  await expect(menu(page)).toBeVisible();
+  // The skill row's visible text starts with the front "skill:" prefix (mirroring the
+  // search term), and the old right-edge .kind-badge is gone.
+  await expect(row(page, "skill:debug")).toContainText("skill:debug");
+  await expect(menu(page).locator(".kind-badge")).toHaveCount(0);
+
+  await box.fill("");
+  await box.click();
+  await page.keyboard.type("@a:");
+  await expect(row(page, "subagent:reviewer")).toContainText("subagent:reviewer");
+  await expect(menu(page).locator(".kind-badge")).toHaveCount(0);
+
+  await box.fill("");
+  await box.click();
+  await page.keyboard.type("@m:");
+  // Model rows show "model:provider/modelId" at the front.
+  await expect(row(page, "model:openai/gpt-5")).toContainText("model:openai/gpt-5");
+  await expect(menu(page).locator(".kind-badge")).toHaveCount(0);
+});
+
+test("model rows keep the friendly label as muted secondary text", async ({ page }) => {
+  const box = ta(page);
+  await box.click();
+  await page.keyboard.type("@m:");
+  await expect(menu(page)).toBeVisible();
+  // claude-opus-4-8's mock fixture carries a friendly label distinct from its modelId.
+  // The row shows the front "model:" prefix + provider/modelId, with the label as
+  // secondary .meta text.
+  const modelRow = row(page, "model:anthropic/claude-opus-4-8");
+  await expect(modelRow).toContainText("model:anthropic/claude-opus-4-8");
+  await expect(modelRow.locator(".meta")).toBeVisible();
+});
+
+test("pinned footer stays visible when scrolling the list to the top", async ({
+  page,
+}) => {
+  const box = ta(page);
+  await box.click();
+  // `@s` matches enough skills + files to overflow the menu's max-height, so the
+  // list scrolls. The footer is pinned outside the scroll region and must remain
+  // visible at both the bottom and the top of the scroll range — if it were inside
+  // the scroll area (the old layout), scrolling down would push it out of view.
+  await page.keyboard.type("@s");
+  await expect(menu(page)).toBeVisible();
+  await expect(menu(page).locator("[data-ref]").first()).toBeVisible();
+  const list = menu(page).locator(".list");
+  // Scroll to the bottom first — the footer must still be visible there.
+  await list.evaluate((el) => (el.scrollTop = el.scrollHeight));
+  await expect(menu(page).getByText("↑↓ navigate")).toBeVisible();
+  // Then scroll back to the top — the footer must still be visible there too.
+  await list.evaluate((el) => (el.scrollTop = 0));
+  await expect(menu(page).getByText("↑↓ navigate")).toBeVisible();
 });
 
 test("plain Tab still accepts the highlighted row after Shift+Tab has toggled ignored files on", async ({

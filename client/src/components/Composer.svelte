@@ -424,9 +424,10 @@
       limit: AT_MENU_LIMIT,
     });
   });
-  const atOpen = $derived(
-    atQ !== null && !atDismissed && atItems.length > 0,
-  );
+  // Always open while the cursor is inside an @-token (even with zero matches), so the
+  // menu's footer/hotkeys stay reachable and there's no "surprise Shift+Tab" when a
+  // query matches nothing (issue #53). AtMenu renders a "No matches" body when empty.
+  const atOpen = $derived(atQ !== null && !atDismissed);
   // Whether the current mode's candidates are affected by the ignore-rules toggle at all —
   // only file browsing (project/external) has a notion of "hidden"/"gitignored"; skill/
   // subagent/model takeovers have no such concept. Drives the AtMenu footer hint.
@@ -1301,16 +1302,13 @@
     // dotfiles and gitignored entries join the candidates while on. Gated on
     // `ignoreToggleApplies` (project/external file modes only): skill/subagent/model
     // takeovers have no notion of "ignored", so Shift+Tab there is NOT consumed here —
-    // it falls through to the facet-rotate branch below instead. Deliberately checked
-    // ahead of (and independent of) the `atOpen`-gated block below: a project-mode query
-    // that matches ONLY a currently-hidden dotfile has zero local candidates, so `atOpen`
-    // (which additionally requires `atItems.length > 0`) is still false at this point —
-    // the menu hasn't rendered yet — but the toggle must still work here, since it's the
-    // only way to ever reveal that candidate and make the menu open. MUST also be checked
-    // before the atOpen block's own Enter/Tab accept branch below: that branch matches on
+    // it falls through to the facet-rotate branch below instead. MUST be checked before
+    // the atOpen block's own Enter/Tab accept branch below: that branch matches on
     // `e.key === "Tab"` alone, so without this earlier, shift-guarded check it would
     // swallow Shift+Tab as an accept instead of a toggle. Plain Tab (no shift) still
-    // falls through to that block's accept, unaffected.
+    // falls through to that block's accept, unaffected. (The menu is now always open in
+    // an @-context — issue #53 — so `atOpen` is true here even with zero matches; the
+    // toggle still needs to win over the accept branch, hence the ordering.)
     if (
       ignoreToggleApplies &&
       !atDismissed &&
@@ -1367,14 +1365,20 @@
         );
         return;
       }
+      // Arrow navigation is owned by the menu while it's open (consistent with the
+      // n > 0 case, where arrows never move the caret). On an empty (zero-match) menu
+      // there's nothing to select, so consume the key as a no-op — don't let it fall
+      // through to caret movement or history recall, which would close the menu
+      // (issue #53: the menu stays open with "No matches"). `(atSel ± 1) % 0` is NaN,
+      // so the selection only changes when n > 0.
       if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
         e.preventDefault();
-        atSel = (atSel + 1) % n;
+        if (n > 0) atSel = (atSel + 1) % n;
         return;
       }
       if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) {
         e.preventDefault();
-        atSel = (atSel - 1 + n) % n;
+        if (n > 0) atSel = (atSel - 1 + n) % n;
         return;
       }
       // Accept requires an UNSHIFTED Tab: in the file modes Shift+Tab was already
@@ -1382,7 +1386,10 @@
       // takeovers (where that branch doesn't apply) Shift+Tab was consumed by the
       // facet-rotate branch above this block. The `!e.shiftKey` guard is belt-and-
       // suspenders: by the time we reach here, Shift+Tab has already been handled.
-      if (e.key === "Enter" || (e.key === "Tab" && !e.shiftKey)) {
+      // Only consume Enter/Tab when there's a row to accept — on an empty (zero-match)
+      // menu, let the keypress fall through to normal submit/newline handling so the
+      // user isn't trapped (issue #53: `@zzz` + Enter sends the draft, not a no-op).
+      if (n > 0 && (e.key === "Enter" || (e.key === "Tab" && !e.shiftKey))) {
         e.preventDefault();
         const item = atItems[atSel];
         if (item) acceptAtItem(item);
