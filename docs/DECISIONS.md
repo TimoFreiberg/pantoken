@@ -115,7 +115,6 @@ invariant (PROGRESS.md #3).
 Both the sidebar listing the sessions and the currently open session transcript have in-progress indicators.
 The sidebar has a spinner on the right of the session title and the session transcript has an elapsed timer, a running token display, and a stop button at the bottom that allows stopping the running agent turn.
 These should always agree with each other. If one is visible, all of them must be visible.
-
 ## Submenu close always restores composer focus
 
 Whenever a composer-chrome submenu closes — facet/permission/branch pickers
@@ -133,3 +132,32 @@ mobile, so on a phone its close focuses the project chip rather than the
 textarea to avoid popping the soft keyboard. Contextual inline menus (slash,
 @-mention, arg menus, prompt history) keep focus in the textarea throughout
 and need no change.
+
+## Remote deployment: version source = codegen-time `polytoken --version` (Option A)
+
+The remote deployment plan needed a polytoken compatibility-target constant —
+a version stamp embedded at codegen time that later provisioning phases check
+against an installed daemon. The question was: where does the authoritative
+version come from?
+
+**Decision: Option A — codegen-time daemon version.** Run `polytoken --version`
+at codegen, parse the semver (with prerelease), and embed as
+`POLYTOKEN_DAEMON_TARGET_VERSION` in `pantoken-daemon-types`.
+
+**Rationale:** `polytoken openapi` exposes `info.version = "0.1.0"` — a static
+string that has never tracked daemon releases (installed daemon is
+`0.5.0-unstable.9`). The `GET /version` endpoint returns the *runtime* daemon
+version, which cannot be captured at codegen time. `polytoken --version` is the
+only source that tracks real releases with honest naming and parses cleanly as
+semver with prerelease.
+
+**Known limitation, accepted:** a same-CLI-version daemon with a silently
+changed spec passes the floor check. The live corpus tests (the frozen golden
+SSE corpus, deliberately pinned and bumped explicitly via
+`scripts/capture-daemon-corpus.ts`) remain the true spec-drift gate.
+
+**No CI freshness gate:** the `rust-server` CI job lacks `bun` and `polytoken`,
+and polytoken's installers fetch latest-unstable (not pinned), so a
+regenerate-in-CI gate is fragile against version skew. Freshness is a
+documented local discipline: after bumping polytoken, run
+`bun run scripts/codegen-polytoken-rs.ts` and commit the regenerated `lib.rs`.

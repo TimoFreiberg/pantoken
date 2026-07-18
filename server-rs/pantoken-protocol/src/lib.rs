@@ -6,6 +6,8 @@
 //! compatibility (the e2e suite fails if a Rust-produced `ServerMessage` JSON
 //! doesn't match what the TS client expects).
 
+pub mod frame;
 pub mod session_driver;
 pub mod state;
+pub mod transport;
 pub mod wire;

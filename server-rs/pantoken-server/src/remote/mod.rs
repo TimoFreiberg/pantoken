@@ -1,0 +1,9 @@
+//! Remote deployment support — provisioning, layout, and manifest contracts.
+//!
+//! Phase 0 scope: **types and contracts only**. The stdio adapter, remote
+//! runtime, provisioning logic, and SSH transport are later phases that will
+//! consume these frozen contracts. Nothing in this module performs I/O or
+//! process spawning.
+
+pub mod layout;
+pub mod manifest;

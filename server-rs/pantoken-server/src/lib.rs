@@ -20,6 +20,7 @@ pub mod mock_driver;
 pub mod pidlock;
 pub mod polytoken;
 pub mod push;
+pub mod remote;
 pub mod settings_store;
 pub mod shared;
 pub mod static_serve;
