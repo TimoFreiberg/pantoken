@@ -75,59 +75,74 @@
   }
 </script>
 
-<!-- use:scrollIndexIntoView keeps the keyboard-selected row in view as you arrow past the fold. -->
+<!-- The menu is a flex column: the .list region scrolls while the .footer stays pinned
+     at the bottom (issue #53 — the footer used to scroll away with the rows). The
+     always-open behavior (Composer renders this whenever the cursor is inside an @-token,
+     even with zero matches) means the footer/hotkeys are always reachable; a zero-item
+     list shows a "No matches" body instead of hiding the whole menu. -->
 <div
   class="menu"
   id="at-menu"
   role="listbox"
   aria-label="References"
   data-testid="at-menu"
-  use:scrollIndexIntoView={selected}
 >
-  {#each items as item, i (rowKey(item))}
-    <button
-      type="button"
-      class="row"
-      class:sel={i === selected}
-      data-i={i}
-      data-kind={item.kind}
-      data-ref={rowKey(item)}
-      role="option"
-      aria-selected={i === selected}
-      title={rowTitle(item)}
-      onmousedown={(e) => {
-        e.preventDefault();
-        onpick(item);
-      }}
-      onmouseenter={() => onhover(i)}
-    >
-      {#if item.kind === "file"}
-        <span class="icon" aria-hidden="true">{item.file.isDirectory ? "▸" : "▹"}</span>
-        <span class="name"
-          >{item.file.path}{#if item.file.isDirectory}<span class="sep">/</span>{/if}</span
+  <!-- use:scrollIndexIntoView keeps the keyboard-selected row in view as you arrow past
+       the fold. It queries `[data-i]` within this node, so it must sit on the scroll
+       container that owns the rows. -->
+  <div class="list" use:scrollIndexIntoView={selected}>
+    {#if items.length === 0}
+      <!-- Non-interactive: not a selectable option, just a presentational empty state.
+           aria-live so screen readers announce the transition into/out of "No matches"
+           (the textarea's aria-expanded/aria-controls point here regardless of count). -->
+      <div class="empty" aria-live="polite">No matches</div>
+    {:else}
+      {#each items as item, i (rowKey(item))}
+        <button
+          type="button"
+          class="row"
+          class:sel={i === selected}
+          data-i={i}
+          data-kind={item.kind}
+          data-ref={rowKey(item)}
+          role="option"
+          aria-selected={i === selected}
+          title={rowTitle(item)}
+          onmousedown={(e) => {
+            e.preventDefault();
+            onpick(item);
+          }}
+          onmouseenter={() => onhover(i)}
         >
-      {:else if item.kind === "skill"}
-        <span class="name">{item.name}</span>
-        <span class="kind-badge">skill</span>
-      {:else if item.kind === "subagent"}
-        <span class="name">{item.name}</span>
-        <span class="kind-badge">subagent</span>
-      {:else if item.kind === "model"}
-        <span class="name">{item.model.modelId}</span>
-        {#if item.model.label && item.model.label !== item.model.modelId}
-          <span class="meta">{item.model.label}</span>
-        {/if}
-        {#if i === selected && reasoningLevel !== null}
-          <span class="reasoning">reasoning: {reasoningLevel}</span>
-        {/if}
-        <span class="kind-badge">model</span>
-      {:else if item.kind === "sigil"}
-        <span class="icon" aria-hidden="true">▸</span>
-        <span class="name sigil">{item.prefix}</span>
-        <span class="meta">{item.label}</span>
-      {/if}
-    </button>
-  {/each}
+          {#if item.kind === "file"}
+            <span class="icon" aria-hidden="true">{item.file.isDirectory ? "▸" : "▹"}</span>
+            <span class="name"
+              >{item.file.path}{#if item.file.isDirectory}<span class="sep">/</span>{/if}</span
+            >
+          {:else if item.kind === "skill"}
+            <!-- Front `kind:` prefix mirrors the search term's structure (polytoken TUI
+                 parity) — the row reads as `skill:name`, the same shape the user would
+                 type. Replaces the old dim right-edge kind badge. -->
+            <span class="prefix">skill:</span><span class="name">{item.name}</span>
+          {:else if item.kind === "subagent"}
+            <span class="prefix">subagent:</span><span class="name">{item.name}</span>
+          {:else if item.kind === "model"}
+            <span class="prefix">model:</span><span class="name">{item.model.provider}/{item.model.modelId}</span>
+            {#if item.model.label && item.model.label !== item.model.modelId}
+              <span class="meta">{item.model.label}</span>
+            {/if}
+            {#if i === selected && reasoningLevel !== null}
+              <span class="reasoning">reasoning: {reasoningLevel}</span>
+            {/if}
+          {:else if item.kind === "sigil"}
+            <span class="icon" aria-hidden="true">▸</span>
+            <span class="name sigil">{item.prefix}</span>
+            <span class="meta">{item.label}</span>
+          {/if}
+        </button>
+      {/each}
+    {/if}
+  </div>
   <div class="footer">{footerHint}</div>
 </div>
 
@@ -139,12 +154,23 @@
     right: 0;
     z-index: 50;
     max-height: min(46vh, 320px);
-    overflow-y: auto;
+    /* Flex column so the list region scrolls while the footer stays pinned at the
+       bottom (issue #53). The menu's own max-height caps the whole stack. */
+    display: flex;
+    flex-direction: column;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--shadow-card);
     padding: 4px;
+  }
+  .list {
+    /* The scrollable region: takes the available height (up to the menu's max-height
+       minus the footer), scrolls when rows overflow. min-height:0 lets flex shrink it
+       below its content so the footer can stay visible. */
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
   }
   .row {
     display: flex;
@@ -169,6 +195,15 @@
     color: var(--text-faint);
     text-align: center;
   }
+  /* Front `kind:` prefix on skill/subagent/model rows — mirrors the search term's
+     structure (polytoken TUI parity). Mono font, muted so the name reads as the
+     primary text. flex-shrink:0 so it never collapses. */
+  .prefix {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text-muted);
+  }
   .name {
     flex-shrink: 0;
     font-family: var(--font-mono);
@@ -180,7 +215,7 @@
     max-width: 60%;
   }
   /* Files are the common case and can be long paths — let them use the full row,
-     unlike the other kinds whose name is a short slug next to a badge/description. */
+     unlike the other kinds whose name is a short slug next to a prefix/description. */
   .row[data-kind="file"] .name {
     flex-shrink: 1;
     max-width: none;
@@ -202,9 +237,9 @@
     white-space: nowrap;
   }
   /* The selected model row's dialed-in reasoning level (`[`/`]`) — right-aligned,
-     mirroring the polytoken TUI. `margin-left: auto` pushes it to the row's right
-     edge when `.meta` is absent; when `.meta` is present its own flex-grow already
-     claims the free space, so this row still reads right-aligned as a group. */
+      mirroring the polytoken TUI. `margin-left: auto` pushes it to the row's right
+      edge when `.meta` is absent; when `.meta` is present its own flex-grow already
+      claims the free space, so this row still reads right-aligned as a group. */
   .reasoning {
     flex-shrink: 0;
     margin-left: auto;
@@ -213,23 +248,18 @@
     white-space: nowrap;
     padding-left: 8px;
   }
-  /* Kind badge — a small static pill echoing the toolbar MenuBadge's rounded-pill
-     look (client/src/components/ui/MenuBadge.svelte), but non-interactive: it's a
-     per-row label here, not a dropdown trigger, so it doesn't reuse that component
-     directly. Mirrors SlashMenu's per-row source badge. */
-  .kind-badge {
-    flex-shrink: 0;
-    margin-left: auto;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+  /* Empty state: shown when the @-query matches zero candidates. Non-interactive
+     (not a button/option) — the menu stays open so the footer/hotkeys remain
+     reachable (issue #53). */
+  .empty {
+    padding: 7px 9px;
+    font-size: 13px;
     color: var(--text-faint);
-    background: var(--surface-sunken);
-    border: 1px solid var(--border);
-    padding: 1px 7px;
-    border-radius: 999px;
+    font-style: italic;
   }
   .footer {
+    /* Pinned sibling of .list — stays at the bottom while the list scrolls. */
+    flex-shrink: 0;
     padding: 6px 9px 3px;
     font-size: 11px;
     color: var(--text-faint);
