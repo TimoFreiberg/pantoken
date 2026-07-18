@@ -527,6 +527,10 @@
         {/each}
       </div>
       <div class="actions"><Button variant="secondary" size="lg" block title="Cancel this request" onclick={cancel}>Cancel</Button></div>
+    {:else if current.kind === "unknown"}
+      <h2 id="approval-title">{current.title}</h2>
+      <p class="msg">{current.message}</p>
+      <div class="actions"><Button variant="secondary" size="lg" block title="Dismiss this request" onclick={cancel}>Dismiss</Button></div>
     {:else if isDialogRequest(current)}
       <!-- unreachable: all dialog kinds handled above -->
     {:else}

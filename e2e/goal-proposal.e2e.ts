@@ -44,9 +44,15 @@ test("unknown interrogative type renders an error card with Dismiss", async ({
   await expect(dialog).toBeVisible();
   // The dialog is blocking.
   await expect(dialog).toHaveAttribute("aria-modal", "true");
-  // Either button dismisses it — both produce {kind:"cancel"} via case "unknown".
-  await dialog.getByRole("button", { name: "Deny" }).click();
+  // Exactly one action button — no Deny/Allow pair (both would silently cancel).
+  // Scoped to .actions so the always-present "Minimize" chrome button isn't counted.
+  const actions = dialog.locator(".actions");
+  const buttons = actions.getByRole("button");
+  await expect(buttons).toHaveCount(1);
+  // Dismiss produces {cancelled:true} → Cancel via the reverse builder's Unknown arm.
+  await actions.getByRole("button", { name: "Dismiss" }).click();
   await expect(dialog).toBeHidden();
+  await expect(page.getByText("Dialog cancelled.")).toBeVisible();
 });
 
 test("unknown interrogative: Escape dismisses the error card", async ({

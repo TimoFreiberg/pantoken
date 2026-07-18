@@ -460,6 +460,18 @@ export type HostUiRequest =
       readonly options: readonly string[];
       readonly timeoutMs?: number;
     }
+  /** A blocking single-action dialog for an unrecognized interrogative type.
+   *  Rendered when the daemon emits an interrogative kind pantoken doesn't know
+   *  how to map to a richer card. Unlike {@link HostUiDialogKind} confirm/permission
+   *  variants, there is no affirmative action — the only valid response is dismiss
+   *  (`{cancelled: true}`), which the backend maps to `Cancel`. There is no
+   *  auto-resolve/timeout (no `timeoutMs`). */
+  | {
+      readonly kind: "unknown";
+      readonly requestId: string;
+      readonly title: string;
+      readonly message: string;
+    }
   // FIRE-AND-FORGET — ambient UI, no response
   | {
       readonly kind: "notify";
@@ -493,7 +505,14 @@ export type HostUiRequest =
   | { readonly kind: "reset"; readonly requestId: string };
 
 export type HostUiDialogKind =
-  "confirm" | "input" | "select" | "editor" | "qna" | "plan" | "permission";
+  | "confirm"
+  | "input"
+  | "select"
+  | "editor"
+  | "qna"
+  | "plan"
+  | "permission"
+  | "unknown";
 
 export function isDialogRequest(
   r: HostUiRequest,
@@ -505,7 +524,8 @@ export function isDialogRequest(
     r.kind === "editor" ||
     r.kind === "qna" ||
     r.kind === "plan" ||
-    r.kind === "permission"
+    r.kind === "permission" ||
+    r.kind === "unknown"
   );
 }
 

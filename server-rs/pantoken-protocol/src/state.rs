@@ -710,6 +710,7 @@ fn host_request_id(req: &HostUiRequest) -> &str {
     use crate::session_driver::HostUiRequest as H;
     match req {
         H::Confirm { request_id, .. }
+        | H::Unknown { request_id, .. }
         | H::Input { request_id, .. }
         | H::Select { request_id, .. }
         | H::Editor { request_id, .. }
