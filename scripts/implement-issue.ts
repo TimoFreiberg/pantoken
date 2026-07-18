@@ -10,7 +10,8 @@ export const POLYTOKEN_CONFIG_DIR = join(SCRIPT_DIR, "polytoken-config");
 export const HOOKS_CONFIG_PATH = join(POLYTOKEN_CONFIG_DIR, "hooks.json");
 
 export type IssueReference = { number: number; url: string; input: string };
-export type Issue = { title: string; body: string };
+export type Comment = { author: string; body: string; createdAt: string };
+export type Issue = { title: string; body: string; comments: Comment[] };
 export type Screenshot = { sourceUrl: string; localPath?: string; mediaType?: string; status: "downloaded" | "failed"; warning?: string };
 export type CommandResult = { code: number; stdout: string; stderr: string; signal?: string };
 export type CommandRunner = (command: string, args: string[], options?: { cwd?: string; env?: Record<string, string>; timeoutMs?: number }) => Promise<CommandResult>;
@@ -52,10 +53,15 @@ export function imageExtension(url: string, contentType?: string): string {
   return "bin";
 }
 
+export function formatComments(comments: Comment[]): string {
+  if (comments.length === 0) return "(no comments on this issue)";
+  return comments.map((c, i) => `### Comment ${i + 1} — @${c.author} (${c.createdAt})\n\n${c.body}`).join("\n\n---\n\n");
+}
+
 export function renderPrompt(template: string, issue: IssueReference & Issue, screenshots: Screenshot[], dryRun = false): string {
   const list = screenshots.filter((s) => s.status === "downloaded").map((s) => `- ${s.localPath} (read with file_read to view this screenshot)`).join("\n") || "(no screenshots in this issue)";
   const sourceList = screenshots.map((s) => `- ${s.sourceUrl}`).join("\n") || "(no image references)";
-  return template.replaceAll("{{ISSUE_NUMBER}}", String(issue.number)).replaceAll("{{ISSUE_URL}}", issue.url).replaceAll("{{ISSUE_TITLE}}", issue.title).replaceAll("{{ISSUE_BODY}}", issue.body).replaceAll("{{ISSUE_IMAGES}}", dryRun ? `${sourceList}\n\n(Normal mode will download these under its owned context directory.)` : list);
+  return template.replaceAll("{{ISSUE_NUMBER}}", String(issue.number)).replaceAll("{{ISSUE_URL}}", issue.url).replaceAll("{{ISSUE_TITLE}}", issue.title).replaceAll("{{ISSUE_BODY}}", issue.body).replaceAll("{{ISSUE_COMMENTS}}", formatComments(issue.comments)).replaceAll("{{ISSUE_IMAGES}}", dryRun ? `${sourceList}\n\n(Normal mode will download these under its owned context directory.)` : list);
 }
 
 export function parseDaemonOutput(output: string, structured?: { session_id?: string; port?: number }): { sessionId: string; port: number } {
@@ -137,10 +143,12 @@ async function daemonRequest(connection: DaemonConnection, path: string, init: R
 }
 
 export async function fetchIssue(issue: IssueReference, runner: CommandRunner = bunCommandRunner): Promise<Issue> {
-  const result = await command(runner, "gh", ["issue", "view", String(issue.number), "--repo", REPOSITORY, "--json", "title,body"]);
+  const result = await command(runner, "gh", ["issue", "view", String(issue.number), "--repo", REPOSITORY, "--json", "title,body,comments"]);
   let value: unknown; try { value = JSON.parse(result.stdout); } catch { throw new Error("gh returned malformed issue JSON"); }
   if (!value || typeof value !== "object" || typeof (value as any).title !== "string" || typeof (value as any).body !== "string") throw new Error("gh issue data lacks a string title or body");
-  return value as Issue;
+  const rawComments = Array.isArray((value as any).comments) ? (value as any).comments : [];
+  const comments: Comment[] = rawComments.map((c: any) => ({ author: typeof c?.author?.login === "string" ? c.author.login : "unknown", body: typeof c?.body === "string" ? c.body : "", createdAt: typeof c?.createdAt === "string" ? c.createdAt : "" }));
+  return { title: (value as any).title, body: (value as any).body, comments };
 }
 
 export async function downloadScreenshots(urls: string[], directory: string, http: HttpClient = fetch, maxBytes = 10 * 1024 * 1024): Promise<Screenshot[]> {
@@ -152,7 +160,7 @@ export async function downloadScreenshots(urls: string[], directory: string, htt
 export type LauncherOptions = { runner?: CommandRunner; http?: HttpClient; env?: Record<string, string>; print?: (text: string) => void };
 export async function runLauncher(args: string[], options: LauncherOptions = {}): Promise<void> {
   const runner = options.runner ?? bunCommandRunner; const http = options.http ?? fetch; const print = options.print ?? console.log; const dryRun = args.includes("--dry-run");
-  const issue = parseIssueReference(args); const repoRoot = resolve(options.env?.PANTOKEN_REPO_ROOT ?? process.env.PANTOKEN_REPO_ROOT ?? resolve(SCRIPT_DIR, "..")); const data = await fetchIssue(issue, runner); const urls = extractImageUrls(data.body); const template = await readFile(TEMPLATE_PATH, "utf8");
+  const issue = parseIssueReference(args); const repoRoot = resolve(options.env?.PANTOKEN_REPO_ROOT ?? process.env.PANTOKEN_REPO_ROOT ?? resolve(SCRIPT_DIR, "..")); const data = await fetchIssue(issue, runner); const urls = extractImageUrls([data.body, ...data.comments.map((c) => c.body)].join("\n")); const template = await readFile(TEMPLATE_PATH, "utf8");
   if (dryRun) { const prompt = renderPrompt(template, { ...issue, ...data }, urls.map((sourceUrl) => ({ sourceUrl, status: "failed" as const })), true); print(`DRY RUN — no filesystem, claims, downloads, or mutating commands\n\nIssue #${issue.number}: ${data.title}\n${issue.url}\n\nPlanned commands:\n${plannedCommands(issue, repoRoot).map((c) => `  ${c.join(" ")}`).join("\n")}\n\nPrompt:\n${prompt}`); return; }
   const contextRoot = join(repoRoot, ".pantoken-issue-context"); await mkdir(contextRoot, { recursive: true }); const context = await mkdtemp(join(contextRoot, "issue-")); let claimed = false; let handedOff = false; let workspace = resolve(repoRoot, ".workspaces", `issue-${issue.number}`); let daemonPid: string | undefined;
   try { await claimCommand(runner, "claim_issue", issue.number); claimed = true; await mkdir(join(context, "images")); const screenshots = await downloadScreenshots(urls, join(context, "images"), http); await writeFile(join(context, "issue-body.md"), data.body); await writeFile(join(context, "manifest.json"), JSON.stringify(screenshots, null, 2)); await mkdir(join(repoRoot, ".workspaces"), { recursive: true }); await command(runner, "jj", ["workspace", "add", workspace, "--name", `issue-${issue.number}`, "--revision", "main"], { cwd: repoRoot }); await command(runner, "bun", ["install"], { cwd: workspace }); await mkdir(join(workspace, ".polytoken"), { recursive: true }); await writeFile(join(workspace, ".polytoken", "hooks.json"), await readFile(HOOKS_CONFIG_PATH, "utf8")); const spawned = await command(runner, "polytoken", ["new", "--no-attach"], { cwd: workspace }); const parsed = parseDaemonOutput(spawned.stdout); const startup = join(process.env.HOME ?? "", ".local/share/polytoken/sessions", parsed.sessionId, "startup.json"); const startupData = await waitForDaemonReady(startup); daemonPid = typeof startupData.pid === "number" ? String(startupData.pid) : undefined; await writeFile(join(workspace, ".autopilot-session-id"), parsed.sessionId); await writeFile(join(workspace, ".autopilot-issue-number"), String(issue.number)); await writeFile(join(workspace, ".autopilot-config-dir"), POLYTOKEN_CONFIG_DIR); const tokenPath = typeof startupData.credential_file_path === "string" ? startupData.credential_file_path : undefined; const token = tokenPath ? JSON.parse(await readFile(tokenPath, "utf8")).token : startupData.token; if (typeof token !== "string" || !token) throw new Error("daemon startup did not provide a credential"); const connection = { sessionId: parsed.sessionId, port: parsed.port, token, baseUrl: `http://localhost:${parsed.port}` }; await claimCommand(runner, "update_claim_session", issue.number, parsed.sessionId); await daemonRequest(connection, "/facet", { method: "POST", body: JSON.stringify({ facet: "plan" }) }, http); await daemonRequest(connection, "/permission-monitor", { method: "POST", body: JSON.stringify({ mode: "bypass_plus" }) }, http); const handoff = await daemonRequest(connection, "/adventurous-handoff", {}, http) as any; if (!handoff?.enabled) await daemonRequest(connection, "/adventurous-handoff", { method: "POST" }, http); const prompt = renderPrompt(template, { ...issue, ...data }, screenshots); await daemonRequest(connection, "/prompt", { method: "POST", body: JSON.stringify({ content: prompt }) }, http); const cleanup = zellijCleanupCommand(parsed.sessionId, join(SCRIPT_DIR, "claims.sh"), issue.number, daemonPid, context, SCRIPT_DIR); await command(runner, "zellij", ["action", "new-tab", "--cwd", workspace, "--name", `#${issue.number}`, "--", cleanup.command, ...cleanup.args]); handedOff = true; print(`TUI started in a new zellij tab. Workspace retained for integration check: ${workspace}`); } finally { if (!handedOff) { if (claimed) await claimCommand(runner, "release_claim", issue.number).catch(() => undefined); if (daemonPid) await runner("kill", [daemonPid]).catch(() => undefined); await rm(context, { recursive: true, force: true }).catch(() => undefined); } }
