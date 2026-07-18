@@ -55,7 +55,7 @@ discussion before becoming a gate (or being rejected).
       including after the sessionAction refactor) — one green
       `workflow_dispatch` run in CI is all that's left before promoting it to
       a blocking gate (drop the `if:` per the comment in ci.yml).
-- [ ] move "archived" popups elsewhere (top of sidebar? still middle of transcript but top instead of bottom? discuss first)
+- [x] move "archived" popups elsewhere (top of sidebar? still middle of transcript but top instead of bottom? discuss first) — resolved: archive-undo notice is now a top-of-sidebar overlay (position: absolute, anchored below the header); it doesn't displace session rows and only one exists at a time (issue #60).
 - ~~[x]~~ The "new session" view leaked the previous session's state:
   ApprovalLayer/QnaInline dialogs, PlanView, the right context panel
   (+ its edge tab), and the composer's context-pressure cue all read

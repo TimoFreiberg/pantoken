@@ -566,6 +566,26 @@ impl PolytokenInner {
             .or_else(|| Self::cwd_for_session(&self.sessions_dir, &ws.client.session_id))
     }
 
+    /// True if any currently-warm session's cwd matches `cwd` — i.e. the session
+    /// owning this worktree is active and its worktree must not be force-reaped.
+    /// Defense-in-depth behind the client-side Undo↔Delete-anyway correlation:
+    /// even if the client race loses (Undo's `openSession` hasn't settled
+    /// server-side before "Delete anyway" fires), the server refuses to
+    /// destroy a live session's worktree. Checks *all* warm sessions, not just
+    /// the most-recently-focused one — the invariant is "no live session's
+    /// worktree gets destroyed."
+    fn warm_session_owns_cwd(&self, cwd: &str) -> bool {
+        let warm = self.warm.read();
+        for ws in warm.values() {
+            if let Some(c) = self.warm_cwd(ws) {
+                if c == cwd {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     fn target_warm_for_read(&self, session_id: Option<&SessionId>) -> Option<Arc<WarmSession>> {
         match session_id {
             Some(sid) => self.get_warm(sid),
@@ -1862,6 +1882,26 @@ impl PantokenDriver for PolytokenDriver {
     /// `removed:false` + a reason). Mirrors `polytoken-driver.ts:1380-1387`
     /// (`cleanupWorktree` → `reapWorktree`, `:862-872`).
     async fn cleanup_worktree(&self, path: String, force: bool) -> WorktreeCleanupResult {
+        // Active-session guard: never reap a worktree whose owning session is
+        // warm (a live SSE attachment). Defense-in-depth against a client race
+        // where an archive Undo's `openSession` hasn't settled before a stale
+        // "Delete anyway" toast fires `cleanupWorktree`. Scoped to
+        // `cleanup_worktree` (the explicit cleanup path) ONLY — NOT the shared
+        // `reap_worktree`, because `set_archived` (the archive path) also calls
+        // `reap_worktree` with `force=false`, and archiving the focused session
+        // is the primary archive use case (the server's session is still warm
+        // at that point). A guard in `reap_worktree` would spuriously retain
+        // clean worktrees on normal archive. In practice the client only calls
+        // `cleanup_worktree` with `force=true` (the "Delete anyway" toast), but
+        // the guard fires unconditionally here — a `force=false` cleanup of an
+        // active session's worktree is also refused (a cold session's clean
+        // worktree would be reaped by `reap_worktree` regardless).
+        if self.inner.warm_session_owns_cwd(&path) {
+            return WorktreeCleanupResult {
+                removed: false,
+                reason: Some("session is active".to_string()),
+            };
+        }
         match self.reap_worktree(&path, force).await {
             ReapOutcome::NoWorktree => WorktreeCleanupResult {
                 removed: false,
@@ -5362,5 +5402,108 @@ mod tests {
             vec!["debug".to_string(), "journal".to_string()]
         );
         assert_eq!(refs.subagents, vec!["reviewer".to_string()]);
+    }
+
+    /// Build a `WarmSession` whose cached `last_state` reports `project_cwd` —
+    /// the field `warm_cwd` reads first. This lets a unit test exercise the
+    /// active-session guard without a real daemon `/state` round-trip (the
+    /// fake-daemon scenario hardcodes `project_cwd: "/PROJECT"`, which never
+    /// matches a real worktree path).
+    fn warm_with_project_cwd(session_id: &str, project_cwd: &str) -> Arc<WarmSession> {
+        let ws = warm_for(session_id);
+        *ws.last_state.write() = Some(SessionStateSnapshot {
+            active_facet: "execute".into(),
+            active_model: None,
+            active_plan: None,
+            active_reasoning_effort: None,
+            adventurous_handoff_active: None,
+            available_models: None,
+            available_skills: None,
+            available_subagents: None,
+            context_usage: None,
+            current_goal: None,
+            cwd: None,
+            cwd_stack_depth: None,
+            env: std::collections::HashMap::new(),
+            flags: vec![],
+            latest_compaction_summary: None,
+            mcp_servers: None,
+            most_recent_assistant_text: None,
+            pending_interrogatives: None,
+            plugin_config: serde_json::Value::Null,
+            project_cwd: Some(project_cwd.into()),
+            session_title: None,
+            source_control: None,
+            symlink_warnings: None,
+            todos: vec![],
+            turn_in_flight: None,
+        });
+        ws
+    }
+
+    /// AC.6 (server guard): `cleanup_worktree(path, force=true)` returns
+    /// `removed: false` with reason "session is active" when the owning session
+    /// is warm, and the guard is wired as an early-return in `cleanup_worktree`
+    /// (not just the `warm_session_owns_cwd` predicate). This tests the full
+    /// guard path: a refactor that breaks the early-return would fail here even
+    /// if the predicate still works in isolation.
+    #[tokio::test]
+    async fn cleanup_worktree_refuses_active_session_then_reaps_after_dispose() {
+        let worktree_path = "/repo/my-project-worktree";
+        let session_id = "sess-active";
+
+        // Build a driver with a warm session whose cached `last_state.project_cwd`
+        // matches the worktree path — the signal `warm_session_owns_cwd` reads.
+        // (The fake-daemon scenario hardcodes `project_cwd: "/PROJECT"`, which is
+        // why we install the warm session directly rather than via new_session.)
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sessions_dir = dir.path().join("sessions");
+        write_session_json(&sessions_dir, session_id, worktree_path);
+        let mut inner = inner_with_order(vec![session_id.to_string()], 64);
+        inner.sessions_dir = sessions_dir;
+        inner.warm.write().insert(
+            session_id.to_string(),
+            warm_with_project_cwd(session_id, worktree_path),
+        );
+        let driver = PolytokenDriver {
+            inner: Arc::new(inner),
+        };
+
+        // Guard fires: the owning session is warm, so cleanup_worktree refuses
+        // to force-reap — returns early with "session is active", never reaching
+        // reap_worktree (no worktree is registered in the store, which would
+        // otherwise return "no pantoken worktree at this path").
+        let result = driver
+            .cleanup_worktree(worktree_path.to_string(), true)
+            .await;
+        assert!(
+            !result.removed,
+            "cleanup_worktree should refuse to reap an active session's worktree"
+        );
+        assert_eq!(
+            result.reason.as_deref(),
+            Some("session is active"),
+            "the refusal reason should indicate the session is active"
+        );
+
+        // Dispose the warm session (simulate going idle). Now the guard no
+        // longer fires — cleanup_worktree proceeds to reap_worktree, which
+        // finds no registered worktree and returns "no pantoken worktree at
+        // this path" (distinct from the guard's "session is active" reason,
+        // proving the guard was the early-return path, not reap_worktree).
+        driver.inner.warm.write().remove(session_id);
+        let result2 = driver
+            .cleanup_worktree(worktree_path.to_string(), true)
+            .await;
+        assert!(
+            !result2.removed,
+            "no worktree is registered, so reap should report none"
+        );
+        assert_eq!(
+            result2.reason.as_deref(),
+            Some("no pantoken worktree at this path"),
+            "after dispose, the guard should not fire — reap_worktree runs and \
+             reports no registered worktree (distinct from the guard's reason)"
+        );
     }
 }
