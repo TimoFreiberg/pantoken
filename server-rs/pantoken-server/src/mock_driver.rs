@@ -26,6 +26,7 @@ use async_trait::async_trait;
 fn request_id_of(r: &HostUiRequest) -> &str {
     match r {
         HostUiRequest::Confirm { request_id, .. }
+        | HostUiRequest::Unknown { request_id, .. }
         | HostUiRequest::Input { request_id, .. }
         | HostUiRequest::Select { request_id, .. }
         | HostUiRequest::Editor { request_id, .. }
@@ -3286,12 +3287,10 @@ impl PantokenDriver for MockDriver {
                 } } },
             ],
             "unknown" => vec![
-                ScriptStep { wait_ms: 0, event: SessionDriverEvent::HostUiRequest { base: base(), request: HostUiRequest::Confirm {
+                ScriptStep { wait_ms: 0, event: SessionDriverEvent::HostUiRequest { base: base(), request: HostUiRequest::Unknown {
                     request_id: "req-unknown-1".into(),
                     title: "⚠ Unknown request type: some_future_type".into(),
                     message: "The agent sent a request type this version of pantoken doesn't recognize. Dismiss to cancel it and unblock the session.".into(),
-                    default_value: None,
-                    timeout_ms: None,
                 } } },
             ],
             "input" => vec![

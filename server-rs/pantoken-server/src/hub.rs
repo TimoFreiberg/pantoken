@@ -3188,6 +3188,7 @@ impl HostUiRequestExt for HostUiRequest {
     fn kind(&self) -> &str {
         match self {
             HostUiRequest::Confirm { .. } => "confirm",
+            HostUiRequest::Unknown { .. } => "unknown",
             HostUiRequest::Select { .. } => "select",
             HostUiRequest::Input { .. } => "input",
             HostUiRequest::Editor { .. } => "editor",
@@ -3206,6 +3207,7 @@ impl HostUiRequestExt for HostUiRequest {
     fn request_id(&self) -> &str {
         match self {
             HostUiRequest::Confirm { request_id, .. } => request_id,
+            HostUiRequest::Unknown { request_id, .. } => request_id,
             HostUiRequest::Select { request_id, .. } => request_id,
             HostUiRequest::Input { request_id, .. } => request_id,
             HostUiRequest::Editor { request_id, .. } => request_id,
@@ -3224,6 +3226,7 @@ impl HostUiRequestExt for HostUiRequest {
     fn title(&self) -> Option<&str> {
         match self {
             HostUiRequest::Confirm { title, .. } => Some(title),
+            HostUiRequest::Unknown { title, .. } => Some(title),
             HostUiRequest::Input { title, .. } => Some(title),
             HostUiRequest::Select { title, .. } => Some(title),
             HostUiRequest::Editor { title, .. } => Some(title),
@@ -3231,15 +3234,30 @@ impl HostUiRequestExt for HostUiRequest {
             HostUiRequest::Permission { title, .. } => Some(title),
             HostUiRequest::Plan { title, .. } => Some(title),
             HostUiRequest::Title { title, .. } => Some(title),
-            _ => None,
+            HostUiRequest::Notify { .. } => None,
+            HostUiRequest::Status { .. } => None,
+            HostUiRequest::Widget { .. } => None,
+            HostUiRequest::EditorText { .. } => None,
+            HostUiRequest::Reset { .. } => None,
         }
     }
 
     fn message(&self) -> Option<&str> {
         match self {
             HostUiRequest::Confirm { message, .. } => Some(message),
+            HostUiRequest::Unknown { message, .. } => Some(message),
             HostUiRequest::Notify { message, .. } => Some(message),
-            _ => None,
+            HostUiRequest::Input { .. } => None,
+            HostUiRequest::Select { .. } => None,
+            HostUiRequest::Editor { .. } => None,
+            HostUiRequest::Qna { .. } => None,
+            HostUiRequest::Permission { .. } => None,
+            HostUiRequest::Plan { .. } => None,
+            HostUiRequest::Status { .. } => None,
+            HostUiRequest::Widget { .. } => None,
+            HostUiRequest::Title { .. } => None,
+            HostUiRequest::EditorText { .. } => None,
+            HostUiRequest::Reset { .. } => None,
         }
     }
 }

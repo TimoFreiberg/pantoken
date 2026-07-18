@@ -591,6 +591,18 @@ pub enum HostUiRequest {
         #[serde(skip_serializing_if = "Option::is_none", default, rename = "timeoutMs")]
         timeout_ms: Option<i64>,
     },
+    /// A blocking single-action dialog for an unrecognized interrogative type.
+    /// Rendered when the daemon emits an interrogative kind pantoken doesn't know
+    /// how to map to a richer card. Unlike `Confirm`/`Permission`, there is no
+    /// affirmative action — the only valid response is dismiss
+    /// (`{cancelled: true}`), which the backend maps to `Cancel`. No
+    /// auto-resolve/timeout (no `timeout_ms`).
+    Unknown {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        title: String,
+        message: String,
+    },
     Input {
         #[serde(rename = "requestId")]
         request_id: String,
@@ -739,12 +751,14 @@ pub const DIALOG_KINDS: &[&str] = &[
     "qna",
     "plan",
     "permission",
+    "unknown",
 ];
 
 pub fn is_dialog_request(req: &HostUiRequest) -> bool {
     matches!(
         req,
         HostUiRequest::Confirm { .. }
+            | HostUiRequest::Unknown { .. }
             | HostUiRequest::Input { .. }
             | HostUiRequest::Select { .. }
             | HostUiRequest::Editor { .. }
@@ -1125,6 +1139,51 @@ mod tests {
             },
             _ => panic!("expected HostUiRequest"),
         }
+    }
+
+    #[test]
+    fn roundtrip_host_ui_request_unknown() {
+        let json_str = r#"{
+            "type": "hostUiRequest",
+            "sessionRef": {"workspaceId": "ws1", "sessionId": "s1"},
+            "timestamp": "2026-07-03T12:00:00Z",
+            "request": {
+                "kind": "unknown",
+                "requestId": "ru1",
+                "title": "⚠ Unknown request type: some_future_type",
+                "message": "Unrecognized."
+            }
+        }"#;
+        let ev: SessionDriverEvent = serde_json::from_str(json_str).unwrap();
+        match ev {
+            SessionDriverEvent::HostUiRequest { request, .. } => match request {
+                HostUiRequest::Unknown {
+                    request_id,
+                    title,
+                    message,
+                } => {
+                    assert_eq!(request_id, "ru1");
+                    assert_eq!(title, "⚠ Unknown request type: some_future_type");
+                    assert_eq!(message, "Unrecognized.");
+                }
+                _ => panic!("expected Unknown"),
+            },
+            _ => panic!("expected HostUiRequest"),
+        }
+        // Also assert it round-trips via re-serialization + that it's a dialog kind.
+        let req = HostUiRequest::Unknown {
+            request_id: "ru1".to_string(),
+            title: "⚠ Unknown request type: some_future_type".to_string(),
+            message: "Unrecognized.".to_string(),
+        };
+        assert!(is_dialog_request(&req));
+        let v = serde_json::to_value(&req).unwrap();
+        assert_eq!(v["kind"], "unknown");
+        assert_eq!(v["requestId"], "ru1");
+        assert_eq!(v["title"], "⚠ Unknown request type: some_future_type");
+        assert_eq!(v["message"], "Unrecognized.");
+        assert!(v.get("timeoutMs").is_none());
+        assert!(v.get("defaultValue").is_none());
     }
 
     #[test]
