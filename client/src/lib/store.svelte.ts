@@ -103,6 +103,13 @@ export interface Toast {
   message: string;
   scope: NoticeScope;
   action?: { label: string; run: () => void | Promise<void> };
+  /** Replace-kind: toasts sharing a kind replace each other (only one per kind at a time).
+   *  Used by the archive-Undo notice so a second archive replaces the first (AC.2/AC.3). */
+  kind?: string;
+  /** Correlation key (typically a session cwd). Notices sharing a key are related and can
+   *  invalidate each other — e.g. an archive Undo dismisses a live "Delete anyway" toast
+   *  for the same session's worktree so it can't force-delete the restored worktree. */
+  correlationKey?: string;
 }
 
 /** Client-visible lifecycle of one request to stop the focused turn. This is
@@ -1411,6 +1418,7 @@ class PantokenStore {
         // and offer a force-delete so it isn't a mystery directory on disk.
         const path = msg.path;
         this.sidebarNotice(`Worktree kept — ${msg.reason}`, {
+          correlationKey: path,
           action: {
             label: "Delete anyway",
             run: () => this.cleanupWorktree(path, true),
@@ -2719,17 +2727,34 @@ class PantokenStore {
   refreshSessions(): void {
     send({ type: "listSessions" });
   }
-  /** Archive or unarchive a session by path. Optimistic — flips the local flag now so
-   *  the row reacts instantly; the server's `sessionList` re-broadcast reconciles. */
-  /** Push a transient sidebar notice; auto-dismisses after `durationMs` (0 = sticky). */
+  /** Push a transient sidebar notice; auto-dismisses after `durationMs` (0 = sticky).
+   *  When `kind` is set, any prior toast of the same kind is replaced (only one per kind
+   *  at a time — e.g. successive archive-Undos collapse to the most recent). */
   sidebarNotice(
     message: string,
-    opts?: { action?: { label: string; run: () => void }; durationMs?: number },
+    opts?: {
+      action?: { label: string; run: () => void };
+      durationMs?: number;
+      kind?: string;
+      correlationKey?: string;
+    },
   ): void {
     const id = ++this.noticeSeq;
+    let next = this.sidebarToasts;
+    if (opts?.kind) {
+      // Replace any prior toast of the same kind (AC.2: only one archive Undo).
+      next = next.filter((t) => t.kind !== opts.kind);
+    }
     this.sidebarToasts = [
-      ...this.sidebarToasts,
-      { id, message, scope: "sidebar", action: opts?.action },
+      ...next,
+      {
+        id,
+        message,
+        scope: "sidebar",
+        action: opts?.action,
+        kind: opts?.kind,
+        correlationKey: opts?.correlationKey,
+      },
     ];
     const ms = opts?.durationMs ?? 6000;
     if (ms > 0) setTimeout(() => this.dismissNotice("sidebar", id), ms);
@@ -2754,11 +2779,23 @@ class PantokenStore {
       this.chatToasts = this.chatToasts.filter((t) => t.id !== id);
     }
   }
+  /** Dismiss every notice in `scope` whose `correlationKey` matches `key`. Used by the
+   *  archive-Undo action to invalidate a live "Delete anyway" toast for the same session's
+   *  worktree, so it can't fire `cleanupWorktree` on the restored session (AC.5). */
+  dismissNoticeByCorrelation(scope: NoticeScope, key: string): void {
+    if (scope === "sidebar") {
+      this.sidebarToasts = this.sidebarToasts.filter((t) => t.correlationKey !== key);
+    } else {
+      this.chatToasts = this.chatToasts.filter((t) => t.correlationKey !== key);
+    }
+  }
   /** Count of active sidebar notices — drives the mobile unread badge. */
   get sidebarNoticeCount(): number {
     return this.sidebarToasts.length;
   }
 
+  /** Archive or unarchive a session by path. Optimistic — flips the local flag now so
+   *  the row reacts instantly; the server's `sessionList` re-broadcast reconciles. */
   setArchived(path: string, archived: boolean): void {
     this.sessions = this.sessions.map((s) =>
       s.path === path ? { ...s, archived } : s,
@@ -2778,10 +2815,16 @@ class PantokenStore {
       const viewedId = this.session.ref?.sessionId ?? this.activeSessionId;
       const archivingFocused = s != null && s.sessionId === viewedId;
       if (archivingFocused) this.startDraft(s.worktree?.base ?? s.cwd);
+      const cwd = s?.cwd;
       this.sidebarNotice(`Archived “${label}”`, {
+        kind: "archive-undo",
+        correlationKey: cwd,
         action: {
           label: "Undo",
           run: () => {
+            // AC.5 (high-risk case): invalidate any live "Delete anyway" toast for this
+            // session's worktree so it can't force-delete the restored session's worktree.
+            if (cwd) this.dismissNoticeByCorrelation("sidebar", cwd);
             this.setArchived(path, false);
             // Restore the prior view too, if archiving had navigated us into a draft.
             if (archivingFocused) this.openSession(path);

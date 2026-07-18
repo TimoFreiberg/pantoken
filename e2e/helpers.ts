@@ -102,3 +102,45 @@ export async function openRightSidebar(page: Page): Promise<void> {
   }
   await expect(panel).toHaveAttribute("data-open", "true");
 }
+
+/** Open the server-path picker and choose `/Users/timo/src/<name>`. */
+export async function chooseProjectDir(page: Page, name: string): Promise<void> {
+  await page.getByTestId("draft-project-control").click();
+  const picker = page.getByTestId("dir-picker");
+  await expect(picker).toBeVisible();
+  const input = picker.getByLabel("Project directory path");
+  await input.fill(`/Users/timo/src/${name}/`);
+  await expect(picker.getByTestId("use-current-directory")).toBeVisible();
+  await picker.getByTestId("use-current-directory").click();
+  await expect(picker).toBeHidden();
+}
+
+/** Create a worktree-backed session at /Users/timo/src/<project> (→ <project>-worktree)
+ *  and leave the sidebar open. `project="dirty"` simulates uncommitted changes so
+ *  archive keeps the worktree + emits `worktreeRetained`. */
+export async function createWorktreeSession(
+  page: Page,
+  project = "demo",
+): Promise<void> {
+  await openSidebar(page);
+  await page
+    .getByTestId("sidebar")
+    .getByTestId("sidebar-new-session")
+    .getByText("New session")
+    .click();
+  await page.getByRole("button", { name: "worktree" }).click();
+  await chooseProjectDir(page, project);
+  const composer = page.getByPlaceholder("Describe a task or ask a question…");
+  await composer.fill("get started");
+  await composer.press("Enter");
+  await openSidebar(page);
+}
+
+/** Archive a session row via its right-click context menu. */
+export async function archiveRow(page: Page, rowText: string): Promise<void> {
+  const sidebar = page.getByTestId("sidebar");
+  const row = sidebar.locator(".row-wrap").filter({ hasText: rowText });
+  await expect(row).toBeVisible();
+  await row.locator(".row").click({ button: "right" });
+  await sidebar.getByRole("menuitem", { name: "Archive", exact: true }).click();
+}
