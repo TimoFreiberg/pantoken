@@ -7,6 +7,10 @@
 
 {{ISSUE_BODY}}
 
+## Issue comments
+
+{{ISSUE_COMMENTS}}
+
 ## Screenshots
 
 {{ISSUE_IMAGES}}

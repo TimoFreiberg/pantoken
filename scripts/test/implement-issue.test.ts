@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractImageUrls, imageExtension, parseDaemonOutput, parseIssueReference, plannedCommands, renderPrompt, zellijCleanupCommand } from "../implement-issue";
+import { extractImageUrls, formatComments, imageExtension, parseDaemonOutput, parseIssueReference, plannedCommands, renderPrompt, zellijCleanupCommand } from "../implement-issue";
 
 describe("implement-issue helpers", () => {
   test("parses supported issue references and rejects ambiguity", () => {
@@ -43,8 +43,29 @@ describe("implement-issue helpers", () => {
   });
 
   test("renders hostile multiline issue data without shell interpolation", () => {
-    const issue = { number: 4, input: "4", url: "https://github.com/TimoFreiberg/pantoken/issues/4", title: "quotes ' \" \\", body: "line 1\n{{ISSUE_TITLE}}\n日本語" };
+    const issue = { number: 4, input: "4", url: "https://github.com/TimoFreiberg/pantoken/issues/4", title: "quotes ' \" \\", body: "line 1\n{{ISSUE_TITLE}}\n日本語", comments: [] };
     expect(renderPrompt("{{ISSUE_TITLE}}\n{{ISSUE_BODY}}\n{{ISSUE_IMAGES}}", issue, [], false)).toContain(issue.body);
+  });
+
+  test("formatComments renders structured, ordered comments with authors", () => {
+    expect(formatComments([])).toBe("(no comments on this issue)");
+    const comments = [
+      { author: "alice", body: "first", createdAt: "2024-01-01T00:00:00Z" },
+      { author: "bob", body: "second", createdAt: "2024-01-02T00:00:00Z" },
+    ];
+    const rendered = formatComments(comments);
+    expect(rendered).toContain("Comment 1 — @alice");
+    expect(rendered).toContain("Comment 2 — @bob");
+    expect(rendered).toContain("first");
+    expect(rendered).toContain("second");
+    expect(rendered).toContain("---");
+  });
+
+  test("renderPrompt substitutes {{ISSUE_COMMENTS}} into the prompt", () => {
+    const issue = { number: 5, input: "5", url: "https://github.com/TimoFreiberg/pantoken/issues/5", title: "t", body: "b", comments: [{ author: "alice", body: "a comment", createdAt: "2024-01-01T00:00:00Z" }] };
+    const rendered = renderPrompt("{{ISSUE_COMMENTS}}", issue, [], false);
+    expect(rendered).toContain("@alice");
+    expect(rendered).toContain("a comment");
   });
 
   test("zellijCleanupCommand builds correct cleanup string and args (AC.6)", () => {
