@@ -326,6 +326,39 @@ async function main() {
   }
   const openapiJson = await new Response(proc.stdout).text();
 
+  // Capture the daemon version from `polytoken --version`.
+  //
+  // The OpenAPI spec's `info.version` is a static "0.1.0" that has never tracked
+  // daemon releases, so it cannot serve as a compatibility target. Instead we
+  // capture the CLI version at codegen time. The live corpus tests (AC.12 in the
+  // remote-deployment master plan) remain the true spec-drift gate; this constant
+  // is a floor, not a proof.
+  const versionProc = Bun.spawn({
+    cmd: [bin, "--version"],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const versionExit = await versionProc.exited;
+  if (versionExit !== 0) {
+    const err = await new Response(versionProc.stderr).text();
+    console.error(`polytoken --version failed (exit ${versionExit}): ${err}`);
+    process.exit(1);
+  }
+  const versionRaw = (await new Response(versionProc.stdout).text()).trim();
+  // Strip the leading "polytoken " prefix: "polytoken 0.5.0-unstable.9" → "0.5.0-unstable.9"
+  const daemonVersion = versionRaw.replace(/^polytoken\s+/, "");
+  const semverRe =
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+  if (!semverRe.test(daemonVersion)) {
+    console.error(
+      `polytoken --version returned an unparseable version: ${JSON.stringify(versionRaw)}`,
+    );
+    console.error(
+      "  expected semver like '0.5.0' or '0.5.0-unstable.9' (with optional prerelease)",
+    );
+    process.exit(1);
+  }
+
   const spec: OpenApiSpec = JSON.parse(openapiJson);
   const schemas = spec.components?.schemas;
   if (!schemas || !("DaemonEvent" in schemas)) {
@@ -347,6 +380,23 @@ async function main() {
 //! DO NOT EDIT MANUALLY.
 
 #![allow(dead_code)]
+
+// ── Compatibility target (sourced from \`polytoken --version\`, NOT OpenAPI) ──
+//
+// This constant is the polytoken daemon version this build was codegen'd against.
+// Source: \`polytoken --version\` at codegen time. The OpenAPI spec's \`info.version\`
+// is a static "0.1.0" that does NOT track daemon releases — do not use it as a
+// compatibility target.
+//
+// The live corpus tests are the true spec-drift gate; this constant is a floor.
+//
+// Regenerate: \`bun run scripts/codegen-polytoken-rs.ts\`
+`,
+    `//! Compatibility target: the polytoken daemon version this build was codegen'd
+//! against. Sourced from \`polytoken --version\` at codegen, NOT from \`info.version\`
+//! in the OpenAPI spec (which is a static "0.1.0"). The live corpus tests are the
+//! true spec-drift gate.
+pub const POLYTOKEN_DAEMON_TARGET_VERSION: &str = "${daemonVersion}";
 `,
   ];
 

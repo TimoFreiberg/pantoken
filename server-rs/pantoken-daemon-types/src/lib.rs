@@ -10,6 +10,22 @@
 //! DO NOT EDIT MANUALLY.
 
 #![allow(dead_code)]
+// ── Compatibility target (sourced from `polytoken --version`, NOT OpenAPI) ──
+//
+// This constant is the polytoken daemon version this build was codegen'd against.
+// Source: `polytoken --version` at codegen time. The OpenAPI spec's `info.version`
+// is a static "0.1.0" that does NOT track daemon releases — do not use it as a
+// compatibility target.
+//
+// The live corpus tests are the true spec-drift gate; this constant is a floor.
+//
+// Regenerate: `bun run scripts/codegen-polytoken-rs.ts`
+
+//! Compatibility target: the polytoken daemon version this build was codegen'd
+//! against. Sourced from `polytoken --version` at codegen, NOT from `info.version`
+//! in the OpenAPI spec (which is a static "0.1.0"). The live corpus tests are the
+//! true spec-drift gate.
+pub const POLYTOKEN_DAEMON_TARGET_VERSION: &str = "0.5.0-unstable.9";
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -99,6 +115,7 @@ pub enum JobOutputChannel {
 pub enum LockSource {
     Initial,
     PostCompaction,
+    ModelSwitch,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -301,6 +318,7 @@ pub enum BlockDeltaPayload {
     SignatureDelta { signature: String },
     RedactedThinking { data: String },
     OpenAiReasoningOpaque { data: String, id: String },
+    OpenAiReasoningSummary { text: String },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -347,6 +365,8 @@ pub enum ContentBlock {
     OpenAiReasoningOpaque {
         data: String,
         id: String,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        summary: Option<String>,
     },
 }
 
@@ -1444,6 +1464,8 @@ pub struct ReattachmentState {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub included_images: Option<Vec<IncludedImageEntry>>,
     pub referenced_paths: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tail_messages: Option<Vec<serde_json::Value>>,
     pub todos: Vec<TodoSnapshot>,
 }
 
@@ -1661,6 +1683,9 @@ pub enum StateDelta {
     SessionEditFormatLocked {
         format: String,
         source: LockSource,
+    },
+    SessionEditFormatRetained {
+        formats: Vec<String>,
     },
     SubagentExitMode,
     FileTouched {
