@@ -7,6 +7,7 @@
     windows_subsystem = "windows"
 )]
 
+mod bridge;
 mod config;
 mod mouse_nav;
 mod proc;
