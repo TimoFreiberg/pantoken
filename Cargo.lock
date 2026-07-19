@@ -3688,8 +3688,10 @@ name = "pantoken-desktop"
 version = "0.2.70"
 dependencies = [
  "block2",
+ "futures-util",
  "libc",
  "objc2-app-kit",
+ "pantoken-protocol",
  "serde",
  "serde_json",
  "tauri",
@@ -3700,6 +3702,10 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
  "url",
 ]
 
