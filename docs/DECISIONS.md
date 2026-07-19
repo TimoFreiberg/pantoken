@@ -191,3 +191,49 @@ dependency was added.
 env). Adding clap for two modes would introduce a new dependency and a
 different config style for no gain. The env-var approach matches the existing
 config style and keeps the binary small.
+
+## Remote deployment Phase 2: bridge WS-only (hub serves assets)
+
+**Decision:** the bridge serves **only** WebSocket connections on its loopback
+port; the existing local hub continues to serve the bundled client assets. The
+browser connects to
+`http://127.0.0.1:{hub_port}/?ws=ws://127.0.0.1:{bridge_port}` — the `?ws=`
+param overrides the WS target.
+
+**Rationale:** building an HTTP file server into the bridge would duplicate the
+hub's asset-serving logic for no functional benefit. The hub is already running
+(its supervisor keeps it alive), and the client only needs its WS target
+pointed at the bridge. The `?ws=` override is a 3-line client change
+(`resolveWsUrl()` in `client/src/lib/ws-url.ts`) vs. a full HTTP+WS server in
+the bridge. The tradeoff: a fatal hub means remote connections can't work —
+acceptable, since a fatal hub means the app is unusable anyway.
+
+## Remote deployment Phase 2: BatchMode=yes for SSH
+
+**Decision:** SSH is invoked with `-o BatchMode=yes`, disabling interactive
+prompts (password, host-key acceptance, passphrase). Auth/host-key failures
+exit fast with code 255 + a stderr message, which the bridge classifies as
+actionable (not retried).
+
+**Rationale:** interactive prompt handling would require a pty + a UI for
+accepting host keys and entering passphrases — a substantial subsystem for a
+Phase 2 that targets pre-provisioned hosts. `BatchMode=yes` is fail-fast: the
+user pre-accepts host keys (via manual SSH) and unlocks their key in the agent,
+and the bridge surfaces a specific, actionable error if auth fails. The known
+UX gap: if the user expects in-app host-key acceptance, that's deferred to a
+future phase.
+
+## Remote deployment Phase 2: full state machine model with partial wiring
+
+**Decision:** the connection state machine models **all** phases (including
+provisioning ones: `Provisioning`, `ProvisioningFailed`), but only Phase-2-
+reachable transitions are wired (`Disconnected → TestingSsh → Connecting →
+Starting → Ready → Reconnecting → Ready`, plus failure states). Provisioning
+transitions are defined but unreachable.
+
+**Rationale:** modeling only Phase-2 states would require reworking the enum +
+UI when Phase 3 (auto-provisioning) lands. The full model lets Phase 3 plug in
+the provisioning actions and wire `Connecting → Provisioning → Starting` without
+changing the state machine's shape or the overlay's rendering. The cost is two
+enum variants that are dead code until Phase 3 — a small price for a stable
+contract.

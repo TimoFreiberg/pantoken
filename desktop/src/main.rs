@@ -11,6 +11,9 @@ mod bridge;
 mod config;
 mod mouse_nav;
 mod proc;
+mod remote_commands;
+mod remote_connection;
+mod remote_profile;
 mod shell;
 mod state;
 mod supervisor;
@@ -45,6 +48,15 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .invoke_handler(tauri::generate_handler![
+            remote_commands::list_remote_profiles,
+            remote_commands::add_remote_profile,
+            remote_commands::update_remote_profile,
+            remote_commands::delete_remote_profile,
+            remote_commands::connect_to_remote,
+            remote_commands::disconnect_remote,
+            remote_commands::remote_connection_state,
+        ])
         .setup(|app| {
             let port = free_port()?;
             let resource_dir = app.path().resource_dir()?;
