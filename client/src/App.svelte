@@ -240,6 +240,36 @@
   // views client-side.)
   function onGlobalKeydown(e: KeyboardEvent) {
     if (store.unauthorized) return;
+    // ⌘P while PlanView is open is PlanView's own toggle (its close affordance,
+    // equivalent to Escape). Handle it before the modal-owns-keyboard guard below
+    // so the close path stays reachable — otherwise the guard would suppress ⌘P
+    // and PlanView could only be closed via Escape/click. (Opening PlanView via ⌘P
+    // while *Settings* or *ImageLightbox* is open is still suppressed by the guard,
+    // since store.planViewOpen is false there — the toggle below is inert unless a
+    // plan exists, and a second modal stacking behind the scrim is the bug we avoid.)
+    if (
+      store.planViewOpen &&
+      !store.draft &&
+      (e.metaKey || e.ctrlKey) &&
+      !e.altKey &&
+      !e.shiftKey &&
+      (e.key === "p" || e.key === "P")
+    ) {
+      e.preventDefault();
+      store.togglePlanView();
+      return;
+    }
+    // While a user-driven modal owns the keyboard (Settings, PlanView, ImageLightbox),
+    // suppress every underlying app shortcut — the modal's own onkeydown (a separate
+    // <svelte:window> listener per component) handles Escape/Alt+n/⌘,/arrows. Zoom keys
+    // (onZoomKey, run before this) stay usable. Mirrors the pre-existing per-shortcut
+    // guard ⌘K/⌘\ used, hoisted to cover ⌘⇧P, Ctrl+Tab, and the whole unshifted switch.
+    if (
+      store.settingsOpen ||
+      store.planViewOpen ||
+      imageViewer.index !== null
+    )
+      return;
     // Ctrl+Tab / Ctrl+Shift+Tab — cycle forward/back through sessions in sidebar order.
     // Handled before the generic guard because it's the one combo that *wants* Shift,
     // and it's gated on Ctrl specifically (Cmd+Tab is the OS app switcher and never
