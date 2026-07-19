@@ -3260,6 +3260,66 @@ impl PantokenDriver for PolytokenDriver {
             snapshot,
         }])
     }
+
+    // ── Lifecycle query interface (Phase 1.4) ────────────────────────────
+
+    fn any_turn_in_flight(&self) -> bool {
+        // Check every warm session's cached state for turn_in_flight.
+        // This is the authoritative signal — disposing a session mid-turn
+        // would kill the running turn (AC.9 invariant).
+        self.inner.warm.read().values().any(|ws| {
+            ws.last_state
+                .read()
+                .as_ref()
+                .and_then(|s| s.turn_in_flight)
+                .unwrap_or(false)
+        })
+    }
+
+    fn warm_session_count(&self) -> usize {
+        self.inner.warm.read().len()
+    }
+
+    async fn dispose_idle_warm(&self) {
+        // Dispose all warm sessions that don't have a turn in flight.
+        // Retains durable session metadata (journal/store persists).
+        let to_dispose: Vec<Arc<WarmSession>> = {
+            let warm = self.inner.warm.read();
+            warm.values()
+                .filter(|ws| {
+                    !ws.last_state
+                        .read()
+                        .as_ref()
+                        .and_then(|s| s.turn_in_flight)
+                        .unwrap_or(false)
+                })
+                .cloned()
+                .collect()
+        };
+        for ws in to_dispose {
+            self.inner.dispose_warm(&ws).await;
+        }
+        // Clear the warm map (idle sessions are disposed; active turns
+        // remain because we filtered them out above).
+        // Note: we don't remove from the warm map inside the loop because
+        // dispose_warm needs the warm map intact for its teardown. After
+        // disposal, remove the disposed sessions.
+        let active: Vec<_> = {
+            let warm = self.inner.warm.read();
+            warm.values()
+                .filter(|ws| {
+                    ws.last_state
+                        .read()
+                        .as_ref()
+                        .and_then(|s| s.turn_in_flight)
+                        .unwrap_or(false)
+                })
+                .map(|ws| ws.session_ref.session_id.clone())
+                .collect()
+        };
+        let mut warm = self.inner.warm.write();
+        warm.retain(|sid, _| active.contains(sid));
+    }
 }
 
 /// Resolve a DirPicker path to an absolute, lexically-normalized path against the
