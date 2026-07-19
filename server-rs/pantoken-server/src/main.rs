@@ -48,6 +48,35 @@ async fn main() {
         )
         .init();
 
+    // ── Serve-mode branch (Phase 1.3) ────────────────────────────────
+    //
+    // Read PANTOKEN_SERVE_MODE early (before pidlock acquisition). Default
+    // (unset) = the current local-server path unchanged. `remote-runtime` =
+    // acquire the remote-root pidlock, build hub+driver, bind the Unix socket,
+    // serve framed connections via ConnectionSession. `stdio-proxy` = skip
+    // hub/router entirely, connect to the Unix socket, relay stdin↔socket.
+    let serve_mode = std::env::var("PANTOKEN_SERVE_MODE").unwrap_or_default();
+    match serve_mode.as_str() {
+        "stdio-proxy" => {
+            let root = pantoken_server::remote::layout::remote_root_from_env();
+            if let Err(e) = pantoken_server::remote::runtime::run_stdio_proxy(&root).await {
+                error!("stdio-proxy exited: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
+        "remote-runtime" => {
+            // Build the hub+driver for the remote runtime, then run it.
+            // This shares the same driver selection logic as the local server
+            // but binds a Unix socket instead of TCP.
+            run_remote_runtime_mode().await;
+            return;
+        }
+        _ => {
+            // Default: the current local-server path (unchanged).
+        }
+    }
+
     let cfg = config::load();
 
     // Mint stable per-data-dir identity before anything else touches the data dir.
@@ -531,6 +560,133 @@ async fn shutdown_signal() {
     }
 
     info!("shutdown signal received");
+}
+
+/// Build the hub+driver for the remote runtime and run it.
+///
+#[allow(clippy::doc_lazy_continuation)]
+/// This is the `PANTOKEN_SERVE_MODE=remote-runtime` path: it acquires the
+/// remote-root pidlock (not the data-dir lock), builds the same `SessionHub`
+/// + `PantokenDriver` stack as the local server, then calls
+/// `remote::runtime::run_remote_runtime` which binds the private Unix socket
+/// and serves framed connections via `ConnectionSession`.
+///
+/// The driver mode (`mock`/`fake`/`polytoken`) is selected the same way via
+/// `PANTOKEN_DRIVER`; the remote runtime defaults to `polytoken`.
+async fn run_remote_runtime_mode() {
+    let root = pantoken_server::remote::layout::remote_root_from_env();
+    let run_dir = pantoken_server::remote::layout::run_dir(&root);
+
+    // Mint stable per-remote-root identity.
+    let server_id = match pidlock::mint_or_read_server_id(&run_dir) {
+        Ok(id) => id,
+        Err(e) => {
+            error!("remote-runtime: failed to mint server id: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // Acquire the remote-root pidlock (not data-dir).
+    let _pid_lock = match pidlock::acquire_pid_lock(&run_dir, &server_id, std::process::id() as i64)
+    {
+        Ok(lock) => lock,
+        Err(e) => {
+            error!(
+                "remote-runtime: startup aborted — remote root already locked: pid={} path={}",
+                e.pid,
+                e.lock_path.display()
+            );
+            std::process::exit(1);
+        }
+    };
+
+    // Driver selection: same as the local server. Defaults to `polytoken`.
+    let driver_mode = std::env::var("PANTOKEN_DRIVER").unwrap_or_else(|_| "polytoken".into());
+    let driver: Arc<dyn PantokenDriver> = {
+        match driver_mode.as_str() {
+            "mock" => Arc::new(pantoken_server::mock_driver::MockDriver::new()),
+            "fake" => {
+                let control =
+                    pantoken_server::polytoken::fake_daemon::FakeControlHub::load_default();
+                pantoken_server::polytoken::fake_daemon::install_fake_spawn(control.clone());
+                let login_shell =
+                    pantoken_server::settings_store::read_pantoken_settings(&run_dir).login_shell;
+                Arc::new(
+                    PolytokenDriver::new_with_fake_control(
+                        run_dir.clone(),
+                        std::env::var("PANTOKEN_POLYTOKEN_BIN")
+                            .unwrap_or_else(|_| "polytoken".into()),
+                        true,
+                        8,
+                        login_shell,
+                        Some(control),
+                    )
+                    .await,
+                )
+            }
+            _ => {
+                let login_shell =
+                    pantoken_server::settings_store::read_pantoken_settings(&run_dir).login_shell;
+                Arc::new(
+                    PolytokenDriver::new(
+                        run_dir.clone(),
+                        std::env::var("PANTOKEN_POLYTOKEN_BIN")
+                            .unwrap_or_else(|_| "polytoken".into()),
+                        false,
+                        8,
+                        login_shell,
+                    )
+                    .await,
+                )
+            }
+        }
+    };
+
+    let (hub_ops, hub_op_rx) = hub_op_channel();
+
+    // Build a Config for the remote runtime (no HTTP routes needed, but
+    // SessionEnv requires it for auth token checks).
+    let cfg = Arc::new(config::Config {
+        port: 0,
+        data_dir: run_dir.clone(),
+        vapid_subject: "mailto:remote@pantoken".into(),
+        host: "127.0.0.1".into(),
+        token: std::env::var("PANTOKEN_TOKEN")
+            .ok()
+            .filter(|t| !t.is_empty()),
+        debug: std::env::var("PANTOKEN_DEBUG")
+            .map(|v| v != "0")
+            .unwrap_or(false),
+        client_dist: run_dir.join("client-dist"),
+        warm_cap: 8,
+        idle_reap_ms: std::env::var("PANTOKEN_IDLE_REAP_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(600000),
+        live_refresh_ms: 1000,
+        delta_flush_ms: 50,
+    });
+
+    let hub = SessionHub::new(
+        driver.clone(),
+        hub_ops,
+        None,
+        cfg.live_refresh_ms,
+        server_id,
+        Some(run_dir.clone()),
+        option_env!("PANTOKEN_BUILD_SHA").unwrap_or("").to_string(),
+        cfg.delta_flush_ms,
+    );
+
+    tokio::spawn(run_hub_op_applier(hub.clone(), hub_op_rx));
+
+    // Run the remote runtime (binds the Unix socket, serves connections).
+    if let Err(e) =
+        pantoken_server::remote::runtime::run_remote_runtime(&root, hub, cfg, driver).await
+    {
+        error!("remote-runtime exited: {e}");
+        std::process::exit(1);
+    }
 }
 
 #[cfg(test)]
