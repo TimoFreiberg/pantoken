@@ -82,6 +82,13 @@ impl PantokenConfig {
         format!("http://127.0.0.1:{}/", self.server_port)
     }
 
+    /// Path to the persisted remote-host profiles JSON file
+    /// (`{data_dir}/remote-profiles.json`). The same data dir the app uses for
+    /// its hub pidlock / settings, so profiles travel with the app identity.
+    pub fn remote_profiles_path(&self) -> std::path::PathBuf {
+        self.data_dir.join("remote-profiles.json")
+    }
+
     /// Environment for the spawned server: inherit the app's (Command does that), then
     /// force a usable PATH and pin host/port/data dir. No PANTOKEN_TOKEN — loopback +
     /// single-user means auth off, and nothing is exposed off-device.

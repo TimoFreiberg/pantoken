@@ -9,6 +9,7 @@ import {
   type ServerMessage,
 } from "@pantoken/protocol";
 import { getToken } from "./auth.js";
+import { resolveWsUrl } from "./ws-url.js";
 
 export type ConnectionState =
   "disconnected" | "connecting" | "connected" | "reconnecting";
@@ -66,11 +67,10 @@ function getReconnectDelay(): number {
 }
 
 function buildWsUrl(): string {
-  const configured = import.meta.env.VITE_PANTOKEN_WS_URL;
-  if (configured) return configured;
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.host}/ws`;
+  return resolveWsUrl(window.location, import.meta.env.VITE_PANTOKEN_WS_URL);
 }
+
+export { resolveWsUrl } from "./ws-url.js";
 
 function scheduleReconnect(): void {
   if (intentionalClose) return;

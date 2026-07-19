@@ -210,3 +210,137 @@ relay path.
 forwards to the SSH stdio transport. The `SshTransport` trait abstracts
 spawning an SSH proxy; Phase 1 ships `SystemSshTransport` (spawns `ssh -T`).
 Phase 2 adds the mobile native impl and the connection-state UX.
+
+## Remote deployment — Phase 2: Desktop Connection UX and SSH Lifecycle
+
+Phase 2 makes the Phase 1 bridge functional and wires it into the desktop app:
+a user connects to a remote Pantoken runtime over SSH, manages remote-host
+profiles, sees phase-specific connection progress, and reconnects with bounded
+backoff — all without leaving the app. Auto-provisioning is out of scope;
+Phase 2 validates against a host that already has `pantoken-server` reachable.
+
+### Bridge WS upgrade + WS-only transport
+
+The bridge accepts real WebSocket connections (via `tokio-tungstenite`,
+promoted from dev-dep to real dep) on a loopback port and forwards WS ↔ SSH
+stdio. The existing local hub continues to serve the bundled client assets.
+The browser connects to `http://127.0.0.1:{hub_port}/?ws=ws://127.0.0.1:{bridge_port}`
+— the `?ws=` query param overrides the default WS URL so the desktop can point
+the browser at the bridge without building an HTTP file server into it.
+
+The bridge wraps raw WS JSON → `ClientEnvelope`+frame outbound (to SSH stdin)
+and unwraps frame+`ServerEnvelope` → raw JSON inbound (to browser) — the
+envelope asymmetry from Phase 1 is preserved. WS-level concerns: `Ping` →
+`Pong` (tokio-tungstenite does not auto-respond), `Close` tears down the
+connection, `Binary` is ignored (text-only JSON protocol).
+
+### `?ws=` URL override
+
+The client's `resolveWsUrl()` (`client/src/lib/ws-url.ts`) reads a `?ws=`
+query param. The override is **restricted to loopback** (`127.0.0.1` /
+`localhost`): a non-loopback value is silently rejected (falls back to default
+derivation). This prevents a compromised hub page, dev-tools-injected script,
+or future XSS from redirecting the WebSocket to an attacker and exfiltrating
+`ClientMessage`s (which carry auth tokens via `getToken()` and prompt content).
+
+### SSH lifecycle: BatchMode, keepalive, child management
+
+`SystemSshTransport` spawns:
+```
+ssh -T -o BatchMode=yes -o ServerAliveInterval=30 [-p <port>] <destination> \
+    PANTOKEN_SERVE_MODE=stdio-proxy PANTOKEN_REMOTE_ROOT=<root> exec <server_path>
+```
+- `BatchMode=yes` disables interactive prompts (password, host-key, passphrase).
+  Auth/host-key failures exit fast with code 255 + a stderr message — the bridge
+  classifies these as actionable (not retried).
+- `ServerAliveInterval=30` for keepalive (no reverse forwarding, no remote port).
+- The `Child` handle is stored; the `exit` future calls `child.wait()` and
+  returns `ExitInfo` (code, signal, stderr). No `std::mem::forget` — the child
+  is properly managed and killed on teardown (SIGTERM → bounded wait → SIGKILL,
+  same pattern as `supervisor.rs::terminate`).
+- **Redaction:** `SshCommand.destination` is a single `user@host` or SSH-config-alias
+  string. The `Debug`/`Display` impls redact the **entire** destination — logs
+  show `ssh -T <redacted> <remote-command>` with no destination string at all.
+
+### Connection state machine
+
+`desktop/src/remote_connection.rs` models all connection phases:
+```
+Disconnected → TestingSsh → Connecting → Starting → Ready → Reconnecting → Ready
+                   ↓            ↓           ↓              ↓
+              (failures)   (failures)  (failures)    (reconnect exhausted)
+```
+**Phase-2-wired transitions:** `Disconnected → TestingSsh → Connecting → Starting
+→ Ready → Reconnecting → Ready`, plus all failure states reachable from the
+wired path (`SshAuthFailed`, `HostKeyUnknown`, `SshUnreachable`,
+`ProtocolMismatch`, `ProxyStartFailed`, `StartupFailed`).
+
+**Provisioning transitions** (`Connecting → Provisioning → Starting`,
+`Provisioning → ProvisioningFailed`) are defined in the enum but no code path
+enters them — a later phase wires them when auto-provisioning lands.
+
+The state machine is thread-safe (`Mutex<RemoteConnection>`); the bridge drives
+it via the `ConnectionStateSink` trait, and the Tauri command layer reads it
+synchronously (`remote_connection_state()`).
+
+### Reconnect backoff + exit classification
+
+When the SSH process exits, the bridge classifies the exit:
+
+| SSH exit code | Stderr pattern | Classification | Action |
+|---|---|---|---|
+| 255 | "Permission denied" | `SshAuthFailed` | No retry — surface actionable error |
+| 255 | "Host key verification failed" / "refused" | `HostKeyUnknown` | No retry |
+| 255 | "Connection refused" / "timed out" / "unreachable" | `SshUnreachable` | Retry with backoff |
+| 0 | — | `CleanExit` | No retry — remote closed deliberately |
+| other | — | `UnknownError` | Retry with backoff (bounded) |
+
+**Backoff:** exponential with jitter, matching the client's `ws.svelte.ts`
+pattern (base 500ms, max 15s, ×2 per attempt, ±25% jitter, max 5 attempts).
+The bridge owns this backoff — when SSH exits with a retryable classification,
+it waits (backoff), then spawns a fresh SSH proxy **while keeping the browser
+WS open**. Only if backoff is exhausted does it close the browser WS, which
+triggers exactly one browser reconnect to the same bridge loopback port (the
+browser's resume token survives).
+
+**Browser heartbeat interaction (critical):** the client's `ws.svelte.ts` runs
+a heartbeat watchdog (`HEARTBEAT_WATCHDOG_MS = 10_000`) — after connecting, it
+pings every 25s and if no inbound frame arrives within 10s of a ping, it
+force-closes the WS. During an SSH-side retry window with max backoff of 15s,
+no frames flow for potentially >10s. The bridge sends periodic WS **text**
+frames (empty `Message::Text("")`, every 3s) during SSH retry to keep the
+browser's heartbeat satisfied. WS `Pong` frames do NOT fire `onmessage` and
+thus do NOT reset `lastInboundAt` — only text/binary frames do.
+
+### Desktop wiring
+
+A dedicated multi-thread tokio runtime is created at app startup (stored in
+`AppState`) — Tauri's internal `async_runtime` is sized for short plugin
+operations, not a persistent listener + child process. Tauri commands cross
+runtimes via `Handle::spawn` + blocking threads; `connect_to_remote` is
+fire-and-forget. Teardown (`AppState::teardown`) stops the remote session
+before the supervisor, then drops the bridge runtime.
+
+Tauri commands: `list_remote_profiles`, `add_remote_profile`,
+`update_remote_profile`, `delete_remote_profile`, `connect_to_remote`,
+`disconnect_remote`, `remote_connection_state`.
+
+### Connection-state UX
+
+- **Native progress overlay** (the existing `shell::Overlay` pattern): shows
+  phase labels ("Testing SSH…", "Connecting…", "Starting runtime…", "Ready")
+  driven by a poller thread that reads the state machine.
+- **Failure dialog:** a Retry/Cancel `MessageDialogButtons` dialog on terminal
+  failures, with the failure label + suggested action.
+- **Tray menu:** "Connect to Remote…" opens a native dialog listing saved
+  profiles; "Disconnect Remote" tears down the session.
+
+### Mobile transport stub
+
+A cfg-gated `MobileSshTransport` impl behind `cfg(target_os = "ios")` (and
+`"android"`) documents the seam: a future mobile impl fills in the body with a
+native SSH library (e.g. SwiftNIO SSH on iOS). The `SshTransport` trait is the
+contract; the mobile impl swaps the system `ssh` executable for a native
+library. The stub returns `io::ErrorKind::Unsupported`. It only compiles on
+mobile targets (no current build targets compile it); verified by code
+inspection.

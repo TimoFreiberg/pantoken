@@ -23,13 +23,18 @@ url = "2"
 # Phase 1.6: local bridge (browser-WS ↔ SSH-stdio). The bridge runs on a
 # dedicated tokio runtime spawned from the desktop side.
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "process", "sync", "time", "macros"] }
+# tokio-util for CancellationToken used by the bridge's graceful shutdown.
+tokio-util = { version = "0.7", default-features = false }
 pantoken-protocol = { path = "../server-rs/pantoken-protocol" }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+# tokio-tungstenite is the bridge's real WS transport (Phase 2 promoted from
+# dev-dep to dep). The browser connects via WebSocket; the bridge upgrades the
+# loopback TCP accept into a WS stream and forwards WS↔SSH stdio.
+tokio-tungstenite = "0.29"
 tracing = "0.1"
 
 [dev-dependencies]
 tempfile = "3"
-tokio-tungstenite = "0.29"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3.2", features = ["NSEvent", "block2"] }
