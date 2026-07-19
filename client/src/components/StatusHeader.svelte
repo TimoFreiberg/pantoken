@@ -1,6 +1,7 @@
 <script lang="ts">
   import { store } from "../lib/store.svelte.js";
   import { sessionSubtitle } from "../lib/session-subtitle.js";
+  import { imageViewer } from "../lib/image-viewer.svelte.js";
   import GoalBadge from "./GoalBadge.svelte";
   import IconButton from "./ui/IconButton.svelte";
   import SidebarPanelIcon from "./ui/SidebarPanelIcon.svelte";
@@ -8,6 +9,15 @@
   let hotkeyN = $state(0);
 
   function onWindowKeydown(e: KeyboardEvent) {
+    // While a user-driven modal owns the keyboard (Settings, PlanView, ImageLightbox),
+    // suppress ⌘⇧M (model picker) and ⌘⇧J (context panel) — they'd open/toggle invisibly
+    // behind the scrim. Mirrors the guard ⌘K/⌘\ use in App.svelte.
+    if (
+      store.settingsOpen ||
+      store.planViewOpen ||
+      imageViewer.index !== null
+    )
+      return;
     const mod = e.metaKey || e.ctrlKey;
     if (!mod || !e.shiftKey) return;
     if (e.key === "m" || e.key === "M") {
