@@ -6,5 +6,6 @@
 //! process spawning.
 
 pub mod layout;
+pub mod lifecycle;
 pub mod manifest;
 pub mod runtime;

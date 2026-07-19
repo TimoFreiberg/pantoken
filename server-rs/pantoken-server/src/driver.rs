@@ -282,6 +282,35 @@ pub trait PantokenDriver: Send + Sync {
 
     /// Dev/test-only reset.
     fn reset(&self, _bootstrap: bool) {}
+
+    // ── Lifecycle query interface (Phase 1.4) ────────────────────────────
+    //
+    // Used by the remote-runtime lifecycle manager (idle reaper) to decide
+    // when it's safe to dispose warm session attachments and when the hub
+    // can exit. The default implementations return "no active work" so
+    // mock/stub drivers are always reaped immediately (they have no real
+    // warm sessions or in-flight turns).
+    //
+    // The `PolytokenDriver` overrides these with its real
+    // `WarmSession`/`turn_in_flight` machinery.
+
+    /// True if ANY session has a turn in flight. An active turn prevents
+    /// cleanup (AC.9 invariant: a dropped proxy does NOT kill an active turn).
+    fn any_turn_in_flight(&self) -> bool {
+        false
+    }
+
+    /// The number of warm session attachments currently held. Used by the
+    /// reaper to decide whether there's warm work to dispose.
+    fn warm_session_count(&self) -> usize {
+        0
+    }
+
+    /// Dispose idle warm session attachments (tear down SSE + close clients)
+    /// while retaining durable session metadata (the journal/store persists
+    /// so the session is resumable). The `PolytokenDriver` impl delegates to
+    /// the existing `dispose_warm`.
+    async fn dispose_idle_warm(&self) {}
 }
 
 /// Error from deleting a todo. The hub surfaces these to the client as an

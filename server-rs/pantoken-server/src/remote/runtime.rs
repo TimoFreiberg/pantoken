@@ -314,12 +314,27 @@ pub async fn run_remote_runtime(
         config: config.clone(),
     };
 
+    // Start the lifecycle manager (Phase 1.4): idle reaping + hub-idle exit.
+    let lifecycle_config = crate::remote::lifecycle::LifecycleConfig::from_env(config.idle_reap_ms);
+    let lifecycle = crate::remote::lifecycle::LifecycleManager::start(
+        hub.clone(),
+        driver.clone(),
+        lifecycle_config,
+    );
+
     // Accept loop. Each connection is either:
     // - a probe (sends {"type":"probe"} → respond with Identity, close)
     // - a session (sends framed ClientEnvelope → ConnectionSession)
     loop {
-        match listener.accept().await {
-            Ok((stream, _)) => {
+        // Check if the lifecycle manager signaled an idle exit.
+        if *lifecycle.exit_signal.borrow() {
+            info!("remote runtime: idle exit signaled, stopping accept loop");
+            break;
+        }
+
+        // Accept with a timeout so we can re-check the exit signal periodically.
+        match tokio::time::timeout(tokio::time::Duration::from_secs(1), listener.accept()).await {
+            Ok(Ok((stream, _))) => {
                 let env = env.clone();
                 tokio::spawn(async move {
                     if let Err(e) = handle_runtime_connection(stream, env).await {
@@ -327,11 +342,17 @@ pub async fn run_remote_runtime(
                     }
                 });
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 warn!("remote runtime accept error: {e}");
+            }
+            Err(_) => {
+                // Timeout — loop back and re-check the exit signal.
             }
         }
     }
+
+    info!("remote runtime: shutting down");
+    Ok(())
 }
 
 /// Handle a single accepted connection. Peeks at the first frame to
