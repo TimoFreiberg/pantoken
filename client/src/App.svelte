@@ -23,6 +23,7 @@
   import { attention, type AttentionSurface } from "./lib/attention-cycle.svelte.js";
   import IconButton from "./components/ui/IconButton.svelte";
   import { notifyIfUnfocused } from "./lib/notify.js";
+  import { requestDockAttention } from "./lib/desktop.js";
   import { wakeLock } from "./lib/wake-lock.js";
   import { trackKeyboardInset } from "./lib/keyboard-inset.js";
   import { watchAppBadgeClear } from "./lib/app-badge.js";
@@ -203,6 +204,10 @@
         tag: `pantoken-${item.phase}-${item.sessionId}`,
         onClick: () => store.openSessionById(item.sessionId),
       });
+      // macOS desktop: bounce the dock icon (replaces the broken Web
+      // Notifications path in Tauri's WKWebView). Same unfocused gate as
+      // notifyIfUnfocused — only buzz when the user isn't looking at us.
+      if (!document.hasFocus()) requestDockAttention();
     }
     prevAttention = next;
     prevAttentionVersion = version;

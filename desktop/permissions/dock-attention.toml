@@ -1,0 +1,6 @@
+[[permission]]
+identifier = "allow-request-dock-attention"
+description = "Allow the web client to request a macOS dock icon bounce on agent attention events."
+commands.allow = [
+  "request_dock_attention"
+]
