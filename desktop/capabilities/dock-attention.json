@@ -1,0 +1,11 @@
+{
+  "$schema": "../target/schemas/desktop-schema.json",
+  "identifier": "dock-attention",
+  "description": "Narrow IPC exception (same pattern as window-drag.json): grants the request_dock_attention command to the hub-served web client at http://127.0.0.1:<port>, so it can bounce the macOS dock icon when the agent's turn ends or needs input. Replaces the broken Web Notifications path in Tauri's WKWebView.",
+  "local": false,
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*/**"]
+  },
+  "permissions": ["allow-request-dock-attention"]
+}

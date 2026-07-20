@@ -9,6 +9,7 @@
 
 mod bridge;
 mod config;
+mod dock_attention;
 mod mouse_nav;
 mod proc;
 mod provisioning;
@@ -57,6 +58,7 @@ fn main() {
             remote_commands::connect_to_remote,
             remote_commands::disconnect_remote,
             remote_commands::remote_connection_state,
+            dock_attention::request_dock_attention,
         ])
         .setup(|app| {
             let port = free_port()?;

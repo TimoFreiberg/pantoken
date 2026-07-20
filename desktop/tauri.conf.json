@@ -11,7 +11,7 @@
   "app": {
     "windows": [],
     "security": {
-      "capabilities": ["default", "window-drag"]
+      "capabilities": ["default", "window-drag", "dock-attention"]
     }
   },
   "bundle": {
