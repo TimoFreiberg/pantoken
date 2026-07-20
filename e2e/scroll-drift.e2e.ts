@@ -5,7 +5,10 @@ import { drive, gotoFresh, waitForSettledWorkBlocks } from "./helpers.js";
 // far from it (gap > 200px) after a height-churn event the follow logic missed (work-block
 // collapse, markstream reflow, image decode — none tick `contentSize`, and the ratio-restore
 // ResizeObserver re-assert is settle-window-gated), the watcher self-heals by re-asserting
-// scrollTo(bottom) and — only with ?dev — raises a sticky "Copy trace" notice.
+// scrollTo(bottom) and raises a sticky "Copy trace" notice. The notice is ALWAYS ON (no
+// longer ?dev-gated) — the single-user release build needs it visible. A second, notice-only
+// condition catches the suspected false-un-pin: un-pinned while streaming with content below
+// the fold (gap > 0), which the pinned-drift detector structurally cannot fire on.
 //
 // FORCING THE DRIFT: growing content under a pinned viewport is non-reproducible in headless
 // Chromium — Chrome's `overflow-anchor` keeps the gap near 0 on growth (documented at
@@ -192,9 +195,9 @@ test.describe("with ?dev flag", () => {
   });
 });
 
-// ── AC.2, AC.3-negative: ?dev absent — self-heal works, no notice ─────────────────────
+// ── AC.1 (no ?dev): pinned-drift notice now fires without ?dev ───────────────────────
 
-test("AC.2/AC.3 — without ?dev, self-heal still works but no notice appears", async ({
+test("AC.1 — without ?dev, the pinned-drift notice still appears (ungated)", async ({
   page,
 }) => {
   // Stage the fixture with ?dev on (gotoFresh navigates to /?dev and drives the mock).
@@ -221,12 +224,174 @@ test("AC.2/AC.3 — without ?dev, self-heal still works but no notice appears", 
 
   await forceDrift(page);
 
-  // AC.2: the self-heal is NOT dev-gated — the gap self-corrects with no user scroll.
+  // The self-heal is NOT dev-gated — the gap self-corrects with no user scroll.
   await expect.poll(gap, { timeout: 5000 }).toBeLessThan(200);
 
-  // AC.3-negative: no notice appears without ?dev.
-  await page.waitForTimeout(1000);
-  await expect(page.getByTestId("chat-notice")).toHaveCount(0);
+  // AC.1: the pinned-drift notice now appears WITHOUT ?dev (previously ?dev-gated, now
+  // always-on so the single-user release build sees it). Assert positive.
+  const notice = page.getByTestId("chat-notice");
+  await expect(notice).toBeVisible({ timeout: 5000 });
+  await expect(notice).toContainText("Scroll drift self-corrected");
+  await expect(notice).toContainText("Copy trace");
 
   await cleanupDrift(page);
+});
+
+// ── Un-pinned-during-streaming: the broadened notice (false-un-pin suspect) ───────────
+
+test.describe("un-pinned during streaming", () => {
+  test.beforeEach(async ({ page }) => {
+    await gotoFresh(page);
+    // Build a tall transcript so the scroller pins to the bottom and top != bottom.
+    for (let i = 0; i < 4; i++) {
+      await drive(page, "reply");
+      await expect(
+        page.getByText("That confirms it", { exact: false }).last(),
+      ).toBeVisible();
+    }
+    await waitForSettledWorkBlocks(page, 5);
+  });
+
+  test("AC.2/AC.6 — un-pinned while streaming raises the notice and does NOT self-heal", async ({
+    page,
+  }) => {
+    const scroller = page.locator(".scroller");
+    const gap = () => gapFn(scroller);
+
+    // Start pinned at the bottom.
+    await expect.poll(gap).toBeLessThan(80);
+
+    // Drive the mock into a streaming-forever state: `pendinghold` sets
+    // SessionStatus::Running and emits thinking deltas but never sends RunCompleted, so
+    // turnActive stays true indefinitely. Exposed as a dev-bar button.
+    await drive(page, "pendinghold");
+
+    // Wait for the streaming state to take (turnActive flips true).
+    await page.waitForTimeout(300);
+
+    // Programmatically scroll up — simulating the false un-pin (a "Worked for Ns" collapse
+    // anchor-adjusts scrollTop, which nextPinned reads as a genuine scroll-up). Scroll by
+    // ~400px to unambiguously exceed BOTTOM_GAP (80px) so `pinned` flips false and gap > 0.
+    await scroller.evaluate((el) => {
+      (el as HTMLElement).scrollTop = Math.max(0, (el as HTMLElement).scrollTop - 400);
+    });
+
+    // Wait past one watcher interval (250ms) so the sampling tick fires.
+    await page.waitForTimeout(400);
+
+    // AC.2: the broadened notice appears.
+    const notice = page
+      .getByTestId("chat-notice")
+      .filter({ hasText: "Viewport not following" });
+    await expect(notice).toBeVisible({ timeout: 5000 });
+    await expect(notice).toContainText("Copy trace");
+
+    // AC.6: the gap did NOT auto-heal (stays > 0 — no self-heal for the un-pinned case).
+    await page.waitForTimeout(400);
+    const gapNow = await gap();
+    expect(gapNow).toBeGreaterThan(0);
+  });
+
+  test("AC.3 — no un-pinned notice when idle (turnActive false)", async ({ page }) => {
+    const scroller = page.locator(".scroller");
+    const gap = () => gapFn(scroller);
+
+    // Transcript has settled (turnActive is false — no pendinghold driven).
+    await expect.poll(gap).toBeLessThan(80);
+
+    // Programmatically scroll up (gap > 0, pinned flips false) while idle.
+    await scroller.evaluate((el) => {
+      (el as HTMLElement).scrollTop = Math.max(0, (el as HTMLElement).scrollTop - 400);
+    });
+
+    // Wait past a watcher interval.
+    await page.waitForTimeout(400);
+
+    // AC.3: no "Viewport not following" notice appears when the agent is idle.
+    await expect(
+      page
+        .getByTestId("chat-notice")
+        .filter({ hasText: "Viewport not following" }),
+    ).toHaveCount(0);
+  });
+
+  test("AC.4 — Copy trace on the un-pinned notice copies a valid JSON trace", async ({
+    page,
+  }) => {
+    const scroller = page.locator(".scroller");
+    const gap = () => gapFn(scroller);
+
+    await expect.poll(gap).toBeLessThan(80);
+
+    await drive(page, "pendinghold");
+    await page.waitForTimeout(300);
+
+    // Scroll up to force the un-pinned state.
+    await scroller.evaluate((el) => {
+      (el as HTMLElement).scrollTop = Math.max(0, (el as HTMLElement).scrollTop - 400);
+    });
+
+    const notice = page
+      .getByTestId("chat-notice")
+      .filter({ hasText: "Viewport not following" });
+    await expect(notice).toBeVisible({ timeout: 5000 });
+
+    // Click "Copy trace" on the un-pinned notice.
+    await notice.getByRole("button", { name: "Copy trace" }).click();
+
+    // The toast auto-dismisses on the action click.
+    await expect(notice).toHaveCount(0);
+
+    // The clipboard contains the trace: a header with the marker, then per-sample lines.
+    const clip = await page.evaluate(() => navigator.clipboard.readText());
+    const lines = clip.split("\n");
+    expect(lines.length).toBeGreaterThan(1);
+    const header = JSON.parse(lines[0]!);
+    expect(header.pantokenScrollDriftTrace).toBe(true);
+    expect(typeof header.detectedAt).toBe("number");
+    expect(typeof header.ua).toBe("string");
+    expect(header.viewport).toEqual({
+      w: expect.any(Number),
+      h: expect.any(Number),
+    });
+    // Each sample line is a JSON object with the named fields.
+    const sampleLine = JSON.parse(lines[1]!);
+    expect(sampleLine).toEqual({
+      t: expect.any(Number),
+      scrollTop: expect.any(Number),
+      scrollHeight: expect.any(Number),
+      clientHeight: expect.any(Number),
+      gap: expect.any(Number),
+      pinned: expect.any(Boolean),
+      turnActive: expect.any(Boolean),
+    });
+  });
+
+  test("AC.5 — a single un-pinned episode raises exactly one notice (no storm)", async ({
+    page,
+  }) => {
+    const scroller = page.locator(".scroller");
+    const gap = () => gapFn(scroller);
+
+    await expect.poll(gap).toBeLessThan(80);
+
+    await drive(page, "pendinghold");
+    await page.waitForTimeout(300);
+
+    // Scroll up to force the un-pinned state and hold it.
+    await scroller.evaluate((el) => {
+      (el as HTMLElement).scrollTop = Math.max(0, (el as HTMLElement).scrollTop - 400);
+    });
+
+    // Wait past several watcher intervals (250ms each) so a storm would show.
+    await page.waitForTimeout(1500);
+
+    // AC.5: exactly one "Viewport not following" toast — the latch fires once per episode,
+    // not every tick. Filter at the TOAST level (not the chat-notice container, which holds
+    // ALL notices and would count a transitional pinned-drift toast from the pendinghold
+    // content-growth transition too).
+    await expect(
+      page.getByTestId("toast").filter({ hasText: "Viewport not following" }),
+    ).toHaveCount(1);
+  });
 });

@@ -33,22 +33,12 @@
   import {
     DRIFT_THRESHOLD,
     isPinnedDrift,
+    isUnpinnedDuringStreaming,
     nextDriftState,
     pushSample,
     formatTrace,
     type DriftSample,
   } from "../lib/scroll-watch.js";
-
-  // Whether the ?dev URL flag is set — gates the VISIBLE debug notice (the self-heal is
-  // active always). The same gate logRenderTiming uses (store.svelte.ts). Evaluated once at
-  // component init: ?dev is a boot-time URL flag, not a runtime toggle, and the ?dev-absent
-  // e2e case does a full page reload (re-initializing the component). A future SPA routing
-  // transition that strips ?dev without a reload would leave this stale — acceptable since
-  // ?dev is only ever added at boot, never removed mid-session in practice.
-  const devMode =
-    typeof window !== "undefined"
-      ? new URLSearchParams(window.location.search).has("dev")
-      : false;
 
   const items = $derived(store.transcriptItems);
 
@@ -322,12 +312,15 @@
     progScrollUntil = Date.now() + ms;
   }
 
-  // ── Pinned-scroll drift watcher: self-heal + debug observability ──────────────
+  // ── Pinned-scroll drift watcher: self-heal + diagnostics ──────────────────────
   //
   // A watcher that continuously checks the pinned invariant: a pinned scroller SHOULD sit
   // at the bottom (gap ≈ 0). When the viewport has drifted far from it (gap > DRIFT_THRESHOLD),
-  // the watcher (a) self-heals by re-asserting scrollTo(bottom) and (b) — only with ?dev —
-  // raises a sticky in-app notice offering a "Copy trace" of the recent scroll geometry.
+  // the watcher (a) self-heals by re-asserting scrollTo(bottom) and (b) raises a sticky
+  // in-app notice offering a "Copy trace" of the recent scroll geometry. The notice is
+  // ALWAYS ON (no longer ?dev-gated) — the single-user release build needs this diagnostic
+  // visible (the real Pantoken.app loads no ?dev). A second, notice-only condition catches
+  // the suspected false-un-pin: un-pinned while streaming with content below the fold.
   //
   // WHY THIS EXISTS (the gap in the follow logic this closes):
   //  - The streaming-pin $effect (below) only re-asserts the bottom when `contentSize`
@@ -348,14 +341,23 @@
   //
   // The watcher closes the gap directly: it checks the invariant on a sampling interval AND
   // on each onScroll, regardless of which height-churn event caused the stranding. The
-  // self-heal is a no-regret fix (a pinned scroller should be at the bottom); the notice is
-  // ?dev-gated observability for the later root-cause fix. The pure decisions live in
+  // self-heal is a no-regret fix (a pinned scroller should be at the bottom); the notices
+  // are always-on diagnostics for the root-cause fix. The pure decisions live in
   // scroll-watch.ts (unit-tested). See scroll-follow.ts for the related pin decision.
   let traceBuffer: DriftSample[] = [];
   let driftReported = false;
+  // A separate latch for the un-pinned-during-streaming notice (the false-un-pin suspect).
+  // Distinct from `driftReported` because the two conditions are mutually exclusive (pinned
+  // vs !pinned) and a single shared latch would suppress one notice type after the other
+  // fired during a transitional tick. Re-arms when `gap` returns to 0 (back at the bottom).
+  let unpinnedReported = false;
   // The detection instant of the current/last drift episode — captured for the trace header
-  // so the root-cause analysis knows when the drift was first observed.
-  let driftDetectedAt = 0;
+  // so the root-cause analysis knows when the drift was first observed. Shared across both
+  // notice types: whichever episode fired most recently owns the header's `detectedAt`. The
+  // ring-buffer samples themselves are correct regardless (they always capture), so only the
+  // header's instant reflects the most recent episode — acceptable for a diagnostics-only
+  // feature (per-notice attribution isn't worth a second variable).
+  let lastDetectedAt = 0;
 
   /** Capture a scroll-geometry sample, push it to the ring buffer, evaluate drift, and (if
    *  drifting) self-heal + raise the debug notice. Called on the 250ms sampling interval and
@@ -378,44 +380,84 @@
     };
     traceBuffer = pushSample(traceBuffer, s, 40);
 
-    // Episode latch: fire the notice once per episode (no storm while it sits drifted),
-    // re-arm when the gap returns under threshold OR the viewport is no longer pinned. The
-    // latch gates only the NOTICE; the self-heal runs every tick it's needed.
+    // Two mutually-exclusive drift detectors run here, each with its OWN episode latch so a
+    // notice of one type can't suppress the other on a transitional tick:
     //
-    // The latch must be evaluated ONLY for genuine pinned drift — not for a large gap while
-    // scrolled up (pinned=false). nextDriftState keys on `gap > threshold` alone (it doesn't
-    // know `pinned`), so feeding it a non-pinned large gap would arm `driftReported=true` and
-    // suppress the notice for the NEXT real pinned drift — the exact evidence-capture scenario
-    // this feature exists for. So: if not drifting, reset the latch and bail; only when
-    // drifting do we ask the latch whether to notify.
-    if (!isPinnedDrift({ pinned, gap })) {
-      driftReported = false; // re-arm: not drifting (or not pinned)
-      return;
-    }
-    const latch = nextDriftState(driftReported, gap, DRIFT_THRESHOLD);
-    driftReported = latch.reported;
+    //  1. isPinnedDrift (pinned && gap > DRIFT_THRESHOLD): the pinned scroller has drifted far
+    //     from the bottom after a height-churn event the follow logic missed. Self-heals
+    //     (re-asserts scrollTo(bottom)) AND raises a sticky notice. Notice was previously
+    //     ?dev-gated; it's now ALWAYS ON — the single-user release build needs this
+    //     diagnostic visible (the real Pantoken.app loads no ?dev). The self-heal was always
+    //     un-gated and stays so.
+    //
+    //  2. isUnpinnedDuringStreaming (!pinned && turnActive && gap > 0): the viewport is
+    //     un-pinned while the agent is actively streaming, with content below the fold — the
+    //     suspected false-un-pin recurrence (a "Worked for Ns" collapse anchor-adjusts
+    //     scrollTop, which nextPinned reads as a genuine scroll-up and un-pins). Once
+    //     un-pinned, every re-assert path bails, stranding the viewport. Notice-ONLY: the
+    //     self-heal NEVER fires here (never yank a reader who deliberately scrolled up). The
+    //     latch re-arms when gap returns to 0 (back at the bottom).
+    //
+    // When neither fires, both latches re-arm for the next episode.
+    if (isPinnedDrift({ pinned, gap })) {
+      const latch = nextDriftState(driftReported, gap, DRIFT_THRESHOLD);
+      driftReported = latch.reported;
 
-    // SELF-HEAL (always on, not dev-gated): re-assert the bottom. Mark it as ours via
-    // markProgScroll(300) — the window must span the 250ms sample interval plus scroll-event-
-    // dispatch slack, since markProgScroll's default 120ms would lapse before the next tick
-    // and let the heal's own scroll event run onScroll ungated (persisting the corrected
-    // position and dropping any in-flight nav cursor). 300ms covers the next tick's potential
-    // re-heal. Leave `pinned` true — we're correcting a pinned scroller back to where it
-    // should be, not un-pinning it.
-    markProgScroll(300);
-    scroller.scrollTo({ top: scrollHeight });
+      // SELF-HEAL (always on, not dev-gated): re-assert the bottom. Mark it as ours via
+      // markProgScroll(300) — the window must span the 250ms sample interval plus scroll-event-
+      // dispatch slack, since markProgScroll's default 120ms would lapse before the next tick
+      // and let the heal's own scroll event run onScroll ungated (persisting the corrected
+      // position and dropping any in-flight nav cursor). 300ms covers the next tick's potential
+      // re-heal. Leave `pinned` true — we're correcting a pinned scroller back to where it
+      // should be, not un-pinning it.
+      markProgScroll(300);
+      scroller.scrollTo({ top: scrollHeight });
 
-    // DEBUG NOTICE (?dev-gated): sticky, with a "Copy trace" action. The notice fires only
-    // on the first detection of an episode (the latch above); sustained drift holds.
-    if (devMode && latch.shouldNotify) {
-      driftDetectedAt = s.t;
-      store.chatNotice(
-        `Scroll drift self-corrected (gap was ${Math.round(gap)}px)`,
-        {
-          durationMs: 0, // sticky — don't miss it
-          action: { label: "Copy trace", run: copyTrace },
-        },
-      );
+      // NOTICE (always on — no longer ?dev-gated): sticky, with a "Copy trace" action. Fires
+      // only on the first detection of an episode (the latch above); sustained drift holds.
+      // console.warn is belt-and-suspenders: the WKWebView inspector is not visible by
+      // default in the release build, so the sticky notice is the primary surface; the warn
+      // surfaces if the inspector is ever opened.
+      if (latch.shouldNotify) {
+        lastDetectedAt = s.t;
+        console.warn("[pantoken] scroll drift (pinned, self-healed)", {
+          gap,
+          pinned,
+          turnActive: s.turnActive,
+        });
+        store.chatNotice(
+          `Scroll drift self-corrected (gap was ${Math.round(gap)}px)`,
+          {
+            durationMs: 0, // sticky — don't miss it
+            action: { label: "Copy trace", run: copyTrace },
+          },
+        );
+      }
+    } else if (
+      isUnpinnedDuringStreaming({ pinned, turnActive: store.turnActive, gap })
+    ) {
+      // Un-pinned-during-streaming notice — NO self-heal (never yank a reader who scrolled up).
+      const unpinnedLatch = nextDriftState(unpinnedReported, gap, 0);
+      unpinnedReported = unpinnedLatch.reported;
+      if (unpinnedLatch.shouldNotify) {
+        lastDetectedAt = s.t;
+        console.warn("[pantoken] viewport unpinned during streaming", {
+          gap,
+          pinned,
+          turnActive: s.turnActive,
+        });
+        store.chatNotice(
+          `Viewport not following — unpinned during streaming (gap ${Math.round(gap)}px)`,
+          {
+            durationMs: 0, // sticky — don't miss it
+            action: { label: "Copy trace", run: copyTrace },
+          },
+        );
+      }
+    } else {
+      // Neither condition holds: re-arm both latches for the next episode.
+      driftReported = false;
+      unpinnedReported = false;
     }
   }
 
@@ -425,7 +467,7 @@
    *  exactly one trace copy). */
   async function copyTrace(): Promise<void> {
     const trace = formatTrace(traceBuffer, {
-      detectedAt: driftDetectedAt,
+      detectedAt: lastDetectedAt,
       ua: typeof navigator !== "undefined" ? navigator.userAgent : "",
       viewport:
         typeof window !== "undefined"

@@ -75,6 +75,28 @@ export function isPinnedDrift({
   return pinned && gap > (threshold ?? DRIFT_THRESHOLD);
 }
 
+/** Whether the viewport is un-pinned while the agent is actively streaming, with content
+ *  below the fold — the false-un-pin suspect the pinned-drift detector structurally cannot
+ *  catch (isPinnedDrift requires pinned === true). Once un-pinned, every re-assert path
+ *  bails (streaming-pin $effect, `.col` ResizeObserver, the self-heal watcher's
+ *  isPinnedDrift), stranding the viewport with new content below the fold.
+ *
+ *  Notice-only: the self-heal never fires for this case. A reader who deliberately scrolled
+ *  up must never be yanked back down; the cost is one extra recurrence before a confident
+ *  root-cause fix (the trace captured here is the input to that fix). The latch re-arms when
+ *  `gap` returns to 0 (back at the bottom), so each stranding episode fires one notice. */
+export function isUnpinnedDuringStreaming({
+  pinned,
+  turnActive,
+  gap,
+}: {
+  pinned: boolean;
+  turnActive: boolean;
+  gap: number;
+}): boolean {
+  return !pinned && turnActive && gap > 0;
+}
+
 /** Push a sample onto a ring buffer, dropping the oldest when the cap is reached. Returns a
  *  new array (immutable, so the component can hold it as plain `let` without surprising
  *  re-render coupling). Cap keeps recent history bounded for the "Copy trace" payload. */
