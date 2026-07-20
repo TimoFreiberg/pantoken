@@ -40,6 +40,7 @@
     closeLabel = "Close menu",
     openExternal = 0,
     overlayId,
+    onOpen,
     onSelect,
     onKeydown: onUnhandledKeydown,
     body,
@@ -57,6 +58,7 @@
     closeLabel?: string;
     openExternal?: number;
     overlayId?: string;
+    onOpen?: () => void;
     onSelect?: (index: number) => void;
     onKeydown?: (event: KeyboardEvent, sel: number) => void;
     body: Snippet<[{ sel: number; close: () => void }]>;
@@ -127,6 +129,7 @@
   let overlayCloseHandled = false;
   function openMenu() {
     open = true;
+    onOpen?.();
     if (overlayId) {
       overlayCloseHandled = false;
       overlayHistory.opened(overlayId, () => {
