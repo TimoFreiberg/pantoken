@@ -1932,11 +1932,13 @@
      session and a live turn. Same glyph for both phases; the tooltip carries the detail. */
   .status[data-state="running"] .spinner,
   .status[data-state="initializing"] .spinner {
-    width: 11px;
-    height: 11px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
-    border: 1.5px solid var(--border-strong);
-    border-top-color: var(--accent);
+    border: 2px solid
+      color-mix(in srgb, var(--progress) 28%, var(--border-strong));
+    border-top-color: var(--progress);
+    border-right-color: var(--progress);
     animation: statusSpin 0.7s linear infinite;
   }
   @keyframes statusSpin {

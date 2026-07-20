@@ -10,16 +10,21 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-/** Resolve a CSS custom property to its computed color value on the page. */
-async function resolvedToken(page: Page, token: string): Promise<string> {
-  return page.evaluate((name) => {
+/** Resolve a CSS color expression to its computed value on the page. */
+async function resolvedColor(page: Page, value: string): Promise<string> {
+  return page.evaluate((colorValue) => {
     const probe = document.createElement("span");
-    probe.style.color = `var(${name})`;
+    probe.style.color = colorValue;
     document.body.append(probe);
     const color = getComputedStyle(probe).color;
     probe.remove();
     return color;
-  }, token);
+  }, value);
+}
+
+/** Resolve a CSS custom property to its computed color value on the page. */
+async function resolvedToken(page: Page, token: string): Promise<string> {
+  return resolvedColor(page, `var(${token})`);
 }
 
 /** The status-indicator span on a given session's sidebar row. */
@@ -103,4 +108,52 @@ test("idle (read) session titles fade to muted text; active and running do not",
   // AC.2: a running session's title is NOT faded — it stays --text.
   const textColor = await resolvedToken(page, "--text");
   await expect(nameOf(page, BG)).toHaveCSS("color", textColor);
+});
+
+test("running and initializing spinners use the bronze progress color", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await drive(page, "bgrun");
+
+  const status = statusOf(page, BG);
+  await expect(status).toHaveAttribute("data-state", "running");
+  const spinner = status.locator(".spinner");
+
+  for (const theme of ["light", "dark"] as const) {
+    await page
+      .locator("html")
+      .evaluate((el, value) => el.setAttribute("data-theme", value), theme);
+    const progress = await resolvedToken(page, "--progress");
+    const trailing = await resolvedColor(
+      page,
+      "color-mix(in srgb, var(--progress) 28%, var(--border-strong))",
+    );
+
+    await expect(spinner).toHaveCSS("width", "12px");
+    await expect(spinner).toHaveCSS("height", "12px");
+    await expect(spinner).toHaveCSS("border-top-width", "2px");
+    await expect(spinner).toHaveCSS("border-top-color", progress);
+    await expect(spinner).toHaveCSS("border-right-color", progress);
+    await expect(spinner).toHaveCSS("border-bottom-color", trailing);
+    await expect(spinner).toHaveCSS("border-left-color", trailing);
+  }
+
+  await drive(page, "initializing");
+  const initializing = statusOf(page, ACTIVE);
+  await expect(initializing).toHaveAttribute("data-state", "initializing");
+  const initializingSpinner = initializing.locator(".spinner");
+  const progress = await resolvedToken(page, "--progress");
+  const trailing = await resolvedColor(
+    page,
+    "color-mix(in srgb, var(--progress) 28%, var(--border-strong))",
+  );
+
+  await expect(initializingSpinner).toHaveCSS("width", "12px");
+  await expect(initializingSpinner).toHaveCSS("height", "12px");
+  await expect(initializingSpinner).toHaveCSS("border-top-width", "2px");
+  await expect(initializingSpinner).toHaveCSS("border-top-color", progress);
+  await expect(initializingSpinner).toHaveCSS("border-right-color", progress);
+  await expect(initializingSpinner).toHaveCSS("border-bottom-color", trailing);
+  await expect(initializingSpinner).toHaveCSS("border-left-color", trailing);
 });
