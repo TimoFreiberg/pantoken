@@ -37,7 +37,7 @@ PUBLIC_KEY='dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg2Mjg4ODNBNzJB
 # ── Fixed installation layout ────────────────────────────────────
 LIVE_LINK="${HOME}/pantoken-live"
 VERSIONS_DIR="${HOME}/pantoken-versions"
-STATE_DIR="${HOME}/.local/state/pantoken"
+STATE_DIR="${HOME}/.local/share/pantoken"
 LOCK_DIR="${STATE_DIR}/.update.lock"
 JOURNAL_FILE="${STATE_DIR}/update-journal.jsonl"
 TRUSTED_VALIDATOR="${HOME}/.local/libexec/pantoken-tar-validate"
@@ -440,8 +440,8 @@ verify_post_flip() {
   if [[ -z "$new_pid" ]]; then
     new_pid="$(ps aux | grep '[p]antoken-server' | head -1 | awk '{print $2}' || true)"
   fi
-  if [[ -z "${PANTOKEN_TEST_DISABLE_PID_OVERRIDE:-}" ]] && [[ -n "${_TEST_LAUNCHCTL:-}" && -f "${HOME}/.local/state/pantoken/fake-service.pid" ]]; then
-    new_pid="$(cat "${HOME}/.local/state/pantoken/fake-service.pid")"
+  if [[ -z "${PANTOKEN_TEST_DISABLE_PID_OVERRIDE:-}" ]] && [[ -n "${_TEST_LAUNCHCTL:-}" && -f "${HOME}/.local/share/pantoken/fake-service.pid" ]]; then
+    new_pid="$(cat "${HOME}/.local/share/pantoken/fake-service.pid")"
   fi
 
   if [[ -z "$new_pid" ]]; then

@@ -364,7 +364,7 @@ describe("mac-mini-preflight.sh", () => {
     expect(existsSync(join(versionsDir, "1.2.3"))).toBe(true);
     expect(existsSync(join(versionsDir, "1.2.3", "VERSION"))).toBe(true);
     expect(readlinkSync(liveLink)).toBe(join(versionsDir, "1.2.3"));
-    expect(existsSync(join(tmpHome, ".local", "state", "pantoken", "pantoken.env"))).toBe(true);
+    expect(existsSync(join(tmpHome, ".local", "share", "pantoken", "pantoken.env"))).toBe(true);
 
     rmSync(tmpHome, { recursive: true, force: true });
     rmSync(archiveDir, { recursive: true, force: true });

@@ -79,6 +79,10 @@ async fn main() {
 
     let cfg = config::load();
 
+    // One-time migration: move a legacy `~/.local/state/pantoken` to the new
+    // `~/.local/share/pantoken` if the old dir exists and the new doesn't.
+    config::migrate_legacy_data_dir(&cfg);
+
     // Mint stable per-data-dir identity before anything else touches the data dir.
     let server_id = match pidlock::mint_or_read_server_id(&cfg.data_dir) {
         Ok(id) => id,

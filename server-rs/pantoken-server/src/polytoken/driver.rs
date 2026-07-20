@@ -154,6 +154,9 @@ struct PolytokenInner {
     is_fake: bool,
     fake_control: Option<FakeControlHub>,
     warm_cap: i64,
+    /// Root dir for centralized session worktrees: `<data_dir>/worktrees`. Each
+    /// worktree lands under `<worktree_root>/<repo-slug>/<name>/`.
+    worktree_root: PathBuf,
     /// The captured login-shell env, threaded into every daemon spawn so the
     /// daemon gets the user's real PATH + tool env. `None` only when capture
     /// ran but produced no env (a degraded state — spawn gets the inherited env).
@@ -251,6 +254,7 @@ impl PolytokenDriver {
                 bin_path,
                 is_fake,
                 warm_cap,
+                worktree_root: data_dir.join("worktrees"),
                 login_env: Mutex::new(login_env),
                 login_env_status: RwLock::new(status),
                 archive_store: Mutex::new(ArchiveStore::new(data_dir.join("archived.json"))),
@@ -311,6 +315,7 @@ impl PolytokenDriver {
                 bin_path,
                 is_fake,
                 warm_cap,
+                worktree_root: data_dir.join("worktrees"),
                 login_env: Mutex::new(login_env),
                 login_env_status: RwLock::new(status),
                 archive_store: Mutex::new(ArchiveStore::new(data_dir.join("archived.json"))),
@@ -2365,7 +2370,13 @@ impl PantokenDriver for PolytokenDriver {
         // worktree dir + store entry leak).
         let mut created_worktree: Option<WorktreeMeta> = None;
         if opts.worktree.unwrap_or(false) {
-            let meta = worktree::create(&cwd, None, opts.base_branch.as_deref()).await?;
+            let meta = worktree::create(
+                &cwd,
+                None,
+                opts.base_branch.as_deref(),
+                &self.inner.worktree_root,
+            )
+            .await?;
             self.inner.worktree_store.lock().add(meta.clone());
             cwd = meta.path.clone();
             created_worktree = Some(meta);
@@ -3445,6 +3456,7 @@ mod tests {
             }),
             archive_store: Mutex::new(ArchiveStore::new(PathBuf::new())),
             worktree_store: Mutex::new(WorktreeStore::new(PathBuf::new())),
+            worktree_root: PathBuf::new(),
             order: Mutex::new(order),
             warm: RwLock::new(HashMap::new()),
             subscribers: Mutex::new(Vec::new()),

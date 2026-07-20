@@ -9,12 +9,11 @@
 //!
 //! This root is for the **remote runtime/provisioning** only: provisioned
 //! binaries, runtime sockets, and durable session metadata. The default is
-//! `~/.local/share/pantoken` (XDG `DATA`), which is intentionally distinct
-//! from the local server's `XDG_STATE_HOME` default (`~/.local/state/pantoken`,
-//! see `config.rs`). The two roots hold different things:
+//! `~/.local/share/pantoken` (XDG `DATA`) — the same tier the local server
+//! now uses (see `config.rs`). The two roots hold different things:
 //!
-//! - **Local** (`XDG_STATE_HOME`): archive index/state — a source of truth,
-//!   not cache, not `~/.local/share`.
+//! - **Local** (`XDG_DATA_HOME`): archive/worktree indices + session worktrees
+//!   — sources of truth, not cache.
 //! - **Remote** (`XDG_DATA_HOME` / `~/.local/share`): provisioned binaries +
 //!   runtime sockets + durable session metadata.
 //!

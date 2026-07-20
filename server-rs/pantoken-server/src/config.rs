@@ -5,17 +5,79 @@
 
 use std::path::{Path, PathBuf};
 
-/// Default server-state dir, XDG-conformant: `$XDG_STATE_HOME/pantoken`, falling back to
-/// `~/.local/state/pantoken`. This is STATE (persists across restarts, machine-local, not
-/// precious enough for `~/.local/share`) — the archive index here is a source of truth,
-/// not a cache, so it must NOT land under `~/.cache` where a cleaner may wipe it.
+/// Default data dir, XDG-conformant: `$XDG_DATA_HOME/pantoken`, falling back to
+/// `~/.local/share/pantoken`. This is DATA (persists across restarts, precious user
+/// state) — session worktrees hold real user work, conversation history is user data,
+/// and the archive/worktree indices are sources of truth, not caches. Pre-0.6 this
+/// lived under `~/.local/state/pantoken`; `migrate_legacy_data_dir()` moves existing
+/// installs on startup.
 fn default_data_dir() -> PathBuf {
+    let data_home = std::env::var("XDG_DATA_HOME")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| dirs().join(".local").join("share"));
+    data_home.join("pantoken")
+}
+
+/// Legacy default data dir (pre-0.6): `~/.local/state/pantoken`. Used by
+/// `migrate_legacy_data_dir` to find and move pre-existing installs.
+pub fn legacy_data_dir() -> PathBuf {
     let state_home = std::env::var("XDG_STATE_HOME")
         .ok()
         .filter(|s| !s.trim().is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| dirs().join(".local").join("state"));
     state_home.join("pantoken")
+}
+
+/// One-time migration: if the legacy `~/.local/state/pantoken` exists and the new
+/// `~/.local/share/pantoken` does not, rename old → new. If both exist, the new
+/// dir wins (leave the old one in place — the user can clean it up manually). If
+/// `PANTOKEN_DATA_DIR` is set explicitly, the legacy default is irrelevant (the
+/// user chose their dir), so this is a no-op. Idempotent and best-effort: a
+/// failed rename logs a warning but does not abort startup (the server will just
+/// create a fresh data dir in the default location).
+pub fn migrate_legacy_data_dir(cfg: &Config) {
+    // Only migrate when using the default data dir (no explicit PANTOKEN_DATA_DIR).
+    if std::env::var("PANTOKEN_DATA_DIR").is_ok() {
+        return;
+    }
+    let legacy = legacy_data_dir();
+    if !legacy.exists() {
+        return;
+    }
+    // New dir already exists — both present, new wins. Don't clobber.
+    if cfg.data_dir.exists() {
+        return;
+    }
+    if let Some(parent) = cfg.data_dir.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            eprintln!(
+                "pantoken: migration: could not create {}: {e}",
+                parent.display()
+            );
+            return;
+        }
+    }
+    match std::fs::rename(&legacy, &cfg.data_dir) {
+        Ok(()) => {
+            eprintln!(
+                "pantoken: migrated data dir {} → {}",
+                legacy.display(),
+                cfg.data_dir.display()
+            );
+        }
+        Err(e) => {
+            // rename can fail across filesystems; fall back to leaving the
+            // legacy dir and letting the server create a fresh new one.
+            eprintln!(
+                "pantoken: migration: could not rename {} → {}: {e}; leaving legacy in place",
+                legacy.display(),
+                cfg.data_dir.display()
+            );
+        }
+    }
 }
 
 /// Home directory (cross-platform). Uses the `HOME` env var on Unix, falling back
@@ -207,6 +269,102 @@ mod tests {
             idle_reap_ms: 600000,
             live_refresh_ms: 1000,
             delta_flush_ms: 50,
+        }
+    }
+
+    #[test]
+    fn migrate_renames_legacy_to_new_when_new_absent() {
+        let temp = tempfile::tempdir().unwrap();
+        let legacy = temp.path().join(".local").join("state").join("pantoken");
+        let new_dir = temp.path().join(".local").join("share").join("pantoken");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("worktrees.json"), "{}").unwrap();
+
+        // Point both XDG vars at the temp root so default_data_dir and
+        // legacy_data_dir resolve under it.
+        unsafe {
+            std::env::set_var("XDG_DATA_HOME", temp.path().join(".local").join("share"));
+            std::env::set_var("XDG_STATE_HOME", temp.path().join(".local").join("state"));
+            std::env::remove_var("PANTOKEN_DATA_DIR");
+        }
+
+        let cfg = Config {
+            data_dir: new_dir.clone(),
+            ..test_config()
+        };
+        migrate_legacy_data_dir(&cfg);
+
+        assert!(new_dir.exists(), "new dir should exist after migration");
+        assert!(
+            new_dir.join("worktrees.json").exists(),
+            "file should have moved"
+        );
+        assert!(!legacy.exists(), "legacy dir should be gone");
+
+        unsafe {
+            std::env::remove_var("XDG_DATA_HOME");
+            std::env::remove_var("XDG_STATE_HOME");
+        }
+    }
+
+    #[test]
+    fn migrate_does_not_clobber_when_new_already_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let legacy = temp.path().join(".local").join("state").join("pantoken");
+        let new_dir = temp.path().join(".local").join("share").join("pantoken");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("old.txt"), "old").unwrap();
+        std::fs::create_dir_all(&new_dir).unwrap();
+        std::fs::write(new_dir.join("new.txt"), "new").unwrap();
+
+        unsafe {
+            std::env::set_var("XDG_DATA_HOME", temp.path().join(".local").join("share"));
+            std::env::set_var("XDG_STATE_HOME", temp.path().join(".local").join("state"));
+            std::env::remove_var("PANTOKEN_DATA_DIR");
+        }
+
+        let cfg = Config {
+            data_dir: new_dir.clone(),
+            ..test_config()
+        };
+        migrate_legacy_data_dir(&cfg);
+
+        // New dir wins — its file is intact, legacy untouched (left for manual cleanup).
+        assert!(new_dir.join("new.txt").exists());
+        assert!(!new_dir.join("old.txt").exists());
+        assert!(legacy.exists(), "legacy should be left in place");
+
+        unsafe {
+            std::env::remove_var("XDG_DATA_HOME");
+            std::env::remove_var("XDG_STATE_HOME");
+        }
+    }
+
+    #[test]
+    fn migrate_is_noop_when_pantoken_data_dir_set() {
+        let temp = tempfile::tempdir().unwrap();
+        let legacy = temp.path().join(".local").join("state").join("pantoken");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("data.txt"), "data").unwrap();
+
+        unsafe {
+            std::env::set_var("XDG_STATE_HOME", temp.path().join(".local").join("state"));
+            std::env::set_var("PANTOKEN_DATA_DIR", "/custom/explicit");
+        }
+
+        let cfg = Config {
+            data_dir: PathBuf::from("/custom/explicit"),
+            ..test_config()
+        };
+        migrate_legacy_data_dir(&cfg);
+
+        // Legacy untouched because PANTOKEN_DATA_DIR was set.
+        assert!(legacy.exists());
+        assert!(legacy.join("data.txt").exists());
+
+        unsafe {
+            std::env::remove_var("XDG_STATE_HOME");
+            std::env::remove_var("PANTOKEN_DATA_DIR");
         }
     }
 }

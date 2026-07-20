@@ -6,7 +6,7 @@ set -euo pipefail
 
 ROOT="$(cd -P -- "$(dirname -- "$0")" && pwd -P)"
 HOME_DIR="${HOME:?HOME must be set by launchd}"
-DATA_DIR="$HOME_DIR/.local/state/pantoken"
+DATA_DIR="$HOME_DIR/.local/share/pantoken"
 ENV_FILE="$DATA_DIR/pantoken.env"
 
 if [[ ! -f "$ENV_FILE" ]]; then
