@@ -613,13 +613,18 @@ describe("groupTurns: injected custom messages", () => {
     const turn = turns[0]!;
     expect(turn.id).toBe("u1");
     expect(turn.response.map((i) => i.id)).toEqual(["post"]);
-    expect(turn.visible.map((i) => i.id)).toEqual(["final", "n1"]);
-    expect(turn.work.map((i) => i.id)).toEqual(["narration", "b1", "journal"]);
-    expect(turn.lanes.map((lane) => lane.item?.id ?? lane.items.map((i) => i.id).join(","))).toEqual([
-      "narration,b1",
+    // The inject `n1` and the prior assistant `final` fold into the work run
+    // instead of being pinned as separate visible lanes.
+    expect(turn.visible.map((i) => i.id)).toEqual([]);
+    expect(turn.work.map((i) => i.id)).toEqual([
+      "narration",
+      "b1",
       "final",
       "n1",
       "journal",
+    ]);
+    expect(turn.lanes.map((lane) => lane.item?.id ?? lane.items.map((i) => i.id).join(","))).toEqual([
+      "narration,b1,final,n1,journal",
     ]);
     expect(turn.collapsible).toBe(true);
   });
@@ -633,7 +638,32 @@ describe("groupTurns: injected custom messages", () => {
       asst("post"),
     ]);
     expect(turns).toHaveLength(1);
-    expect(turns[0]!.visible.map((i) => i.id)).toEqual(["final", "n1"]);
+    // The inject `n1` and `final` fold into the work run; nothing is pinned visible.
+    expect(turns[0]!.visible.map((i) => i.id)).toEqual([]);
+    expect(turns[0]!.work.map((i) => i.id)).toEqual(["final", "n1", "t"]);
+  });
+
+  test("multiple injects between tools fold into one work run", () => {
+    const turns = groupTurns([
+      user("u1"),
+      tool("edit1", "edit_plan"),
+      inject("r1", { customType: "Plan review required" }),
+      tool("edit2", "edit_plan"),
+      inject("r2", { customType: "Plan review required" }),
+      asst("done", { completedAt: "9000" }),
+    ]);
+    expect(turns).toHaveLength(1);
+    const workLanes = turns[0]!.lanes.filter((l) => l.kind === "work");
+    expect(workLanes).toHaveLength(1);
+    expect(workLanes[0]!.items.map((i) => i.id)).toEqual([
+      "edit1",
+      "r1",
+      "edit2",
+      "r2",
+    ]);
+    // Injects folded into work, not pinned visible; response stays visible.
+    expect(turns[0]!.visible).toEqual([]);
+    expect(turns[0]!.response.map((i) => i.id)).toEqual(["done"]);
   });
 
   test("only an explicitly marked inject starts a new turn", () => {

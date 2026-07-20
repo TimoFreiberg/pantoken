@@ -216,9 +216,13 @@ function buildTurn(
 
   // Lanes preserve chronological order: a contiguous run of non-visible work folds into
   // one collapsible run; each visible tool stays pinned in place between runs, so it
-  // doesn't float to the bottom of the work block as later work streams in. Assistant
-  // paragraphs immediately before a same-turn inject are pinned so a later run cannot
-  // hide an already-rendered response.
+  // doesn't float to the bottom of the work block as later work streams in. Non-boundary
+  // injects (system reminders, journal nudges, compaction markers, …) fold into the
+  // current work run as inline content rather than being pinned as separate lanes, so a
+  // turn with `edit_plan` → reminder → `edit_plan` → reminder produces one contiguous
+  // "Worked for Ns" block, not one per tool call. The inject pill still renders (when
+  // `display:true`) — just inside the collapsed work block. `turnBoundary:true` injects
+  // (goal reminders) never reach here: they start a new turn via `startsTurn`.
   //
   // Lead-up keep-visible: when a work run is immediately followed by a pinned `answer`
   // card, peel its trailing assistant paragraph(s) into pinned lanes too. Those carry
@@ -246,18 +250,7 @@ function buildTurn(
       lanes.push({ kind: "pinned", id: it.id, item: it });
   };
   for (const it of workItems) {
-    if (it.kind === "inject") {
-      // A same-turn inject is chronological visible content. Protect the completed
-      // assistant paragraph immediately before it from being swallowed by the work
-      // lane created by the run that follows it.
-      if (run.length > 0) {
-        const [work, leadUp] = splitLeadUp(run);
-        run = work;
-        flushRun();
-        flushLeadUp(leadUp);
-      }
-      lanes.push({ kind: "pinned", id: it.id, item: it });
-    } else if (isVisibleTool(it)) {
+    if (isVisibleTool(it)) {
       // Peel the lead-up paragraph(s) off the run BEFORE pinning the answer card, so
       // they render between the (now shorter) collapsible work run and the Q&A.
       if (isAnswerTool(it) && run.length > 0) {
