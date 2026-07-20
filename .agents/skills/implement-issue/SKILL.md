@@ -1,21 +1,20 @@
 ---
-description: Implement a GitHub issue end-to-end — clarify, plan, execute, review, and integrate into main. Entry point @skill:implement-issue <N>.
-polytoken: true
+description: Implement a GitHub issue end-to-end. Clarify, plan, execute, review, and integrate into main.
 ---
 
 # Implement GitHub Issue #{{ISSUE_NUMBER}}
 
 You are implementing a GitHub issue. The issue number is provided in the
-prompt that invoked this skill (e.g. `@skill:implement-issue 42` or `#42`).
+prompt that invoked this skill (e.g. `@skill:implement-issue 42`, `#42`, or `https://github.com/User/repo/issues/42`).
 Extract the issue number from the prompt; if no number is present, ask the
 user which issue to implement before proceeding.
 
 ## Step 0: Fetch the issue and bootstrap the worktree
 
-1. Run the fetch script to pull the issue body, comments, and screenshots:
+1. Run the fetch script with the issue number to pull the issue body, comments, and screenshots:
 
    ```bash
-   bash scripts/gh-issue-fetch.sh <N>
+   bash scripts/gh-issue-fetch.sh <issue-number>
    ```
 
    This writes the issue body + comments to a temp `issue.md`, downloads any
@@ -25,6 +24,9 @@ user which issue to implement before proceeding.
 2. **Read the issue.** Read `issue.md` with `file_read`. Read each downloaded
    screenshot with `file_read` (it renders images). Do not re-download or
    re-fetch the issue — everything you need is local now.
+
+3. **Ensure you're in a worktree.** If you're in the base repo of the current
+   project, enter a `jj workspace`.
 
 3. **Bootstrap the worktree.** If this session is running in a fresh worktree
    (the `implement-issue` workflow uses `worktree=true`), `node_modules` will
@@ -58,32 +60,31 @@ This session has a two-phase interaction contract:
 
 ## Step 1: Clarify implementation intent
 
-1. Read the issue and investigate enough of the codebase and product
+1. This phase is read-only.
+2. Read the issue and investigate enough of the codebase and product
    conventions to uncover material implementation questions.
-2. Use research subagents where applicable to get focused information without
+3. Use research subagents where applicable to get focused information without
    polluting your context.
-3. If questions remain, ask them through the session's user-question
+4. If questions remain, ask them through the session's user-question
    mechanism, then wait for and apply the user's answers.
-4. If no questions remain, continue immediately.
-5. Do not make code changes, commit, merge, or push until this clarification
-   phase is complete.
+5. If no questions remain, continue immediately.
 
 ## Step 2: Plan
 
 Write and review the plan only after clarification is complete.
 
-1. Investigate the codebase (you are in the plan facet, read-only).
-2. Write a plan with `write_plan`.
-3. Run the `plan-reviewer` subagent on your plan. Fix or rebut every finding.
+1. You should be in plan facet already. If not, `switch_facet` to plan.
+2. Investigate the codebase.
+3. Write a plan with `write_plan`.
+4. Run the `plan-reviewer` subagent on your plan. Fix or rebut every finding.
    Repeat until there are no critical or high findings.
-4. Call `handoff_plan` to hand off to the execute facet.
+5. Call `handoff_plan` to hand off to the execute facet.
 
 ## Step 3: Execute
 
 After handoff approval:
 
 1. Implement the plan.
-2. Follow `AGENTS.md` conventions.
 3. Commit with `Fixes #<N>` in the commit message (on its own line, after the
    subject). This links the commit to the GitHub issue.
 
@@ -96,23 +97,11 @@ After handoff approval:
 
 ## Step 5: Integrate into main
 
-A stop hook (`check-integration-before-stop`) fires when you would finish. If
-you have unpushed commits above `main`, it returns `continue` with a redirect
-to the integration command instead of letting you stop. Run it:
-
-```bash
-just integrate-into-main <N>
-```
-
-This acquires a lock, rebases onto latest main, runs `bun test` + `bun run
-check` + `cargo fmt`, advances `main`, pushes, and closes the issue. Do not
-stop until integration succeeds (exit 0) or you have posted a comment
-explaining a blocking failure. If it exits 2 (conflicts), resolve them with
-the `jj-resolve-conflicts` skill and retry.
+A stop hook (`check-integration-before-stop`) will guide you on how to integrate
+your commit into `main`.
 
 ## Constraints
 
-- Follow `AGENTS.md` conventions.
 - Do NOT push directly — use `just integrate-into-main`.
 - Commit message MUST include `Fixes #<N>`.
 - All `gh` commands MUST include `--repo TimoFreiberg/pantoken`.
