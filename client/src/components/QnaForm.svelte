@@ -237,7 +237,7 @@
   });
 </script>
 
-<!-- Form-level keyboard shortcuts (Esc / ⌘↵ / arrows) live on the container; the
+<!-- Form-level keyboard shortcuts (Esc / Enter / arrows) live on the container; the
      focusable controls inside still handle their own keys. -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
@@ -252,7 +252,7 @@
   <div class="head">
     {#if request.title}<h2>{request.title}</h2>{/if}
     <div class="head-right">
-      {#if total > 1}
+      {#if total > 1 && phase === "editing"}
         <span class="progress" aria-live="polite"
           >Question {current + 1} of {total} · {answeredCount} answered</span
         >
