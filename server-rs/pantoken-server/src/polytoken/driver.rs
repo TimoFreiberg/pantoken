@@ -3706,32 +3706,82 @@ mod tests {
         )
     }
 
+    /// Driver with two warm sessions (s1→/repo/a, s2→/repo/b) sharing one
+    /// sessions_dir and runner — for cwd-scoped cache invalidation tests.
+    fn driver_with_two_sessions(
+        runner: Arc<CommandRunner>,
+    ) -> (PolytokenDriver, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sessions_dir = dir.path().join("sessions");
+        write_session_json(&sessions_dir, "s1", "/repo/a");
+        write_session_json(&sessions_dir, "s2", "/repo/b");
+        let mut inner = inner_with_order(vec!["s1".into(), "s2".into()], 64);
+        inner.sessions_dir = sessions_dir;
+        inner.bin_path = "polytoken-test".into();
+        inner.command_runner = runner;
+        inner.warm.write().insert("s1".into(), warm_for("s1"));
+        inner.warm.write().insert("s2".into(), warm_for("s2"));
+        (
+            PolytokenDriver {
+                inner: Arc::new(inner),
+            },
+            dir,
+        )
+    }
+
     #[tokio::test]
-    async fn list_commands_runs_in_session_cwd_and_caches_by_cwd() {
+    async fn list_commands_and_facets_cache_by_cwd() {
+        // list_commands: second call hits the cwd cache
         let calls = Arc::new(Mutex::new(Vec::<(Vec<String>, Option<String>)>::new()));
-        let calls_for_runner = calls.clone();
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, args, cwd| {
-            calls_for_runner.lock().push((args, cwd));
+        let cc = calls.clone();
+        let runner: Arc<CommandRunner> = Arc::new(move |_p, args, cwd| {
+            cc.lock().push((args, cwd));
             Box::pin(async { Ok(ok_output("[]")) })
         });
         let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
-
         let _ = driver.list_commands(Some("s1".into())).await;
         let _ = driver.list_commands(Some("s1".into())).await;
+        {
+            let calls = calls.lock();
+            assert_eq!(
+                calls.len(),
+                1,
+                "second list_commands should hit the cwd cache"
+            );
+            assert_eq!(calls[0].1.as_deref(), Some("/repo/a"));
+            assert_eq!(calls[0].0[0..2], ["--working-dir", "/repo/a"]);
+            assert!(calls[0].0.contains(&"print-slash-commands".to_string()));
+        }
 
-        let calls = calls.lock();
-        assert_eq!(calls.len(), 1, "second call should hit the cwd cache");
-        assert_eq!(calls[0].1.as_deref(), Some("/repo/a"));
-        assert_eq!(calls[0].0[0..2], ["--working-dir", "/repo/a"]);
-        assert!(calls[0].0.contains(&"print-slash-commands".to_string()));
+        // list_facets: second call hits the cwd cache
+        let calls = Arc::new(Mutex::new(0));
+        let cc = calls.clone();
+        let runner: Arc<CommandRunner> = Arc::new(move |_p, args, _c| {
+            *cc.lock() += 1;
+            Box::pin(async move {
+                if args.iter().any(|a| a == "ls") {
+                    Ok(ok_output("execute.md\n"))
+                } else {
+                    Ok(ok_output("---\nname: execute\n---\nbody"))
+                }
+            })
+        });
+        let (driver, _dir) = driver_with_runner("s1", "/repo/facets", runner);
+        let _ = driver.list_facets(Some("s1".into())).await;
+        let _ = driver.list_facets(Some("s1".into())).await;
+        assert_eq!(
+            *calls.lock(),
+            2,
+            "second list_facets should hit the cwd cache"
+        );
     }
 
     #[tokio::test]
     async fn list_facets_runs_in_session_cwd_and_falls_back_to_file_stems() {
         let calls = Arc::new(Mutex::new(Vec::<(Vec<String>, Option<String>)>::new()));
-        let calls_for_runner = calls.clone();
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, args, cwd| {
-            calls_for_runner.lock().push((args.clone(), cwd));
+        let cc = calls.clone();
+        let runner: Arc<CommandRunner> = Arc::new(move |_p, args, cwd| {
+            cc.lock().push((args.clone(), cwd));
             Box::pin(async move {
                 if args.iter().any(|a| a == "ls") {
                     Ok(ok_output("execute.md\nplan.md\nREADME.txt\n"))
@@ -3743,9 +3793,7 @@ mod tests {
             })
         });
         let (driver, _dir) = driver_with_runner("s1", "/repo/facets", runner);
-
         let facets = driver.list_facets(Some("s1".into())).await;
-
         assert_eq!(facets, vec!["execute".to_string(), "plan".to_string()]);
         let calls = calls.lock();
         assert_eq!(calls.len(), 3, "vfs ls + two vfs cat calls");
@@ -3757,169 +3805,76 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_facets_caches_by_cwd() {
-        let calls = Arc::new(Mutex::new(0));
-        let calls_for_runner = calls.clone();
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, args, _cwd| {
-            *calls_for_runner.lock() += 1;
-            Box::pin(async move {
-                if args.iter().any(|a| a == "ls") {
-                    Ok(ok_output("execute.md\n"))
-                } else {
-                    Ok(ok_output("---\nname: execute\n---\nbody"))
-                }
-            })
-        });
-        let (driver, _dir) = driver_with_runner("s1", "/repo/facets", runner);
-
-        let _ = driver.list_facets(Some("s1".into())).await;
-        let _ = driver.list_facets(Some("s1".into())).await;
-
-        assert_eq!(
-            *calls.lock(),
-            2,
-            "second facet list should hit the cwd cache"
-        );
-    }
-
-    #[tokio::test]
     async fn list_facets_falls_back_to_builtins_on_error_or_empty() {
         let runner: Arc<CommandRunner> =
-            Arc::new(move |_program, _args, _cwd| Box::pin(async { Err("boom".to_string()) }));
+            Arc::new(move |_p, _a, _c| Box::pin(async { Err("boom".to_string()) }));
         let (driver, _dir) = driver_with_runner("s1", "/repo/facets", runner);
-
         assert_eq!(
             driver.list_facets(Some("s1".into())).await,
             vec!["execute".to_string(), "plan".to_string()]
         );
     }
 
+    /// Internal/cwd-relative `list_files` queries: (a) narrowing query against
+    /// session cwd, (b) empty query returns all files, (c) `..` dispatches to
+    /// the parent of the cwd.
     #[tokio::test]
-    async fn list_files_searches_session_cwd_when_caller_omits_cwd() {
-        // list_files now does an in-process .gitignore-aware walk (via the
-        // `ignore` crate) instead of spawning `polytoken files` (which doesn't
-        // exist). Create real files in a temp dir and verify they're found.
-        let repo = tempfile::tempdir().expect("repo tempdir");
-        let repo_path = repo.path();
-        std::fs::create_dir_all(repo_path.join("src")).expect("mkdir src");
-        std::fs::write(repo_path.join("src/main.rs"), "").expect("write main.rs");
-        std::fs::write(repo_path.join("src/lib.rs"), "").expect("write lib.rs");
-        std::fs::write(repo_path.join("README.md"), "").expect("write README.md");
-
-        // Use a no-op runner — list_files no longer goes through it.
-        let runner: Arc<CommandRunner> =
+    async fn list_files_internal_queries_table() {
+        let noop: Arc<CommandRunner> =
             Arc::new(|_p, _a, _c| Box::pin(async { Err("unused".to_string()) }));
-        let (driver, _dir) = driver_with_runner("s1", repo_path.to_str().unwrap(), runner);
 
+        // (a) narrowing query — caller omits cwd, search defaults to session cwd
+        let repo = tempfile::tempdir().expect("repo tempdir");
+        let p = repo.path();
+        std::fs::create_dir_all(p.join("src")).expect("mkdir src");
+        std::fs::write(p.join("src/main.rs"), "").expect("write main.rs");
+        std::fs::write(p.join("src/lib.rs"), "").expect("write lib.rs");
+        std::fs::write(p.join("README.md"), "").expect("write README.md");
+        let (driver, _dir) = driver_with_runner("s1", p.to_str().unwrap(), noop.clone());
         let files = driver
             .list_files("main".into(), Some("s1".into()), None, false)
             .await;
-
         assert_eq!(files.len(), 1, "should find only main.rs for query 'main'");
         assert_eq!(files[0].path, "src/main.rs");
-    }
 
-    #[tokio::test]
-    async fn list_files_empty_query_returns_all_files() {
+        // (b) empty query — exact set catches over-inclusion
         let repo = tempfile::tempdir().expect("repo tempdir");
-        let repo_path = repo.path();
-        std::fs::write(repo_path.join("a.rs"), "").expect("write a.rs");
-        std::fs::write(repo_path.join("b.rs"), "").expect("write b.rs");
-
-        let runner: Arc<CommandRunner> =
-            Arc::new(|_p, _a, _c| Box::pin(async { Err("unused".to_string()) }));
-        let (driver, _dir) = driver_with_runner("s1", repo_path.to_str().unwrap(), runner);
-
+        let p = repo.path();
+        std::fs::write(p.join("a.rs"), "").expect("write a.rs");
+        std::fs::write(p.join("b.rs"), "").expect("write b.rs");
+        let (driver, _dir) = driver_with_runner("s1", p.to_str().unwrap(), noop.clone());
         let files = driver
             .list_files("".into(), Some("s1".into()), None, false)
             .await;
-        // Exact set (not `>= 2`): a fresh tempdir has only a.rs and b.rs, so an
-        // exact comparison also catches over-inclusion regressions.
         let mut paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
         paths.sort();
         assert_eq!(paths, vec!["a.rs".to_string(), "b.rs".to_string()]);
-    }
 
-    #[tokio::test]
-    async fn list_files_dispatches_external_dotdot_query_to_parent_of_cwd() {
-        // A query starting with `..` should list the immediate children of the
-        // session cwd's PARENT directory instead of the recursive project
-        // search — exercises `list_files`'s external-query dispatch
-        // (`file_search::is_external_query` + `list_external`), not just the
-        // pure helper in isolation.
+        // (c) `..` query — lists immediate children of the cwd's PARENT
         let root = tempfile::tempdir().expect("root tempdir");
         let repo_path = root.path().join("project");
         std::fs::create_dir_all(&repo_path).expect("mkdir project");
         std::fs::write(root.path().join("sibling.txt"), "").expect("write sibling.txt");
-
-        let runner: Arc<CommandRunner> =
-            Arc::new(|_p, _a, _c| Box::pin(async { Err("unused".to_string()) }));
-        let (driver, _dir) = driver_with_runner("s1", repo_path.to_str().unwrap(), runner);
-
+        let (driver, _dir) = driver_with_runner("s1", repo_path.to_str().unwrap(), noop);
         let files = driver
             .list_files("..".into(), Some("s1".into()), None, false)
             .await;
         let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
-
         assert!(names.contains(&"../sibling.txt"));
         assert!(names.contains(&"../project"));
     }
 
+    /// External `list_files` queries: (a) absolute path works with no cwd, (b)
+    /// `include_ignored` reveals dotfiles and gitignored entries.
     #[tokio::test]
-    async fn list_files_include_ignored_reveals_dotfiles_and_gitignored_entries() {
-        // End-to-end through the driver method (not just the pure `file_search`
-        // helpers): `include_ignored` must reach `list_files_with_fd` and flip its
-        // hidden/gitignore filtering.
-        let repo = tempfile::tempdir().expect("repo tempdir");
-        let repo_path = repo.path();
-        std::fs::create_dir_all(repo_path.join(".git")).expect("mkdir .git");
-        std::fs::write(repo_path.join(".gitignore"), "*.log\n").expect("write .gitignore");
-        std::fs::write(repo_path.join(".env"), "SECRET=1").expect("write .env");
-        std::fs::write(repo_path.join("ignored.log"), "noise").expect("write ignored.log");
-        std::fs::write(repo_path.join("visible.rs"), "").expect("write visible.rs");
-
-        let runner: Arc<CommandRunner> =
+    async fn list_files_external_queries_table() {
+        let noop: Arc<CommandRunner> =
             Arc::new(|_p, _a, _c| Box::pin(async { Err("unused".to_string()) }));
-        let (driver, _dir) = driver_with_runner("s1", repo_path.to_str().unwrap(), runner);
 
-        let default_files = driver
-            .list_files("".into(), Some("s1".into()), None, false)
-            .await;
-        let default_names: Vec<&str> = default_files.iter().map(|f| f.path.as_str()).collect();
-        assert!(!default_names.contains(&".env"), "hidden by default");
-        assert!(!default_names.contains(&"ignored.log"), "hidden by default");
-        assert!(default_names.contains(&"visible.rs"));
-
-        let toggled_files = driver
-            .list_files("".into(), Some("s1".into()), None, true)
-            .await;
-        let toggled_names: Vec<&str> = toggled_files.iter().map(|f| f.path.as_str()).collect();
-        assert!(
-            toggled_names.contains(&".env"),
-            "revealed with include_ignored, got: {:?}",
-            toggled_names
-        );
-        assert!(
-            toggled_names.contains(&"ignored.log"),
-            "revealed with include_ignored, got: {:?}",
-            toggled_names
-        );
-        assert!(toggled_names.contains(&"visible.rs"));
-    }
-
-    #[tokio::test]
-    async fn list_files_external_absolute_query_works_without_a_cwd() {
-        // `~/…` and `/…` external queries need no cwd — only `..`-relative ones
-        // do — so a missing file_lookup_root (no session, no caller cwd) must
-        // not blank them. Target a session id with no warm entry so the root
-        // resolves to None, then browse an absolute tempdir path.
+        // (a) absolute external browse with no cwd; `..` with no root is empty
         let browse = tempfile::tempdir().expect("browse tempdir");
         std::fs::write(browse.path().join("visible.txt"), "").expect("write visible.txt");
-
-        let runner: Arc<CommandRunner> =
-            Arc::new(|_p, _a, _c| Box::pin(async { Err("unused".to_string()) }));
-        let (driver, _dir) = driver_with_runner("s1", "/repo/unused", runner);
-
+        let (driver, _dir) = driver_with_runner("s1", "/repo/unused", noop.clone());
         let query = format!("{}/", browse.path().display());
         let files = driver
             .list_files(query, Some("no-such-session".into()), None, false)
@@ -3929,9 +3884,6 @@ mod tests {
             "absolute external browse should work with no cwd, got: {:?}",
             files
         );
-
-        // A `..`-relative query with no root has nothing to resolve against —
-        // graceful empty, not a panic or a wrong-base listing.
         let dotdot = driver
             .list_files("..".into(), Some("no-such-session".into()), None, false)
             .await;
@@ -3940,6 +3892,38 @@ mod tests {
             "`..` with no cwd should be empty, got: {:?}",
             dotdot
         );
+
+        // (b) include_ignored reveals dotfiles and gitignored entries
+        let repo = tempfile::tempdir().expect("repo tempdir");
+        let p = repo.path();
+        std::fs::create_dir_all(p.join(".git")).expect("mkdir .git");
+        std::fs::write(p.join(".gitignore"), "*.log\n").expect("write .gitignore");
+        std::fs::write(p.join(".env"), "SECRET=1").expect("write .env");
+        std::fs::write(p.join("ignored.log"), "noise").expect("write ignored.log");
+        std::fs::write(p.join("visible.rs"), "").expect("write visible.rs");
+        let (driver, _dir) = driver_with_runner("s1", p.to_str().unwrap(), noop);
+        let files = driver
+            .list_files("".into(), Some("s1".into()), None, false)
+            .await;
+        let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert!(!names.contains(&".env"), "hidden by default");
+        assert!(!names.contains(&"ignored.log"), "hidden by default");
+        assert!(names.contains(&"visible.rs"));
+        let files = driver
+            .list_files("".into(), Some("s1".into()), None, true)
+            .await;
+        let names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert!(
+            names.contains(&".env"),
+            "revealed with include_ignored, got: {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"ignored.log"),
+            "revealed with include_ignored, got: {:?}",
+            names
+        );
+        assert!(names.contains(&"visible.rs"));
     }
 
     #[test]
@@ -4412,11 +4396,73 @@ mod tests {
         );
     }
 
+    /// Table-driven: model parsing + defaults extraction across four config shapes.
     #[tokio::test]
-    async fn list_models_caches_subprocess_output_until_invalidated() {
+    async fn model_defaults_table() {
+        struct F {
+            stdout: &'static str,
+            model_id: Option<&'static str>,
+            provider: Option<&'static str>,
+            thinking: Option<&'static str>,
+        }
+        let fixtures = [
+            // normal: default model present, no reasoning line
+            F {
+                stdout: "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n",
+                model_id: Some("umans/umans-glm-5.2"),
+                provider: Some("umans/umans-glm-5.2"),
+                thinking: None,
+            },
+            // custom reasoning with default marker on "high"
+            F {
+                stdout: "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=high (default), max, none; can_disable=yes\n",
+                model_id: Some("umans/umans-glm-5.2"),
+                provider: Some("umans/umans-glm-5.2"),
+                thinking: Some("high"),
+            },
+            // reasoning line but no level marked (default) → None
+            F {
+                stdout: "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=low, medium, high; can_disable=yes\n",
+                model_id: Some("umans/umans-glm-5.2"),
+                provider: Some("umans/umans-glm-5.2"),
+                thinking: None,
+            },
+            // config drift: default not in models list → provider falls back to split prefix
+            F {
+                stdout: "default_model: umans/missing-model\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=high (default), max, none; can_disable=yes\n",
+                model_id: Some("umans/missing-model"),
+                provider: Some("umans"),
+                thinking: None,
+            },
+        ];
+        for f in &fixtures {
+            let stdout = f.stdout.to_string();
+            let runner: Arc<CommandRunner> = Arc::new(move |_p, _a, _c| {
+                let s = stdout.clone();
+                Box::pin(async move { Ok(ok_output(&s)) })
+            });
+            let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
+            let models = driver.list_models().await;
+            let d = driver.get_model_defaults().await;
+            assert_eq!(d.model_id.as_deref(), f.model_id);
+            assert_eq!(d.provider.as_deref(), f.provider);
+            assert_eq!(d.thinking_level.as_deref(), f.thinking);
+            // When the default model is in the parsed list, provider must equal
+            // ModelOption.provider (not the split prefix).
+            if let Some(id) = f.model_id {
+                if let Some(m) = models.iter().find(|m| m.model_id == id) {
+                    assert_eq!(d.provider.as_deref(), Some(m.provider.as_str()));
+                }
+            }
+        }
+    }
+
+    /// Caching: `list_models` twice + `get_model_defaults` runs the runner once.
+    #[tokio::test]
+    async fn model_catalog_caches_subprocess_output() {
         let calls = Arc::new(Mutex::new(0));
         let calls_clone = calls.clone();
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, args, _cwd| {
+        let runner: Arc<CommandRunner> = Arc::new(move |_p, args, _c| {
             *calls_clone.lock() += 1;
             Box::pin(async move {
                 assert!(
@@ -4424,149 +4470,21 @@ mod tests {
                     "expected models arg, got {args:?}"
                 );
                 Ok(ok_output(
-                    "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n",
-                ))
-            })
-        });
-        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
-
-        let models1 = driver.list_models().await;
-        let models2 = driver.list_models().await;
-
-        assert_eq!(models1.len(), 1);
-        assert_eq!(models1[0].model_id, "umans/umans-glm-5.2");
-        assert_eq!(models2.len(), 1, "second call should return cached models");
-        assert_eq!(
-            *calls.lock(),
-            1,
-            "polytoken models should run at most once until invalidation"
-        );
-    }
-
-    #[tokio::test]
-    async fn model_defaults_reuses_cached_models_result() {
-        let calls = Arc::new(Mutex::new(0));
-        let calls_clone = calls.clone();
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, args, _cwd| {
-            *calls_clone.lock() += 1;
-            Box::pin(async move {
-                assert!(args.contains(&"models".to_string()));
-                Ok(ok_output(
                     "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=high (default), max, none; can_disable=yes\n",
                 ))
             })
         });
         let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
-
-        let _ = driver.list_models().await;
-        let defaults = driver.get_model_defaults().await;
-
-        assert_eq!(
-            *calls.lock(),
-            1,
-            "get_model_defaults should reuse the cached models result, not re-run"
-        );
-        assert_eq!(
-            defaults.provider.as_deref(),
-            Some("umans/umans-glm-5.2"),
-            "provider should match the ModelOption.provider field, not the split prefix"
-        );
-        assert_eq!(defaults.model_id.as_deref(), Some("umans/umans-glm-5.2"));
-        assert_eq!(
-            defaults.thinking_level.as_deref(),
-            Some("high"),
-            "thinking_level should be the default model's default reasoning level"
-        );
-    }
-
-    #[tokio::test]
-    async fn model_defaults_provider_matches_model_option_provider() {
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
-            Box::pin(async move {
-                Ok(ok_output(
-                    "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=high (default), max, none; can_disable=yes\n",
-                ))
-            })
-        });
-        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
-
-        let models = driver.list_models().await;
-        let defaults = driver.get_model_defaults().await;
-
-        let default_model = models
-            .iter()
-            .find(|m| m.model_id == defaults.model_id.as_deref().unwrap_or(""))
-            .expect("default model should be in the model list");
-        assert_eq!(
-            defaults.provider.as_deref(),
-            Some(default_model.provider.as_str()),
-            "get_model_defaults().provider must equal ModelOption.provider for the default model"
-        );
-    }
-
-    #[tokio::test]
-    async fn model_defaults_thinking_level_from_default_model_reasoning() {
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
-            Box::pin(async move {
-                Ok(ok_output(
-                    "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=low, medium (default), high, none; can_disable=yes\n",
-                ))
-            })
-        });
-        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
-
-        let defaults = driver.get_model_defaults().await;
-        assert_eq!(defaults.model_id.as_deref(), Some("umans/umans-glm-5.2"));
-        assert_eq!(
-            defaults.thinking_level.as_deref(),
-            Some("medium"),
-            "thinking_level should be the level marked (default) in the reasoning line"
-        );
-    }
-
-    #[tokio::test]
-    async fn model_defaults_thinking_level_none_when_no_default_marker() {
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
-            Box::pin(async move {
-                Ok(ok_output(
-                    "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=low, medium, high; can_disable=yes\n",
-                ))
-            })
-        });
-        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
-
-        let defaults = driver.get_model_defaults().await;
-        assert_eq!(defaults.model_id.as_deref(), Some("umans/umans-glm-5.2"));
-        assert_eq!(defaults.provider.as_deref(), Some("umans/umans-glm-5.2"));
-        assert!(
-            defaults.thinking_level.is_none(),
-            "thinking_level should be None when no level is marked (default)"
-        );
-    }
-
-    #[tokio::test]
-    async fn model_defaults_falls_back_to_split_when_default_not_in_models() {
-        // Config drift: default_model points to a model absent from the models: section.
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
-            Box::pin(async move {
-                Ok(ok_output(
-                    "default_model: umans/missing-model\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=high (default), max, none; can_disable=yes\n",
-                ))
-            })
-        });
-        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
-
-        let defaults = driver.get_model_defaults().await;
-        assert_eq!(defaults.model_id.as_deref(), Some("umans/missing-model"));
-        assert_eq!(
-            defaults.provider.as_deref(),
-            Some("umans"),
-            "provider should fall back to the split-on-`/` prefix when the default model isn't in the parsed list"
-        );
-        assert!(
-            defaults.thinking_level.is_none(),
-            "thinking_level should be None when the default model isn't in the parsed list"
-        );
+        let m1 = driver.list_models().await;
+        let m2 = driver.list_models().await;
+        let d = driver.get_model_defaults().await;
+        assert_eq!(m1.len(), 1);
+        assert_eq!(m1[0].model_id, "umans/umans-glm-5.2");
+        assert_eq!(m2.len(), 1, "second call should return cached models");
+        assert_eq!(d.provider.as_deref(), Some("umans/umans-glm-5.2"));
+        assert_eq!(d.model_id.as_deref(), Some("umans/umans-glm-5.2"));
+        assert_eq!(d.thinking_level.as_deref(), Some("high"));
+        assert_eq!(*calls.lock(), 1, "runner should run at most once");
     }
 
     #[tokio::test]
@@ -4592,7 +4510,7 @@ mod tests {
             axum::serve(listener, app).await.expect("serve test daemon");
         });
 
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
+        let runner: Arc<CommandRunner> = Arc::new(move |_p, _a, _c| {
             Box::pin(async move {
                 Ok(ok_output(
                     "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n",
@@ -4608,9 +4526,8 @@ mod tests {
             ),
         );
 
-        let defaults = driver.get_model_defaults().await;
         assert_eq!(
-            defaults.default_permission_monitor,
+            driver.get_model_defaults().await.default_permission_monitor,
             Some(PermissionMonitorMode::BypassPlus),
             "warm daemon config_default should map to the protocol permission-monitor mode"
         );
@@ -4620,9 +4537,9 @@ mod tests {
 
     #[tokio::test]
     async fn model_defaults_permission_monitor_none_on_cold_start() {
-        // No warm session has a live daemon, so get_permission_monitor() errors
-        // and default_permission_monitor stays None (the cold-start fallback).
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
+        // No warm session has a live daemon → get_permission_monitor() errors
+        // and default_permission_monitor stays None (cold-start fallback).
+        let runner: Arc<CommandRunner> = Arc::new(move |_p, _a, _c| {
             Box::pin(async move {
                 Ok(ok_output(
                     "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=high (default), max, none; can_disable=yes\n",
@@ -4630,57 +4547,50 @@ mod tests {
             })
         });
         let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
-
-        let defaults = driver.get_model_defaults().await;
         assert!(
-            defaults.default_permission_monitor.is_none(),
+            driver
+                .get_model_defaults()
+                .await
+                .default_permission_monitor
+                .is_none(),
             "default_permission_monitor should be None when no warm daemon is reachable"
         );
     }
 
     // ---- model catalog diagnostics ----
 
+    /// Parametrized: each fixture produces an empty model list + a distinct
+    /// diagnostic kind (empty output, unparseable output, subprocess failure).
     #[tokio::test]
-    async fn model_catalog_empty_stdout_sets_empty_output_diagnostic() {
-        let runner: Arc<CommandRunner> =
-            Arc::new(move |_program, _args, _cwd| Box::pin(async { Ok(ok_output("")) }));
-        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
-
-        assert!(driver.list_models().await.is_empty());
-        assert!(matches!(
-            driver.model_catalog_diagnostic(),
-            Some(ModelCatalogDiagnostic::EmptyOutput { .. })
-        ));
-    }
-
-    #[tokio::test]
-    async fn model_catalog_nonempty_zero_entries_sets_parse_diagnostic() {
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
-            Box::pin(async { Ok(ok_output("default_model: missing\nmodels:\n")) })
-        });
-        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
-
-        assert!(driver.list_models().await.is_empty());
-        assert!(matches!(
-            driver.model_catalog_diagnostic(),
-            Some(ModelCatalogDiagnostic::CouldNotBeParsed { message })
-                if message.contains("no model entries")
-        ));
-    }
-
-    #[tokio::test]
-    async fn model_catalog_subprocess_failure_sets_no_response_diagnostic() {
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
-            Box::pin(async { Err("models command failed".to_string()) })
-        });
-        let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
-
-        assert!(driver.list_models().await.is_empty());
-        assert!(matches!(
-            driver.model_catalog_diagnostic(),
-            Some(ModelCatalogDiagnostic::NoResponse { message })
-                if message == "could not discover models; check polytoken configuration"
-        ));
+    async fn model_catalog_diagnostics_table() {
+        // (runner_output, expected diagnostic kind)
+        let fixtures: [(Result<&str, &str>, &str); 3] = [
+            (Ok(""), "empty"),
+            (Ok("default_model: missing\nmodels:\n"), "parse"),
+            (Err("models command failed"), "no_response"),
+        ];
+        for (output, kind) in &fixtures {
+            let output = *output;
+            let runner: Arc<CommandRunner> = Arc::new(move |_p, _a, _c| {
+                Box::pin(async move { output.map(ok_output).map_err(|e| e.to_string()) })
+            });
+            let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
+            assert!(driver.list_models().await.is_empty());
+            let diag = driver.model_catalog_diagnostic();
+            match *kind {
+                "empty" => assert!(matches!(
+                    diag,
+                    Some(ModelCatalogDiagnostic::EmptyOutput { .. })
+                )),
+                "parse" => assert!(
+                    matches!(diag, Some(ModelCatalogDiagnostic::CouldNotBeParsed { message }) if message.contains("no model entries"))
+                ),
+                "no_response" => assert!(
+                    matches!(diag, Some(ModelCatalogDiagnostic::NoResponse { message }) if message == "could not discover models; check polytoken configuration")
+                ),
+                _ => unreachable!(),
+            }
+        }
     }
 
     // ---- env threading + stderr enrichment ----
@@ -4688,19 +4598,14 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn list_models_threads_login_env() {
-        let mut login_env = HashMap::new();
-        login_env.insert(
+        let runner = default_command_runner(Some(HashMap::from([(
             "PANTOKEN_TEST_SENTINEL".to_string(),
             "/sentinel-value".to_string(),
-        );
-        let runner = default_command_runner(Some(login_env));
-
-        // `/usr/bin/env` prints `KEY=VALUE` lines for every env var it sees.
+        )])));
         let result = runner("/usr/bin/env".to_string(), vec![], None)
             .await
             .expect("env subprocess should succeed");
         let stdout = String::from_utf8_lossy(&result.stdout);
-
         assert!(
             stdout.contains("PANTOKEN_TEST_SENTINEL=/sentinel-value"),
             "login env should be threaded into the subprocess; got:\n{stdout}"
@@ -4721,7 +4626,7 @@ mod tests {
     #[tokio::test]
     async fn empty_stdout_with_stderr_includes_snippet() {
         use std::os::unix::process::ExitStatusExt;
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
+        let runner: Arc<CommandRunner> = Arc::new(move |_p, _a, _c| {
             Box::pin(async {
                 Ok(Output {
                     status: std::process::ExitStatus::from_raw(0),
@@ -4731,18 +4636,11 @@ mod tests {
             })
         });
         let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
-
         assert!(driver.list_models().await.is_empty());
         match driver.model_catalog_diagnostic() {
             Some(ModelCatalogDiagnostic::EmptyOutput { message }) => {
-                assert!(
-                    message.contains("stderr"),
-                    "message should mention stderr; got: {message}"
-                );
-                assert!(
-                    message.contains("config not found"),
-                    "message should include stderr snippet; got: {message}"
-                );
+                assert!(message.contains("stderr"), "got: {message}");
+                assert!(message.contains("config not found"), "got: {message}");
             }
             other => panic!("expected EmptyOutput, got {other:?}"),
         }
@@ -4753,34 +4651,26 @@ mod tests {
         let output = Arc::new(Mutex::new(
             "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n".to_string(),
         ));
-        let output_clone = output.clone();
+        let out_clone = output.clone();
         let calls = Arc::new(Mutex::new(0));
         let calls_clone = calls.clone();
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
-            let out = output_clone.lock().clone();
+        let runner: Arc<CommandRunner> = Arc::new(move |_p, _a, _c| {
+            let out = out_clone.lock().clone();
             *calls_clone.lock() += 1;
             Box::pin(async move { Ok(ok_output(&out)) })
         });
         let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
-
-        let models1 = driver.list_models().await;
-        assert_eq!(models1.len(), 1);
-        assert_eq!(models1[0].model_id, "umans/umans-glm-5.2");
+        let m1 = driver.list_models().await;
+        assert_eq!(m1.len(), 1);
+        assert_eq!(m1[0].model_id, "umans/umans-glm-5.2");
         assert_eq!(*calls.lock(), 1);
 
-        // Invalidate the model cache.
         driver.inner.invalidate_model_cache();
-
-        // Change the output so we can verify the re-run observes it.
         *output.lock() =
             "default_model: deepseek/deepseek-v4-pro\n\nmodels:\n- deepseek/deepseek-v4-pro\n  provider: deepseek/deepseek-v4-pro\n".to_string();
-
-        let models2 = driver.list_models().await;
-        assert_eq!(models2.len(), 1);
-        assert_eq!(
-            models2[0].model_id, "deepseek/deepseek-v4-pro",
-            "after invalidation, list_models should re-run and observe updated output"
-        );
+        let m2 = driver.list_models().await;
+        assert_eq!(m2.len(), 1);
+        assert_eq!(m2[0].model_id, "deepseek/deepseek-v4-pro");
         assert_eq!(*calls.lock(), 2, "invalidation should force a re-run");
     }
 
@@ -4788,16 +4678,19 @@ mod tests {
     async fn model_cache_not_populated_on_error() {
         let calls = Arc::new(Mutex::new(0));
         let calls_clone = calls.clone();
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
+        let runner: Arc<CommandRunner> = Arc::new(move |_p, _a, _c| {
             *calls_clone.lock() += 1;
             Box::pin(async { Err("subprocess failed".to_string()) })
         });
         let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
-
-        let models1 = driver.list_models().await;
-        assert!(models1.is_empty(), "error should yield empty list");
-        let models2 = driver.list_models().await;
-        assert!(models2.is_empty(), "second call also empty");
+        assert!(
+            driver.list_models().await.is_empty(),
+            "error should yield empty list"
+        );
+        assert!(
+            driver.list_models().await.is_empty(),
+            "second call also empty"
+        );
         assert_eq!(
             *calls.lock(),
             2,
@@ -4808,9 +4701,9 @@ mod tests {
     #[tokio::test]
     async fn cwd_config_invalidation_clears_only_targeted_facet_and_command_cache() {
         let calls = Arc::new(Mutex::new(Vec::<(Vec<String>, Option<String>)>::new()));
-        let calls_clone = calls.clone();
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, args, cwd| {
-            calls_clone.lock().push((args.clone(), cwd.clone()));
+        let cc = calls.clone();
+        let runner: Arc<CommandRunner> = Arc::new(move |_p, args, cwd| {
+            cc.lock().push((args.clone(), cwd.clone()));
             Box::pin(async move {
                 if args.iter().any(|a| a == "ls") {
                     Ok(ok_output("execute.md\n"))
@@ -4821,63 +4714,47 @@ mod tests {
                 }
             })
         });
-        // Build a driver with two sessions in the same sessions_dir, each with
-        // a different cwd, so we can test cwd-scoped invalidation.
-        let dir = tempfile::tempdir().expect("tempdir");
-        let sessions_dir = dir.path().join("sessions");
-        write_session_json(&sessions_dir, "s1", "/repo/a");
-        write_session_json(&sessions_dir, "s2", "/repo/b");
-        let mut inner = inner_with_order(vec!["s1".into(), "s2".into()], 64);
-        inner.sessions_dir = sessions_dir;
-        inner.bin_path = "polytoken-test".into();
-        inner.command_runner = runner;
-        inner.warm.write().insert("s1".into(), warm_for("s1"));
-        inner.warm.write().insert("s2".into(), warm_for("s2"));
-        let driver = PolytokenDriver {
-            inner: Arc::new(inner),
-        };
+        let (driver, _dir) = driver_with_two_sessions(runner);
 
         // Populate both cwds.
-        let _ = driver.list_commands(Some("s1".into())).await;
-        let _ = driver.list_facets(Some("s1".into())).await;
-        let _ = driver.list_commands(Some("s2".into())).await;
-        let _ = driver.list_facets(Some("s2".into())).await;
-
-        let initial_calls = calls.lock().len();
-        assert!(initial_calls > 0, "should have made subprocess calls");
+        for sid in ["s1", "s2"] {
+            let _ = driver.list_commands(Some(sid.into())).await;
+            let _ = driver.list_facets(Some(sid.into())).await;
+        }
+        assert!(
+            !calls.lock().is_empty(),
+            "should have made subprocess calls"
+        );
 
         // Invalidate only /repo/a.
         driver.inner.invalidate_cwd_config_caches("/repo/a");
 
         // /repo/a should re-run; /repo/b should hit cache.
         calls.lock().clear();
-        let _ = driver.list_commands(Some("s1".into())).await;
-        let _ = driver.list_facets(Some("s1".into())).await;
-        let _ = driver.list_commands(Some("s2".into())).await;
-        let _ = driver.list_facets(Some("s2".into())).await;
-
-        let after_calls = calls.lock();
-        // /repo/a commands + facets should have re-run (at least 2 calls).
+        for sid in ["s1", "s2"] {
+            let _ = driver.list_commands(Some(sid.into())).await;
+            let _ = driver.list_facets(Some(sid.into())).await;
+        }
+        let after = calls.lock();
         assert!(
-            after_calls.len() >= 2,
+            after.len() >= 2,
             "invalidated cwd should re-run, got {} calls",
-            after_calls.len()
+            after.len()
         );
-        // All re-run calls should be for /repo/a (cwd of s1).
         assert!(
-            after_calls
+            after
                 .iter()
                 .all(|(_, cwd)| cwd.as_deref() == Some("/repo/a")),
-            "only /repo/a should re-run, but got: {after_calls:?}"
+            "only /repo/a should re-run, but got: {after:?}"
         );
     }
 
     #[tokio::test]
     async fn global_invalidation_clears_all_cwd_scoped_caches() {
         let calls = Arc::new(Mutex::new(Vec::<(Vec<String>, Option<String>)>::new()));
-        let calls_clone = calls.clone();
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, args, cwd| {
-            calls_clone.lock().push((args.clone(), cwd.clone()));
+        let cc = calls.clone();
+        let runner: Arc<CommandRunner> = Arc::new(move |_p, args, cwd| {
+            cc.lock().push((args.clone(), cwd.clone()));
             Box::pin(async move {
                 if args.iter().any(|a| a == "ls") {
                     Ok(ok_output("execute.md\n"))
@@ -4888,38 +4765,23 @@ mod tests {
                 }
             })
         });
-        // Build a driver with two sessions in the same sessions_dir.
-        let dir = tempfile::tempdir().expect("tempdir");
-        let sessions_dir = dir.path().join("sessions");
-        write_session_json(&sessions_dir, "s1", "/repo/a");
-        write_session_json(&sessions_dir, "s2", "/repo/b");
-        let mut inner = inner_with_order(vec!["s1".into(), "s2".into()], 64);
-        inner.sessions_dir = sessions_dir;
-        inner.bin_path = "polytoken-test".into();
-        inner.command_runner = runner;
-        inner.warm.write().insert("s1".into(), warm_for("s1"));
-        inner.warm.write().insert("s2".into(), warm_for("s2"));
-        let driver = PolytokenDriver {
-            inner: Arc::new(inner),
-        };
+        let (driver, _dir) = driver_with_two_sessions(runner);
 
         // Populate both cwds.
         let _ = driver.list_commands(Some("s1".into())).await;
         let _ = driver.list_commands(Some("s2".into())).await;
 
-        // Global invalidation.
         driver.inner.invalidate_all_config_caches();
 
-        // Both cwds should re-run.
         calls.lock().clear();
         let _ = driver.list_commands(Some("s1".into())).await;
         let _ = driver.list_commands(Some("s2".into())).await;
 
-        let after_calls = calls.lock();
+        let after = calls.lock();
         assert!(
-            after_calls.len() >= 2,
+            after.len() >= 2,
             "both cwds should re-run after global invalidation, got {} calls",
-            after_calls.len()
+            after.len()
         );
     }
 
@@ -4929,90 +4791,59 @@ mod tests {
         let driver = PolytokenDriver::new_with_login_env(
             dir.path().to_path_buf(),
             "polytoken".into(),
-            true, // is_fake = true
+            true,
             64,
             None,
         )
         .await;
-
-        assert!(
-            matches!(
-                driver.inner.watch_status(),
-                config_watcher::WatchStatus::Disabled
-            ),
-            "fake mode should have Disabled watcher status"
-        );
-        assert!(
-            driver.inner.watcher_handle.lock().is_none(),
-            "fake mode should not have a watcher handle"
-        );
+        assert!(matches!(
+            driver.inner.watch_status(),
+            config_watcher::WatchStatus::Disabled
+        ));
+        assert!(driver.inner.watcher_handle.lock().is_none());
     }
 
     #[tokio::test]
     async fn test_constructor_does_not_start_watcher() {
+        // new_with_login_env never starts the watcher, even if is_fake is false.
         let dir = tempfile::tempdir().expect("tempdir");
         let driver = PolytokenDriver::new_with_login_env(
             dir.path().to_path_buf(),
             "polytoken".into(),
-            false, // not fake, but test constructor doesn't start watcher
+            false,
             64,
             None,
         )
         .await;
-
-        // The test constructor (new_with_login_env) never starts the watcher,
-        // even if is_fake is false. Only new_with_fake_control starts it.
-        assert!(
-            matches!(
-                driver.inner.watch_status(),
-                config_watcher::WatchStatus::Disabled
-            ),
-            "test constructor should have Disabled watcher status"
-        );
+        assert!(matches!(
+            driver.inner.watch_status(),
+            config_watcher::WatchStatus::Disabled
+        ));
     }
 
     #[tokio::test]
     async fn watch_setup_failure_records_status_and_driver_still_lists() {
-        // Use the config_watcher module directly with an unwatchable path.
         let called = Arc::new(Mutex::new(false));
-        let called_clone = called.clone();
+        let cc = called.clone();
         let invalidation: config_watcher::InvalidationCallback = Arc::new(move |_| {
-            *called_clone.lock() = true;
+            *cc.lock() = true;
         });
-
         let bad_path = PathBuf::from("/nonexistent-root-xyz-12345/polytoken");
         let (handle, status) = config_watcher::setup_watcher(
             vec![config_watcher::WatchedPath::Binary(bad_path)],
             invalidation,
             true,
         );
-
-        // The status should reflect the failure (Failed or PartialFailure).
-        // On some platforms the watch may succeed deferred, so we accept Ok too,
-        // but the key invariant is: no crash, and the status is inspectable.
-        match &status {
-            config_watcher::WatchStatus::Failed { .. } => {
-                assert!(handle.is_none(), "failed watcher should have no handle");
-            }
-            config_watcher::WatchStatus::PartialFailure { .. } => {
-                // Acceptable — some paths failed but others may have succeeded.
-            }
-            config_watcher::WatchStatus::Ok { .. } => {
-                // On some platforms, watching a nonexistent parent might
-                // succeed (deferred). That's acceptable.
-            }
-            config_watcher::WatchStatus::Disabled => {
-                // Shouldn't happen when paths were provided, but if the
-                // watcher returned no watched paths, it's effectively disabled.
-            }
+        // No crash; status is inspectable. Failed → no handle; other variants
+        // (PartialFailure/Ok/Disabled) are platform-dependent and acceptable.
+        if matches!(status, config_watcher::WatchStatus::Failed { .. }) {
+            assert!(handle.is_none(), "failed watcher should have no handle");
         }
 
-        // The driver should still work through the injected command runner
-        // regardless of watcher status.
         let calls = Arc::new(Mutex::new(0));
-        let calls_clone = calls.clone();
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
-            *calls_clone.lock() += 1;
+        let cc = calls.clone();
+        let runner: Arc<CommandRunner> = Arc::new(move |_p, _a, _c| {
+            *cc.lock() += 1;
             Box::pin(async {
                 Ok(ok_output(
                     "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n",
@@ -5020,7 +4851,6 @@ mod tests {
             })
         });
         let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
-
         let models = driver.list_models().await;
         assert_eq!(
             models.len(),
@@ -5030,19 +4860,18 @@ mod tests {
         assert_eq!(*calls.lock(), 1);
     }
 
-    // ---- Thundering herd: concurrent model cache miss shares one subprocess ----
+    // ---- thundering herd: concurrent model cache miss ----
 
     #[tokio::test]
     async fn concurrent_model_cache_miss_shares_one_subprocess() {
-        // N concurrent callers on a cold cache should share one subprocess
-        // invocation (single-flight deduplication via model_cache_lock).
+        // N concurrent callers on a cold cache share one subprocess invocation
+        // (single-flight deduplication via model_cache_lock).
         let calls = Arc::new(Mutex::new(0));
-        let calls_clone = calls.clone();
-        let runner: Arc<CommandRunner> = Arc::new(move |_program, _args, _cwd| {
-            *calls_clone.lock() += 1;
+        let cc = calls.clone();
+        let runner: Arc<CommandRunner> = Arc::new(move |_p, _a, _c| {
+            *cc.lock() += 1;
             Box::pin(async {
-                // Simulate a slow subprocess so concurrent callers overlap.
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await; // slow → overlap
                 Ok(ok_output(
                     "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n",
                 ))
@@ -5050,7 +4879,6 @@ mod tests {
         });
         let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
 
-        // Fire N concurrent list_models calls on a cold cache.
         let n = 8;
         let mut handles = Vec::new();
         for _ in 0..n {
@@ -5060,35 +4888,22 @@ mod tests {
             }));
         }
         for h in handles {
-            let models = h.await.expect("task panicked");
-            assert_eq!(models.len(), 1, "each caller should get the model list");
+            assert_eq!(h.await.expect("task panicked").len(), 1);
         }
-
-        // Only one subprocess should have run.
         assert_eq!(
             *calls.lock(),
             1,
-            "concurrent cache miss should share one subprocess (single-flight)"
+            "concurrent cache miss should share one subprocess"
         );
     }
+    // ---- fail-fast: restoring a session whose cwd no longer exists ----
 
-    // ---- docs/TODO.md open bug: restoring a session whose cwd no longer
-    // exists must fail fast, with a clear message, and must not be retried ----
-
-    /// Serializes `SPAWN_OVERRIDE` use within this test binary (it's
-    /// process-global — see `daemon_client::set_spawn_override`'s doc comment).
-    /// Three tests below install `PanicIfSpawnedGuard`; each takes this lock
-    /// first (held across the whole test body, hence a `tokio::sync::Mutex`,
-    /// not `parking_lot`) so they can't race each other's install/clear.
-    /// Mirrors `tests/live_path.rs`'s `OVERRIDE_MUTEX`.
+    /// Serializes `SPAWN_OVERRIDE` (process-global) across tests that install
+    /// `PanicIfSpawnedGuard`. Mirrors `tests/live_path.rs`'s `OVERRIDE_MUTEX`.
     static OVERRIDE_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-    /// Installs a spawn override that panics if it's ever invoked, proving a
-    /// code path never reaches the spawn seam. Clears itself on drop
-    /// (panic-safe). Callers must hold `OVERRIDE_MUTEX` for the guard's whole
-    /// lifetime — `SPAWN_OVERRIDE` is process-global and `fake_daemon.rs`/
-    /// `hub.rs`'s tests use `MockDriver` (never `PolytokenDriver`), so this
-    /// binary is the only contender, but multiple tests here now use it.
+    /// Installs a spawn override that panics if invoked, proving a code path
+    /// never reaches the spawn seam. Clears itself on drop (panic-safe).
     struct PanicIfSpawnedGuard;
     impl PanicIfSpawnedGuard {
         fn install() -> Self {
@@ -5096,8 +4911,7 @@ mod tests {
                 |_bin: &str, _opts: SpawnDaemonOpts| {
                     Box::pin(async {
                         panic!(
-                            "spawn_daemon must not be called when the session cwd is missing \
-                             — open_session should fail fast before ever reaching this seam"
+                            "spawn_daemon must not be called — open_session should fail fast before reaching this seam"
                         )
                     })
                 },
@@ -5111,12 +4925,7 @@ mod tests {
         }
     }
 
-    /// The concrete case from docs/TODO.md: "trying to restore a session that
-    /// was run in a directory that no longer exists can't ever succeed."
-    /// Arrange a registry entry (`session.json`) pointing at a temp dir, then
-    /// delete that dir — mirrors a session whose project was moved/deleted
-    /// after the session ran. No `startup.json` is written, so this is a
-    /// genuinely cold session (nothing to attach to).
+    /// Restoring a session whose cwd no longer exists must fail fast (no spawn).
     #[tokio::test]
     async fn open_session_fails_fast_when_project_dir_is_gone() {
         let _lock = OVERRIDE_MUTEX.lock().await;
@@ -5132,9 +4941,8 @@ mod tests {
         std::fs::remove_dir_all(&project_dir).expect("delete project dir");
         assert!(
             !project_dir.exists(),
-            "precondition: the project dir must actually be gone"
+            "precondition: project dir must be gone"
         );
-
         let mut inner = inner_with_order(vec![], 64);
         inner.sessions_dir = sessions_dir.clone();
         inner.bin_path = "polytoken-must-not-run".into();
@@ -5142,8 +4950,7 @@ mod tests {
             inner: Arc::new(inner),
         };
 
-        // Prove open_session never attempts a spawn: this panics if reached.
-        let _guard = PanicIfSpawnedGuard::install();
+        let _guard = PanicIfSpawnedGuard::install(); // panics if open_session spawns
 
         let path = sessions_dir
             .join("sess-gone")
@@ -5154,34 +4961,24 @@ mod tests {
             driver.open_session(path).await
         })
         .await
-        .expect(
-            "open_session must return promptly on a missing cwd, not hang through \
-             startup/health polling",
-        );
-
-        let err = result.expect_err(
-            "opening a session whose cwd no longer exists must fail, not silently \
-             return an empty seed (the prior 'session switch returned no session' bug)",
-        );
+        .expect("open_session must return promptly, not hang");
+        let err = result.expect_err("must fail, not silently return an empty seed");
         assert!(
             err.contains(project_dir.to_str().unwrap()),
-            "error should name the missing directory, got: {err}"
+            "error should name the missing dir, got: {err}"
         );
         assert_eq!(
             RestoreErrorClass::classify(&err),
             RestoreErrorClass::MissingCwd,
-            "the error should classify as permanent (MissingCwd), got: {err}"
+            "got: {err}"
         );
         assert!(
             RestoreErrorClass::classify(&err).is_permanent(),
-            "a deleted project directory must classify as permanent — retrying can't help"
+            "deleted cwd must be permanent"
         );
     }
 
-    /// A stale `startup.json` (from a since-dead daemon) must not change the
-    /// outcome: attach is attempted and fails (nothing listens on that port),
-    /// and the cold-start fallback must still fail fast on the missing cwd
-    /// rather than attempting a spawn.
+    /// A stale `startup.json` (dead daemon) must not change the fail-fast outcome.
     #[tokio::test]
     async fn open_session_fails_fast_when_project_dir_is_gone_even_with_stale_startup_json() {
         let _lock = OVERRIDE_MUTEX.lock().await;
@@ -5194,20 +4991,14 @@ mod tests {
             "sess-gone-2",
             project_dir.to_str().expect("utf8 path"),
         );
-        // A stale startup.json pointing at a port nothing listens on (a prior
-        // daemon that has since died) — attach must fail and fall through.
+        // Stale startup.json pointing at a dead port — attach fails, falls through.
         std::fs::write(
             sessions_dir.join("sess-gone-2").join("startup.json"),
-            serde_json::json!({
-                "state": "ready",
-                "pid": 999_999_999u64,
-                "port": 1u16,
-            })
-            .to_string(),
+            serde_json::json!({ "state": "ready", "pid": 999_999_999u64, "port": 1u16 })
+                .to_string(),
         )
         .expect("write startup.json");
         std::fs::remove_dir_all(&project_dir).expect("delete project dir");
-
         let mut inner = inner_with_order(vec![], 64);
         inner.sessions_dir = sessions_dir.clone();
         inner.bin_path = "polytoken-must-not-run".into();
@@ -5227,34 +5018,20 @@ mod tests {
         })
         .await
         .expect("open_session must return promptly, not hang");
-
         let err = result.expect_err("must fail, not silently return an empty seed");
         assert!(
             err.contains(project_dir.to_str().unwrap()),
-            "error should name the missing directory even after a failed attach, got: {err}"
+            "error should name the missing dir, got: {err}"
         );
     }
 
-    /// The general half of the fix, independent of the missing-cwd case:
-    /// ANY cold-start spawn failure must propagate as `Err`, not silently
-    /// degrade to `Ok(Vec::new())`. Before this fix, `open_session` logged the
-    /// spawn failure at `warn!` but still returned an empty seed, so the
-    /// client only ever saw the generic "session switch returned no session"
-    /// banner — never the real reason. Here the cwd genuinely exists (so the
-    /// new fail-fast check does NOT fire); the failure is a real spawn error
-    /// (no such binary on PATH, no override installed) — a different, more
-    /// mundane error class than `MissingCwd`, exercising the propagation path
-    /// generally rather than the specific permanent-classification path.
+    /// A cold-start spawn failure must propagate as Err, not silently degrade.
     #[tokio::test]
     async fn open_session_propagates_cold_start_spawn_errors_instead_of_swallowing_them() {
-        // Reads the process-global spawn seam (relies on NO override being
-        // installed), so it must serialize against the PanicIfSpawnedGuard
-        // tests even though it installs nothing itself.
         let _lock = OVERRIDE_MUTEX.lock().await;
         let dir = tempfile::tempdir().expect("tempdir");
         let sessions_dir = dir.path().join("sessions");
-        // A REAL, existing project dir — the fail-fast cwd check must not
-        // fire here; the failure below must come from the spawn itself.
+        // Real project dir — fail-fast cwd check must NOT fire; failure comes from spawn.
         let project_dir = dir.path().join("real-project");
         std::fs::create_dir_all(&project_dir).expect("mkdir project");
         write_session_json(
@@ -5265,9 +5042,7 @@ mod tests {
 
         let mut inner = inner_with_order(vec![], 64);
         inner.sessions_dir = sessions_dir.clone();
-        // No spawn override installed, and this binary does not exist on
-        // PATH — `Command::spawn()` fails immediately (ENOENT), giving a
-        // real (not fail-fast-shortcut) spawn error to propagate.
+        // Binary doesn't exist on PATH → spawn fails immediately (ENOENT).
         inner.bin_path = "polytoken-definitely-does-not-exist-on-this-machine".into();
         let driver = PolytokenDriver {
             inner: Arc::new(inner),
@@ -5282,35 +5057,22 @@ mod tests {
             driver.open_session(path).await
         })
         .await
-        .expect("open_session must return promptly on a spawn failure, not hang");
-
-        let err = result.expect_err(
-            "a cold-start spawn failure must propagate as Err, not silently degrade to an \
-             empty seed (the prior 'session switch returned no session' bug)",
-        );
+        .expect("open_session must return promptly, not hang");
+        let err =
+            result.expect_err("spawn failure must propagate as Err, not degrade to empty seed");
         assert!(
             err.contains("failed to spawn polytoken daemon"),
-            "error should be the real spawn failure, not a generic fallback: {err}"
+            "got: {err}"
         );
-        // This is NOT the missing-cwd case (the project dir is real) — a
-        // plain spawn failure like this is treated as non-permanent (benefit
-        // of the doubt: could be a transient OS resource issue), unlike a
-        // deleted project directory.
+        // Not the missing-cwd case — a plain spawn failure is non-permanent.
         assert!(
             !RestoreErrorClass::classify(&err).is_permanent(),
-            "a generic spawn failure should not be classified permanent: {err}"
+            "spawn failure should not be permanent: {err}"
         );
     }
 
-    // ---- docs/TODO.md open bugs: rename doesn't work / renaming a cold
-    // session hijacks activeSessionId (and spawns a daemon) ----
-
-    /// Bug 2 (cold-session rename): renaming a session with no warm daemon
-    /// must NOT spawn one (that would also hijack focus/activeSessionId via
-    /// `open_session`'s cold path — out of scope for `rename_session` to ever
-    /// reach). Reuses the same panic-if-spawned proof as the open_session
-    /// fail-fast tests above, now serialized behind `OVERRIDE_MUTEX` since
-    /// this is a second consumer of the process-global spawn override.
+    // ---- rename doesn't work / renaming a cold session hijacks activeSessionId ----
+    /// Renaming a cold session must NOT spawn a daemon or hijack activeSessionId.
     #[tokio::test]
     async fn rename_session_cold_persists_overridden_title_without_spawning_or_warming() {
         let _lock = OVERRIDE_MUTEX.lock().await;
@@ -5325,8 +5087,7 @@ mod tests {
             inner: Arc::new(inner),
         };
 
-        // Prove rename_session never attempts a spawn for a cold session.
-        let _guard = PanicIfSpawnedGuard::install();
+        let _guard = PanicIfSpawnedGuard::install(); // panics if rename_session spawns
 
         let path = sessions_dir
             .join("cold-1")
@@ -5337,30 +5098,19 @@ mod tests {
             .rename_session(path, "Renamed While Cold".to_string())
             .await;
 
-        // No warm session was created as a side effect (the structural half of
-        // "doesn't hijack activeSessionId": nothing here ever calls
-        // `open_session`/`focus`, which is what a client-visible focus switch
-        // would require).
+        // No warm session created (doesn't hijack activeSessionId).
         assert!(
             driver.inner.get_warm(&"cold-1".to_string()).is_none(),
-            "a cold rename must not warm the session"
+            "cold rename must not warm"
         );
-
-        // Bug 1 (persistence): the new title is visible via list_sessions()...
+        // Title is visible via list_sessions() and persists across a restart.
         let sessions = driver.list_sessions().await;
         let entry = sessions
             .iter()
             .find(|s| s.session_id == "cold-1")
-            .expect("cold-1 should still be listed");
-        assert_eq!(
-            entry.display_name.as_deref(),
-            Some("Renamed While Cold"),
-            "the renamed title should be the cold session's display name"
-        );
+            .expect("cold-1 should be listed");
+        assert_eq!(entry.display_name.as_deref(), Some("Renamed While Cold"));
 
-        // ...and it's read straight off disk, not some in-memory shortcut: a
-        // FRESH driver instance (simulating a pantoken-server restart) over the
-        // same sessions_dir must see the same title.
         let mut restarted_inner = inner_with_order(vec![], 64);
         restarted_inner.sessions_dir = sessions_dir.clone();
         restarted_inner.bin_path = "polytoken-must-not-run".into();
@@ -5371,18 +5121,14 @@ mod tests {
         let entry_after_restart = sessions_after_restart
             .iter()
             .find(|s| s.session_id == "cold-1")
-            .expect("cold-1 should survive a fresh driver instance");
+            .expect("cold-1 should survive a restart");
         assert_eq!(
             entry_after_restart.display_name.as_deref(),
-            Some("Renamed While Cold"),
-            "the rename must survive a pantoken-server restart (a fresh driver \
-             reading the same on-disk sessions_dir)"
+            Some("Renamed While Cold")
         );
     }
 
-    /// A cold rename with an unresolvable path (not a `.../<id>/session.json`
-    /// shape) must degrade quietly — no panic, no spawn — mirroring how
-    /// `open_session` treats the same unresolvable-path case.
+    /// A cold rename with an unresolvable path must degrade quietly (no panic/spawn).
     #[tokio::test]
     async fn rename_session_with_unresolvable_path_is_a_quiet_no_op() {
         let _lock = OVERRIDE_MUTEX.lock().await;
@@ -5400,14 +5146,10 @@ mod tests {
                 "New Name".to_string(),
             )
             .await;
-        // No assertion beyond "didn't panic" — this proves the not-found path
-        // degrades quietly rather than e.g. unwrapping None.
+        // No assertion beyond "didn't panic" — proves the not-found path degrades quietly.
     }
 
-    /// A minimal `SessionStateSnapshot` with every field at its quietest
-    /// default except `available_skills`/`available_subagents`, which the
-    /// caller overrides. Mirrors `event_map::tests::base_state` (private to
-    /// that module, hence duplicated here rather than imported).
+    /// Minimal `SessionStateSnapshot` with only `available_skills`/`available_subagents` set.
     fn state_with_at_refs(
         skills: Option<Vec<String>>,
         subagents: Option<Vec<String>>,
@@ -5441,8 +5183,7 @@ mod tests {
         }
     }
 
-    /// No snapshot at all (never fetched, or the fetch failed) → empty `AtRefs`,
-    /// not an error — the composer's `@`-menu just shows no skill/subagent rows.
+    /// No snapshot → empty `AtRefs`.
     #[test]
     fn at_refs_from_snapshot_no_state_is_empty() {
         let refs = at_refs_from_snapshot(None);
@@ -5450,8 +5191,7 @@ mod tests {
         assert!(refs.subagents.is_empty());
     }
 
-    /// The daemon reporting `None` for either field (older daemon, or a facet
-    /// with nothing configured) maps to an empty vec, same as no snapshot.
+    /// `None` fields map to empty vecs, same as no snapshot.
     #[test]
     fn at_refs_from_snapshot_none_fields_map_to_empty_vecs() {
         let state = state_with_at_refs(None, None);
@@ -5460,8 +5200,7 @@ mod tests {
         assert!(refs.subagents.is_empty());
     }
 
-    /// The normal case: the snapshot's `available_skills`/`available_subagents`
-    /// pass through verbatim into `AtRefs`.
+    /// Snapshot's `available_skills`/`available_subagents` pass through verbatim.
     #[test]
     fn at_refs_from_snapshot_maps_skills_and_subagents() {
         let state = state_with_at_refs(
@@ -5476,11 +5215,7 @@ mod tests {
         assert_eq!(refs.subagents, vec!["reviewer".to_string()]);
     }
 
-    /// Build a `WarmSession` whose cached `last_state` reports `project_cwd` —
-    /// the field `warm_cwd` reads first. This lets a unit test exercise the
-    /// active-session guard without a real daemon `/state` round-trip (the
-    /// fake-daemon scenario hardcodes `project_cwd: "/PROJECT"`, which never
-    /// matches a real worktree path).
+    /// Build a `WarmSession` whose cached `last_state` reports `project_cwd`.
     fn warm_with_project_cwd(session_id: &str, project_cwd: &str) -> Arc<WarmSession> {
         let ws = warm_for(session_id);
         *ws.last_state.write() = Some(SessionStateSnapshot {
@@ -5513,21 +5248,14 @@ mod tests {
         ws
     }
 
-    /// AC.6 (server guard): `cleanup_worktree(path, force=true)` returns
-    /// `removed: false` with reason "session is active" when the owning session
-    /// is warm, and the guard is wired as an early-return in `cleanup_worktree`
-    /// (not just the `warm_session_owns_cwd` predicate). This tests the full
-    /// guard path: a refactor that breaks the early-return would fail here even
-    /// if the predicate still works in isolation.
+    /// `cleanup_worktree(force=true)` refuses when the owning session is warm,
+    /// then reaps after dispose. Tests the full guard path, not just the predicate.
     #[tokio::test]
     async fn cleanup_worktree_refuses_active_session_then_reaps_after_dispose() {
         let worktree_path = "/repo/my-project-worktree";
         let session_id = "sess-active";
 
-        // Build a driver with a warm session whose cached `last_state.project_cwd`
-        // matches the worktree path — the signal `warm_session_owns_cwd` reads.
-        // (The fake-daemon scenario hardcodes `project_cwd: "/PROJECT"`, which is
-        // why we install the warm session directly rather than via new_session.)
+        // Warm session whose cached `last_state.project_cwd` matches the worktree path.
         let dir = tempfile::tempdir().expect("tempdir");
         let sessions_dir = dir.path().join("sessions");
         write_session_json(&sessions_dir, session_id, worktree_path);
@@ -5541,41 +5269,28 @@ mod tests {
             inner: Arc::new(inner),
         };
 
-        // Guard fires: the owning session is warm, so cleanup_worktree refuses
-        // to force-reap — returns early with "session is active", never reaching
-        // reap_worktree (no worktree is registered in the store, which would
-        // otherwise return "no pantoken worktree at this path").
+        // Guard fires: owning session is warm → refuse to force-reap.
         let result = driver
             .cleanup_worktree(worktree_path.to_string(), true)
             .await;
         assert!(
             !result.removed,
-            "cleanup_worktree should refuse to reap an active session's worktree"
+            "should refuse to reap an active session's worktree"
         );
-        assert_eq!(
-            result.reason.as_deref(),
-            Some("session is active"),
-            "the refusal reason should indicate the session is active"
-        );
+        assert_eq!(result.reason.as_deref(), Some("session is active"));
 
-        // Dispose the warm session (simulate going idle). Now the guard no
-        // longer fires — cleanup_worktree proceeds to reap_worktree, which
-        // finds no registered worktree and returns "no pantoken worktree at
-        // this path" (distinct from the guard's "session is active" reason,
-        // proving the guard was the early-return path, not reap_worktree).
+        // Dispose the warm session → guard no longer fires → reap_worktree runs.
         driver.inner.warm.write().remove(session_id);
         let result2 = driver
             .cleanup_worktree(worktree_path.to_string(), true)
             .await;
         assert!(
             !result2.removed,
-            "no worktree is registered, so reap should report none"
+            "no worktree registered, so reap reports none"
         );
         assert_eq!(
             result2.reason.as_deref(),
-            Some("no pantoken worktree at this path"),
-            "after dispose, the guard should not fire — reap_worktree runs and \
-             reports no registered worktree (distinct from the guard's reason)"
+            Some("no pantoken worktree at this path")
         );
     }
 }
