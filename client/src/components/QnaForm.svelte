@@ -2,7 +2,6 @@
   export interface QnaDraftAnswer {
     selectedOptionIndices: number[];
     customText: string;
-    customSelected: boolean;
   }
 
   export interface QnaDraft {
@@ -62,7 +61,6 @@
       return request.questions.map((_, i) => ({
         selectedOptionIndices: [...(saved?.[i]?.selectedOptionIndices ?? [])],
         customText: saved?.[i]?.customText ?? "",
-        customSelected: saved?.[i]?.customSelected ?? false,
       }));
     }),
   );
@@ -75,7 +73,23 @@
     ),
   );
   let root: HTMLDivElement | undefined = $state();
-  let customInput: HTMLInputElement | undefined = $state();
+  let customField: HTMLTextAreaElement | undefined = $state();
+
+  // Auto-grow: mirror the Composer pattern. Cap ~5 lines, grow a little with
+  // the window, floor 60px so a scrollbar never shows below that.
+  let winH = $state(typeof window !== "undefined" ? window.innerHeight : 800);
+  const maxFieldH = $derived(Math.max(60, Math.min(winH * 0.2, 140)));
+
+  function autosize(el: HTMLTextAreaElement | undefined) {
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, maxFieldH)}px`;
+  }
+
+  // "editing" walks the question cards; "summary" shows a review page before the
+  // no-undo submit. Advancing from the last question → summary; advancing from
+  // summary → submit.
+  let phase: "editing" | "summary" = $state("editing");
 
   // current is always kept in [0, total) and answers has one slot per question,
   // so these indexed reads are present — assert past noUncheckedIndexedAccess.
@@ -89,15 +103,9 @@
 
   function isAnswered(i: number): boolean {
     const ans = answers[i]!;
-    const question = questions[i]!;
-    const singleSelect =
-      Array.isArray(question.options) &&
-      question.options.length > 0 &&
-      !question.multiSelect;
     return (
       ans.selectedOptionIndices.length > 0 ||
-      ((!singleSelect || ans.customSelected) &&
-        ans.customText.trim().length > 0)
+      ans.customText.trim().length > 0
     );
   }
   const answeredCount = $derived(answers.filter((_, i) => isAnswered(i)).length);
@@ -108,20 +116,14 @@
       answers: answers.map((x) => ({
         selectedOptionIndices: [...x.selectedOptionIndices],
         customText: x.customText,
-        customSelected: x.customSelected,
       })),
     });
   }
 
   function pickSingle(j: number) {
-    // Preserve the typed alternative as a draft when a preset wins. Submit sanitizes
-    // the inactive text so the extension still receives exactly one single-select answer.
-    answers[current] = {
-      ...a,
-      selectedOptionIndices: [j],
-      customSelected: false,
-    };
+    answers[current] = { ...a, selectedOptionIndices: [j] };
     draftChanged();
+    root?.focus();
   }
   function toggleMulti(j: number) {
     const set = new Set(a.selectedOptionIndices);
@@ -132,39 +134,29 @@
       selectedOptionIndices: [...set].sort((x, y) => x - y),
     };
     draftChanged();
-  }
-  function chooseCustom(focus = true) {
-    answers[current] = {
-      ...a,
-      selectedOptionIndices: [],
-      customSelected: true,
-    };
-    draftChanged();
-    if (focus) customInput?.focus();
+    root?.focus();
   }
   function setCustom(text: string) {
-    // Typing activates the custom radio on single-select cards. Multi-select and
-    // free-text cards can carry custom text without an exclusive selection mode.
-    if (hasOptions && !isMulti) {
-      answers[current] = {
-        selectedOptionIndices: [],
-        customText: text,
-        customSelected: true,
-      };
-    } else {
-      answers[current] = { ...a, customText: text };
-    }
+    answers[current] = { ...a, customText: text };
     draftChanged();
   }
 
-  function next() {
+  function advance() {
+    if (phase === "summary") {
+      submit();
+      return;
+    }
     if (current < total - 1) {
       current += 1;
       draftChanged();
+    } else {
+      phase = "summary";
     }
   }
-  function prev() {
-    if (current > 0) {
+  function back() {
+    if (phase === "summary") {
+      phase = "editing";
+    } else if (current > 0) {
       current -= 1;
       draftChanged();
     }
@@ -172,26 +164,15 @@
   function goto(i: number) {
     current = i;
     draftChanged();
+    root?.focus();
   }
   function submit() {
     // Hand back plain data (not the $state proxy) for clean WS serialization.
     onsubmit(
-      answers.map((x, i) => {
-        const question = questions[i]!;
-        const singleSelect =
-          Array.isArray(question.options) &&
-          question.options.length > 0 &&
-          !question.multiSelect;
-        return {
-          selectedOptionIndices: [...x.selectedOptionIndices],
-          customText:
-            singleSelect &&
-            x.selectedOptionIndices.length > 0 &&
-            !x.customSelected
-              ? ""
-              : x.customText,
-        };
-      }),
+      answers.map((x) => ({
+        selectedOptionIndices: [...x.selectedOptionIndices],
+        customText: x.customText,
+      })),
     );
   }
 
@@ -201,22 +182,26 @@
       oncancel();
       return;
     }
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+    if (e.key === "Enter") {
+      // Shift+Enter → newline in a text field (let the browser handle it).
+      if (e.shiftKey) return;
+      // Enter on a focused button (radio/checkbox/dot/action) → let it activate.
+      const t = e.target as HTMLElement | null;
+      if (t?.tagName === "BUTTON") return;
       e.preventDefault();
-      submit();
+      advance();
       return;
     }
     // Arrow nav only when not typing — don't hijack cursor movement in a field.
     const t = e.target as HTMLElement | null;
-    const typing =
-      t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA");
+    const typing = t && t.tagName === "TEXTAREA";
     if (!typing) {
       if (e.key === "ArrowRight") {
         e.preventDefault();
-        next();
+        advance();
       } else if (e.key === "ArrowLeft") {
         e.preventDefault();
-        prev();
+        back();
       }
     }
   }
@@ -224,6 +209,31 @@
   // Focus the form on mount so Esc / arrows work before the first click.
   $effect(() => {
     root?.focus();
+  });
+
+  // Re-fit the textarea when its content changes or the cap moves (resize).
+  $effect(() => {
+    current;
+    a?.customText;
+    maxFieldH;
+    autosize(customField);
+  });
+
+  // Re-focus the container on any phase change so Enter works in both
+  // directions (entering summary unmounts the textarea → focus is lost;
+  // Back from summary also needs to land somewhere focusable).
+  $effect(() => {
+    phase;
+    root?.focus();
+  });
+
+  // Track window height so maxFieldH re-derives on resize.
+  $effect(() => {
+    const onResize = () => {
+      winH = window.innerHeight;
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
   });
 </script>
 
@@ -264,6 +274,43 @@
   </div>
 
   {#if !collapsed}
+  {#if phase === "summary"}
+    <div class="summary" transition:reveal>
+      <p class="summary-head">Review your answers</p>
+      {#each questions as question, i (i)}
+        {@const ans = answers[i]!}
+        <div class="summary-item">
+          <p class="summary-q">{question.question}</p>
+          {#if ans.selectedOptionIndices.length > 0}
+            <ul class="summary-opts">
+              {#each ans.selectedOptionIndices as idx (idx)}
+                <li>{question.options?.[idx]?.label ?? `Option ${idx + 1}`}</li>
+              {/each}
+            </ul>
+          {/if}
+          {#if ans.customText.trim()}
+            <p class="summary-text">{ans.customText}</p>
+          {:else if ans.selectedOptionIndices.length === 0}
+            <p class="summary-empty">(not answered)</p>
+          {/if}
+        </div>
+      {/each}
+    </div>
+    <div class="actions">
+      <Button
+        variant="secondary"
+        size="lg"
+        title="Back to editing (←)"
+        onclick={back}>Back</Button
+      >
+      <Button
+        variant="primary"
+        size="lg"
+        title="Confirm and send (Enter)"
+        onclick={submit}>Confirm</Button
+      >
+    </div>
+  {:else}
   <div class="card" transition:reveal>
     <p class="q">{q.question}</p>
     {#if q.context}<div class="ctx"><Markdown content={q.context} final /></div>{/if}
@@ -301,30 +348,32 @@
           </button>
         {/each}
         {#if !isMulti}
-          <input
+          <textarea
             class="field"
-            class:sel={a.customSelected}
-            bind:this={customInput}
+            rows="1"
+            bind:this={customField}
             placeholder="Something else…"
             value={a.customText}
-            onfocus={() => chooseCustom(false)}
             oninput={(e) => setCustom(e.currentTarget.value)}
-            title="Type a free-text answer instead of choosing an option"
-          />
+            title="Add a free-text answer alongside the chosen option"
+          ></textarea>
         {:else}
-          <input
+          <textarea
             class="field"
+            rows="1"
+            bind:this={customField}
             placeholder="Something else…"
             value={a.customText}
             oninput={(e) => setCustom(e.currentTarget.value)}
             title="Add a free-text answer alongside the selected options"
-          />
+          ></textarea>
         {/if}
       </div>
     {:else}
       <textarea
         class="field area"
-        rows="4"
+        rows="1"
+        bind:this={customField}
         placeholder="Type your answer…"
         value={a.customText}
         oninput={(e) => setCustom(e.currentTarget.value)}
@@ -364,7 +413,7 @@
         size="lg"
         title="Previous question (←)"
         disabled={current === 0}
-        onclick={prev}>Back</Button
+        onclick={back}>Back</Button
       >
     {/if}
     {#if current < total - 1}
@@ -372,17 +421,18 @@
         variant="primary"
         size="lg"
         title="Next question (→)"
-        onclick={next}>Next</Button
+        onclick={advance}>Next</Button
       >
     {:else}
       <Button
         variant="primary"
         size="lg"
-        title="Submit all answers (⌘/Ctrl+Enter)"
-        onclick={submit}>Submit</Button
+        title="Review answers (→)"
+        onclick={advance}>Review answers</Button
       >
     {/if}
   </div>
+  {/if}
   {/if}
 </div>
 
@@ -554,16 +604,14 @@
     color: var(--text);
     font-family: inherit;
     outline: none;
+    resize: none;        /* auto-grow handles height */
+    overflow-y: auto;     /* scroll internally once capped */
+    line-height: 1.5;
   }
   .field:focus {
     border-color: var(--accent);
   }
-  .field.sel {
-    border-color: var(--select-border);
-  }
   .field.area {
-    resize: vertical;
-    line-height: 1.5;
     flex-shrink: 0;
   }
   .dots {
@@ -599,6 +647,49 @@
   .actions :global(.btn) {
     flex: 1 1 0;
   }
+  .summary {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .summary-head {
+    font-size: 1em;
+    font-weight: 600;
+    margin: 0 0 12px;
+  }
+  .summary-item {
+    margin: 0 0 14px;
+  }
+  .summary-item:last-child {
+    margin-bottom: 0;
+  }
+  .summary-q {
+    font-size: 0.9333em;
+    font-weight: 550;
+    margin: 0 0 4px;
+    line-height: 1.4;
+  }
+  .summary-opts {
+    margin: 0 0 0 4px;
+    padding-left: 18px;
+  }
+  .summary-opts li {
+    line-height: 1.4;
+  }
+  .summary-text {
+    margin: 4px 0 0;
+    font-size: 0.8667em;
+    color: var(--text-muted);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .summary-empty {
+    margin: 4px 0 0;
+    font-size: 0.8667em;
+    color: var(--text-faint);
+    font-style: italic;
+  }
   @media (max-width: 859px) {
     .qna.full-screen { height: 100%; min-height: 0; }
     .full-screen .head { align-items: flex-start; margin-bottom: 12px; }
@@ -607,6 +698,7 @@
     .full-screen .min span { display: inline; }
     .full-screen .card { flex: 1; min-height: 0; max-height: none; overflow-y: auto; }
     .full-screen .ctx { flex: none; min-height: 0; overflow: visible; }
+    .full-screen .summary { overflow-y: auto; }
     .full-screen .dot { width: 44px; height: 44px; background: transparent; border: 0; position: relative; }
     .full-screen .dot::after { content: ""; position: absolute; width: 9px; height: 9px; border-radius: 99px; background: var(--surface-sunken); border: 1px solid var(--border-strong); inset: 50% auto auto 50%; transform: translate(-50%, -50%); }
     .full-screen .dot.done::after { background: color-mix(in srgb, var(--text) 35%, var(--surface-sunken)); }
