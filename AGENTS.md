@@ -70,6 +70,17 @@ gate** (`rust-server` job in `.github/workflows/ci.yml`: `cargo fmt --check` +
 `cargo clippy --locked --all-targets -- -D warnings` + `cargo test`); run
 `bun run check:rs` locally for the same three checks.
 
+**Implementing an issue — two paths:**
+- **CLI path** (out-of-session orchestration): `just implement-issue <issue-url>`
+  runs `scripts/implement-issue.ts`, which claims the issue, spawns a worktree,
+  boots a polytoken daemon, and opens a zellij tab.
+- **Pantoken path** (in-session): invoke `@skill:implement-issue <N>` from a
+  pantoken session. The skill runs `scripts/gh-issue-fetch.sh <N>` to fetch the
+  issue body + screenshots, then drives the clarify → plan → execute → review →
+  integrate workflow. A stop hook (`.polytoken/hooks/stop-check-integration.sh`)
+  fires on every stop and redirects to `just integrate-into-main <N>` if there
+  are unpushed commits above main.
+
 **Driver note:** the server defaults to the polytoken daemon driver. Set
 `PANTOKEN_DRIVER=mock` to use the deterministic mock instead — you want this for UI dev
 without a running daemon and for the dev-bar (`/?dev`). The e2e suite sets it

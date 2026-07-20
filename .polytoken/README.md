@@ -20,4 +20,7 @@ PANTOKEN_DRIVER=mock PANTOKEN_AUTO_PORT=1 bun run dev
 Then navigate the MCP browser to the preview URL. Do not point it at a
 production or live-daemon URL unless that is deliberate and authenticated.
 
-`.polytoken/hooks/` is ignored because hooks may be generated or machine-local.
+`.polytoken/hooks/` is tracked — committed hooks (like the implement-issue
+stop hook) live here. Machine-local or generated hooks should be gitignored
+individually. Runtime-only directories the daemon writes (`.polytoken/sessions/`,
+`.polytoken/cache/`, etc.) are gitignored.

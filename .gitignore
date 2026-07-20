@@ -18,12 +18,17 @@ server-rs/target/
 .pantoken-issue-context/
 grindbot-config.toml
 .grindbot
-.polytoken/hooks/
-.polytoken/hooks.json
+# Runtime-only polytoken artifacts the daemon writes; committed config
+# (hooks, skills, config.yaml, README.md) must stay trackable.
+.polytoken/sessions/
+.polytoken/cache/
+.polytoken/state/
+.polytoken/logs/
 .merge-lock
 .autopilot-session-id
 .autopilot-issue-number
 .autopilot-config-dir
 .autopilot-stop-redirects
+.implement-issue-number
+.implement-issue-stop-redirects
 .playwright-mcp/
-.polytoken/
