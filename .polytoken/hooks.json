@@ -1,0 +1,9 @@
+[
+  {
+    "name": "check-integration-before-stop",
+    "event": "stop",
+    "handler": {
+      "bash": "[ -f .implement-issue-number ] && exec .polytoken/hooks/stop-check-integration.sh; exit 0"
+    }
+  }
+]
