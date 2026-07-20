@@ -62,6 +62,11 @@ const MARKDOWN_SAMPLE: &str = "## Markdown showcase\n\nHere's **bold**, *italic*
 /// Plan handoff text (ported from fixtures.ts planHandoff()).
 const PLAN_HANDOFF_TEXT: &str = "# Plan: Add facet indicator + plan-handoff card\n\n## Goal\nStop discarding plan-mode data the daemon already streams. Render the plan\nmarkdown in the handoff card and show a facet badge in the header.\n\n## Steps\n1. Add a `plan` variant to `HostUiRequest` in the protocol.\n2. Thread `plan_text` through the server event-map.\n3. Render markdown + 3 buttons in `ApprovalLayer.svelte`.\n4. Add a facet badge to `StatusHeader.svelte`.\n\n## Code\n```ts\ncase \"plan_handoff\": {\n  const ph = ev.plan_handoff;\n  const labels = ph\n    ? [ph.action_labels.implement_new_context,\n       ph.action_labels.implement_current_context,\n       ph.action_labels.cancel]\n    : [\"Implement (new context)\", \"Implement (current context)\", \"Cancel\"];\n  pending.planHandoffLabels = labels;\n}\n```\n\n## Risks\n- `plan_text` can be several KB; the card caps height at ~50vh and scrolls.\n- The default-facet sentinel is `\"execute\"`; a different default would show the\n  badge spuriously.\n\nOnce approved, the chosen label round-trips to a `plan_handoff_answer` decision\nvia the reverse mapping in `ui-bridge.ts` (no change needed there).";
 
+/// Long context for the `qnatall` script — enough paragraphs to overflow the
+/// QnA form's `.ctx` scroll region at the desktop viewport so scroll position
+/// is observable and testable.
+const LONG_QNA_CONTEXT: &str = "This question carries a long context block so the context region overflows and becomes scrollable. Read through it before answering; the relevant detail is spread across several paragraphs.\n\n**Background.** The form renders one question at a time inside a shared card. The context region (`.ctx`) is the sole scroll container on desktop, capped by the surrounding flex layout. When the context is taller than the available height, a scrollbar appears and the user can scroll within it.\n\n**Why this matters.** Each question should start scrolled to the top. If the scroll position carries over from a previous question, the user lands mid-context and has to scroll back up to find the beginning. That is the bug this fixture exists to exercise.\n\n**What to check.** After advancing to the next question, the context should be at `scrollTop === 0`. After going back to a previous question, the same should hold — scrolling one question must not affect any other.\n\n**Layout details.** The card is a flex column: the question text is pinned at the top, the context region shrinks and scrolls, and the options stay pinned at the bottom. The context region's height is a fraction of the form height, which itself is capped at roughly 70vh of the viewport.\n\n**Paragraph five.** Lorem-style filler follows to guarantee overflow at the standard 850px desktop viewport used by the e2e suite. Each paragraph adds a few lines of height; with enough of them the cumulative height exceeds the region's client height and scrolling becomes possible.\n\n**Paragraph six.** The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.\n\n**Paragraph seven.** A second block of filler text to add more height. A second block of filler text to add more height. A second block of filler text to add more height. A second block of filler text to add more height.\n\n**Paragraph eight.** Yet more content to be certain the region overflows even on taller viewports. Yet more content to be certain the region overflows even on taller viewports. Yet more content to be certain the region overflows even on taller viewports.\n\n**Paragraph nine.** Final filler paragraph. Final filler paragraph. Final filler paragraph. Final filler paragraph. Final filler paragraph. Final filler paragraph. Final filler paragraph. Final filler paragraph.";
+
 /// Tiny deterministic PNGs (solid-color rectangles) for the images fixture.
 const MOCKUP_PNG_B64: &str = "iVBORw0KGgoAAAANSUhEUgAAAKAAAABkCAIAAACO1KzYAAABAUlEQVR4nO3RAQkAIBDAwE9pDFMazBQijIMLMNisfQib7wU8ZXCcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEGxxkcZ3CcwXEX9RS5koKflW4AAAAASUVORK5CYII=";
 const SHOT_PNG_B64: &str = "iVBORw0KGgoAAAANSUhEUgAAAHgAAABQCAIAAABd+SbeAAAAqElEQVR4nO3QAQkAIADAMFMaw5QGs4XCHTzA2dhr6kLj+cEngQbdCjToVqBBtwINuhVo0K1Ag24FGnQr0KBbgQbdCjToVqBBtwINuhVo0K1Ag24FGnQr0KBbgQbdCjToVqBBtwINuhVo0K1Ag24FGnQr0KBbgQbdCjToVqBBtwINuhVo0K1Ag24FGnQr0KBbgQbdCjToVqBBtwINuhVo0K1Ag24FGnSrA0Iub1g8jaYyAAAAAElFTkSuQmCC";
@@ -3324,6 +3329,43 @@ impl PantokenDriver for MockDriver {
                         },
                         QnaQuestion {
                             question: "Anything else I should know before starting?".into(),
+                            context: None,
+                            multi_select: None,
+                            options: None,
+                        },
+                    ],
+                    timeout_ms: None,
+                } } },
+            ],
+            // Like `qna` but with a long context on Q1/Q2 so the `.ctx` region
+            // overflows and scroll-independence between pages is testable.
+            "qnatall" => vec![
+                ScriptStep { wait_ms: 0, event: SessionDriverEvent::HostUiRequest { base: base(), request: HostUiRequest::Qna {
+                    request_id: "req-qna-tall-1".into(),
+                    title: Some("Scroll independence test".into()),
+                    questions: vec![
+                        QnaQuestion {
+                            question: "Pick the first option (long context)".into(),
+                            context: Some(LONG_QNA_CONTEXT.into()),
+                            multi_select: None,
+                            options: Some(vec![
+                                QnaQuestionOption { label: "Alpha".into(), description: None },
+                                QnaQuestionOption { label: "Beta".into(), description: None },
+                                QnaQuestionOption { label: "Gamma".into(), description: None },
+                            ]),
+                        },
+                        QnaQuestion {
+                            question: "Pick the second option (long context)".into(),
+                            context: Some(LONG_QNA_CONTEXT.into()),
+                            multi_select: None,
+                            options: Some(vec![
+                                QnaQuestionOption { label: "Delta".into(), description: None },
+                                QnaQuestionOption { label: "Epsilon".into(), description: None },
+                                QnaQuestionOption { label: "Zeta".into(), description: None },
+                            ]),
+                        },
+                        QnaQuestion {
+                            question: "Any final notes?".into(),
                             context: None,
                             multi_select: None,
                             options: None,

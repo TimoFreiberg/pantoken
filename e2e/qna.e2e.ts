@@ -433,3 +433,49 @@ test("qna form: summary page shows all answers", async ({ page }) => {
   await expect(qnaForm(page)).toBeHidden();
   await expect(page.getByText("Your answers")).toBeVisible();
 });
+
+test("qna form: scroll position is independent per page", async ({ page }) => {
+  await drive(page, "qnatall");
+  const form = qnaForm(page);
+  const ctx = form.locator(".ctx");
+
+  // Q1: scroll the context down.
+  await expect(ctx).toBeVisible();
+  await ctx.evaluate((el) => (el.scrollTop = el.scrollHeight));
+  // Verify it actually scrolled (context is tall enough to overflow).
+  const q1Scroll = await ctx.evaluate((el) => el.scrollTop);
+  expect(q1Scroll).toBeGreaterThan(100);
+
+  // Advance to Q2 — its context should start at the top. The scroll reset
+  // runs in a requestAnimationFrame inside QnaForm's $effect, so poll until
+  // it lands at 0 rather than reading it synchronously (which could race the
+  // rAF and observe the carried-over scroll from Q1).
+  await form.getByRole("button", { name: "Next" }).click();
+  await expect(
+    form.getByText("Pick the second option (long context)"),
+  ).toBeVisible();
+  await expect
+    .poll(async () => await ctx.evaluate((el) => el.scrollTop), {
+      timeout: 1000,
+      message: "Q2 context should start scrolled to top",
+    })
+    .toBe(0);
+
+  // Scroll Q2 down, go back to Q1 — Q1 should also start at the top
+  // (Q2's scroll must not have leaked into Q1).
+  await ctx.evaluate((el) => (el.scrollTop = el.scrollHeight));
+  // Verify Q2 actually scrolled (same long context as Q1).
+  const q2Scroll = await ctx.evaluate((el) => el.scrollTop);
+  expect(q2Scroll).toBeGreaterThan(100);
+
+  await form.getByRole("button", { name: "Back" }).click();
+  await expect(
+    form.getByText("Pick the first option (long context)"),
+  ).toBeVisible();
+  await expect
+    .poll(async () => await ctx.evaluate((el) => el.scrollTop), {
+      timeout: 1000,
+      message: "Q1 context should start scrolled to top after back-nav",
+    })
+    .toBe(0);
+});
