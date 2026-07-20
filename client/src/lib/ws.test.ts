@@ -24,6 +24,11 @@ describe("resolveWsUrl (pure)", () => {
     expect(resolveWsUrl(loc)).toBe("ws://localhost:9999/ws");
   });
 
+  test("?ws= IPv6 loopback [::1] override is accepted", () => {
+    const loc = { protocol: "http:", host: "127.0.0.1:8787", search: "?ws=ws://[::1]:9999/ws" };
+    expect(resolveWsUrl(loc)).toBe("ws://[::1]:9999/ws");
+  });
+
   test("?ws= off-loopback is REJECTED → falls back to default (security)", () => {
     const loc = { protocol: "http:", host: "127.0.0.1:8787", search: "?ws=ws://attacker.com/ws" };
     expect(resolveWsUrl(loc)).toBe("ws://127.0.0.1:8787/ws");

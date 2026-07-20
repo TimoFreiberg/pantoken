@@ -33,7 +33,7 @@
 use std::sync::Arc;
 
 use tauri::{AppHandle, Manager, State};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tokio_util::sync::CancellationToken;
 
 use crate::bridge::{Bridge, ConnectionStateSink, SshCommand, SshTransport, SystemSshTransport};
@@ -208,35 +208,27 @@ fn spawn_overlay_poller(app: AppHandle, connection: Arc<RemoteConnection>) {
             if last_label.as_deref() != Some(info.state.as_str()) {
                 last_label = Some(info.state.clone());
                 if info.failed {
-                    // Terminal failure: show Retry/Cancel dialog.
+                    // Terminal failure: show an OK dialog (no Retry — a full
+                    // reconnect re-runs connect_to_remote, which tears down
+                    // the session and is left as a manual tray step for
+                    // Phase 2). The user can reconnect via "Connect to Remote…"
+                    // in the tray after dismissing.
                     let body = format!(
-                        "{}\n\n{}",
+                        "{}\n\n{}\n\nReconnect via the tray menu.",
                         info.failure_label.as_deref().unwrap_or("Connection failed"),
                         info.failure_action.as_deref().unwrap_or_default(),
                     );
-                    let retry = app
+                    let _ = app
                         .dialog()
                         .message(body)
                         .title("Remote connection failed")
-                        .buttons(MessageDialogButtons::YesNo)
                         .kind(MessageDialogKind::Warning)
                         .blocking_show();
-                    if retry {
-                        // Retry: mark reconnecting (the browser's resume logic +
-                        // the bridge's fresh-proxy-per-connection handle it).
-                        // A full re-run of connect_to_remote is left as a
-                        // manual tray step for Phase 2.
-                        connection.on_state(ConnectionState::Reconnecting);
-                        if let Some(state) = app.try_state::<AppState>() {
-                            state.overlay.raise(&app, "Reconnecting…");
-                        }
-                    } else {
-                        // Cancel: disconnect.
-                        if let Some(state) = app.try_state::<AppState>() {
-                            let _ = disconnect_remote_impl(&app, &state);
-                        }
-                        return;
+                    // Disconnect + navigate back to the local hub.
+                    if let Some(state) = app.try_state::<AppState>() {
+                        let _ = disconnect_remote_impl(&app, &state);
                     }
+                    return;
                 } else if info.state == "Ready" {
                     // Ready: hide the overlay (the WebView is live now).
                     if let Some(state) = app.try_state::<AppState>() {

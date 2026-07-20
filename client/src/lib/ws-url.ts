@@ -26,7 +26,11 @@ export function resolveWsUrl(
     // protocol stream including auth tokens and prompt content.
     try {
       const parsed = new URL(wsOverride);
-      if (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost") {
+      if (
+        parsed.hostname === "127.0.0.1" ||
+        parsed.hostname === "localhost" ||
+        parsed.hostname === "[::1]"
+      ) {
         return wsOverride;
       }
     } catch {
