@@ -3,6 +3,7 @@ import {
   DRIFT_THRESHOLD,
   formatTrace,
   isPinnedDrift,
+  isUnpinnedDuringStreaming,
   nextDriftState,
   pushSample,
   type DriftSample,
@@ -57,6 +58,31 @@ describe("isPinnedDrift", () => {
     // race scroll-follow.ts guards) must NOT be classified as drift, or the self-heal would
     // fight normal follow and the notice would spam.
     expect(isPinnedDrift({ pinned: true, gap: 79 })).toBe(false);
+  });
+});
+
+describe("isUnpinnedDuringStreaming", () => {
+  test("!pinned && turnActive && gap > 0 → true (the false-un-pin suspect)", () => {
+    expect(isUnpinnedDuringStreaming({ pinned: false, turnActive: true, gap: 1 })).toBe(true);
+    expect(isUnpinnedDuringStreaming({ pinned: false, turnActive: true, gap: 300 })).toBe(true);
+  });
+
+  test("pinned === true → false (a pinned viewport is handled by isPinnedDrift, not this)", () => {
+    expect(
+      isUnpinnedDuringStreaming({ pinned: true, turnActive: true, gap: 1000 }),
+    ).toBe(false);
+  });
+
+  test("turnActive === false → false (no notice when idle + scrolled up)", () => {
+    expect(
+      isUnpinnedDuringStreaming({ pinned: false, turnActive: false, gap: 500 }),
+    ).toBe(false);
+  });
+
+  test("gap === 0 → false (at the bottom — nothing below the fold)", () => {
+    expect(
+      isUnpinnedDuringStreaming({ pinned: false, turnActive: true, gap: 0 }),
+    ).toBe(false);
   });
 });
 
@@ -201,5 +227,21 @@ describe("nextDriftState", () => {
       reported: false,
       shouldNotify: false,
     });
+  });
+
+  test("threshold 0 (un-pinned-during-streaming latch): fires on gap>0, re-arms at gap=0", () => {
+    // The un-pinned-during-streaming detector uses threshold 0: any gap>0 while un-pinned +
+    // streaming is a stranding episode. The latch must fire once, hold while the gap stays
+    // positive, and re-arm when the viewport returns to the bottom (gap=0) so the next
+    // episode fires again.
+    const T0 = 0;
+    let r = nextDriftState(false, 300, T0);
+    expect(r).toEqual({ reported: true, shouldNotify: true }); // first fire
+    r = nextDriftState(r.reported, 400, T0);
+    expect(r).toEqual({ reported: true, shouldNotify: false }); // held (no storm)
+    r = nextDriftState(r.reported, 0, T0);
+    expect(r).toEqual({ reported: false, shouldNotify: false }); // back at bottom → re-arm
+    r = nextDriftState(r.reported, 500, T0);
+    expect(r).toEqual({ reported: true, shouldNotify: true }); // new episode fires
   });
 });
