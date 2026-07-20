@@ -74,6 +74,9 @@
   );
   let root: HTMLDivElement | undefined = $state();
   let customField: HTMLTextAreaElement | undefined = $state();
+  let cardEl: HTMLDivElement | undefined = $state();
+  let ctxEl: HTMLDivElement | undefined = $state();
+  let summaryEl: HTMLDivElement | undefined = $state();
 
   // Auto-grow: mirror the Composer pattern. Cap ~5 lines, grow a little with
   // the window, floor 60px so a scrollbar never shows below that.
@@ -227,6 +230,23 @@
     root?.focus();
   });
 
+  // Reset scroll to top on every page change so each question starts at the top.
+  // Without this, the .ctx scroll position carries over between questions because
+  // Svelte reuses the same DOM element across reactive content updates.
+  $effect(() => {
+    current;
+    phase;
+    // Defer to the next animation frame so the new content (rendered through
+    // Markdown.svelte's MarkdownRender child component) has laid out before we
+    // reset scroll. queueMicrotask would fire before browser layout, making
+    // scrollTo(0, 0) a no-op if scrollHeight hasn't updated yet.
+    requestAnimationFrame(() => {
+      ctxEl?.scrollTo(0, 0);
+      summaryEl?.scrollTo(0, 0);
+      cardEl?.scrollTo(0, 0);
+    });
+  });
+
   // Track window height so maxFieldH re-derives on resize.
   $effect(() => {
     const onResize = () => {
@@ -275,7 +295,7 @@
 
   {#if !collapsed}
   {#if phase === "summary"}
-    <div class="summary" transition:reveal>
+    <div class="summary" bind:this={summaryEl} transition:reveal>
       <p class="summary-head">Review your answers</p>
       {#each questions as question, i (i)}
         {@const ans = answers[i]!}
@@ -311,9 +331,9 @@
       >
     </div>
   {:else}
-  <div class="card" transition:reveal>
+  <div class="card" bind:this={cardEl} transition:reveal>
     <p class="q">{q.question}</p>
-    {#if q.context}<div class="ctx"><Markdown content={q.context} final /></div>{/if}
+    {#if q.context}<div class="ctx" bind:this={ctxEl}><Markdown content={q.context} final /></div>{/if}
 
     {#if hasOptions}
       <div class="opts" role={isMulti ? "group" : "radiogroup"}>
