@@ -97,7 +97,7 @@ test("highlighting Plan while Execute is active does not expose or toggle handof
   await expect(panel).toBeFocused();
 });
 
-test("Right and Left set Plan handoff from the authoritative snapshot", async ({
+test("Right and Left toggle Plan handoff locally without a daemon request", async ({
   page,
 }) => {
   const badge = page.getByTestId("facet-badge");

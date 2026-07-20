@@ -13,9 +13,12 @@
   // inserted into the composer).
   //
   // Adventurous handoff is a slide-toggle on the right side of the Plan row.
-  // Right/Left act on the highlighted Plan row without selecting it; the folded
-  // session flag remains authoritative, so repeated desired-state presses are
-  // no-ops once the snapshot matches.
+  // While the menu is open, the toggle edits a LOCAL pendingHandoff value only
+  // — no daemon request fires mid-menu. Right/Left act on the highlighted Plan
+  // row's pending value without selecting it. The pending value is flushed to
+  // the daemon exactly once on commit (Enter / click-select / number-key), and
+  // only if it differs from the session's authoritative value; aborting the
+  // menu (Escape / click-outside) discards it.
   //
   // The dropdown chrome (badge, open/close, keyboard nav, backdrop, panel CSS)
   // lives in MenuBadge; this component supplies the facet items as the panel
@@ -28,15 +31,22 @@
   // Adventurous handoff lives in this menu because it's a plan-mode modifier
   // in spirit: it lets plan mode hand off to implementation autonomously. It's
   // a live per-session daemon flag, so it hides while drafting (no session yet).
-  const handoff = $derived(store.session.adventurousHandoff ?? false);
+  // `sessionHandoff` is the authoritative session value — used for the badge
+  // color (shown when the menu is closed). `pendingHandoff` is the local
+  // in-menu edit; it's snapshotted from sessionHandoff on every open and
+  // flushed on commit.
+  const sessionHandoff = $derived(store.session.adventurousHandoff ?? false);
+  let pendingHandoff = $state(false);
 
   // The badge + rows are colored by facet state: execute = amber, plan (handoff
   // off) = dusty blue, plan+auto = muted lavender. Unknown facets stay neutral.
+  // The badge color tracks the authoritative sessionHandoff (it shows when the
+  // menu is closed); the in-panel toggle/row track pendingHandoff (local edits).
   const facetColorClass = $derived(
     facet === "execute"
       ? "facet-execute"
       : isPlan
-        ? handoff
+        ? sessionHandoff
           ? "facet-auto"
           : "facet-plan"
         : "",
@@ -54,10 +64,22 @@
     e.preventDefault();
     e.stopPropagation();
     const desired = e.key === "ArrowRight";
-    // The protocol exposes toggle-only handoff state. Idempotence is therefore
-    // authoritative-snapshot based; a rapid opposite press before that snapshot
-    // arrives remains subject to the existing toggle round trip.
-    if (handoff !== desired) store.toggleAdventurousHandoff();
+    pendingHandoff = desired;
+  }
+
+  // Single commit funnel for Enter, click-select, and number-key commits.
+  // Guards the setFacet no-op (selecting the already-active facet sends no
+  // request) and flushes the pending handoff only if it differs from the
+  // session value. The handoff flush is draft-guarded: while drafting, the
+  // toggle is hidden so pendingHandoff can't change, and toggleAdventurousHandoff
+  // has no draft branch (it's a live-session-only flag), so we skip it entirely.
+  function commit(targetFacet: string): void {
+    if (targetFacet !== store.composerFacet) {
+      store.setFacet(targetFacet);
+    }
+    if (!store.draft && pendingHandoff !== sessionHandoff) {
+      store.toggleAdventurousHandoff();
+    }
   }
 </script>
 
@@ -73,7 +95,10 @@
   minWidth="160px"
   closeLabel="Close facet menu"
   openExternal={store.facetMenuOpenN}
-  onSelect={(i) => store.setFacet(facets[i] ?? "execute")}
+  onOpen={() => {
+    pendingHandoff = sessionHandoff;
+  }}
+  onSelect={(i) => commit(facets[i] ?? "execute")}
   onKeydown={onUnhandledKeydown}
 >
   {#snippet body({ sel, close })}
@@ -88,8 +113,8 @@
           class:hl={sel === i}
           role="option"
           aria-selected={sel === i}
-          class:facet-plan={!handoff}
-          class:facet-auto={handoff}
+          class:facet-plan={!pendingHandoff}
+          class:facet-auto={pendingHandoff}
           title={opt === facet ? `Facet: ${opt} (current)` : `Switch to ${opt} facet`}
         >
           <button
@@ -97,7 +122,7 @@
             type="button"
             title={opt === facet ? `Facet: ${opt} (current)` : `Switch to ${opt} facet`}
             onclick={() => {
-              store.setFacet(opt);
+              commit(opt);
               close();
             }}
           >
@@ -105,17 +130,17 @@
           </button>
           <button
             class="facet-toggle"
-            class:on={handoff}
+            class:on={pendingHandoff}
             role="switch"
-            aria-checked={handoff}
+            aria-checked={pendingHandoff}
             aria-label="Adventurous handoff"
             data-testid="adventurous-handoff"
-            title={handoff
+            title={pendingHandoff
               ? "Disable adventurous handoff — plan mode waits for your approval (Left)"
               : "Enable adventurous handoff — plan mode may start implementing autonomously (Right)"}
             onclick={(e) => {
               e.stopPropagation();
-              store.toggleAdventurousHandoff();
+              pendingHandoff = !pendingHandoff;
             }}
           >
             <span class="facet-toggle-knob" aria-hidden="true"></span>
@@ -131,7 +156,7 @@
           aria-selected={sel === i}
           title={opt === facet ? `Facet: ${opt} (current)` : `Switch to ${opt} facet`}
           onclick={() => {
-            store.setFacet(opt);
+            commit(opt);
             close();
           }}
         >
