@@ -28,12 +28,13 @@
   --accent-hover: #514b44;
   --accent-soft: #e2dcd1;
   --accent-text: #ffffff;
-  /* Warm nickel is structural: focus, selection, navigation, and progress. Gold is
-     scarce hardware: decisive actions and activity that wants the operator's eye. */
+  /* Warm nickel is structural: focus, selection, and navigation. Bronze progress
+     stays easy to spot without spending the scarce gold attention color. */
   --highlight: #cf962b;
   --highlight-hover: #b87f20;
   --highlight-soft: #f6ead2;
   --highlight-text: #191b25;
+  --progress: #955a24;
   /* Text-selection band (::selection). Translucent accent so it tints consistently
      over prose, bubbles, and code blocks while keeping the text readable. */
   --select-text-bg: rgba(111, 103, 94, 0.24);
@@ -145,6 +146,7 @@
   --highlight-hover: #edbb55;
   --highlight-soft: #342a19;
   --highlight-text: #20170c;
+  --progress: #d08e58;
   /* Text selection is structural, so it uses translucent nickel instead of spending
      the gold highlight on ordinary editing feedback. */
   --select-text-bg: rgba(170, 163, 154, 0.35);

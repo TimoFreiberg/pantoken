@@ -9,12 +9,13 @@ conventions (autoformatter, VCS, protocol purity, driver trait) stay in
 
 ### Color semantics
 
-Pantoken has two brand-material roles. Keep them semantically distinct so gold remains
+Pantoken has three brand-material roles. Keep them semantically distinct so gold remains
 a useful highlight instead of becoming general decoration:
 
 - **Warm nickel (`--accent*`) is structural:** links, focus rings, selected rows and
-  choices, navigation, drag targets, running/progress indicators, and soft background
-  tints.
+  choices, navigation, drag targets, and soft background tints. **Bronze
+  (`--progress`) is active motion:** compact running/progress indicators that need to
+  remain visible in dense chrome without spending gold.
 - **Gold (`--highlight*`) is scarce emphasis:** enabled primary actions, the composer
   Send button, new/unread/ready-for-you activity, and small branded attention moments.
   Gold fills always use `--highlight-text` (dark ink), never white; the brand gold does
