@@ -9,7 +9,7 @@
   tokens with the absolute paths for this host, then a bootstrap script
   installs the rendered plist via sudo.
 
-  Secrets are NOT here: run.sh sources them from ~/.local/state/pantoken/pantoken.env.
+  Secrets are NOT here: run.sh sources them from ~/.local/share/pantoken/pantoken.env.
   See deploy/DEPLOY.md and deploy/bootstrap-headless.sh.
 
   Required placeholders:
@@ -46,7 +46,7 @@
     <key>PATH</key>
     <string>@@@HOME@@@/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>PANTOKEN_DATA_DIR</key>
-    <string>@@@HOME@@@/.local/state/pantoken</string>
+    <string>@@@HOME@@@/.local/share/pantoken</string>
     <key>PANTOKEN_HOST</key>
     <string>127.0.0.1</string>
     <key>PANTOKEN_PORT</key>

@@ -11,13 +11,13 @@ source poller, or an automatic release fetcher.
 ~/pantoken-versions/<version>/{VERSION,BUILD_SHA,run.sh,update.sh}
 ~/pantoken-versions/<version>/bin/pantoken-server
 ~/pantoken-versions/<version>/client-dist/
-~/.local/state/pantoken/pantoken.env   # user-owned, mode 0600
+~/.local/share/pantoken/pantoken.env   # user-owned, mode 0600
 ~/.local/libexec/pantoken-tar-validate # trusted root-owned validator
 ```
 
 The rendered `/Library/LaunchDaemons/com.pantoken.server.plist` runs
 `~/pantoken-live/run.sh` as the target user with `KeepAlive` and `RunAtLoad`.
-It fixes `PANTOKEN_DATA_DIR` to `~/.local/state/pantoken`, binds `127.0.0.1:8787`,
+It fixes `PANTOKEN_DATA_DIR` to `~/.local/share/pantoken`, binds `127.0.0.1:8787`,
 and sets `PANTOKEN_CLIENT_DIST` to the active release. Tailscale Serve remains
 unchanged and must proxy `/` to `http://127.0.0.1:8787`.
 
@@ -52,7 +52,7 @@ bash deploy/bootstrap-headless.sh <version> /path/to/extracted-payload --skip-da
 bash deploy/bootstrap-headless.sh <version> /path/to/extracted-payload
 ```
 
-Create `~/.local/state/pantoken/pantoken.env` with only strict unquoted records,
+Create `~/.local/share/pantoken/pantoken.env` with only strict unquoted records,
 for example:
 
 ```text
@@ -98,7 +98,7 @@ fresh process identity/path plus healthy `/health` and HTML. A failure after the
 flip restores the prior release, restarts it, and requires health before
 returning. It retains the active and previous releases and prunes only older
 known version directories after a successful commit. The journal in
-`~/.local/state/pantoken/update-journal.jsonl` records transaction and rollback
+`~/.local/share/pantoken/update-journal.jsonl` records transaction and rollback
 states.
 
 ## Verification and platform gate

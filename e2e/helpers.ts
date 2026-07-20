@@ -115,7 +115,7 @@ export async function chooseProjectDir(page: Page, name: string): Promise<void> 
   await expect(picker).toBeHidden();
 }
 
-/** Create a worktree-backed session at /Users/timo/src/<project> (→ <project>-worktree)
+/** Create a worktree-backed session at /Users/timo/src/<project>
  *  and leave the sidebar open. `project="dirty"` simulates uncommitted changes so
  *  archive keeps the worktree + emits `worktreeRetained`. */
 export async function createWorktreeSession(

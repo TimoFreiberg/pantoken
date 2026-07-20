@@ -18,9 +18,9 @@ function fixture(name: string, output: string): { home: string; version: string 
     `#!/bin/sh\nprintf '%s\\n' '${output}'\n`,
   );
   chmodSync(join(version, "bin", "pantoken-server"), 0o755);
-  mkdirSync(join(home, ".local", "state", "pantoken"), { recursive: true });
+  mkdirSync(join(home, ".local", "share", "pantoken"), { recursive: true });
   writeFileSync(
-    join(home, ".local", "state", "pantoken", "pantoken.env"),
+    join(home, ".local", "share", "pantoken", "pantoken.env"),
     "PANTOKEN_TOKEN=test-token\nPANTOKEN_VAPID_SUBJECT=mailto:test@example.com\n",
     { mode: 0o600 },
   );
@@ -39,7 +39,7 @@ describe("release runtime wrapper", () => {
 
   test("rejects inherited data-dir override and unsafe env syntax", async () => {
     const f = fixture("unsafe", "never");
-    writeFileSync(join(f.home, ".local", "state", "pantoken", "pantoken.env"), "PANTOKEN_DATA_DIR=/tmp/escape\n", { mode: 0o600 });
+    writeFileSync(join(f.home, ".local", "share", "pantoken", "pantoken.env"), "PANTOKEN_DATA_DIR=/tmp/escape\n", { mode: 0o600 });
     const proc = Bun.spawn([wrapper], { env: { ...process.env, HOME: f.home, PANTOKEN_DATA_DIR: "/tmp/inherited" }, stderr: "pipe" });
     expect(await proc.exited).not.toBe(0);
   });

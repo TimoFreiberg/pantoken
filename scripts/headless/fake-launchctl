@@ -9,15 +9,15 @@ set -euo pipefail
 RECORD_PID_FILE="${RECORD_PID_FILE:-}"
 FORCE_EXIT="${FORCE_EXIT:-0}"
 FORCE_HEALTH_FAIL="${FORCE_HEALTH_FAIL:-0}"
-SERVICE_PID_FILE="${SERVICE_PID_FILE:-${HOME}/.local/state/pantoken/fake-service.pid}"
-SERVICE_COUNT_FILE="${SERVICE_COUNT_FILE:-${HOME}/.local/state/pantoken/fake-service.count}"
+SERVICE_PID_FILE="${SERVICE_PID_FILE:-${HOME}/.local/share/pantoken/fake-service.pid}"
+SERVICE_COUNT_FILE="${SERVICE_COUNT_FILE:-${HOME}/.local/share/pantoken/fake-service.count}"
 SERVICE_PORT="${PANTOKEN_TEST_SERVICE_PORT:-8787}"
 SERVICE_FAIL_FIRST="${PANTOKEN_TEST_FAIL_FIRST:-0}"
 SERVICE_FAIL_ALWAYS="${PANTOKEN_TEST_FAIL_ALWAYS:-0}"
 SERVICE_FAIL_VERSION="${PANTOKEN_TEST_FAIL_VERSION:-}"
 SERVICE_FAIL_VERSIONS="${PANTOKEN_TEST_FAIL_VERSIONS:-}"
 
-FAKE_LAUNCHCTL_LOG="${HOME}/.local/state/pantoken/.launchctl.log"
+FAKE_LAUNCHCTL_LOG="${HOME}/.local/share/pantoken/.launchctl.log"
 mkdir -p "$(dirname "$FAKE_LAUNCHCTL_LOG")"
 
 ARGS=""
@@ -84,14 +84,14 @@ if [[ "$ARGS" == *"kickstart"* ]]; then
   # Detach from the updater's stdout/stderr so the background child does not
   # keep Bun.spawn's stream reads alive. Redirect to a log file.
   PANTOKEN_UPDATE_TEST_MODE=1 PANTOKEN_PORT="$SERVICE_PORT" PANTOKEN_TEST_SERVICE_PORT="$SERVICE_PORT" PANTOKEN_FAIL_HEALTH="$fail_health" \
-    "$HOME/pantoken-live/run.sh" >"${HOME}/.local/state/pantoken/fake-service.log" 2>&1 </dev/null &
+    "$HOME/pantoken-live/run.sh" >"${HOME}/.local/share/pantoken/fake-service.log" 2>&1 </dev/null &
   service_pid=$!
   printf '%s\n' "$service_pid" > "$SERVICE_PID_FILE"
   # Record the PGID for group-based cleanup. On macOS setsid may not be
   # available; resolve the actual PGID from ps so the cleanup hook can
   # kill the process group deterministically.
   service_pgid="$(ps -o pgid= -p "$service_pid" 2>/dev/null | tr -d ' ' || true)"
-  printf '%s\n' "${service_pgid:-$service_pid}" > "${SERVICE_PGID_FILE:-${HOME}/.local/state/pantoken/fake-service.pgid}"
+  printf '%s\n' "${service_pgid:-$service_pid}" > "${SERVICE_PGID_FILE:-${HOME}/.local/share/pantoken/fake-service.pgid}"
   # Give the interpreter a moment to exec the fixture binary before print/ps.
   sleep 0.05
   exit 0

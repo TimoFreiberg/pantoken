@@ -212,7 +212,7 @@ describe("update-headless.sh integration", () => {
   beforeEach(async () => {
     home = mkdtempSync(join(tmpdir(), "pantoken-update-"));
     versionsDir = join(home, "pantoken-versions");
-    stateDir = join(home, ".local", "state", "pantoken");
+    stateDir = join(home, ".local", "share", "pantoken");
     liveLink = join(home, "pantoken-live");
     mkdirSync(versionsDir, { recursive: true });
     mkdirSync(stateDir, { recursive: true });

@@ -117,8 +117,8 @@ from the polytoken compatibility floor.
 
 `pantoken-server::remote::layout` provides pure path-derivation functions
 over a root `PathBuf`. Default root is `~/.local/share/pantoken`
-(`XDG_DATA_HOME`), distinct from the local server's `XDG_STATE_HOME` default
-(`~/.local/state/pantoken`). Path safety: `validate_layout` rejects
+(`XDG_DATA_HOME`), the same tier as the local server's data dir
+(`~/.local/share/pantoken`). Path safety: `validate_layout` rejects
 empty/relative/`..`-traversing roots; version/target inputs are sanitized
 against traversal.
 

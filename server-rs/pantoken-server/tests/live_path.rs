@@ -1721,7 +1721,7 @@ async fn new_session_worktree_isolates_cwd() {
     let override_guard = fake_daemon::MultiSpawnOverrideGuard::install(scenario, "worktree-cwd");
     let handle = override_guard.handle();
 
-    let (driver, _dir) = make_driver().await;
+    let (driver, dir) = make_driver().await;
 
     let _seed = driver
         .new_session(NewSessionOptsData {
@@ -1732,10 +1732,10 @@ async fn new_session_worktree_isolates_cwd() {
         .await
         .expect("new_session with worktree");
 
-    // The spawned session's cwd should be a worktree path: a sibling of the
-    // repo (not the repo itself). We get the cwd from the list_sessions warm
-    // entry (the fake daemon writes no session.json, so only the warm entry
-    // surfaces).
+    // The spawned session's cwd should be a worktree path: centralized under
+    // the data dir's worktrees root (not a sibling of the repo). We get the
+    // cwd from the list_sessions warm entry (the fake daemon writes no
+    // session.json, so only the warm entry surfaces).
     let listed = driver.list_sessions().await;
     let entry = listed
         .into_iter()
@@ -1753,12 +1753,13 @@ async fn new_session_worktree_isolates_cwd() {
         &repo.to_string_lossy().to_string(),
         "session cwd should be the worktree path, not the repo itself"
     );
-    // The worktree is a sibling: it shares the repo's parent dir.
+    // The worktree is centralized under <data_dir>/worktrees/<repo-slug>/<name>/.
     let worktree_path = std::path::Path::new(session_cwd);
+    let worktrees_root = dir.path().join("worktrees");
     assert!(
-        worktree_path.starts_with(repo.parent().unwrap()),
-        "worktree path {session_cwd} should be a sibling of the repo (under {})",
-        repo.parent().unwrap().display()
+        worktree_path.starts_with(&worktrees_root),
+        "worktree path {session_cwd} should be under the data dir's worktrees root ({})",
+        worktrees_root.display()
     );
     assert!(
         worktree_path.is_dir(),

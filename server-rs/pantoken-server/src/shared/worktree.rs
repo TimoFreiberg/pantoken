@@ -64,18 +64,28 @@ pub fn detect_vcs(repo_dir: impl AsRef<Path>) -> Option<Vcs> {
     None
 }
 
-/// Pure: plan the worktree path + the command to create it. The worktree is a
-/// sibling dir of the repo. When `base_branch` is `Some`, the worktree is based
-/// on that branch: jj uses `-r <branch>`, git appends the branch as a commit-ish.
+/// Pure: plan the worktree path + the command to create it. The worktree lives
+/// under `worktree_root/<repo-slug>/<name>/`, NOT as a sibling of the repo — this
+/// centralizes all pantoken worktrees under the data dir so they don't clutter the
+/// repo's parent. `worktree_root` is typically `~/.local/share/pantoken/worktrees`.
+/// When `base_branch` is `Some`, the worktree is based on that branch: jj uses
+/// `-r <branch>`, git appends the branch as a commit-ish.
 pub fn plan_worktree(
     repo_dir: impl AsRef<Path>,
     vcs: Vcs,
     id: &str,
     base_branch: Option<&str>,
+    worktree_root: impl AsRef<Path>,
 ) -> WorktreePlan {
     let base = resolve_lexical(repo_dir.as_ref());
     let name = format!("pantoken-{id}");
-    let path = format!("{base}-{id}");
+    let slug = slugify_repo_path(&base);
+    let path = worktree_root
+        .as_ref()
+        .join(&slug)
+        .join(&name)
+        .to_string_lossy()
+        .to_string();
 
     match vcs {
         Vcs::Jj => {
@@ -157,32 +167,44 @@ pub fn plan_worktree_removal(meta: &WorktreeMeta, force: bool) -> WorktreeRemova
     }
 }
 
-/// Pick a worktree plan whose sibling dir doesn't already exist.
+/// Pick a worktree plan whose dir doesn't already exist.
 pub fn plan_fresh_worktree(
     repo_dir: impl AsRef<Path>,
     vcs: Vcs,
     base_branch: Option<&str>,
+    worktree_root: impl AsRef<Path>,
 ) -> WorktreePlan {
     let repo_dir = repo_dir.as_ref();
+    let worktree_root = worktree_root.as_ref();
     for _ in 0..10 {
-        let plan = plan_worktree(repo_dir, vcs.clone(), &random_worktree_name(), base_branch);
+        let plan = plan_worktree(
+            repo_dir,
+            vcs.clone(),
+            &random_worktree_name(),
+            base_branch,
+            worktree_root,
+        );
         if !Path::new(&plan.path).exists() {
             return plan;
         }
     }
 
     let fallback = format!("{}-{}", random_worktree_name(), now_base36());
-    plan_worktree(repo_dir, vcs, &fallback, base_branch)
+    plan_worktree(repo_dir, vcs, &fallback, base_branch, worktree_root)
 }
 
 /// Create an isolated worktree of `repo_dir` and return its metadata.
 /// When `base_branch` is `Some`, the worktree is based on that branch.
+/// `worktree_root` is the parent dir under which worktrees are organized
+/// (typically `~/.local/share/pantoken/worktrees`).
 pub async fn create(
     repo_dir: impl AsRef<Path>,
     id: Option<&str>,
     base_branch: Option<&str>,
+    worktree_root: impl AsRef<Path>,
 ) -> Result<WorktreeMeta, String> {
     let repo_dir = repo_dir.as_ref();
+    let worktree_root = worktree_root.as_ref();
     let vcs = detect_vcs(repo_dir).ok_or_else(|| {
         format!(
             "cannot create a worktree: {} is not a jj or git repository",
@@ -190,9 +212,21 @@ pub async fn create(
         )
     })?;
     let plan = match id {
-        Some(id) => plan_worktree(repo_dir, vcs.clone(), id, base_branch),
-        None => plan_fresh_worktree(repo_dir, vcs.clone(), base_branch),
+        Some(id) => plan_worktree(repo_dir, vcs.clone(), id, base_branch, worktree_root),
+        None => plan_fresh_worktree(repo_dir, vcs.clone(), base_branch, worktree_root),
     };
+
+    // Ensure the project subdirectory exists (the worktree path is two levels
+    // deep under worktree_root: <slug>/<name>/). VCS commands don't create
+    // intermediate dirs.
+    if let Some(parent) = Path::new(&plan.path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "failed to create worktree parent dir {}: {e}",
+                parent.display()
+            )
+        })?;
+    }
 
     run(&plan.command, &plan.args).await?;
     Ok(WorktreeMeta {
@@ -380,6 +414,19 @@ fn resolve_lexical(path: &Path) -> String {
     absolute.to_string_lossy().trim_end_matches('/').to_string()
 }
 
+/// Slugify a repo's absolute path into a directory name: replace `/` with `-`,
+/// lowercase, and strip leading/trailing dashes. E.g. `/Users/timo/src/pantoken`
+/// → `users-timo-src-pantoken`. Two distinct repos never share a slug unless
+/// they're literally the same path.
+fn slugify_repo_path(abs_path: &str) -> String {
+    abs_path
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+        .to_lowercase()
+}
+
 fn now_base36() -> String {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -432,10 +479,10 @@ mod tests {
     }
 
     #[test]
-    fn plan_worktree_jj_workspace_add_at_sibling_path_with_unique_name() {
-        let p = plan_worktree("/Users/x/repo", Vcs::Jj, "abc", None);
+    fn plan_worktree_jj_workspace_add_at_centralized_path_with_unique_name() {
+        let p = plan_worktree("/Users/x/repo", Vcs::Jj, "abc", None, "/wt");
 
-        assert_eq!(p.path, "/Users/x/repo-abc");
+        assert_eq!(p.path, "/wt/users-x-repo/pantoken-abc");
         assert_eq!(p.command, "jj");
         assert_eq!(
             p.args,
@@ -446,16 +493,16 @@ mod tests {
                 "add",
                 "--name",
                 "pantoken-abc",
-                "/Users/x/repo-abc",
+                "/wt/users-x-repo/pantoken-abc",
             ])
         );
     }
 
     #[test]
-    fn plan_worktree_git_detached_worktree_at_sibling_path() {
-        let p = plan_worktree("/Users/x/repo/", Vcs::Git, "xy", None);
+    fn plan_worktree_git_detached_worktree_at_centralized_path() {
+        let p = plan_worktree("/Users/x/repo/", Vcs::Git, "xy", None, "/wt");
 
-        assert_eq!(p.path, "/Users/x/repo-xy");
+        assert_eq!(p.path, "/wt/users-x-repo/pantoken-xy");
         assert_eq!(p.command, "git");
         assert_eq!(
             p.args,
@@ -465,14 +512,14 @@ mod tests {
                 "worktree",
                 "add",
                 "--detach",
-                "/Users/x/repo-xy",
+                "/wt/users-x-repo/pantoken-xy",
             ])
         );
     }
 
     #[test]
     fn plan_worktree_jj_with_base_branch_includes_revision_flag() {
-        let p = plan_worktree("/Users/x/repo", Vcs::Jj, "abc", Some("develop"));
+        let p = plan_worktree("/Users/x/repo", Vcs::Jj, "abc", Some("develop"), "/wt");
 
         assert_eq!(p.command, "jj");
         assert_eq!(
@@ -486,14 +533,14 @@ mod tests {
                 "pantoken-abc",
                 "-r",
                 "develop",
-                "/Users/x/repo-abc",
+                "/wt/users-x-repo/pantoken-abc",
             ])
         );
     }
 
     #[test]
     fn plan_worktree_git_with_base_branch_appends_commit_ish() {
-        let p = plan_worktree("/Users/x/repo", Vcs::Git, "xy", Some("feature-x"));
+        let p = plan_worktree("/Users/x/repo", Vcs::Git, "xy", Some("feature-x"), "/wt");
 
         assert_eq!(p.command, "git");
         assert_eq!(
@@ -504,7 +551,7 @@ mod tests {
                 "worktree",
                 "add",
                 "--detach",
-                "/Users/x/repo-xy",
+                "/wt/users-x-repo/pantoken-xy",
                 "feature-x",
             ])
         );
@@ -512,10 +559,31 @@ mod tests {
 
     #[test]
     fn plan_worktree_exposes_name_and_base_for_worktree_index() {
-        let p = plan_worktree("/Users/x/repo", Vcs::Jj, "abc", None);
+        let p = plan_worktree("/Users/x/repo", Vcs::Jj, "abc", None, "/wt");
 
         assert_eq!(p.name, "pantoken-abc");
         assert_eq!(p.base, "/Users/x/repo");
+    }
+
+    #[test]
+    fn slugify_repo_path_lowercases_and_dash_separates() {
+        assert_eq!(slugify_repo_path("/Users/x/repo"), "users-x-repo");
+        assert_eq!(slugify_repo_path("/Users/x/repo/"), "users-x-repo");
+        assert_eq!(
+            slugify_repo_path("/home/timo/src/pantoken"),
+            "home-timo-src-pantoken"
+        );
+    }
+
+    #[test]
+    fn plan_worktree_uses_full_path_slug_to_avoid_basename_collisions() {
+        // Two repos both named "repo" at different paths must get different slugs.
+        let p1 = plan_worktree("/Users/alice/repo", Vcs::Jj, "id1", None, "/wt");
+        let p2 = plan_worktree("/Users/bob/repo", Vcs::Jj, "id1", None, "/wt");
+
+        assert_ne!(p1.path, p2.path);
+        assert!(p1.path.starts_with("/wt/users-alice-repo/"));
+        assert!(p2.path.starts_with("/wt/users-bob-repo/"));
     }
 
     #[test]
@@ -593,7 +661,10 @@ mod tests {
         )
         .await;
 
-        let meta = create(&repo, Some("spawn"), None).await.unwrap();
+        let wt_root = temp.path().join("worktrees");
+        std::fs::create_dir(&wt_root).unwrap();
+
+        let meta = create(&repo, Some("spawn"), None, &wt_root).await.unwrap();
         assert_eq!(meta.vcs, Vcs::Git);
         assert!(Path::new(&meta.path).is_dir());
         assert!(is_clean(&meta).await);
