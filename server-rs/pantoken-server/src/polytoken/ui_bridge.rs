@@ -936,6 +936,27 @@ mod tests {
     }
 
     #[test]
+    fn ask_user_question_both_option_and_free_text_sent_together() {
+        // The client's single-select "Something else…" field is additive: a
+        // selected radio and typed free-text are sent together (the mutual
+        // exclusion was a purely client-side artifact). The server contract
+        // already maps both fields unconditionally; this test locks that in so
+        // a future refactor can't silently regress it.
+        let out = build(
+            with_questions(
+                pending(PendingInterrogativeType::AskUserQuestion),
+                vec![question("q-a", vec!["o1", "o2"])],
+            ),
+            answers(vec![answer(vec![0], "additional context")]),
+        );
+        let answers = expect_ask_user_question_answers(out);
+        assert_eq!(answers.len(), 1);
+        assert_eq!(answers[0].question_id, "q-a");
+        assert_eq!(answers[0].selected_option_ids, Some(vec!["o1".to_string()]));
+        assert_eq!(answers[0].free_text, Some("additional context".to_string()));
+    }
+
+    #[test]
     fn ask_user_question_out_of_range_index_filtered_out_not_crashed() {
         let out = build(
             with_questions(
