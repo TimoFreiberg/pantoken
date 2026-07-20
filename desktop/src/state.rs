@@ -40,15 +40,25 @@ impl RemoteSession {
                 // bridge runtime with a 2s timeout. This avoids
                 // "Cannot start a runtime from within a runtime" when stop()
                 // is called from inside a tokio worker (tests / async Tauri
-                // commands). The handle is aborted if the timeout fires.
+                // commands). If the timeout fires, the runtime's shutdown
+                // reaps the task (the SSH child is killed via kill_on_drop
+                // when the task is dropped).
                 let h = remote_handle.clone();
-                let _ = std::thread::spawn(move || {
+                let timed_out = std::thread::spawn(move || {
                     h.block_on(async {
-                        let _ =
-                            tokio::time::timeout(std::time::Duration::from_secs(2), handle).await;
-                    });
+                        tokio::time::timeout(std::time::Duration::from_secs(2), handle)
+                            .await
+                            .is_err()
+                    })
                 })
-                .join();
+                .join()
+                .unwrap_or(false);
+                if timed_out {
+                    eprintln!(
+                        "pantoken: bridge task didn't exit within 2s — runtime \
+                         shutdown will reap it (SSH child killed via kill_on_drop)"
+                    );
+                }
             }
         }
     }

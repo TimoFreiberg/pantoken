@@ -256,6 +256,12 @@ impl SshTransport for SystemSshTransport {
             info!(target: "pantoken::bridge", "spawning ssh proxy: {}", command.redacted_debug());
 
             let mut cmd = tokio::process::Command::new("ssh");
+            // kill_on_drop: if the bridge drops the Child handle (teardown,
+            // panic, or task abort), the SSH process is killed — NOT orphaned.
+            // This closes the Phase 1 `std::mem::forget` leak for good: the
+            // child is reaped whenever the owning task ends, whether cleanly
+            // (exit future resolves) or abruptly (cancellation/abort).
+            cmd.kill_on_drop(true);
             cmd.args(&argv);
             cmd.stdin(std::process::Stdio::piped());
             cmd.stdout(std::process::Stdio::piped());
@@ -621,8 +627,21 @@ impl Bridge {
                     let transport = transport.clone();
                     let command = command.clone();
                     let state_sink = state_sink.clone();
+                    // Child token: cancels this connection's relay task when the
+                    // bridge shuts down. Without this, the detached relay task
+                    // (holding the SshProxy → Child) would outlive `run()` and
+                    // the SSH process would leak.
+                    let conn_cancel = cancel.child_token();
                     tokio::spawn(async move {
-                        if let Err(e) = handle_browser_connection(stream, transport, command, state_sink).await {
+                        if let Err(e) = handle_browser_connection(
+                            stream,
+                            transport,
+                            command,
+                            state_sink,
+                            conn_cancel,
+                        )
+                        .await
+                        {
                             warn!(target: "pantoken::bridge", "bridge: connection error: {e}");
                         }
                     });
@@ -639,6 +658,7 @@ async fn handle_browser_connection(
     transport: Arc<dyn SshTransport>,
     command: Arc<SshCommand>,
     state_sink: Option<Arc<dyn ConnectionStateSink>>,
+    cancel: CancellationToken,
 ) -> io::Result<()> {
     use crate::remote_connection::ConnectionState;
 
@@ -652,7 +672,7 @@ async fn handle_browser_connection(
         sink.on_state(ConnectionState::Connecting);
     }
 
-    run_ws_relay(ws_stream, transport, command, state_sink).await
+    run_ws_relay(ws_stream, transport, command, state_sink, cancel).await
 }
 
 /// The WS↔SSH relay loop with reconnect-with-backoff on the SSH side.
@@ -665,6 +685,7 @@ async fn run_ws_relay(
     transport: Arc<dyn SshTransport>,
     command: Arc<SshCommand>,
     state_sink: Option<Arc<dyn ConnectionStateSink>>,
+    cancel: CancellationToken,
 ) -> io::Result<()> {
     use crate::remote_connection::ConnectionState;
 
@@ -820,12 +841,19 @@ async fn run_ws_relay(
             }
         };
 
-        // Race the two relay directions against the SSH exit future.
+        // Race the two relay directions against the SSH exit future + the
+        // cancellation token.
         // - If a relay direction finishes first, the connection is tearing
         //   down (browser closed or a stream error); break out.
         // - If ssh_exit resolves first, classify and decide retry vs. surface.
+        // - If cancel fires, the bridge is shutting down — return immediately
+        //   (dropping the streams + the SSH child via kill_on_drop).
         tokio::select! {
             biased;
+            _ = cancel.cancelled() => {
+                info!(target: "pantoken::bridge", "bridge: relay cancelled, tearing down");
+                return Ok(());
+            }
             _ = &mut ssh_exit => {
                 // The relay futures are still pending; we can't cleanly cancel
                 // them without dropping the streams. Drop the relay handles
@@ -898,6 +926,7 @@ async fn run_ws_relay(
         loop {
             tokio::select! {
                 biased;
+                _ = cancel.cancelled() => return Ok(()),
                 _ = &mut keepalive_deadline => break,
                 _ = keepalive_ticker.tick() => {
                     if ws_sink.send(keepalive_frame()).await.is_err() {
