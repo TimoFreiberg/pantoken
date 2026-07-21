@@ -23,10 +23,20 @@ export const BOTTOM_GAP = 80;
 
 type SavedPosition = { ratio: number; atBottom: boolean; at: number };
 
-export function loadScrollPositions(): Record<string, SavedPosition> {
+/** Resolve the localStorage key for scroll positions. When `serverId` is
+ *  provided, uses the namespaced key (`pantoken.<serverId>.scrollPositions`)
+ *  so scroll positions don't collide across hosts. Falls back to the legacy
+ *  global key for backward compatibility. */
+function keyFor(serverId?: string): string {
+  return serverId
+    ? `pantoken.${serverId}.scrollPositions`
+    : KEY;
+}
+
+export function loadScrollPositions(serverId?: string): Record<string, SavedPosition> {
   if (typeof window === "undefined") return {};
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(keyFor(serverId));
     if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return {};
@@ -53,10 +63,11 @@ export function loadScrollPositions(): Record<string, SavedPosition> {
 
 export function persistScrollPositions(
   map: Record<string, SavedPosition>,
+  serverId?: string,
 ): void {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(KEY, JSON.stringify(map));
+    localStorage.setItem(keyFor(serverId), JSON.stringify(map));
   } catch {
     // Storage full / unavailable (private mode) — positions stay in-memory this session.
   }
