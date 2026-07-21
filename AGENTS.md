@@ -67,8 +67,8 @@ cd server-rs && cargo run         # run the Rust server (reads PANTOKEN_PORT, PA
 `tsconfig.scripts.json` and `tsconfig.e2e.json` close the typecheck gap for the
 dev-tooling and Playwright trees. Keep it green. **server-rs has its own CI
 gate** (`rust-server` job in `.github/workflows/ci.yml`: `cargo fmt --check` +
-`cargo clippy --locked --all-targets -- -D warnings` + `cargo test`); run
-`bun run check:rs` locally for the same three checks.
+`cargo clippy --locked --all-targets -- -D warnings` + `cargo nextest run`);
+run `bun run check:rs` locally for the same three checks.
 
 **Implementing an issue — two paths:**
 - **CLI path** (out-of-session orchestration): `just implement-issue <issue-url>`
