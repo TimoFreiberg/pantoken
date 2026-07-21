@@ -9,7 +9,7 @@ use std::time::Duration;
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, TitleBarStyle, WebviewUrl, WebviewWindowBuilder};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
@@ -180,79 +180,7 @@ pub fn present_fatal(app: &AppHandle, message: &str) {
     });
 }
 
-// ─────────────────────── remote connection UX ────────────────────────────
-// The tray "Connect to Remote…" / "Disconnect Remote" items drive the bridge
-// (remote_commands). The profile-picker is a native blocking dialog listing
-// saved profiles by label; selecting one (Yes) connects, Cancel aborts.
-
-/// Open a native dialog listing saved remote profiles. The user picks one
-/// (Yes connects to it; No/Cancel aborts). Runs on a spawned thread so the
-/// tray menu handler returns immediately.
-pub fn remote_connect_dialog(app: &AppHandle) {
-    let app = app.clone();
-    let state = app.state::<AppState>();
-    let profiles = crate::remote_commands::list_remote_profiles_impl(&state);
-
-    std::thread::spawn(move || {
-        if profiles.is_empty() {
-            app.dialog()
-                .message(
-                    "No remote profiles saved yet. Add one via the Settings \
-                     panel's Remote tab.",
-                )
-                .title("Connect to Remote")
-                .kind(MessageDialogKind::Info)
-                .blocking_show();
-            return;
-        }
-        // Build a numbered list. With multiple profiles, the user picks the
-        // first by confirming; a richer picker lives in the WebView (Phase 3).
-        // For Phase 2 we connect to the first profile — the dialog confirms.
-        let body = if profiles.len() == 1 {
-            format!(
-                "Connect to \"{}\" ({})?",
-                profiles[0].label, profiles[0].ssh_destination
-            )
-        } else {
-            let list = profiles
-                .iter()
-                .map(|p| format!("• {} ({})", p.label, p.ssh_destination))
-                .collect::<Vec<_>>()
-                .join("\n");
-            format!("Connect to the first profile?\n\n{list}")
-        };
-        let connect = app
-            .dialog()
-            .message(body)
-            .title("Connect to Remote")
-            .buttons(MessageDialogButtons::YesNo)
-            .kind(MessageDialogKind::Info)
-            .blocking_show();
-        if connect {
-            if let Some(p) = profiles.first() {
-                let id = p.id.clone();
-                let app2 = app.clone();
-                let state = app2.state::<AppState>();
-                if let Err(e) = crate::remote_commands::connect_to_remote_impl(&app2, &state, id) {
-                    app2.dialog()
-                        .message(format!("Couldn't connect: {e}"))
-                        .title("Connect to Remote")
-                        .kind(MessageDialogKind::Error)
-                        .blocking_show();
-                }
-            }
-        }
-    });
-}
-
-/// Disconnect the active remote session (stop bridge + SSH child, navigate
-/// back to the local hub). Idempotent.
-pub fn remote_disconnect(app: &AppHandle) {
-    let state = app.state::<AppState>();
-    let _ = crate::remote_commands::disconnect_remote_impl(app, &state);
-}
-
-// ───────────────────────────── update overlay ─────────────────────────────
+// ───────────────────────── update overlay ─────────────────────────────
 // The frosted "Updating Pantoken…" scrim, painted INTO the page via eval rather than as a
 // native view: the DOM freezes during the apply (the client's WS is dying anyway), the
 // post-update navigation replaces the document — which tears the scrim down for free —
@@ -357,17 +285,13 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItemBuilder::with_id("open", "Open Pantoken").build(app)?;
     let copy_url = MenuItemBuilder::with_id("copy-url", "Copy App URL").build(app)?;
     let restart = MenuItemBuilder::with_id("restart-hub", "Restart Hub").build(app)?;
-    let connect_remote =
-        MenuItemBuilder::with_id("connect-remote", "Connect to Remote…").build(app)?;
-    let disconnect_remote =
-        MenuItemBuilder::with_id("disconnect-remote", "Disconnect Remote").build(app)?;
     let updates =
         MenuItemBuilder::with_id("check-updates", "Check for Shell Updates…").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit Pantoken").build(app)?;
     let menu = MenuBuilder::new(app)
         .items(&[&open])
         .item(&PredefinedMenuItem::separator(app)?)
-        .items(&[&copy_url, &restart, &connect_remote, &disconnect_remote])
+        .items(&[&copy_url, &restart])
         .item(&PredefinedMenuItem::separator(app)?)
         .items(&[&updates])
         .item(&PredefinedMenuItem::separator(app)?)
@@ -400,8 +324,6 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
                         s.restart_hub();
                     }
                 }
-                "connect-remote" => crate::shell::remote_connect_dialog(app),
-                "disconnect-remote" => crate::shell::remote_disconnect(app),
                 "check-updates" => crate::updater::spawn_check(app.clone(), true),
                 "quit" => app.exit(0),
                 _ => {}

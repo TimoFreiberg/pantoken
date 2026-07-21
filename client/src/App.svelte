@@ -1,6 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { store } from "./lib/store.svelte.js";
+  import { HostCoordinator } from "./lib/hosts.svelte.js";
+  import { createSingleHostProvider } from "./lib/hosts/provider.js";
+  import { createTauriHostProvider } from "./lib/hosts/tauri-provider.js";
+  import { isDesktopShell } from "./lib/desktop.js";
+  import { resolveWsUrl } from "./lib/ws-url.js";
   import StatusHeader from "./components/StatusHeader.svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import RightSidebar from "./components/RightSidebar.svelte";
@@ -125,7 +130,29 @@
     }
   });
 
-  onMount(() => store.start());
+  // Construct the host coordinator with the appropriate provider for the
+  // current environment. On desktop, the TauriHostProvider calls the native
+  // host-manager commands. In browser/e2e, the SingleHostProvider exposes the
+  // local server's WS URL (the coordinator is a passive observer for the
+  // local host — it doesn't create a WsClient, since store.start() wires the
+  // compatibility singleton).
+  const hostCoordinator = (() => {
+    if (isDesktopShell()) {
+      return new HostCoordinator(
+        createTauriHostProvider(() => store.serverLabel),
+      );
+    }
+    const wsUrl = resolveWsUrl(
+      window.location,
+      import.meta.env.VITE_PANTOKEN_WS_URL,
+    );
+    return new HostCoordinator(createSingleHostProvider(wsUrl));
+  })();
+
+  onMount(async () => {
+    await hostCoordinator.init();
+    store.start();
+  });
 
   // Transcript zoom: intercept the browser-zoom keys (⌘=/⌘+ grow, ⌘- shrink, ⌘0 reset)
   // and drive our own persisted, PWA-safe text-scale instead. Modifier-gated, so plain

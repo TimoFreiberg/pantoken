@@ -453,4 +453,66 @@ describe("HostCoordinator message routing boundary", () => {
     expect((store as unknown as { draftMap: Record<string, string> }).draftMap["s:remote-session"]).toBe("remote draft");
     expect(store.lastProjectCwd).toBe("/remote/home/project");
   });
+
+  test("local host does not create a WsClient or double-register onMessage", async () => {
+    // The local host must NOT get a WsClient created — its messages flow
+    // through the compatibility singleton (wired by store.start()). Creating
+    // a WsClient would double-register onMessage and process every server
+    // message twice.
+    const { provider } = createFakeHostProvider([
+      descriptor("local", { wsUrl: "ws://127.0.0.1:8787/ws" }),
+      descriptor("remote-1", { kind: "remote" }),
+    ]);
+    const coordinator = new HostCoordinator(provider);
+
+    // Track whether connectHost is called (it should NOT be for local).
+    let connectHostCalledForLocal = false;
+    const origConnectHost = coordinator.connectHost.bind(coordinator);
+    coordinator.connectHost = async (id: string) => {
+      if (id === "local") {
+        connectHostCalledForLocal = true;
+      }
+      // For remote, use the fake client injection pattern.
+      const fakeClient = new FakeWsClient();
+      const entry = (coordinator as unknown as {
+        hostState: Map<string, { client: IWsClient | null; unsubscribe: (() => void) | null; descriptor: NativeHostDescriptor }>;
+      }).hostState.get(id);
+      if (entry && !entry.client) {
+        entry.client = fakeClient;
+        const listener: MessageListener = (msg) =>
+          (coordinator as unknown as {
+            onHostMessage: (hostId: string, msg: ServerMessage) => void;
+          }).onHostMessage(id, msg);
+        entry.unsubscribe = fakeClient.onMessage(listener);
+      }
+    };
+
+    await coordinator.init();
+    await coordinator.selectHost("local");
+
+    // connectHost was NOT called for the local host.
+    expect(connectHostCalledForLocal).toBe(false);
+
+    // The local host's entry has NO WsClient.
+    const localEntry = (coordinator as unknown as {
+      hostState: Map<string, { client: IWsClient | null }>;
+    }).hostState.get("local");
+    expect(localEntry?.client).toBeNull();
+
+    // selectedClient returns the compatibility singleton for local.
+    expect(coordinator.selectedClient).toBeDefined();
+    expect(coordinator.selectedClient?.isCompatibilitySingleton).toBe(true);
+
+    // Switching to remote-1 and back to local should restore local state.
+    await coordinator.selectHost("remote-1");
+    expect(coordinator.selectedHostId).toBe("remote-1");
+
+    // Switch back to local — should NOT create a WsClient.
+    connectHostCalledForLocal = false;
+    await coordinator.selectHost("local");
+    expect(connectHostCalledForLocal).toBe(false);
+
+    // selectedClient is the compatibility singleton again.
+    expect(coordinator.selectedClient?.isCompatibilitySingleton).toBe(true);
+  });
 });

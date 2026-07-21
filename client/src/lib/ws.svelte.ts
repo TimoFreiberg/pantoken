@@ -8,13 +8,19 @@
 // `WsClient` instances for remote hosts.
 
 import { type ClientMessage, type ResumeToken, type ServerMessage } from "@pantoken/protocol";
-import { WsClient, type ConnectionState, type MessageListener } from "./ws-client.svelte.js";
+import { WsClient, type ConnectionState, type IWsClient, type MessageListener } from "./ws-client.svelte.js";
 import { resolveWsUrl } from "./ws-url.js";
 
 const defaultClient = new WsClient(() =>
   resolveWsUrl(window.location, import.meta.env.VITE_PANTOKEN_WS_URL),
 );
 defaultClient.isCompatibilitySingleton = true;
+
+/** The compatibility singleton WsClient instance. Exported so the
+ *  HostCoordinator can return it as the `selectedClient` when the local host
+ *  is selected — the local host's messages flow through this singleton (wired
+ *  by store.start()), not through a coordinator-created WsClient. */
+export const compatibilityClient: IWsClient = defaultClient;
 
 export function connectionState(): ConnectionState {
   return defaultClient.connectionState();

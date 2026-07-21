@@ -335,3 +335,57 @@ the wrong process. The `Child` handle is the OS-level start-token for spawned
 daemons; process start-time verification is the start-token for attached
 daemons. The two mechanisms are complementary: `try_wait()` is sufficient
 when we own the process, start-time verification covers the attach path.
+
+## Stage 4: Native multi-host manager
+
+**Decision:** Replace the exclusive single-remote-session model
+(`AppState.remote: Mutex<Option<Arc<RemoteSession>>>`) with a collection
+keyed by remote profile id (`Mutex<HashMap<String, Arc<RemoteSession>>>`),
+so multiple remote computers can hold live bridge sessions simultaneously.
+Split "ensure this remote bridge exists" from "navigate/select this host in
+the WebView" — the native command returns a loopback WebSocket URL once the
+bridge is ready and does NOT navigate the whole WebView.
+
+### Keyed collection
+
+Multiple remote computers hold live bridge sessions simultaneously. Starting
+profile B does NOT stop profile A. Disconnecting B stops only B. Teardown
+stops all. The local computer is NOT in this map — it's the `Supervisor`.
+
+### Ensure-vs-navigate split
+
+The old `connect_to_remote_impl` started the bridge, navigated the WebView to
+`?ws=ws://127.0.0.1:{bridge_port}`, raised a native overlay, and spawned an
+overlay poller that showed native dialogs on failure. The new
+`ensure_remote_host_impl` starts the bridge + provisioning and returns a
+`HostStateSnapshot` with the loopback WS URL. It does NOT navigate the
+WebView, raise the overlay, or show dialogs. This is a compile-time
+guarantee: the new impl functions take no `&AppHandle` parameter, so they
+physically cannot call `shell::navigate_main`.
+
+The client (`TauriHostProvider.connectHost`) polls `host_state(id)` until the
+bridge is ready (state `ready`) or fails (state `failed`). The coordinator
+creates a `WsClient` pointed at the returned `wsUrl` (loopback only).
+
+### Background connection lifetime
+
+Each `ensure_remote_host_impl` call spawns its own bridge task on the
+dedicated `remote_handle` runtime. The task holds its own `RemoteConnection`
+`Arc`. Multiple tasks run concurrently on the multi-thread runtime with no
+shared mutable state between sessions.
+
+### Local-label rule
+
+The native `list_hosts`/`host_state` returns `label: ""` and `subtitle: ""`
+for the local host (the Rust side doesn't speak the WS protocol). The
+client's `TauriHostProvider` fills in the label from `store.serverLabel`
+(which it has after `hello`) and sets `subtitle: "This computer"`. This
+avoids the Rust side needing to speak the protocol.
+
+### Tray removal
+
+The tray's "Connect to Remote…" / "Disconnect Remote" items are removed —
+they drove the exclusive navigate-the-WebView flow, which is incompatible
+with the multi-host model. The in-app host picker (stage 5) + Settings
+"Computers" section (stage 6) replace the tray as the primary management
+surface.

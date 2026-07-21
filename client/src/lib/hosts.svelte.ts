@@ -14,6 +14,7 @@
 import type { ClientMessage, ServerMessage } from "@pantoken/protocol";
 import type { IWsClient, MessageListener } from "./ws-client.svelte.js";
 import { WsClient } from "./ws-client.svelte.js";
+import { compatibilityClient } from "./ws.svelte.js";
 import { store } from "./store.svelte.js";
 import type { HostActivity, NativeHostDescriptor } from "./hosts/types.js";
 import type { HostProvider } from "./hosts/provider.js";
@@ -82,7 +83,11 @@ export class HostCoordinator {
     if (!entry) return;
 
     // 1. If the target host is not connected, connect it first.
-    if (!entry.client && entry.descriptor.wsUrl) {
+    // The local host does NOT get a WsClient created — its messages flow
+    // through the compatibility singleton (wired by store.start()). Creating
+    // a WsClient for the local host would double-register onMessage and cause
+    // every server message to be processed twice.
+    if (id !== "local" && !entry.client && entry.descriptor.wsUrl) {
       await this.connectHost(id);
     }
 
@@ -212,9 +217,13 @@ export class HostCoordinator {
     }
   }
 
-  /** The selected host's WsClient (for compatibility delegation). */
+  /** The selected host's WsClient (for compatibility delegation).
+   *  For the local host, returns the compatibility singleton (whose messages
+   *  are wired by store.start()). For remote hosts, returns the coordinator-
+   *  created WsClient. */
   get selectedClient(): IWsClient | null {
     if (!this.selectedHostId) return null;
+    if (this.selectedHostId === "local") return compatibilityClient;
     return this.getClient(this.selectedHostId);
   }
 
