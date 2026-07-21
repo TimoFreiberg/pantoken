@@ -102,3 +102,103 @@ test("AC.2 — grow→shrink→grow cycle keeps the transcript pinned throughout
   );
   await expect.poll(gap).toBeLessThan(5);
 });
+
+test("AC.3 — proactive re-assert fired: composerResizeN incremented after typing a wrapping line", async ({
+  page,
+}) => {
+  const scroller = page.locator(".scroller");
+  const textarea = page.locator(".composer-wrap textarea");
+
+  await expect.poll(() => gapFn(scroller)).toBeLessThan(5);
+
+  // Snapshot the counter before (may be > 0 from prior setup keystrokes).
+  const before = Number((await scroller.getAttribute("data-composer-resize-n")) ?? 0);
+
+  await textarea.click();
+  await textarea.fill(
+    "This is a long line of text that will wrap to multiple lines when typed into the composer textarea, causing it to grow and shrink the transcript viewport",
+  );
+
+  // The proactive path sets dataset.composerResizeN; the async viewportObserver
+  // does NOT. So if the attribute incremented, the proactive effect ran.
+  await expect
+    .poll(async () => Number((await scroller.getAttribute("data-composer-resize-n")) ?? 0))
+    .toBeGreaterThan(before);
+  // And the gap stayed closed (the re-assert did its job).
+  await expect.poll(() => gapFn(scroller)).toBeLessThan(5);
+});
+
+test("AC.4 — a reader scrolled up is not yanked down when the composer grows", async ({
+  page,
+}) => {
+  const scroller = page.locator(".scroller");
+  const textarea = page.locator(".composer-wrap textarea");
+
+  // Start pinned at the bottom.
+  await expect.poll(() => gapFn(scroller)).toBeLessThan(5);
+
+  // Scroll up — a reader reading scrollback.
+  await scroller.evaluate((el) => {
+    (el as HTMLElement).scrollTop = Math.max(0, (el as HTMLElement).scrollTop - 400);
+  });
+  // Confirm we're genuinely scrolled up (pinned should be false now).
+  await expect.poll(() => gapFn(scroller)).toBeGreaterThan(80);
+
+  const topBefore = await scroller.evaluate((el) => (el as HTMLElement).scrollTop);
+  // Snapshot the proactive tick before typing — it must NOT increment here
+  // (the effect bails on `!pinned`). This directly tests the effect's guard,
+  // which scrollTop alone cannot (applySettle has its own redundant `!pinned`
+  // bail that would also prevent a yank).
+  const resizeNBefore = await scroller.getAttribute("data-composer-resize-n");
+
+  // Type a wrapping line — autosize bumps composerResizeN, the proactive
+  // effect fires but must bail (pinned === false). scrollTop must not jump.
+  await textarea.click();
+  await textarea.fill(
+    "This is a long line of text that will wrap to multiple lines when typed into the composer textarea, causing it to grow and shrink the transcript viewport",
+  );
+
+  const topAfter = await scroller.evaluate((el) => (el as HTMLElement).scrollTop);
+  // The reader was NOT yanked to the bottom — scrollTop barely moved (the
+  // viewport shrink may nudge it a few px, but not hundreds).
+  expect(Math.abs(topAfter - topBefore)).toBeLessThan(20);
+  // The proactive effect's `pinned` guard held — it did NOT set the tick
+  // attribute (if it had, the guard was removed and this would fail).
+  const resizeNAfter = await scroller.getAttribute("data-composer-resize-n");
+  expect(resizeNAfter).toBe(resizeNBefore);
+});
+
+test("AC.5 — a non-wrapping keystroke does not cause the transcript to jump", async ({
+  page,
+}) => {
+  const scroller = page.locator(".scroller");
+  const gap = () => gapFn(scroller);
+  const textarea = page.locator(".composer-wrap textarea");
+  const box = page.locator('[data-testid="composer-box"]');
+
+  // Start pinned at the bottom.
+  await expect.poll(gap).toBeLessThan(5);
+
+  // Disable overflow-anchor so Chrome doesn't mask the jitter (simulates
+  // WKWebView where overflow-anchor is unreliable). Without the
+  // testForHeightReduction optimization, the height="auto" reset on every
+  // keystroke would cause a transient layout invalidation → jitter.
+  await disableOverflowAnchor(scroller);
+
+  // Snapshot the reset counter before (may be > 0 from prior setup keystrokes).
+  const resetBefore = Number((await box.getAttribute("data-autosize-reset-n")) ?? 0);
+
+  // Type a single character — the composer stays at one row (no line wrap),
+  // so the height doesn't change. The testForHeightReduction optimization
+  // skips the height="auto" reset (text grew → no reset needed), avoiding
+  // the transient layout invalidation that causes jitter on WKWebView.
+  await textarea.click();
+  await textarea.fill("a");
+
+  // The reset path did NOT run — the optimization skipped it (text grew).
+  // Without the optimization, the reset would have run and incremented this.
+  const resetAfter = Number((await box.getAttribute("data-autosize-reset-n")) ?? 0);
+  expect(resetAfter).toBe(resetBefore);
+  // And the gap stayed under 5px — the transcript did not jump.
+  await expect.poll(gap).toBeLessThan(5);
+});

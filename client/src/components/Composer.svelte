@@ -79,6 +79,18 @@
   let dragDepth = 0;
   let dragActive = $state(false);
 
+  // Track the previous text length so we can skip the height="auto" reset when
+  // the text only grew. The reset collapses the textarea to rows=1 transiently,
+  // triggering a layout invalidation that overflow-anchor on WKWebView mishandles
+  // — causing jitter on EVERY keystroke, even when the final height is unchanged.
+  // When the text grew, scrollHeight with the current set height still returns
+  // the correct content height (it includes overflow), so the reset is unnecessary.
+  // (Mirrors the testForHeightReduction optimization from jackmoore/autosize.)
+  // Strict > (not >=): an equal-length replacement (e.g. acceptHistory with a
+  // same-length entry that wraps differently) must still run the reset, or the
+  // textarea can be left at a stale (too-tall) height.
+  let lastTextLen = 0;
+
   // Ambient widgets above the composer. The "tasklist" widget gets a collapsed
   // pill (parsed from its lines) that expands on hover/click; everything else
   // renders as the raw monospace box. A tasklist whose lines don't parse (format
@@ -557,8 +569,32 @@
   function autosize() {
     if (box) box.style.setProperty("--composer-max", `${maxH}px`);
     if (!ta) return;
-    ta.style.height = "auto";
+    const grew = ta.value.length > lastTextLen;
+    lastTextLen = ta.value.length;
+    if (!grew) {
+      // Text shrank (backspace) or stayed the same length (replacement) — the
+      // "auto" reset is necessary to get the true content height. This path is
+      // less frequent; the viewportObserver + proactive re-assert cover its jitter.
+      ta.style.height = "auto";
+      // Surface the reset-path tick for e2e + devtools inspection — proves the
+      // reset ran (the testForHeightReduction optimization skips it on growth).
+      if (box) box.dataset.autosizeResetN = String(Number(box.dataset.autosizeResetN ?? 0) + 1);
+    }
     ta.style.height = `${Math.min(ta.scrollHeight, maxH)}px`;
+    // Tell the transcript to re-assert its pinned bottom — the $effect flushes
+    // before the browser paints the gap the composer growth opened. The
+    // viewportObserver ResizeObserver fires a frame later — too late on
+    // WKWebView where overflow-anchor doesn't compensate (#64).
+    //
+    // Deferred via queueMicrotask: autosize() is called from $effects (the
+    // draft-tracking effect and the cap-tracking effect). Bumping a $state
+    // synchronously inside an effect triggers the Transcript's reactive
+    // effect within the SAME flush, which calls settleScroll() → scrollTo()
+    // → onScroll → writes `pinned`, re-triggering the Composer effects in a
+    // loop (effect_update_depth_exceeded). Deferring to a microtask breaks
+    // the synchronous cycle: the bump lands after the current flush settles,
+    // and the Transcript effect fires cleanly on the next microtask.
+    queueMicrotask(() => store.composerResizeN++);
   }
 
   // Re-fit whenever the cap changes (window resize).
@@ -940,7 +976,13 @@
   }
 
   function onInput() {
-    autosize();
+    // autosize() is driven solely by the `$effect` tracking `store.composerDraft`
+    // (which `bind:value` updates on every keystroke). Calling it here too would
+    // double-fire per keystroke — and the second call would always see
+    // `grew = false` (the first already bumped `lastTextLen`), defeating the
+    // testForHeightReduction optimization. The $effect runs in the microtask flush
+    // (before paint), which is exactly when we want the proactive re-assert. The
+    // rest of onInput (cursor tracking, history nav reset, menu state) is unaffected.
     // Track cursor so @-mentions work inline.
     cursorPos = ta?.selectionStart ?? 0;
     // Sync selection range to the store so the @-mention insertion path

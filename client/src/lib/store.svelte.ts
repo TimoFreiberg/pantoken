@@ -642,6 +642,13 @@ class PantokenStore {
   // incoming reply land in view even if they'd scrolled up reading scrollback — without
   // it, the optimistic bubble appears below the fold behind the "New messages ↓" pill.
   promptSentN = $state(0);
+  // Bump to ask the transcript to re-assert its pinned bottom proactively —
+  // fired by the composer's autosize() after it grows the textarea, so the
+  // scroll re-assert flushes before the browser paints (microtask), not a
+  // frame later via the viewportObserver ResizeObserver. On
+  // WKWebView (macOS Tauri), overflow-anchor is unreliable, so the async
+  // ResizeObserver alone leaves a one-frame visible dip (#64 regression).
+  composerResizeN = $state(0);
 
   /** The localStorage key the current composer text belongs to: the new-session draft's
    *  project while drafting, else the focused/active session. */
