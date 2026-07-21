@@ -61,6 +61,69 @@ function splitLeadUp(run: TranscriptItem[]): [TranscriptItem[], TranscriptItem[]
   return [run.slice(0, j), run.slice(j)];
 }
 
+/** A settled assistant response (one carrying `completedAt`) trailed by a
+ *  non-assistant item must stay visible instead of collapsing into "Worked for
+ *  Ns". This is the late-notification invariant: a delayed background-agent
+ *  notification folds into a `notice` transcript item, which lands *after* an
+ *  already-settled final response inside the same turn. The notice breaks the
+ *  trailing-assistant-run scan in `buildTurn`, so without promotion that settled
+ *  response would fold into `work` and hide behind the collapse header — leaving
+ *  only the short follow-up visible. Promoting the settled response AND the
+ *  trailing notice(s) into pinned lanes keeps both visible in place.
+ *
+ *  A preserved segment starts at a `completedAt`-stamped assistant item that is
+ *  followed (within `workItems`) by a non-assistant item, and extends to include
+ *  every immediately-following non-assistant item up to the next settled assistant
+ *  or the end of `workItems`. Returns the inclusive `[start, end]` index ranges.
+ *
+ *  Key non-regression: when the `completedAt` assistant is the genuine trailing
+ *  run (the greeting/cold-restore case — not trailed by a non-assistant item), no
+ *  segment is produced, so behavior is unchanged. The promotion is also keyed on
+ *  `completedAt` *presence*, not its value, so cold-restored turns (whose
+ *  `completedAt` sits far past `ts`) still collapse correctly when no notice
+ *  follows. A non-settled streaming assistant (no `completedAt`) interrupted by a
+ *  compaction notice is NOT promoted — it keeps folding into work as before. */
+export function findPreservedSegments(
+  workItems: readonly TranscriptItem[],
+): Array<[number, number]> {
+  const segments: Array<[number, number]> = [];
+  for (let i = 0; i < workItems.length; i++) {
+    const it = workItems[i]!;
+    // A preserved segment starts at a settled assistant response.
+    if (!(it.kind === "assistant" && it.completedAt !== undefined)) continue;
+    // …that is trailed by a passive, non-assistant, non-tool item (a notice/inject —
+    // the thing that breaks the trailing-run scan without being active work). If
+    // this is the last item, or the next item is an assistant (the normal trailing
+    // run) or a tool (new work — the "buggy order" follow-up case), it's not
+    // preserved. Tools are never part of a preserved segment: promotion must never
+    // move tools out of `work` so the turn-level `collapsible` (which keys on
+    // `work.some(isWorkTool)`) stays stable.
+    const next = workItems[i + 1];
+    if (
+      i + 1 >= workItems.length ||
+      next!.kind === "assistant" ||
+      next!.kind === "tool"
+    )
+      continue;
+    // Extend the segment over the settled response + every immediately-following
+    // non-assistant, non-tool item (notices/injects). An inject that lands after a
+    // settled response is intentionally promoted alongside the notice — it should
+    // stay visible rather than hide behind a collapse header, same as the notice.
+    let end = i;
+    while (
+      end + 1 < workItems.length &&
+      workItems[end + 1]!.kind !== "assistant" &&
+      workItems[end + 1]!.kind !== "tool"
+    )
+      end++;
+    segments.push([i, end]);
+    // Continue scanning AFTER this segment (don't skip — a later settled response
+    // trailed by another notice must be found too, per the multi-notification case).
+    i = end;
+  }
+  return segments;
+}
+
 /** The id of the assistant item that is the active thinking tail: the LAST
  *  item, only if it is an assistant item still accumulating reasoning with no
  *  answer text yet (thinking present, text empty). This is the single thinking
@@ -249,7 +312,28 @@ function buildTurn(
     for (const it of leadUpItems)
       lanes.push({ kind: "pinned", id: it.id, item: it });
   };
-  for (const it of workItems) {
+  // Preserved segments: settled responses trailed by notices (see
+  // findPreservedSegments). Each item in a segment becomes its own pinned lane so
+  // both the settled response AND the trailing notice(s) render visibly in place —
+  // neither collapses behind "Worked for Ns". Built once as an index→segment map so
+  // the main loop can check membership in O(1) without re-scanning.
+  const preserved = findPreservedSegments(workItems);
+  const preservedAt = new Map<number, [number, number]>();
+  for (const seg of preserved) {
+    for (let s = seg[0]; s <= seg[1]; s++) preservedAt.set(s, seg);
+  }
+  for (let idx = 0; idx < workItems.length; idx++) {
+    const it = workItems[idx]!;
+    // A preserved segment is flushed as one-per-item pinned lanes (settled
+    // response + trailing notices), skipping past the whole segment.
+    const seg = preservedAt.get(idx);
+    if (seg) {
+      flushRun();
+      for (let s = seg[0]; s <= seg[1]; s++)
+        lanes.push({ kind: "pinned", id: workItems[s]!.id, item: workItems[s]! });
+      idx = seg[1];
+      continue;
+    }
     if (isVisibleTool(it)) {
       // Peel the lead-up paragraph(s) off the run BEFORE pinning the answer card, so
       // they render between the (now shorter) collapsible work run and the Q&A.

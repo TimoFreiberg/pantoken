@@ -1,6 +1,7 @@
 import type {
   AssistantItem,
   InjectItem,
+  NoticeItem,
   ToolItem,
   TranscriptItem,
 } from "@pantoken/protocol";
@@ -8,6 +9,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createTurnGrouper,
   filterHiddenThinking,
+  findPreservedSegments,
   formatWorkedDuration,
   groupTurns,
   injectText,
@@ -54,6 +56,16 @@ const inject = (
   customType: "journal-nudge",
   text: id,
   display: true,
+  ...over,
+});
+const notice = (
+  id: string,
+  over: Partial<NoticeItem> = {},
+): TranscriptItem => ({
+  kind: "notice",
+  id,
+  level: "info",
+  text: id,
   ...over,
 });
 
@@ -424,6 +436,231 @@ describe("groupTurns: queued follow-up delivery position", () => {
     // finalA is buried in the follow-up turn's collapsible work, not its response.
     expect(turns[1]!.work.map((i) => i.id)).toContain("finalA");
     expect(turns[1]!.response.map((i) => i.id)).toEqual(["finalB"]);
+  });
+});
+
+// Late subagent notifications collapse the preceding final assistant response (#78).
+// A delayed background-agent notification folds into a `notice` transcript item that
+// lands AFTER an already-settled (`completedAt`-stamped) final response, inside the
+// same turn. The notice breaks the trailing-assistant-run scan, so without promotion
+// the settled response folds into `work` and hides behind "Worked for Ns" — leaving
+// only the short follow-up visible. The fix promotes the settled response + trailing
+// notice(s) into pinned lanes so both stay visible in place.
+describe("groupTurns: late notification preserving a settled response", () => {
+  test("a settled response trailed by a notice stays visible; the follow-up is the response", () => {
+    // [user, asst(narration), tool, asst(finalA, completedAt), notice, asst(followUp)]
+    const turns = groupTurns([
+      user("u1"),
+      asst("narration"),
+      tool("b1", "bash"),
+      asst("finalA", { completedAt: "9000" }),
+      notice("n1"),
+      asst("followUp"),
+    ]);
+    expect(turns).toHaveLength(1);
+    const t = turns[0]!;
+    // finalA is NOT in work (not collapsed).
+    expect(t.work.map((i) => i.id)).not.toContain("finalA");
+    // finalA renders as visible/pinned content; followUp is the trailing response.
+    expect(t.visible.map((i) => i.id)).toContain("finalA");
+    expect(t.response.map((i) => i.id)).toEqual(["followUp"]);
+    // The notice renders in place between them — in `visible`, NOT `work`, so it
+    // stays visible when the work block is collapsed (the default state).
+    expect(t.visible.map((i) => i.id)).toContain("n1");
+    expect(t.work.map((i) => i.id)).not.toContain("n1");
+    // The turn is collapsible (tool work exists) but finalA is excluded from the
+    // collapsed run.
+    expect(t.collapsible).toBe(true);
+    expect(t.work.map((i) => i.id)).toEqual(["narration", "b1"]);
+    // Full lane structure: [work(narration,b1), pinned(finalA), pinned(notice)]
+    // with response=[followUp].
+    expect(t.lanes.map((l) => l.kind)).toEqual(["work", "pinned", "pinned"]);
+    expect(
+      t.lanes.map((l) =>
+        l.kind === "pinned" ? l.item.id : l.items.map((i) => i.id).join(","),
+      ),
+    ).toEqual(["narration,b1", "finalA", "n1"]);
+    // The turnText footer key is followUp, NOT finalA — the promoted settled
+    // response doesn't steal the footer (work→visible→response order, last assistant).
+    const footerIds: string[] = [];
+    for (const it of [...t.work, ...t.visible, ...t.response]) {
+      if (it.kind === "assistant" && it.text) footerIds.push(it.id);
+    }
+    expect(footerIds[footerIds.length - 1]).toBe("followUp");
+  });
+
+  test("greeting still collapses (non-regression): a completedAt trailing run with no notice is unchanged", () => {
+    const turns = groupTurns([
+      user("u1"),
+      asst("narration"),
+      tool("b1", "bash"),
+      asst("final", { completedAt: "9000" }),
+    ]);
+    expect(turns).toHaveLength(1);
+    const t = turns[0]!;
+    // final is the response (the trailing run), not promoted to visible.
+    expect(t.response.map((i) => i.id)).toEqual(["final"]);
+    expect(t.visible.map((i) => i.id)).toEqual([]);
+    expect(t.work.map((i) => i.id)).toEqual(["narration", "b1"]);
+    expect(t.collapsible).toBe(true);
+    expect(t.lanes.map((l) => l.kind)).toEqual(["work"]);
+  });
+
+  test("cold-restore shape still collapses: completedAt far past ts, no trailing notice", () => {
+    const turns = groupTurns(
+      [
+        user("u1", "2025-01-01T00:00:01.000Z"),
+        asst("narration", { ts: "2025-01-01T00:00:02.000Z", streaming: false }),
+        tool("t1", "bash"),
+        asst("final", {
+          ts: "2025-01-01T00:00:04.000Z",
+          streaming: false,
+          completedAt: "2025-06-01T12:00:00.000Z",
+        }),
+      ],
+      false,
+    );
+    expect(turns).toHaveLength(1);
+    const t = turns[0]!;
+    expect(t.collapsible).toBe(true);
+    expect(t.response.map((i) => i.id)).toEqual(["final"]);
+    expect(t.visible.map((i) => i.id)).toEqual([]);
+  });
+
+  test("a mid-turn compaction notice is unaffected: a non-settled streaming bubble is NOT promoted", () => {
+    // [user, asst(streaming text, NO completedAt), notice, asst(more text)]
+    const turns = groupTurns([
+      user("u1"),
+      asst("streaming-text", { streaming: true }),
+      notice("compact", { text: "Compacting context…" }),
+      asst("more-text"),
+    ]);
+    expect(turns).toHaveLength(1);
+    const t = turns[0]!;
+    // The first assistant has no completedAt → not promoted. It stays in work
+    // (trailed by a non-assistant item, but not settled, so no preservation).
+    expect(t.work.map((i) => i.id)).toContain("streaming-text");
+    expect(t.visible.map((i) => i.id)).not.toContain("streaming-text");
+    // The notice folds into work too (the existing compaction-notice behavior).
+    expect(t.work.map((i) => i.id)).toContain("compact");
+    // more-text is the trailing response.
+    expect(t.response.map((i) => i.id)).toEqual(["more-text"]);
+  });
+
+  test("multiple late notifications: every settled response trailed by a notice is promoted", () => {
+    // [user, tool, asst(finalA, completedAt), notice, asst(followA, completedAt), notice, asst(followB)]
+    const turns = groupTurns([
+      user("u1"),
+      tool("b1", "bash"),
+      asst("finalA", { completedAt: "9000" }),
+      notice("n1"),
+      asst("followA", { completedAt: "10000" }),
+      notice("n2"),
+      asst("followB"),
+    ]);
+    expect(turns).toHaveLength(1);
+    const t = turns[0]!;
+    // Both settled responses (finalA, followA) stay visible; only followB is the
+    // trailing response.
+    expect(t.visible.map((i) => i.id)).toEqual([
+      "finalA",
+      "n1",
+      "followA",
+      "n2",
+    ]);
+    expect(t.response.map((i) => i.id)).toEqual(["followB"]);
+    // Only the real tool work stays in work.
+    expect(t.work.map((i) => i.id)).toEqual(["b1"]);
+    // Full lane structure:
+    // [work(b1), pinned(finalA), pinned(n1), pinned(followA), pinned(n2)]
+    // with response=[followB].
+    expect(t.lanes.map((l) => l.kind)).toEqual([
+      "work",
+      "pinned",
+      "pinned",
+      "pinned",
+      "pinned",
+    ]);
+    expect(
+      t.lanes.map((l) =>
+        l.kind === "pinned" ? l.item.id : l.items.map((i) => i.id).join(","),
+      ),
+    ).toEqual(["b1", "finalA", "n1", "followA", "n2"]);
+  });
+
+  test("an active last turn forces work lanes non-collapsible, but promoted settled responses stay visible", () => {
+    const items: TranscriptItem[] = [
+      user("u1"),
+      asst("narration"),
+      tool("b1", "bash"),
+      asst("finalA", { completedAt: "9000" }),
+      notice("n1"),
+      asst("followUp", { streaming: true }),
+    ];
+    const turns = groupTurns(items, true);
+    expect(turns).toHaveLength(1);
+    const t = turns[0]!;
+    // Active: turn not collapsible, and every work lane is non-collapsible.
+    expect(t.collapsible).toBe(false);
+    for (const l of t.lanes)
+      if (l.kind === "work") expect(l.collapsible).toBe(false);
+    // The promoted settled response + notice still render as visible pinned lanes.
+    expect(t.visible.map((i) => i.id)).toContain("finalA");
+    expect(t.visible.map((i) => i.id)).toContain("n1");
+    expect(t.response.map((i) => i.id)).toEqual(["followUp"]);
+  });
+});
+
+// Direct unit tests for the preserved-segment scan, isolated from the full lane
+// machinery so the boundary conditions are explicit.
+describe("findPreservedSegments", () => {
+  test("a settled response trailed by a notice yields one segment", () => {
+    const items = [
+      asst("narration"),
+      tool("b1"),
+      asst("finalA", { completedAt: "9000" }),
+      notice("n1"),
+    ];
+    expect(findPreservedSegments(items)).toEqual([[2, 3]]);
+  });
+
+  test("a settled response as the trailing run (no notice) yields no segment", () => {
+    const items = [
+      asst("narration"),
+      tool("b1"),
+      asst("final", { completedAt: "9000" }),
+    ];
+    expect(findPreservedSegments(items)).toEqual([]);
+  });
+
+  test("a non-settled assistant trailed by a notice yields no segment", () => {
+    const items = [
+      asst("streaming", { streaming: true }),
+      notice("compact"),
+    ];
+    expect(findPreservedSegments(items)).toEqual([]);
+  });
+
+  test("multiple settled responses trailed by notices yield multiple segments", () => {
+    const items = [
+      tool("b1"),
+      asst("finalA", { completedAt: "9000" }),
+      notice("n1"),
+      asst("followA", { completedAt: "10000" }),
+      notice("n2"),
+    ];
+    expect(findPreservedSegments(items)).toEqual([
+      [1, 2],
+      [3, 4],
+    ]);
+  });
+
+  test("a settled response trailed by a tool yields no segment (tool stops promotion)", () => {
+    const items = [
+      asst("finalA", { completedAt: "9000" }),
+      tool("b1"),
+    ];
+    expect(findPreservedSegments(items)).toEqual([]);
   });
 });
 
