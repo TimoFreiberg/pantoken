@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount, untrack } from "svelte";
   import { cubicOut } from "svelte/easing";
   import { reveal } from "../lib/transitions.js";
   import Chevron from "./ui/Chevron.svelte";
@@ -708,6 +708,36 @@
     // markstream finalizing). A one-shot scroll can land short; settleScroll chases the
     // true bottom until it holds steady. (Same reason session-switch uses it.)
     settleScroll();
+  });
+
+  // Re-assert the pinned bottom the instant the composer resizes — autosize()
+  // bumps composerResizeN after setting the textarea height, so this flushes
+  // before paint (microtask), earlier than the viewportObserver. The
+  // viewportObserver ResizeObserver (the async path) fires a frame later; on
+  // WKWebView (overflow-anchor unreliable) that leaves a one-frame visible
+  // dip (#64). This closes it before paint. Only while pinned: a reader
+  // scrolled up must never be yanked back down.
+  //
+  // The entire action runs inside untrack() because settleScroll() →
+  // applySettle() reads `pinned` (line 585), and scrollTo() fires onScroll
+  // which writes `pinned` — even to the same value. Svelte 5 re-triggers
+  // effects on any $state write (not just value changes), so reading `pinned`
+  // inside this effect would loop to effect_update_depth_exceeded. untrack()
+  // breaks the cycle: the effect reacts ONLY to composerResizeN.
+  let lastResizeN = store.composerResizeN;
+  $effect(() => {
+    const n = store.composerResizeN;
+    if (n === lastResizeN) return;
+    lastResizeN = n;
+    untrack(() => {
+      if (pinned && scroller) {
+        settleScroll();
+        // Surface the proactive-path tick for e2e + devtools inspection —
+        // proves the proactive re-assert fired (the async ResizeObserver
+        // path doesn't touch this attribute).
+        scroller.dataset.composerResizeN = String(n);
+      }
+    });
   });
 
   /** Jump to the newest content and clear the unread flag (the "new messages ↓" pill). */
