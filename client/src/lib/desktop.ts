@@ -32,3 +32,15 @@ export function requestDockAttention(): void {
     // silently — this is a best-effort UX nicety, not a critical path.
   });
 }
+
+/**
+ * Set the macOS dock icon's badge to a count of unread sessions, or clear it.
+ * Pass null/0 to clear. Silently no-ops in a browser/PWA context.
+ */
+export function setDockBadge(count: number | null): void {
+  if (!isDesktopShell()) return;
+  const normalized = count && count > 0 ? count : null;
+  window.__TAURI_INTERNALS__!.invoke("set_dock_badge", { count: normalized }).catch(() => {
+    // best-effort — a failed badge set just leaves no badge
+  });
+}

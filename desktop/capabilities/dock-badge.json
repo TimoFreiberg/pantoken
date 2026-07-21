@@ -1,0 +1,11 @@
+{
+  "$schema": "../target/schemas/desktop-schema.json",
+  "identifier": "dock-badge",
+  "description": "Narrow IPC exception (same pattern as dock-attention.json): grants the set_dock_badge command to the hub-served web client at http://127.0.0.1:<port>, so it can show the unread-session count as a red badge on the macOS dock icon.",
+  "local": false,
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*/**"]
+  },
+  "permissions": ["allow-set-dock-badge"]
+}

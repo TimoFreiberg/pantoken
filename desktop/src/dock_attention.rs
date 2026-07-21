@@ -36,3 +36,31 @@ pub fn request_dock_attention(_app: AppHandle) {
     }
     // Non-macOS: no-op (future: Windows taskbar flash, Linux urgency hint)
 }
+
+/// Set the macOS dock icon's badge label to a count, or clear it.
+///
+/// Called from the web client's unread-count effect (App.svelte) whenever the
+/// number of unread sessions changes. `count = None` clears the badge; a
+/// positive number shows a red badge with that number. No-op on non-macOS.
+#[tauri::command]
+pub fn set_dock_badge(_app: AppHandle, _count: Option<u32>) {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::NSApplication;
+        use objc2_foundation::{MainThreadMarker, NSString};
+
+        let count = _count;
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        let app = NSApplication::sharedApplication(mtm);
+        let dock_tile = app.dockTile();
+        let label = match count {
+            Some(n) if n > 0 => Some(NSString::from_str(&n.to_string())),
+            _ => None,
+        };
+        dock_tile.setBadgeLabel(label.as_deref());
+        dock_tile.display();
+    }
+    // Non-macOS: no-op (future: Windows taskbar overlay icon, Linux urgency hint)
+}

@@ -11,7 +11,7 @@
   "app": {
     "windows": [],
     "security": {
-      "capabilities": ["default", "window-drag", "dock-attention", "remote-commands"]
+      "capabilities": ["default", "window-drag", "dock-attention", "dock-badge", "remote-commands"]
     }
   },
   "bundle": {

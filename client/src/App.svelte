@@ -23,7 +23,7 @@
   import { attention, type AttentionSurface } from "./lib/attention-cycle.svelte.js";
   import IconButton from "./components/ui/IconButton.svelte";
   import { notifyIfUnfocused } from "./lib/notify.js";
-  import { requestDockAttention } from "./lib/desktop.js";
+  import { requestDockAttention, setDockBadge } from "./lib/desktop.js";
   import { wakeLock } from "./lib/wake-lock.js";
   import { trackKeyboardInset } from "./lib/keyboard-inset.js";
   import { watchAppBadgeClear } from "./lib/app-badge.js";
@@ -211,6 +211,14 @@
     }
     prevAttention = next;
     prevAttentionVersion = version;
+  });
+
+  // Keep the macOS dock badge in sync with the unread-session count.
+  // Persists until all unread sessions are viewed (macOS Messages/Mail
+  // convention) — the sidebar shows live state once the app is visible.
+  $effect(() => {
+    const unreadCount = store.unread.size + (store.activeUnread ? 1 : 0);
+    setDockBadge(unreadCount > 0 ? unreadCount : null);
   });
 
   // Reflect the active session's title in the browser tab so it's legible from the
