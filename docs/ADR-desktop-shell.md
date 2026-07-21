@@ -13,7 +13,7 @@ The Tauri front end auto updates the entire app.
 ## Narrow IPC exceptions for the hub-served web client
 
 By design the hub-served web client gets **no** Tauri IPC (see
-`desktop/capabilities/default.json`). Two deliberate, narrow exceptions exist,
+`desktop/capabilities/default.json`). Three deliberate, narrow exceptions exist,
 both granted to the client's `http://127.0.0.1:<port>` origin via a `remote`
 capability:
 
@@ -26,3 +26,8 @@ capability:
   WKWebView on macOS (`new Notification()` silently fails). The client calls
   `window.__TAURI_INTERNALS__.invoke` directly — no `@tauri-apps/api` dependency
   — keeping the zero-Tauri-dependency client design intact.
+- **`dock-badge`** — `set_dock_badge` sets the macOS dock icon's badge label
+  to the count of unread sessions. Called reactively from the web client's
+  unread-state effect whenever `store.unread` changes. Clears when all
+  sessions are read. Same direct `__TAURI_INTERNALS__.invoke` pattern, no
+  `@tauri-apps/api` dependency.

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { isDesktopShell, requestDockAttention } from "./desktop.js";
+import { isDesktopShell, requestDockAttention, setDockBadge } from "./desktop.js";
 
 // desktop.ts reads window.__TAURI_INTERNALS__ directly. bun:test runs without a
 // DOM, so window is undefined by default — isDesktopShell() is false there.
@@ -73,6 +73,63 @@ describe("requestDockAttention", () => {
     // Should not throw synchronously, and the rejected promise should be
     // caught internally (no unhandled rejection).
     expect(() => requestDockAttention()).not.toThrow();
+    // Let the microtask queue drain so the .catch handler runs.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(calls.length).toBe(1);
+  });
+});
+
+describe("setDockBadge", () => {
+  test("is a no-op (invoke not called) when __TAURI_INTERNALS__ is undefined", () => {
+    // @ts-expect-error — ensure no leftover window from a prior test.
+    delete globalThis.window;
+    expect(() => setDockBadge(3)).not.toThrow();
+  });
+
+  test("calls invoke('set_dock_badge', { count: N }) when count > 0", () => {
+    const { invoke, calls } = makeInvokeSpy();
+    globalThis.window = {
+      __TAURI_INTERNALS__: { invoke },
+    } as unknown as typeof globalThis.window;
+
+    setDockBadge(3);
+
+    expect(calls.length).toBe(1);
+    expect(calls[0]!.cmd).toBe("set_dock_badge");
+    expect(calls[0]!.args).toEqual({ count: 3 });
+  });
+
+  test("normalizes 0 to null (clears the badge)", () => {
+    const { invoke, calls } = makeInvokeSpy();
+    globalThis.window = {
+      __TAURI_INTERNALS__: { invoke },
+    } as unknown as typeof globalThis.window;
+
+    setDockBadge(0);
+
+    expect(calls.length).toBe(1);
+    expect(calls[0]!.args).toEqual({ count: null });
+  });
+
+  test("normalizes null to null (clears the badge)", () => {
+    const { invoke, calls } = makeInvokeSpy();
+    globalThis.window = {
+      __TAURI_INTERNALS__: { invoke },
+    } as unknown as typeof globalThis.window;
+
+    setDockBadge(null);
+
+    expect(calls.length).toBe(1);
+    expect(calls[0]!.args).toEqual({ count: null });
+  });
+
+  test("swallows a rejected invoke (best-effort, never throws)", async () => {
+    const { invoke, calls } = makeInvokeSpy({ reject: true });
+    globalThis.window = {
+      __TAURI_INTERNALS__: { invoke },
+    } as unknown as typeof globalThis.window;
+
+    expect(() => setDockBadge(1)).not.toThrow();
     // Let the microtask queue drain so the .catch handler runs.
     await new Promise((r) => setTimeout(r, 0));
     expect(calls.length).toBe(1);

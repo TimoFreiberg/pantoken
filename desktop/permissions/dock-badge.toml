@@ -1,0 +1,6 @@
+[[permission]]
+identifier = "allow-set-dock-badge"
+description = "Allow the web client to set the macOS dock icon's unread-count badge."
+commands.allow = [
+  "set_dock_badge"
+]

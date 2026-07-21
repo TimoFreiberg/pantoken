@@ -59,6 +59,7 @@ fn main() {
             remote_commands::disconnect_remote,
             remote_commands::remote_connection_state,
             dock_attention::request_dock_attention,
+            dock_attention::set_dock_badge,
         ])
         .setup(|app| {
             let port = free_port()?;
