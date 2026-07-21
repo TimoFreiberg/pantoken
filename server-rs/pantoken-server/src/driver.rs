@@ -32,7 +32,6 @@ pub struct NewSessionOptsData {
 
 #[derive(Debug, Clone)]
 pub struct NewSessionModel {
-    pub provider: String,
     pub model_id: String,
 }
 

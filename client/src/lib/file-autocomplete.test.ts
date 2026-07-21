@@ -475,45 +475,43 @@ describe("filterNames", () => {
 });
 
 describe("filterModels", () => {
-  const m = (
-    provider: string,
-    modelId: string,
-    label: string,
-  ): ModelOption => ({ provider, modelId, label });
+  const m = (modelId: string, label: string): ModelOption => ({ modelId, label });
   const MODELS: readonly ModelOption[] = [
-    m("anthropic", "claude-opus-4-8", "Claude Opus 4.8"),
-    m("anthropic", "claude-sonnet-4-6", "Claude Sonnet 4.6"),
-    m("openai", "gpt-5", "GPT-5"),
+    m("anthropic/claude-opus-4-8", "Claude Opus 4.8"),
+    m("anthropic/claude-sonnet-4-6", "Claude Sonnet 4.6"),
+    m("openai/gpt-5", "GPT-5"),
   ];
   const ids = (items: ModelOption[]) => items.map((i) => i.modelId);
 
   test("empty partial returns the head of the list as-given", () => {
     expect(ids(filterModels(MODELS, "", 2))).toEqual([
-      "claude-opus-4-8",
-      "claude-sonnet-4-6",
+      "anthropic/claude-opus-4-8",
+      "anthropic/claude-sonnet-4-6",
     ]);
   });
 
   test("matches modelId", () => {
-    expect(ids(filterModels(MODELS, "gpt"))).toEqual(["gpt-5"]);
+    expect(ids(filterModels(MODELS, "gpt"))).toEqual(["openai/gpt-5"]);
   });
 
   test("matches label (case-insensitive)", () => {
-    expect(ids(filterModels(MODELS, "opus"))).toEqual(["claude-opus-4-8"]);
+    expect(ids(filterModels(MODELS, "opus"))).toEqual([
+      "anthropic/claude-opus-4-8",
+    ]);
   });
 
-  test("matches provider/modelId", () => {
+  test("matches full-registry modelId substring", () => {
     expect(ids(filterModels(MODELS, "anthropic/claude-sonnet"))).toEqual([
-      "claude-sonnet-4-6",
+      "anthropic/claude-sonnet-4-6",
     ]);
   });
 
   test("ranks a modelId-start match before an interior/label-only match", () => {
     const models = [
-      m("x", "gpt-5", "GPT-5"), // label contains "5", modelId starts with "gpt", not "5"
-      m("x", "5-flash", "Five Flash"), // modelId starts with "5"
+      m("x/gpt-5", "GPT-5"), // label contains "5", modelId starts with "x/gpt", not "5"
+      m("x/5-flash", "Five Flash"), // modelId starts with "x/5"
     ];
-    expect(ids(filterModels(models, "5"))).toEqual(["5-flash", "gpt-5"]);
+    expect(ids(filterModels(models, "5"))).toEqual(["x/5-flash", "x/gpt-5"]);
   });
 
   test("respects the limit", () => {
@@ -581,18 +579,14 @@ describe("buildAtItems", () => {
     path,
     isDirectory,
   });
-  const m = (
-    provider: string,
-    modelId: string,
-    label: string,
-  ): ModelOption => ({ provider, modelId, label });
+  const m = (modelId: string, label: string): ModelOption => ({ modelId, label });
 
   const SKILLS = ["debug", "journal"];
   const SUBAGENTS = ["reviewer", "explorer"];
   const MODELS: readonly ModelOption[] = [
-    m("anthropic", "claude-opus-4-8", "Claude Opus 4.8"),
-    m("anthropic", "claude-sonnet-4-6", "Claude Sonnet 4.6"),
-    m("openai", "gpt-5", "GPT-5"),
+    m("anthropic/claude-opus-4-8", "Claude Opus 4.8"),
+    m("anthropic/claude-sonnet-4-6", "Claude Sonnet 4.6"),
+    m("openai/gpt-5", "GPT-5"),
   ];
   const FILES: readonly FileInfo[] = [
     f("README.md"),
@@ -793,14 +787,14 @@ describe("buildAtItems", () => {
       serverFiles: [],
       skills: ["model-skill"],
       subagents: ["model-agent"],
-      models: [m("x", "model-9", "Model Nine")],
+      models: [m("x/model-9", "Model Nine")],
       query: "model",
     });
     expect(items).toEqual([
       { kind: "file", file: f("modelo.txt") },
       { kind: "skill", name: "model-skill" },
       { kind: "subagent", name: "model-agent" },
-      { kind: "model", model: m("x", "model-9", "Model Nine") },
+      { kind: "model", model: m("x/model-9", "Model Nine") },
       { kind: "sigil", prefix: "model:", label: "browse models…" },
     ] satisfies AtItem[]);
   });

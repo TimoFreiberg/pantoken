@@ -507,9 +507,9 @@ export function filterNames(
 
 /**
  * Rank the available models against a partial query, for `@model:`/`@m:` takeover
- * and appended badged matches. Matches against `label`, `modelId`, and
- * `provider/modelId` (so "sonnet", "claude-sonnet-4-6", and "anthropic/claude"
- * all hit); ranks a `modelId`-start match first, then alphabetical by `modelId`.
+ * and appended badged matches. Matches against `label` and `modelId` (the full
+ * registry name, so "sonnet", "claude-sonnet-4-6", and "anthropic/claude" all
+ * hit); ranks a `modelId`-start match first, then alphabetical by `modelId`.
  * An empty partial returns the head of the list as-given.
  */
 export function filterModels(
@@ -524,13 +524,7 @@ export function filterModels(
   for (const m of models) {
     const modelId = m.modelId.toLowerCase();
     const label = m.label.toLowerCase();
-    const providerModel = `${m.provider}/${m.modelId}`.toLowerCase();
-    if (
-      !modelId.includes(q) &&
-      !label.includes(q) &&
-      !providerModel.includes(q)
-    )
-      continue;
+    if (!modelId.includes(q) && !label.includes(q)) continue;
     scored.push({ m, rank: modelId.startsWith(q) ? 0 : 1 });
   }
 

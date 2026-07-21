@@ -3,19 +3,18 @@ import type { ModelOption } from "@pantoken/protocol";
 import { rankModels, sortEfforts } from "./model-picker-helpers.js";
 
 function model(
-  provider: string,
   modelId: string,
   label: string,
   thinkingLevels?: string[],
 ): ModelOption {
-  return { provider, modelId, label, thinkingLevels };
+  return { modelId, label, thinkingLevels };
 }
 
 const MODELS: ModelOption[] = [
-  model("anthropic", "claude-opus-4-8", "Claude Opus 4.8", ["off", "low", "medium", "high"]),
-  model("anthropic", "claude-sonnet-4-6", "Claude Sonnet 4.6", ["off", "low", "medium", "high"]),
-  model("deepseek", "deepseek-v4-flash", "DeepSeek V4 Flash", ["off"]),
-  model("openai", "gpt-5", "GPT-5", ["minimal", "low", "medium", "high"]),
+  model("anthropic/claude-opus-4-8", "Claude Opus 4.8", ["off", "low", "medium", "high"]),
+  model("anthropic/claude-sonnet-4-6", "Claude Sonnet 4.6", ["off", "low", "medium", "high"]),
+  model("deepseek/deepseek-v4-flash", "DeepSeek V4 Flash", ["off"]),
+  model("openai/gpt-5", "GPT-5", ["minimal", "low", "medium", "high"]),
 ];
 
 describe("sortEfforts", () => {
@@ -58,7 +57,7 @@ describe("rankModels", () => {
     // (no other model contains "deep" as a substring).
     const ranked = rankModels(MODELS, "deep");
     expect(ranked.length).toBe(1);
-    expect(ranked[0].model.modelId).toBe("deepseek-v4-flash");
+    expect(ranked[0].model.modelId).toBe("deepseek/deepseek-v4-flash");
     expect(ranked[0].substring).toBe(true);
   });
 
@@ -66,7 +65,7 @@ describe("rankModels", () => {
     // "g5" is a subsequence of "gpt-5" (label "GPT-5") but not a substring.
     const ranked = rankModels(MODELS, "g5");
     expect(ranked.length).toBe(1);
-    expect(ranked[0].model.modelId).toBe("gpt-5");
+    expect(ranked[0].model.modelId).toBe("openai/gpt-5");
     expect(ranked[0].substring).toBe(false);
   });
 
@@ -75,8 +74,8 @@ describe("rankModels", () => {
     // catalog order.
     const ranked = rankModels(MODELS, "claude");
     expect(ranked.length).toBe(2);
-    expect(ranked[0].model.modelId).toBe("claude-opus-4-8");
-    expect(ranked[1].model.modelId).toBe("claude-sonnet-4-6");
+    expect(ranked[0].model.modelId).toBe("anthropic/claude-opus-4-8");
+    expect(ranked[1].model.modelId).toBe("anthropic/claude-sonnet-4-6");
   });
 
   test("no matches returns empty", () => {
@@ -90,9 +89,11 @@ describe("rankModels", () => {
     expect(upper).toEqual(lower);
   });
 
-  test("matches on provider as well", () => {
+  test("matches on the provider prefix of modelId as well", () => {
     const ranked = rankModels(MODELS, "anthropic");
     expect(ranked.length).toBe(2);
-    expect(ranked.every((r) => r.model.provider === "anthropic")).toBe(true);
+    expect(
+      ranked.every((r) => r.model.modelId.startsWith("anthropic/")),
+    ).toBe(true);
   });
 });

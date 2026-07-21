@@ -18,10 +18,14 @@
 //!   selectable: deepseek/deepseek-v4-pro, deepseek/deepseek-v4-pro(none), ...
 //! ```
 //!
-//! The model id is the `- <id>` header line; `provider` is often == the id;
-//! `selectable` is a comma-separated list of `<id>` / `<id>(<reasoning_level>)`
-//! variants. The reasoning `levels` (minus the `(default)` marker) are the
-//! model's thinking levels.
+//! The model id (the `- <id>` header line) is the FULL registry name
+//! (`provider/id`, e.g. `deepseek/deepseek-v4-pro`) — it already carries its
+//! provider prefix, so `ModelOption` has no separate `provider` field. The
+//! indented `provider:` line is the daemon's `provider_name` (the upstream model
+//! identifier), which for catalog models always equals the registry name, so it
+//! carries no extra information and is ignored. `selectable` is a comma-separated
+//! list of `<id>` / `<id>(<reasoning_level>)` variants. The reasoning `levels`
+//! (minus the `(default)` marker) are the model's thinking levels.
 //!
 //! This is a pure parser over the text — unit-testable without invoking the binary.
 //! The driver shells out to `polytoken models` and hands the stdout here.
@@ -107,7 +111,6 @@ pub fn parse_models(stdout: &str) -> ParsedModels {
     // Track the current model block as we walk the lines. A block starts at
     // `- <id>` (indented 0 under `models:`) and its fields are indented further.
     let mut current_id: Option<String> = None;
-    let mut current_provider: Option<String> = None;
     let mut current_reasoning: Option<String> = None;
     // Only treat `- <id>` lines as model headers once we've seen the `models:`
     // section marker. Set on the bare `models:` line; stays true after.
@@ -121,34 +124,27 @@ pub fn parse_models(stdout: &str) -> ParsedModels {
     // flush closure: emits the current model block and returns its id + default
     // thinking level (so the caller can match the id against `default_model`).
     let flush = |cid: &mut Option<String>,
-                 cprov: &mut Option<String>,
                  creason: &mut Option<String>,
                  models: &mut Vec<ModelOption>|
      -> Option<(String, Option<String>)> {
         let Some(id) = cid.take() else {
-            *cprov = None;
             *creason = None;
             return None;
         };
-        // The model id (e.g. `deepseek/deepseek-v4-pro`) already carries its
-        // provider prefix; polytoken's `provider:` field is often identical.
-        // Split on the first `/` so pantoken's provider-grouped picker gets a
-        // sensible group key — but fall back to the whole id when there's no
-        // slash.
-        let provider = cprov
-            .clone()
-            .unwrap_or_else(|| id.split('/').next().unwrap_or(&id).to_string());
+        // The model id (e.g. `deepseek/deepseek-v4-pro`) is the FULL registry
+        // name — it already carries its provider prefix, so there's no separate
+        // provider field to populate. The indented `provider:` line (the
+        // daemon's `provider_name`) is ignored — for catalog models it always
+        // equals the registry name and so carries no extra information.
         let info = creason.as_ref().map(|r| parse_reasoning(r));
         let thinking_levels = info.as_ref().map(|i| i.levels.clone());
         let model_default_level = info.and_then(|i| i.default_level);
         models.push(ModelOption {
-            provider,
             model_id: id.clone(),
             label: id.clone(),
             thinking_levels,
             default_thinking_level: model_default_level.clone(),
         });
-        *cprov = None;
         *creason = None;
         Some((id, model_default_level))
     };
@@ -175,12 +171,9 @@ pub fn parse_models(stdout: &str) -> ParsedModels {
         // Matches `^-\s+(\S+)` — starts with `-` then whitespace, then non-ws token.
         if in_models_section {
             if let Some(id) = parse_model_header(line) {
-                if let Some((flushed_id, lvl)) = flush(
-                    &mut current_id,
-                    &mut current_provider,
-                    &mut current_reasoning,
-                    &mut models,
-                ) {
+                if let Some((flushed_id, lvl)) =
+                    flush(&mut current_id, &mut current_reasoning, &mut models)
+                {
                     if Some(&flushed_id) == default_model.as_ref() {
                         default_thinking_level = lvl;
                     }
@@ -192,24 +185,16 @@ pub fn parse_models(stdout: &str) -> ParsedModels {
         if current_id.is_none() {
             continue;
         }
-        // Field lines are indented further than the `- ` header.
-        // `^\s+provider:\s*(\S+)`
-        if let Some(token) = parse_indented_field(line, "provider:") {
-            current_provider = Some(token.to_string());
-            continue;
-        }
+        // Field lines are indented further than the `- ` header. The indented
+        // `provider:` line (daemon `provider_name`) carries no extra info for
+        // catalog models — it always equals the registry name — so it's ignored.
         // `^\s+reasoning:\s*(.*)$`
         if let Some(rest) = parse_indented_field_rest(line, "reasoning:") {
             current_reasoning = Some(rest.to_string());
             continue;
         }
     }
-    if let Some((flushed_id, lvl)) = flush(
-        &mut current_id,
-        &mut current_provider,
-        &mut current_reasoning,
-        &mut models,
-    ) {
+    if let Some((flushed_id, lvl)) = flush(&mut current_id, &mut current_reasoning, &mut models) {
         if Some(&flushed_id) == default_model.as_ref() {
             default_thinking_level = lvl;
         }
@@ -236,24 +221,6 @@ fn parse_model_header(line: &str) -> Option<String> {
     }
 }
 
-/// Parse an indented `provider:` field line. Matches `^\s+provider:\s*(\S+)`.
-/// Returns the first non-whitespace token after the colon.
-fn parse_indented_field(line: &str, field: &str) -> Option<String> {
-    // Must start with whitespace (indented field).
-    let first = line.chars().next()?;
-    if !first.is_whitespace() {
-        return None;
-    }
-    let trimmed = line.trim_start();
-    let rest = trimmed.strip_prefix(field)?;
-    let token = rest.split_whitespace().next()?;
-    if token.is_empty() {
-        None
-    } else {
-        Some(token.to_string())
-    }
-}
-
 /// Parse an indented `reasoning:` field line, returning everything after the
 /// colon. Matches `^\s+reasoning:\s*(.*)$`.
 fn parse_indented_field_rest(line: &str, field: &str) -> Option<String> {
@@ -266,37 +233,13 @@ fn parse_indented_field_rest(line: &str, field: &str) -> Option<String> {
     Some(rest.trim_start().to_string())
 }
 
-/// Split a full `provider/id` registry name into the picker's `{provider, modelId}`
-/// shape. `modelId` stays the FULL registry name (polytoken's POST /model key),
-/// NOT the bare id — see `setModel` notes. Falls back to the whole string as both
-/// when there's no slash (mirrors `parseModels`' provider fallback).
-pub fn default_model_ref(marker: &str) -> ModelRef {
-    match marker.find('/') {
-        Some(slash) => ModelRef {
-            provider: marker[..slash].to_string(),
-            model_id: marker.to_string(),
-        },
-        None => ModelRef {
-            provider: marker.to_string(),
-            model_id: marker.to_string(),
-        },
-    }
-}
-
 /// The model string to POST to /model. Polytoken's `ModelConfig.name` (the
 /// registry key) is the FULL `provider/id`, which is exactly what
 /// `ModelOption.model_id` and the default markers already carry — so the POST
 /// key IS the model_id, unmodified. Centralized here so `set_model`/`new_session`
-/// share one tested path for the `${provider}/${modelId}` key.
+/// share one tested path for the POST key.
 pub fn model_post_key(model_id: &str) -> String {
     model_id.to_string()
-}
-
-/// The provider + model-id pair returned by [`default_model_ref`].
-#[derive(Debug, Clone)]
-pub struct ModelRef {
-    pub provider: String,
-    pub model_id: String,
 }
 
 #[cfg(test)]
@@ -340,7 +283,6 @@ models:
         assert_eq!(out.models.len(), 3);
 
         let pro = &out.models[0];
-        assert_eq!(pro.provider, "deepseek/deepseek-v4-pro");
         assert_eq!(pro.model_id, "deepseek/deepseek-v4-pro");
         assert_eq!(pro.label, "deepseek/deepseek-v4-pro");
         assert_eq!(
@@ -371,20 +313,18 @@ models:
     }
 
     #[test]
-    fn splits_provider_from_model_id_on_first_slash() {
+    fn model_id_keeps_full_registry_name_with_slash() {
         let out = parse_models(
             "models:\n- anthropic/claude-sonnet-5\n  reasoning: levels=low (default), high; can_disable=yes\n",
         );
         assert_eq!(out.models.len(), 1);
-        assert_eq!(out.models[0].provider, "anthropic");
         assert_eq!(out.models[0].model_id, "anthropic/claude-sonnet-5");
     }
 
     #[test]
-    fn falls_back_to_whole_id_as_provider_when_no_slash() {
+    fn model_id_keeps_whole_string_when_no_slash() {
         let out =
             parse_models("models:\n- local-model\n  reasoning: levels=high; can_disable=yes\n");
-        assert_eq!(out.models[0].provider, "local-model");
         assert_eq!(out.models[0].model_id, "local-model");
     }
 
@@ -392,6 +332,16 @@ models:
     fn no_reasoning_line_yields_none_thinking_levels() {
         let out = parse_models("models:\n- base-model\n  provider: base-model\n");
         assert!(out.models[0].thinking_levels.is_none());
+    }
+
+    #[test]
+    fn provider_field_line_is_ignored() {
+        // The indented `provider:` line is the daemon's `provider_name`, which
+        // for catalog models always equals the registry name — it carries no
+        // extra information, so it's ignored and `model_id` stays the header id.
+        let out = parse_models("models:\n- codex/gpt-5.6-luna\n  provider: codex/gpt-5.6-luna\n");
+        assert_eq!(out.models.len(), 1);
+        assert_eq!(out.models[0].model_id, "codex/gpt-5.6-luna");
     }
 
     #[test]
@@ -542,15 +492,7 @@ models:
     }
 
     #[test]
-    fn default_model_ref_and_model_post_key() {
-        let r = default_model_ref("umans/umans-glm-5.2");
-        assert_eq!(r.provider, "umans");
-        assert_eq!(r.model_id, "umans/umans-glm-5.2");
-
-        let r2 = default_model_ref("local-model");
-        assert_eq!(r2.provider, "local-model");
-        assert_eq!(r2.model_id, "local-model");
-
+    fn model_post_key_is_identity() {
         assert_eq!(model_post_key("umans/umans-glm-5.2"), "umans/umans-glm-5.2");
         assert_eq!(
             model_post_key("deepseek/deepseek-v4-pro"),

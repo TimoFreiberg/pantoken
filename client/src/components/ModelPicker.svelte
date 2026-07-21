@@ -18,35 +18,27 @@
   const cfg = $derived(store.composerConfig);
   // Show the friendly label (e.g. "Claude Opus 4.8") in the badge, matching the Claude
   // app; fall back to the raw id before the model list arrives or if the active
-  // model isn't in it. The raw provider:id stays available in the tooltip.
+  // model isn't in it. The raw modelId (the full registry name) stays available in the tooltip.
   const activeModel = $derived(
-    store.models.find((m) => m.provider === cfg.provider && m.modelId === cfg.modelId),
+    store.models.find((m) => m.modelId === cfg.modelId),
   );
   const modelLabel = $derived(activeModel?.label ?? cfg.modelId ?? "model");
-  const modelTitle = $derived(
-    cfg.modelId
-      ? cfg.modelId.includes("/")
-        ? cfg.modelId
-        : cfg.provider
-          ? `${cfg.provider}:${cfg.modelId}`
-          : cfg.modelId
-      : "model",
-  );
+  const modelTitle = $derived(cfg.modelId ?? "model");
   // Always show the effort in the badge — even off/none (e.g. "Claude Opus 4.8 · off").
   const thinking = $derived(cfg.thinkingLevel ?? "off");
   const hasModels = $derived(store.models.length > 0);
 
-  // Filter-as-you-type search within the model list (label / id / provider).
+  // Filter-as-you-type search within the model list (label / id).
   let query = $state("");
   const ranked = $derived(rankModels(store.pickerModels, query));
 
   // Keyboard-highlight index into the flat ranked list.
   let sel = $state(0);
-  // Staged effort per model: a map keyed by `${provider}:${modelId}` holding the
-  // effort the user has cycled to. Seeded from the model's defaultThinkingLevel
-  // (or the first sorted level) when a model is first highlighted; the active
-  // model starts with its current effort. `undefined` means "no effort control"
-  // (the model has no thinkingLevels at all).
+  // Staged effort per model: a map keyed by modelId (the full registry name)
+  // holding the effort the user has cycled to. Seeded from the model's
+  // defaultThinkingLevel (or the first sorted level) when a model is first
+  // highlighted; the active model starts with its current effort. `undefined`
+  // means "no effort control" (the model has no thinkingLevels at all).
   let stagedEffort = $state<Record<string, string | undefined>>({});
 
   // Element handles for focus management + scroll-into-view.
@@ -54,7 +46,7 @@
   let panelEl = $state<HTMLDivElement>();
 
   function effortKey(m: ModelOption): string {
-    return `${m.provider}:${m.modelId}`;
+    return m.modelId;
   }
 
   /** Resolve the effective effort to show for a model row: the staged value if
@@ -164,8 +156,8 @@
 
   function applyModel(m: ModelOption): void {
     const effort = effortFor(m);
-    if (!(m.provider === cfg.provider && m.modelId === cfg.modelId) || effort !== cfg.thinkingLevel) {
-      store.setModel(m.provider, m.modelId, effort);
+    if (m.modelId !== cfg.modelId || effort !== cfg.thinkingLevel) {
+      store.setModel(m.modelId, effort);
     }
     closePicker();
   }
@@ -223,7 +215,7 @@
       {#if open}
         <div class="panel" bind:this={panelEl} transition:reveal>
           {#each ranked as { model }, i (model.modelId)}
-            {@const active = model.provider === cfg.provider && model.modelId === cfg.modelId}
+            {@const active = model.modelId === cfg.modelId}
             {@const levels = levelsFor(model)}
             {@const effort = effortFor(model)}
             {@const hasEffort = levels.length > 1}

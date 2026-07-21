@@ -53,7 +53,7 @@
       case "subagent":
         return `subagent:${item.name}`;
       case "model":
-        return `model:${item.model.provider}/${item.model.modelId}`;
+        return `model:${item.model.modelId}`;
       case "sigil":
         return `sigil:${item.prefix}`;
     }
@@ -68,7 +68,7 @@
       case "subagent":
         return `Insert @subagent:${item.name} ${KEYBOARD_HINT}`;
       case "model":
-        return `Insert @model:${item.model.provider}/${item.model.modelId} — [ ] adjust reasoning ${KEYBOARD_HINT}`;
+        return `Insert @model:${item.model.modelId} — [ ] adjust reasoning ${KEYBOARD_HINT}`;
       case "sigil":
         return `Insert @${item.prefix} to ${item.label} ${KEYBOARD_HINT}`;
     }
@@ -127,7 +127,7 @@
           {:else if item.kind === "subagent"}
             <span class="prefix">subagent:</span><span class="name">{item.name}</span>
           {:else if item.kind === "model"}
-            <span class="prefix">model:</span><span class="name">{item.model.provider}/{item.model.modelId}</span>
+            <span class="prefix">model:</span><span class="name">{item.model.modelId}</span>
             {#if item.model.label && item.model.label !== item.model.modelId}
               <span class="meta">{item.model.label}</span>
             {/if}

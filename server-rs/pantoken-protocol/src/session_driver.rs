@@ -111,8 +111,6 @@ pub struct SessionQueuedMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SessionConfig {
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub provider: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default, rename = "modelId")]
     pub model_id: Option<String>,
     #[serde(
@@ -171,7 +169,6 @@ pub enum ModelCatalogDiagnostic {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelOption {
-    pub provider: String,
     #[serde(rename = "modelId")]
     pub model_id: String,
     pub label: String,
@@ -191,8 +188,6 @@ pub struct ModelOption {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModelDefaults {
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub provider: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default, rename = "modelId")]
     pub model_id: Option<String>,
     #[serde(

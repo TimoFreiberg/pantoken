@@ -1636,7 +1636,6 @@ impl SessionHub {
                     worktree: *worktree,
                     base_branch: base_branch.clone(),
                     model: model.as_ref().map(|m| crate::driver::NewSessionModel {
-                        provider: m.provider.clone(),
                         model_id: m.model_id.clone(),
                     }),
                     thinking: thinking.clone(),
@@ -3846,7 +3845,11 @@ mod hub_models_tests {
         .await;
         match model_list {
             ServerMessage::ModelList { models, .. } => {
-                assert!(models.iter().any(|m| m.model_id == "deepseek-v4-flash"));
+                assert!(
+                    models
+                        .iter()
+                        .any(|m| m.model_id == "deepseek/deepseek-v4-flash")
+                );
             }
             other => panic!("expected modelList, got {other:?}"),
         }
@@ -3857,8 +3860,10 @@ mod hub_models_tests {
         .await;
         match defaults {
             ServerMessage::ModelDefaults { defaults } => {
-                assert_eq!(defaults.provider.as_deref(), Some("anthropic"));
-                assert_eq!(defaults.model_id.as_deref(), Some("claude-opus-4-8"));
+                assert_eq!(
+                    defaults.model_id.as_deref(),
+                    Some("anthropic/claude-opus-4-8")
+                );
                 assert_eq!(defaults.thinking_level.as_deref(), Some("medium"));
             }
             other => panic!("expected modelDefaults, got {other:?}"),
@@ -3909,16 +3914,17 @@ mod hub_models_tests {
             client_key,
             ClientMessage::SessionAction {
                 action: pantoken_protocol::wire::SessionAction::SetModel {
-                    provider: "deepseek".into(),
-                    model_id: "deepseek-v4-flash".into(),
+                    model_id: "deepseek/deepseek-v4-flash".into(),
                     thinking_level: Some("high".into()),
                 },
                 session_id: None,
             },
         );
         let config = receive_session_config(&mut rx).await;
-        assert_eq!(config.provider.as_deref(), Some("deepseek"));
-        assert_eq!(config.model_id.as_deref(), Some("deepseek-v4-flash"));
+        assert_eq!(
+            config.model_id.as_deref(),
+            Some("deepseek/deepseek-v4-flash")
+        );
         assert_eq!(config.thinking_level.as_deref(), Some("high"));
 
         hub.lock().handle_client(
@@ -3931,8 +3937,10 @@ mod hub_models_tests {
             },
         );
         let config = receive_session_config(&mut rx).await;
-        assert_eq!(config.provider.as_deref(), Some("deepseek"));
-        assert_eq!(config.model_id.as_deref(), Some("deepseek-v4-flash"));
+        assert_eq!(
+            config.model_id.as_deref(),
+            Some("deepseek/deepseek-v4-flash")
+        );
         assert_eq!(config.thinking_level.as_deref(), Some("high"));
         applier.abort();
     }

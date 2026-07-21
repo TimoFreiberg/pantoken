@@ -516,7 +516,6 @@ pub enum SessionAction {
         action: McpAction,
     },
     SetModel {
-        provider: String,
         #[serde(rename = "modelId")]
         model_id: String,
         #[serde(
@@ -557,7 +556,6 @@ pub enum SessionAction {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewSessionModel {
-    pub provider: String,
     #[serde(rename = "modelId")]
     pub model_id: String,
 }
@@ -819,7 +817,7 @@ mod tests {
             "type": "newSession",
             "cwd": "/home/project",
             "worktree": true,
-            "model": {"provider": "anthropic", "modelId": "claude-4"},
+            "model": {"modelId": "claude-4"},
             "thinking": "high",
             "prompt": "Build something"
         }"#;
@@ -927,19 +925,17 @@ mod tests {
     #[test]
     fn roundtrip_session_action_set_model_with_thinking_level() {
         // SetModel with thinkingLevel — the combined model+effort action.
-        let json_str = r#"{"type": "sessionAction", "action": {"kind": "setModel", "provider": "anthropic", "modelId": "claude-opus", "thinkingLevel": "high"}, "sessionId": "s1"}"#;
+        let json_str = r#"{"type": "sessionAction", "action": {"kind": "setModel", "modelId": "claude-opus", "thinkingLevel": "high"}, "sessionId": "s1"}"#;
         let msg = parse_client_message(json_str).unwrap();
         match msg {
             ClientMessage::SessionAction {
                 action:
                     SessionAction::SetModel {
-                        provider,
                         model_id,
                         thinking_level,
                     },
                 ..
             } => {
-                assert_eq!(provider, "anthropic");
                 assert_eq!(model_id, "claude-opus");
                 assert_eq!(thinking_level.as_deref(), Some("high"));
             }
@@ -947,19 +943,17 @@ mod tests {
         }
 
         // SetModel without thinkingLevel — the field is optional (defaults to None).
-        let json_str = r#"{"type": "sessionAction", "action": {"kind": "setModel", "provider": "openai", "modelId": "gpt-5"}, "sessionId": "s1"}"#;
+        let json_str = r#"{"type": "sessionAction", "action": {"kind": "setModel", "modelId": "gpt-5"}, "sessionId": "s1"}"#;
         let msg = parse_client_message(json_str).unwrap();
         match msg {
             ClientMessage::SessionAction {
                 action:
                     SessionAction::SetModel {
-                        provider,
                         model_id,
                         thinking_level,
                     },
                 ..
             } => {
-                assert_eq!(provider, "openai");
                 assert_eq!(model_id, "gpt-5");
                 assert!(thinking_level.is_none());
             }

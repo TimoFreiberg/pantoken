@@ -11,7 +11,6 @@ function emptyDraft(cwd = "/proj"): DraftConfig {
 }
 
 const FULL_DEFAULTS: ModelDefaults = {
-  provider: "umans/umans-glm-5.2",
   modelId: "umans/umans-glm-5.2",
   thinkingLevel: "high",
   favorites: [],
@@ -37,7 +36,6 @@ describe("reseedDraftFromDefaults", () => {
     const draft = emptyDraft();
     const out = reseedDraftFromDefaults(draft, FULL_DEFAULTS);
     expect(out.model).toEqual({
-      provider: "umans/umans-glm-5.2",
       modelId: "umans/umans-glm-5.2",
     });
     expect(out.thinking).toBe("high");
@@ -47,11 +45,11 @@ describe("reseedDraftFromDefaults", () => {
   test("does not clobber an explicitly picked model", () => {
     const draft: DraftConfig = {
       ...emptyDraft(),
-      model: { provider: "anthropic", modelId: "claude-sonnet-5" },
+      model: { modelId: "anthropic/claude-sonnet-5" },
       thinking: "max",
     };
     const out = reseedDraftFromDefaults(draft, FULL_DEFAULTS);
-    expect(out.model).toEqual({ provider: "anthropic", modelId: "claude-sonnet-5" });
+    expect(out.model).toEqual({ modelId: "anthropic/claude-sonnet-5" });
     expect(out.thinking).toBe("max");
   });
 
@@ -64,18 +62,17 @@ describe("reseedDraftFromDefaults", () => {
   test("seeds only the unset field when the other is already set", () => {
     const draft: DraftConfig = {
       ...emptyDraft(),
-      model: { provider: "anthropic", modelId: "claude-sonnet-5" },
+      model: { modelId: "anthropic/claude-sonnet-5" },
     };
     const out = reseedDraftFromDefaults(draft, FULL_DEFAULTS);
-    expect(out.model).toEqual({ provider: "anthropic", modelId: "claude-sonnet-5" });
+    expect(out.model).toEqual({ modelId: "anthropic/claude-sonnet-5" });
     expect(out.thinking).toBe("high");
   });
 
-  test("seeds thinking but not model when defaults lack provider/modelId", () => {
+  test("seeds thinking but not model when defaults lack modelId", () => {
     const draft = emptyDraft();
     const out = reseedDraftFromDefaults(draft, {
       ...FULL_DEFAULTS,
-      provider: undefined,
       modelId: undefined,
     });
     expect(out.model).toBeUndefined();
@@ -89,7 +86,6 @@ describe("reseedDraftFromDefaults", () => {
       thinkingLevel: undefined,
     });
     expect(out.model).toEqual({
-      provider: "umans/umans-glm-5.2",
       modelId: "umans/umans-glm-5.2",
     });
     expect(out.thinking).toBeUndefined();
@@ -98,7 +94,7 @@ describe("reseedDraftFromDefaults", () => {
   test("returns the same reference when nothing changes", () => {
     const draft: DraftConfig = {
       ...emptyDraft(),
-      model: { provider: "anthropic", modelId: "claude-sonnet-5" },
+      model: { modelId: "anthropic/claude-sonnet-5" },
       thinking: "max",
       permissionMonitor: "autonomous",
     };

@@ -351,7 +351,7 @@ class PantokenStore {
     worktree: boolean;
     /** Base branch for worktree creation (jj `-r` / git commit-ish). Undefined = auto-detect. */
     baseBranch?: string;
-    model?: { provider: string; modelId: string };
+    model?: { modelId: string };
     thinking?: string;
     /** Facet to start the session in (undefined = the daemon's default, execute). */
     facet?: string;
@@ -720,8 +720,7 @@ class PantokenStore {
     if (this.draft.worktree) cfg.worktree = true;
     if (this.draft.baseBranch) cfg.baseBranch = this.draft.baseBranch;
     const m = this.draft.model;
-    if (m && (m.provider !== def.provider || m.modelId !== def.modelId))
-      cfg.model = m;
+    if (m && m.modelId !== def.modelId) cfg.model = m;
     if (this.draft.thinking && this.draft.thinking !== def.thinkingLevel)
       cfg.thinking = this.draft.thinking;
     // "execute" is the daemon default — only a divergent pick is worth pinning.
@@ -2422,10 +2421,7 @@ class PantokenStore {
     this.draft = {
       cwd,
       worktree: false,
-      model:
-        d.provider && d.modelId
-          ? { provider: d.provider, modelId: d.modelId }
-          : undefined,
+      model: d.modelId ? { modelId: d.modelId } : undefined,
       thinking: d.thinkingLevel,
       facet: "execute",
       // Undefined lets the composer show the standard fallback until the daemon's
@@ -2832,13 +2828,9 @@ class PantokenStore {
     const d = this.draft;
     if (!d) return this.session.config;
     const levels = d.model
-      ? this.models.find(
-          (m) =>
-            m.provider === d.model?.provider && m.modelId === d.model?.modelId,
-        )?.thinkingLevels
+      ? this.models.find((m) => m.modelId === d.model?.modelId)?.thinkingLevels
       : undefined;
     return {
-      provider: d.model?.provider,
       modelId: d.model?.modelId,
       thinkingLevel: d.thinking,
       availableThinkingLevels: levels,
@@ -2859,11 +2851,11 @@ class PantokenStore {
       ? (this.draft.permissionMonitor ?? "standard")
       : (this.session.permissionMonitor ?? "standard");
   }
-  setModel(provider: string, modelId: string, thinkingLevel?: string): void {
+  setModel(modelId: string, thinkingLevel?: string): void {
     if (this.draft) {
       this.draft = {
         ...this.draft,
-        model: { provider, modelId },
+        model: { modelId },
         thinking: thinkingLevel,
       };
       this.persistDraftConfig();
@@ -2871,7 +2863,7 @@ class PantokenStore {
     }
     send({
       type: "sessionAction",
-      action: { kind: "setModel", provider, modelId, thinkingLevel },
+      action: { kind: "setModel", modelId, thinkingLevel },
     });
   }
   setThinking(level: string): void {
@@ -3009,13 +3001,11 @@ class PantokenStore {
     const set = new Set(favs);
     const cfg = this.composerConfig;
     return this.models.filter(
-      (m) =>
-        set.has(`${m.provider}:${m.modelId}`) ||
-        (m.provider === cfg.provider && m.modelId === cfg.modelId),
+      (m) => set.has(m.modelId) || m.modelId === cfg.modelId,
     );
   }
-  isFavorite(provider: string, modelId: string): boolean {
-    return this.modelDefaults.favorites.includes(`${provider}:${modelId}`);
+  isFavorite(modelId: string): boolean {
+    return this.modelDefaults.favorites.includes(modelId);
   }
 
   /** Set (or clear, with null/empty) the login shell pantoken captures env from at startup.
@@ -3499,7 +3489,7 @@ function persistDraftMap(map: Record<string, string>): void {
 type StoredDraftConfig = {
   worktree?: boolean;
   baseBranch?: string;
-  model?: { provider: string; modelId: string };
+  model?: { modelId: string };
   thinking?: string;
   facet?: string;
   permissionMonitor?: PermissionMonitorMode;
@@ -3530,9 +3520,9 @@ function loadDraftConfigMap(): Record<string, StoredDraftConfig> {
       if (rec.worktree === true) cfg.worktree = true;
       if (typeof rec.baseBranch === "string" && rec.baseBranch !== "")
         cfg.baseBranch = rec.baseBranch;
-      const m = rec.model as { provider?: unknown; modelId?: unknown } | null;
-      if (m && typeof m.provider === "string" && typeof m.modelId === "string")
-        cfg.model = { provider: m.provider, modelId: m.modelId };
+      const m = rec.model as { modelId?: unknown } | null;
+      if (m && typeof m.modelId === "string")
+        cfg.model = { modelId: m.modelId };
       if (typeof rec.thinking === "string") cfg.thinking = rec.thinking;
       // Facets are dynamic (the daemon extracts frontmatter `name`s from facet
       // files), so any non-empty string is valid — not just the execute/plan

@@ -87,7 +87,7 @@ test("@a: lists the available subagents", async ({ page }) => {
   await expect(box).toHaveValue("@subagent:reviewer ");
 });
 
-test("@m: lists the mock models; accepting inserts the canonical provider/modelId", async ({
+test("@m: lists the mock models; accepting inserts the canonical modelId + default effort", async ({
   page,
 }) => {
   const box = ta(page);
@@ -98,13 +98,14 @@ test("@m: lists the mock models; accepting inserts the canonical provider/modelI
   await expect(row(page, "model:anthropic/claude-sonnet-4-6")).toBeVisible();
   await expect(row(page, "model:openai/gpt-5")).toBeVisible();
 
-  // Narrow with the shorthand's partial, then accept — canonical `@model:provider/id`
-  // regardless of the `m:` shorthand used to get there.
+  // Narrow with the shorthand's partial, then accept — canonical `@model:<modelId>`
+  // (the full registry name) regardless of the `m:` shorthand used to get there,
+  // plus the model's default effort level in a `(<level>)` suffix (gpt-5 default = medium).
   await page.keyboard.type("gpt");
   await expect(row(page, "model:openai/gpt-5")).toBeVisible();
   await expect(row(page, "model:anthropic/claude-opus-4-8")).toHaveCount(0);
   await box.press("Enter");
-  await expect(box).toHaveValue("@model:openai/gpt-5 ");
+  await expect(box).toHaveValue("@model:openai/gpt-5(medium) ");
 });
 
 test("@sk shows the skill: sigil row after file matches; accepting it narrows into the skill list", async ({
@@ -154,29 +155,29 @@ test("[ ] adjust a selected model row's reasoning level; accepting appends (leve
   await expect(menu(page)).toBeVisible();
   await expect(row(page, "model:anthropic/claude-sonnet-4-6")).toBeVisible();
 
-  // No level chosen yet — no "reasoning:" text on the row.
+  // The row seeds to the model's defaultThinkingLevel (medium) before any keypress.
   await expect(
     row(page, "model:anthropic/claude-sonnet-4-6"),
-  ).not.toContainText("reasoning:");
+  ).toContainText("reasoning: medium");
 
-  // ] steps up from unset: null -> "off".
+  // ] steps up from the seeded default: "medium" -> "high".
   await box.press("]");
   await expect(row(page, "model:anthropic/claude-sonnet-4-6")).toContainText(
-    "reasoning: off",
+    "reasoning: high",
   );
-  // ] again: "off" -> "low".
+  // ] again clamps at the top ("high").
   await box.press("]");
   await expect(row(page, "model:anthropic/claude-sonnet-4-6")).toContainText(
-    "reasoning: low",
+    "reasoning: high",
   );
-  // [ steps back down: "low" -> "off".
+  // [ steps back down: "high" -> "medium".
   await box.press("[");
   await expect(row(page, "model:anthropic/claude-sonnet-4-6")).toContainText(
-    "reasoning: off",
+    "reasoning: medium",
   );
 
   await box.press("Enter");
-  await expect(box).toHaveValue("@model:anthropic/claude-sonnet-4-6(off) ");
+  await expect(box).toHaveValue("@model:anthropic/claude-sonnet-4-6(medium) ");
 });
 
 test("] clamps at the top level of a single-level model instead of wrapping", async ({
@@ -184,16 +185,22 @@ test("] clamps at the top level of a single-level model instead of wrapping", as
 }) => {
   const box = ta(page);
   await box.click();
-  // deepseek-v4-flash's only thinking level is "off" (mock fixture).
+  // deepseek-v4-flash's only thinking level is "off" (mock fixture), which is also
+  // its defaultThinkingLevel — so the row seeds to "off" on highlight.
   await page.keyboard.type("@m:deepseek");
   await expect(menu(page)).toBeVisible();
   await expect(row(page, "model:deepseek/deepseek-v4-flash")).toBeVisible();
 
+  // The row seeds to the default "off" immediately.
+  await expect(row(page, "model:deepseek/deepseek-v4-flash")).toContainText(
+    "reasoning: off",
+  );
+  // ] clamps at the top (the only level) instead of wrapping.
   await box.press("]");
   await expect(row(page, "model:deepseek/deepseek-v4-flash")).toContainText(
     "reasoning: off",
   );
-  // A second ] clamps at the top instead of wrapping back to unset.
+  // A second ] still clamps.
   await box.press("]");
   await expect(row(page, "model:deepseek/deepseek-v4-flash")).toContainText(
     "reasoning: off",

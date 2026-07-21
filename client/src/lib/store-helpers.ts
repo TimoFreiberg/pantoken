@@ -59,7 +59,7 @@ export function settleStopOperation(
 export interface DraftConfig {
   cwd: string;
   worktree: boolean;
-  model?: { provider: string; modelId: string };
+  model?: { modelId: string };
   thinking?: string;
   /** Facet to start the session in (undefined = the daemon's default, execute). */
   facet?: string;
@@ -91,10 +91,10 @@ export function reseedDraftFromDefaults(
   defaults: ModelDefaults,
 ): DraftConfig {
   let next = draft;
-  if (!draft.model && defaults.provider && defaults.modelId) {
+  if (!draft.model && defaults.modelId) {
     next = {
       ...next,
-      model: { provider: defaults.provider, modelId: defaults.modelId },
+      model: { modelId: defaults.modelId },
     };
   }
   if (!draft.thinking && defaults.thinkingLevel) {

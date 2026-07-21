@@ -480,7 +480,7 @@ describe("foldEvent", () => {
           title: "My session",
           status: "running",
           updatedAt: "t",
-          config: { provider: "anthropic", modelId: "claude-opus-4-8" },
+          config: { modelId: "claude-opus-4-8" },
         },
       }),
     ]);
