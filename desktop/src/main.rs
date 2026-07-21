@@ -55,9 +55,10 @@ fn main() {
             remote_commands::add_remote_profile,
             remote_commands::update_remote_profile,
             remote_commands::delete_remote_profile,
-            remote_commands::connect_to_remote,
-            remote_commands::disconnect_remote,
-            remote_commands::remote_connection_state,
+            remote_commands::ensure_remote_host,
+            remote_commands::host_state,
+            remote_commands::list_hosts,
+            remote_commands::disconnect_host,
             dock_attention::request_dock_attention,
             dock_attention::set_dock_badge,
         ])

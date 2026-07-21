@@ -1,12 +1,13 @@
 [[permission]]
 identifier = "allow-remote-commands"
-description = "Allow the hub-served web client to manage remote connection profiles and drive connect/disconnect. Covers: list_remote_profiles, add_remote_profile, update_remote_profile, delete_remote_profile, connect_to_remote, disconnect_remote, remote_connection_state."
+description = "Allow the hub-served web client to manage remote computer profiles and drive host connect/disconnect. Covers: list_remote_profiles, add_remote_profile, update_remote_profile, delete_remote_profile, ensure_remote_host, host_state, list_hosts, disconnect_host."
 commands.allow = [
   "list_remote_profiles",
   "add_remote_profile",
   "update_remote_profile",
   "delete_remote_profile",
-  "connect_to_remote",
-  "disconnect_remote",
-  "remote_connection_state",
+  "ensure_remote_host",
+  "host_state",
+  "list_hosts",
+  "disconnect_host",
 ]
