@@ -18,16 +18,18 @@
     return models.filter(
       (model) =>
         model.label.toLowerCase().includes(query) ||
-        model.modelId.toLowerCase().includes(query) ||
-        model.provider.toLowerCase().includes(query),
+        model.modelId.toLowerCase().includes(query),
     );
   });
   const groupedModels = $derived.by(() => {
     const groups = new Map<string, typeof filteredModels>();
     for (const model of filteredModels) {
-      const group = groups.get(model.provider);
+      // Derive the display group key from the provider prefix of the full
+      // registry name (e.g. "anthropic/claude-opus-4-8" → "anthropic").
+      const groupKey = model.modelId.split("/")[0] ?? model.modelId;
+      const group = groups.get(groupKey);
       if (group) group.push(model);
-      else groups.set(model.provider, [model]);
+      else groups.set(groupKey, [model]);
     }
     return [...groups.entries()];
   });
@@ -157,10 +159,9 @@
           <div class="provider">
             <h3>{provider}</h3>
             <div class="choices compact">
-              {#each items as model (`${model.provider}:${model.modelId}`)}
+              {#each items as model (model.modelId)}
                 <label
-                  class:active={cfg.provider === model.provider &&
-                    cfg.modelId === model.modelId}
+                  class:active={cfg.modelId === model.modelId}
                 >
                   <span class="choice-copy">
                     <span class="choice-title">{model.label}</span>
@@ -169,13 +170,11 @@
                   <input
                     type="radio"
                     name="mobile-model"
-                    value={`${model.provider}:${model.modelId}`}
+                    value={model.modelId}
                     title={`Set model to ${model.label}`}
-                    checked={cfg.provider === model.provider &&
-                      cfg.modelId === model.modelId}
+                    checked={cfg.modelId === model.modelId}
                     onchange={() =>
                       store.setModel(
-                        model.provider,
                         model.modelId,
                         model.defaultThinkingLevel,
                       )}

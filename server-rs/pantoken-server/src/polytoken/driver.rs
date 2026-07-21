@@ -2633,14 +2633,12 @@ impl PantokenDriver for PolytokenDriver {
     async fn get_model_defaults(&self) -> ModelDefaults {
         // Reuse the same cached parsed models as list_models.
         let parsed = self.inner.get_or_fetch_parsed_models().await;
+        // The default model's modelId is the full registry name
+        // (`parsed.default_model`). We confirm it's in the parsed list (so the
+        // client's active-model lookup resolves), but there's no separate
+        // provider to look up — modelId already carries the provider prefix.
         let default = parsed.default_model.as_deref();
-        // Look up the default model in the parsed list so `provider` matches
-        // `ModelOption.provider` (the `provider:` field), not the split-on-`/`
-        // prefix — the client's active-model lookup compares against the picker's
-        // provider, so a mismatch leaves the badge showing a raw id. Fall back to
-        // the split prefix when the default model isn't in the parsed list (config
-        // drift), preserving the old behavior.
-        let model = default.and_then(|id| parsed.models.iter().find(|m| m.model_id == id));
+        let _model = default.and_then(|id| parsed.models.iter().find(|m| m.model_id == id));
         // A global config default is available through any warm daemon session.
         // Clone clients before awaiting so the synchronous warm-map lock is not
         // held across network I/O; cold starts simply omit this optional field.
@@ -2659,9 +2657,6 @@ impl PantokenDriver for PolytokenDriver {
             }
         }
         ModelDefaults {
-            provider: model
-                .map(|m| m.provider.clone())
-                .or_else(|| default.and_then(|m| m.split('/').next().map(|s| s.to_string()))),
             model_id: parsed.default_model.clone(),
             thinking_level: parsed.default_thinking_level.clone(),
             favorites: Vec::new(),
@@ -3073,11 +3068,10 @@ impl PantokenDriver for PolytokenDriver {
         };
         let (what, result, notice) = match action {
             SessionAction::SetModel {
-                provider,
                 model_id,
                 thinking_level,
             } => {
-                let mut msg = format!("Model switched to {provider}/{model_id}");
+                let mut msg = format!("Model switched to {model_id}");
                 if let Some(level) = &thinking_level {
                     msg.push_str(&format!(" (thinking: {level})"));
                 }
@@ -4448,7 +4442,6 @@ mod tests {
         struct F {
             stdout: &'static str,
             model_id: Option<&'static str>,
-            provider: Option<&'static str>,
             thinking: Option<&'static str>,
         }
         let fixtures = [
@@ -4456,28 +4449,25 @@ mod tests {
             F {
                 stdout: "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n",
                 model_id: Some("umans/umans-glm-5.2"),
-                provider: Some("umans/umans-glm-5.2"),
                 thinking: None,
             },
             // custom reasoning with default marker on "high"
             F {
                 stdout: "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=high (default), max, none; can_disable=yes\n",
                 model_id: Some("umans/umans-glm-5.2"),
-                provider: Some("umans/umans-glm-5.2"),
                 thinking: Some("high"),
             },
             // reasoning line but no level marked (default) → None
             F {
                 stdout: "default_model: umans/umans-glm-5.2\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=low, medium, high; can_disable=yes\n",
                 model_id: Some("umans/umans-glm-5.2"),
-                provider: Some("umans/umans-glm-5.2"),
                 thinking: None,
             },
-            // config drift: default not in models list → provider falls back to split prefix
+            // config drift: default not in models list → model_id is still the
+            // full registry name (no provider fallback to split prefix).
             F {
                 stdout: "default_model: umans/missing-model\n\nmodels:\n- umans/umans-glm-5.2\n  provider: umans/umans-glm-5.2\n  reasoning: effort set=custom; levels=high (default), max, none; can_disable=yes\n",
                 model_id: Some("umans/missing-model"),
-                provider: Some("umans"),
                 thinking: None,
             },
         ];
@@ -4488,18 +4478,10 @@ mod tests {
                 Box::pin(async move { Ok(ok_output(&s)) })
             });
             let (driver, _dir) = driver_with_runner("s1", "/repo/a", runner);
-            let models = driver.list_models().await;
+            let _models = driver.list_models().await;
             let d = driver.get_model_defaults().await;
             assert_eq!(d.model_id.as_deref(), f.model_id);
-            assert_eq!(d.provider.as_deref(), f.provider);
             assert_eq!(d.thinking_level.as_deref(), f.thinking);
-            // When the default model is in the parsed list, provider must equal
-            // ModelOption.provider (not the split prefix).
-            if let Some(id) = f.model_id {
-                if let Some(m) = models.iter().find(|m| m.model_id == id) {
-                    assert_eq!(d.provider.as_deref(), Some(m.provider.as_str()));
-                }
-            }
         }
     }
 
@@ -4527,7 +4509,6 @@ mod tests {
         assert_eq!(m1.len(), 1);
         assert_eq!(m1[0].model_id, "umans/umans-glm-5.2");
         assert_eq!(m2.len(), 1, "second call should return cached models");
-        assert_eq!(d.provider.as_deref(), Some("umans/umans-glm-5.2"));
         assert_eq!(d.model_id.as_deref(), Some("umans/umans-glm-5.2"));
         assert_eq!(d.thinking_level.as_deref(), Some("high"));
         assert_eq!(*calls.lock(), 1, "runner should run at most once");

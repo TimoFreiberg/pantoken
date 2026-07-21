@@ -114,8 +114,7 @@ fn mock_workspace() -> WorkspaceRef {
 fn mock_models() -> Vec<ModelOption> {
     vec![
         ModelOption {
-            provider: "anthropic".into(),
-            model_id: "claude-opus-4-8".into(),
+            model_id: "anthropic/claude-opus-4-8".into(),
             label: "Claude Opus 4.8".into(),
             thinking_levels: Some(vec![
                 "off".into(),
@@ -126,8 +125,7 @@ fn mock_models() -> Vec<ModelOption> {
             default_thinking_level: Some("medium".into()),
         },
         ModelOption {
-            provider: "anthropic".into(),
-            model_id: "claude-sonnet-4-6".into(),
+            model_id: "anthropic/claude-sonnet-4-6".into(),
             label: "Claude Sonnet 4.6".into(),
             thinking_levels: Some(vec![
                 "off".into(),
@@ -138,15 +136,13 @@ fn mock_models() -> Vec<ModelOption> {
             default_thinking_level: Some("medium".into()),
         },
         ModelOption {
-            provider: "deepseek".into(),
-            model_id: "deepseek-v4-flash".into(),
+            model_id: "deepseek/deepseek-v4-flash".into(),
             label: "DeepSeek V4 Flash".into(),
             thinking_levels: Some(vec!["off".into()]),
             default_thinking_level: Some("off".into()),
         },
         ModelOption {
-            provider: "openai".into(),
-            model_id: "gpt-5".into(),
+            model_id: "openai/gpt-5".into(),
             label: "GPT-5".into(),
             thinking_levels: Some(vec![
                 "minimal".into(),
@@ -392,7 +388,7 @@ fn mock_subagents() -> Vec<String> {
 /// (kind-filtered against `mock_skills()`/`mock_subagents()`) or a known
 /// `mock_files()` path, or it's silently skipped (most `@`s in a prompt aren't
 /// references at all). `@model:` tokens aren't filtered against a fixture list — the
-/// daemon accepts any provider/model — so they always resolve. Duplicate mentions of
+/// daemon accepts any modelId — so they always resolve. Duplicate mentions of
 /// the same (kind, name) collapse to one chip, first-seen order.
 fn parse_at_references(text: &str) -> Vec<ResolvedRef> {
     let skills = mock_skills();
@@ -521,8 +517,7 @@ fn mock_mcp_servers() -> Vec<McpServerInfo> {
 
 fn mock_default_config() -> SessionConfig {
     SessionConfig {
-        provider: Some("anthropic".into()),
-        model_id: Some("claude-opus-4-8".into()),
+        model_id: Some("anthropic/claude-opus-4-8".into()),
         thinking_level: Some("medium".into()),
         available_thinking_levels: Some(vec![
             "off".into(),
@@ -2555,22 +2550,16 @@ impl PantokenDriver for MockDriver {
                 sessions.insert(0, new_session_entry(&session_id, &dir));
             }
         }
-        // Build the config: provider/modelId from the draft (or the default),
+        // Build the config: modelId from the draft (or the default),
         // thinkingLevel from the draft (or the default), availableThinkingLevels
         // from the chosen model's entry in MOCK_MODELS (or the default).
         let default = mock_default_config();
         let chosen = model.as_ref().and_then(|m| {
             mock_models()
                 .into_iter()
-                .find(|opt| opt.provider == m.provider && opt.model_id == m.model_id)
+                .find(|opt| opt.model_id == m.model_id)
         });
         let config = SessionConfig {
-            provider: Some(
-                model
-                    .as_ref()
-                    .map(|m| m.provider.clone())
-                    .unwrap_or_else(|| default.provider.clone().unwrap()),
-            ),
             model_id: Some(
                 model
                     .as_ref()
@@ -2677,7 +2666,6 @@ impl PantokenDriver for MockDriver {
     async fn get_model_defaults(&self) -> ModelDefaults {
         let default = mock_default_config();
         ModelDefaults {
-            provider: default.provider,
             model_id: default.model_id,
             thinking_level: default.thinking_level,
             favorites: Vec::new(),
@@ -2884,12 +2872,10 @@ impl PantokenDriver for MockDriver {
     async fn session_action(&self, action: SessionAction, _session_id: Option<SessionId>) {
         match action {
             SessionAction::SetModel {
-                provider,
                 model_id,
                 thinking_level,
             } => {
                 let mut config = self.config.lock();
-                config.provider = Some(provider.clone());
                 config.model_id = Some(model_id.clone());
                 if let Some(level) = &thinking_level {
                     config.thinking_level = Some(level.clone());
@@ -2901,7 +2887,7 @@ impl PantokenDriver for MockDriver {
                     base: base(),
                     snapshot,
                 });
-                let mut message = format!("Model switched to {provider}/{model_id}");
+                let mut message = format!("Model switched to {model_id}");
                 if let Some(level) = &thinking_level {
                     message.push_str(&format!(" (thinking: {level})"));
                 }

@@ -29,7 +29,6 @@ use pantoken_protocol::session_driver::{
     TodoStatus as PantokenTodoStatus, WorkspaceRef,
 };
 
-use crate::polytoken::models::{ModelRef, default_model_ref};
 use crate::polytoken::ui_bridge::{
     PERMISSION_APPROVAL_CHOICES, PERMISSION_APPROVAL_LABELS, PendingInterrogative,
     PendingInterrogativeType, PendingQuestion, prune_approval_options,
@@ -398,23 +397,21 @@ pub fn snapshot_from_state(
         .to_string();
 
     // active_model is stored as the FULL `provider/id` registry name
-    // (e.g. "anthropic/claude-sonnet-4"). modelId stays the full registry name —
-    // matching ModelOption.modelId from parseModels and the default markers via
-    // defaultModelRef — so ModelPicker's store.models.find() resolves the friendly
-    // label instead of falling back to the bare id. `provider` is the bare prefix
-    // (group key), mirroring parseModels. If a model string ever lacks a slash (a
-    // custom/local name), defaultModelRef degrades both to the whole string.
-    let config = state.and_then(|s| s.active_model.as_deref()).map(|m| {
-        let ModelRef { provider, model_id } = default_model_ref(m);
-        SessionConfig {
-            provider: Some(provider),
-            model_id: Some(model_id),
+    // (e.g. "anthropic/claude-sonnet-4"). modelId IS the full registry name —
+    // matching ModelOption.modelId from parseModels and the default markers —
+    // so ModelPicker's store.models.find() resolves the friendly label instead
+    // of falling back to the bare id. There is no separate `provider` field:
+    // the registry name already carries its provider prefix, and grouping can
+    // derive the prefix at display time via `modelId.split('/')[0]`.
+    let config = state
+        .and_then(|s| s.active_model.as_deref())
+        .map(|m| SessionConfig {
+            model_id: Some(m.to_string()),
             thinking_level: state
                 .and_then(|s| s.active_reasoning_effort.as_deref())
                 .map(|s| s.to_string()),
             available_thinking_levels: None,
-        }
-    });
+        });
 
     // Thread current_goal → goal. Three cases: a CurrentGoal object → set (the
     // daemon carries summary + lifecycle); null (explicitly cleared) → null (the
@@ -1724,16 +1721,13 @@ pub fn map_daemon_event(
             ..
         } => {
             // The model/reasoning changed. The event carries from/to — build a snapshot
-            // with the NEW config directly (no state fetch needed).
-            // Same full-registry-name modelId as snapshot_from_state — to_model is the
-            // FULL `provider/id`, so defaultModelRef gives the bare provider prefix +
-            // the full modelId (matching ModelOption.modelId) so the picker's find()
-            // resolves the friendly label. Degrades both to the whole string if a model
-            // string ever lacks a slash (config is display-only).
-            let ModelRef { provider, model_id } = default_model_ref(to_model);
+            // with the NEW config directly (no state fetch needed). to_model is the
+            // FULL `provider/id` registry name, which IS modelId (matching
+            // ModelOption.modelId) so the picker's find() resolves the friendly label.
+            // There's no separate `provider` field; grouping derives the prefix at
+            // display time.
             let config = SessionConfig {
-                provider: Some(provider),
-                model_id: Some(model_id),
+                model_id: Some(to_model.to_string()),
                 thinking_level: to_reasoning_effort.as_deref().map(|s| s.to_string()),
                 available_thinking_levels: None,
             };
@@ -2316,7 +2310,6 @@ mod tests {
                 archived_at: None,
                 preview: None,
                 config: Some(SessionConfig {
-                    provider: Some("anthropic".to_string()),
                     model_id: Some("anthropic/claude-sonnet-4".to_string()),
                     thinking_level: Some("medium".to_string()),
                     available_thinking_levels: None,
@@ -3209,7 +3202,7 @@ mod tests {
         assert_eq!(ev["type"], "sessionUpdated");
         assert_eq!(
             ev["snapshot"]["config"],
-            json!({ "provider": "openai", "modelId": "openai/gpt-5", "thinkingLevel": "high" })
+            json!({ "modelId": "openai/gpt-5", "thinkingLevel": "high" })
         );
     }
 
@@ -4130,7 +4123,6 @@ mod tests {
     fn snapshot_config_slash_bearing_model_full_form() {
         let st = base_state();
         let cfg = snap_from(Some(&st)).config.expect("config present");
-        assert_eq!(cfg.provider.as_deref(), Some("anthropic"));
         assert_eq!(cfg.model_id.as_deref(), Some("anthropic/claude-sonnet-4"));
         assert_eq!(cfg.thinking_level.as_deref(), Some("medium"));
     }
@@ -4140,7 +4132,6 @@ mod tests {
         let mut st = base_state();
         st.active_model = Some("local-model".to_string());
         let cfg = snap_from(Some(&st)).config.expect("config present");
-        assert_eq!(cfg.provider.as_deref(), Some("local-model"));
         assert_eq!(cfg.model_id.as_deref(), Some("local-model"));
         assert_eq!(cfg.thinking_level.as_deref(), Some("medium"));
     }

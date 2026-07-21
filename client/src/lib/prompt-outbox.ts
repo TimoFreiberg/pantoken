@@ -17,7 +17,7 @@ export interface PendingPrompt {
     cwd?: string;
     worktree?: boolean;
     baseBranch?: string;
-    model?: { provider: string; modelId: string };
+    model?: { modelId: string };
     thinking?: string;
     facet?: string;
     permissionMonitor?: import("@pantoken/protocol").PermissionMonitorMode;
@@ -98,7 +98,6 @@ function toPlainPrompt(prompt: PendingPrompt): PendingPrompt {
           baseBranch: prompt.newSession.baseBranch,
           model: prompt.newSession.model
             ? {
-                provider: prompt.newSession.model.provider,
                 modelId: prompt.newSession.model.modelId,
               }
             : undefined,

@@ -68,7 +68,6 @@ export interface SessionQueuedMessage {
 }
 
 export interface SessionConfig {
-  readonly provider?: string;
   readonly modelId?: string;
   readonly thinkingLevel?: string;
   /** Thinking levels the current model supports — drives the picker's options. */
@@ -108,7 +107,6 @@ export type ModelCatalogDiagnostic =
 /** One selectable model for the per-session model picker (the available set is
  *  broadcast separately from the per-session snapshot; see `modelList`). */
 export interface ModelOption {
-  readonly provider: string;
   readonly modelId: string;
   readonly label: string;
   /** Thinking levels this model supports (the daemon's `getSupportedThinkingLevels`). Lets the
@@ -155,11 +153,11 @@ export interface FileInfo {
 }
 /** Pantoken's view of the daemon's GLOBAL model config (not per-session): the default new
  *  sessions start from, plus the favorites subset the header picker is filtered to.
- *  `favorites` are concrete `provider:modelId` refs (resolved server-side from the daemon's
- *  glob-capable `enabledModels` patterns); empty = no filter, show every model.
+ *  `favorites` are concrete `modelId` refs (the full registry name, e.g.
+ *  `anthropic/claude-opus-4-8`) resolved server-side from the daemon's glob-capable
+ *  `enabledModels` patterns; empty = no filter, show every model.
  *  Broadcast as `modelDefaults`. */
 export interface ModelDefaults {
-  readonly provider?: string;
   readonly modelId?: string;
   readonly thinkingLevel?: string;
   readonly favorites: readonly string[];

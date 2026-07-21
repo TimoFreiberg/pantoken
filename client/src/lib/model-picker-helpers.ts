@@ -53,11 +53,8 @@ export function rankModels(
     .map((model, order) => {
       const label = model.label.toLowerCase();
       const id = model.modelId.toLowerCase();
-      const provider = model.provider.toLowerCase();
-      const substring =
-        label.includes(q) || id.includes(q) || provider.includes(q);
-      const fuzzy =
-        fuzzyMatch(q, label) || fuzzyMatch(q, id) || fuzzyMatch(q, provider);
+      const substring = label.includes(q) || id.includes(q);
+      const fuzzy = fuzzyMatch(q, label) || fuzzyMatch(q, id);
       return { model, substring, fuzzy, order };
     })
     .filter((entry) => entry.fuzzy)

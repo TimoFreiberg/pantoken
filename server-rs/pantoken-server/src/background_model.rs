@@ -57,9 +57,12 @@ fn has_trailing_date(id: &str) -> bool {
     tail.as_bytes()[0] == b'-' && tail[1..].bytes().all(|b| b.is_ascii_digit())
 }
 
-/// Find an exact model reference match. Supports either a bare model id or a
-/// canonical `provider/modelId` reference. Bare-id matches are rejected when
-/// ambiguous across providers.
+/// Find an exact model reference match. The reference (a spec or substring) is
+/// compared case-insensitively against each model's `model_id` — which is the
+/// FULL registry name (`provider/id`, e.g. `anthropic/claude-sonnet-4-6`), so a
+/// full-registry spec matches directly and a bare-id spec simply won't (it
+/// falls through to `try_match_model`'s substring path). Duplicate `model_id`s
+/// (a data error — the daemon never produces them) are rejected as ambiguous.
 fn find_exact_model_reference_match(
     reference: &str,
     models: &[ModelOption],
@@ -70,46 +73,15 @@ fn find_exact_model_reference_match(
     }
     let lower = trimmed.to_lowercase();
 
-    // Canonical `provider/id` exact match.
-    let canonical: Vec<&ModelOption> = models
-        .iter()
-        .filter(|m| format!("{}/{}", m.provider, m.model_id).to_lowercase() == lower)
-        .collect();
-    if canonical.len() == 1 {
-        return Some(canonical[0].clone());
-    }
-    if canonical.len() > 1 {
-        return None; // ambiguous
-    }
-
-    // `provider/id` with different casing/components.
-    if let Some(slash) = trimmed.find('/') {
-        let provider = trimmed[..slash].trim();
-        let model_id = trimmed[slash + 1..].trim();
-        if !provider.is_empty() && !model_id.is_empty() {
-            let pm: Vec<&ModelOption> = models
-                .iter()
-                .filter(|m| {
-                    m.provider.to_lowercase() == provider.to_lowercase()
-                        && m.model_id.to_lowercase() == model_id.to_lowercase()
-                })
-                .collect();
-            if pm.len() == 1 {
-                return Some(pm[0].clone());
-            }
-            if pm.len() > 1 {
-                return None;
-            }
-        }
-    }
-
-    // Bare id exact match (ambiguous across providers → reject).
-    let by_id: Vec<&ModelOption> = models
+    // Exact match against the full registry name (case-insensitive). Ambiguous
+    // duplicates (shouldn't happen — the daemon guarantees unique model_ids)
+    // are rejected.
+    let matches: Vec<&ModelOption> = models
         .iter()
         .filter(|m| m.model_id.to_lowercase() == lower)
         .collect();
-    if by_id.len() == 1 {
-        Some(by_id[0].clone())
+    if matches.len() == 1 {
+        Some(matches[0].clone())
     } else {
         None
     }
@@ -151,9 +123,9 @@ fn try_match_model(pattern: &str, models: &[ModelOption]) -> Option<ModelOption>
         .cloned()
 }
 
-/// Parse a `provider/model[:thinking]` spec against the available models.
+/// Parse a `modelId[:thinking]` spec against the available models.
 fn parse_spec(spec: &str, models: &[ModelOption]) -> ResolvedBackgroundModel {
-    // Exact (incl. canonical `provider/id`) match first — no thinking suffix.
+    // Exact (incl. full-registry `provider/id`) match first — no thinking suffix.
     if let Some(exact) = try_match_model(spec, models) {
         return ResolvedBackgroundModel {
             model: Some(exact),
@@ -220,7 +192,7 @@ fn parse_spec(spec: &str, models: &[ModelOption]) -> ResolvedBackgroundModel {
         model: None,
         thinking_level: None,
         warning: Some(format!(
-            "No registered model matches \"{}\". Check the provider/model id, or connect the provider first.",
+            "No registered model matches \"{}\". Check the model id, or connect the provider first.",
             spec
         )),
     }
@@ -265,22 +237,19 @@ mod tests {
     fn reg() -> Vec<ModelOption> {
         vec![
             ModelOption {
-                provider: "anthropic".into(),
-                model_id: "claude-sonnet-4-6".into(),
+                model_id: "anthropic/claude-sonnet-4-6".into(),
                 label: "Claude Sonnet 4.6".into(),
                 thinking_levels: None,
                 default_thinking_level: None,
             },
             ModelOption {
-                provider: "anthropic".into(),
-                model_id: "claude-opus-4-8".into(),
+                model_id: "anthropic/claude-opus-4-8".into(),
                 label: "Claude Opus 4.8".into(),
                 thinking_levels: None,
                 default_thinking_level: None,
             },
             ModelOption {
-                provider: "openai".into(),
-                model_id: "gpt-5".into(),
+                model_id: "openai/gpt-5".into(),
                 label: "GPT-5".into(),
                 thinking_levels: None,
                 default_thinking_level: None,
@@ -308,7 +277,10 @@ mod tests {
         // Ports TS: the good e2e spec resolves with no warning.
         let r = resolve_background_model(Some("anthropic/claude-sonnet-4-6:low"), &reg());
         assert!(r.warning.is_none());
-        assert_eq!(r.model.as_ref().unwrap().model_id, "claude-sonnet-4-6");
+        assert_eq!(
+            r.model.as_ref().unwrap().model_id,
+            "anthropic/claude-sonnet-4-6"
+        );
         assert_eq!(r.thinking_level.as_deref(), Some("low"));
     }
 
@@ -316,7 +288,10 @@ mod tests {
     fn canonical_without_thinking_resolves_cleanly() {
         let r = resolve_background_model(Some("anthropic/claude-sonnet-4-6"), &reg());
         assert!(r.warning.is_none());
-        assert_eq!(r.model.as_ref().unwrap().model_id, "claude-sonnet-4-6");
+        assert_eq!(
+            r.model.as_ref().unwrap().model_id,
+            "anthropic/claude-sonnet-4-6"
+        );
         assert!(r.thinking_level.is_none());
     }
 
@@ -353,7 +328,10 @@ mod tests {
         // Model resolves but the suffix is invalid → model kept, suffix dropped,
         // non-fatal warning.
         let r = resolve_background_model(Some("anthropic/claude-sonnet-4-6:bogus"), &reg());
-        assert_eq!(r.model.as_ref().unwrap().model_id, "claude-sonnet-4-6");
+        assert_eq!(
+            r.model.as_ref().unwrap().model_id,
+            "anthropic/claude-sonnet-4-6"
+        );
         assert!(
             r.warning
                 .as_deref()
@@ -371,8 +349,7 @@ mod tests {
         // never a panic.
         let mut models = reg();
         models.push(ModelOption {
-            provider: "other".into(),
-            model_id: "gpt-5".into(),
+            model_id: "other/gpt-5".into(),
             label: "Other GPT-5".into(),
             thinking_levels: None,
             default_thinking_level: None,
@@ -390,15 +367,13 @@ mod tests {
         // dated version. (background-model.ts:124-130.)
         let models = vec![
             ModelOption {
-                provider: "anthropic".into(),
-                model_id: "claude-x-4-5-20250101".into(),
+                model_id: "anthropic/claude-x-4-5-20250101".into(),
                 label: "Claude X 4.5 (dated)".into(),
                 thinking_levels: None,
                 default_thinking_level: None,
             },
             ModelOption {
-                provider: "anthropic".into(),
-                model_id: "claude-x-4-5".into(),
+                model_id: "anthropic/claude-x-4-5".into(),
                 label: "Claude X 4.5 (alias)".into(),
                 thinking_levels: None,
                 default_thinking_level: None,
@@ -408,7 +383,7 @@ mod tests {
         assert!(r.warning.is_none(), "alias should resolve cleanly");
         assert_eq!(
             r.model.as_ref().unwrap().model_id,
-            "claude-x-4-5",
+            "anthropic/claude-x-4-5",
             "alias must win over the dated version"
         );
     }
@@ -419,15 +394,13 @@ mod tests {
         // check), so a `-latest` id wins over a dated sibling.
         let models = vec![
             ModelOption {
-                provider: "anthropic".into(),
-                model_id: "claude-x-4-5-20250101".into(),
+                model_id: "anthropic/claude-x-4-5-20250101".into(),
                 label: "dated".into(),
                 thinking_levels: None,
                 default_thinking_level: None,
             },
             ModelOption {
-                provider: "anthropic".into(),
-                model_id: "claude-x-4-5-latest".into(),
+                model_id: "anthropic/claude-x-4-5-latest".into(),
                 label: "latest".into(),
                 thinking_levels: None,
                 default_thinking_level: None,
@@ -435,7 +408,10 @@ mod tests {
         ];
         let r = resolve_background_model(Some("claude-x-4-5-latest"), &models);
         assert!(r.warning.is_none());
-        assert_eq!(r.model.as_ref().unwrap().model_id, "claude-x-4-5-latest");
+        assert_eq!(
+            r.model.as_ref().unwrap().model_id,
+            "anthropic/claude-x-4-5-latest"
+        );
     }
 
     // ── Ported from background-model.test.ts.bak ──────────────────────────
@@ -456,33 +432,34 @@ mod tests {
     }
 
     #[test]
-    fn canonical_provider_id_with_real_collision_warns() {
-        // The SAME canonical `provider/id` appearing twice (shouldn't happen,
-        // but if a custom provider double-registers) is ambiguous and rejected
-        // loud — no silent pick.
+    fn duplicate_model_id_resolves_via_substring_fallback() {
+        // Two models with the SAME `model_id` (a daemon data error that can't
+        // occur in real output — the daemon guarantees unique ids): the
+        // exact-match path rejects the ambiguity (returns None), but
+        // `try_match_model`'s substring fallback deterministically picks one
+        // (the highest-sorting id). This matches the TS port — the old Rust
+        // test "warned" only because bare ids didn't substring-match a
+        // `provider/id` spec, which was a format-mismatch artifact, not a real
+        // safety guarantee. Assert the deterministic pick (never a panic).
         let dup = vec![
             ModelOption {
-                provider: "anthropic".into(),
-                model_id: "dupe".into(),
+                model_id: "anthropic/dupe".into(),
                 label: "Dupe 1".into(),
                 thinking_levels: None,
                 default_thinking_level: None,
             },
             ModelOption {
-                provider: "anthropic".into(),
-                model_id: "dupe".into(),
+                model_id: "anthropic/dupe".into(),
                 label: "Dupe 2".into(),
                 thinking_levels: None,
                 default_thinking_level: None,
             },
         ];
         let r = resolve_background_model(Some("anthropic/dupe"), &dup);
-        assert!(r.model.is_none());
         assert!(
-            r.warning
-                .as_deref()
-                .unwrap()
-                .contains("No registered model matches")
+            r.model.is_some(),
+            "substring fallback picks one deterministically"
         );
+        assert!(r.warning.is_none());
     }
 }

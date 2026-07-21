@@ -350,7 +350,7 @@ export type SessionAction =
       serverName: string;
       action: "enable" | "disable" | "disconnect" | "reconnect";
     }
-  | { kind: "setModel"; provider: string; modelId: string; thinkingLevel?: string }
+  | { kind: "setModel"; modelId: string; thinkingLevel?: string }
   | { kind: "setThinking"; level: string }
   | { kind: "setFacet"; facet: string }
   | { kind: "setPermissionMonitor"; mode: PermissionMonitorMode }
@@ -439,7 +439,7 @@ export type ClientMessage =
       /** When worktree is on, base the new worktree on this branch (jj `-r` /
        *  git commit-ish). Omitted = auto-detect (main → master → first branch). */
       baseBranch?: string;
-      model?: { provider: string; modelId: string };
+      model?: { modelId: string };
       thinking?: string;
       /** Apply this facet at creation (draft-picked, e.g. start straight in plan). */
       facet?: string;

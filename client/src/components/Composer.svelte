@@ -13,6 +13,7 @@
     type AtItem,
     type CachedServerFiles,
   } from "../lib/file-autocomplete.js";
+  import { sortEfforts } from "../lib/model-picker-helpers.js";
   import {
     IMAGE_LIMITS,
     prepareImageFiles,
@@ -190,10 +191,9 @@
   });
   const composerCfg = $derived(store.composerConfig);
   const composerModelLabel = $derived(
-    store.models.find(
-      (model) =>
-        model.provider === composerCfg.provider && model.modelId === composerCfg.modelId,
-    )?.label ?? composerCfg.modelId ?? "model",
+    store.models.find((model) => model.modelId === composerCfg.modelId)?.label ??
+      composerCfg.modelId ??
+      "model",
   );
   const permissionSummary = $derived(permissionModeLabel(store.composerPermissionMonitor));
   const facetSummary = $derived(
@@ -379,9 +379,14 @@
   // Model reasoning level (polytoken TUI parity): `[`/`]` step the highlighted model
   // row's level while it's a "model" item (see the atOpen keydown block below); the
   // selected row renders it as `reasoning: <level>`, and accepting appends `(<level>)`.
-  // `null` = no level chosen (unchanged accept: plain `@model:provider/modelId`). Reset
-  // effect is below, alongside atQ/atOpen (which it depends on).
+  // `null` = no level chosen (unchanged accept: plain `@model:<modelId>`). Seeded to the
+  // selected model's defaultThinkingLevel (with sortEfforts fallback) when a model row is
+  // first highlighted — see the seed effect below, alongside atQ/atOpen (which it depends on).
   let modelLevel = $state<string | null>(null);
+  // Tracks the model whose level modelLevel was last seeded for, so narrowing the
+  // query (which re-runs the seed effect) doesn't re-seed a level the user already
+  // dialed with `[`/`]`. Reset alongside modelLevel when the row is no longer a model.
+  let lastSeededKey: string | null = null;
   // Shift+Tab ignore-rules toggle (polytoken TUI parity): while true, the picker bypasses
   // the local index entirely and always server-queries with `includeIgnored: true`, so
   // hidden dotfiles and gitignored entries join the candidates (project AND external
@@ -465,15 +470,27 @@
   $effect(() => {
     if (atSel >= atItems.length) atSel = 0;
   });
-  // The selected row or the active query moving invalidates any level dialed in for
-  // the previous model — mirrors the atSel-out-of-range reset just above. Also fires
-  // when the menu closes (atOpen false) so a dismissed/closed picker never leaves a
-  // stale level behind for the next time it opens.
+  // Seed modelLevel to the highlighted model row's defaultThinkingLevel (polytoken
+  // TUI parity), or clear it when the highlighted row isn't a model / the menu closed.
+  // The lastSeededKey guard prevents re-seeding while typing-to-narrow the query
+  // (which re-runs this effect) once the user has dialed a level with `[`/`]` —
+  // without it, every keystroke would clobber their pick back to the default.
   $effect(() => {
     atSel;
     atQ;
     atOpen;
-    modelLevel = null;
+    const item = atItems[atSel];
+    const m = item?.kind === "model" ? item.model : null;
+    if (!m) {
+      modelLevel = null;
+      lastSeededKey = null;
+      return;
+    }
+    const key = m.modelId;
+    if (key !== lastSeededKey) {
+      modelLevel = m.defaultThinkingLevel ?? sortEfforts(m.thinkingLevels ?? [])[0] ?? null;
+      lastSeededKey = key;
+    }
   });
   // ignoreOff resets when the ACTIVE MENTION ITSELF changes (a different `@`, or none at
   // all — `atTokenPos`) or the menu is explicitly dismissed (Escape — `atDismissed`) —
@@ -1112,9 +1129,9 @@
    *    - file: directories get a trailing "/" so the user can keep typing to narrow
    *      further.
    *    - skill/subagent: `@skill:<name>` / `@subagent:<name>`.
-   *    - model: `@model:<provider>/<modelId>` — always canonical, even if the user
-   *      typed the `m:` shorthand — plus a `(<level>)` suffix when a reasoning level
-   *      was dialed in with `[`/`]` (unset stays suffix-free).
+   *    - model: `@model:<modelId>` — always canonical (the full registry name),
+   *      even if the user typed the `m:` shorthand — plus a `(<level>)` suffix
+   *      when a reasoning level was dialed in with `[`/`]` (unset stays suffix-free).
    *    - sigil: just `@<prefix>` (e.g. `@skill:`) — the cursor lands right after the
    *      colon, so the menu recomputes to that kind's list (same keep-narrowing
    *      mechanic as a directory `/`). */
@@ -1139,7 +1156,7 @@
         inserted = `subagent:${item.name}`;
         break;
       case "model":
-        inserted = `model:${item.model.provider}/${item.model.modelId}`;
+        inserted = `model:${item.model.modelId}`;
         if (modelLevel !== null) inserted += `(${modelLevel})`;
         break;
       case "sigil":
@@ -1414,7 +1431,7 @@
       ) {
         e.preventDefault();
         modelLevel = stepLevel(
-          selectedAtItem.model.thinkingLevels,
+          sortEfforts(selectedAtItem.model.thinkingLevels ?? []),
           modelLevel,
           e.key === "]" ? 1 : -1,
         );

@@ -36,8 +36,6 @@ use pantoken_protocol::session_driver::{
 };
 use serde_json::Value;
 
-use crate::polytoken::models::default_model_ref;
-
 // ---------------------------------------------------------------------------
 // PLAN_REVIEW_LABELS — the snake_case reason.type → human label map.
 // Mirrors `PLAN_REVIEW_LABELS` in event-map.ts (and the `plan_review_label`
@@ -387,14 +385,12 @@ pub fn history_to_seed_events(
                 // Thread the model config like the live model_switch event does.
                 let to_model = item.get("to_model").and_then(|v| v.as_str());
                 if let Some(to_model) = to_model {
-                    let mr = default_model_ref(to_model);
                     let thinking_level = item
                         .get("to_reasoning_effort")
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
                     let config = SessionConfig {
-                        provider: Some(mr.provider),
-                        model_id: Some(mr.model_id),
+                        model_id: Some(to_model.to_string()),
                         thinking_level,
                         available_thinking_levels: None,
                     };
@@ -933,7 +929,6 @@ mod tests {
         match &out[0] {
             SessionDriverEvent::SessionUpdated { snapshot, .. } => {
                 let cfg = snapshot.config.as_ref().unwrap();
-                assert_eq!(cfg.provider.as_deref(), Some("deepseek"));
                 assert_eq!(cfg.model_id.as_deref(), Some("deepseek/deepseek-v4-pro"));
                 assert_eq!(cfg.thinking_level.as_deref(), Some("high"));
             }
