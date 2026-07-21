@@ -3626,6 +3626,133 @@ impl PantokenDriver for MockDriver {
                 s
             }
             "reply" => prompt_reply_script("Show me the streamed reply script.", None, &[]),
+            // Reproduces #78: a delayed background-agent notification collapses the
+            // preceding final assistant response. Emits: userMessage → narration →
+            // tool span → finalA (settled response, RunCompleted stamps completedAt) →
+            // HostUiRequest::Notify (the late notification) → follow-up deltas →
+            // RunCompleted (settles the follow-up so the turn collapses). The
+            // second RunCompleted is essential: without it the follow-up stays
+            // streaming:true, store.turnActive stays true, applyLastTurnActive
+            // forces every work lane non-collapsible, and no work-toggle renders.
+            "latenotify" => {
+                let u_id = format!("u-ln-{}", ts());
+                let call_id = format!("t-ln-{}", ts());
+                let mut s = vec![
+                    ScriptStep {
+                        wait_ms: 0,
+                        event: SessionDriverEvent::UserMessage {
+                            base: base(),
+                            id: u_id.clone(),
+                            text: "Run the build and summarize.".into(),
+                            images: None,
+                            entry_id: Some(format!("e-{u_id}")),
+                            references: None,
+                        },
+                    },
+                    ScriptStep {
+                        wait_ms: 0,
+                        event: SessionDriverEvent::SessionUpdated {
+                            base: base(),
+                            snapshot: mock_snapshot(SessionStatus::Running),
+                        },
+                    },
+                ];
+                // Narration deltas.
+                for chunk in deltas("I'll run the build and report the result.", 3) {
+                    s.push(ScriptStep {
+                        wait_ms: 28,
+                        event: SessionDriverEvent::AssistantDelta {
+                            base: base(),
+                            text: chunk,
+                            channel: Some(AssistantDeltaChannel::Text),
+                            entry_id: None,
+                        },
+                    });
+                }
+                // Tool span — a build run (so the turn has collapsible work).
+                s.extend(tool_span(
+                    &call_id,
+                    "bash",
+                    "Run shell command",
+                    Some("Execute a command in the workspace shell"),
+                    serde_json::json!({"command": "cargo build"}),
+                    true,
+                    serde_json::json!("   Compiling pantoken-server v0.5.0\n    Finished dev [unoptimized + debuginfo] target(s)"),
+                    120,
+                    220,
+                    980,
+                ));
+                // finalA — the settled response (RunCompleted stamps completedAt).
+                for chunk in deltas(
+                    "Build succeeded with no warnings. The server compiles cleanly and is ready to ship.",
+                    3,
+                ) {
+                    s.push(ScriptStep {
+                        wait_ms: 28,
+                        event: SessionDriverEvent::AssistantDelta {
+                            base: base(),
+                            text: chunk,
+                            channel: Some(AssistantDeltaChannel::Text),
+                            entry_id: None,
+                        },
+                    });
+                }
+                // RunCompleted settles finalA: closes its bubble, stamps completedAt,
+                // flips streaming:false (the idle snapshot path).
+                s.push(ScriptStep {
+                    wait_ms: 60,
+                    event: SessionDriverEvent::RunCompleted {
+                        base: base(),
+                        snapshot: mock_snapshot(SessionStatus::Idle),
+                        user_entry_id: Some(format!("e-{u_id}")),
+                        assistant_entry_id: Some("e-a-finalA".into()),
+                    },
+                });
+                // The delayed background-agent notification (HostUiRequest::Notify).
+                // Folds into a `notice` transcript item that lands AFTER finalA.
+                s.push(ScriptStep {
+                    wait_ms: 200,
+                    event: SessionDriverEvent::HostUiRequest {
+                        base: base(),
+                        request: HostUiRequest::Notify {
+                            request_id: "ln-notify".into(),
+                            message: "Subagent general-purpose: Success".into(),
+                            level: Some(NotifyLevel::Info),
+                        },
+                    },
+                });
+                // The follow-up acknowledging the notification.
+                s.push(ScriptStep {
+                    wait_ms: 0,
+                    event: SessionDriverEvent::SessionUpdated {
+                        base: base(),
+                        snapshot: mock_snapshot(SessionStatus::Running),
+                    },
+                });
+                for chunk in deltas("Noted — the background subagent finished successfully.", 3) {
+                    s.push(ScriptStep {
+                        wait_ms: 28,
+                        event: SessionDriverEvent::AssistantDelta {
+                            base: base(),
+                            text: chunk,
+                            channel: Some(AssistantDeltaChannel::Text),
+                            entry_id: None,
+                        },
+                    });
+                }
+                // RunCompleted settles the follow-up (closes its bubble, stamps
+                // completedAt, flips streaming:false) so the turn collapses.
+                s.push(ScriptStep {
+                    wait_ms: 60,
+                    event: SessionDriverEvent::RunCompleted {
+                        base: base(),
+                        snapshot: mock_snapshot(SessionStatus::Idle),
+                        user_entry_id: Some(format!("e-{u_id}")),
+                        assistant_entry_id: Some("e-a-followup".into()),
+                    },
+                });
+                s
+            }
             // ── Background session scripts ────────────────────────────────
             "bgrun" => {
                 let ref_id = session_ref_for("older-session");
