@@ -91,6 +91,13 @@ import {
 } from "./ws.svelte.js";
 import { applyCorrelatedResponse } from "./correlated-response.js";
 import { pickDefaultBranch } from "./branch-default.js";
+import {
+  loadNamespacedMap,
+  loadNamespacedScalar,
+  persistNamespacedMap,
+  persistNamespacedScalar,
+} from "./hosts/persistence.js";
+import { migrateLegacyPersistence } from "./hosts/migration.js";
 
 /** Which surface a notice belongs to. Sidebar notices render at the top of the
  * sidebar (session-list operations); chat notices render in-flow above the
@@ -1054,7 +1061,9 @@ class PantokenStore {
     send({ type: "requestSeed" });
   }
 
-  private onServer(msg: ServerMessage): void {
+  /** Process a server message. Public so the host coordinator can forward
+   *  messages from the selected host's WsClient (multi-host routing boundary). */
+  onServer(msg: ServerMessage): void {
     switch (msg.type) {
       case "hello":
         // Guard against a stale cached PWA (old protocol) silently misfolding
@@ -1071,6 +1080,9 @@ class PantokenStore {
         this.serverLabel = msg.serverLabel;
         this.dataDir = msg.dataDir ?? "";
         persistLastServerId(msg.serverId);
+        // One-time migration of legacy unnamespaced localStorage data to the
+        // namespaced key for this server. Idempotent — a no-op if already done.
+        migrateLegacyPersistence(msg.serverId);
         void this.hydrateOutbox(msg.serverId);
         // The server names the bundle it is SERVING; if it differs from the one
         // we're RUNNING, the server updated underneath this tab/PWA (sw.js is
@@ -1492,6 +1504,185 @@ class PantokenStore {
     }
   }
 
+  // ── Host switching (multi-computer support) ──────────────────────────
+  //
+  // switchHost stashes the current per-client view state to namespaced
+  // persistence, clears all server-scoped visible state so the previous
+  // host's transcript/paths/models never appear under the new host label,
+  // then sets a neutral connecting/switching state. The coordinator calls
+  // hydrateFromBootstrap afterward to replay the new host's cached bootstrap
+  // messages + fresh seed.
+
+  /** Switch the visible store to a different host. Stashes per-client view
+   *  state to namespaced persistence, clears all server-scoped visible state,
+   *  and sets a neutral connecting/switching state.
+   *
+   *  The target host's per-client state is loaded separately by
+   *  loadPerClientState() after the host's bootstrap messages are replayed. */
+  switchHost(): void {
+    // 1. Stash the current host's per-client view state to namespaced persistence.
+    this.stashPerClientState();
+
+    // 2. Clear all server-scoped visible state.
+    this.resetServerScopedState();
+
+    // 3. Clear pending prompts so the old host's queued prompts don't get
+    //    flushed to the new host's connection. The new host's outbox is
+    //    hydrated from IDB by hydrateOutbox during bootstrap replay.
+    this.pendingPrompts = [];
+    this.hydratedOutboxServerId = null;
+
+    // 4. Set a neutral connecting/switching state. The store shows this until
+    //    the new host's bootstrap/seed arrives.
+    this.ready = false;
+    this.serverId = null;
+  }
+
+  /** Hydrate the store from cached bootstrap messages for a host.
+   *  Called by the coordinator after switchHost() when the host's cached
+   *  hello/sessionList/sessionStatus/seed arrive (or are replayed).
+   *
+   *  Each message is processed through onServer() as if it arrived live. */
+  hydrateFromBootstrap(messages: ServerMessage[]): void {
+    for (const msg of messages) {
+      this.onServer(msg);
+    }
+  }
+
+  /** Load per-client view state from namespaced persistence for a host.
+   *  Called by the coordinator after hydrateFromBootstrap() to restore the
+   *  target host's drafts, draft config, prompt history, last project cwd,
+   *  and scroll positions from its namespaced localStorage keys.
+   *
+   *  These are client-only localStorage data, not server messages, so
+   *  hydrateFromBootstrap() cannot restore them — this method is separate. */
+  loadPerClientState(serverId: string): void {
+    this.draftMap = loadNamespacedMap<string>("composerDrafts", serverId);
+    this.draftConfigMap = loadNamespacedMap("draftConfig", serverId);
+    this.promptHistory = loadNamespacedMap("promptHistory", serverId);
+    const cwd = loadNamespacedScalar("lastProjectCwd", serverId);
+    if (cwd !== null) this.lastProjectCwd = cwd;
+  }
+
+  /** Stash the current per-client view state to namespaced persistence.
+   *  Called by switchHost() before clearing server-scoped state. */
+  private stashPerClientState(): void {
+    if (!this.serverId) return;
+    const sid = this.serverId;
+    // Stash drafts, draft config, prompt history, last project cwd.
+    persistNamespacedMap("composerDrafts", sid, this.draftMap);
+    persistNamespacedMap("draftConfig", sid, this.draftConfigMap);
+    persistNamespacedMap("promptHistory", sid, this.promptHistory);
+    persistNamespacedScalar("lastProjectCwd", sid, this.lastProjectCwd);
+    // Stash scroll positions (managed by scroll-position.ts, loaded from localStorage).
+    if (typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem("pantoken.scrollPositions");
+      if (raw) {
+        try {
+          localStorage.setItem(
+            `pantoken.${sid}.scrollPositions`,
+            raw,
+          );
+        } catch {
+          // Best effort.
+        }
+      }
+    }
+  }
+
+  /** Reset all server-scoped visible state to initial values.
+   *  Does NOT touch per-client view state that is host-independent
+   *  (theme, font scale, sidebar width, viewport width). */
+  private resetServerScopedState(): void {
+    // Clear the stop confirmation timer first (it references server-scoped state).
+    this.clearStopConfirmationTimer();
+
+    // Visible server-scoped state.
+    this.session = initialSessionState();
+    this.sessions = [];
+    this.activeSessionId = null;
+    this.defaultNewSessionCwd = "";
+    this.runningIds = new Set();
+    this.initializingIds = new Set();
+    this.attention = new Map();
+    this.attentionVersion = 0;
+    this.unread = new Set();
+    this.activeUnread = false;
+    this.models = [];
+    this.modelCatalogDiagnostic = undefined;
+    this.commands = [];
+    this.facets = ["execute", "plan"];
+    this.jobs = [];
+    this.fileIndex = { files: [], truncated: false };
+    this.atRefs = { skills: [], subagents: [] };
+    this.files = { query: "", items: [], includeIgnored: false };
+    this.dirListing = null;
+    this.pathStat = null;
+    this.branchList = null;
+    this.dirLoading = false;
+    this.branchLoading = false;
+    this.modelDefaults = { favorites: [] };
+    this.pantokenSettings = { loginShell: null, backgroundModel: null };
+    this.loginEnv = { activeShell: null, ok: false };
+    this.loginShellPendingRestart = false;
+    this.backgroundModelWarning = undefined;
+    this.serverId = null;
+    this.serverLabel = "Pantoken server";
+    this.dataDir = "";
+    this.ready = false;
+    this.unauthorized = false;
+    this.unauthorizedReason = null;
+    this.protocolMismatch = null;
+    this.pushState = "idle";
+    this.appUpdate = null;
+
+    // Session-lifecycle private state.
+    this.openingSession = null;
+    this.creatingSession = null;
+    this.draft = null;
+    this.booted = false;
+    this.bootDraftHandled = false;
+    this.bootRestoreInFlight = false;
+    this.reconnectFocusId = null;
+    this.lastAttemptedSessionPath = null;
+    this.seedSessionId = null;
+    this.seedEpoch = 0;
+    this.seedSeq = 0;
+    this.seedRequested = false;
+    this.staleBuildNotified = null;
+    this.stopOperation = null;
+    this.pendingAbortRestore = null;
+    this.activityVersion = 0;
+    this.stopRequestSeq = 0;
+    this.hydratedOutboxServerId = null;
+    this.locallyResolved = new Set();
+    this.selectedTodoId = null;
+    this.selectedJobHandle = null;
+    this.navStack = [];
+    this.navIndex = -1;
+    this.navigating = false;
+    this.sidebarToasts = [];
+    this.chatToasts = [];
+    this.noticeSeq = 0;
+    this.lastError = null;
+    this.dirRequestId = 0;
+    this.statRequestId = 0;
+    this.branchRequestId = 0;
+
+    // Transient UI state (reset to defaults).
+    this.searchOpen = false;
+    this.searchFocusN = 0;
+    this.sidebarSearchFocusN = 0;
+    this.hotkeyAction = null;
+    this.focusComposerN = 0;
+    this.facetMenuOpenN = 0;
+    this.composerSelectionStart = 0;
+    this.composerSelectionEnd = 0;
+    this.promptSentN = 0;
+    this.desktopContextOverlay = false;
+    this.swUpdateReady = false;
+  }
+
   /** Save a token and reconnect (from the auth gate). */
   authenticate(token: string): void {
     setToken(token);
@@ -1530,8 +1721,14 @@ class PantokenStore {
 
   private flushOutbox(): void {
     if (this.connection !== "connected") return;
+    // Defense-in-depth: only flush prompts for the current server, so a stale
+    // prompt from a previous host can never be sent to the wrong connection.
     for (const prompt of this.pendingPrompts)
-      if (prompt.state !== "rejected") this.sendPendingPrompt(prompt.promptId);
+      if (
+        prompt.state !== "rejected" &&
+        prompt.serverId === this.serverId
+      )
+        this.sendPendingPrompt(prompt.promptId);
   }
 
   private sendPendingPrompt(promptId: string): void {

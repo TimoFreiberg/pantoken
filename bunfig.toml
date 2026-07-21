@@ -3,6 +3,9 @@
 # Project-local on purpose: Bun ignores a *global* bunfig for these keys
 # (bun #28726), and the cooldown is what dodges fresh npm malware.
 
+[test]
+preload = ["./test-setup.ts"]
+
 [install]
 # Refuse to RESOLVE any package version published < 3 days ago. 3d (259200s)
 # tops the dominant npm-malware detection band (most malicious versions are
