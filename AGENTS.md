@@ -35,13 +35,16 @@ Monorepo, Bun workspaces.
 - `protocol/` — shared, JSON-serializable WS contract + the `foldEvent` reducer that
   runs identically on server & client.
 - `server-rs/` — the Rust server. Axum-based WS bridge + HTTP routes + static file
-  serving. Three crates: `pantoken-protocol` (WS types + fold),
-  `pantoken-daemon-types` (auto-generated from OpenAPI), `pantoken-server` (the binary).
-  The `PantokenDriver` seam has two implementors: `mock` (deterministic, for dev/e2e)
-  and `polytoken` (the live daemon). **The installed daemon is
-  `0.5.0-unstable.1`** (bearer-token auth). See `server-rs/PROGRESS.md` for the
-  live-path validation status before building on it. Archived TS tests are in
-  `server-rs/ts-test-reference/` for reference when porting cases to Rust.
+  serving. Six workspace members: `pantoken-protocol` (WS types + fold),
+  `pantoken-daemon-types` (auto-generated from OpenAPI), `pantoken-remote-layout`
+  (remote provisioning path-safety), `pantoken-server` (the binary),
+  `pantoken-tar-validate` (archive path-safety for provisioning), plus `desktop`
+  (Tauri desktop app) at the workspace root. The `PantokenDriver` seam has two
+  implementors: `mock` (deterministic, for dev/e2e) and `polytoken` (the live
+  daemon). **The installed daemon is `0.5.0-unstable.9`** (bearer-token auth). See
+  `server-rs/PROGRESS.md` for the live-path validation status before building on
+  it. Archived TS tests are in `server-rs/ts-test-reference/` for reference when
+  porting cases to Rust.
 - `client/` — Svelte 5 + Vite PWA. Reconnecting WS singleton, the same fold reducer,
   Claude-app theming in `src/app.css` (warm paper, light + dark).
 

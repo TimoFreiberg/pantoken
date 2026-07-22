@@ -33,7 +33,7 @@ open http://localhost:5173
 ```
 
 The server defaults to the real agent driver. Set `PANTOKEN_DRIVER=mock` to use the
-deterministic mock — you want this for UI development without a running pi instance
+deterministic mock — you want this for UI development without a running polytoken daemon
 and for the dev bar (`http://localhost:5173/?dev`).
 
 `http://localhost:5173/?dev` adds a dev bar to drive the mock to any UI state.

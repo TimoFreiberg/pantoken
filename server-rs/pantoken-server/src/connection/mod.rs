@@ -612,13 +612,13 @@ mod tests {
             .await
             .unwrap();
 
-        // Wait until the hub has a client.
-        for _ in 0..40 {
-            if hub.lock().client_count() > 0 {
-                break;
+        // Wait until the hub has a client (event-driven, not sleep-poll).
+        let _ = tokio::time::timeout(Duration::from_secs(2), async {
+            while hub.lock().client_count() == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
+        })
+        .await;
         assert_eq!(
             hub.lock().client_count(),
             1,
@@ -629,12 +629,13 @@ mod tests {
         inbound_tx.send(None).await.unwrap();
         let _ = tokio::time::timeout(Duration::from_secs(2), handle).await;
 
-        for _ in 0..40 {
-            if hub.lock().client_count() == 0 {
-                return;
+        // Wait until the hub has no clients (event-driven, not sleep-poll).
+        let result = tokio::time::timeout(Duration::from_secs(2), async {
+            while hub.lock().client_count() > 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-        panic!("hub must have no clients after EOF cleanup");
+        })
+        .await;
+        assert!(result.is_ok(), "hub must have no clients after EOF cleanup");
     }
 }

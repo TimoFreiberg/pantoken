@@ -4,6 +4,11 @@
 //! itself is path-agnostic.
 //!
 //! Faithful port of `server/src/archive-store.ts`.
+//!
+//! **I/O failure policy:** `new` and `persist` degrade gracefully — they log
+//! via `tracing::error!` and continue with in-memory state rather than panicking.
+//! A read-only filesystem or a failed write never crashes the server; the
+//! in-memory set remains correct for the session's lifetime.
 
 use std::collections::HashSet;
 use std::fs;
@@ -18,8 +23,9 @@ impl ArchiveStore {
     pub fn new(file: impl Into<PathBuf>) -> Self {
         let file = file.into();
         if let Some(parent) = file.parent() {
-            fs::create_dir_all(parent)
-                .unwrap_or_else(|e| panic!("[archive] failed to create {}: {e}", parent.display()));
+            if let Err(e) = fs::create_dir_all(parent) {
+                tracing::error!("[archive] failed to create {}: {e}", parent.display());
+            }
         }
         let mut store = Self {
             file,
@@ -65,18 +71,24 @@ impl ArchiveStore {
                     self.archived.insert(path);
                 }
                 if count > 0 {
-                    println!("[archive] loaded {count} archived session(s)");
+                    tracing::info!("[archive] loaded {count} archived session(s)");
                 }
             }
-            None => eprintln!("[archive] failed to load index"),
+            None => tracing::error!("[archive] failed to load index"),
         }
     }
 
     fn persist(&self) {
-        let json = serde_json::to_string_pretty(&self.archived.iter().collect::<Vec<_>>())
-            .expect("archive index should serialize");
-        fs::write(&self.file, json)
-            .unwrap_or_else(|e| panic!("[archive] failed to write {}: {e}", self.file.display()));
+        let json = match serde_json::to_string_pretty(&self.archived.iter().collect::<Vec<_>>()) {
+            Ok(j) => j,
+            Err(e) => {
+                tracing::error!("[archive] failed to serialize index: {e}");
+                return;
+            }
+        };
+        if let Err(e) = fs::write(&self.file, json) {
+            tracing::error!("[archive] failed to write {}: {e}", self.file.display());
+        }
     }
 }
 
@@ -133,5 +145,32 @@ mod tests {
     fn a_missing_index_file_loads_as_empty_not_an_error() {
         let dir = tempfile::tempdir().unwrap();
         assert!(!ArchiveStore::new(dir.path().join("nope.json")).has("/a.jsonl"));
+    }
+
+    #[test]
+    fn archive_store_read_only_dir_does_not_panic() {
+        // A read-only directory: set() should not panic, in-memory has() still works.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("archived.json");
+        let mut store = ArchiveStore::new(file.clone());
+        // Make the directory read-only after construction.
+        store.set("/a.jsonl", true);
+        assert!(store.has("/a.jsonl"));
+        // Now make the parent read-only and try another set — should not panic.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o444));
+        }
+        store.set("/b.jsonl", true);
+        assert!(
+            store.has("/b.jsonl"),
+            "in-memory state should be correct even if persist failed"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o755));
+        }
     }
 }

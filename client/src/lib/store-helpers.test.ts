@@ -3,6 +3,8 @@ import type { ModelDefaults } from "@pantoken/protocol";
 import {
   auxClickAction,
   reseedDraftFromDefaults,
+  shouldSetPendingSeedRequest,
+  shouldReassertSeedRequest,
   type DraftConfig,
 } from "./store-helpers.js";
 
@@ -114,5 +116,33 @@ describe("reseedDraftFromDefaults", () => {
     expect(out).toBe(draft);
     expect(out.model).toBeUndefined();
     expect(out.thinking).toBeUndefined();
+  });
+});
+
+describe("shouldSetPendingSeedRequest", () => {
+  test("returns true when send failed (socket not OPEN)", () => {
+    expect(shouldSetPendingSeedRequest(false, false)).toBe(true);
+  });
+
+  test("returns false when send succeeded", () => {
+    expect(shouldSetPendingSeedRequest(true, false)).toBe(false);
+  });
+
+  test("preserves existing true when send succeeds", () => {
+    expect(shouldSetPendingSeedRequest(true, true)).toBe(true);
+  });
+
+  test("stays true when send fails and was already true", () => {
+    expect(shouldSetPendingSeedRequest(false, true)).toBe(true);
+  });
+});
+
+describe("shouldReassertSeedRequest", () => {
+  test("returns true when pending flag is set", () => {
+    expect(shouldReassertSeedRequest(true)).toBe(true);
+  });
+
+  test("returns false when pending flag is clear", () => {
+    expect(shouldReassertSeedRequest(false)).toBe(false);
   });
 });

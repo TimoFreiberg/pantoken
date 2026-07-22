@@ -1,6 +1,7 @@
 [package]
 name = "pantoken-tar-validate"
 version = "0.1.0"
+description = "Archive path-safety validator for the pantoken provisioning flow"
 edition.workspace = true
 rust-version.workspace = true
 

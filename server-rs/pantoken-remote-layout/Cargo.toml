@@ -1,6 +1,7 @@
 [package]
 name = "pantoken-remote-layout"
 version = "0.1.0"
+description = "Remote provisioning path-safety validation for pantoken archives"
 edition.workspace = true
 rust-version.workspace = true
 

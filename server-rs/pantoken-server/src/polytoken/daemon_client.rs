@@ -833,6 +833,59 @@ impl std::fmt::Display for LeaseConflictError {
 
 impl std::error::Error for LeaseConflictError {}
 
+/// Typed lease error: distinguishes retriable conflicts (HTTP 409) from
+/// non-retriable failures (401, 500, network errors). Mapped by HTTP status,
+/// not body-parse success — a malformed 409 body is still a conflict.
+#[derive(Debug, Clone)]
+pub enum LeaseError {
+    /// HTTP 409 — another TUI holds the lease. `held` may be `None` when the
+    /// 409 body is malformed (still a retriable conflict).
+    Conflict { held: Option<LeaseHeldInfo> },
+    /// Any non-409 failure (401, 500, network error). Not retriable.
+    Other(String),
+}
+
+impl std::fmt::Display for LeaseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LeaseError::Conflict { held } => match held {
+                Some(h) => write!(
+                    f,
+                    "another TUI is attached to this session ({}). Detach it there (/detach) or wait ~30s for its lease to lapse.",
+                    h.summary
+                ),
+                None => write!(f, "lease claim failed (409)"),
+            },
+            LeaseError::Other(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+impl std::error::Error for LeaseError {}
+
+impl From<LeaseError> for LeaseConflictError {
+    fn from(e: LeaseError) -> Self {
+        match e {
+            LeaseError::Conflict { held } => {
+                let message = held
+                    .as_ref()
+                    .map(|h| {
+                        format!(
+                            "another TUI is attached to this session ({}). Detach it there (/detach) or wait ~30s for its lease to lapse.",
+                            h.summary
+                        )
+                    })
+                    .unwrap_or_else(|| "lease claim failed (409)".to_string());
+                LeaseConflictError { message, held }
+            }
+            LeaseError::Other(msg) => LeaseConflictError {
+                message: msg,
+                held: None,
+            },
+        }
+    }
+}
+
 /// The boxed future returned by a [`SleepFn`]. Mirrors the [`SpawnOverrideFuture`]
 /// shape: a pinned, boxed, `Send + 'static` future so the sleep closure can be
 /// stored as a trait object.
@@ -848,16 +901,10 @@ pub type SleepFn = Arc<dyn Fn(Duration) -> SleepFuture + Send + Sync>;
 /// with `delay_ms` backoff between attempts. Pure — takes the claim function so
 /// it's unit-testable without a live daemon. On exhaustion (or an early exit
 /// when the lease won't lapse within the remaining retry window), returns a
-/// LeaseConflictError whose message includes the computed time-to-lapse.
+/// `LeaseConflictError` whose message includes the computed time-to-lapse.
 ///
-/// **Divergence from TS `retryClaim`:** the TS version's `claim` throws
-/// arbitrary errors and re-throws non-`LeaseConflictError`s immediately (no
-/// retry). The Rust `claim` returns `Result<_, LeaseConflictError>`, so *every*
-/// `Err` is a lease conflict and is retried. `claim_lease` models non-409
-/// failures as `LeaseConflictError { held: None }`, which has no expiry and so
-/// always retries to exhaustion. Restoring the TS behavior would need an error
-/// enum distinguishing conflict from other failures (pre-existing; tracked in
-/// PROGRESS.md).
+/// Only `LeaseError::Conflict` is retried; `LeaseError::Other` returns
+/// immediately (no retry).
 ///
 /// Delegates to [`retry_claim_with_sleep`] with `tokio::time::sleep` as the
 /// default sleep, so the public signature is unchanged for existing callers.
@@ -868,7 +915,7 @@ pub async fn retry_claim<T, F, Fut>(
 ) -> Result<T, LeaseConflictError>
 where
     F: Fn() -> Fut,
-    Fut: std::future::Future<Output = Result<T, LeaseConflictError>>,
+    Fut: std::future::Future<Output = Result<T, LeaseError>>,
 {
     let sleep: SleepFn = Arc::new(|d| Box::pin(tokio::time::sleep(d)));
     retry_claim_with_sleep(claim, max_retries, delay_ms, sleep).await
@@ -885,7 +932,7 @@ pub async fn retry_claim_with_sleep<T, F, Fut>(
 ) -> Result<T, LeaseConflictError>
 where
     F: Fn() -> Fut,
-    Fut: std::future::Future<Output = Result<T, LeaseConflictError>>,
+    Fut: std::future::Future<Output = Result<T, LeaseError>>,
 {
     let max_retries = max_retries.unwrap_or(3) as i32;
     let delay_ms = delay_ms.unwrap_or(3000);
@@ -893,10 +940,28 @@ where
     for attempt in 0..=max_retries {
         match claim().await {
             Ok(v) => return Ok(v),
-            Err(e) => {
+            Err(LeaseError::Other(msg)) => {
+                // Non-retriable: return immediately.
+                return Err(LeaseConflictError {
+                    message: msg,
+                    held: None,
+                });
+            }
+            Err(LeaseError::Conflict { held }) => {
+                let e = LeaseConflictError {
+                    message: held
+                        .as_ref()
+                        .map(|h| {
+                            format!(
+                                "another TUI is attached to this session ({}). Detach it there (/detach) or wait ~30s for its lease to lapse.",
+                                h.summary
+                            )
+                        })
+                        .unwrap_or_else(|| "lease claim failed (409)".to_string()),
+                    held: held.clone(),
+                };
                 last_conflict = Some(e.clone());
-                let expiry = e
-                    .held
+                let expiry = held
                     .as_ref()
                     .and_then(|h| h.expires_at.as_deref())
                     .and_then(parse_iso8601_to_millis);
@@ -1444,10 +1509,7 @@ impl DaemonClient {
     /// message naming the holder + lease expiry — the raw JSON body is not useful to
     /// the operator. The holder's lease auto-expires (~30s); retrying after it lapses
     /// succeeds.
-    pub async fn claim_lease(
-        &self,
-        label: &str,
-    ) -> Result<TuiAttachClaimResponse, LeaseConflictError> {
+    pub async fn claim_lease(&self, label: &str) -> Result<TuiAttachClaimResponse, LeaseError> {
         let body = TuiAttachClaimRequest {
             pid: self.pid,
             terminal_label: Some(label.to_string()),
@@ -1459,27 +1521,16 @@ impl DaemonClient {
             .await;
         if res.status != 200 || res.data.is_none() {
             if res.status == 409 {
+                // Map by HTTP status, not body-parse success: a malformed 409
+                // body is still a retriable conflict.
                 let held = parse_lease_held_error(res.error.as_deref());
-                let message = match &held {
-                    Some(h) => format!(
-                        "another TUI is attached to this session ({}). Detach it there (/detach) or wait ~30s for its lease to lapse.",
-                        h.summary
-                    ),
-                    None => format!(
-                        "lease claim failed (409): {}",
-                        res.error.as_deref().unwrap_or("")
-                    ),
-                };
-                return Err(LeaseConflictError { message, held });
+                return Err(LeaseError::Conflict { held });
             }
-            return Err(LeaseConflictError {
-                message: format!(
-                    "lease claim failed ({}): {}",
-                    res.status,
-                    res.error.as_deref().unwrap_or("")
-                ),
-                held: None,
-            });
+            return Err(LeaseError::Other(format!(
+                "lease claim failed ({}): {}",
+                res.status,
+                res.error.as_deref().unwrap_or("")
+            )));
         }
         let data = res.data.unwrap();
         // Start the heartbeat timer. The spike confirmed heartbeat_interval_seconds: 5,
@@ -1562,18 +1613,37 @@ impl DaemonClient {
         max_retries: Option<u32>,
         delay_ms: Option<u64>,
     ) -> Result<TuiAttachClaimResponse, LeaseConflictError> {
-        // retry_claim needs an owned claim closure. We can't borrow self across the
-        // generic boundary easily, so inline the logic here.
+        // Inline retry loop that shares the same logic as the standalone
+        // retry_claim_with_sleep seam. Only LeaseError::Conflict is retried;
+        // LeaseError::Other (401, 500, network) returns immediately.
         let max_r = max_retries.unwrap_or(3) as i32;
         let delay = delay_ms.unwrap_or(3000);
         let mut last_conflict: Option<LeaseConflictError> = None;
         for attempt in 0..=max_r {
             match self.claim_lease(label).await {
                 Ok(v) => return Ok(v),
-                Err(e) => {
+                Err(LeaseError::Other(msg)) => {
+                    // Non-retriable: return immediately.
+                    return Err(LeaseConflictError {
+                        message: msg,
+                        held: None,
+                    });
+                }
+                Err(LeaseError::Conflict { held }) => {
+                    let e = LeaseConflictError {
+                        message: held
+                            .as_ref()
+                            .map(|h| {
+                                format!(
+                                    "another TUI is attached to this session ({}). Detach it there (/detach) or wait ~30s for its lease to lapse.",
+                                    h.summary
+                                )
+                            })
+                            .unwrap_or_else(|| "lease claim failed (409)".to_string()),
+                        held: held.clone(),
+                    };
                     last_conflict = Some(e.clone());
-                    let expiry = e
-                        .held
+                    let expiry = held
                         .as_ref()
                         .and_then(|h| h.expires_at.as_deref())
                         .and_then(parse_iso8601_to_millis);
@@ -3258,16 +3328,12 @@ sleep 30
         format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}.{subsec_millis:03}Z")
     }
 
-    /// Build a `LeaseConflictError` like `claim_lease` throws on a 409 — the
+    /// Build a `LeaseError::Conflict` like `claim_lease` returns on a 409 — the
     /// Rust analogue of the TS `conflict(expiresAt)`. `held.summary` carries a
     /// readable holder line; `held.expires_at` carries the ISO timestamp the
     /// retry loop parses to compute time-to-lapse.
-    fn conflict(summary: &str, expires_at: &str) -> LeaseConflictError {
-        LeaseConflictError {
-            message: format!(
-                "another TUI is attached to this session ({}). Detach it there (/detach) or wait ~30s for its lease to lapse.",
-                summary
-            ),
+    fn conflict(summary: &str, expires_at: &str) -> LeaseError {
+        LeaseError::Conflict {
             held: Some(LeaseHeldInfo {
                 summary: summary.to_string(),
                 expires_at: Some(expires_at.to_string()),
@@ -3285,7 +3351,7 @@ sleep 30
                 let c = calls_fn.clone();
                 Box::pin(async move {
                     *c.lock().expect("calls") += 1;
-                    Ok::<String, LeaseConflictError>("ok".to_string())
+                    Ok::<String, LeaseError>("ok".to_string())
                 })
             },
             Some(3),
@@ -3319,7 +3385,7 @@ sleep 30
                     if n == 1 {
                         return Err(conflict("\"tui\" pid 99999", &exp));
                     }
-                    Ok::<String, LeaseConflictError>("ok".to_string())
+                    Ok::<String, LeaseError>("ok".to_string())
                 })
             },
             Some(3),
@@ -3369,32 +3435,21 @@ sleep 30
 
     // retryClaim — test 4: "does NOT retry on non-409 errors".
     //
-    // DEVNOTE: this test CANNOT be faithfully ported. The TS `retryClaim`'s
-    // claim throws arbitrary `Error`s; a plain (non-LeaseConflictError) is not
-    // retried. The Rust `retry_claim`'s claim returns `Result<T, LeaseConflictError>`
-    // — EVERY error is a `LeaseConflictError`, and `retry_claim` retries on any
-    // `Err` (it never inspects whether the error is actually a 409 vs a 500). A
-    // `LeaseConflictError` with `held: None` (the shape `claim_lease` emits for a
-    // non-409 status, e.g. `"lease claim failed (500): ..."`) therefore IS retried
-    // to exhaustion — there is no expiry to trigger the early-exit. So the TS
-    // intent ("a non-conflict error must not be retried") is not expressible.
-    //
-    // Rather than assert misleading behavior, we assert the ACTUAL Rust behavior
-    // (a `held: None` error retries to exhaustion) and document the divergence.
+    // Now faithfully ported: LeaseError::Other (401, 500, network) returns
+    // immediately — zero retries, zero sleeps. This matches the TS intent.
     #[tokio::test]
-    async fn retry_claim_non_conflict_error_retries_to_exhaustion() {
+    async fn retry_claim_non_conflict_error_not_retried() {
         let calls = std::sync::Arc::new(std::sync::Mutex::new(0u32));
         let calls_fn = calls.clone();
-        // A non-409 error as claim_lease models it: held: None, status in message.
+        // A non-409 error as claim_lease now models it: LeaseError::Other.
         let result: Result<String, LeaseConflictError> = retry_claim_with_sleep(
             move || {
                 let c = calls_fn.clone();
                 Box::pin(async move {
                     *c.lock().expect("calls") += 1;
-                    Err(LeaseConflictError {
-                        message: "lease claim failed (500): server error".into(),
-                        held: None,
-                    })
+                    Err(LeaseError::Other(
+                        "lease claim failed (500): server error".into(),
+                    ))
                 })
             },
             Some(3),
@@ -3402,17 +3457,63 @@ sleep 30
             no_op_sleep(),
         )
         .await;
-        // The Rust model retries ANY Err(LeaseConflictError) — unlike TS, which
-        // only retries LeaseConflictError. So this runs all 4 attempts.
+        // Non-conflict errors return immediately — only 1 attempt, no retries.
         assert!(result.is_err(), "should return Err");
-        assert_eq!(*calls.lock().expect("calls"), 4);
+        assert_eq!(*calls.lock().expect("calls"), 1);
         assert!(
             result
                 .unwrap_err()
                 .to_string()
-                .contains("lease claim failed (409): another TUI is attached"),
-            "exhausted non-409 falls back to the malformed-409 message"
+                .contains("lease claim failed (500)"),
+            "non-409 error should be returned as-is"
         );
+    }
+
+    // Extra: 401 auth errors also return immediately (no retry).
+    #[tokio::test]
+    async fn retry_claim_auth_error_not_retried() {
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(0u32));
+        let calls_fn = calls.clone();
+        let result: Result<String, LeaseConflictError> = retry_claim_with_sleep(
+            move || {
+                let c = calls_fn.clone();
+                Box::pin(async move {
+                    *c.lock().expect("calls") += 1;
+                    Err(LeaseError::Other(
+                        "lease claim failed (401): unauthorized".into(),
+                    ))
+                })
+            },
+            Some(3),
+            Some(1),
+            no_op_sleep(),
+        )
+        .await;
+        assert!(result.is_err(), "should return Err");
+        assert_eq!(*calls.lock().expect("calls"), 1, "401 must not retry");
+    }
+
+    // Extra: malformed 409 body (held: None) is still a Conflict, still retried.
+    #[tokio::test]
+    async fn retry_claim_malformed_409_body_still_retried() {
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(0u32));
+        let calls_fn = calls.clone();
+        let result: Result<String, LeaseConflictError> = retry_claim_with_sleep(
+            move || {
+                let c = calls_fn.clone();
+                Box::pin(async move {
+                    *c.lock().expect("calls") += 1;
+                    Err(LeaseError::Conflict { held: None })
+                })
+            },
+            Some(3),
+            Some(1),
+            no_op_sleep(),
+        )
+        .await;
+        assert!(result.is_err(), "should return Err after exhaustion");
+        // 1 initial + 3 retries = 4 attempts — malformed 409 is still retried.
+        assert_eq!(*calls.lock().expect("calls"), 4);
     }
 
     // retryClaim — test 5: stops early when the lease won't lapse within the
@@ -3457,9 +3558,9 @@ sleep 30
         let err: LeaseConflictError = retry_claim_with_sleep(
             move || {
                 let exp = exp_for_claim.clone();
-                Box::pin(async move {
-                    Err::<String, LeaseConflictError>(conflict("\"tui\" pid 99999", &exp))
-                })
+                Box::pin(
+                    async move { Err::<String, LeaseError>(conflict("\"tui\" pid 99999", &exp)) },
+                )
             },
             Some(3),
             Some(2_000),
@@ -3492,16 +3593,9 @@ sleep 30
     // retryClaim — test 7: falls back to ~30s when the body lacks an expiry.
     #[tokio::test]
     async fn retry_claim_falls_back_to_30s_without_expiry() {
-        // A LeaseConflictError with no held info (malformed 409 body).
+        // A Conflict with no held info (malformed 409 body).
         let result: Result<String, LeaseConflictError> = retry_claim_with_sleep(
-            || {
-                Box::pin(async move {
-                    Err(LeaseConflictError {
-                        message: "lease claim failed (409): malformed body".into(),
-                        held: None,
-                    })
-                })
-            },
+            || Box::pin(async move { Err(LeaseError::Conflict { held: None }) }),
             Some(3),
             Some(1),
             no_op_sleep(),
@@ -3528,8 +3622,7 @@ sleep 30
     #[tokio::test]
     async fn retry_claim_falls_back_to_30s_when_held_has_no_expiry() {
         // held present, but expires_at: None (a malformed-but-present 409 body).
-        let conflict_no_expiry = LeaseConflictError {
-            message: "another TUI is attached (no expiry)".into(),
+        let conflict_no_expiry = LeaseError::Conflict {
             held: Some(LeaseHeldInfo {
                 summary: "\"tui\" pid 99999".into(),
                 expires_at: None,
@@ -3541,7 +3634,7 @@ sleep 30
         let err: LeaseConflictError = retry_claim_with_sleep(
             || {
                 let e = conflict_no_expiry.clone();
-                Box::pin(async move { Err::<String, LeaseConflictError>(e) })
+                Box::pin(async move { Err::<String, LeaseError>(e) })
             },
             Some(3),
             Some(1),
@@ -3580,7 +3673,7 @@ sleep 30
                 let exp = exp_for_claim.clone();
                 Box::pin(async move {
                     *c.lock().expect("calls") += 1;
-                    Err::<String, LeaseConflictError>(conflict("\"tui\" pid 99999", &exp))
+                    Err::<String, LeaseError>(conflict("\"tui\" pid 99999", &exp))
                 })
             },
             Some(3),
@@ -3620,7 +3713,7 @@ sleep 30
                     if n < 3 {
                         return Err(conflict("\"tui\" pid 99999", &exp));
                     }
-                    Ok::<String, LeaseConflictError>("ok".to_string())
+                    Ok::<String, LeaseError>("ok".to_string())
                 })
             },
             Some(3),
@@ -3915,5 +4008,65 @@ sleep 30
         // In dispose_warm, already_exited=true means we skip child.kill().
         // The child is already dead — calling kill() on it would be a no-op
         // at best, or signal a recycled PID at worst.
+    }
+
+    /// C8: reseed fetches (GET /state, GET /history) must time out on a
+    /// hanging daemon rather than wedging the SSE consumer forever. The
+    /// `safe_fetch` wrapper applies a `tokio::time::timeout` per request.
+    #[tokio::test]
+    async fn reseed_fetch_times_out_on_hanging_daemon() {
+        use tokio::io::AsyncReadExt;
+        use tokio::net::TcpListener;
+
+        // A server that accepts the connection but never responds — simulates a
+        // wedged daemon. axum won't even get to route; the TCP accept is enough
+        // to keep reqwest waiting.
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("local addr").port();
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = match listener.accept().await {
+                    Ok(s) => s,
+                    Err(_) => break,
+                };
+                // Read the request but never respond — hang forever.
+                let mut buf = [0u8; 1024];
+                let _ =
+                    tokio::time::timeout(std::time::Duration::from_secs(30), socket.read(&mut buf))
+                        .await;
+            }
+        });
+
+        let client = DaemonClient::new("s1".into(), port, 1, None);
+
+        // GET /state should time out within ~10s (the safe_fetch default).
+        // We wrap in a 15s outer timeout to prove it returns well before that.
+        let result = tokio::time::timeout(std::time::Duration::from_secs(15), client.state()).await;
+
+        assert!(
+            result.is_ok(),
+            "state() should complete (via timeout) within 15s, not hang forever"
+        );
+        let resp = result.unwrap();
+        assert_eq!(
+            resp.status, 0,
+            "a hanging daemon should produce status 0 (timeout), not a real response"
+        );
+
+        // Same for GET /history.
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            client.history(None, None),
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "history() should complete (via timeout) within 15s, not hang forever"
+        );
+        let resp = result.unwrap();
+        assert_eq!(
+            resp.status, 0,
+            "a hanging daemon should produce status 0 (timeout), not a real response"
+        );
     }
 }
