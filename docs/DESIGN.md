@@ -7,7 +7,7 @@ from a desktop GUI/browser/phone over Tailscale. Default look/feel mirrors Codex
 ## Architecture
 
 ```
-   Mac Mini (server: Bun + TS)
+   Mac Mini (server: Rust + axum)
    ┌─────────────────────────────────────────────────────────────┐
    │  PolytokenDriver ── HTTP+SSE ──┐   polytoken daemon(s)      │
    │    per-session daemon proc      │   (one per session/port)  │

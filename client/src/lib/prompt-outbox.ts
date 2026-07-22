@@ -33,6 +33,16 @@ const DB_VERSION = 1;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
+/** Reset the DB cache. For tests that need a fresh IndexedDB instance. */
+export function _resetDbCache(): void {
+  dbPromise = null;
+}
+
+/** Clear all prompts from the store. For tests. */
+export async function _clearAllPrompts(): Promise<void> {
+  await transaction("readwrite", (store) => store.clear());
+}
+
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {

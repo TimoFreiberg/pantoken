@@ -63,44 +63,37 @@ use crate::journal::{
     tail_covers, try_merge,
 };
 
-pub const HUB_COMPLETION_QUEUE_CAPACITY: usize = 256;
-
 type HubApplyFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
 type HubOp = Box<dyn FnOnce(Arc<Mutex<SessionHub>>) -> HubApplyFuture + Send + 'static>;
 
 #[derive(Clone)]
 pub struct HubOpSender {
-    tx: mpsc::Sender<HubOp>,
+    tx: mpsc::UnboundedSender<HubOp>,
 }
 
 pub struct HubOpReceiver {
-    rx: mpsc::Receiver<HubOp>,
+    rx: mpsc::UnboundedReceiver<HubOp>,
 }
 
 pub fn hub_op_channel() -> (HubOpSender, HubOpReceiver) {
-    let (tx, rx) = mpsc::channel(HUB_COMPLETION_QUEUE_CAPACITY);
+    let (tx, rx) = mpsc::unbounded_channel();
     (HubOpSender { tx }, HubOpReceiver { rx })
 }
 
 impl HubOpSender {
     fn enqueue(&self, label: &'static str, op: HubOp) {
-        // `Full` is intentionally process-fatal: overflowing the single hub
-        // completion queue would otherwise silently corrupt all clients, not just
-        // the connection that happened to enqueue. Do not "fix" this by changing
-        // to blocking `send().await`: the applier is the sole receiver and some
-        // ops enqueue more work re-entrantly (for example, `finish_switch` queues
-        // four refreshes), so waiting for capacity from inside the applier would
-        // self-deadlock on a full channel. If `Full` is ever observed in practice,
-        // use an unbounded channel or a much larger bound instead. For this
-        // single-user tool, 256 requires roughly 43 simultaneous reconnects (or a
-        // wedged applier), so panic-as-canary is reasonable today.
-        match self.tx.try_send(op) {
+        // Unbounded: the hub op queue must never overflow (process-fatal) or
+        // silently drop ops (corrupts all clients, not just the enqueuing
+        // connection). Blocking `send().await` is not an option: the applier is
+        // the sole receiver and some ops enqueue more work re-entrantly (e.g.
+        // `finish_switch` queues four refreshes), so waiting for capacity from
+        // inside the applier would self-deadlock on a bounded channel. The
+        // tradeoff is unbounded memory growth if the applier stalls — acceptable
+        // for a single-user tool, and a louder failure than silent corruption.
+        match self.tx.send(op) {
             Ok(()) => {}
-            Err(mpsc::error::TrySendError::Full(_)) => {
-                panic!("hub completion queue is full while enqueuing {label}");
-            }
-            Err(mpsc::error::TrySendError::Closed(_)) => {
+            Err(mpsc::error::SendError(_)) => {
                 tracing::debug!(
                     "hub completion queue is closed while enqueuing {label}; dropping op during shutdown"
                 );
@@ -3621,13 +3614,16 @@ mod hub_models_tests {
     where
         F: Fn(&ServerMessage) -> bool,
     {
-        for _ in 0..32 {
-            let msg = drain_one(rx).await;
-            if pred(&msg) {
-                return msg;
+        let result = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let msg = drain_one(rx).await;
+                if pred(&msg) {
+                    return msg;
+                }
             }
-        }
-        panic!("did not receive expected server message");
+        })
+        .await;
+        result.expect("did not receive expected server message within 2s")
     }
 
     async fn apply_one(hub: Arc<Mutex<SessionHub>>, receiver: &mut HubOpReceiver) {
@@ -4355,18 +4351,22 @@ mod hub_models_tests {
     /// TS `lastUpdate` helper, which scans `c.received` for the most recent
     /// `updateStatus`). Panics if none arrived within the drain window.
     async fn last_update(rx: &mut mpsc::Receiver<ServerMessage>) -> ServerMessage {
-        let mut last: Option<ServerMessage> = None;
-        for _ in 0..64 {
-            match timeout(Duration::from_millis(50), rx.recv()).await {
-                Ok(Some(msg)) => {
-                    if matches!(msg, ServerMessage::UpdateStatus { .. }) {
-                        last = Some(msg);
-                    }
+        // Drain messages until the channel is idle (50ms gap), returning the
+        // last UpdateStatus seen. Bounded by a 2s outer timeout.
+        let result = tokio::time::timeout(Duration::from_secs(2), async {
+            let mut last: Option<ServerMessage> = None;
+            while let Ok(Some(msg)) = timeout(Duration::from_millis(50), rx.recv()).await {
+                if matches!(msg, ServerMessage::UpdateStatus { .. }) {
+                    last = Some(msg);
                 }
-                _ => break,
             }
-        }
-        last.expect("expected at least one updateStatus message")
+            last
+        })
+        .await;
+        result
+            .ok()
+            .flatten()
+            .expect("expected at least one updateStatus message")
     }
 
     #[tokio::test]
@@ -5130,5 +5130,25 @@ mod hub_models_tests {
             !hub.lock().session_list_dirty(),
             "dirty flag should be clear after live_tick rebroadcast"
         );
+    }
+
+    /// C4/AC.5: the hub op queue is unbounded — enqueuing >256 ops must not
+    /// panic, even if the applier hasn't drained any.
+    #[tokio::test]
+    async fn hub_op_queue_overflow_does_not_panic() {
+        let (tx, _rx) = hub_op_channel(); // _rx: never drained — simulates a stalled applier
+
+        // Enqueue 500 ops — well over the old 256 bound. Must not panic.
+        for i in 0..500u32 {
+            tx.enqueue(
+                "test-overflow",
+                Box::new(move |_| {
+                    Box::pin(async move {
+                        let _ = i;
+                    })
+                }),
+            );
+        }
+        // If we reach here, no panic occurred — the test passes.
     }
 }

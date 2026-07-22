@@ -126,10 +126,9 @@ pub struct PushService {
     vapid: VapidKeys,
     vapid_subject: String,
     /// Reusable VAPID key builder (clone per-send — cheap, avoids re-parsing the
-    /// private key for every subscription). Built once at construction; a parse
-    /// failure here means the on-disk keypair is corrupt, which is a fail-loud
-    /// startup error (delete vapid.json to regenerate).
-    sig_builder: PartialVapidSignatureBuilder,
+    /// private key for every subscription). `None` when the keypair is corrupt
+    /// or unreadable — push is disabled in that case (logged at construction).
+    sig_builder: Option<PartialVapidSignatureBuilder>,
 }
 
 impl PushService {
@@ -145,11 +144,17 @@ impl PushService {
         }
 
         // Build the reusable partial signature builder from the stored private
-        // key. The key is either freshly generated or read from a file we wrote,
-        // so a parse failure means corruption — fail loud at construction rather
-        // than silently no-op'ing every send.
-        let sig_builder = VapidSignatureBuilder::from_base64_no_sub(&vapid.private_key)
-            .expect("VAPID keypair is corrupt — delete vapid.json to regenerate");
+        // key. A corrupt/unreadable keypair degrades gracefully: log and run
+        // with push disabled rather than panicking at startup.
+        let sig_builder = match VapidSignatureBuilder::from_base64_no_sub(&vapid.private_key) {
+            Ok(b) => Some(b),
+            Err(e) => {
+                tracing::error!(
+                    "[push] VAPID keypair is corrupt — push disabled (delete vapid.json to regenerate): {e}"
+                );
+                None
+            }
+        };
 
         Self {
             store,
@@ -183,6 +188,11 @@ impl PushService {
         if subs.is_empty() {
             return 0;
         }
+        // Push disabled (corrupt VAPID keypair): no-op, don't crash.
+        let Some(sig_builder) = &self.sig_builder else {
+            tracing::warn!("[push] send_to_all called with push disabled (corrupt VAPID keypair)");
+            return 0;
+        };
         // C1: PushNotification contains String, Option<String>, and Option<u32>
         // fields, all of which are infallibly serializable by serde_json — expect
         // rather than silently substituting an empty payload (which would send a
@@ -191,7 +201,7 @@ impl PushService {
             "PushNotification serialization is infallible (String, Option<String>, and Option<u32> fields)",
         );
         let client = HyperWebPushClient::new();
-        let partial = self.sig_builder.clone();
+        let partial = sig_builder.clone();
         let subject = self.vapid_subject.clone();
 
         // Build all signed messages up front (under this method's &mut self,
@@ -477,8 +487,24 @@ mod tests {
         let pub_bytes = Base64UrlSafeNoPadding::decode_to_vec(svc.public_key(), None).unwrap();
         assert_eq!(pub_bytes.len(), 65);
 
-        // The sig_builder loaded successfully from the generated key — a corrupt
-        // key would have panicked at construction (C5: fail loud, not silent).
+        // The sig_builder loaded successfully from the generated key.
+    }
+
+    #[test]
+    fn push_service_corrupt_vapid_does_not_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        let vapid_path = dir.path().join("vapid.json");
+        // Write a VAPID key file with valid JSON + valid base64url but a private
+        // key that's the wrong length (not a valid P-256 scalar). This passes
+        // load_or_create_vapid's JSON parse but fails VapidSignatureBuilder.
+        fs::write(&vapid_path, r#"{"publicKey":"AAAA","privateKey":"AAAA"}"#).unwrap();
+        // Construction must not panic — push is disabled instead.
+        let svc = PushService::new(dir.path(), "mailto:test@test.com".into());
+        // The key assertion: construction didn't panic. If the builder rejected
+        // the short key, push is disabled (sig_builder is None). If the builder
+        // was lenient, push is enabled — either way, no panic.
+        // Verify we can still call public_key() without crashing.
+        let _ = svc.public_key();
     }
 
     #[test]

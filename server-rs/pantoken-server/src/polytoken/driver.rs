@@ -36,6 +36,11 @@
 //! per session, caught at the code level — the primary regression protection,
 //! since the ordering test is only probabilistically discriminating).
 //!
+//! **Subscriber channel invariant:** `emit()` fans out to subscribers via an
+//! unbounded `mpsc::unbounded_channel` — driver→hub delivery is lossless. A slow
+//! hub causes memory growth, never silent transcript corruption. This is
+//! consistent with the SSE consumer's unbounded choice above.
+//!
 //! On disposal (`reload_session`/`shutdown`), the consumer's `JoinHandle` is
 //! aborted + awaited alongside the SSE-subscription teardown so no task leaks.
 //
@@ -173,7 +178,7 @@ struct PolytokenInner {
     /// `warm` HashMap stays the lookup; `order` is the recency substrate.
     order: Mutex<Vec<SessionId>>,
     warm: RwLock<HashMap<SessionId, Arc<WarmSession>>>,
-    subscribers: Mutex<Vec<(usize, mpsc::Sender<SessionDriverEvent>)>>,
+    subscribers: Mutex<Vec<(usize, mpsc::UnboundedSender<SessionDriverEvent>)>>,
     next_sub_id: Mutex<usize>,
     is_viewed: RwLock<Option<Box<SessionViewed>>>,
     command_cache: Mutex<HashMap<String, Vec<CommandInfo>>>,
@@ -453,7 +458,9 @@ impl PolytokenInner {
     fn emit(&self, ev: SessionDriverEvent) {
         let subs = self.subscribers.lock();
         for (_, tx) in subs.iter() {
-            let _ = tx.try_send(ev.clone());
+            // Unbounded: driver→hub delivery is lossless. A slow hub causes
+            // memory growth, never silent transcript corruption.
+            let _ = tx.send(ev.clone());
         }
     }
 
@@ -1589,7 +1596,7 @@ impl PantokenDriver for PolytokenDriver {
             *next += 1;
             id
         };
-        let (tx, mut rx) = mpsc::channel(256);
+        let (tx, mut rx) = mpsc::unbounded_channel();
         inner.subscribers.lock().push((id, tx));
         tokio::spawn(async move {
             while let Some(ev) = rx.recv().await {
@@ -5318,6 +5325,51 @@ mod tests {
         assert_eq!(
             result2.reason.as_deref(),
             Some("no pantoken worktree at this path")
+        );
+    }
+
+    /// C1/AC.5: the subscriber channel is unbounded — emitting >256 events
+    /// while the subscriber task is delayed must not drop any.
+    #[tokio::test]
+    async fn subscriber_channel_never_drops_under_contention() {
+        let inner = inner_with_order(Vec::new(), 10);
+
+        let received = Arc::new(Mutex::new(0u32));
+        let received_clone = received.clone();
+
+        // Manually wire a subscriber (mirrors PolytokenDriver::subscribe).
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        inner.subscribers.lock().push((0, tx));
+        tokio::spawn(async move {
+            while let Some(ev) = rx.recv().await {
+                let r = received_clone.clone();
+                *r.lock() += 1;
+                drop(ev);
+            }
+        });
+
+        // Emit 500 events — well over the old 256 bound.
+        for _ in 0..500 {
+            inner.emit(SessionDriverEvent::SessionReset {
+                base: SessionEventBase {
+                    session_ref: SessionRef {
+                        workspace_id: "ws".into(),
+                        session_id: "s1".into(),
+                    },
+                    timestamp: "t".into(),
+                    run_id: None,
+                },
+            });
+        }
+
+        // Give the subscriber task time to drain.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // All 500 events must have been delivered — zero drops.
+        assert_eq!(
+            *received.lock(),
+            500,
+            "unbounded subscriber channel must not drop events under contention"
         );
     }
 }

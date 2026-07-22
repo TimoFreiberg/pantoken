@@ -1,6 +1,7 @@
 [package]
 name = "pantoken-protocol"
 version = "0.1.0"
+description = "Shared WS protocol types + fold reducer for the pantoken server and client"
 edition.workspace = true
 rust-version.workspace = true
 

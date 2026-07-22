@@ -105,3 +105,32 @@ export function reseedDraftFromDefaults(
   }
   return next;
 }
+
+// ── Seed-request reconnect helpers (C7) ────────────────────────────────
+
+/** Decide whether a seed request needs to be re-asserted after a reconnect.
+ *
+ * @param sendSucceeded Whether `send({ type: "requestSeed" })` returned true
+ *   (socket was OPEN). When false, the request was stranded and must be
+ *   re-sent on the next `hello`.
+ * @param pendingSeedRequest The current `pendingSeedRequest` flag value.
+ * @returns The new `pendingSeedRequest` value: `true` if the send failed and
+ *   the request must be re-asserted on reconnect.
+ */
+export function shouldSetPendingSeedRequest(
+  sendSucceeded: boolean,
+  pendingSeedRequest: boolean,
+): boolean {
+  if (!sendSucceeded) return true;
+  return pendingSeedRequest;
+}
+
+/** Decide whether to re-send a seed request on `hello` (reconnect).
+ *
+ * @param pendingSeedRequest The current flag. When true, a prior requestSeed
+ *   was stranded by a closed socket.
+ * @returns `true` if the seed request should be re-sent now.
+ */
+export function shouldReassertSeedRequest(pendingSeedRequest: boolean): boolean {
+  return pendingSeedRequest;
+}

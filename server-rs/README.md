@@ -17,6 +17,12 @@ server-rs/
 ├── pantoken-daemon-types/       # Daemon wire types (generated from OpenAPI)
 │   └── src/
 │       └── lib.rs            # generated via scripts/codegen-polytoken-rs.ts
+├── pantoken-remote-layout/      # Remote provisioning path-safety
+│   └── src/
+│       └── lib.rs
+├── pantoken-tar-validate/       # Archive path-safety for provisioning
+│   └── src/
+│       └── main.rs
 ├── pantoken-server/             # The server binary
 │   └── src/
 │       ├── main.rs           # entrypoint (axum router)
@@ -64,7 +70,8 @@ bun run scripts/codegen-polytoken-rs.ts
 ```
 
 This runs `polytoken openapi` and generates `pantoken-daemon-types/src/lib.rs` with
-161 serde types including the 60-variant `DaemonEvent` discriminated union.
+162 serde types (90 structs + 48 enums + 24 type aliases) including the 55-variant
+`DaemonEvent` discriminated union.
 
 ## E2E integration
 

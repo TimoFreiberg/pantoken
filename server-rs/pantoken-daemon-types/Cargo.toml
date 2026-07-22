@@ -1,6 +1,7 @@
 [package]
 name = "pantoken-daemon-types"
 version = "0.1.0"
+description = "Auto-generated daemon wire types from the polytoken OpenAPI spec"
 edition.workspace = true
 rust-version.workspace = true
 

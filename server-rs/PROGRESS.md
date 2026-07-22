@@ -1,8 +1,9 @@
 # Rust Server — Status & Resumption Plan
 
 **Status (2026-07-08):** Cutover complete. The TS server has been deleted; the
-Rust server is the only server. 498 Rust tests green (5 daemon-types, 64
-protocol, 396 lib [5 `#[ignore]`], 8 corpus, 25 live_path). `cargo clippy
+Rust server is the only server. 993 Rust tests green (9 daemon-types, 106
+protocol, 831 server lib + integration [8 skipped], 24 tar-validate, 35
+remote-layout, 87 desktop). `cargo clippy
 --all-targets -- -D warnings` + `cargo fmt --check` clean. Mock-e2e burn-down
 complete (Phase 1); live-path validation parts 1–2 complete (Phases 2, 2.5, 5);
 6 live-path `BUG:` markers resolved (Phase A). Phase 3 `/health` real counts +
@@ -26,8 +27,8 @@ Rust server is the only server. The TS test files are archived in
 
 **Ground truth (2026-07-07, full suite, one machine — Phase 5 done):**
 
-- `cargo test`: **430/430 pass** (5 daemon-types, 64 protocol, 334 server lib
-  [5 `#[ignore]`], 8 corpus, 19 live-path integration).
+- `cargo test`: **993/993 pass** (9 daemon-types, 106 protocol, 831 server lib +
+  integration [8 skipped], 24 tar-validate, 35 remote-layout, 87 desktop).
 - `cargo clippy --all-targets -- -D warnings`: 0 warnings.
 - e2e (Rust server, mock driver): 298/0 (3.0 min, `--project=desktop`). 2 known
   load-induced flakes (dir-picker, sidebar-drafts) pass in isolation.
@@ -48,7 +49,7 @@ review-approved.
   `history_seed`: the ported timestamp fabrication is deletable on the next
   daemon bump (unstable.6 ships `emitted_at`); don't extend it. Also note the
   known TS bug that only 3 of 12 history kinds are replayed.
-- `pantoken-daemon-types` — codegen from `polytoken openapi` (161 types).
+- `pantoken-daemon-types` — codegen from `polytoken openapi` (162 types).
 - `daemon_client.rs` — 1:1 method-surface port including lease retry.
   **Untested** — dedicated test ports still open (Phase 2 item 4). SSE liveness
   is heartbeat-based (Phase 2.0).
@@ -198,7 +199,7 @@ faithfully.
 > set as unstable.1). Two additive type changes: `TransportKind::StreamInterrupted`
 > new variant, `ProviderError::Transport` gained optional `source_detail: Option<String>`.
 > Bearer-token auth (PT-235) remains adopted. Corpus replayed as drift canary: all
-> 745 server tests pass. Re-check only on the *next* bump: re-run codegen, replay
+> 993 server tests pass. Re-check only on the *next* bump: re-run codegen, replay
 > the corpus as the drift canary, adopt newly daemon-owned fields, re-capture only
 > on conscious adoption.
 
@@ -320,7 +321,7 @@ faithfully.
 ## How to verify current state
 
 ```bash
-cd server-rs && cargo test                      # 430 tests, green
+cd server-rs && cargo test                      # 993 tests, green
 cd server-rs && cargo clippy --all-targets -- -D warnings   # 0 warnings
 bun run check:rs                                # fmt + clippy + test locally (CI gate)
 bun run test:e2e                                # mock-driver e2e (298/0; 2 load-induced flakes)

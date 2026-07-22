@@ -202,6 +202,9 @@ class PantokenStore {
   private seedSeq = 0;
   // One requestSeed per detected gap — cleared when the fresh seed arrives.
   private seedRequested = false;
+  /** Set when requestSeed() was called but the socket wasn't OPEN. Re-sent on
+   *  the next hello (reconnect). Cleared on seed/full-state receipt. */
+  private pendingSeedRequest = false;
   // Session ids with a live turn right now (server-pushed via `sessionStatus`).
   runningIds = $state<Set<string>>(new Set());
   // Session ids warming up (created/opened, not yet streaming) — server-pushed in the
@@ -1064,7 +1067,10 @@ class PantokenStore {
     if (this.seedRequested) return;
     this.seedRequested = true;
     console.error("[pantoken] event seq gap — requesting a fresh seed");
-    send({ type: "requestSeed" });
+    if (!send({ type: "requestSeed" })) {
+      // Socket not OPEN — re-assert on the next hello (reconnect).
+      this.pendingSeedRequest = true;
+    }
   }
 
   /** Process a server message. Public so the host coordinator can forward
@@ -1114,6 +1120,11 @@ class PantokenStore {
         if (this.booted && !this.draft)
           this.reconnectFocusId = this.session.ref?.sessionId ?? null;
         this.booted = true;
+        // Re-assert a seed request that was stranded by a closed socket.
+        if (this.pendingSeedRequest) {
+          this.pendingSeedRequest = false;
+          send({ type: "requestSeed" });
+        }
         break;
       case "seed": {
         // Protocol v2: the server ships EVENTS, not folded state — fold them
@@ -1125,6 +1136,7 @@ class PantokenStore {
         this.seedEpoch = msg.epoch;
         this.seedSeq = msg.seq;
         this.seedRequested = false;
+        this.pendingSeedRequest = false;
         this.session = built;
         this.settleStopOperation();
         this.ready = true;
@@ -1164,6 +1176,7 @@ class PantokenStore {
         // A contiguous frame folded — any earlier gap was healed (e.g. by a
         // resume replay), so a future gap may request again.
         this.seedRequested = false;
+        this.pendingSeedRequest = false;
         const ev = msg.event;
         // Only transcript/turn-progress events prove that the agent continued after a
         // stop attempt. Session snapshots and status broadcasts can repeat or briefly
@@ -1655,6 +1668,7 @@ class PantokenStore {
     this.seedEpoch = 0;
     this.seedSeq = 0;
     this.seedRequested = false;
+    this.pendingSeedRequest = false;
     this.staleBuildNotified = null;
     this.stopOperation = null;
     this.pendingAbortRestore = null;
@@ -2610,6 +2624,7 @@ class PantokenStore {
     this.seedEpoch = 0;
     this.seedSeq = 0;
     this.seedRequested = false;
+    this.pendingSeedRequest = false;
     this.creatingSession = {
       promptId,
       text: t,

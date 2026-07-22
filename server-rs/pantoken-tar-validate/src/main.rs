@@ -1,3 +1,10 @@
+//! Archive path-safety validator for the pantoken provisioning flow.
+//!
+//! Validates that a `.tar.gz` archive contains only safe, expected member paths
+//! (no traversal, no symlinks escaping the root, no unexpected files). Used
+//! during remote provisioning to ensure downloaded archives are safe to extract
+//! before uploading over SSH. Exit 0 = valid, 2 = malformed gzip/tar, 3 = unsafe.
+
 use std::process;
 
 fn main() {
