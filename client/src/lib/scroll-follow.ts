@@ -34,6 +34,19 @@
 //      re-pin or hold, never spuriously un-pin. (A scrolled-up restore relies on `pinned`
 //      being set false explicitly by that effect, not on this unpin branch.)
 //
+// WHY `&& scrollHeight >= prevScrollHeight` ON THE UNPIN (#86): when content SHRINKS — a
+// thinking block unmounts after its text arrives, a work block collapses, or a late
+// reflow settles — `scrollHeight` decreases. The ResizeObserver re-asserts
+// `scrollTo({top: scrollHeight})` to the new (shorter) bottom, the browser fires a scroll
+// event with a lower `scrollTop`, and `top < prevTop && gap >= 80` would spuriously
+// un-pin — stranding the viewport. A `scrollTop` decrease accompanied by a `scrollHeight`
+// decrease is the browser clamping or our own re-assert to the new bottom, NOT a user
+// scrolling up. Only a `scrollTop` decrease with UNCHANGED `scrollHeight` is a genuine
+// user scroll-up. The `prevScrollHeight` discriminator excludes content-shrink events
+// from the un-pin condition, holding the pin so the ResizeObserver / streaming-pin effect
+// keeps following to the new bottom. (Like `prevTop`, `prevScrollHeight` is component-
+// scoped and reset to 0 at the session switch.)
+//
 // This rule needs no time window (a `progScrollUntil` gate would also suppress a real
 // reader scroll-up during streaming, since that window is always in the future while
 // pinned — breaking the scroll-up-to-read-scrollback affordance).
@@ -47,11 +60,17 @@ export type PinnedInput = {
   top: number;
   /** `scrollHeight - scrollTop - clientHeight` for THIS scroll event. */
   gap: number;
+  /** `scrollHeight` seen by the PREVIOUS onScroll call (component-scoped, like prevTop). */
+  prevScrollHeight: number;
+  /** `scrollHeight` for THIS scroll event. */
+  scrollHeight: number;
 };
 
 /** Whether the transcript should stay stuck to the live bottom after a scroll event.
  *
- *  - Un-pin only on a genuine upward move that has left the 80px bottom zone.
+ *  - Un-pin only on a genuine upward move that has left the 80px bottom zone AND whose
+ *    `scrollHeight` did NOT decrease (content-shrink-induced `scrollTop` clamp-down is
+ *    not a user scroll-up — see #86 comment above).
  *  - Re-pin whenever the viewport reaches the bottom zone (from any direction).
  *  - Otherwise (moved down or held, but still short of the bottom — e.g. a programmatic
  *    chase frame that landed short while content grew under it) hold the prior pin so the
@@ -61,8 +80,10 @@ export function nextPinned({
   prevTop,
   top,
   gap,
+  prevScrollHeight,
+  scrollHeight,
 }: PinnedInput): boolean {
-  if (top < prevTop && gap >= 80) return false;
+  if (top < prevTop && gap >= 80 && scrollHeight >= prevScrollHeight) return false;
   if (gap < 80) return true;
   return prevPinned;
 }

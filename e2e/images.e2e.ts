@@ -33,22 +33,19 @@ async function assertPinnedToBottom(
   expect(clearance).toBeGreaterThan(0);
 }
 
-/** Disable overflow-anchor (simulating iOS Safari), wait for the settle window
- *  to lapse, then insert a small spacer BEFORE the final assistant row —
- *  mimicking a late image decode in a row above the final text that grows the
- *  content height and pushes the final row down. Appending at the END would grow
- *  scrollHeight (opening a gap) but wouldn't move the final row, so the
- *  clearance check wouldn't be discriminative. Inserting before the final row
- *  pushes it down, matching the real bug: images decode in rows ABOVE the final
- *  assistant text, pushing it below the viewport. */
+/** Wait for the settle window to lapse, then insert a small spacer BEFORE the final
+ *  assistant row — mimicking a late image decode in a row above the final text that
+ *  grows the content height and pushes the final row down. Appending at the END would
+ *  grow scrollHeight (opening a gap) but wouldn't move the final row, so the
+ *  clearance check wouldn't be discriminative. Inserting before the final row pushes
+ *  it down, matching the real bug: images decode in rows ABOVE the final assistant
+ *  text, pushing it below the viewport. (overflow-anchor: none is set globally on
+ *  .scroller via CSS — #86, no per-test override needed.) */
 async function forceLateHeightChange(
   page: import("@playwright/test").Page,
   px: number,
 ): Promise<void> {
   const scroller = page.locator(".scroller");
-  await scroller.evaluate((el) => {
-    (el as HTMLElement).style.overflowAnchor = "none";
-  });
   // Wait for the 500ms settle window to lapse (plus margin).
   await page.waitForTimeout(1500);
   await scroller.locator(".col").evaluate((el, height) => {
@@ -396,11 +393,11 @@ test("a pinned transcript stays at the live bottom as images decode and after re
   );
   expect(scrollable).toBe(true);
 
-  // Simulate a LATE image decode (the real failure surface): disable
-  // overflow-anchor (Chrome's auto-anchoring masks the bug — see
-  // e2e/scroll-drift.e2e.ts for the same technique), let the settle window
-  // lapse, then force a small height change that mimics a slow image decode.
-  // Without the fix, the ResizeObserver is settle-window-gated and the drift
+  // Simulate a LATE image decode (the real failure surface): overflow-anchor is
+  // disabled globally on .scroller via CSS (#86 — Chrome's auto-anchoring would
+  // otherwise mask the bug), so let the settle window lapse, then force a small
+  // height change that mimics a slow image decode. Without the fix, the
+  // ResizeObserver is settle-window-gated and the drift
   // watcher's 200px threshold misses this gap; the final message is clipped.
   await forceLateHeightChange(page, 68);
   await assertPinnedToBottom(page);

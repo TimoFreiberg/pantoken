@@ -5,13 +5,11 @@ import { drive, gotoFresh, waitForSettledWorkBlocks } from "./helpers.js";
 // (wraps to a new line), the transcript's last paragraph must not jump below the viewport.
 // The pinned-to-bottom invariant must hold across composer-driven viewport resizes.
 //
-// FORCING THE BUG: like the drift tests (e2e/scroll-drift.e2e.ts), this spec disables
-// `overflow-anchor` on the scroller to reproduce the bug in headless Chromium. Chrome's
-// overflow-anchor normally compensates for viewport shrinks (adjusting scrollTop to keep
-// the content pinned), masking the gap. But on iOS Safari — the real-world failure
-// surface — overflow-anchor is unreliable, so the gap opens. Disabling it here simulates
-// that environment. Without the fix, a single line-wrap creates ~68px of gap; with the
-// fix, the scroller ResizeObserver re-asserts the bottom and the gap stays at 0.
+// The scroller has `overflow-anchor: none` globally (added in #86), so Chrome no longer
+// masks the gap on viewport shrink — simulating the iOS Safari / WKWebView failure
+// surface where overflow-anchor is unreliable. Without the fix, a single line-wrap
+// creates ~68px of gap; with the fix, the scroller ResizeObserver re-asserts the bottom
+// and the gap stays at 0.
 
 /** Read the current gap (scrollHeight - scrollTop - clientHeight) of the scroller. */
 function gapFn(scroller: import("@playwright/test").Locator) {
@@ -21,16 +19,6 @@ function gapFn(scroller: import("@playwright/test").Locator) {
       (el as HTMLElement).scrollTop -
       (el as HTMLElement).clientHeight,
   );
-}
-
-/** Disable overflow-anchor so Chrome doesn't mask the gap on viewport shrink (simulates
- *  iOS Safari where overflow-anchor is unreliable — the real-world failure surface). */
-async function disableOverflowAnchor(
-  scroller: import("@playwright/test").Locator,
-): Promise<void> {
-  await scroller.evaluate((el) => {
-    (el as HTMLElement).style.overflowAnchor = "none";
-  });
 }
 
 test.beforeEach(async ({ page }) => {
@@ -55,9 +43,6 @@ test("AC.1 — typing a line-wrap in the composer keeps the transcript pinned to
   // Start pinned at the bottom.
   await expect.poll(gap).toBeLessThan(5);
 
-  // Disable overflow-anchor so Chrome doesn't mask the gap on viewport shrink.
-  await disableOverflowAnchor(scroller);
-
   // Focus the composer and type enough text to force a line wrap. The textarea starts
   // at rows=1; a single long line wraps, growing the composer by one line (~24px) and
   // shrinking the scroller's clientHeight via flex reflow.
@@ -81,9 +66,6 @@ test("AC.2 — grow→shrink→grow cycle keeps the transcript pinned throughout
 
   // Start pinned at the bottom.
   await expect.poll(gap).toBeLessThan(5);
-
-  // Disable overflow-anchor so Chrome doesn't mask the gap on viewport shrink.
-  await disableOverflowAnchor(scroller);
 
   // Grow: type wrapping text.
   await textarea.click();
@@ -179,12 +161,9 @@ test("AC.5 — a non-wrapping keystroke does not cause the transcript to jump", 
   // Start pinned at the bottom.
   await expect.poll(gap).toBeLessThan(5);
 
-  // Disable overflow-anchor so Chrome doesn't mask the jitter (simulates
-  // WKWebView where overflow-anchor is unreliable). Without the
-  // testForHeightReduction optimization, the height="auto" reset on every
-  // keystroke would cause a transient layout invalidation → jitter.
-  await disableOverflowAnchor(scroller);
-
+  // Without the testForHeightReduction optimization, the height="auto" reset on every
+  // keystroke would cause a transient layout invalidation → jitter on WKWebView.
+  // (overflow-anchor: none is set globally on .scroller — no per-test override needed.)
   // Snapshot the reset counter before (may be > 0 from prior setup keystrokes).
   const resetBefore = Number((await box.getAttribute("data-autosize-reset-n")) ?? 0);
 

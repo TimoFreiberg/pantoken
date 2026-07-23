@@ -11,17 +11,17 @@ import { drive, gotoFresh, waitForSettledWorkBlocks } from "./helpers.js";
 // the fold (gap > 0), which the pinned-drift detector structurally cannot fire on.
 //
 // FORCING THE DRIFT: growing content under a pinned viewport is non-reproducible in headless
-// Chromium — Chrome's `overflow-anchor` keeps the gap near 0 on growth (documented at
-// e2e/scroll-follow.e2e.ts:4-10). A content-height shrink is also masked: Chrome clamps
-// scrollTop down to the new max and fires a scroll event that re-pins before the watcher
-// sees the drift. The reliable forcing method is to DISABLE `overflow-anchor` on the scroller
-// (simulating iOS Safari, where overflow-anchor is unreliable — the real-world failure
-// surface) and then grow the DOM directly: append a tall spacer as a SIBLING of `.col`
-// (directly under `.scroller`), NOT as a child of `.col`. This grows scrollHeight without
-// changing `.col`'s height, so the ResizeObserver on `.col` doesn't fire — Phase 1's fix
-// (#57) re-asserts the bottom on every `.col` height change while pinned, which would close
-// the gap before the drift watcher sees it. `contentSize` (Svelte items) doesn't tick either,
-// so the streaming-pin effect doesn't re-run; and with overflow-anchor off, Chrome does NOT
+// Chromium — Chrome's `overflow-anchor` keeps the gap near 0 on growth. A content-height
+// shrink is also masked: Chrome clamps scrollTop down to the new max and fires a scroll
+// event that re-pins before the watcher sees the drift. The reliable forcing method relies
+// on the global `overflow-anchor: none` on `.scroller` (set via CSS — #86, simulating iOS
+// Safari where overflow-anchor is unreliable — the real-world failure surface) and then
+// growing the DOM directly: append a tall spacer as a SIBLING of `.col` (directly under
+// `.scroller`), NOT as a child of `.col`. This grows scrollHeight without changing `.col`'s
+// height, so the ResizeObserver on `.col` doesn't fire — Phase 1's fix (#57) re-asserts the
+// bottom on every `.col` height change while pinned, which would close the gap before the
+// drift watcher sees it. `contentSize` (Svelte items) doesn't tick either, so the
+// streaming-pin effect doesn't re-run; and with overflow-anchor off, Chrome does NOT
 // adjust scrollTop on growth, so no scroll event fires and `pinned` stays true — producing
 // `pinned && gap > threshold`, the exact state the watcher targets.
 
@@ -38,14 +38,13 @@ function gapFn(scroller: import("@playwright/test").Locator) {
 /** Append a tall spacer as a sibling of `.col` (under `.scroller`), growing scrollHeight
  *  without changing `.col`'s height — so the ResizeObserver on `.col` doesn't fire and
  *  Phase 1's live-bottom re-assert (#57) doesn't close the gap before the watcher sees it.
- *  `contentSize` (Svelte items) is unchanged too. With overflow-anchor disabled,
- *  scrollTop stays put and the gap opens — forcing `pinned && gap > threshold`. */
+ *  `contentSize` (Svelte items) is unchanged too. With overflow-anchor disabled (set
+ *  globally on .scroller via CSS — #86), scrollTop stays put and the gap opens — forcing
+ *  `pinned && gap > threshold`. */
 async function forceDrift(page: import("@playwright/test").Page): Promise<void> {
   const scroller = page.locator(".scroller");
-  // Disable overflow-anchor so Chrome doesn't mask the drift on growth.
-  await scroller.evaluate((el) => {
-    (el as HTMLElement).style.overflowAnchor = "none";
-  });
+  // overflow-anchor: none is set globally on .scroller via CSS (#86), so Chrome no
+  // longer masks the drift on growth — no per-test override needed.
   // Wait for the settle window (500ms) to lapse so the ratio-restore ResizeObserver
   // branch won't re-assert. (The live-bottom branch doesn't fire because the spacer
   // is appended to the scroller, not .col — see below.)
@@ -65,10 +64,10 @@ async function forceDrift(page: import("@playwright/test").Page): Promise<void> 
   });
 }
 
-/** Remove the injected drift spacer and restore the scroller's overflow-anchor. */
+/** Remove the injected drift spacer. (overflow-anchor is set globally via CSS — nothing
+ *  to restore.) */
 async function cleanupDrift(page: import("@playwright/test").Page): Promise<void> {
-  await page.locator(".scroller").evaluate((el) => {
-    (el as HTMLElement).style.overflowAnchor = "";
+  await page.locator(".scroller").evaluate(() => {
     document.getElementById("test-drift-spacer")?.remove();
   });
 }
