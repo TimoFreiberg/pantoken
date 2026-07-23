@@ -530,10 +530,14 @@
   // switch (a stale cross-session prevTop could spuriously un-pin a taller live session —
   // see scroll-follow.ts). Within a session it tracks the live scroll position.
   let lastScrollTop = 0;
+  // The scrollHeight the last onScroll saw — fed to nextPinned as prevScrollHeight.
+  // Component-scoped like lastScrollTop (reset at session switch — #86).
+  let lastScrollHeight = 0;
   function onScroll() {
     if (!scroller) return;
     const top = scroller.scrollTop;
-    const gap = scroller.scrollHeight - top - scroller.clientHeight;
+    const h = scroller.scrollHeight;
+    const gap = h - top - scroller.clientHeight;
     // Direction-based pin (extracted, unit-tested in scroll-follow.test.ts): a programmatic
     // snap can land short (scrollHeight grows after its scrollTo as a collapsing work block /
     // streaming content settles), and the resulting scroll event would, under a gap-only
@@ -544,13 +548,19 @@
     // move that has left the bottom zone holds the pin through our own short-landing events
     // without a time window (which would also suppress a real reader scroll-up during
     // streaming, since progScrollUntil is always in the future while pinned).
+    //
+    // The `prevScrollHeight`/`scrollHeight` fields exclude content-shrink events from
+    // the un-pin condition (#86) — see scroll-follow.ts for the full rationale.
     pinned = nextPinned({
       prevPinned: pinned,
       prevTop: lastScrollTop,
       top,
       gap,
+      prevScrollHeight: lastScrollHeight,
+      scrollHeight: h,
     });
     lastScrollTop = top;
+    lastScrollHeight = h;
     // Reaching the bottom clears the active-session unread flag (you've seen it all).
     if (pinned) store.clearActiveUnread();
     // A user scroll (not one of ours) abandons prompt-stepping, so the next ↑ button press re-anchors.
@@ -642,7 +652,9 @@
     // `top < prevTop && gap >= 80` — un-pinning the live tail, the same stuck-pill symptom
     // this fix targets. With prevTop=0 the comparison can only re-pin or hold. (A scrolled-
     // up restore relies on `pinned` being set false explicitly below, not on this branch.)
+    // `lastScrollHeight` is reset for the same reason (#86).
     lastScrollTop = 0;
+    lastScrollHeight = 0;
     navIndex = null;
     const plan = id ? planRestore(scrollPositions, id) : null;
     if (plan && plan !== "bottom") {
@@ -1375,6 +1387,12 @@
     flex: 1;
     overflow-y: auto;
     overscroll-behavior: contain;
+    /* The JS follow logic (streaming-pin effect, ResizeObserver, drift watcher) is the
+       sole authority for scroll position. Browser `overflow-anchor: auto` is unreliable on
+       WKWebView (acknowledged in scroll-follow.ts) and can adjust scrollTop after our
+       programmatic scrollTo, fighting the follow. Disabling it makes behavior consistent
+       across browsers (#86). */
+    overflow-anchor: none;
   }
   /* "New messages ↓" pill — floats over the transcript when content lands below the
      fold while scrolled up. Centered near the bottom, above the composer. */
