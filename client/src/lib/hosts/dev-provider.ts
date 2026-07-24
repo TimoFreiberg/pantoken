@@ -20,6 +20,8 @@ export interface DevHostControls {
   // ── Docker-state hooks ──────────────────────────────────────────────────
   /** Set the pending risks surfaced for a host during awaitingAcknowledgement. */
   setPendingRisks(id: string, risks: PendingRisk[]): void;
+  /** Pre-register risks to apply to the next docker profile created (e2e). */
+  setPendingRisksForNextDocker(risks: PendingRisk[]): void;
   /** Set the preflight phase surfaced for a host during preflight. */
   setPreflightPhase(id: string, phase: PreflightPhase): void;
   /** Set the containers returned by testSshAndListContainers. */
@@ -109,6 +111,8 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
   const provisioningPhaseMap = new Map<string, number>();
   const acknowledgedRisks = new Map<string, Set<string>>(); // hostId → set of riskIds acknowledged
   const containerIdMap = new Map<string, string>(); // hostId → current containerId
+  // Pre-registered risks to apply to the next docker profile created (for e2e).
+  let nextDockerRisks: PendingRisk[] | null = null;
 
   /** Check whether all pending risks for a host have been acknowledged. */
   function allRisksAcknowledged(hostId: string, risks: PendingRisk[]): boolean {
@@ -224,22 +228,18 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
         return;
       }
       setState(id, "testingSsh");
-      // Wait for test to drive the state to a terminal-ish state.
-      // Resolves for non-terminal states (preflight, awaitingAcknowledgement)
-      // so the coordinator's non-terminal handling kicks in, mirroring the
-      // Tauri provider's pollHostState behavior.
-      await new Promise<void>((resolve, reject) => {
-        const check = setInterval(() => {
-          const h = hostMap.get(id);
-          if (!h) { clearInterval(check); reject(new Error("Computer not found")); return; }
-          if (h.state === "ready") { clearInterval(check); resolve(); return; }
-          if (h.state === "failed") { clearInterval(check); reject(new Error(h.failureLabel ?? "Connection failed")); return; }
-          if (h.state === "awaitingAcknowledgement" || h.state === "preflight") {
-            clearInterval(check); resolve(); return;
-          }
-          if (h.state === "disconnected") { clearInterval(check); reject(new Error("Connection cancelled")); return; }
-        }, 50);
-      });
+      // If pending risks were injected (via setPendingRisks), transition
+      // directly to awaitingAcknowledgement so the UI can render them.
+      if (pendingRisksMap.get(id)?.length) {
+        setState(id, "awaitingAcknowledgement");
+        return;
+      }
+      // No risks — simulate connection progress: preflight → provisioning.
+      // The test or coordinator drives further state changes via
+      // driveProvisioningPhase / setState.
+      setState(id, "preflight");
+      setState(id, "provisioning");
+      provisioningPhaseMap.set(id, 1);
     },
     disconnectHost: async (id) => setState(id, "disconnected"),
     listProfiles: async () => [...profileMap.values()].map((p) => structuredClone(p)),
@@ -267,6 +267,15 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
         });
         // Set a default container ID.
         containerIdMap.set(hostId, `dev-id-${containerName}`);
+        // Apply pre-registered risks for e2e testing (set via setPendingRisksForNextDocker).
+        if (nextDockerRisks) {
+          pendingRisksMap.set(hostId, nextDockerRisks);
+          hostMap.set(hostId, {
+            ...hostMap.get(hostId)!,
+            pendingRisks: nextDockerRisks,
+          });
+          nextDockerRisks = null;
+        }
       } else {
         // Host profile — add a non-docker descriptor.
         hostMap.set(profile.id, {
@@ -359,6 +368,7 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
     setFailure,
     setMessageSink: (next) => { sink = next; },
     setPendingRisks,
+    setPendingRisksForNextDocker: (risks: PendingRisk[]) => { nextDockerRisks = risks; },
     setPreflightPhase,
     setContainerPicker,
     driveProvisioningPhase,

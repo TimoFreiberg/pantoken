@@ -46,6 +46,8 @@ pub struct RiskAcknowledgements {
     pub root_fingerprint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ephemeral_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docker_socket_fingerprint: Option<String>,
 }
 
 /// A persisted remote-host profile.
@@ -161,6 +163,7 @@ impl RemoteProfile {
         if let Some(a) = [
             &self.risk_acknowledgements.root_fingerprint,
             &self.risk_acknowledgements.ephemeral_fingerprint,
+            &self.risk_acknowledgements.docker_socket_fingerprint,
         ]
         .into_iter()
         .flatten()
@@ -343,6 +346,29 @@ pub fn ephemeral_risk_fingerprint(
         mount_type.into(),
         read_write.into(),
         backing_identity_hash.into(),
+    ])
+}
+
+/// Docker-socket risk fingerprint.
+///
+/// Covers the container identity + the socket mount's source and destination
+/// paths, so the risk is invalidated when the container is replaced or the
+/// socket mount changes.
+pub fn socket_risk_fingerprint(
+    schema_version: u16,
+    profile_id: &str,
+    container_name: &str,
+    container_id: &str,
+    socket_source: &str,
+    socket_destination: &str,
+) -> String {
+    fingerprint(&[
+        schema_version.to_string(),
+        profile_id.into(),
+        container_name.into(),
+        container_id.into(),
+        socket_source.into(),
+        socket_destination.into(),
     ])
 }
 
@@ -722,5 +748,78 @@ mod tests {
 
         // Default is RequireExisting.
         assert_eq!(PolytokenPolicy::default(), PolytokenPolicy::RequireExisting);
+    }
+
+    #[test]
+    fn socket_risk_fingerprint_fixed_vector_and_invalidation() {
+        let fp = socket_risk_fingerprint(
+            1,
+            "profile-1",
+            "work-api",
+            "sha256:012345",
+            "/var/run/docker.sock",
+            "/var/run/docker.sock",
+        );
+        // Must be a 64-char lowercase hex string.
+        assert_eq!(fp.len(), 64);
+        assert!(fp
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+
+        // Invalidated by a different container ID.
+        assert_ne!(
+            fp,
+            socket_risk_fingerprint(
+                1,
+                "profile-1",
+                "work-api",
+                "sha256:999999",
+                "/var/run/docker.sock",
+                "/var/run/docker.sock",
+            )
+        );
+
+        // Invalidated by a different socket source.
+        assert_ne!(
+            fp,
+            socket_risk_fingerprint(
+                1,
+                "profile-1",
+                "work-api",
+                "sha256:012345",
+                "/custom/docker.sock",
+                "/var/run/docker.sock",
+            )
+        );
+    }
+
+    #[test]
+    fn docker_socket_fingerprint_validated_like_other_risks() {
+        let mut profile = sample_profile();
+        profile.risk_acknowledgements.docker_socket_fingerprint = Some("not-a-valid-hash".into());
+        assert!(profile.validate().is_err());
+
+        // A valid 64-char lowercase hex is accepted.
+        profile.risk_acknowledgements.docker_socket_fingerprint = Some("a".repeat(64));
+        assert!(profile.validate().is_ok());
+    }
+
+    #[test]
+    fn docker_socket_fingerprint_roundtrip() {
+        let mut profile = sample_profile();
+        profile.risk_acknowledgements.docker_socket_fingerprint =
+            Some("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789".into());
+        let json = serde_json::to_string(&profile).unwrap();
+        assert!(
+            json.contains("docker_socket_fingerprint"),
+            "JSON should contain the socket fingerprint field"
+        );
+        let back: RemoteProfile = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            back.risk_acknowledgements
+                .docker_socket_fingerprint
+                .as_deref(),
+            Some("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
+        );
     }
 }

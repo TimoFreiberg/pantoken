@@ -64,6 +64,8 @@ fn main() {
             remote_commands::acknowledge_risk,
             remote_commands::cancel_connection,
             remote_commands::resume_connection,
+            remote_commands::test_ssh_and_list_containers,
+            remote_commands::inspect_container,
             dock_attention::request_dock_attention,
             dock_attention::set_dock_badge,
         ])

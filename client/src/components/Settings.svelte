@@ -1,7 +1,7 @@
 <script lang="ts">
   import { store } from "../lib/store.svelte.js";
-  import type { HostCoordinator } from "../lib/hosts.svelte.js";
   import { profileEditor } from "../lib/profile-editor.svelte.js";
+  import type { HostCoordinator } from "../lib/hosts.svelte.js";
   import { redactSshDestination, type RemoteProfile } from "../lib/hosts/types.js";
   import type { ThemeMode } from "../lib/theme.js";
   import Button from "./ui/Button.svelte";

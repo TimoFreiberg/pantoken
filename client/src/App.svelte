@@ -162,6 +162,7 @@
           setActivity: provider.setActivity,
           emit: provider.emit,
           setPendingRisks: provider.setPendingRisks,
+          setPendingRisksForNextDocker: provider.setPendingRisksForNextDocker,
           setPreflightPhase: provider.setPreflightPhase,
           setContainerPicker: provider.setContainerPicker,
           driveProvisioningPhase: provider.driveProvisioningPhase,
@@ -176,6 +177,7 @@
             provider.setFailure(hostId, label, action, detail);
             void coordinator.refreshHosts();
           },
+          openSettingsTo: (section: string) => store.openSettingsTo(section as "appearance" | "notifications" | "models" | "environment" | "mcp" | "token" | "computers"),
         };
         return () => delete (window as unknown as { __pantokenHosts?: unknown }).__pantokenHosts;
       });

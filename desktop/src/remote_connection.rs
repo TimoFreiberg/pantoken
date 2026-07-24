@@ -39,6 +39,7 @@ pub enum PreflightPhase {
 pub enum RiskKind {
     RootExecution,
     EphemeralData,
+    DockerSocket,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]

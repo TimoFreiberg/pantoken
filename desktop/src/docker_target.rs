@@ -91,6 +91,35 @@ pub struct ContainerListRecord {
     pub image: String,
     pub state: String,
     pub status: String,
+    /// Docker label map (e.g. `com.docker.compose.project`). Absent on some
+    /// Docker versions / non-compose containers.
+    #[serde(default)]
+    pub labels: std::collections::HashMap<String, String>,
+}
+
+/// Extract Compose project + service from a container's label map.
+pub fn compose_metadata(
+    labels: &std::collections::HashMap<String, String>,
+) -> (Option<String>, Option<String>) {
+    let project = labels
+        .get("com.docker.compose.project")
+        .cloned()
+        .filter(|s| !s.is_empty());
+    let service = labels
+        .get("com.docker.compose.service")
+        .cloned()
+        .filter(|s| !s.is_empty());
+    (project, service)
+}
+
+/// Find a Docker socket mount: a bind mount whose source or destination ends
+/// in `docker.sock`. Returns the mount if found, so the caller can compute a
+/// fingerprint for risk acknowledgement.
+pub fn find_socket_mount(mounts: &[DockerMount]) -> Option<&DockerMount> {
+    mounts.iter().find(|m| {
+        m.mount_type == "bind"
+            && (m.source.ends_with("docker.sock") || m.destination.ends_with("docker.sock"))
+    })
 }
 
 pub fn parse_container_list(stdout: &str) -> Result<Vec<ContainerListRecord>, DockerTargetError> {
@@ -146,6 +175,21 @@ pub struct DockerInspect {
     pub state: InspectState,
     pub config: InspectConfig,
     pub mounts: Vec<DockerMount>,
+    /// Platform OS/arch (e.g. "linux"/"amd64"). Present on daemon-side inspect
+    /// output; absent on some Docker versions.
+    #[serde(default)]
+    pub platform: Option<DockerPlatform>,
+}
+
+/// Platform info from `docker container inspect`.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct DockerPlatform {
+    #[serde(default)]
+    pub os: Option<String>,
+    #[serde(default, rename = "Architecture")]
+    pub architecture: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -326,6 +370,7 @@ mod tests {
             image: "image:latest".into(),
             state: state.into(),
             status: state.into(),
+            labels: std::collections::HashMap::new(),
         }
     }
 
@@ -452,5 +497,74 @@ mod tests {
             normalize_absolute_path("/data//project/./cache").unwrap(),
             "/data/project/cache"
         );
+    }
+
+    #[test]
+    fn find_socket_mount_detects_docker_sock() {
+        let mounts = vec![
+            DockerMount {
+                mount_type: "volume".into(),
+                name: Some("data".into()),
+                source: "/var/lib/docker/volumes/data".into(),
+                destination: "/data".into(),
+                mode: "rw".into(),
+                read_write: true,
+            },
+            DockerMount {
+                mount_type: "bind".into(),
+                name: None,
+                source: "/var/run/docker.sock".into(),
+                destination: "/var/run/docker.sock".into(),
+                mode: "rw".into(),
+                read_write: true,
+            },
+        ];
+        let socket = find_socket_mount(&mounts).unwrap();
+        assert_eq!(socket.source, "/var/run/docker.sock");
+        assert_eq!(socket.destination, "/var/run/docker.sock");
+    }
+
+    #[test]
+    fn find_socket_mount_returns_none_when_no_socket() {
+        let mounts = vec![DockerMount {
+            mount_type: "bind".into(),
+            name: None,
+            source: "/host/project".into(),
+            destination: "/data".into(),
+            mode: "rw".into(),
+            read_write: true,
+        }];
+        assert!(find_socket_mount(&mounts).is_none());
+    }
+
+    #[test]
+    fn find_socket_mount_detects_destination_only() {
+        let mounts = vec![DockerMount {
+            mount_type: "bind".into(),
+            name: None,
+            source: "/custom/path".into(),
+            destination: "/var/run/docker.sock".into(),
+            mode: "rw".into(),
+            read_write: true,
+        }];
+        assert!(find_socket_mount(&mounts).is_some());
+    }
+
+    #[test]
+    fn compose_metadata_extracts_labels() {
+        let mut labels = std::collections::HashMap::new();
+        labels.insert("com.docker.compose.project".into(), "myapp".into());
+        labels.insert("com.docker.compose.service".into(), "web".into());
+        let (project, service) = compose_metadata(&labels);
+        assert_eq!(project.as_deref(), Some("myapp"));
+        assert_eq!(service.as_deref(), Some("web"));
+    }
+
+    #[test]
+    fn compose_metadata_empty_when_no_labels() {
+        let labels = std::collections::HashMap::new();
+        let (project, service) = compose_metadata(&labels);
+        assert_eq!(project, None);
+        assert_eq!(service, None);
     }
 }
