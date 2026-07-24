@@ -349,8 +349,16 @@
     profileEditor.openEdit(profile);
   }
 
+  function setupDockerProfile(profile: RemoteProfile): void {
+    profileEditor.openEditContainer(profile);
+  }
+
   function addComputer(): void {
     profileEditor.openNew();
+  }
+
+  function setupDocker(): void {
+    profileEditor.openNewContainer();
   }
 </script>
 
@@ -790,6 +798,9 @@
                     <Button variant="primary" title="Connect to this computer" onclick={() => void connectProfile(profile.id)}>Connect</Button>
                   {/if}
                   <Button title="Edit this computer" onclick={() => editProfile(profile)}>Edit</Button>
+                  {#if profile.executionTarget.kind === "dockerContainer"}
+                    <Button title="Setup Docker container" onclick={() => setupDockerProfile(profile)}>Setup</Button>
+                  {/if}
                   <Button title="Remove this computer" onclick={() => confirmDelete(profile)}>Remove</Button>
                 </div>
               {/if}
@@ -799,6 +810,7 @@
 
         <div class="add-computer">
           <Button variant="primary" title="Add a new computer" onclick={() => addComputer()} data-testid="add-computer-btn">Add computer</Button>
+          <Button title="Setup a Docker container" onclick={() => setupDocker()} data-testid="settings-setup-docker">Setup Docker container</Button>
         </div>
       </section>
       {/if}

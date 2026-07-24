@@ -174,6 +174,7 @@
       {#if coordinator.multiHostCapable}
         <div class="management">
           <button onclick={() => profileEditor.openNew()} data-testid="add-computer-btn">Add computer</button>
+          <button onclick={() => profileEditor.openNewContainer()} data-testid="host-switcher-setup-docker">Setup Docker container</button>
           <button onclick={() => store.openSettingsTo("computers")} data-testid="manage-computers-btn">Manage computers</button>
         </div>
       {/if}

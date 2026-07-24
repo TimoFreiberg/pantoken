@@ -40,8 +40,9 @@ test("a streamed reply renders user text, a working block, and the final answer"
   // so an unscoped `.tool` could match both and trip strict mode.
   const work = page.locator(".turn-work").last().getByTestId("work-body");
   const toolCard = work.locator(":scope > .tool");
-  await expect(toolCard).toHaveCount(1);
-  await expect(toolCard.locator(":scope > .head .name")).toHaveText(
+  // The reply script has two tools (Read file + Search) — both render as tool cards.
+  await expect(toolCard).toHaveCount(2);
+  await expect(toolCard.first().locator(":scope > .head .name")).toHaveText(
     "Read file",
   );
 });

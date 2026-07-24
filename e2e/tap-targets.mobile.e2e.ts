@@ -148,15 +148,18 @@ test("collapse footer meets 44px touch target", async ({ page }) => {
   await drive(page, "longoutput");
   await waitForSettledWorkBlocks(page, 2);
   await page.getByTestId("work-toggle").last().click();
-  // Open the tool card and expand its output so the body grows tall.
+  // The longoutput script has two tool spans — target the first one.
   const head = page
     .getByTestId("work-body")
     .last()
-    .locator(":scope > .tool > .head");
+    .locator(":scope > .tool > .head")
+    .first();
   await head.click();
   const expandBtn = page
     .getByTestId("work-body")
     .last()
+    .locator(":scope > .tool")
+    .first()
     .locator(".out-bar")
     .getByRole("button", { name: "Expand", exact: true });
   await expect(expandBtn).toBeVisible();
@@ -165,7 +168,9 @@ test("collapse footer meets 44px touch target", async ({ page }) => {
   const footer = page
     .getByTestId("work-body")
     .last()
-    .locator(":scope > .tool > .body")
+    .locator(":scope > .tool")
+    .first()
+    .locator("> .body")
     .locator(".collapse-footer");
   await expect(footer).toBeVisible();
   await expectTall(footer);
