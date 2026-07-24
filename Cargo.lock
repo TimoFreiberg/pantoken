@@ -3685,7 +3685,7 @@ dependencies = [
 
 [[package]]
 name = "pantoken-desktop"
-version = "0.2.87"
+version = "0.2.88"
 dependencies = [
  "block2",
  "futures-util",
