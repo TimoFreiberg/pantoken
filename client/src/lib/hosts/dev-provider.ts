@@ -214,6 +214,15 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
       const host = hostMap.get(id);
       if (!host) throw new Error("Computer not found");
       if (host.state === "failed") throw new Error(host.failureLabel ?? "Connection failed");
+      // If there are unacknowledged pending risks, transition directly to
+      // awaitingAcknowledgement (mirrors the real backend's preflight that
+      // surfaces risks before proceeding). Resolves immediately so the
+      // coordinator's non-terminal handling kicks in.
+      const risks = pendingRisksMap.get(id);
+      if (risks && risks.length > 0 && !allRisksAcknowledged(id, risks)) {
+        setState(id, "awaitingAcknowledgement");
+        return;
+      }
       setState(id, "testingSsh");
       // Wait for test to drive the state to a terminal-ish state.
       // Resolves for non-terminal states (preflight, awaitingAcknowledgement)

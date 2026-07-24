@@ -23,6 +23,7 @@ test("Settings opens as a full-screen section index", async ({ page }) => {
     "environment",
     "mcp",
     "token",
+    "computers",
   ]) {
     const row = panel.getByTestId(`settings-tab-${section}`);
     await expect(row).toBeVisible();
@@ -40,7 +41,7 @@ test("Settings opens as a full-screen section index", async ({ page }) => {
     panel.getByRole("button", { name: "Close settings" }),
   ).toBeFocused();
   await page.keyboard.press("Shift+Tab");
-  await expect(panel.getByTestId("settings-tab-token")).toBeFocused();
+  await expect(panel.getByTestId("settings-tab-computers")).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(
     panel.getByRole("button", { name: "Close settings" }),
