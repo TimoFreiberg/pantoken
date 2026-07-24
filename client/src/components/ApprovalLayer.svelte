@@ -659,10 +659,11 @@
       border-bottom: 1px solid var(--border);
     }
   }
-  /* Plan handoff: a plan is a full document, not a one-line question — take
-     nearly the whole chat pane (a sliver of scrim stays visible so it still
-     reads as an overlay). Flex column so the markdown body gets the height
-     and scrolls while the header + actions stay pinned. */
+  /* Plan handoff: a plan is a full document, not a one-line question — cap at
+     the reading measure so the plan text aligns with the transcript column (a
+     sliver of scrim stays visible so it still reads as an overlay). Flex column
+     so the markdown body gets the height and scrolls while the header + actions
+     stay pinned. */
   .sheet.plan {
     display: flex;
     flex-direction: column;
@@ -670,7 +671,11 @@
   }
   @media (min-width: 600px) {
     .sheet.plan {
-      width: calc(100% - 48px);
+      /* Cap at the transcript reading measure (--maxw, set on .chat) + the
+         sheet's own 20px horizontal padding so the plan text inside is exactly
+         as wide as the transcript text column. The calc(100% - 48px) cap
+         preserves the scrim gutter when the chat area is narrower than that. */
+      width: min(calc(var(--maxw) + 42px), calc(100% - 48px));
       bottom: 24px;
       max-height: calc(100% - 48px);
     }

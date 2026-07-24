@@ -143,3 +143,47 @@ test("a timed-out plan card auto-dismisses to the cancel decision", async ({
   await expect(page.getByRole("dialog")).toBeHidden({ timeout: 8000 });
   await expect(page.getByText("Received: Cancel")).toBeVisible();
 });
+
+test("plan sheet width matches the transcript text column", async ({ page }) => {
+  // The plan sheet is capped at var(--maxw) + 42px of chrome (20px padding × 2 +
+  // 1px border × 2) so the plan text inside is exactly as wide as the transcript
+  // column. The calc(100% - 48px) cap only kicks in when .chat is narrow, so
+  // both sidebars must be closed to make .chat full-width (1100px at the desktop
+  // viewport) and exercise the reading-measure branch.
+  const leftSidebar = page.getByTestId("sidebar");
+  const rightSidebar = page.getByTestId("right-sidebar");
+
+  // Close both sidebars via their toggle shortcuts. These are toggles, so assert
+  // the closed state afterward — a prior test could have left one closed, making
+  // the toggle re-open it. Asserting turns a silent wrong-state into a failure.
+  await page.keyboard.press("Meta+b");
+  await expect(leftSidebar).toHaveAttribute("data-open", "false");
+  await page.keyboard.press("Meta+Shift+j");
+  await expect(rightSidebar).toHaveAttribute("data-open", "false");
+
+  await drive(page, "planhandoff");
+  const sheet = page.locator(".sheet.plan");
+  await expect(sheet).toBeVisible();
+
+  const { maxw, chatWidth, sheetWidth } = await sheet.evaluate((el) => {
+    const chat = el.closest(".chat") as HTMLElement | null;
+    const chatStyle = chat ? getComputedStyle(chat) : null;
+    const maxw = chatStyle
+      ? parseFloat(chatStyle.getPropertyValue("--maxw"))
+      : NaN;
+    const sheetRect = (el as HTMLElement).getBoundingClientRect();
+    const chatRect = chat ? chat.getBoundingClientRect() : { width: NaN };
+    return {
+      maxw,
+      chatWidth: chatRect.width,
+      sheetWidth: sheetRect.width,
+    };
+  });
+
+  // --maxw is 760px; sheet width should be --maxw + 42px = 802px (±3px for
+  // border/rounding), so the text content inside matches the transcript column.
+  const expected = maxw + 42;
+  expect(Math.abs(sheetWidth - expected)).toBeLessThanOrEqual(3);
+  // The scrim gutter is visible on both sides — sheet is narrower than .chat.
+  expect(sheetWidth).toBeLessThan(chatWidth);
+});
