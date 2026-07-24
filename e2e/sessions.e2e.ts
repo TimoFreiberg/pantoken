@@ -5,12 +5,14 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-/** Open the server-path picker and choose `/Users/timo/src/<name>`. */
+/** Open the project menu and choose `/Users/timo/src/<name>` via the DirPicker. */
 async function chooseProjectDir(
   page: import("@playwright/test").Page,
   name: string,
 ): Promise<void> {
   await page.getByTestId("draft-project-control").click();
+  await page.getByTestId("project-menu").getByText("New project…").click();
+  await page.mouse.move(0, 0);
   const picker = page.getByTestId("dir-picker");
   await expect(picker).toBeVisible();
   const input = picker.getByLabel("Project directory path");
@@ -394,15 +396,15 @@ test("reopening the sidebar starts compact; search focuses only after activation
   await expect(sidebar.getByTestId("sidebar-search-input")).toBeFocused();
 });
 
-test("clicking the project chip opens the directory browser", async ({
+test("clicking the project chip opens the project menu", async ({
   page,
 }) => {
   await openSidebar(page);
   await page.getByTestId("sidebar").getByTestId("sidebar-new-session").getByText("New session").click();
   await page.getByTestId("draft-project-control").click();
-  // The chip opens a server-side directory browser (the full browse/pick flow lives in
-  // dir-picker.e2e.ts); here we only assert the chip is what surfaces it.
-  await expect(page.getByTestId("dir-picker")).toBeVisible();
+  // The chip now opens the project menu (the full browse/pick flow lives in
+  // dir-picker.e2e.ts); here we only assert the chip surfaces the menu.
+  await expect(page.getByTestId("project-menu")).toBeVisible();
 });
 
 test("the worktree chip creates the session in an isolated worktree dir, grouped under its parent project", async ({

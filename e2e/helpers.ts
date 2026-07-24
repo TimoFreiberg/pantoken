@@ -103,9 +103,11 @@ export async function openRightSidebar(page: Page): Promise<void> {
   await expect(panel).toHaveAttribute("data-open", "true");
 }
 
-/** Open the server-path picker and choose `/Users/timo/src/<name>`. */
+/** Open the project menu and choose `/Users/timo/src/<name>` via the DirPicker. */
 export async function chooseProjectDir(page: Page, name: string): Promise<void> {
   await page.getByTestId("draft-project-control").click();
+  await page.getByTestId("project-menu").getByText("New project…").click();
+  await page.mouse.move(0, 0);
   const picker = page.getByTestId("dir-picker");
   await expect(picker).toBeVisible();
   const input = picker.getByLabel("Project directory path");

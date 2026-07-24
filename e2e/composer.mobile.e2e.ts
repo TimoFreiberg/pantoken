@@ -76,7 +76,7 @@ test("mobile: new-session scope-row chips stay tappable above the composer surfa
   const visibleProjectBase = (await project.innerText()).trim();
   expect(visibleProjectBase).not.toBe("");
   await expect(project).toHaveAccessibleName(
-    `${visibleProjectBase} — browse to change project directory`,
+    `${visibleProjectBase} — choose a project`,
   );
   await expect(worktree).toHaveAccessibleName("Enable worktree isolation");
   for (const control of [project, worktree]) {
@@ -95,15 +95,15 @@ test("mobile: new-session scope-row chips stay tappable above the composer surfa
 
   await project.click();
   await expect(project).toHaveAttribute("aria-expanded", "true");
-  const picker = page.getByRole("dialog", { name: "Choose project directory" });
-  const filter = picker.getByRole("textbox", {
-    name: "Project directory path",
+  const projectMenu = page.getByTestId("project-menu");
+  await expect(projectMenu).toBeVisible();
+  const projectFilter = projectMenu.getByRole("textbox", {
+    name: "Filter projects",
   });
-  await expect(picker).toBeVisible();
-  await expect(filter).toBeVisible();
+  await expect(projectFilter).toBeVisible();
   for (const [name, landmark] of [
-    ["project picker", picker],
-    ["project filter", filter],
+    ["project menu", projectMenu],
+    ["project filter", projectFilter],
   ] as const) {
     const box = await landmark.boundingBox();
     expect(box, `${name} should render`).not.toBeNull();
@@ -114,10 +114,10 @@ test("mobile: new-session scope-row chips stay tappable above the composer surfa
       page.viewportSize()!.height + 0.5,
     );
   }
-  await filter.fill("pan");
-  await expect(filter).toHaveValue("pan");
+  await projectFilter.fill("pan");
+  await expect(projectFilter).toHaveValue("pan");
   await page.keyboard.press("Escape");
-  await expect(picker).toBeHidden();
+  await expect(projectMenu).toBeHidden();
   await expect(project).toHaveAttribute("aria-expanded", "false");
   await worktree.click();
   await expect(worktree).toHaveAttribute("aria-pressed", "true");

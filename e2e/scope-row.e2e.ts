@@ -62,12 +62,10 @@ test("scope controls preserve picker exclusion and worktree branch behavior", as
   const project = page.getByTestId("draft-project-control");
   const worktree = page.getByTestId("draft-worktree-control");
   await project.click();
-  const dirPicker = page.getByRole("dialog", {
-    name: "Choose project directory",
-  });
-  await expect(dirPicker).toBeVisible();
+  const projectMenu = page.getByTestId("project-menu");
+  await expect(projectMenu).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(dirPicker).toBeHidden();
+  await expect(projectMenu).toBeHidden();
 
   await worktree.click();
   const branch = page.getByTestId("draft-branch-control");
@@ -77,14 +75,14 @@ test("scope controls preserve picker exclusion and worktree branch behavior", as
   await expect(
     page.getByRole("listbox", { name: "Select base branch" }),
   ).toBeVisible();
-  await expect(dirPicker).toBeHidden();
+  await expect(projectMenu).toBeHidden();
 
   await page.keyboard.press("Escape");
   await expect(
     page.getByRole("listbox", { name: "Select base branch" }),
   ).toBeHidden();
   await project.click();
-  await expect(dirPicker).toBeVisible();
+  await expect(projectMenu).toBeVisible();
   await expect(
     page.getByRole("listbox", { name: "Select base branch" }),
   ).toBeHidden();

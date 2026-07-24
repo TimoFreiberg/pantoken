@@ -81,7 +81,7 @@ test("⌘N on a worktree session defaults the draft to the parent project (AC.1)
   await expect(chip).not.toContainText(WORKTREE_BASENAME);
   // The title carries the full parent project path — a precise guard that the
   // substring toContainText above can't provide alone ("pantoken" ⊂ "pantoken-worktree").
-  await expect(chip).toHaveAttribute("title", `Project: ${PARENT_PROJECT} — click to browse for a directory (⌥P)`);
+  await expect(chip).toHaveAttribute("title", `Project: ${PARENT_PROJECT} — click to choose a project (⌥P)`);
 });
 
 test("the sidebar's top + button on a worktree session defaults the draft to the parent project (AC.2)", async ({
@@ -100,7 +100,7 @@ test("the sidebar's top + button on a worktree session defaults the draft to the
   await expect(chip).toBeVisible();
   await expect(chip).toContainText(PARENT_BASENAME);
   await expect(chip).not.toContainText(WORKTREE_BASENAME);
-  await expect(chip).toHaveAttribute("title", `Project: ${PARENT_PROJECT} — click to browse for a directory (⌥P)`);
+  await expect(chip).toHaveAttribute("title", `Project: ${PARENT_PROJECT} — click to choose a project (⌥P)`);
 });
 
 test("opening a worktree session persists the parent project as lastProjectCwd (AC.3)", async ({

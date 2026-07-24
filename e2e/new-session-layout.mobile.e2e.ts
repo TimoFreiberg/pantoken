@@ -25,9 +25,7 @@ test("mobile centres the deferred draft and keeps its controls usable", async ({
   );
 
   await page.getByTestId("draft-project-control").click();
-  await expect(
-    page.getByRole("dialog", { name: "Choose project directory" }),
-  ).toBeVisible();
+  await expect(page.getByTestId("project-menu")).toBeVisible();
   await page.keyboard.press("Escape");
   await page.getByTestId("mobile-session-controls-trigger").click();
   await expect(

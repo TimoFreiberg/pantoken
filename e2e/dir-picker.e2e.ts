@@ -18,8 +18,15 @@ async function openDraft(page: Page): Promise<void> {
 async function openPicker(page: Page): Promise<void> {
   await openDraft(page);
   await projectChip(page).click();
+  await expect(page.getByTestId("project-menu")).toBeVisible();
+  await page.getByTestId("project-menu").getByText("New project…").click();
   await expect(picker(page)).toBeVisible();
+  // Move the mouse off the picker's result list so no mouseenter fires on a
+  // directory row (the click on "New project…" lands mid-screen, and the
+  // DirPicker's centered dialog can open with its results under the cursor).
+  await page.mouse.move(0, 0);
   await expect(pathInput(page)).toBeFocused();
+  await expect(page.getByTestId("use-current-directory")).toBeVisible();
 }
 
 test("desktop presents a centered server-filesystem command palette", async ({
@@ -207,6 +214,8 @@ test("Escape closes without abandoning the draft and restores composer focus", a
   await openDraft(page);
   await draftBox(page).fill("keep me");
   await projectChip(page).click();
+  await expect(page.getByTestId("project-menu")).toBeVisible();
+  await page.getByTestId("project-menu").getByText("New project…").click();
   await pathInput(page).press("Escape");
   await expect(picker(page)).toBeHidden();
   await expect(draftBox(page)).toHaveValue("keep me");
@@ -215,10 +224,10 @@ test("Escape closes without abandoning the draft and restores composer focus", a
   await expect(draftBox(page)).toBeFocused();
 });
 
-test("⌥P opens the picker without changing the draft", async ({ page }) => {
+test("⌥P opens the project menu without changing the draft", async ({ page }) => {
   await openDraft(page);
   await draftBox(page).focus();
   await draftBox(page).press("Alt+p");
-  await expect(pathInput(page)).toBeFocused();
+  await expect(page.getByTestId("project-menu")).toBeVisible();
   await expect(draftBox(page)).toHaveValue("");
 });
