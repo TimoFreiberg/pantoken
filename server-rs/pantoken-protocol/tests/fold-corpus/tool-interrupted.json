@@ -1,0 +1,58 @@
+{
+  "description": "toolStarted + toolFinished(interrupted) → interrupted status",
+  "events": [
+    {
+      "callId": "call-1",
+      "input": {
+        "command": "sleep 100"
+      },
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "timestamp": "2026-01-01T00:00:00Z",
+      "toolName": "shell_exec",
+      "type": "toolStarted"
+    },
+    {
+      "callId": "call-1",
+      "interrupted": true,
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "success": false,
+      "timestamp": "2026-01-01T00:00:05Z",
+      "type": "toolFinished"
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {},
+      "widgets": {}
+    },
+    "config": {},
+    "flags": [],
+    "items": [
+      {
+        "finishedAt": "2026-01-01T00:00:05Z",
+        "id": "call-1",
+        "input": {
+          "command": "sleep 100"
+        },
+        "kind": "tool",
+        "name": "shell_exec",
+        "startedAt": "2026-01-01T00:00:00Z",
+        "status": "interrupted"
+      }
+    ],
+    "mcpServers": [],
+    "pendingApprovals": [],
+    "queued": [],
+    "ref": null,
+    "status": "idle",
+    "title": "",
+    "todos": []
+  },
+  "name": "tool-interrupted"
+}

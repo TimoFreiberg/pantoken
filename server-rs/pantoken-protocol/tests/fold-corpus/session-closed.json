@@ -1,0 +1,55 @@
+{
+  "description": "sessionClosed → terminal state",
+  "events": [
+    {
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "snapshot": {
+        "ref": {
+          "sessionId": "s1",
+          "workspaceId": "ws"
+        },
+        "status": "running",
+        "title": "Test",
+        "updatedAt": "2026-01-01T00:00:00Z",
+        "workspace": {
+          "path": "/home",
+          "workspaceId": "ws"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "sessionOpened"
+    },
+    {
+      "reason": "ended",
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "timestamp": "2026-01-01T00:00:05Z",
+      "type": "sessionClosed"
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {},
+      "widgets": {}
+    },
+    "config": {},
+    "flags": [],
+    "items": [],
+    "mcpServers": [],
+    "pendingApprovals": [],
+    "queued": [],
+    "ref": {
+      "sessionId": "s1",
+      "workspaceId": "ws"
+    },
+    "status": "idle",
+    "title": "Test",
+    "todos": []
+  },
+  "name": "session-closed"
+}

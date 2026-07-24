@@ -1,0 +1,75 @@
+{
+  "description": "queuedMessageStarted → dequeues message and surfaces it as a user item",
+  "events": [
+    {
+      "messages": [
+        {
+          "createdAt": "2026-01-01T00:00:00Z",
+          "id": "q1",
+          "mode": "steer",
+          "text": "Follow up question",
+          "updatedAt": "2026-01-01T00:00:00Z"
+        }
+      ],
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "queueUpdated"
+    },
+    {
+      "message": {
+        "createdAt": "2026-01-01T00:00:00Z",
+        "id": "q1",
+        "mode": "steer",
+        "references": [
+          {
+            "fileKind": "file",
+            "kind": "file",
+            "name": "src/main.rs"
+          }
+        ],
+        "text": "Follow up question",
+        "updatedAt": "2026-01-01T00:00:01Z"
+      },
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "timestamp": "2026-01-01T00:00:01Z",
+      "type": "queuedMessageStarted"
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {},
+      "widgets": {}
+    },
+    "config": {},
+    "flags": [],
+    "items": [
+      {
+        "id": "q1",
+        "kind": "user",
+        "references": [
+          {
+            "fileKind": "file",
+            "kind": "file",
+            "name": "src/main.rs"
+          }
+        ],
+        "text": "Follow up question",
+        "ts": "2026-01-01T00:00:00Z"
+      }
+    ],
+    "mcpServers": [],
+    "pendingApprovals": [],
+    "queued": [],
+    "ref": null,
+    "status": "idle",
+    "title": "",
+    "todos": []
+  },
+  "name": "queued-message-started"
+}

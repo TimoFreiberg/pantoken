@@ -1,0 +1,79 @@
+{
+  "description": "Ambient widget/status updates via hostUiRequest",
+  "events": [
+    {
+      "request": {
+        "key": "build",
+        "kind": "status",
+        "requestId": "r1",
+        "text": "compiling..."
+      },
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "hostUiRequest"
+    },
+    {
+      "request": {
+        "key": "progress",
+        "kind": "widget",
+        "lines": [
+          "Step 1: done",
+          "Step 2: running"
+        ],
+        "placement": "aboveComposer",
+        "requestId": "r2"
+      },
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "timestamp": "2026-01-01T00:00:01Z",
+      "type": "hostUiRequest"
+    },
+    {
+      "request": {
+        "kind": "title",
+        "requestId": "r3",
+        "title": "Custom Title"
+      },
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "timestamp": "2026-01-01T00:00:02Z",
+      "type": "hostUiRequest"
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {
+        "build": "compiling..."
+      },
+      "title": "Custom Title",
+      "widgets": {
+        "progress": {
+          "key": "progress",
+          "lines": [
+            "Step 1: done",
+            "Step 2: running"
+          ],
+          "placement": "aboveComposer"
+        }
+      }
+    },
+    "config": {},
+    "flags": [],
+    "items": [],
+    "mcpServers": [],
+    "pendingApprovals": [],
+    "queued": [],
+    "ref": null,
+    "status": "idle",
+    "title": "",
+    "todos": []
+  },
+  "name": "ambient-widgets"
+}

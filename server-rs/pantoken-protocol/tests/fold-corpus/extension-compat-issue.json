@@ -1,0 +1,42 @@
+{
+  "description": "extensionCompatibilityIssue → warning notice added to transcript",
+  "events": [
+    {
+      "issue": {
+        "capability": "streaming",
+        "classification": "terminal-only",
+        "message": "This extension requires streaming support which is not available."
+      },
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "extensionCompatibilityIssue"
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {},
+      "widgets": {}
+    },
+    "config": {},
+    "flags": [],
+    "items": [
+      {
+        "id": "compat-2026-01-01T00:00:00Z",
+        "kind": "notice",
+        "level": "warning",
+        "text": "Extension capability \"streaming\" is terminal-only: This extension requires streaming support which is not available."
+      }
+    ],
+    "mcpServers": [],
+    "pendingApprovals": [],
+    "queued": [],
+    "ref": null,
+    "status": "idle",
+    "title": "",
+    "todos": []
+  },
+  "name": "extension-compat-issue"
+}

@@ -1,0 +1,82 @@
+{
+  "description": "toolStarted + toolUpdated + toolFinished → tool item with progress + ok status",
+  "events": [
+    {
+      "callId": "call-1",
+      "description": "Run a shell command",
+      "input": {
+        "command": "echo hello"
+      },
+      "label": "Shell Exec",
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "timestamp": "2026-01-01T00:00:00Z",
+      "toolName": "shell_exec",
+      "type": "toolStarted"
+    },
+    {
+      "callId": "call-1",
+      "progress": 0.5,
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "text": "Running...",
+      "timestamp": "2026-01-01T00:00:01Z",
+      "type": "toolUpdated"
+    },
+    {
+      "callId": "call-1",
+      "output": {
+        "exitCode": 0,
+        "stdout": "hello\n"
+      },
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "success": true,
+      "timestamp": "2026-01-01T00:00:02Z",
+      "type": "toolFinished"
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {},
+      "widgets": {}
+    },
+    "config": {},
+    "flags": [],
+    "items": [
+      {
+        "description": "Run a shell command",
+        "finishedAt": "2026-01-01T00:00:02Z",
+        "id": "call-1",
+        "input": {
+          "command": "echo hello"
+        },
+        "kind": "tool",
+        "label": "Shell Exec",
+        "name": "shell_exec",
+        "output": {
+          "exitCode": 0,
+          "stdout": "hello\n"
+        },
+        "progress": 0.5,
+        "startedAt": "2026-01-01T00:00:00Z",
+        "status": "ok",
+        "text": "Running..."
+      }
+    ],
+    "mcpServers": [],
+    "pendingApprovals": [],
+    "queued": [],
+    "ref": null,
+    "status": "idle",
+    "title": "",
+    "todos": []
+  },
+  "name": "tool-lifecycle"
+}

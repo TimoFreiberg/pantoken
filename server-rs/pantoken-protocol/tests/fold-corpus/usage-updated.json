@@ -1,0 +1,69 @@
+{
+  "description": "usageUpdated → standalone usage update without a full snapshot",
+  "events": [
+    {
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "snapshot": {
+        "ref": {
+          "sessionId": "s1",
+          "workspaceId": "ws"
+        },
+        "status": "running",
+        "title": "Test",
+        "updatedAt": "2026-01-01T00:00:00Z",
+        "usage": {
+          "contextWindow": 200000,
+          "percent": 0.5,
+          "tokens": 1000
+        },
+        "workspace": {
+          "path": "/home",
+          "workspaceId": "ws"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "sessionOpened"
+    },
+    {
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "timestamp": "2026-01-01T00:00:03Z",
+      "type": "usageUpdated",
+      "usage": {
+        "contextWindow": 200000,
+        "percent": 2.5,
+        "tokens": 5000
+      }
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {},
+      "widgets": {}
+    },
+    "config": {},
+    "flags": [],
+    "items": [],
+    "mcpServers": [],
+    "pendingApprovals": [],
+    "queued": [],
+    "ref": {
+      "sessionId": "s1",
+      "workspaceId": "ws"
+    },
+    "status": "running",
+    "title": "Test",
+    "todos": [],
+    "usage": {
+      "contextWindow": 200000,
+      "percent": 2.5,
+      "tokens": 5000
+    }
+  },
+  "name": "usage-updated"
+}

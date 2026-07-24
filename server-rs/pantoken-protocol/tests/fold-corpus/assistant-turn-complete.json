@@ -1,0 +1,66 @@
+{
+  "description": "assistantDelta + runCompleted → completed assistant with completedAt",
+  "events": [
+    {
+      "channel": "text",
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "text": "Working on it...",
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "assistantDelta"
+    },
+    {
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "snapshot": {
+        "ref": {
+          "sessionId": "s1",
+          "workspaceId": "ws"
+        },
+        "status": "idle",
+        "title": "Test",
+        "updatedAt": "2026-01-01T00:00:05Z",
+        "workspace": {
+          "path": "/home",
+          "workspaceId": "ws"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:05Z",
+      "type": "runCompleted"
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {},
+      "widgets": {}
+    },
+    "config": {},
+    "flags": [],
+    "items": [
+      {
+        "completedAt": "2026-01-01T00:00:05Z",
+        "id": "a-2026-01-01T00:00:00Z-0",
+        "kind": "assistant",
+        "streaming": false,
+        "text": "Working on it...",
+        "thinking": "",
+        "ts": "2026-01-01T00:00:00Z"
+      }
+    ],
+    "mcpServers": [],
+    "pendingApprovals": [],
+    "queued": [],
+    "ref": {
+      "sessionId": "s1",
+      "workspaceId": "ws"
+    },
+    "status": "idle",
+    "title": "Test",
+    "todos": []
+  },
+  "name": "assistant-turn-complete"
+}

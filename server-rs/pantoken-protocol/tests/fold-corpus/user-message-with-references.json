@@ -1,0 +1,53 @@
+{
+  "description": "userMessage with references → user item with resolved refs",
+  "events": [
+    {
+      "id": "u1",
+      "references": [
+        {
+          "fileKind": "file",
+          "kind": "file",
+          "name": "src/main.rs"
+        }
+      ],
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "text": "Look at @file",
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "userMessage"
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {},
+      "widgets": {}
+    },
+    "config": {},
+    "flags": [],
+    "items": [
+      {
+        "id": "u1",
+        "kind": "user",
+        "references": [
+          {
+            "fileKind": "file",
+            "kind": "file",
+            "name": "src/main.rs"
+          }
+        ],
+        "text": "Look at @file",
+        "ts": "2026-01-01T00:00:00Z"
+      }
+    ],
+    "mcpServers": [],
+    "pendingApprovals": [],
+    "queued": [],
+    "ref": null,
+    "status": "idle",
+    "title": "",
+    "todos": []
+  },
+  "name": "user-message-with-references"
+}

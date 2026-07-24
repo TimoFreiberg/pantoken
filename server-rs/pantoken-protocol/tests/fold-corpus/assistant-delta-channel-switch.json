@@ -1,0 +1,51 @@
+{
+  "description": "Deltas on different channels (text then thinking) accumulate into same assistant item",
+  "events": [
+    {
+      "channel": "thinking",
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "text": "Let me think. ",
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "assistantDelta"
+    },
+    {
+      "channel": "text",
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "text": "The answer is 42.",
+      "timestamp": "2026-01-01T00:00:01Z",
+      "type": "assistantDelta"
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {},
+      "widgets": {}
+    },
+    "config": {},
+    "flags": [],
+    "items": [
+      {
+        "id": "a-2026-01-01T00:00:00Z-0",
+        "kind": "assistant",
+        "streaming": true,
+        "text": "The answer is 42.",
+        "thinking": "Let me think. ",
+        "ts": "2026-01-01T00:00:00Z"
+      }
+    ],
+    "mcpServers": [],
+    "pendingApprovals": [],
+    "queued": [],
+    "ref": null,
+    "status": "idle",
+    "title": "",
+    "todos": []
+  },
+  "name": "assistant-delta-channel-switch"
+}

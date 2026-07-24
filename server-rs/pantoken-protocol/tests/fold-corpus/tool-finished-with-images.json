@@ -1,0 +1,79 @@
+{
+  "description": "toolFinished with images → tool item carries image content blocks",
+  "events": [
+    {
+      "callId": "call-1",
+      "input": {
+        "url": "https://example.com"
+      },
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "timestamp": "2026-01-01T00:00:00Z",
+      "toolName": "screenshot",
+      "type": "toolStarted"
+    },
+    {
+      "callId": "call-1",
+      "images": [
+        {
+          "data": "iVBORw0KGgo=",
+          "mimeType": "image/png",
+          "type": "image"
+        }
+      ],
+      "output": {
+        "height": 600,
+        "width": 800
+      },
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "success": true,
+      "timestamp": "2026-01-01T00:00:01Z",
+      "type": "toolFinished"
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {},
+      "widgets": {}
+    },
+    "config": {},
+    "flags": [],
+    "items": [
+      {
+        "finishedAt": "2026-01-01T00:00:01Z",
+        "id": "call-1",
+        "images": [
+          {
+            "data": "iVBORw0KGgo=",
+            "mimeType": "image/png",
+            "type": "image"
+          }
+        ],
+        "input": {
+          "url": "https://example.com"
+        },
+        "kind": "tool",
+        "name": "screenshot",
+        "output": {
+          "height": 600,
+          "width": 800
+        },
+        "startedAt": "2026-01-01T00:00:00Z",
+        "status": "ok"
+      }
+    ],
+    "mcpServers": [],
+    "pendingApprovals": [],
+    "queued": [],
+    "ref": null,
+    "status": "idle",
+    "title": "",
+    "todos": []
+  },
+  "name": "tool-finished-with-images"
+}

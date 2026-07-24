@@ -1,0 +1,140 @@
+{
+  "description": "user → assistant → tool → assistant → runCompleted (full interaction)",
+  "events": [
+    {
+      "id": "u1",
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "text": "List files in the current directory",
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "userMessage"
+    },
+    {
+      "channel": "text",
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "text": "I'll list the files for you.",
+      "timestamp": "2026-01-01T00:00:01Z",
+      "type": "assistantDelta"
+    },
+    {
+      "callId": "call-1",
+      "input": {
+        "command": "ls"
+      },
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "timestamp": "2026-01-01T00:00:02Z",
+      "toolName": "shell_exec",
+      "type": "toolStarted"
+    },
+    {
+      "callId": "call-1",
+      "output": {
+        "stdout": "file1.txt\nfile2.rs\n"
+      },
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "success": true,
+      "timestamp": "2026-01-01T00:00:03Z",
+      "type": "toolFinished"
+    },
+    {
+      "channel": "text",
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "text": "Here are the files: file1.txt, file2.rs",
+      "timestamp": "2026-01-01T00:00:04Z",
+      "type": "assistantDelta"
+    },
+    {
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "snapshot": {
+        "ref": {
+          "sessionId": "s1",
+          "workspaceId": "ws"
+        },
+        "status": "idle",
+        "title": "Test",
+        "updatedAt": "2026-01-01T00:00:05Z",
+        "workspace": {
+          "path": "/home",
+          "workspaceId": "ws"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:05Z",
+      "type": "runCompleted"
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {},
+      "widgets": {}
+    },
+    "config": {},
+    "flags": [],
+    "items": [
+      {
+        "id": "u1",
+        "kind": "user",
+        "text": "List files in the current directory",
+        "ts": "2026-01-01T00:00:00Z"
+      },
+      {
+        "id": "a-2026-01-01T00:00:01Z-1",
+        "kind": "assistant",
+        "streaming": false,
+        "text": "I'll list the files for you.",
+        "thinking": "",
+        "ts": "2026-01-01T00:00:01Z"
+      },
+      {
+        "finishedAt": "2026-01-01T00:00:03Z",
+        "id": "call-1",
+        "input": {
+          "command": "ls"
+        },
+        "kind": "tool",
+        "name": "shell_exec",
+        "output": {
+          "stdout": "file1.txt\nfile2.rs\n"
+        },
+        "startedAt": "2026-01-01T00:00:02Z",
+        "status": "ok"
+      },
+      {
+        "completedAt": "2026-01-01T00:00:05Z",
+        "id": "a-2026-01-01T00:00:04Z-3",
+        "kind": "assistant",
+        "streaming": false,
+        "text": "Here are the files: file1.txt, file2.rs",
+        "thinking": "",
+        "ts": "2026-01-01T00:00:04Z"
+      }
+    ],
+    "mcpServers": [],
+    "pendingApprovals": [],
+    "queued": [],
+    "ref": {
+      "sessionId": "s1",
+      "workspaceId": "ws"
+    },
+    "status": "idle",
+    "title": "Test",
+    "todos": []
+  },
+  "name": "multi-turn"
+}

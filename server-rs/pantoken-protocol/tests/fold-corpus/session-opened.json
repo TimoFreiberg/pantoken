@@ -1,0 +1,62 @@
+{
+  "description": "sessionOpened with full snapshot → ref, title, status, config, usage",
+  "events": [
+    {
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "snapshot": {
+        "config": {
+          "modelId": "claude-sonnet-4-20250514"
+        },
+        "ref": {
+          "sessionId": "s1",
+          "workspaceId": "ws"
+        },
+        "status": "idle",
+        "title": "My Session",
+        "updatedAt": "2026-01-01T00:00:00Z",
+        "usage": {
+          "contextWindow": 200000,
+          "percent": 0.5,
+          "tokens": 1000
+        },
+        "workspace": {
+          "displayName": "project",
+          "path": "/home/user/project",
+          "workspaceId": "ws"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "sessionOpened"
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {},
+      "widgets": {}
+    },
+    "config": {
+      "modelId": "claude-sonnet-4-20250514"
+    },
+    "flags": [],
+    "items": [],
+    "mcpServers": [],
+    "pendingApprovals": [],
+    "queued": [],
+    "ref": {
+      "sessionId": "s1",
+      "workspaceId": "ws"
+    },
+    "status": "idle",
+    "title": "My Session",
+    "todos": [],
+    "usage": {
+      "contextWindow": 200000,
+      "percent": 0.5,
+      "tokens": 1000
+    }
+  },
+  "name": "session-opened"
+}
