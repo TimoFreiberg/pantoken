@@ -1,8 +1,8 @@
 <script lang="ts">
   import { tick } from "svelte";
   import { overlayHistory } from "../lib/overlay-history.js";
-  import { profileEditor } from "../lib/profile-editor.svelte.js";
   import { store } from "../lib/store.svelte.js";
+  import { profileEditor } from "../lib/profile-editor.svelte.js";
   import type { HostCoordinator } from "../lib/hosts.svelte.js";
   import type { HostSummary } from "../lib/hosts/types.js";
   import Chevron from "./ui/Chevron.svelte";

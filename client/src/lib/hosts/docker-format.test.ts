@@ -238,7 +238,7 @@ describe("riskInvalidation", () => {
   });
 
   test("risksNeedingAcknowledgement with no acks returns all", () => {
-    const needed = risksNeedingAcknowledgement({}, undefined, baseEnv);
+    const needed = risksNeedingAcknowledgement({}, baseEnv);
     expect(needed).toContain("rootExecution");
     expect(needed).toContain("ephemeralData");
     expect(needed).not.toContain("dockerSocket"); // no socket mount
@@ -248,7 +248,6 @@ describe("riskInvalidation", () => {
     const keys = computeRiskKeys(baseEnv);
     const needed = risksNeedingAcknowledgement(
       { rootFingerprint: keys.root, ephemeralFingerprint: keys.ephemeral },
-      undefined,
       baseEnv,
     );
     expect(needed).toEqual([]);
@@ -259,7 +258,6 @@ describe("riskInvalidation", () => {
     const keys = computeRiskKeys(env);
     const needed = risksNeedingAcknowledgement(
       { rootFingerprint: keys.root, ephemeralFingerprint: keys.ephemeral },
-      undefined,
       env,
     );
     expect(needed).toContain("dockerSocket");
@@ -269,8 +267,7 @@ describe("riskInvalidation", () => {
     const env = { ...baseEnv, hasSocketMount: true, socketMountKey: "/var/run/docker.sock" };
     const keys = computeRiskKeys(env);
     const needed = risksNeedingAcknowledgement(
-      { rootFingerprint: keys.root, ephemeralFingerprint: keys.ephemeral },
-      keys.socket,
+      { rootFingerprint: keys.root, ephemeralFingerprint: keys.ephemeral, dockerSocketFingerprint: keys.socket },
       env,
     );
     expect(needed).toEqual([]);

@@ -206,6 +206,8 @@ export interface RiskAcknowledgements {
   rootFingerprint?: string;
   /** Lowercase SHA-256 hex for the current persistence facts. */
   ephemeralFingerprint?: string;
+  /** Lowercase SHA-256 hex for the current Docker-socket facts. */
+  dockerSocketFingerprint?: string;
 }
 
 /**

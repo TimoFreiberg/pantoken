@@ -127,6 +127,62 @@ pub struct HostStateSnapshot {
     pub container_name: Option<String>,
 }
 
+// ── Container discovery DTOs (test_ssh_and_list_containers / inspect_container) ─
+
+/// A running container summary returned by `test_ssh_and_list_containers`.
+/// Mirrors the TS `ContainerSummary` interface.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContainerSummary {
+    pub name: String,
+    pub image: String,
+    pub state: String,
+    pub configured_user: String,
+    pub compose_project: Option<String>,
+    pub compose_service: Option<String>,
+}
+
+/// Result of `test_ssh_and_list_containers`. Mirrors the TS `TestSshResult`.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestSshResult {
+    pub ssh_ok: bool,
+    pub docker_permission: String,
+    pub containers: Vec<ContainerSummary>,
+}
+
+/// A mount on a container, from `inspect_container`. Mirrors `MountSummary`.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MountSummary {
+    #[serde(rename = "type")]
+    pub mount_type: String,
+    pub source: Option<String>,
+    pub destination: String,
+    pub read_only: bool,
+    pub name: Option<String>,
+}
+
+/// Full container inspection result from `inspect_container`.
+/// Mirrors the TS `ContainerInspection`.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContainerInspection {
+    pub name: String,
+    pub container_id: String,
+    pub image: String,
+    pub running: bool,
+    pub configured_user: String,
+    pub resolved_user: String,
+    pub resolved_uid: u64,
+    pub resolved_gid: u64,
+    pub resolved_home: String,
+    pub os: Option<String>,
+    pub arch: Option<String>,
+    pub mounts: Vec<MountSummary>,
+    pub pantoken_root_suggestion: String,
+}
+
 /// Map `ConnectionState` → the client's `HostConnectionState` string.
 /// This is separate from `overlay_label()` which returns display strings
 /// like "Testing SSH…". The client expects camelCase state names.
@@ -567,6 +623,9 @@ pub fn acknowledge_risk_impl(
         crate::remote_connection::RiskKind::EphemeralData => {
             profile.risk_acknowledgements.ephemeral_fingerprint = Some(fingerprint.into());
         }
+        crate::remote_connection::RiskKind::DockerSocket => {
+            profile.risk_acknowledgements.docker_socket_fingerprint = Some(fingerprint.into());
+        }
     }
     profile.validate().map_err(|error| error.to_string())?;
     store.save(&path).map_err(|error| error.to_string())?;
@@ -576,6 +635,213 @@ pub fn acknowledge_risk_impl(
 
 pub fn cancel_connection_impl(state: &AppState, id: &str) -> Result<(), String> {
     disconnect_host_impl(state, id)
+}
+
+// ── Container discovery (pre-profile probes) ───────────────────────────────
+
+/// Test SSH connectivity and list Docker containers on the remote host.
+/// Runs before a profile is saved, so it builds a minimal `SshCommand` from
+/// just destination + port.
+pub async fn test_ssh_and_list_containers_impl(
+    ssh_destination: String,
+    port: Option<u16>,
+    transport: &Arc<dyn SshTransport>,
+) -> Result<TestSshResult, String> {
+    let command = SshCommand::for_probe(&ssh_destination, port);
+
+    // 1. Test SSH connectivity + Docker availability/permission.
+    let docker_version = transport
+        .run_command(
+            command.clone(),
+            "docker version --format '{{.Client.Version}}'",
+        )
+        .await
+        .map_err(|e| format!("SSH connection failed: {e}"))?;
+
+    // If the SSH command itself failed (non-zero exit), check whether it's an
+    // SSH-level failure (exit 255) or a Docker-permission failure.
+    if !docker_version.is_success() {
+        // Exit code 255 = SSH-level failure (auth, unreachable, host-key).
+        if docker_version.exit_code == Some(255) {
+            return Ok(TestSshResult {
+                ssh_ok: false,
+                docker_permission: "unknown".into(),
+                containers: Vec::new(),
+            });
+        }
+        // Non-255 failure = Docker CLI issue or permission denied.
+        return Ok(TestSshResult {
+            ssh_ok: true,
+            docker_permission: "denied".into(),
+            containers: Vec::new(),
+        });
+    }
+
+    // 2. List all containers (including stopped, so the picker can show them).
+    let list_command = crate::docker_target::shell_join(&[
+        "docker".into(),
+        "container".into(),
+        "ls".into(),
+        "-a".into(),
+        "--format".into(),
+        crate::docker_target::CONTAINER_LIST_FORMAT.into(),
+    ]);
+    let listed = transport
+        .run_command(command.clone(), &list_command)
+        .await
+        .map_err(|e| format!("failed to list containers: {e}"))?;
+
+    if !listed.is_success() {
+        return Ok(TestSshResult {
+            ssh_ok: true,
+            docker_permission: "denied".into(),
+            containers: Vec::new(),
+        });
+    }
+
+    let records = crate::docker_target::parse_container_list(&listed.stdout)
+        .map_err(|e| format!("malformed container list: {e}"))?;
+
+    let containers = records
+        .into_iter()
+        .map(|record| {
+            // docker container ls doesn't give configured user or compose
+            // metadata reliably; the list shows basic info. Full details come
+            // from inspect_container after selection.
+            let (compose_project, compose_service) =
+                crate::docker_target::compose_metadata(&record.labels);
+            ContainerSummary {
+                name: record.names,
+                image: record.image,
+                state: record.state,
+                configured_user: String::new(),
+                compose_project,
+                compose_service,
+            }
+        })
+        .collect();
+
+    Ok(TestSshResult {
+        ssh_ok: true,
+        docker_permission: "granted".into(),
+        containers,
+    })
+}
+
+/// Inspect a Docker container on the remote host: full details including
+/// resolved user/UID/GID/home, mounts, and platform OS/arch.
+pub async fn inspect_container_impl(
+    ssh_destination: String,
+    port: Option<u16>,
+    container_name: String,
+    transport: &Arc<dyn SshTransport>,
+) -> Result<ContainerInspection, String> {
+    let command = SshCommand::for_probe(&ssh_destination, port);
+
+    // 1. Inspect the container.
+    let inspect_command = crate::docker_target::shell_join(&[
+        "docker".into(),
+        "container".into(),
+        "inspect".into(),
+        container_name.clone(),
+    ]);
+    let inspected = transport
+        .run_command(command.clone(), &inspect_command)
+        .await
+        .map_err(|e| format!("failed to inspect container: {e}"))?;
+
+    if !inspected.is_success() {
+        return Err(format!(
+            "container '{container_name}' not found or inspect failed"
+        ));
+    }
+
+    let inspect = crate::docker_target::parse_inspect(&inspected.stdout)
+        .map_err(|e| format!("malformed inspect output: {e}"))?;
+
+    // 2. Run an identity probe inside the container to get resolved UID/GID/home.
+    let identity_script = "uid=$(id -u) && gid=$(id -g) && home=${HOME:-} && \
+         printf '%s|%s|%s\\n' \"$uid\" \"$gid\" \"$home\""
+        .to_string();
+    let identity_exec = crate::docker_target::shell_join(&[
+        "docker".into(),
+        "exec".into(),
+        inspect.id.clone(),
+        "sh".into(),
+        "-c".into(),
+        identity_script,
+    ]);
+    let identity = transport
+        .run_command(command.clone(), &identity_exec)
+        .await
+        .map_err(|e| format!("identity probe failed: {e}"))?;
+
+    let (resolved_uid, resolved_gid, resolved_home) = if identity.is_success() {
+        let fields: Vec<&str> = identity.stdout.trim().split('|').collect();
+        if fields.len() == 3 {
+            let uid: u64 = fields[0]
+                .parse()
+                .map_err(|_| "identity probe returned invalid UID".to_string())?;
+            let gid: u64 = fields[1]
+                .parse()
+                .map_err(|_| "identity probe returned invalid GID".to_string())?;
+            (uid, gid, fields[2].to_string())
+        } else {
+            return Err("identity probe returned malformed output".into());
+        }
+    } else {
+        return Err("could not resolve container user identity".into());
+    };
+
+    // 3. Map mounts.
+    let mounts = inspect
+        .mounts
+        .iter()
+        .map(|m| MountSummary {
+            mount_type: m.mount_type.clone(),
+            source: if m.source.is_empty() {
+                None
+            } else {
+                Some(m.source.clone())
+            },
+            destination: m.destination.clone(),
+            read_only: !m.read_write,
+            name: m.name.clone(),
+        })
+        .collect();
+
+    // 4. Compute pantoken root suggestion.
+    let pantoken_root_suggestion = {
+        let home = resolved_home.trim_end_matches('/');
+        if home.is_empty() {
+            "/.local/share/pantoken".into()
+        } else {
+            format!("{home}/.local/share/pantoken")
+        }
+    };
+
+    // 5. Resolve platform OS/arch.
+    let (os, arch) = inspect
+        .platform
+        .as_ref()
+        .map(|p| (p.os.clone(), p.architecture.clone()))
+        .unwrap_or((None, None));
+
+    Ok(ContainerInspection {
+        name: inspect.name.trim_start_matches('/').to_string(),
+        container_id: inspect.id,
+        image: inspect.image,
+        running: inspect.state.running,
+        configured_user: inspect.config.user.clone(),
+        resolved_user: inspect.config.user,
+        resolved_uid,
+        resolved_gid,
+        resolved_home,
+        os,
+        arch,
+        mounts,
+        pantoken_root_suggestion,
+    })
 }
 
 // ── Tauri command wrappers (thin: delegate to the _impl functions) ───────
@@ -662,6 +928,29 @@ pub fn resume_connection(
     ensure_remote_host(id, state)
 }
 
+/// Test SSH connectivity and list Docker containers on the remote host.
+/// Runs before a profile is saved (pre-profile discovery).
+#[tauri::command]
+pub async fn test_ssh_and_list_containers(
+    ssh_destination: String,
+    port: Option<u16>,
+) -> Result<TestSshResult, String> {
+    let transport: Arc<dyn SshTransport> = Arc::new(SystemSshTransport::new());
+    test_ssh_and_list_containers_impl(ssh_destination, port, &transport).await
+}
+
+/// Inspect a Docker container on the remote host: full details including
+/// resolved user/UID/GID/home, mounts, and platform OS/arch.
+#[tauri::command]
+pub async fn inspect_container(
+    ssh_destination: String,
+    port: Option<u16>,
+    container_name: String,
+) -> Result<ContainerInspection, String> {
+    let transport: Arc<dyn SshTransport> = Arc::new(SystemSshTransport::new());
+    inspect_container_impl(ssh_destination, port, container_name, &transport).await
+}
+
 /// Register all remote commands on the Tauri builder. Kept for standalone
 /// test wiring; the main builder registers them inline via `generate_handler!`.
 #[allow(dead_code)]
@@ -678,6 +967,8 @@ pub fn invoke_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tau
         acknowledge_risk,
         cancel_connection,
         resume_connection,
+        test_ssh_and_list_containers,
+        inspect_container,
     ])
 }
 
@@ -1604,5 +1895,244 @@ mod tests {
             "PANTOKEN_POLYTOKEN_BIN should be set"
         );
         assert_eq!(polytoken_env.unwrap().1, "polytoken");
+    }
+
+    // ── Container discovery command tests ───────────────────────────────────
+
+    fn container_list_stdout() -> String {
+        // Two container records as JSON-per-line (docker container ls --format '{{json .}}').
+        let line1 = r#"{"Id":"abc123","Names":"work-api-dev","Image":"node:20-alpine","State":"running","Status":"Up 2 hours","Labels":{"com.docker.compose.project":"work-api","com.docker.compose.service":"api"}}"#;
+        let line2 = r#"{"Id":"def456","Names":"postgres-dev","Image":"postgres:16","State":"exited","Status":"Exited 0","Labels":{}}"#;
+        format!("{line1}\n{line2}\n")
+    }
+
+    fn inspect_stdout() -> String {
+        // Minimal valid docker inspect JSON.
+        r#"[
+          {
+            "Id": "abc123def456",
+            "Name": "/work-api-dev",
+            "Image": "node:20-alpine",
+            "State": {
+              "Status": "running",
+              "Running": true,
+              "Paused": false,
+              "Restarting": false,
+              "Dead": false
+            },
+            "Config": {
+              "User": "dev",
+              "WorkingDir": "/app",
+              "Image": "node:20-alpine"
+            },
+            "Mounts": [
+              {
+                "Type": "bind",
+                "Name": null,
+                "Source": "/var/run/docker.sock",
+                "Destination": "/var/run/docker.sock",
+                "Mode": "rw",
+                "RW": true
+              },
+              {
+                "Type": "volume",
+                "Name": "data",
+                "Source": "/var/lib/docker/volumes/data",
+                "Destination": "/data",
+                "Mode": "rw",
+                "RW": true
+              }
+            ],
+            "Platform": {
+              "Os": "linux",
+              "Architecture": "amd64"
+            }
+          }
+        ]"#
+        .into()
+    }
+
+    #[tokio::test]
+    async fn test_ssh_and_list_containers_happy_path() {
+        let fake = FakeSshTransport::new(FakeScenario::default());
+        fake.add_command_response(
+            "docker version",
+            crate::bridge::CommandOutput {
+                stdout: "27.0.0".into(),
+                stderr: String::new(),
+                exit_code: Some(0),
+            },
+        );
+        fake.add_command_response(
+            "container ls",
+            crate::bridge::CommandOutput {
+                stdout: container_list_stdout(),
+                stderr: String::new(),
+                exit_code: Some(0),
+            },
+        );
+        let transport: Arc<dyn SshTransport> = Arc::new(fake);
+
+        let result = test_ssh_and_list_containers_impl("dev@server".into(), Some(22), &transport)
+            .await
+            .unwrap();
+
+        assert!(result.ssh_ok);
+        assert_eq!(result.docker_permission, "granted");
+        assert_eq!(result.containers.len(), 2);
+        assert_eq!(result.containers[0].name, "work-api-dev");
+        assert_eq!(result.containers[0].image, "node:20-alpine");
+        assert_eq!(result.containers[0].state, "running");
+        assert_eq!(result.containers[0].configured_user, "");
+        assert_eq!(
+            result.containers[0].compose_project.as_deref(),
+            Some("work-api")
+        );
+        assert_eq!(result.containers[0].compose_service.as_deref(), Some("api"));
+        assert_eq!(result.containers[1].name, "postgres-dev");
+        assert_eq!(result.containers[1].compose_project, None);
+    }
+
+    #[tokio::test]
+    async fn test_ssh_and_list_containers_docker_denied() {
+        let fake = FakeSshTransport::new(FakeScenario::default());
+        fake.add_command_response(
+            "docker version",
+            crate::bridge::CommandOutput {
+                stdout: String::new(),
+                stderr: "permission denied".into(),
+                exit_code: Some(1),
+            },
+        );
+        let transport: Arc<dyn SshTransport> = Arc::new(fake);
+
+        let result = test_ssh_and_list_containers_impl("dev@server".into(), None, &transport)
+            .await
+            .unwrap();
+
+        assert!(result.ssh_ok);
+        assert_eq!(result.docker_permission, "denied");
+        assert!(result.containers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_ssh_and_list_containers_ssh_failure() {
+        let fake = FakeSshTransport::new(FakeScenario::default());
+        fake.add_command_response(
+            "docker version",
+            crate::bridge::CommandOutput {
+                stdout: String::new(),
+                stderr: "Permission denied (publickey)".into(),
+                exit_code: Some(255),
+            },
+        );
+        let transport: Arc<dyn SshTransport> = Arc::new(fake);
+
+        let result = test_ssh_and_list_containers_impl("dev@server".into(), None, &transport)
+            .await
+            .unwrap();
+
+        assert!(!result.ssh_ok);
+        assert_eq!(result.docker_permission, "unknown");
+        assert!(result.containers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn inspect_container_happy_path() {
+        let fake = FakeSshTransport::new(FakeScenario::default());
+        fake.add_command_response(
+            "container inspect",
+            crate::bridge::CommandOutput {
+                stdout: inspect_stdout(),
+                stderr: String::new(),
+                exit_code: Some(0),
+            },
+        );
+        fake.add_command_response(
+            "docker exec",
+            crate::bridge::CommandOutput {
+                stdout: "1000|1000|/home/dev\n".into(),
+                stderr: String::new(),
+                exit_code: Some(0),
+            },
+        );
+        let transport: Arc<dyn SshTransport> = Arc::new(fake);
+
+        let result = inspect_container_impl(
+            "dev@server".into(),
+            Some(22),
+            "work-api-dev".into(),
+            &transport,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.name, "work-api-dev");
+        assert_eq!(result.container_id, "abc123def456");
+        assert_eq!(result.image, "node:20-alpine");
+        assert!(result.running);
+        assert_eq!(result.configured_user, "dev");
+        assert_eq!(result.resolved_uid, 1000);
+        assert_eq!(result.resolved_gid, 1000);
+        assert_eq!(result.resolved_home, "/home/dev");
+        assert_eq!(result.os.as_deref(), Some("linux"));
+        assert_eq!(result.arch.as_deref(), Some("amd64"));
+        assert_eq!(result.mounts.len(), 2);
+        assert_eq!(result.mounts[0].mount_type, "bind");
+        assert_eq!(
+            result.mounts[0].source.as_deref(),
+            Some("/var/run/docker.sock")
+        );
+        assert_eq!(result.mounts[0].destination, "/var/run/docker.sock");
+        assert!(!result.mounts[0].read_only);
+        assert_eq!(
+            result.pantoken_root_suggestion,
+            "/home/dev/.local/share/pantoken"
+        );
+    }
+
+    #[tokio::test]
+    async fn inspect_container_not_found() {
+        let fake = FakeSshTransport::new(FakeScenario::default());
+        fake.add_command_response(
+            "container inspect",
+            crate::bridge::CommandOutput {
+                stdout: String::new(),
+                stderr: "No such container".into(),
+                exit_code: Some(1),
+            },
+        );
+        let transport: Arc<dyn SshTransport> = Arc::new(fake);
+
+        let result =
+            inspect_container_impl("dev@server".into(), None, "nonexistent".into(), &transport)
+                .await;
+
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("not found"),
+            "error should mention not found"
+        );
+    }
+
+    #[tokio::test]
+    async fn inspect_container_malformed() {
+        let fake = FakeSshTransport::new(FakeScenario::default());
+        fake.add_command_response(
+            "container inspect",
+            crate::bridge::CommandOutput {
+                stdout: "not valid json".into(),
+                stderr: String::new(),
+                exit_code: Some(0),
+            },
+        );
+        let transport: Arc<dyn SshTransport> = Arc::new(fake);
+
+        let result =
+            inspect_container_impl("dev@server".into(), None, "work-api-dev".into(), &transport)
+                .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("malformed"));
     }
 }

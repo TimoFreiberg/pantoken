@@ -151,9 +151,8 @@ function findCoveringMount(
 // - Ephemeral waiver: invalidated by root path or mount backing change.
 // - Socket ack: invalidated by container replacement / socket mount change.
 //
-// Socket acks are persisted client-side in localStorage (not in
-// RiskAcknowledgements — the Rust struct has no socket field). These
-// functions provide the keys for comparison.
+// Socket acks are persisted in RiskAcknowledgements.dockerSocketFingerprint
+// (backend-persisted), alongside root and ephemeral acks.
 
 export interface RiskFingerprintEnv {
   /** Immutable container ID for the current connection attempt. */
@@ -233,14 +232,16 @@ export function computeRiskKeys(env: RiskFingerprintEnv): {
 /**
  * Determine which risks need re-acknowledgement by comparing stored acks
  * against the current environment keys.
+ *
+ * Socket acks are sourced from `acks.dockerSocketFingerprint` (the
+ * backend-persisted fingerprint), not from client-side localStorage.
  */
 export function risksNeedingAcknowledgement(
   acks: RiskAcknowledgements,
-  socketAckKey: string | undefined,
   env: RiskFingerprintEnv,
 ): ("rootExecution" | "ephemeralData" | "dockerSocket")[] {
   const needed: ("rootExecution" | "ephemeralData" | "dockerSocket")[] = [];
-  if (!isRiskAckValid("rootExecution", env.containerId ? acks.rootFingerprint : undefined, env)) {
+  if (!isRiskAckValid("rootExecution", acks.rootFingerprint, env)) {
     needed.push("rootExecution");
   }
   if (!isRiskAckValid("ephemeralData", acks.ephemeralFingerprint, env)) {
@@ -248,7 +249,7 @@ export function risksNeedingAcknowledgement(
   }
   if (
     env.hasSocketMount &&
-    !isRiskAckValid("dockerSocket", socketAckKey, env)
+    !isRiskAckValid("dockerSocket", acks.dockerSocketFingerprint, env)
   ) {
     needed.push("dockerSocket");
   }

@@ -221,6 +221,27 @@ impl From<&RemoteProfile> for SshCommand {
     }
 }
 
+impl SshCommand {
+    /// Build a minimal SSH command for pre-profile probes (e.g. `docker
+    /// container ls`, `docker container inspect`). These run before a
+    /// `RemoteProfile` exists, so they carry only destination + port.
+    ///
+    /// `run_command` on the transport builds its own argv from destination +
+    /// port + the passed `remote_command`, so `remote_root` / `server_path` /
+    /// `extra_env` / `raw_remote_command` are required by the struct but
+    /// ignored at runtime.
+    pub fn for_probe(destination: &str, port: Option<u16>) -> Self {
+        SshCommand {
+            destination: destination.into(),
+            port,
+            remote_root: String::new(),
+            server_path: String::new(),
+            extra_env: Vec::new(),
+            raw_remote_command: None,
+        }
+    }
+}
+
 // ─────────────────────────────── SshTransport ──────────────────────────────
 
 /// Information about how the SSH proxy process exited.

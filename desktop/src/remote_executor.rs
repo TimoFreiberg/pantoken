@@ -14,12 +14,14 @@ use std::sync::Arc;
 
 use crate::bridge::{CommandOutput, SshCommand, SshProxy, SshTransport};
 use crate::docker_target::{
-    parse_container_list, parse_inspect, persistence_facts, resolve_exact_running, shell_join,
-    PersistenceClassification, ResolvedDockerTarget, CONTAINER_LIST_FORMAT,
+    find_socket_mount, parse_container_list, parse_inspect, persistence_facts,
+    resolve_exact_running, shell_join, PersistenceClassification, ResolvedDockerTarget,
+    CONTAINER_LIST_FORMAT,
 };
 use crate::remote_connection::{PendingRisk, PreflightPhase, RiskKind};
 use crate::remote_profile::{
-    ephemeral_risk_fingerprint, root_risk_fingerprint, ExecutionTargetProfile, RemoteProfile,
+    ephemeral_risk_fingerprint, root_risk_fingerprint, socket_risk_fingerprint,
+    ExecutionTargetProfile, RemoteProfile,
 };
 
 /// Physical SSH reachability for the dev server (destination + optional port).
@@ -323,6 +325,35 @@ pub async fn preflight_docker(
             consequences: "Container removal, recreation, or rebuild can lose the Pantoken runtime, session state, and Pantoken-managed polytoken XDG data.".into(),
             continue_label: "Use non-persistent storage".into(),
         });
+    }
+
+    // Docker socket risk: a bind mount whose source or destination ends in
+    // `docker.sock` exposes host-level Docker control to the container.
+    if let Some(socket_mount) = find_socket_mount(&inspect.mounts) {
+        let socket_fingerprint = socket_risk_fingerprint(
+            1,
+            &profile.id,
+            container_name,
+            &inspect.id,
+            &socket_mount.source,
+            &socket_mount.destination,
+        );
+        if profile
+            .risk_acknowledgements
+            .docker_socket_fingerprint
+            .as_deref()
+            != Some(socket_fingerprint.as_str())
+        {
+            pending_risks.push(PendingRisk {
+                id: "dockerSocket".into(),
+                kind: RiskKind::DockerSocket,
+                fingerprint: socket_fingerprint,
+                title: "Docker socket exposed".into(),
+                explanation: "This container has the Docker socket bind-mounted. Access to the socket grants full control over Docker on the host, including the ability to create privileged containers, mount host paths, or escalate to host-level access.".into(),
+                consequences: "Agent processes inside this container can control Docker on the host, potentially creating privileged containers or mounting host paths to gain host-level access.".into(),
+                continue_label: "Allow Docker socket access".into(),
+            });
+        }
     }
 
     target.env.extend([
