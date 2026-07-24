@@ -1,0 +1,45 @@
+{
+  "description": "hostUiRequest(confirm) + hostUiResolved → pending approval added then cleared",
+  "events": [
+    {
+      "request": {
+        "kind": "confirm",
+        "message": "The agent wants to run shell_exec",
+        "requestId": "req-1",
+        "title": "Allow tool?"
+      },
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "hostUiRequest"
+    },
+    {
+      "requestId": "req-1",
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "timestamp": "2026-01-01T00:00:05Z",
+      "type": "hostUiResolved"
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {},
+      "widgets": {}
+    },
+    "config": {},
+    "flags": [],
+    "items": [],
+    "mcpServers": [],
+    "pendingApprovals": [],
+    "queued": [],
+    "ref": null,
+    "status": "idle",
+    "title": "",
+    "todos": []
+  },
+  "name": "host-ui-approval"
+}

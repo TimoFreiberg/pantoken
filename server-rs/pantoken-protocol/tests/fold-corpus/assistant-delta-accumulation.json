@@ -1,0 +1,51 @@
+{
+  "description": "Multiple assistantDelta on same channel → one streaming assistant item",
+  "events": [
+    {
+      "channel": "text",
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "text": "Hello ",
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "assistantDelta"
+    },
+    {
+      "channel": "text",
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "text": "world",
+      "timestamp": "2026-01-01T00:00:01Z",
+      "type": "assistantDelta"
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {},
+      "widgets": {}
+    },
+    "config": {},
+    "flags": [],
+    "items": [
+      {
+        "id": "a-2026-01-01T00:00:00Z-0",
+        "kind": "assistant",
+        "streaming": true,
+        "text": "Hello world",
+        "thinking": "",
+        "ts": "2026-01-01T00:00:00Z"
+      }
+    ],
+    "mcpServers": [],
+    "pendingApprovals": [],
+    "queued": [],
+    "ref": null,
+    "status": "idle",
+    "title": "",
+    "todos": []
+  },
+  "name": "assistant-delta-accumulation"
+}

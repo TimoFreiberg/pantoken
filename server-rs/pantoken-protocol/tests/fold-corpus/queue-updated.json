@@ -1,0 +1,47 @@
+{
+  "description": "queueUpdated events → queued messages",
+  "events": [
+    {
+      "messages": [
+        {
+          "createdAt": "2026-01-01T00:00:00Z",
+          "id": "q1",
+          "mode": "steer",
+          "text": "Follow up question",
+          "updatedAt": "2026-01-01T00:00:00Z"
+        }
+      ],
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "queueUpdated"
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {},
+      "widgets": {}
+    },
+    "config": {},
+    "flags": [],
+    "items": [],
+    "mcpServers": [],
+    "pendingApprovals": [],
+    "queued": [
+      {
+        "createdAt": "2026-01-01T00:00:00Z",
+        "id": "q1",
+        "mode": "steer",
+        "text": "Follow up question",
+        "updatedAt": "2026-01-01T00:00:00Z"
+      }
+    ],
+    "ref": null,
+    "status": "idle",
+    "title": "",
+    "todos": []
+  },
+  "name": "queue-updated"
+}

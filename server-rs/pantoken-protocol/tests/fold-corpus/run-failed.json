@@ -1,0 +1,89 @@
+{
+  "description": "runFailed → status failed, error notice added, running tools interrupted",
+  "events": [
+    {
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "snapshot": {
+        "ref": {
+          "sessionId": "s1",
+          "workspaceId": "ws"
+        },
+        "status": "running",
+        "title": "Test",
+        "updatedAt": "2026-01-01T00:00:00Z",
+        "workspace": {
+          "path": "/home",
+          "workspaceId": "ws"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "sessionOpened"
+    },
+    {
+      "callId": "call-1",
+      "input": {
+        "command": "sleep 100"
+      },
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "timestamp": "2026-01-01T00:00:01Z",
+      "toolName": "shell_exec",
+      "type": "toolStarted"
+    },
+    {
+      "error": {
+        "code": "ECONNRESET",
+        "message": "Connection lost"
+      },
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "timestamp": "2026-01-01T00:00:05Z",
+      "type": "runFailed"
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {},
+      "widgets": {}
+    },
+    "config": {},
+    "flags": [],
+    "items": [
+      {
+        "finishedAt": "2026-01-01T00:00:05Z",
+        "id": "call-1",
+        "input": {
+          "command": "sleep 100"
+        },
+        "kind": "tool",
+        "name": "shell_exec",
+        "startedAt": "2026-01-01T00:00:01Z",
+        "status": "interrupted"
+      },
+      {
+        "id": "err-2026-01-01T00:00:05Z",
+        "kind": "notice",
+        "level": "error",
+        "text": "Connection lost"
+      }
+    ],
+    "mcpServers": [],
+    "pendingApprovals": [],
+    "queued": [],
+    "ref": {
+      "sessionId": "s1",
+      "workspaceId": "ws"
+    },
+    "status": "failed",
+    "title": "Test",
+    "todos": []
+  },
+  "name": "run-failed"
+}

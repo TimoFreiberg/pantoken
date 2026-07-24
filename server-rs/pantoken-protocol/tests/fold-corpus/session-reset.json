@@ -1,0 +1,64 @@
+{
+  "description": "Events + sessionReset → items cleared, meta preserved",
+  "events": [
+    {
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "snapshot": {
+        "ref": {
+          "sessionId": "s1",
+          "workspaceId": "ws"
+        },
+        "status": "idle",
+        "title": "Test Session",
+        "updatedAt": "2026-01-01T00:00:00Z",
+        "workspace": {
+          "path": "/home",
+          "workspaceId": "ws"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "sessionOpened"
+    },
+    {
+      "id": "u1",
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "text": "Hello",
+      "timestamp": "2026-01-01T00:00:01Z",
+      "type": "userMessage"
+    },
+    {
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "timestamp": "2026-01-01T00:00:02Z",
+      "type": "sessionReset"
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {},
+      "widgets": {}
+    },
+    "config": {},
+    "flags": [],
+    "items": [],
+    "mcpServers": [],
+    "pendingApprovals": [],
+    "queued": [],
+    "ref": {
+      "sessionId": "s1",
+      "workspaceId": "ws"
+    },
+    "status": "idle",
+    "title": "Test Session",
+    "todos": []
+  },
+  "name": "session-reset"
+}

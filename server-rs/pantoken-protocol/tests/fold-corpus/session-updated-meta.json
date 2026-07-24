@@ -1,0 +1,99 @@
+{
+  "description": "sessionUpdated with facet/usage/flags/todos/mcpServers",
+  "events": [
+    {
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "snapshot": {
+        "facet": "execute",
+        "flags": [
+          {
+            "mode": "included",
+            "path": "src/main.rs"
+          }
+        ],
+        "mcpServers": [
+          {
+            "serverName": "filesystem",
+            "status": "connected",
+            "toolCount": 5
+          }
+        ],
+        "ref": {
+          "sessionId": "s1",
+          "workspaceId": "ws"
+        },
+        "status": "idle",
+        "title": "Test",
+        "todos": [
+          {
+            "dependencies": [],
+            "description": "Do something",
+            "id": 1,
+            "status": "pending",
+            "title": "Task 1"
+          }
+        ],
+        "updatedAt": "2026-01-01T00:00:00Z",
+        "usage": {
+          "contextWindow": 200000,
+          "percent": 2.5,
+          "tokens": 5000
+        },
+        "workspace": {
+          "path": "/home",
+          "workspaceId": "ws"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00Z",
+      "type": "sessionUpdated"
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {},
+      "widgets": {}
+    },
+    "config": {},
+    "facet": "execute",
+    "flags": [
+      {
+        "mode": "included",
+        "path": "src/main.rs"
+      }
+    ],
+    "items": [],
+    "mcpServers": [
+      {
+        "serverName": "filesystem",
+        "status": "connected",
+        "toolCount": 5
+      }
+    ],
+    "pendingApprovals": [],
+    "queued": [],
+    "ref": {
+      "sessionId": "s1",
+      "workspaceId": "ws"
+    },
+    "status": "idle",
+    "title": "Test",
+    "todos": [
+      {
+        "dependencies": [],
+        "description": "Do something",
+        "id": 1,
+        "status": "pending",
+        "title": "Task 1"
+      }
+    ],
+    "usage": {
+      "contextWindow": 200000,
+      "percent": 2.5,
+      "tokens": 5000
+    }
+  },
+  "name": "session-updated-meta"
+}

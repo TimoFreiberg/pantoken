@@ -4,10 +4,27 @@
 //! contract. The TS `protocol/` package is the client's source of truth; this
 //! crate mirrors it and is validated by byte-compatibility via the e2e suite.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+/// Deserialize a JSON `null | T | absent` field into `Option<Option<T>>`:
+/// - absent key → `None` (preserve existing state)
+/// - `null` → `Some(None)` (clear)
+/// - `T` → `Some(Some(T))` (set)
+///
+/// serde's default `Option<Option<T>>` deserialization maps JSON `null` to
+/// `None` (outer), making `Some(None)` unreachable — so the "clear" signal is
+/// lost. This custom deserializer restores the three-way distinction that the
+/// TS side gets for free via `undefined` vs `null` vs object.
+fn deserialize_some_or_none<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Deserialize::deserialize(deserializer).map(Some)
 }
 
 // ── Primitive type aliases ──────────────────────────────────────────────
@@ -292,6 +309,7 @@ pub struct FlaggedFile {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub enum FlaggedFileMode {
     Included,
     Referenced,
@@ -446,7 +464,12 @@ pub struct SessionSnapshot {
         rename = "activePlan"
     )]
     pub active_plan: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", default, rename = "goal")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        deserialize_with = "deserialize_some_or_none",
+        rename = "goal"
+    )]
     pub goal: Option<Option<GoalInfo>>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub flags: Option<Vec<FlaggedFile>>,

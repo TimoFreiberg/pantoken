@@ -1,0 +1,45 @@
+{
+  "description": "customMessage → inject item with turnBoundary",
+  "events": [
+    {
+      "customType": "goalReminder",
+      "display": true,
+      "id": "inj-1",
+      "sessionRef": {
+        "sessionId": "s1",
+        "workspaceId": "ws"
+      },
+      "text": "Remember to check tests",
+      "timestamp": "2026-01-01T00:00:00Z",
+      "turnBoundary": true,
+      "type": "customMessage"
+    }
+  ],
+  "expected": {
+    "ambient": {
+      "statuses": {},
+      "widgets": {}
+    },
+    "config": {},
+    "flags": [],
+    "items": [
+      {
+        "customType": "goalReminder",
+        "display": true,
+        "id": "inj-1",
+        "kind": "inject",
+        "text": "Remember to check tests",
+        "ts": "2026-01-01T00:00:00Z",
+        "turnBoundary": true
+      }
+    ],
+    "mcpServers": [],
+    "pendingApprovals": [],
+    "queued": [],
+    "ref": null,
+    "status": "idle",
+    "title": "",
+    "todos": []
+  },
+  "name": "inject-message"
+}
