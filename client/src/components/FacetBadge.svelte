@@ -13,12 +13,20 @@
   // inserted into the composer).
   //
   // Adventurous handoff is a slide-toggle on the right side of the Plan row.
-  // While the menu is open, the toggle edits a LOCAL pendingHandoff value only
-  // — no daemon request fires mid-menu. Right/Left act on the highlighted Plan
-  // row's pending value without selecting it. The pending value is flushed to
-  // the daemon exactly once on commit (Enter / click-select / number-key), and
-  // only if it differs from the session's authoritative value; aborting the
-  // menu (Escape / click-outside) discards it.
+  // While the menu is open on a LIVE session, the toggle edits a LOCAL
+  // pendingHandoff value only — no daemon request fires mid-menu. Right/Left
+  // act on the highlighted Plan row's pending value without selecting it. The
+  // pending value is flushed to the daemon exactly once on commit (Enter /
+  // click-select / number-key), and only if it differs from the session's
+  // authoritative value; aborting the menu (Escape / click-outside) discards it.
+  //
+  // While DRAFTING a new session, the toggle is visible on the Plan row (a fresh
+  // draft defaults to Execute, so the toggle appears once the user picks Plan).
+  // It edits store.draft.adventurousHandoff via store.setDraftAdventurousHandoff
+  // (no daemon request — the toggle fires post-creation in settlePrompt, after
+  // the new session exists). The badge color tracks the draft's handoff state
+  // via effectiveHandoff so the closed badge reflects the draft, not the stale
+  // previous session's value.
   //
   // The dropdown chrome (badge, open/close, keyboard nav, backdrop, panel CSS)
   // lives in MenuBadge; this component supplies the facet items as the panel
@@ -30,23 +38,34 @@
   const facets = $derived(store.facets);
   // Adventurous handoff lives in this menu because it's a plan-mode modifier
   // in spirit: it lets plan mode hand off to implementation autonomously. It's
-  // a live per-session daemon flag, so it hides while drafting (no session yet).
-  // `sessionHandoff` is the authoritative session value — used for the badge
-  // color (shown when the menu is closed). `pendingHandoff` is the local
-  // in-menu edit; it's snapshotted from sessionHandoff on every open and
-  // flushed on commit.
+  // a per-session daemon flag, but while drafting the toggle edits the draft's
+  // adventurousHandoff field (the daemon toggle fires post-creation in
+  // settlePrompt). `sessionHandoff` is the authoritative live-session value;
+  // `draftHandoff` reads the draft's field. `effectiveHandoff` unifies the two
+  // (draft takes priority while drafting) for the badge color. `pendingHandoff`
+  // is the local in-menu edit for live sessions; it's snapshotted from
+  // sessionHandoff on every open and flushed on commit.
   const sessionHandoff = $derived(store.session.adventurousHandoff ?? false);
+  const draftHandoff = $derived(store.draft?.adventurousHandoff ?? false);
   let pendingHandoff = $state(false);
+  // The toggle reads from the draft while drafting (no daemon call — flushed
+  // post-creation), or from the local pendingHandoff while live (flushed on
+  // commit if it differs from sessionHandoff).
+  const toggleHandoff = $derived(store.draft ? draftHandoff : pendingHandoff);
+  // The badge color (shown when the menu is closed) uses the draft's handoff
+  // while drafting, or the authoritative session value while live.
+  const effectiveHandoff = $derived(store.draft ? draftHandoff : sessionHandoff);
 
   // The badge + rows are colored by facet state: execute = amber, plan (handoff
   // off) = dusty blue, plan+auto = muted lavender. Unknown facets stay neutral.
-  // The badge color tracks the authoritative sessionHandoff (it shows when the
-  // menu is closed); the in-panel toggle/row track pendingHandoff (local edits).
+  // The badge color tracks effectiveHandoff (draft handoff while drafting, live
+  // session handoff otherwise — shows when the menu is closed); the in-panel
+  // toggle/row track pendingHandoff (live) or draftHandoff (draft).
   const facetColorClass = $derived(
     facet === "execute"
       ? "facet-execute"
       : isPlan
-        ? sessionHandoff
+        ? effectiveHandoff
           ? "facet-auto"
           : "facet-plan"
         : "",
@@ -55,7 +74,6 @@
   function onUnhandledKeydown(e: KeyboardEvent, sel: number): void {
     if (
       (e.key !== "ArrowRight" && e.key !== "ArrowLeft") ||
-      store.draft ||
       !isPlan ||
       sel !== facets.indexOf("plan")
     ) {
@@ -64,15 +82,19 @@
     e.preventDefault();
     e.stopPropagation();
     const desired = e.key === "ArrowRight";
-    pendingHandoff = desired;
+    if (store.draft) {
+      store.setDraftAdventurousHandoff(desired);
+    } else {
+      pendingHandoff = desired;
+    }
   }
 
   // Single commit funnel for Enter, click-select, and number-key commits.
   // Guards the setFacet no-op (selecting the already-active facet sends no
   // request) and flushes the pending handoff only if it differs from the
   // session value. The handoff flush is draft-guarded: while drafting, the
-  // toggle is hidden so pendingHandoff can't change, and toggleAdventurousHandoff
-  // has no draft branch (it's a live-session-only flag), so we skip it entirely.
+  // daemon toggle is deferred to post-creation (settlePrompt), so we skip the
+  // live flush here entirely.
   function commit(targetFacet: string): void {
     if (targetFacet !== store.composerFacet) {
       store.setFacet(targetFacet);
@@ -103,7 +125,7 @@
 >
   {#snippet body({ sel, close })}
     {#each facets as opt, i (opt)}
-      {#if opt === "plan" && isPlan && !store.draft}
+      {#if opt === "plan" && isPlan}
         <!-- Plan row: a div (not button) so the inline slide-toggle button isn't
              nested inside the row's select button. role=option keeps listbox
              semantics; the select button covers the label area. -->
@@ -113,8 +135,8 @@
           class:hl={sel === i}
           role="option"
           aria-selected={sel === i}
-          class:facet-plan={!pendingHandoff}
-          class:facet-auto={pendingHandoff}
+          class:facet-plan={!effectiveHandoff}
+          class:facet-auto={effectiveHandoff}
           title={opt === facet ? `Facet: ${opt} (current)` : `Switch to ${opt} facet`}
         >
           <button
@@ -130,17 +152,21 @@
           </button>
           <button
             class="facet-toggle"
-            class:on={pendingHandoff}
+            class:on={toggleHandoff}
             role="switch"
-            aria-checked={pendingHandoff}
+            aria-checked={toggleHandoff}
             aria-label="Adventurous handoff"
             data-testid="adventurous-handoff"
-            title={pendingHandoff
+            title={toggleHandoff
               ? "Disable adventurous handoff — plan mode waits for your approval (Left)"
               : "Enable adventurous handoff — plan mode may start implementing autonomously (Right)"}
             onclick={(e) => {
               e.stopPropagation();
-              pendingHandoff = !pendingHandoff;
+              if (store.draft) {
+                store.setDraftAdventurousHandoff(!draftHandoff);
+              } else {
+                pendingHandoff = !pendingHandoff;
+              }
             }}
           >
             <span class="facet-toggle-knob" aria-hidden="true"></span>
