@@ -1127,8 +1127,12 @@ fn greeting_seed() -> Vec<SessionDriverEvent> {
     });
     advance_ts(260);
     events.push(SessionDriverEvent::ToolFinished {
-        base: base(), call_id: "t2".into(), success: true,
-        output: Some(serde_json::json!("app.get('/health', (req, res) => { res.json({ ok: true }) })")),
+        base: base(),
+        call_id: "t2".into(),
+        success: true,
+        output: Some(serde_json::json!(
+            "app.get('/health', (req, res) => { res.json({ ok: true }) })"
+        )),
         images: None,
         interrupted: None,
     });
@@ -1481,12 +1485,19 @@ fn greeting_script() -> Vec<ScriptStep> {
         },
     });
     advance_ts(260);
-    steps.push(ScriptStep { wait_ms: 180, event: SessionDriverEvent::ToolFinished {
-        base: base(), call_id: "t2".into(), success: true,
-        output: Some(serde_json::json!("app.get('/health', (req, res) => { res.json({ ok: true }) })")),
-        images: None,
-        interrupted: None,
-    }});
+    steps.push(ScriptStep {
+        wait_ms: 180,
+        event: SessionDriverEvent::ToolFinished {
+            base: base(),
+            call_id: "t2".into(),
+            success: true,
+            output: Some(serde_json::json!(
+                "app.get('/health', (req, res) => { res.json({ ok: true }) })"
+            )),
+            images: None,
+            interrupted: None,
+        },
+    });
 
     // More deltas
     let text2 = "Routes live in `server/src/index.ts`. I'll register `/health` next to the others and add a Bun test.";

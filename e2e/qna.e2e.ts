@@ -483,7 +483,7 @@ test("qna form: summary page shows all answers", async ({ page }) => {
   await form.getByRole("button", { name: "Review answers" }).click();
   await expect(form.getByText("Review your answers")).toBeVisible();
   // Each question + its answer is visible. Scope to .summary so the assertions
-  // don't collide with the editing card's .q text during the reveal transition.
+  // don't collide with the editing card's .q text.
   const summary = form.locator(".summary");
   await expect(
     summary.getByText("Which package manager should I use?"),
@@ -499,12 +499,25 @@ test("qna form: summary page shows all answers", async ({ page }) => {
   ).toBeVisible();
   await expect(summary.getByText("Please keep commits small.")).toBeVisible();
 
+  // The phase switch is instant — no slide animation should be active.
+  // Svelte's reveal/slide uses the Web Animations API, so check getAnimations().
+  const summaryAnims = await form.locator(".summary").evaluate(
+    (el) => el.getAnimations().length,
+  );
+  expect(summaryAnims).toBe(0);
+
   // Back returns to the last question (Q3 card reappears). The summary's Back
   // is disambiguated from the editing Back by its title (both read "Back").
   await form.getByTitle("Back to editing (←)").click();
   await expect(
     form.locator(".card").getByText("Anything else I should know before starting?"),
   ).toBeVisible();
+
+  // Back from summary to editing is also instant — no active animations.
+  const cardAnims = await form.locator(".card").evaluate(
+    (el) => el.getAnimations().length,
+  );
+  expect(cardAnims).toBe(0);
 
   // Review again → Confirm submits.
   await form.getByRole("button", { name: "Review answers" }).click();

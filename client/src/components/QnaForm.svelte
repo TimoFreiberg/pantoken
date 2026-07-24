@@ -12,7 +12,6 @@
 
 <script lang="ts">
   import { onDestroy, untrack } from "svelte";
-  import { reveal } from "../lib/transitions.js";
   import type { HostUiRequest, QnaAnswer } from "@pantoken/protocol";
   import Button from "./ui/Button.svelte";
   import Chevron from "./ui/Chevron.svelte";
@@ -266,7 +265,7 @@
   // Reset the cancel confirm gate when navigating between questions or
   // phases so a stale "Click again" label can't persist across cards.
   // Synchronous (no rAF deferral) — a deferred disarm could flash the armed
-  // label during the next card's reveal transition.
+  // label during the next card's mount.
   $effect(() => {
     current;
     phase;
@@ -338,7 +337,7 @@
 
   {#if !collapsed}
   {#if phase === "summary"}
-    <div class="summary" bind:this={summaryEl} transition:reveal>
+    <div class="summary" bind:this={summaryEl}>
       <p class="summary-head">Review your answers</p>
       {#each questions as question, i (i)}
         {@const ans = answers[i]!}
@@ -374,7 +373,7 @@
       >
     </div>
   {:else}
-  <div class="card" bind:this={cardEl} transition:reveal>
+  <div class="card" bind:this={cardEl}>
     <p class="q">{q.question}</p>
     {#if q.context}<div class="ctx" bind:this={ctxEl}><Markdown content={q.context} final /></div>{/if}
 
