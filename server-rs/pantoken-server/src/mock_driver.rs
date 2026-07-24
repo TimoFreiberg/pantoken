@@ -1781,6 +1781,11 @@ pub struct MockDriver {
     /// One-shot artificial delay before abort settles. Dev/e2e-only: exercises the
     /// client-side stop confirmation deadline without weakening normal mock aborts.
     abort_delay_ms: AtomicU64,
+    /// One-shot delay (ms) before `new_session` returns its seed events. Dev/e2e-only:
+    /// widens the client's warm-up window so e2e can assert the composer badges hold
+    /// the draft's values (not daemon defaults) while the seed is pending. Mirrors
+    /// `abort_delay_ms`.
+    new_session_seed_delay_ms: AtomicU64,
     /// One-shot delay before the terminal `RunCompleted` event fires after an
     /// accepted abort. When set, `abort()` returns `Ok(())` immediately (so
     /// `AbortResult { accepted: true }` is sent quickly) but defers the
@@ -1902,6 +1907,7 @@ impl MockDriver {
             long_next_branch_list: Arc::new(AtomicBool::new(false)),
             fail_next_session: Arc::new(AtomicBool::new(false)),
             abort_delay_ms: AtomicU64::new(0),
+            new_session_seed_delay_ms: AtomicU64::new(0),
             abort_settle_delay_ms: AtomicU64::new(0),
             pending_dialogs: Arc::new(Mutex::new(std::collections::HashMap::new())),
             adventurous_handoff: Arc::new(std::sync::Mutex::new(false)),
@@ -2476,6 +2482,13 @@ impl PantokenDriver for MockDriver {
         // any state mutation, mirroring TS `MockDriver.failNextNewSession`.
         if self.fail_next_new_session.swap(false, Ordering::SeqCst) {
             return Err("new session failed (failnewsession)".to_string());
+        }
+        // One-shot artificial delay (armed via run_script("slownewsession")): widen
+        // the client's warm-up window so e2e can assert the composer badges hold the
+        // draft's values (not daemon defaults) while the seed is pending.
+        let seed_delay = self.new_session_seed_delay_ms.swap(0, Ordering::SeqCst);
+        if seed_delay > 0 {
+            tokio::time::sleep(Duration::from_millis(seed_delay)).await;
         }
         // Faithful port of TS `newSession()`: resolve the cwd (applying a
         // `-worktree` suffix when the draft asked for an isolated worktree) and
@@ -3210,6 +3223,13 @@ impl PantokenDriver for MockDriver {
             // state (on the stop button only, no chat toast or sidebar error).
             "slowabort" => {
                 self.abort_delay_ms.store(1000, Ordering::SeqCst);
+                return;
+            }
+            // Widen the client's warm-up window (2s) so e2e can assert the composer
+            // badges hold the draft's values (not daemon defaults) while the seed is
+            // pending. Mirrors `slowabort`'s one-shot delay pattern.
+            "slownewsession" => {
+                self.new_session_seed_delay_ms.store(2000, Ordering::SeqCst);
                 return;
             }
             // Simulates the real daemon's behavior during a tool call: the
@@ -4406,6 +4426,7 @@ impl PantokenDriver for MockDriver {
         self.long_next_branch_list.store(false, Ordering::SeqCst);
         self.fail_next_session.store(false, Ordering::SeqCst);
         self.abort_delay_ms.store(0, Ordering::SeqCst);
+        self.new_session_seed_delay_ms.store(0, Ordering::SeqCst);
         self.abort_settle_delay_ms.store(0, Ordering::SeqCst);
         *self.adventurous_handoff.lock().unwrap() = false;
         *self.goal.lock().unwrap() = None;
