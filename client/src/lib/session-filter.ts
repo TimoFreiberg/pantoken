@@ -115,7 +115,7 @@ function matchesQuery(entry: SessionListEntry, q: string): boolean {
 
 /** The display name for a project group: the final path segment of its cwd. Kept here
  *  (not imported from the Sidebar component) so this module stays DOM-free + unit-testable. */
-function projectName(cwd: string): string {
+export function projectName(cwd: string): string {
   const parts = cwd.replace(/\/+$/, "").split("/");
   return parts[parts.length - 1] || cwd;
 }
@@ -125,7 +125,7 @@ function projectName(cwd: string): string {
  *  agent bumps on every streamed turn — it only moves when you actually interact, so a
  *  running session holds its place instead of jumping around as it emits tokens. Falls
  *  back to `updatedAt` if the server didn't supply it. */
-function lastInteractionKey(entry: SessionListEntry): string {
+export function lastInteractionKey(entry: SessionListEntry): string {
   return entry.lastUserMessageAt || entry.updatedAt;
 }
 

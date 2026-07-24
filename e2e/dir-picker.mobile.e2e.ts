@@ -14,6 +14,8 @@ async function openPicker(page: Page, draft?: string): Promise<void> {
     await draftBox(page).fill(draft);
   }
   await page.getByTestId("draft-project-control").click();
+  await page.getByTestId("project-menu").getByText("New project…").click();
+  await page.mouse.move(0, 0);
   await expect(input(page)).toBeFocused();
 }
 
@@ -56,6 +58,8 @@ test("visible Back closes the picker and consumes its nested history entry", asy
   await expect(picker(page)).toBeHidden();
   // Reopening after a UI close must receive a fresh entry once the owned pop settles.
   await page.getByTestId("draft-project-control").click();
+  await page.getByTestId("project-menu").getByText("New project…").click();
+  await page.mouse.move(0, 0);
   await expect(input(page)).toBeFocused();
   await page.goBack();
   await expect(picker(page)).toBeHidden();

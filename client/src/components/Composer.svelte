@@ -44,6 +44,7 @@
   import ArgMenu from "./ArgMenu.svelte";
   import AtMenu from "./AtMenu.svelte";
   import DirPicker from "./DirPicker.svelte";
+  import ProjectMenu from "./ProjectMenu.svelte";
   import MenuBadge from "./ui/MenuBadge.svelte";
   import ImageLightbox from "./ImageLightbox.svelte";
   import ModelPicker from "./ModelPicker.svelte";
@@ -138,12 +139,14 @@
   // Project chip → server-side directory browser (DirPicker). The path is chosen on the
   // server's filesystem because the agent runs server-side; a native picker would see the client.
   let pickingCwd = $state(false);
+  let projectMenuOpen = $state(false);
   let projectControlRef = $state<HTMLButtonElement>();
   let mobileControlsOpen = $state(false);
   // Never carry an open picker across drafts (it would auto-pop on the next new session).
   $effect(() => {
     if (!drafting) {
       pickingCwd = false;
+      projectMenuOpen = false;
     }
   });
   // Issue #54: after the DirPicker closes, restore focus. On desktop, return
@@ -1588,10 +1591,12 @@
       if (lightboxIndex !== null) return;
       // New-session draft shortcuts also work when the textarea isn't focused yet
       // (⌘N leaves it blurred): ⌥P toggles the project picker, ⌥W the worktree chip.
-      // Handle ⌥P before the pickingCwd guard so it can also close an open picker.
+      // Handle ⌥P before the picker guards so it can also close an open picker.
       if (drafting && e.altKey && e.code === "KeyP") {
         e.preventDefault();
-        pickingCwd = !pickingCwd;
+        // ⌥P toggles the project menu; if the DirPicker is open it closes that instead.
+        if (pickingCwd) pickingCwd = false;
+        else projectMenuOpen = !projectMenuOpen;
         return;
       }
       if (drafting && e.altKey && e.code === "KeyW") {
@@ -1601,7 +1606,7 @@
       }
       // The directory picker owns the keyboard while open (arrows / Enter / Esc to
       // navigate); don't pull focus back to the textarea on a keystroke.
-      if (pickingCwd) return;
+      if (pickingCwd || projectMenuOpen) return;
       // ⌘⇧F / Ctrl+Shift+F: open the file picker for image attachments.
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "F") {
         e.preventDefault();
@@ -1709,14 +1714,14 @@
           bind:this={projectControlRef}
           class="chip"
           data-testid="draft-project-control"
-          aria-haspopup="dialog"
-          aria-expanded={pickingCwd}
-          aria-label={`${cwdBase} — browse to change project directory`}
-          title={`Project: ${store.draft.cwd || "home"} — click to browse for a directory (⌥P)`}
-          onclick={() => { pickingCwd = !pickingCwd; }}
+          aria-haspopup="listbox"
+          aria-expanded={projectMenuOpen}
+          aria-label={`${cwdBase} — choose a project`}
+          title={`Project: ${store.draft.cwd || "home"} — click to choose a project (⌥P)`}
+          onclick={() => { projectMenuOpen = !projectMenuOpen; }}
         >
           {cwdBase}
-          <Chevron open={pickingCwd} variant="menu" size={10} />
+          <Chevron open={projectMenuOpen} variant="menu" size={10} />
         </button>
         <button
           class="chip toggle-chip"
@@ -1812,6 +1817,24 @@
 
     <div class="composer-surface" data-testid="composer-surface">
     <div class="box-wrap">
+      {#if projectMenuOpen && drafting && store.draft}
+        <ProjectMenu
+          current={store.draft.cwd}
+          onpick={(cwd) => {
+            store.setDraftCwd(cwd);
+            projectMenuOpen = false;
+            refocusAfterDirPicker();
+          }}
+          onbrowse={() => {
+            projectMenuOpen = false;
+            pickingCwd = true;
+          }}
+          onclose={() => {
+            projectMenuOpen = false;
+            refocusAfterDirPicker();
+          }}
+        />
+      {/if}
       {#if pickingCwd && drafting && store.draft}
         <DirPicker
           current={store.draft.cwd}

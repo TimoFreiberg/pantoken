@@ -108,8 +108,10 @@ test("retargeting a draft moves its row to the new project — no ghost left beh
   await openSidebar(page);
   await group(page, "pantoken").getByTestId("draft-row").click();
 
-  // Retarget via the project chip → dir picker.
+  // Retarget via the project menu → "New project…" → dir picker.
   await page.getByTestId("draft-project-control").click();
+  await page.getByTestId("project-menu").getByText("New project…").click();
+  await page.mouse.move(0, 0);
   await expect(page.getByTestId("dir-picker")).toBeVisible();
   const picker = page.getByTestId("dir-picker");
   const input = picker.getByLabel("Project directory path");
@@ -198,6 +200,8 @@ test("a top-level draft shows its location tag and Draft separated by a middot",
   await group(page, "pantoken").getByTestId("draft-row").click();
 
   await page.getByTestId("draft-project-control").click();
+  await page.getByTestId("project-menu").getByText("New project…").click();
+  await page.mouse.move(0, 0);
   const picker = page.getByTestId("dir-picker");
   const input = picker.getByLabel("Project directory path");
   await input.fill("/Users/timo/src/elsewhere/");

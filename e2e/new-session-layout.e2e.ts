@@ -104,15 +104,11 @@ test("keyboard shortcuts toggle picker and worktree while drafting", async ({
   await openSidebar(page);
   await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
 
-  // ⌥P opens the DirPicker.
+  // ⌥P opens the project menu.
   await page.keyboard.press("Alt+p");
-  await expect(
-    page.getByRole("dialog", { name: "Choose project directory" }),
-  ).toBeVisible();
+  await expect(page.getByTestId("project-menu")).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(
-    page.getByRole("dialog", { name: "Choose project directory" }),
-  ).toBeHidden();
+  await expect(page.getByTestId("project-menu")).toBeHidden();
 
   // ⌥W toggles the worktree chip's aria-pressed.
   const worktree = page.getByTestId("draft-worktree-control");
