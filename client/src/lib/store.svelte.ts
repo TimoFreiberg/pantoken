@@ -470,10 +470,6 @@ class PantokenStore {
   pushState = $state<PushState | "working">("idle");
   // Settings panel open/closed — per-client view state, never sent upstream.
   settingsOpen = $state(false);
-  // Computer setup dialog open/closed + mode (add/edit) + optional profile id for edit.
-  computerSetupOpen = $state(false);
-  computerSetupMode = $state<"add" | "edit">("add");
-  computerSetupProfileId = $state<string | null>(null);
   // Requested settings section (set by openSettings(section) to navigate directly).
   requestedSettingsSection = $state<"appearance" | "notifications" | "models" | "environment" | "mcp" | "token" | "computers" | null>(null);
   _settingsSectionN = $state(0);
@@ -2689,15 +2685,6 @@ class PantokenStore {
   }
   closeSettings(): void {
     this.settingsOpen = false;
-  }
-  openComputerSetup(mode: "add" | "edit" = "add", profileId: string | null = null): void {
-    this.computerSetupMode = mode;
-    this.computerSetupProfileId = profileId;
-    this.computerSetupOpen = true;
-  }
-  closeComputerSetup(): void {
-    this.computerSetupOpen = false;
-    this.computerSetupProfileId = null;
   }
   /** ⌘F — open the in-transcript find box and (re)focus it. No-op while drafting: there's
    *  no transcript to search, so we leave native ⌘F to the draft form instead. */
