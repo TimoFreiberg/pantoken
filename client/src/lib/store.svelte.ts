@@ -360,6 +360,9 @@ class PantokenStore {
     facet?: string;
     /** Omit to use the daemon/global default. */
     permissionMonitor?: PermissionMonitorMode;
+    /** Enable adventurous handoff after the session is created (post-creation
+     *  toggle, since the daemon has no set-at-spawn endpoint — only a toggle). */
+    adventurousHandoff?: boolean;
   } | null>(null);
   // A newSession prompt was just submitted and we're awaiting the new session's first
   // authoritative seed from the server (session warm-up can take a beat). Holds the
@@ -745,13 +748,15 @@ class PantokenStore {
       this.draft.permissionMonitor !== "standard"
     )
       cfg.permissionMonitor = this.draft.permissionMonitor;
+    if (this.draft.adventurousHandoff) cfg.adventurousHandoff = true;
     if (
       cfg.worktree ||
       cfg.baseBranch ||
       cfg.model ||
       cfg.thinking ||
       cfg.facet ||
-      cfg.permissionMonitor
+      cfg.permissionMonitor ||
+      cfg.adventurousHandoff
     )
       this.draftConfigMap[key] = cfg;
     else delete this.draftConfigMap[key];
@@ -1864,6 +1869,17 @@ class PantokenStore {
       } catch (e) {
         this.lastError = `prompt was accepted, but its local outbox entry couldn't be cleared: ${errorText(e)}`;
       }
+      // Post-creation adventurous handoff: if the draft had it toggled on, fire
+      // a single toggle now (the daemon defaults to false, so one toggle → true).
+      // Guarded by the focused session matching the created session — if the user
+      // navigated away before this fires, skip the toggle (not worth chasing).
+      if (
+        prompt.kind === "newSession" &&
+        prompt.newSession?.adventurousHandoff &&
+        this.session.ref?.sessionId === result.sessionId
+      ) {
+        this.toggleAdventurousHandoff(result.sessionId);
+      }
       return;
     }
     // Any rejection retires the "creating session" placeholder (a SUCCESS clears it via the
@@ -1952,6 +1968,7 @@ class PantokenStore {
       facet: ns?.facet ?? "execute",
       permissionMonitor:
         ns?.permissionMonitor ?? this.modelDefaults.defaultPermissionMonitor,
+      adventurousHandoff: ns?.adventurousHandoff,
     };
     this.composerDraft = prompt.text;
     this.composerImages = prompt.images ? [...prompt.images] : [];
@@ -2440,6 +2457,7 @@ class PantokenStore {
       // Undefined lets the composer show the standard fallback until the daemon's
       // global default arrives in the modelDefaults message.
       permissionMonitor: this.modelDefaults.defaultPermissionMonitor,
+      adventurousHandoff: false,
     };
     // Restore this project's pending new-session draft, if any (key now resolves to n:cwd).
     this.loadDraft(this.composerDraftKey);
@@ -2457,6 +2475,8 @@ class PantokenStore {
         facet: saved.facet ?? this.draft.facet,
         permissionMonitor:
           saved.permissionMonitor ?? this.draft.permissionMonitor,
+        adventurousHandoff:
+          saved.adventurousHandoff ?? this.draft.adventurousHandoff,
       };
     // Record the draft view for ⌘[ / ⌘] history and remember its project for ⌘N.
     this.pushNav({ kind: "draft", cwd });
@@ -2593,6 +2613,7 @@ class PantokenStore {
           d.permissionMonitor && d.permissionMonitor !== "standard"
             ? d.permissionMonitor
             : undefined,
+        adventurousHandoff: d.adventurousHandoff || undefined,
       },
     });
     if (!promptId) return false;
@@ -2952,12 +2973,23 @@ class PantokenStore {
     });
   }
 
+  /** Set the adventurous handoff flag on a draft (no daemon call — the toggle
+   *  fires post-creation in settlePrompt). */
+  setDraftAdventurousHandoff(enabled: boolean): void {
+    if (!this.draft) return;
+    this.draft = { ...this.draft, adventurousHandoff: enabled };
+    this.persistDraftConfig();
+  }
+
   /** Toggle the adventurous auto-handoff flag (lets plan mode autonomously start
-   *  implementing). The updated state arrives via the next snapshot. */
-  toggleAdventurousHandoff(): void {
+   *  implementing). The updated state arrives via the next snapshot. Pass
+   *  `sessionId` to target a specific session (e.g. post-creation toggle);
+   *  omit to target the focused session (the default). */
+  toggleAdventurousHandoff(sessionId?: string): void {
     send({
       type: "sessionAction",
       action: { kind: "toggleAdventurousHandoff" },
+      sessionId,
     });
   }
 
@@ -3526,6 +3558,7 @@ type StoredDraftConfig = {
   thinking?: string;
   facet?: string;
   permissionMonitor?: PermissionMonitorMode;
+  adventurousHandoff?: boolean;
 };
 
 /** Read per-new-session-draft config from localStorage. Tolerant of a missing / corrupt
@@ -3548,6 +3581,7 @@ function loadDraftConfigMap(): Record<string, StoredDraftConfig> {
         thinking?: unknown;
         facet?: unknown;
         permissionMonitor?: unknown;
+        adventurousHandoff?: unknown;
       };
       const cfg: StoredDraftConfig = {};
       if (rec.worktree === true) cfg.worktree = true;
@@ -3571,13 +3605,15 @@ function loadDraftConfigMap(): Record<string, StoredDraftConfig> {
           pm === "autonomous")
       )
         cfg.permissionMonitor = pm;
+      if (rec.adventurousHandoff === true) cfg.adventurousHandoff = true;
       if (
         cfg.worktree ||
         cfg.baseBranch ||
         cfg.model ||
         cfg.thinking ||
         cfg.facet ||
-        cfg.permissionMonitor
+        cfg.permissionMonitor ||
+        cfg.adventurousHandoff
       )
         out[k] = cfg;
     }

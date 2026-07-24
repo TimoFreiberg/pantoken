@@ -2882,7 +2882,15 @@ impl PantokenDriver for MockDriver {
     // One arm per SessionAction, each a faithful port of its TS MockDriver
     // method: deterministic fixture responses so Settings toggles and the
     // context actions round-trip through hub → client in dev/e2e.
-    async fn session_action(&self, action: SessionAction, _session_id: Option<SessionId>) {
+    async fn session_action(&self, action: SessionAction, session_id: Option<SessionId>) {
+        // Stamp events with the target session (falls back to the default mock
+        // session when no target is given — the historical behavior).
+        let sid = session_id.unwrap_or_else(|| SESSION_ID.to_string());
+        let base = || SessionEventBase {
+            session_ref: session_ref_for(&sid),
+            timestamp: ts(),
+            run_id: None,
+        };
         match action {
             SessionAction::SetModel {
                 model_id,

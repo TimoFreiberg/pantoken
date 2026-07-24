@@ -21,6 +21,7 @@ export interface PendingPrompt {
     thinking?: string;
     facet?: string;
     permissionMonitor?: import("@pantoken/protocol").PermissionMonitorMode;
+    adventurousHandoff?: boolean;
   };
   createdAt: string;
   state: "queued" | "sending" | "rejected";
@@ -112,6 +113,9 @@ function toPlainPrompt(prompt: PendingPrompt): PendingPrompt {
               }
             : undefined,
           thinking: prompt.newSession.thinking,
+          facet: prompt.newSession.facet,
+          permissionMonitor: prompt.newSession.permissionMonitor,
+          adventurousHandoff: prompt.newSession.adventurousHandoff,
         }
       : undefined,
     createdAt: prompt.createdAt,

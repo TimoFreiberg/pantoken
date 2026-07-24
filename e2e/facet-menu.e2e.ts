@@ -80,8 +80,9 @@ test("selecting a different facet still switches", async ({ page }) => {
 
 test("facet selection while drafting writes to the draft", async ({ page }) => {
   // AC.8 — while a new-session draft is open, selecting a facet writes to the
-  // draft (no daemon request, no error). The handoff toggle is hidden while
-  // drafting, so only the facet pick is exercised here.
+  // draft (no daemon request, no error). The handoff toggle is now visible on
+  // the Plan row while drafting, but it only edits the draft field (no daemon
+  // request), so only the facet pick is exercised here.
   await openSidebar(page);
   await page
     .getByTestId("sidebar")
@@ -132,8 +133,10 @@ test("handoff flush is draft-guarded: committing a facet pick while drafting sen
   );
 
   // Now open a new-session draft. The live session's handoff is on; the draft
-  // has no handoff state. The toggle is hidden while drafting. The draft view
-  // has its own (empty) transcript, so we assert no notices appear at all.
+  // has its own handoff state (defaults to off). The toggle is visible on the
+  // Plan row while drafting but only edits the draft field — no daemon request
+  // fires. The draft view has its own (empty) transcript, so we assert no
+  // notices appear at all.
   await openSidebar(page);
   await page
     .getByTestId("sidebar")
@@ -148,7 +151,8 @@ test("handoff flush is draft-guarded: committing a facet pick while drafting sen
 
   // Open the facet menu and commit a facet pick (Plan) via Enter. The handoff
   // flush must NOT fire — no notice appears. setFacet also writes to the draft
-  // (no wire message), so no notice from that either.
+  // (no wire message), so no notice from that either. The toggle appears on
+  // the Plan row but is draft-aware (edits the draft, no daemon call).
   await draftBadge.click();
   const panel = page.getByRole("listbox", { name: "Facet" });
   await expect(panel).toBeVisible();
