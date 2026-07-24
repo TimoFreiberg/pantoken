@@ -21,6 +21,7 @@
   import TokenGate from "./components/TokenGate.svelte";
   import Settings from "./components/Settings.svelte";
   import RemoteProfileForm from "./components/RemoteProfileForm.svelte";
+  import ContainerSetupSheet from "./components/ContainerSetupSheet.svelte";
   import ConnectionSheet from "./components/ConnectionSheet.svelte";
   import PlanView from "./components/PlanView.svelte";
   import Tooltip from "./components/Tooltip.svelte";
@@ -545,6 +546,7 @@
 <Settings coordinator={hostCoordinator} />
 {#if hostCoordinator.multiHostCapable}
   <RemoteProfileForm coordinator={hostCoordinator} />
+  <ContainerSetupSheet coordinator={hostCoordinator} />
   <ConnectionSheet coordinator={hostCoordinator} />
 {/if}
 {#if !store.draft}

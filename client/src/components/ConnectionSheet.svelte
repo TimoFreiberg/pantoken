@@ -57,6 +57,11 @@
   // and connectHost blocks during the connecting phase. The sheet must
   // appear as soon as any host enters a first-time connecting state.
   $effect(() => {
+    // Don't auto-show the connection sheet while the container setup sheet
+    // is open — it handles risk acknowledgement inline and closes itself
+    // when done. After it closes, if the host is still in
+    // awaitingAcknowledgement, this effect fires on the next summary update.
+    if (profileEditor.open && profileEditor.containerWizard) return;
     // Show for first-time connecting states on any host.
     for (const summary of coordinator.summaries) {
       const id = summary.descriptor.id;

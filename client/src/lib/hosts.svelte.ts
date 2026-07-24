@@ -63,6 +63,7 @@ const BOOTSTRAP_TYPES = new Set([
  *  wsUrl is absent in these states; the coordinator returns ok without a WsClient. */
 const NON_TERMINAL_CONNECT_STATES = new Set([
   "preflight",
+  "provisioning",
   "awaitingAcknowledgement",
 ]);
 

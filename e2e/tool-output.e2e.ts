@@ -18,12 +18,13 @@ test("a long tool output offers copy + an inline expand past the scrollbox cap",
   await waitForSettledWorkBlocks(page, 2);
   await expandWork(page, "last");
 
-  // The ToolCard renders directly in the work body — open its body.
-  const head = page.getByTestId("work-body").last().locator(":scope > .tool > .head");
+  // The longoutput script has two tool spans (both "Run shell command").
+  // Target the first one — it has the long output that overflows the scrollbox.
+  const head = page.getByTestId("work-body").last().locator(":scope > .tool > .head").first();
   await expect(head).toBeVisible();
   await head.click();
 
-  const tool = page.getByTestId("work-body").last().locator(":scope > .tool");
+  const tool = page.getByTestId("work-body").last().locator(":scope > .tool").first();
   const pre = tool.locator(".out");
   await expect(pre).toBeVisible();
   const bar = tool.locator(".out-bar");

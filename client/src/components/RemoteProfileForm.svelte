@@ -16,7 +16,7 @@
 
   const { coordinator }: { coordinator: HostCoordinator } = $props();
 
-  const open = $derived(profileEditor.open);
+  const open = $derived(profileEditor.open && !profileEditor.containerWizard);
   const editing = $derived(profileEditor.editing);
   const isEdit = $derived(editing !== null);
 
