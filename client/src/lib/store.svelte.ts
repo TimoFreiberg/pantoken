@@ -373,6 +373,13 @@ class PantokenStore {
     text: string;
     images?: ImageContent[];
     createdAt: string;
+    // The draft's picks at submit time — carried so the composer badges don't
+    // flash to daemon defaults during the warm-up window before the seed lands.
+    // Same values sent in the newSession request; the seed usually echoes them.
+    facet?: string;
+    model?: { modelId: string };
+    thinking?: string;
+    permissionMonitor?: PermissionMonitorMode;
   } | null>(null);
   // Desktop panel preferences and phone navigation are deliberately separate:
   // resizing through the breakpoint never rewrites either desktop preference,
@@ -2622,6 +2629,10 @@ class PantokenStore {
       text: t,
       images: images ? [...images] : undefined,
       createdAt: new Date().toISOString(),
+      facet: d.facet,
+      model: d.model,
+      thinking: d.thinking,
+      permissionMonitor: d.permissionMonitor,
     };
     return true;
   }
@@ -2833,30 +2844,45 @@ class PantokenStore {
    *  exists yet to report its own). */
   get composerConfig(): SessionConfig {
     const d = this.draft;
-    if (!d) return this.session.config;
-    const levels = d.model
-      ? this.models.find((m) => m.modelId === d.model?.modelId)?.thinkingLevels
-      : undefined;
-    return {
-      modelId: d.model?.modelId,
-      thinkingLevel: d.thinking,
-      availableThinkingLevels: levels,
-    };
+    if (d) {
+      const levels = d.model
+        ? this.models.find((m) => m.modelId === d.model?.modelId)?.thinkingLevels
+        : undefined;
+      return {
+        modelId: d.model?.modelId,
+        thinkingLevel: d.thinking,
+        availableThinkingLevels: levels,
+      };
+    }
+    const c = this.creatingSession;
+    if (c) {
+      const levels = c.model
+        ? this.models.find((m) => m.modelId === c.model?.modelId)?.thinkingLevels
+        : undefined;
+      return {
+        modelId: c.model?.modelId,
+        thinkingLevel: c.thinking,
+        availableThinkingLevels: levels,
+      };
+    }
+    return this.session.config;
   }
   /** The facet the composer should advertise: the draft's while a draft is open,
    *  else the active session's. Mirrors composerConfig's draft-awareness for the
    *  FacetBadge and the Shift+Tab hotkey. */
   get composerFacet(): string {
-    return this.draft
-      ? (this.draft.facet ?? "execute")
-      : (this.session.facet ?? "execute");
+    if (this.draft) return this.draft.facet ?? "execute";
+    if (this.creatingSession) return this.creatingSession.facet ?? "execute";
+    return this.session.facet ?? "execute";
   }
   /** The permission-monitor mode the composer should advertise: the draft's while a
    *  draft is open, else the active session's. Mirrors composerConfig's draft-awareness. */
   get composerPermissionMonitor(): PermissionMonitorMode {
-    return this.draft
-      ? (this.draft.permissionMonitor ?? "standard")
-      : (this.session.permissionMonitor ?? "standard");
+    if (this.draft)
+      return this.draft.permissionMonitor ?? "standard";
+    if (this.creatingSession)
+      return this.creatingSession.permissionMonitor ?? "standard";
+    return this.session.permissionMonitor ?? "standard";
   }
   setModel(modelId: string, thinkingLevel?: string): void {
     if (this.draft) {

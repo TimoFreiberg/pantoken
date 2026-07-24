@@ -442,3 +442,103 @@ test("submitting a default draft creates a session with Execute + Bypass+ badges
   await expect(page.getByTestId("facet-badge")).toHaveText("Execute");
   await expect(page.getByTestId("permission-badge")).toContainText("Bypass+");
 });
+
+// --- Warm-up badge consistency ---
+// The composer's selector badges (facet, model/thinking, permission-monitor) must
+// not flash to daemon defaults during the session warm-up window — they should show
+// the draft's picks until the authoritative seed arrives. These tests arm a 2s
+// new-session seed delay (via the `slownewsession` mock script) so the warm-up
+// window is wide enough to assert the badge holds the draft's value mid-warm-up,
+// proving it never flashed to the default.
+
+async function armSlowNewSession(page: Page): Promise<void> {
+  await drive(page, "slownewsession");
+}
+
+test("a plan-facet draft's badge does not flash to Execute during warm-up", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
+  const badge = page.getByTestId("facet-badge");
+  await badge.click();
+  await page.getByRole("option", { name: "Plan" }).click();
+  await expect(badge).toHaveText("Plan");
+
+  await armSlowNewSession(page);
+  const box = composer(page);
+  await box.fill("start in plan mode");
+  await box.press("Enter");
+
+  // The warm-up window is open (seed delayed 2s). The badge must hold "Plan"
+  // through it — never flashing to "Execute" (the default).
+  await expect(page.getByTestId("working-indicator")).toBeVisible();
+  await expect(badge).toHaveText("Plan");
+
+  // After the seed lands, the badge is still "Plan" (the seed carries facet: "plan").
+  await expect(page.getByText("On it — the session's up")).toBeVisible();
+  await expect(badge).toHaveText("Plan");
+});
+
+test("a non-default model draft's badge does not flash during warm-up", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
+  await pickNonDefaultModelAndThinking(page);
+
+  await armSlowNewSession(page);
+  const box = composer(page);
+  await box.fill("use sonnet with high thinking");
+  await box.press("Enter");
+
+  await expect(page.getByTestId("working-indicator")).toBeVisible();
+  await expectNonDefaultModelAndThinking(page);
+
+  await expect(page.getByText("On it — the session's up")).toBeVisible();
+  await expectNonDefaultModelAndThinking(page);
+});
+
+test("a non-default permission-monitor draft's badge does not flash during warm-up", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
+  await page.getByTestId("permission-badge").click();
+  const panel = page.getByRole("listbox", { name: "Permission mode" });
+  await panel.getByRole("option", { name: /^Bypass[^+]/ }).click();
+  await expect(page.getByTestId("permission-badge")).toContainText("Bypass");
+
+  await armSlowNewSession(page);
+  const box = composer(page);
+  await box.fill("run with bypass permissions");
+  await box.press("Enter");
+
+  await expect(page.getByTestId("working-indicator")).toBeVisible();
+  await expect(page.getByTestId("permission-badge")).toContainText("Bypass");
+
+  await expect(page.getByText("On it — the session's up")).toBeVisible();
+  await expect(page.getByTestId("permission-badge")).toContainText("Bypass");
+});
+
+test("a default draft's badges stay consistent through warm-up", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
+  await expect(page.getByTestId("facet-badge")).toHaveText("Execute");
+  await expect(page.getByTestId("permission-badge")).toContainText("Bypass+");
+
+  await armSlowNewSession(page);
+  const box = composer(page);
+  await box.fill("just a plain session");
+  await box.press("Enter");
+
+  await expect(page.getByTestId("working-indicator")).toBeVisible();
+  await expect(page.getByTestId("facet-badge")).toHaveText("Execute");
+  await expect(page.getByTestId("permission-badge")).toContainText("Bypass+");
+
+  await expect(page.getByText("On it — the session's up")).toBeVisible();
+  await expect(page.getByTestId("facet-badge")).toHaveText("Execute");
+  await expect(page.getByTestId("permission-badge")).toContainText("Bypass+");
+});
