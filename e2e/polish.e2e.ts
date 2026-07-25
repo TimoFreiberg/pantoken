@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import {
   drive,
   expandWork,
@@ -9,6 +9,35 @@ import {
   keyboardScrollToPosition,
   scrollUpViaKeyboard,
 } from "./helpers.js";
+
+/** Build `turns` reply turns (plus the greeting) and wait for `turns + 1` settled
+ *  work blocks. Shared by the prompt-nav tests that each previously rebuilt a
+ *  5-turn transcript via inline `for` loops. */
+async function buildMultiTurn(page: Page, turns: number): Promise<void> {
+  for (let i = 0; i < turns; i++) {
+    await drive(page, "reply");
+    await expect(
+      page.getByText("That confirms it", { exact: false }).last(),
+    ).toBeVisible();
+  }
+  await waitForSettledWorkBlocks(page, turns + 1);
+}
+
+/** True when the scroller sits at prompt `idx`'s block-start target.
+ *  `scrollIntoView` clamps at the max scroll offset, so a prompt too near the
+ *  tail to reach the top settles at the bottom — `min(within, max)` models that. */
+function atPrompt(page: Page, idx: number) {
+  return page.evaluate((i) => {
+    const sc = document.querySelector(".scroller") as HTMLElement;
+    const row = document.querySelectorAll(".row.user")[i] as HTMLElement;
+    const within =
+      row.getBoundingClientRect().top -
+      sc.getBoundingClientRect().top +
+      sc.scrollTop;
+    const max = sc.scrollHeight - sc.clientHeight;
+    return Math.abs(sc.scrollTop - Math.min(within, max)) < 4;
+  }, idx);
+}
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
@@ -582,13 +611,7 @@ test("Ctrl/Cmd+Up anchors to the scroll position, not always the last prompt", a
   page,
 }) => {
   // Build enough turns that early prompts have room to scroll to the top of the viewport.
-  for (let i = 0; i < 5; i++) {
-    await drive(page, "reply");
-    await expect(
-      page.getByText("That confirms it", { exact: false }).last(),
-    ).toBeVisible();
-  }
-  await waitForSettledWorkBlocks(page, 6);
+  await buildMultiTurn(page, 5);
   const count = await page.locator(".row.user").count();
   expect(count).toBeGreaterThanOrEqual(6);
   const last = count - 1;
@@ -648,33 +671,14 @@ test("Ctrl/Cmd+Up anchors to the scroll position, not always the last prompt", a
 test("Ctrl/Cmd+Up/Down step through user prompts", async ({ page }) => {
   // Build several turns so the oldest prompts have enough content below them to scroll to
   // the top (a short final turn can't, which is fine — the stepper clamps there).
-  for (let i = 0; i < 5; i++) {
-    await drive(page, "reply");
-    await expect(
-      page.getByText("That confirms it", { exact: false }).last(),
-    ).toBeVisible();
-  }
-  await waitForSettledWorkBlocks(page, 6);
+  await buildMultiTurn(page, 5);
 
   const count = await page.locator(".row.user").count(); // greeting + 5 replies
   expect(count).toBeGreaterThanOrEqual(6);
   const last = count - 1;
 
-  // True when the scroller sits at prompt `idx`'s block-start target. `scrollIntoView`
-  // clamps at the max scroll offset, so a prompt too near the tail to reach the top
-  // settles at the bottom — `min(within, max)` models that. (Asserting by scroll position,
-  // not prompt text: the reply fixture reuses one prompt string across turns.)
-  const atPrompt = (idx: number) =>
-    page.evaluate((i) => {
-      const sc = document.querySelector(".scroller") as HTMLElement;
-      const row = document.querySelectorAll(".row.user")[i] as HTMLElement;
-      const within =
-        row.getBoundingClientRect().top -
-        sc.getBoundingClientRect().top +
-        sc.scrollTop;
-      const max = sc.scrollHeight - sc.clientHeight;
-      return Math.abs(sc.scrollTop - Math.min(within, max)) < 4;
-    }, idx);
+  // Asserting by scroll position, not prompt text: the reply fixture reuses one
+  // prompt string across turns. `atPrompt` is the shared helper above.
   const atBottom = () =>
     page.evaluate(() => {
       const sc = document.querySelector(".scroller") as HTMLElement;
@@ -688,16 +692,16 @@ test("Ctrl/Cmd+Up/Down step through user prompts", async ({ page }) => {
   const downBtn = page.getByTestId("prompt-nav-down");
   for (let i = last; i >= 0; i--) {
     await upBtn.click();
-    await expect.poll(() => atPrompt(i)).toBe(true);
+    await expect.poll(() => atPrompt(page, i)).toBe(true);
   }
   // Past the oldest, ↑ clamps — it stays on the first prompt.
   await upBtn.click();
-  await expect.poll(() => atPrompt(0)).toBe(true);
+  await expect.poll(() => atPrompt(page, 0)).toBe(true);
 
   // ↓ walks back toward newer prompts…
   for (let i = 1; i <= last; i++) {
     await downBtn.click();
-    await expect.poll(() => atPrompt(i)).toBe(true);
+    await expect.poll(() => atPrompt(page, i)).toBe(true);
   }
   // …and stepping past the newest returns to the live bottom.
   await downBtn.click();
@@ -708,13 +712,7 @@ test("sending a prompt while scrolled up jumps the transcript to the bottom", as
   page,
 }) => {
   // Build a transcript tall enough that its top and bottom differ.
-  for (let i = 0; i < 3; i++) {
-    await drive(page, "reply");
-    await expect(
-      page.getByText("That confirms it", { exact: false }).last(),
-    ).toBeVisible();
-  }
-  await waitForSettledWorkBlocks(page, 4);
+  await buildMultiTurn(page, 3);
 
   // Scroll to the top so we're no longer pinned to the bottom — via real wheel
   // input so the input-gated pin registers it as a user action and un-pins.
@@ -753,30 +751,11 @@ test("prev/next prompt-nav buttons are visible on hover and step through prompts
 }) => {
   // Build several turns so the oldest prompts have enough content below them to scroll to
   // the top (a short final turn can't, which is fine — the stepper clamps there).
-  for (let i = 0; i < 5; i++) {
-    await drive(page, "reply");
-    await expect(
-      page.getByText("That confirms it", { exact: false }).last(),
-    ).toBeVisible();
-  }
-  await waitForSettledWorkBlocks(page, 6);
+  await buildMultiTurn(page, 5);
 
   const count = await page.locator(".row.user").count(); // greeting + 5 replies
   expect(count).toBeGreaterThanOrEqual(6);
   const last = count - 1;
-
-  // True when the scroller sits at prompt `idx`'s block-start target.
-  const atPrompt = (idx: number) =>
-    page.evaluate((i) => {
-      const sc = document.querySelector(".scroller") as HTMLElement;
-      const row = document.querySelectorAll(".row.user")[i] as HTMLElement;
-      const within =
-        row.getBoundingClientRect().top -
-        sc.getBoundingClientRect().top +
-        sc.scrollTop;
-      const max = sc.scrollHeight - sc.clientHeight;
-      return Math.abs(sc.scrollTop - Math.min(within, max)) < 4;
-    }, idx);
 
   // The nav control is always mounted but hidden (opacity 0) until the transcript is
   // hovered. Hover the transcript-wrap to reveal it.
@@ -793,16 +772,16 @@ test("prev/next prompt-nav buttons are visible on hover and step through prompts
   // From the live tail, clicking ↑ steps one prompt older per click.
   for (let i = last; i >= 0; i--) {
     await upBtn.click();
-    await expect.poll(() => atPrompt(i)).toBe(true);
+    await expect.poll(() => atPrompt(page, i)).toBe(true);
   }
   // Past the oldest, ↑ clamps.
   await upBtn.click();
-  await expect.poll(() => atPrompt(0)).toBe(true);
+  await expect.poll(() => atPrompt(page, 0)).toBe(true);
 
   // ↓ walks back toward newer prompts…
   for (let i = 1; i <= last; i++) {
     await downBtn.click();
-    await expect.poll(() => atPrompt(i)).toBe(true);
+    await expect.poll(() => atPrompt(page, i)).toBe(true);
   }
 });
 
