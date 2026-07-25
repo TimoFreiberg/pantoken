@@ -24,24 +24,6 @@ discussion before becoming a gate (or being rejected).
 
 ## 🔴 Open bugs
 
-- ~~[x]~~ pantoken supports all the `@` references like polytoken does (files,
-  `@~/`/`@/`/`@../` external paths, `@skill:`, `@subagent:`,
-  `@model:p/m(level)` with `[`/`]` reasoning, Shift+Tab ignore toggle,
-  resolved-ref chips + missing-ref warnings). Known limits, accepted:
-  chips don't survive history replay (daemon `.jsonl` doesn't persist
-  `resolved_references`); external paths with spaces can't be referenced
-  (mention token ends at whitespace — TUI parity).
-- ~~[x]~~ tops of both sidebars are now window-drag surfaces
-  (`data-tauri-drag-region="deep"`, same contract as StatusHeader).
-- ~~[x]~~ sidebar build stamp now leads with the nearest release tag
-  (`v0.2.15 · <hash> · <date>`); tag resolves via `git describe` with a
-  jj fallback, hides when unresolvable.
-- ~~[x]~~ Subagent-completion notice dumped the whole report as a giant
-  ellipse-shaped pill. Fixed at both ends: `notification_message` in
-  `event_map.rs` builds a short label from `notification_type`
-  (summary passes through only for `HookResult`/`ExtensionMessage`/
-  `Unknown`), and `.notice` CSS is hardened (`--radius-sm`, `flex-start`,
-  `pre-wrap`) so any future long notice wraps instead of ellipsing.
 - [ ] **e2e live-tier coverage gap** (was "e2e suite asserts mock behaviors the
       live driver never produces"): the corpus-backed live tier exists
       (`e2e/live/`, 5 spec files vs `PANTOKEN_DRIVER=fake`, real recorded
@@ -55,13 +37,6 @@ discussion before becoming a gate (or being rejected).
       including after the sessionAction refactor) — one green
       `workflow_dispatch` run in CI is all that's left before promoting it to
       a blocking gate (drop the `if:` per the comment in ci.yml).
-- [x] move "archived" popups elsewhere (top of sidebar? still middle of transcript but top instead of bottom? discuss first) — resolved: archive-undo notice is now a top-of-sidebar overlay (position: absolute, anchored below the header); it doesn't displace session rows and only one exists at a time (issue #60).
-- ~~[x]~~ The "new session" view leaked the previous session's state:
-  ApprovalLayer/QnaInline dialogs, PlanView, the right context panel
-  (+ its edge tab), and the composer's context-pressure cue all read
-  `store.session` (still the old session while drafting). All now gate on
-  `!store.draft` — the pattern QueueTray already used. If a NEW surface
-  reads `store.session`, it must decide what drafting means for it.
 - [ ] **Branch (`/rewind`) live-path gaps** (found 2026-07-10 by the frontend→daemon
       trace; the request shape + entry-id→prompt_id mapping are correct, these are
       error-handling/coverage holes): (a) `branch_from` returns a bare
@@ -80,17 +55,6 @@ discussion before becoming a gate (or being rejected).
       OpenAPI spec does not enumerate valid domain values; they were discovered
       empirically against polytoken 0.5.3. See
       `rewind_experiment_results.md` in the session dir for full evidence.
-- [ ] **Finer-grained rewind domain menu** (deferred from the domains fix above):
-      the rewind button currently sends all three domains (`conversation`, `todos`,
-      `flags`) unconditionally. A right-click / long-press context menu on the
-      rewind button could offer finer-grained control — e.g., "rewind conversation
-      only" (keep todos/flags), "rewind conversation + todos" (keep flags), or the
-      default "rewind all." Needs UX design: menu placement, mobile long-press
-      behavior (phone-first), default label, and whether `conversation`-only is
-      useful given the unknown cascade question (does `conversation` alone already
-      reset todos/flags internally? untested). The store's `branch(entryId)` entry
-      point would take an optional `domains` param flowing through WS → hub →
-      `branch_from` → `RewindRequest`.
 - [ ] **clear_queue + SessionAction live-driver test gaps** (found 2026-07-10):
       the `clear_queue_drains_daemon_queue` test uses a 1-item fake `/turn/input`
       fixture, so its `deletes == 1` assertion can't tell "one DELETE per item" from
@@ -108,19 +72,6 @@ discussion before becoming a gate (or being rejected).
 
 ## 🎨 UI explorations
 
-- [ ] **Implement exploration 2a: composer chrome and status row.** Add the facet
-      control as a small tab on the composer's top border; keep upload on the left
-      edge of the composer; put permissions at the bottom-left; combine model and
-      effort into one quiet, text-looking button at the bottom-right; and place a
-      context-usage circle immediately to its right with no percentage text. Keep
-      the exact context value available through the control's tooltip/popover and
-      preserve keyboard and touch labels/hit targets.
-- [x] **Implement exploration 2c: sidebar top-row controls.** Keep New session as
-      the primary button, turn Search and Filter into icon buttons in the top row,
-      and pin Collapse to the left-side position it occupies in the collapsed
-      layout from exploration 1f so the collapse target does not move between
-      states. Preserve the search expansion behavior, filter-active indicator,
-      hotkeys, tooltips, and mobile-sized labeled controls.
 - [ ] **Implement exploration 1g: quieter transcript/sidebar chrome.** Minimize
       the transcript header to a single-line session title with a muted project
       tag (omit the tag when redundant), move Settings to the bottom-left sidebar
