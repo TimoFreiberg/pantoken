@@ -3,6 +3,8 @@ import { drive, gotoFresh } from "./helpers.js";
 
 const composer = (page: Page) => page.locator(".composer-wrap textarea");
 
+// ─── Ctrl+R prompt-history popup (merged from prompt-history-popup.e2e.ts) ────────
+
 // The focused greeting session at boot has exactly one user message — recall surfaces it.
 const GREETING = "Add a /health route to the server and a smoke test for it.";
 
@@ -128,4 +130,55 @@ test("Alt+Enter inserts a newline instead of sending", async ({ page }) => {
   await page.keyboard.press("Alt+Enter");
   await page.keyboard.type("line two");
   await expect(ta).toHaveValue("line one\nline two");
+});
+
+test("Ctrl+R opens prompt history popup and fills the composer on Enter", async ({
+  page,
+}) => {
+  // Send a few prompts so there's history to recall.
+  const popupComposer = page.getByPlaceholder("Message pantoken…");
+  for (let i = 0; i < 3; i++) {
+    await drive(page, "reply");
+    await expect(
+      page.getByText("That confirms it", { exact: false }).last(),
+    ).toBeVisible();
+  }
+
+  // Focus the composer and press Ctrl+R.
+  await popupComposer.focus();
+  await popupComposer.press("Control+r");
+
+  // The popup should be visible with recent prompts.
+  const menu = page.getByTestId("prompt-history-menu");
+  await expect(menu).toBeVisible();
+  // At least one option (the exact count depends on how many unique prompts were sent).
+  const optCount = await menu.getByRole("option").count();
+  expect(optCount).toBeGreaterThan(0);
+
+  // Arrow down to the next entry, Enter fills the composer.
+  await menu.press("ArrowDown");
+  await menu.press("Enter");
+  await expect(menu).toHaveCount(0);
+  // The composer should now have text (the selected prompt).
+  await expect(popupComposer).not.toHaveValue("");
+});
+
+test("Escape closes the prompt history popup without filling", async ({
+  page,
+}) => {
+  const popupComposer = page.getByPlaceholder("Message pantoken…");
+  await drive(page, "reply");
+  await expect(
+    page.getByText("That confirms it", { exact: false }),
+  ).toBeVisible();
+
+  await popupComposer.focus();
+  await popupComposer.press("Control+r");
+  const menu = page.getByTestId("prompt-history-menu");
+  await expect(menu).toBeVisible();
+
+  await menu.press("Escape");
+  await expect(menu).toHaveCount(0);
+  // Composer should still be empty (no prompt was selected).
+  await expect(popupComposer).toHaveValue("");
 });

@@ -1,10 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 import { drive, gotoFresh, waitForSettledWorkBlocks } from "./helpers.js";
 
-// Regression for issue #38: tighten the inter-block margins in the transcript's
+// Markdown rendering specs (merged from markdown-spacing.e2e.ts + markdown-link.e2e.ts).
+// Spacing: regression for issue #38 — tighten inter-block margins in the transcript's
 // markdown rendering and the gap between assistant prose and tool calls, without
-// changing line-height. These specs read getComputedStyle on real rendered
-// elements to verify the CSS overrides in markstream-theme.css + Transcript.svelte.
+// changing line-height. These specs read getComputedStyle on real rendered elements to
+// verify the CSS overrides in markstream-theme.css + Transcript.svelte.
+// Link: regression for the desktop-app bug where a markdown link's hover tooltip stuck
+// around forever and intercepted clicks (root cause: markstream-svelte's built-in link
+// tooltip `.ms-tooltip` had no opacity binding / pointer-events without its dist CSS).
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
@@ -39,6 +43,8 @@ async function waitForMarkdownSettled(page: Page): Promise<void> {
       .getByRole("button", { name: "Copy message" }),
   ).toBeVisible();
 }
+
+// ─── Spacing (issue #38) ───────────────────────────────────────────────────────
 
 test("markdown block margins are tightened", async ({ page }) => {
   await drive(page, "markdown");
@@ -183,4 +189,29 @@ test("assistant row flex gap is reduced", async ({ page }) => {
     return getComputedStyle(row).gap;
   });
   expect(gap).toBe("5px");
+});
+
+// ─── Link tooltip (merged from markdown-link.e2e.ts) ─────────────────────────────
+
+test("markdown links route through pantoken's tooltip, not markstream's stuck one", async ({
+  page,
+}) => {
+  await drive(page, "markdown");
+
+  // The showcase fixture renders `[link](https://example.com)`.
+  const link = page.locator("a.link-node", { hasText: "link" }).first();
+  await expect(link).toBeVisible();
+
+  // markstream's own tooltip is off, so LinkNode falls back to a plain `title`
+  // attribute — the hook our delegated Tooltip.svelte reads. (It carries the href,
+  // since the markdown link has no explicit title.)
+  await expect(link).toHaveAttribute("title", "https://example.com");
+  await expect(link).toHaveAttribute("href", "https://example.com");
+
+  // The broken singleton must never be created — not before and not after a hover.
+  // Its absence is what kills both the stuck-forever text and the click-eating overlay.
+  await expect(page.locator(".ms-tooltip")).toHaveCount(0);
+  await link.hover();
+  await page.waitForTimeout(200); // past markstream's 80ms show timer, had it fired
+  await expect(page.locator(".ms-tooltip")).toHaveCount(0);
 });
