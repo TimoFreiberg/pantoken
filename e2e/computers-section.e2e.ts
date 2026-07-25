@@ -14,6 +14,41 @@ test("Add computer button opens profile form", async ({ page }) => {
   await expect(page.getByTestId("profile-label-input")).toBeVisible();
 });
 
+test("Add computer from dropdown closes the dropdown", async ({ page }) => {
+  const switcher = page.getByTestId("host-switcher");
+  await switcher.getByTestId("host-switcher-trigger").click();
+  await switcher.getByTestId("add-computer-btn").click();
+  await expect(page.getByTestId("profile-form-panel")).toBeVisible();
+  // The dropdown panel should be gone. The panel uses id= (not data-testid=),
+  // so use a CSS id selector.
+  await expect(page.locator("#host-switcher-panel")).toHaveCount(0);
+});
+
+test("Form opens with first input focused", async ({ page }) => {
+  const switcher = page.getByTestId("host-switcher");
+  await switcher.getByTestId("host-switcher-trigger").click();
+  await switcher.getByTestId("add-computer-btn").click();
+  await expect(page.getByTestId("profile-label-input")).toBeFocused();
+});
+
+test("Typing while form is open does not steal composer focus", async ({ page }) => {
+  const switcher = page.getByTestId("host-switcher");
+  await switcher.getByTestId("host-switcher-trigger").click();
+  await switcher.getByTestId("add-computer-btn").click();
+  await expect(page.getByTestId("profile-form-panel")).toBeVisible();
+  // Explicitly blur the input to simulate focus-drift.
+  await page.getByTestId("profile-label-input").evaluate((el) => (el as HTMLInputElement).blur());
+  // Confirm the input is no longer focused before pressing a key.
+  await expect(page.getByTestId("profile-label-input")).not.toBeFocused();
+  // Press a printable key.
+  await page.keyboard.press("a");
+  // The composer textarea should NOT have focus.
+  const activeTag = await page.evaluate(() => document.activeElement?.tagName);
+  expect(activeTag).not.toBe("TEXTAREA");
+  // The form's first input should have been refocused.
+  await expect(page.getByTestId("profile-label-input")).toBeFocused();
+});
+
 test("Manage computers opens Settings to Computers section", async ({ page }) => {
   const switcher = page.getByTestId("host-switcher");
   await switcher.getByTestId("host-switcher-trigger").click();

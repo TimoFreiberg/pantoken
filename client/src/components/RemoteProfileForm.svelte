@@ -36,6 +36,7 @@
   let xdgModeDraft = $state<XdgMode>("isolated");
   let executionTargetDraft = $state<ExecutionTargetProfile>({ kind: "host" });
   let error = $state<string | null>(null);
+  let errorDetail = $state<string | null>(null);
   let saving = $state(false);
 
   // Docker sub-fields
@@ -112,7 +113,7 @@
       if (phone) {
         overlayHistory.opened("profile-form", closeFromHistory);
       }
-      void tick().then(() => panelEl?.focus());
+      void tick().then(() => panelEl?.querySelector<HTMLInputElement>("#profile-label")?.focus());
     }
   });
 
@@ -138,12 +139,40 @@
     target?.focus();
   }
 
-  function onKey(e: KeyboardEvent): void {
-    if (e.key === "Escape" && open) {
-      e.preventDefault();
-      close();
+  // Exclusive hotkey ownership while the form is open. Registered as a
+  // capture-phase listener so it fires BEFORE the composer's bubble-phase
+  // type-to-focus / Enter-to-send handler (Composer mounts first, so a
+  // bubble-phase guard here would lose the race). When no input is focused
+  // (focus-drift case), absorb printable keystrokes and Enter and refocus the
+  // first input so the composer's activeElement check sees an INPUT and bails.
+  $effect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent): void {
+      // Escape closes the form.
+      if (e.key === "Escape") {
+        e.preventDefault();
+        close();
+        return;
+      }
+      // While the form is open, absorb printable keystrokes and Enter so they
+      // never reach the composer's type-to-focus / Enter-to-send handler.
+      if (e.key.length === 1 || e.key === "Enter") {
+        const el = document.activeElement as HTMLElement | null;
+        if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) {
+          // The focused input will handle the key — don't interfere.
+          return;
+        }
+        // No input focused: prevent the keystroke from reaching the composer.
+        // Capture-phase preventDefault stops the default action; the composer's
+        // bubble-phase listener still fires, but its activeElement check now
+        // sees the refocused input, so it bails.
+        e.preventDefault();
+        panelEl?.querySelector<HTMLInputElement>("#profile-label")?.focus();
+      }
     }
-  }
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
+  });
 
   const policyOptions = [
     { value: "requireExisting" as const, label: "Require existing" },
@@ -184,11 +213,13 @@
     const validationError = validate();
     if (validationError) {
       error = validationError;
+      errorDetail = null;
       return;
     }
 
     saving = true;
     error = null;
+    errorDetail = null;
 
     try {
       const portNum = portDraft.trim() ? Number(portDraft.trim()) : undefined;
@@ -225,7 +256,13 @@
 
       close();
     } catch (err) {
-      error = (err as Error)?.message ?? "Failed to save computer";
+      const message = (err as Error)?.message ?? "Failed to save computer";
+      const detail = err instanceof Error
+        ? (err.cause ? String(err.cause) : err.stack ?? err.toString())
+        : typeof err === "string" ? err : JSON.stringify(err, null, 2);
+      error = message;
+      errorDetail = detail !== message && detail !== "{}" ? detail : null;
+      console.error("[RemoteProfileForm] Failed to save computer:", err);
       // Preserve all form values on error — do not reset.
     } finally {
       saving = false;
@@ -243,8 +280,6 @@
         : { kind: "host" };
   }
 </script>
-
-<svelte:window onkeydown={onKey} />
 
 {#if open}
   <div class="scrim" onclick={() => close()} role="presentation"></div>
@@ -433,7 +468,16 @@
       </p>
 
       {#if error}
-        <p class="error" role="alert" data-testid="profile-form-error">{error}</p>
+        <div class="error-block" role="alert" data-testid="profile-form-error">
+          <p class="error-msg">{error}</p>
+          {#if errorDetail}
+            <details class="error-details">
+              <summary>Show details</summary>
+              <pre class="error-detail-text">{errorDetail}</pre>
+              <button type="button" class="error-copy" onclick={() => navigator.clipboard.writeText(errorDetail ?? "")}>Copy</button>
+            </details>
+          {/if}
+        </div>
       {/if}
 
       <div class="actions">
@@ -562,11 +606,30 @@
     line-height: 1.5;
     margin: 4px 0 0;
   }
-  .error {
-    font-size: 13px;
-    color: var(--danger);
-    margin: 0;
+  .error-block {
+    border: 1px solid var(--danger);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
   }
+  .error-block .error-msg { font-size: 13px; color: var(--danger); margin: 0; }
+  .error-details { margin-top: 6px; }
+  .error-details summary {
+    font-size: 12px; color: var(--text-muted); cursor: pointer;
+    min-height: 32px; display: flex; align-items: center;
+  }
+  .error-detail-text {
+    font-size: 11px; font-family: var(--font-mono, monospace);
+    color: var(--text-muted); margin: 6px 0 0; white-space: pre-wrap;
+    word-break: break-all; max-height: 200px; overflow-y: auto;
+    background: var(--surface-sunken); padding: 8px; border-radius: 4px;
+  }
+  .error-copy {
+    font: inherit; font-size: 11px; color: var(--accent);
+    background: none; border: 0; cursor: pointer; padding: 4px 0;
+    min-height: 32px;
+  }
+  .error-copy:hover { color: var(--text); }
   .actions {
     display: flex;
     gap: 8px;

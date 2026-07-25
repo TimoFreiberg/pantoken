@@ -15,6 +15,10 @@
   --bg-elevated: #fffdf8;
   --surface: #fbf8f1;
   --surface-sunken: #ece7dd;
+  /* Hover affordance on warm-paper surfaces — used by dropdown options and
+     trigger/management buttons. Matches --surface-sunken: a slightly darker
+     plane that reads as "this is interactive" without spending elevation. */
+  --surface-hover: #ece7dd;
   /* Code gets its own quiet neutral plane. It should scan as technical content without
      borrowing the stronger elevation/selection semantics of the shared surfaces. */
   --surface-code: #efebe3;
@@ -131,6 +135,9 @@
   --bg-elevated: #2b2824;
   --surface: #272420;
   --surface-sunken: #1e1c19;
+  /* Hover lift on the charcoal canvas — sits between --surface and --bg-elevated
+     so it reads as a subtle lighter hover affordance. */
+  --surface-hover: #312d29;
   --surface-code: #131210;
   --border-code: #332f2b;
   --text: #eee9e1;

@@ -34,6 +34,14 @@ test("Profile form is full-screen with Back button", async ({ page }) => {
   await expect(page.getByTestId("profile-form-panel")).toBeHidden();
 });
 
+test("Add computer from dropdown closes dropdown on phone", async ({ page }) => {
+  const switcher = page.getByTestId("host-switcher");
+  await switcher.getByTestId("host-switcher-trigger").click();
+  await switcher.getByTestId("add-computer-btn").click();
+  await expect(page.getByTestId("profile-form-panel")).toBeVisible();
+  await expect(page.locator("#host-switcher-panel")).toHaveCount(0);
+});
+
 test("Add/edit/delete flows work on phone", async ({ page }) => {
   await openSettings(page, "computers");
   await page.getByTestId("add-computer-btn").click();

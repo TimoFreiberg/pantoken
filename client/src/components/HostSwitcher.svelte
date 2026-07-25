@@ -42,6 +42,18 @@
     restoreFocus();
   }
 
+  // Unmount the panel without touching the overlay-history stack or restoring
+  // focus. Used by the management buttons: a child overlay (profile form,
+  // container setup, settings) is about to open and take over both focus and
+  // the phone history stack. Calling close() here would race — its async
+  // history.back() would interleave with the child's opened() call and strand
+  // the sidebar scrim. The child overlay's opened() replaces the host-switcher
+  // entry via peer navigation, so we just hide the panel and let it take over.
+  function hide(): void {
+    open = false;
+    failure = null;
+  }
+
   function toggle(): void {
     if (open) {
       close();
@@ -173,9 +185,9 @@
       </div>
       {#if coordinator.multiHostCapable}
         <div class="management">
-          <button onclick={() => profileEditor.openNew()} data-testid="add-computer-btn">Add computer</button>
-          <button onclick={() => profileEditor.openNewContainer()} data-testid="host-switcher-setup-docker">Setup Docker container</button>
-          <button onclick={() => store.openSettingsTo("computers")} data-testid="manage-computers-btn">Manage computers</button>
+          <button onclick={() => { hide(); profileEditor.openNew(); }} data-testid="add-computer-btn">Add computer</button>
+          <button onclick={() => { hide(); profileEditor.openNewContainer(); }} data-testid="host-switcher-setup-docker">Setup Docker container</button>
+          <button onclick={() => { hide(); store.openSettingsTo("computers"); }} data-testid="manage-computers-btn">Manage computers</button>
         </div>
       {/if}
     </div>
@@ -213,6 +225,11 @@
   .failure button { border: 0; background: none; color: var(--accent); cursor: pointer; font: inherit; font-weight: 650; }
   .management { display: grid; gap: 2px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
   .management button { min-height: 40px; text-align: left; padding: 0 8px; color: var(--text-muted); font-size: 12px; }
+  .management button:hover, .management button:focus-visible {
+    background: var(--surface-hover);
+    color: var(--text);
+    outline: none;
+  }
   @media (max-width: 859px) {
     .host-switcher { padding: 0 0 8px; }
     .host-trigger { min-height: 52px; }
