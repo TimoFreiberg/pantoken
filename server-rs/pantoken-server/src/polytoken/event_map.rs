@@ -3521,13 +3521,6 @@ mod tests {
     }
 
     #[test]
-    fn heartbeat_empty() {
-        let out = fold_fresh(json!({ "type": "heartbeat", "timestamp": "t" }));
-        assert!(out.events.is_empty());
-        assert!(out.effects.is_empty());
-    }
-
-    #[test]
     fn notification_autodrain_switch_session_updated_and_set_autodrain_enabled_regression() {
         let out = fold_fresh(json!({ "type": "notification_autodrain_switch", "enabled": true }));
         let ev = event_json(&out.events[0]);
@@ -3537,13 +3530,6 @@ mod tests {
             effects_json(&out),
             vec![json!({ "type": "setAutodrainEnabled", "enabled": true })]
         );
-    }
-
-    #[test]
-    fn notifications_drained_empty() {
-        let out = fold_fresh(json!({ "type": "notifications_drained", "count": 3 }));
-        assert!(out.events.is_empty());
-        assert!(out.effects.is_empty());
     }
 
     #[test]
@@ -4299,10 +4285,81 @@ mod tests {
     }
 
     #[test]
-    fn hook_fired_empty() {
-        assert_empty(
-            json!({ "type": "hook_fired", "event_type": "pre_tool", "hook_name": "my-hook", "outcome": "allowed" }),
-        );
+    fn ambient_events_produce_no_events_or_effects() {
+        // All these daemon event variants fold to an empty result (no events,
+        // no effects). Previously 13 individual tests; consolidated into one
+        // table-driven loop over (name, json).
+        let cases: &[(&str, Value)] = &[
+            (
+                "heartbeat",
+                json!({ "type": "heartbeat", "timestamp": "t" }),
+            ),
+            (
+                "notifications_drained",
+                json!({ "type": "notifications_drained", "count": 3 }),
+            ),
+            (
+                "context_loaded",
+                json!({ "type": "context_loaded", "hash": "abc", "path": "/foo" }),
+            ),
+            (
+                "tool_reveal",
+                json!({ "type": "tool_reveal", "prompt_id": "p1", "source": { "type": "tool_search" }, "tool_names": ["bash"] }),
+            ),
+            (
+                "classifier_decision",
+                json!({ "type": "classifier_decision", "call_id": "c1", "outcome": "allow", "prompt_id": "p1", "tool_name": "bash" }),
+            ),
+            (
+                "extension_registered",
+                json!({ "type": "extension_registered", "name": "my-ext" }),
+            ),
+            (
+                "image_reference_resolved",
+                json!({ "type": "image_reference_resolved", "file_size_bytes": 1024, "media_type": "image/png", "path": "/img.png", "prompt_id": "p1" }),
+            ),
+            (
+                "job_promoted",
+                json!({ "type": "job_promoted", "job_id": "j1" }),
+            ),
+            (
+                "job_completed",
+                json!({ "type": "job_completed", "exit_code": 0, "job_id": "j1" }),
+            ),
+            (
+                "job_expiring",
+                json!({ "type": "job_expiring", "job_id": "j1" }),
+            ),
+            (
+                "job_cancelled",
+                json!({ "type": "job_cancelled", "job_id": "j1" }),
+            ),
+            (
+                "job_updated",
+                json!({ "type": "job_updated", "job_id": "j1" }),
+            ),
+            (
+                "usage_throttle",
+                json!({ "type": "usage_throttle", "action": { "kind": "proceed" }, "provider": "anthropic", "snapshot": {} }),
+            ),
+            (
+                "hook_fired_pre_tool_allowed",
+                json!({ "type": "hook_fired", "event_type": "pre_tool", "hook_name": "my-hook", "outcome": "allowed" }),
+            ),
+            (
+                "hook_fired_stop_allowed",
+                json!({ "type": "hook_fired", "event_type": "stop", "hook_name": "my-hook", "outcome": "allowed" }),
+            ),
+            (
+                "hook_fired_non_stop_blocked",
+                json!({ "type": "hook_fired", "event_type": "pre_tool", "hook_name": "my-hook", "outcome": "blocked" }),
+            ),
+        ];
+        for (name, value) in cases {
+            let out = fold_fresh(value.clone());
+            assert!(out.events.is_empty(), "{name}: expected no events");
+            assert!(out.effects.is_empty(), "{name}: expected no effects");
+        }
     }
 
     #[test]
@@ -4337,47 +4394,6 @@ mod tests {
     }
 
     #[test]
-    fn hook_fired_stop_allowed_is_empty() {
-        // A stop hook that allows the stop (outcome:"allowed") should be a no-op.
-        assert_empty(
-            json!({ "type": "hook_fired", "event_type": "stop", "hook_name": "my-hook", "outcome": "allowed" }),
-        );
-    }
-
-    #[test]
-    fn hook_fired_non_stop_blocked_is_empty() {
-        // A non-stop hook with outcome:"blocked" (e.g. a pre_tool hook that blocks)
-        // should NOT trigger the turn-boundary synthesis — only stop hooks do.
-        assert_empty(
-            json!({ "type": "hook_fired", "event_type": "pre_tool", "hook_name": "my-hook", "outcome": "blocked" }),
-        );
-    }
-
-    #[test]
-    fn context_loaded_empty() {
-        assert_empty(json!({ "type": "context_loaded", "hash": "abc", "path": "/foo" }));
-    }
-
-    #[test]
-    fn tool_reveal_empty() {
-        assert_empty(
-            json!({ "type": "tool_reveal", "prompt_id": "p1", "source": { "type": "tool_search" }, "tool_names": ["bash"] }),
-        );
-    }
-
-    #[test]
-    fn classifier_decision_empty() {
-        assert_empty(
-            json!({ "type": "classifier_decision", "call_id": "c1", "outcome": "allow", "prompt_id": "p1", "tool_name": "bash" }),
-        );
-    }
-
-    #[test]
-    fn extension_registered_empty() {
-        assert_empty(json!({ "type": "extension_registered", "name": "my-ext" }));
-    }
-
-    #[test]
     fn subagent_started_emits_fetch_state() {
         let out = fold_fresh(
             json!({ "type": "subagent_started", "handle": "h1", "model": "m", "subagent_type": "general" }),
@@ -4407,45 +4423,6 @@ mod tests {
                 prompt_id: None,
             }
         ));
-    }
-
-    #[test]
-    fn image_reference_resolved_empty() {
-        assert_empty(
-            json!({ "type": "image_reference_resolved", "file_size_bytes": 1024, "media_type": "image/png", "path": "/img.png", "prompt_id": "p1" }),
-        );
-    }
-
-    #[test]
-    fn job_promoted_empty() {
-        assert_empty(json!({ "type": "job_promoted", "job_id": "j1" }));
-    }
-
-    #[test]
-    fn job_completed_empty() {
-        assert_empty(json!({ "type": "job_completed", "exit_code": 0, "job_id": "j1" }));
-    }
-
-    #[test]
-    fn job_expiring_empty() {
-        assert_empty(json!({ "type": "job_expiring", "job_id": "j1" }));
-    }
-
-    #[test]
-    fn job_cancelled_empty() {
-        assert_empty(json!({ "type": "job_cancelled", "job_id": "j1" }));
-    }
-
-    #[test]
-    fn job_updated_empty() {
-        assert_empty(json!({ "type": "job_updated", "job_id": "j1" }));
-    }
-
-    #[test]
-    fn usage_throttle_empty() {
-        assert_empty(
-            json!({ "type": "usage_throttle", "action": { "kind": "proceed" }, "provider": "anthropic", "snapshot": {} }),
-        );
     }
 
     /// Assert a daemon event folds to a single notify hostUiRequest at the given
