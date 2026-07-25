@@ -7,6 +7,11 @@
 // `WsClient` singleton, preserving the existing single-host behavior and all
 // current importers (store, pull-to-refresh, delivery).
 //
+// TODO: reconnect/backoff/heartbeat logic is untested — the existing unit tests
+// cover only URL resolution, send-gating, and unsubscribe. The exponential
+// backoff, heartbeat watchdog, half-open probe, and visibility/online
+// auto-reconnect paths have no unit coverage today.
+//
 // The logic is a near-verbatim port of the original module-scope code: each
 // module-scope reference (`_state`, `ws`, `listeners`, etc.) became `this.`-
 // instance fields, and the global event listeners register/unregister per
