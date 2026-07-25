@@ -10,12 +10,10 @@ import {
   createTurnGrouper,
   filterHiddenThinking,
   findPreservedSegments,
-  formatWorkedDuration,
   groupTurns,
   injectText,
   parseQnaResult,
   thinkingTailId,
-  workedLabel,
 } from "./transcript-view.js";
 
 // ── builders ─────────────────────────────────────────────────────────────────
@@ -1267,42 +1265,5 @@ describe("parseQnaResult", () => {
 
   test("returns null when there are no Q: lines (raw fallback)", () => {
     expect(parseQnaResult("just some prose, no questions")).toBeNull();
-  });
-});
-
-describe("formatWorkedDuration", () => {
-  test("sub-second rounds up to 1s (never 0s)", () => {
-    expect(formatWorkedDuration(120)).toBe("1s");
-  });
-  test("whole seconds under a minute", () => {
-    expect(formatWorkedDuration(37_000)).toBe("37s");
-  });
-  test("minutes and seconds", () => {
-    expect(formatWorkedDuration(125_000)).toBe("2m 5s");
-  });
-  test("exact minute drops the seconds", () => {
-    expect(formatWorkedDuration(120_000)).toBe("2m");
-  });
-  test("hours and minutes", () => {
-    expect(formatWorkedDuration(3_780_000)).toBe("1h 3m");
-  });
-});
-
-describe("workedLabel", () => {
-  test("settled turn with both bounds yields the duration", () => {
-    const t = groupTurns([
-      user("u1", "1000"),
-      tool("b1"),
-      asst("final", { completedAt: "38000" }),
-    ])[0]!;
-    expect(workedLabel(t)).toBe("Worked for 37s");
-  });
-  test("missing end bound falls back to bare 'Worked'", () => {
-    const t = groupTurns([
-      user("u1", "1000"),
-      tool("b1"),
-      asst("final", { ts: undefined }),
-    ])[0]!;
-    expect(workedLabel(t)).toBe("Worked");
   });
 });
