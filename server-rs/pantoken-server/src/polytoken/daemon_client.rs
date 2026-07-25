@@ -1118,6 +1118,60 @@ struct CancelHandle {
     notify: Arc<tokio::sync::Notify>,
 }
 
+/// Pure state machine governing `sse_loop`'s reconnect/backoff/continuity
+/// decisions. Holds no IO and no async — every method returns a decision the
+/// loop acts on, so transitions are unit-testable without axum or sleeps.
+struct SseReconnectState {
+    backoff: u64,
+    backoff_start: u64,
+    backoff_cap: u64,
+    had_connected_once: bool,
+    last_event_id: Option<String>,
+}
+
+impl SseReconnectState {
+    fn new(backoff_start: u64, backoff_cap: u64) -> Self {
+        Self {
+            backoff: backoff_start,
+            backoff_start,
+            backoff_cap,
+            had_connected_once: false,
+            last_event_id: None,
+        }
+    }
+
+    /// The `Last-Event-ID` header value to send on the next connect, if any.
+    fn last_event_id_header(&self) -> Option<&str> {
+        self.last_event_id.as_deref()
+    }
+
+    /// Record an `id:` line seen while streaming. Mutates `last_event_id`.
+    fn record_event_id(&mut self, id: String) {
+        self.last_event_id = Some(id);
+    }
+
+    /// Called on a *successful* connect (HTTP 2xx + stream opened).
+    /// Returns whether a synthetic `StreamDiscontinuity` envelope should be
+    /// emitted *before* streaming begins — true exactly when this is a
+    /// reconnect (we had connected once before). Flips `had_connected_once`
+    /// and resets backoff.
+    fn on_connected(&mut self) -> bool {
+        let emit = self.had_connected_once;
+        self.had_connected_once = true;
+        self.backoff = self.backoff_start; // reset on success
+        emit
+    }
+
+    /// Called on any failure requiring reconnect (HTTP error, stream error,
+    /// heartbeat timeout). Returns the backoff to sleep *this* iteration,
+    /// then doubles/caps internally for the next attempt.
+    fn on_failure(&mut self) -> u64 {
+        let sleep = self.backoff;
+        self.backoff = (self.backoff * 2).min(self.backoff_cap);
+        sleep
+    }
+}
+
 /// A typed client for one live polytoken daemon process. Owns the HTTP surface, the
 /// attachment lease (+ heartbeat task), and the SSE subscriber. Call `close()` to
 /// release the lease and terminate the daemon — never leave a child process orphaned.
@@ -2391,10 +2445,7 @@ impl DaemonClient {
     ) where
         F: Fn(SseEnvelope) + Send + Sync + 'static,
     {
-        let mut backoff: u64 = 1000;
-        let max_backoff: u64 = 30_000;
-        let mut last_event_id: Option<String> = None;
-        let mut had_connected_once = false;
+        let mut state = SseReconnectState::new(1000, 30_000);
         let mut stopped = false;
 
         // Liveness is a heartbeat timeout folded into the stream read below (the
@@ -2407,7 +2458,7 @@ impl DaemonClient {
         while !stopped {
             // Build the request.
             let mut req = self.http.get(format!("{}/events", self.base_url));
-            if let Some(ref id) = last_event_id {
+            if let Some(id) = state.last_event_id_header() {
                 req = req.header("Last-Event-ID", id);
             }
             // Attach the bearer auth header (daemon 0.5.0+). Without it the SSE
@@ -2431,15 +2482,14 @@ impl DaemonClient {
             let response = match response_result {
                 Err(e) => {
                     if !stopped {
-                        error!("[polytoken] SSE error: {}; retry in {}ms", e, backoff);
+                        error!("[polytoken] SSE error: {}; retry in {}ms", e, state.backoff);
                     }
                     if !stopped {
                         tokio::select! {
                             _ = &mut cancel_rx => { stopped = true; break; }
                             _ = stop_notify.notified() => { stopped = true; break; }
-                            _ = tokio::time::sleep(Duration::from_millis(backoff)) => {}
+                            _ = tokio::time::sleep(Duration::from_millis(state.on_failure())) => {}
                         }
-                        backoff = (backoff * 2).min(max_backoff);
                     }
                     continue;
                 }
@@ -2449,21 +2499,23 @@ impl DaemonClient {
             if !response.status().is_success() {
                 let status = response.status();
                 if !stopped {
-                    error!("[polytoken] SSE connect failed: {status}; retry in {backoff}ms");
+                    error!(
+                        "[polytoken] SSE connect failed: {status}; retry in {}ms",
+                        state.backoff
+                    );
                 }
                 if !stopped {
                     tokio::select! {
                         _ = &mut cancel_rx => { stopped = true; break; }
                         _ = stop_notify.notified() => { stopped = true; break; }
-                        _ = tokio::time::sleep(Duration::from_millis(backoff)) => {}
+                        _ = tokio::time::sleep(Duration::from_millis(state.on_failure())) => {}
                     }
-                    backoff = (backoff * 2).min(max_backoff);
                 }
                 continue;
             }
 
             // Reconnected successfully.
-            if had_connected_once {
+            if state.on_connected() {
                 info!("[polytoken] SSE reconnected");
                 // Emit a synthetic stream_discontinuity so the driver re-seeds.
                 // seq: None matches the documented contract for synthesized events.
@@ -2477,8 +2529,6 @@ impl DaemonClient {
                     },
                 });
             }
-            had_connected_once = true;
-            backoff = 1000; // reset backoff on successful connect
 
             // Stream the body and parse SSE frames.
             use futures_util::StreamExt;
@@ -2541,7 +2591,7 @@ impl DaemonClient {
                                     let mut data_lines: Vec<String> = Vec::new();
                                     for l in &lines {
                                         if let Some(rest) = l.strip_prefix("id:") {
-                                            last_event_id = Some(rest.trim().to_string());
+                                            state.record_event_id(rest.trim().to_string());
                                         } else if let Some(rest) = l.strip_prefix("data:") {
                                             // SSE spec: strip a single leading space after the colon.
                                             let data = rest.strip_prefix(' ').unwrap_or(rest);
@@ -2573,17 +2623,15 @@ impl DaemonClient {
                 tokio::select! {
                     _ = &mut cancel_rx => { stopped = true; break; }
                     _ = stop_notify.notified() => { stopped = true; break; }
-                    _ = tokio::time::sleep(Duration::from_millis(backoff)) => {}
+                    _ = tokio::time::sleep(Duration::from_millis(state.on_failure())) => {}
                 }
-                backoff = (backoff * 2).min(max_backoff);
             } else if !stopped {
                 // Stream ended normally — reconnect with backoff.
                 tokio::select! {
                     _ = &mut cancel_rx => { stopped = true; break; }
                     _ = stop_notify.notified() => { stopped = true; break; }
-                    _ = tokio::time::sleep(Duration::from_millis(backoff)) => {}
+                    _ = tokio::time::sleep(Duration::from_millis(state.on_failure())) => {}
                 }
-                backoff = (backoff * 2).min(max_backoff);
             }
         }
     }
@@ -4067,6 +4115,422 @@ sleep 30
         assert_eq!(
             resp.status, 0,
             "a hanging daemon should produce status 0 (timeout), not a real response"
+        );
+    }
+
+    // --- SseReconnectState unit tests (T1) ---
+
+    #[test]
+    fn backoff_doubles_then_caps_at_max() {
+        let mut s = SseReconnectState::new(1, 4);
+        // Failures yield 1, 2, 4, 4, 4 — doubling then holding at the cap.
+        assert_eq!(s.on_failure(), 1);
+        assert_eq!(s.on_failure(), 2);
+        assert_eq!(s.on_failure(), 4);
+        assert_eq!(s.on_failure(), 4);
+        assert_eq!(s.on_failure(), 4);
+    }
+
+    #[test]
+    fn backoff_resets_on_success_after_failures() {
+        let mut s = SseReconnectState::new(1, 4);
+        // Two failures: 1, then 2.
+        assert_eq!(s.on_failure(), 1);
+        assert_eq!(s.on_failure(), 2);
+        // A successful connect resets backoff to the start value.
+        s.on_connected();
+        // The next failure should return the reset value (1), not the doubled (4).
+        assert_eq!(s.on_failure(), 1);
+    }
+
+    #[test]
+    fn first_connect_emits_no_discontinuity() {
+        let mut s = SseReconnectState::new(1000, 30_000);
+        // First connect: no prior connection, so no discontinuity.
+        assert!(!s.on_connected());
+        // After the first connect, the gate is flipped.
+        assert!(s.had_connected_once);
+    }
+
+    #[test]
+    fn reconnect_emits_discontinuity() {
+        let mut s = SseReconnectState::new(1000, 30_000);
+        // First connect: no discontinuity.
+        assert!(!s.on_connected());
+        // Second connect (reconnect): discontinuity emitted.
+        assert!(s.on_connected());
+        // Third connect: still emits (every reconnect).
+        assert!(s.on_connected());
+    }
+
+    #[test]
+    fn last_event_id_replay() {
+        let mut s = SseReconnectState::new(1000, 30_000);
+        // Before any event id is recorded, the header is None.
+        assert!(s.last_event_id_header().is_none());
+        // After recording an id, it's available for replay.
+        s.record_event_id("42".to_string());
+        assert_eq!(s.last_event_id_header(), Some("42"));
+    }
+
+    #[test]
+    fn backoff_sequence_after_resets_and_failures() {
+        // A longer interleaved sequence locking in cumulative behavior.
+        let mut s = SseReconnectState::new(1000, 30_000);
+
+        // success — no backoff consumed, resets to start (already at start).
+        s.on_connected();
+        // fail, fail
+        assert_eq!(s.on_failure(), 1000);
+        assert_eq!(s.on_failure(), 2000);
+        // success — resets backoff to 1000.
+        s.on_connected();
+        // fail, fail, fail
+        assert_eq!(s.on_failure(), 1000);
+        assert_eq!(s.on_failure(), 2000);
+        assert_eq!(s.on_failure(), 4000);
+    }
+
+    // --- Behavioral tests (T1): sse_loop reconnect via real IO ---
+
+    /// Build a valid SSE `data:` frame JSON for a `message_start` event.
+    fn sse_message_start_json(session_id: &str, seq: i64) -> String {
+        serde_json::json!({
+            "seq": seq,
+            "emitted_at": "1970-01-01T00:00:00.000Z",
+            "session_id": session_id,
+            "event": {
+                "type": "message_start",
+                "prompt_id": "test-prompt"
+            }
+        })
+        .to_string()
+    }
+
+    /// A heartbeat SSE frame (keeps the connection alive without a real event).
+    fn sse_heartbeat_event() -> axum::response::sse::Event {
+        // An SSE comment line (starts with ':') is a valid heartbeat that the
+        // daemon uses; axum's `Event::comment` produces `: heartbeat\n\n`.
+        axum::response::sse::Event::default().comment("heartbeat")
+    }
+
+    #[tokio::test]
+    async fn sse_loop_delivers_streamed_event() {
+        use std::sync::{Arc, Mutex};
+
+        use axum::{
+            Router,
+            response::sse::{Event, Sse},
+            routing::get,
+        };
+        use tokio::net::TcpListener;
+        use tokio_stream::wrappers::ReceiverStream;
+
+        let session_id = "s1";
+        let frame_json = sse_message_start_json(session_id, 0);
+
+        // Server sends one data frame then keeps the stream alive with heartbeats.
+        let app = Router::new().route(
+            "/events",
+            get(move || {
+                let frame_json = frame_json.clone();
+                async move {
+                    let (tx, rx) =
+                        tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(16);
+                    // Send one real event frame.
+                    let _ = tx.send(Ok(Event::default().data(frame_json))).await;
+                    // Keep the stream open with periodic heartbeats so the
+                    // client doesn't time out.
+                    let tx2 = tx.clone();
+                    tokio::spawn(async move {
+                        loop {
+                            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                            if tx2.send(Ok(sse_heartbeat_event())).await.is_err() {
+                                break;
+                            }
+                        }
+                    });
+                    Sse::new(ReceiverStream::new(rx))
+                }
+            }),
+        );
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("local addr").port();
+        let _server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve");
+        });
+
+        let mut client = DaemonClient::new(session_id.into(), port, 1, None);
+        client.heartbeat_timeout_ms = 50;
+        let client = Arc::new(client);
+
+        let collected: Arc<Mutex<Vec<SseEnvelope>>> = Arc::new(Mutex::new(Vec::new()));
+        let collected_cb = collected.clone();
+        let sub = client
+            .subscribe(move |env| {
+                collected_cb.lock().unwrap().push(env);
+            })
+            .await;
+
+        // Wait for the event to arrive.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        sub.stop().await;
+
+        let events = collected.lock().unwrap();
+        assert!(
+            events.iter().any(|e| {
+                matches!(&e.event, DaemonEvent::MessageStart { .. }) && e.seq == Some(0)
+            }),
+            "should have delivered the streamed message_start event; got {:?}",
+            events.iter().map(|e| &e.event).collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn sse_loop_reconnects_and_emits_stream_discontinuity_on_heartbeat_timeout() {
+        use std::sync::{
+            Arc, Mutex,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        use axum::{
+            Router,
+            response::sse::{Event, Sse},
+            routing::get,
+        };
+        use tokio::net::TcpListener;
+        use tokio_stream::wrappers::ReceiverStream;
+
+        let session_id = "s1";
+        let connect_count = Arc::new(AtomicUsize::new(0));
+
+        // First connect: send one frame then go SILENT (no heartbeats) →
+        // heartbeat timeout fires → client reconnects.
+        // Second connect: send heartbeats to stabilize.
+        let connect_count_handler = connect_count.clone();
+        let app = Router::new().route(
+            "/events",
+            get(move || {
+                let cc = connect_count_handler.clone();
+                async move {
+                    let n = cc.fetch_add(1, Ordering::SeqCst);
+                    let (tx, rx) =
+                        tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(16);
+                    if n == 0 {
+                        // First connect: send one frame, then go SILENT by
+                        // holding `tx` open in a long-lived task without sending
+                        // anything. This keeps `ReceiverStream` pending (not
+                        // yielding None), so `stream.next()` blocks until the
+                        // client's 50ms heartbeat timeout fires — exercising
+                        // the heartbeat-timeout → reconnect path.
+                        let _ = tx
+                            .send(Ok(
+                                Event::default().data(sse_message_start_json(session_id, 0))
+                            ))
+                            .await;
+                        tokio::spawn(async move {
+                            let _tx = tx;
+                            std::future::pending::<()>().await;
+                        });
+                    } else {
+                        // Subsequent connects: keep alive with heartbeats.
+                        let tx2 = tx.clone();
+                        tokio::spawn(async move {
+                            loop {
+                                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                                if tx2.send(Ok(sse_heartbeat_event())).await.is_err() {
+                                    break;
+                                }
+                            }
+                        });
+                    }
+                    Sse::new(ReceiverStream::new(rx))
+                }
+            }),
+        );
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("local addr").port();
+        let _server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve");
+        });
+
+        let mut client = DaemonClient::new(session_id.into(), port, 1, None);
+        client.heartbeat_timeout_ms = 50;
+        let client = Arc::new(client);
+
+        let collected: Arc<Mutex<Vec<SseEnvelope>>> = Arc::new(Mutex::new(Vec::new()));
+        let collected_cb = collected.clone();
+        let sub = client
+            .subscribe(move |env| {
+                collected_cb.lock().unwrap().push(env);
+            })
+            .await;
+
+        // Poll until a StreamDiscontinuity arrives (heartbeat timeout ~50ms +
+        // backoff ~1000ms + reconnect + synthesis), with a generous outer
+        // timeout to avoid flaking under CI load.
+        let mut got_discontinuity = false;
+        for _ in 0..50 {
+            if collected
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| matches!(&e.event, DaemonEvent::StreamDiscontinuity { .. }))
+            {
+                got_discontinuity = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        sub.stop().await;
+
+        assert!(
+            got_discontinuity,
+            "should have received a StreamDiscontinuity after heartbeat-timeout reconnect; \
+             got {:?}",
+            collected
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|e| &e.event)
+                .collect::<Vec<_>>()
+        );
+        let events = collected.lock().unwrap();
+        let d = events
+            .iter()
+            .find(|e| matches!(&e.event, DaemonEvent::StreamDiscontinuity { .. }))
+            .unwrap();
+        assert_eq!(d.seq, None, "synthesized discontinuity has seq: None");
+        assert_eq!(d.session_id, session_id, "session_id matches the client");
+        if let DaemonEvent::StreamDiscontinuity {
+            missed,
+            subagent_handle,
+        } = &d.event
+        {
+            assert_eq!(*missed, 0, "missed is 0 for synthesized discontinuity");
+            assert!(
+                subagent_handle.is_none(),
+                "subagent_handle is None for synthesized discontinuity"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn sse_loop_replays_last_event_id_on_reconnect() {
+        use std::sync::{
+            Arc, Mutex,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        use axum::{
+            Router,
+            http::HeaderMap,
+            response::sse::{Event, Sse},
+            routing::get,
+        };
+        use tokio::net::TcpListener;
+        use tokio_stream::wrappers::ReceiverStream;
+
+        let session_id = "s1";
+        let connect_count = Arc::new(AtomicUsize::new(0));
+        // Records the Last-Event-ID header seen on each connect.
+        let seen_headers: Arc<Mutex<Vec<Option<String>>>> = Arc::new(Mutex::new(Vec::new()));
+
+        let seen_headers_handler = seen_headers.clone();
+        let connect_count_handler = connect_count.clone();
+        let app = Router::new().route(
+            "/events",
+            get(move |headers: HeaderMap| {
+                let cc = connect_count_handler.clone();
+                let sh = seen_headers_handler.clone();
+                async move {
+                    let n = cc.fetch_add(1, Ordering::SeqCst);
+                    let last_event_id = headers
+                        .get("last-event-id")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
+                    sh.lock().unwrap().push(last_event_id);
+
+                    let (tx, rx) =
+                        tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(16);
+                    if n == 0 {
+                        // First connect: send a frame WITH an id: line, then
+                        // hold `tx` open without sending → the client's 50ms
+                        // heartbeat timeout fires → reconnect.
+                        let _ = tx
+                            .send(Ok(Event::default()
+                                .id("7")
+                                .data(sse_message_start_json(session_id, 0))))
+                            .await;
+                        tokio::spawn(async move {
+                            let _tx = tx;
+                            std::future::pending::<()>().await;
+                        });
+                    } else {
+                        // Subsequent connects: keep alive with heartbeats.
+                        let tx2 = tx.clone();
+                        tokio::spawn(async move {
+                            loop {
+                                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                                if tx2.send(Ok(sse_heartbeat_event())).await.is_err() {
+                                    break;
+                                }
+                            }
+                        });
+                    }
+                    Sse::new(ReceiverStream::new(rx))
+                }
+            }),
+        );
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("local addr").port();
+        let _server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve");
+        });
+
+        let mut client = DaemonClient::new(session_id.into(), port, 1, None);
+        client.heartbeat_timeout_ms = 50;
+        let client = Arc::new(client);
+
+        let collected: Arc<Mutex<Vec<SseEnvelope>>> = Arc::new(Mutex::new(Vec::new()));
+        let collected_cb = collected.clone();
+        let sub = client
+            .subscribe(move |env| {
+                collected_cb.lock().unwrap().push(env);
+            })
+            .await;
+
+        // Poll until at least 2 connects have been recorded (first connect +
+        // heartbeat timeout ~50ms + backoff ~1000ms + second connect).
+        for _ in 0..50 {
+            if seen_headers.lock().unwrap().len() >= 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        sub.stop().await;
+
+        let headers = seen_headers.lock().unwrap();
+        assert!(
+            headers.len() >= 2,
+            "should have at least 2 connects (first + reconnect); got {}",
+            headers.len()
+        );
+        // First connect: no Last-Event-ID (never seen an id before).
+        assert!(
+            headers[0].is_none(),
+            "first connect should have no Last-Event-ID header; got {:?}",
+            headers[0]
+        );
+        // Second connect: should replay the id "7" from the first stream.
+        assert_eq!(
+            headers[1].as_deref(),
+            Some("7"),
+            "second connect should replay Last-Event-ID=7; got {:?}",
+            headers[1]
         );
     }
 }
