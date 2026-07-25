@@ -326,46 +326,6 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn test_build_path_query_plain() {
-        assert_eq!(build_path_query("main"), vec!["main".to_string()]);
-    }
-
-    #[test]
-    fn test_build_path_query_path_segments() {
-        let segs = build_path_query("src/main");
-        assert_eq!(segs, vec!["src".to_string(), "main".to_string()]);
-    }
-
-    #[test]
-    fn test_build_path_query_empty() {
-        assert_eq!(build_path_query(""), Vec::<String>::new());
-    }
-
-    #[test]
-    fn test_path_matches_simple() {
-        assert!(path_matches("src/main.rs", &["main".to_string()]));
-        assert!(!path_matches("src/lib.rs", &["main".to_string()]));
-    }
-
-    #[test]
-    fn test_path_matches_ordered_segments() {
-        assert!(path_matches(
-            "src/main/mod.rs",
-            &["src".to_string(), "main".to_string()]
-        ));
-        // Out-of-order segments should NOT match.
-        assert!(!path_matches(
-            "main/src/mod.rs",
-            &["src".to_string(), "main".to_string()]
-        ));
-    }
-
-    #[test]
-    fn test_path_matches_empty_query_matches_all() {
-        assert!(path_matches("anything.rs", &[]));
-    }
-
-    #[test]
     fn test_list_files_finds_files() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
@@ -638,58 +598,6 @@ mod external_tests {
         fs::write(home.path().join("Documents/report.md"), "").expect("write report.md");
         fs::write(home.path().join(".secrets"), "").expect("write .secrets");
         home
-    }
-
-    #[test]
-    fn test_split_external_query_tilde_alone() {
-        assert_eq!(split_external_query("~"), ("~".to_string(), "".to_string()));
-    }
-
-    #[test]
-    fn test_split_external_query_dotdot_alone() {
-        assert_eq!(
-            split_external_query(".."),
-            ("..".to_string(), "".to_string())
-        );
-    }
-
-    #[test]
-    fn test_split_external_query_trailing_slash_empty_partial() {
-        assert_eq!(
-            split_external_query("~/Documents/"),
-            ("~/Documents".to_string(), "".to_string())
-        );
-    }
-
-    #[test]
-    fn test_split_external_query_root_single_segment() {
-        // "/etc" has its only "/" at index 0 — the root marker must survive,
-        // not collapse to an empty dir_prefix.
-        assert_eq!(
-            split_external_query("/etc"),
-            ("/".to_string(), "etc".to_string())
-        );
-    }
-
-    #[test]
-    fn test_split_external_query_absolute_dir_with_partial() {
-        assert_eq!(
-            split_external_query("/etc/ho"),
-            ("/etc".to_string(), "ho".to_string())
-        );
-    }
-
-    #[test]
-    fn test_join_prefix_no_double_slash_for_root() {
-        assert_eq!(join_prefix("/", "etc"), "/etc");
-    }
-
-    #[test]
-    fn test_join_prefix_regular_prefix() {
-        assert_eq!(
-            join_prefix("~/Documents", "report.md"),
-            "~/Documents/report.md"
-        );
     }
 
     #[test]

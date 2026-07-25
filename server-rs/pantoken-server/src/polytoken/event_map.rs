@@ -4166,56 +4166,34 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_config_slash_bearing_model_full_form() {
+    fn snapshot_projects_fields_from_present_state() {
+        // Config: slash-bearing model id is split into model_id + thinking_level.
         let st = base_state();
         let cfg = snap_from(Some(&st)).config.expect("config present");
         assert_eq!(cfg.model_id.as_deref(), Some("anthropic/claude-sonnet-4"));
         assert_eq!(cfg.thinking_level.as_deref(), Some("medium"));
-    }
 
-    #[test]
-    fn snapshot_config_slash_less_model_whole_string() {
+        // Config: slash-less model stays as the whole string.
         let mut st = base_state();
         st.active_model = Some("local-model".to_string());
         let cfg = snap_from(Some(&st)).config.expect("config present");
         assert_eq!(cfg.model_id.as_deref(), Some("local-model"));
         assert_eq!(cfg.thinking_level.as_deref(), Some("medium"));
-    }
 
-    #[test]
-    fn snapshot_config_null_state_none() {
-        assert!(snap_from(None).config.is_none());
-    }
-
-    #[test]
-    fn snapshot_threads_active_facet() {
+        // Facet: projected from active_facet.
         let mut st = base_state();
         st.active_facet = "plan".to_string();
         assert_eq!(snap_from(Some(&st)).facet.as_deref(), Some("plan"));
-    }
 
-    #[test]
-    fn snapshot_facet_none_for_null_state() {
-        assert!(snap_from(None).facet.is_none());
-    }
-
-    #[test]
-    fn snapshot_threads_active_plan() {
+        // Active plan: projected from active_plan.
         let mut st = base_state();
         st.active_plan = Some("# My Plan\n- Step 1".to_string());
         assert_eq!(
             snap_from(Some(&st)).active_plan.as_deref(),
             Some("# My Plan\n- Step 1")
         );
-    }
 
-    #[test]
-    fn snapshot_active_plan_none_for_null_state() {
-        assert!(snap_from(None).active_plan.is_none());
-    }
-
-    #[test]
-    fn snapshot_threads_current_goal() {
+        // Current goal: projected from current_goal.
         use pantoken_protocol::session_driver::GoalInfo;
         let mut st = base_state();
         st.current_goal = Some(make_goal("Ship feature X", "active"));
@@ -4226,6 +4204,17 @@ mod tests {
                 lifecycle: "active".to_string(),
             }))
         );
+    }
+
+    #[test]
+    fn snapshot_null_state_projects_none_for_all_fields() {
+        let snap = snap_from(None);
+        assert!(snap.config.is_none(), "config");
+        assert!(snap.facet.is_none(), "facet");
+        assert!(snap.active_plan.is_none(), "active_plan");
+        assert!(snap.goal.is_none(), "goal");
+        assert!(snap.flags.is_none(), "flags");
+        assert!(snap.todos.is_none(), "todos");
     }
 
     #[test]
@@ -4254,16 +4243,24 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_threads_flags() {
-        use pantoken_protocol::session_driver::{FlaggedFile, FlaggedFileMode};
+    fn snapshot_threads_flags_and_todos() {
+        use pantoken_protocol::session_driver::{
+            FlaggedFile, FlaggedFileMode, TodoItem, TodoStatus,
+        };
+
         let mut st = base_state();
         st.flags = serde_json::from_value(json!([
             { "path": "src/app.ts", "mode": "included" },
             { "path": "README.md", "mode": "referenced" },
         ]))
         .expect("valid flag entries");
+        st.todos = serde_json::from_value(json!([
+            { "id": 1, "title": "Write tests", "description": "Add unit tests", "status": "in_progress", "dependencies": [2], "emitted_at": "2025-01-01T00:00:00Z" },
+        ]))
+        .expect("valid todo entries");
+        let snap = snap_from(Some(&st));
         assert_eq!(
-            snap_from(Some(&st)).flags,
+            snap.flags,
             Some(vec![
                 FlaggedFile {
                     path: "src/app.ts".to_string(),
@@ -4275,18 +4272,8 @@ mod tests {
                 },
             ])
         );
-    }
-
-    #[test]
-    fn snapshot_threads_todos() {
-        use pantoken_protocol::session_driver::{TodoItem, TodoStatus};
-        let mut st = base_state();
-        st.todos = serde_json::from_value(json!([
-            { "id": 1, "title": "Write tests", "description": "Add unit tests", "status": "in_progress", "dependencies": [2], "emitted_at": "2025-01-01T00:00:00Z" },
-        ]))
-        .expect("valid todo entries");
         assert_eq!(
-            snap_from(Some(&st)).todos,
+            snap.todos,
             Some(vec![TodoItem {
                 id: 1,
                 title: "Write tests".to_string(),
@@ -4296,13 +4283,6 @@ mod tests {
                 created_at: Some("2025-01-01T00:00:00Z".to_string()),
             }])
         );
-    }
-
-    #[test]
-    fn snapshot_flags_todos_none_for_null_state() {
-        let snap = snap_from(None);
-        assert!(snap.flags.is_none());
-        assert!(snap.todos.is_none());
     }
 
     // -----------------------------------------------------------------------

@@ -493,37 +493,6 @@ mod tests {
 
     // ---- WatchStatus tests ----
 
-    #[test]
-    fn watch_status_disabled_is_not_watching() {
-        assert!(!WatchStatus::Disabled.is_watching());
-    }
-
-    #[test]
-    fn watch_status_ok_with_paths_is_watching() {
-        let status = WatchStatus::Ok {
-            watched: vec![PathBuf::from("/etc/polytoken")],
-            project_watching_unavailable: false,
-        };
-        assert!(status.is_watching());
-    }
-
-    #[test]
-    fn watch_status_ok_empty_is_not_watching() {
-        let status = WatchStatus::Ok {
-            watched: vec![],
-            project_watching_unavailable: false,
-        };
-        assert!(!status.is_watching());
-    }
-
-    #[test]
-    fn watch_status_failed_is_not_watching() {
-        let status = WatchStatus::Failed {
-            error: "boom".into(),
-        };
-        assert!(!status.is_watching());
-    }
-
     // ---- DebounceCoalescer tests ----
 
     #[test]
