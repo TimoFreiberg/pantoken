@@ -1056,8 +1056,8 @@
                 value={xdgMode}
                 onchange={(v: "isolated" | "shared") => xdgMode = v}
                 options={[
-                  { value: "isolated", label: "Isolated" },
-                  { value: "shared", label: "Shared" },
+                  { value: "isolated", label: "Isolated", title: "Stores config, sessions, and cache in isolated directories." },
+                  { value: "shared", label: "Shared", title: "Shares config, sessions, and cache with your existing polytoken install." },
                 ]}
               />
             </div>
@@ -1327,7 +1327,7 @@
             </div>
             <div class="field">
               <label>XDG mode</label>
-              <SegmentedControl ariaLabel="XDG mode" value={xdgMode} onchange={(v: "isolated" | "shared") => xdgMode = v} options={[{ value: "isolated", label: "Isolated" }, { value: "shared", label: "Shared" }]} />
+              <SegmentedControl ariaLabel="XDG mode" value={xdgMode} onchange={(v: "isolated" | "shared") => xdgMode = v} options={[{ value: "isolated", label: "Isolated", title: "Stores config, sessions, and cache in isolated directories." }, { value: "shared", label: "Shared", title: "Shares config, sessions, and cache with your existing polytoken install." }]} />
             </div>
           </div>
         {/if}
