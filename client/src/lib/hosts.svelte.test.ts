@@ -84,6 +84,59 @@ class FakeWsClient implements IWsClient {
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
+/** Inject a FakeWsClient into the coordinator's hostState entry for `id`,
+ *  wiring onMessage to route through the coordinator. This ~15-line pattern
+ *  was duplicated across 8 tests. */
+function injectFakeClient(
+  coordinator: HostCoordinator,
+  id: string,
+  fakeClient: FakeWsClient,
+): void {
+  const entry = (
+    coordinator as unknown as {
+      hostState: Map<
+        string,
+        {
+          client: IWsClient | null;
+          unsubscribe: (() => void) | null;
+          descriptor: NativeHostDescriptor;
+        }
+      >;
+    }
+  ).hostState.get(id);
+  if (entry && !entry.client) {
+    entry.client = fakeClient;
+    const listener: MessageListener = (msg) =>
+      (
+        coordinator as unknown as {
+          onHostMessage: (hostId: string, msg: ServerMessage) => void;
+        }
+      ).onHostMessage(id, msg);
+    entry.unsubscribe = fakeClient.onMessage(listener);
+  }
+}
+
+/** Set up a coordinator with 2 hosts and a fake-client injection for connectHost.
+ *  Returns the shared fakeClient so tests can deliver messages. */
+async function setupCoordinatorWithFakeClient(): Promise<{
+  coordinator: HostCoordinator;
+  fakeClient: FakeWsClient;
+}> {
+  const { provider } = createFakeHostProvider([
+    descriptor("local"),
+    descriptor("remote-1", { kind: "remote" }),
+  ]);
+  const coordinator = new HostCoordinator(provider);
+  const fakeClient = new FakeWsClient();
+  coordinator.connectHost = async (id: string) => {
+    injectFakeClient(coordinator, id, fakeClient);
+    return { ok: true };
+  };
+  await coordinator.init();
+  await coordinator.selectHost("local");
+  return { coordinator, fakeClient };
+}
+
 function descriptor(
   id: string,
   overrides: Partial<NativeHostDescriptor> = {},
@@ -130,33 +183,7 @@ function sessionStatusMsg(runningIds: string[]): ServerMessage {
 
 describe("HostCoordinator message routing boundary", () => {
   test("messages from an inactive WsClient do not mutate the visible store", async () => {
-    const { provider } = createFakeHostProvider([
-      descriptor("local"),
-      descriptor("remote-1", { kind: "remote" }),
-    ]);
-    const coordinator = new HostCoordinator(provider);
-
-    // Replace connectHost's WsClient creation with a fake client.
-    const fakeClient = new FakeWsClient();
-    const originalConnectHost = coordinator.connectHost.bind(coordinator);
-    coordinator.connectHost = async (id: string) => {
-      // Inject the fake client directly.
-      const entry = (coordinator as unknown as {
-        hostState: Map<string, { client: IWsClient | null; unsubscribe: (() => void) | null; descriptor: NativeHostDescriptor }>;
-      }).hostState.get(id);
-      if (entry && !entry.client) {
-        entry.client = fakeClient;
-        const listener: MessageListener = (msg) =>
-          (coordinator as unknown as {
-            onHostMessage: (hostId: string, msg: ServerMessage) => void;
-          }).onHostMessage(id, msg);
-        entry.unsubscribe = fakeClient.onMessage(listener);
-      }
-      return { ok: true };
-    };
-
-    await coordinator.init();
-    await coordinator.selectHost("local");
+    const { coordinator, fakeClient } = await setupCoordinatorWithFakeClient();
 
     // The store should have the local host's data.
     const initialServerId = store.serverId;
@@ -169,30 +196,7 @@ describe("HostCoordinator message routing boundary", () => {
   });
 
   test("switching requests authoritative seed/bootstrap before showing the new transcript", async () => {
-    const { provider } = createFakeHostProvider([
-      descriptor("local"),
-      descriptor("remote-1", { kind: "remote" }),
-    ]);
-    const coordinator = new HostCoordinator(provider);
-
-    const fakeClient = new FakeWsClient();
-    coordinator.connectHost = async (id: string) => {
-      const entry = (coordinator as unknown as {
-        hostState: Map<string, { client: IWsClient | null; unsubscribe: (() => void) | null; descriptor: NativeHostDescriptor }>;
-      }).hostState.get(id);
-      if (entry && !entry.client) {
-        entry.client = fakeClient;
-        const listener: MessageListener = (msg) =>
-          (coordinator as unknown as {
-            onHostMessage: (hostId: string, msg: ServerMessage) => void;
-          }).onHostMessage(id, msg);
-        entry.unsubscribe = fakeClient.onMessage(listener);
-      }
-      return { ok: true };
-    };
-
-    await coordinator.init();
-    await coordinator.selectHost("local");
+    const { coordinator, fakeClient } = await setupCoordinatorWithFakeClient();
 
     // Switch to remote-1.
     await coordinator.selectHost("remote-1");
@@ -202,30 +206,7 @@ describe("HostCoordinator message routing boundary", () => {
   });
 
   test("host A data cannot render beneath host B identity during a slow switch", async () => {
-    const { provider } = createFakeHostProvider([
-      descriptor("local"),
-      descriptor("remote-1", { kind: "remote" }),
-    ]);
-    const coordinator = new HostCoordinator(provider);
-
-    const fakeClient = new FakeWsClient();
-    coordinator.connectHost = async (id: string) => {
-      const entry = (coordinator as unknown as {
-        hostState: Map<string, { client: IWsClient | null; unsubscribe: (() => void) | null; descriptor: NativeHostDescriptor }>;
-      }).hostState.get(id);
-      if (entry && !entry.client) {
-        entry.client = fakeClient;
-        const listener: MessageListener = (msg) =>
-          (coordinator as unknown as {
-            onHostMessage: (hostId: string, msg: ServerMessage) => void;
-          }).onHostMessage(id, msg);
-        entry.unsubscribe = fakeClient.onMessage(listener);
-      }
-      return { ok: true };
-    };
-
-    await coordinator.init();
-    await coordinator.selectHost("local");
+    const { coordinator } = await setupCoordinatorWithFakeClient();
 
     // Switch to remote-1 — before any seed arrives, the store should be in a
     // neutral state (ready=false, serverId=null).
@@ -236,30 +217,7 @@ describe("HostCoordinator message routing boundary", () => {
   });
 
   test("selecting a computer clears ordinary unseen", async () => {
-    const { provider } = createFakeHostProvider([
-      descriptor("local"),
-      descriptor("remote-1", { kind: "remote" }),
-    ]);
-    const coordinator = new HostCoordinator(provider);
-
-    const fakeClient = new FakeWsClient();
-    coordinator.connectHost = async (id: string) => {
-      const entry = (coordinator as unknown as {
-        hostState: Map<string, { client: IWsClient | null; unsubscribe: (() => void) | null; descriptor: NativeHostDescriptor }>;
-      }).hostState.get(id);
-      if (entry && !entry.client) {
-        entry.client = fakeClient;
-        const listener: MessageListener = (msg) =>
-          (coordinator as unknown as {
-            onHostMessage: (hostId: string, msg: ServerMessage) => void;
-          }).onHostMessage(id, msg);
-        entry.unsubscribe = fakeClient.onMessage(listener);
-      }
-      return { ok: true };
-    };
-
-    await coordinator.init();
-    await coordinator.selectHost("local");
+    const { coordinator, fakeClient } = await setupCoordinatorWithFakeClient();
 
     // Drive remote-1 to unseen: first establish baseline with a running session,
     // then transition to done.
@@ -287,30 +245,7 @@ describe("HostCoordinator message routing boundary", () => {
   });
 
   test("waiting/failed attention survives selection", async () => {
-    const { provider } = createFakeHostProvider([
-      descriptor("local"),
-      descriptor("remote-1", { kind: "remote" }),
-    ]);
-    const coordinator = new HostCoordinator(provider);
-
-    const fakeClient = new FakeWsClient();
-    coordinator.connectHost = async (id: string) => {
-      const entry = (coordinator as unknown as {
-        hostState: Map<string, { client: IWsClient | null; unsubscribe: (() => void) | null; descriptor: NativeHostDescriptor }>;
-      }).hostState.get(id);
-      if (entry && !entry.client) {
-        entry.client = fakeClient;
-        const listener: MessageListener = (msg) =>
-          (coordinator as unknown as {
-            onHostMessage: (hostId: string, msg: ServerMessage) => void;
-          }).onHostMessage(id, msg);
-        entry.unsubscribe = fakeClient.onMessage(listener);
-      }
-      return { ok: true };
-    };
-
-    await coordinator.init();
-    await coordinator.selectHost("local");
+    const { coordinator, fakeClient } = await setupCoordinatorWithFakeClient();
 
     // Drive remote-1 to waiting.
     await coordinator.connectHost("remote-1");
@@ -365,30 +300,7 @@ describe("HostCoordinator message routing boundary", () => {
   });
 
   test("queued prompts remain bound to their original serverId", async () => {
-    const { provider } = createFakeHostProvider([
-      descriptor("local"),
-      descriptor("remote-1", { kind: "remote" }),
-    ]);
-    const coordinator = new HostCoordinator(provider);
-
-    const fakeClient = new FakeWsClient();
-    coordinator.connectHost = async (id: string) => {
-      const entry = (coordinator as unknown as {
-        hostState: Map<string, { client: IWsClient | null; unsubscribe: (() => void) | null; descriptor: NativeHostDescriptor }>;
-      }).hostState.get(id);
-      if (entry && !entry.client) {
-        entry.client = fakeClient;
-        const listener: MessageListener = (msg) =>
-          (coordinator as unknown as {
-            onHostMessage: (hostId: string, msg: ServerMessage) => void;
-          }).onHostMessage(id, msg);
-        entry.unsubscribe = fakeClient.onMessage(listener);
-      }
-      return { ok: true };
-    };
-
-    await coordinator.init();
-    await coordinator.selectHost("local");
+    const { coordinator } = await setupCoordinatorWithFakeClient();
 
     // Enqueue a prompt on the local host.
     store.serverId = "local-server";
@@ -410,30 +322,7 @@ describe("HostCoordinator message routing boundary", () => {
   });
 
   test("hydrateFromBootstrap replays cached messages into the store", async () => {
-    const { provider } = createFakeHostProvider([
-      descriptor("local"),
-      descriptor("remote-1", { kind: "remote" }),
-    ]);
-    const coordinator = new HostCoordinator(provider);
-
-    const fakeClient = new FakeWsClient();
-    coordinator.connectHost = async (id: string) => {
-      const entry = (coordinator as unknown as {
-        hostState: Map<string, { client: IWsClient | null; unsubscribe: (() => void) | null; descriptor: NativeHostDescriptor }>;
-      }).hostState.get(id);
-      if (entry && !entry.client) {
-        entry.client = fakeClient;
-        const listener: MessageListener = (msg) =>
-          (coordinator as unknown as {
-            onHostMessage: (hostId: string, msg: ServerMessage) => void;
-          }).onHostMessage(id, msg);
-        entry.unsubscribe = fakeClient.onMessage(listener);
-      }
-      return { ok: true };
-    };
-
-    await coordinator.init();
-    await coordinator.selectHost("local");
+    const { coordinator, fakeClient } = await setupCoordinatorWithFakeClient();
 
     // Connect remote-1 and deliver bootstrap messages.
     await coordinator.connectHost("remote-1");
