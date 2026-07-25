@@ -479,22 +479,23 @@ test("branch panel is left-aligned with the chip and opens upward", async ({
   expect(panelBox!.y + panelBox!.height).toBeLessThanOrEqual(chipBox!.y);
 });
 
-// --- Empty prompt as a "continue" signal (issue #21) ---
-// When the session is idle, an empty prompt (Enter or Send button with an empty
-// composer) acts as a "continue" signal, mirroring the polytoken TUI. An empty
-// mid-turn steer or an empty first message for a new session remains blocked.
+// --- Empty prompts are forbidden (issue #74) ---
+// The polytoken daemon forbids empty prompts, so the frontend blocks sending
+// an empty prompt in ALL states — idle (previously a "continue" signal per
+// issue #21, now removed), mid-turn (empty steer), and drafting (empty first
+// message). An image-only prompt is still valid. Issue #74 supersedes #21.
 
 const composerTextarea = (page: import("@playwright/test").Page) =>
   page.getByTestId("composer-box").locator("textarea");
 const sendButton = (page: import("@playwright/test").Page) =>
   page.locator("button.send");
 
-test("send button is enabled when idle and the composer is empty", async ({
+test("send button is disabled when the composer is empty (issue #74)", async ({
   page,
 }) => {
   // After gotoFresh the greeting has settled (idle). The composer is empty.
   await expect(composerTextarea(page)).toHaveValue("");
-  await expect(sendButton(page)).not.toBeDisabled();
+  await expect(sendButton(page)).toBeDisabled();
 });
 
 test("send button is a squircle, not a perfect circle", async ({ page }) => {
@@ -555,12 +556,18 @@ test("enabled send uses quiet inactive chrome and highlights on composer focus",
     disabledBorder: await resolvedToken(page, "border-color", "--border"),
   };
 
+  // Type a character so the send button is enabled for the inactive/focused/
+  // hovered assertions below — an empty composer now disables it (issue #74).
+  await textarea.fill("x");
   await textarea.evaluate((el) => el.blur());
   await expect(send).not.toBeDisabled();
-  const inactive = await visualStyle();
-  expect(inactive.backgroundColor).toBe(expected.inactiveBackground);
-  expect(inactive.color).toBe(expected.inactiveColor);
-  expect(inactive.opacity).toBe(1);
+  // Poll for the inactive style to settle (Svelte reactivity after fill+blur).
+  await expect.poll(visualStyle).toEqual({
+    backgroundColor: expected.inactiveBackground,
+    color: expected.inactiveColor,
+    borderColor: expect.any(String),
+    opacity: 1,
+  });
 
   await textarea.focus();
   await expect
@@ -575,6 +582,8 @@ test("enabled send uses quiet inactive chrome and highlights on composer focus",
     .poll(async () => (await visualStyle()).backgroundColor)
     .toBe(expected.hoveredBackground);
 
+  // Clear the composer so the send button is disabled (empty + streaming).
+  await textarea.fill("");
   await drive(page, "streamhold");
   await expect(send).toBeDisabled();
   await expect.poll(visualStyle).toEqual({
@@ -585,28 +594,19 @@ test("enabled send uses quiet inactive chrome and highlights on composer focus",
   });
 });
 
-test("Enter on an empty idle composer sends a prompt and starts a turn", async ({
+test("Enter on an empty idle composer does not send (issue #74)", async ({
   page,
 }) => {
   const textarea = composerTextarea(page);
   await expect(textarea).toHaveValue("");
+  // Before this turn there is one settled work block (the greeting).
   // Focus and press Enter on the empty composer.
   await textarea.click();
   await page.keyboard.press("Enter");
-  // The mock driver replies to the empty prompt: a second turn settles.
-  await waitForSettledWorkBlocks(page, 2);
-  // The composer cleared after sending.
+  // No new turn starts: still one settled work block.
   await expect(textarea).toHaveValue("");
-});
-
-test("clicking Send on an empty idle composer sends a prompt", async ({
-  page,
-}) => {
-  const textarea = composerTextarea(page);
-  await expect(textarea).toHaveValue("");
-  await sendButton(page).click();
-  // A new turn appears (second settled work block).
-  await waitForSettledWorkBlocks(page, 2);
+  await waitForSettledWorkBlocks(page, 1);
+  // The composer is still empty (nothing was sent).
   await expect(textarea).toHaveValue("");
 });
 

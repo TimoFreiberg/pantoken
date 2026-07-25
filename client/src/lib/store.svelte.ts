@@ -1998,11 +1998,9 @@ class PantokenStore {
     images?: ImageContent[],
   ): Promise<boolean> {
     const t = text.trim();
-    // An empty prompt is allowed when the session is idle — it acts as a
-    // "continue" signal (parity with the polytoken TUI). Block it mid-turn
-    // (an empty steer into /turn/input is meaningless) and when there are
-    // no images either.
-    if (!t && (!images || images.length === 0) && this.turnActive) return false;
+    // Empty prompts are forbidden by the polytoken daemon (issue #74). Block
+    // unconditionally — no text and no images.
+    if (!t && (!images || images.length === 0)) return false;
     // This call is a user gesture — the moment to ask for notification permission
     // (tab-open path) and register a Web Push subscription (closed-phone path).
     ensurePermission();
@@ -2596,6 +2594,7 @@ class PantokenStore {
     const d = this.draft;
     if (!d) return false;
     const t = text.trim();
+    // Empty prompts are forbidden by the polytoken daemon (issue #74).
     if (!t && (!images || images.length === 0)) return false;
     ensurePermission();
     void ensurePushSubscription().then((s) => {

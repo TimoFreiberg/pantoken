@@ -824,10 +824,10 @@
   async function submit() {
     if (submitting) return;
     const text = store.composerDraft;
-    // Allow an empty prompt to act as a "continue" signal when the agent is
-    // idle (parity with the polytoken TUI). Block it mid-turn (empty steer)
-    // and when drafting a new session (empty first message).
-    if (!text.trim() && images.length === 0 && (streaming || drafting)) return;
+    // Empty prompts are forbidden by the polytoken daemon (issue #74). Block in
+    // all states — idle, mid-turn (empty steer), and drafting (empty first
+    // message). An image-only prompt is still valid.
+    if (!text.trim() && images.length === 0) return;
 
     // Slash-command interception (only when NOT drafting a new session —
     // session actions target focused_id, which is the previous session in
@@ -2005,14 +2005,12 @@
         <div class="actions">
           <button
             class="send"
-            disabled={submitting || addingImages || ((!store.composerDraft.trim() && imageCount === 0) && (streaming || drafting))}
+            disabled={submitting || addingImages || (!store.composerDraft.trim() && imageCount === 0)}
             onclick={() => submit()}
-            aria-label={drafting ? "Create session and send" : !store.composerDraft.trim() && imageCount === 0 ? "Send empty prompt to continue" : "Send"}
+            aria-label={drafting ? "Create session and send" : "Send"}
             title={drafting
               ? `Create session and send first message (${isTouch ? "⌘/Ctrl+Enter" : "Enter"})`
-              : !store.composerDraft.trim() && imageCount === 0
-                ? `Send empty prompt to continue (${isTouch ? "⌘/Ctrl+Enter" : "Enter"})`
-                : `Send (${isTouch ? "⌘/Ctrl+Enter" : "Enter"})`}
+              : `Send (${isTouch ? "⌘/Ctrl+Enter" : "Enter"})`}
           >
             ↑
           </button>

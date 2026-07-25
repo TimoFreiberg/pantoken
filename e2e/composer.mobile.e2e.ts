@@ -124,12 +124,13 @@ test("mobile: new-session scope-row chips stay tappable above the composer surfa
   await expect(worktree).toHaveAccessibleName("Disable worktree isolation");
 });
 
-test("mobile: send button is enabled when idle and the composer is empty", async ({
+test("mobile: send button is disabled when the composer is empty (issue #74)", async ({
   page,
 }) => {
-  // On touch, bare Enter inserts a newline, so the Send button is the only path to
-  // send an empty prompt. After the greeting settles (idle), it must be enabled.
+  // Empty prompts are forbidden (issue #74), so the Send button is disabled
+  // when the composer is empty — even when idle. On touch there's no Enter
+  // path, so the button is the only send affordance and must stay disabled.
   const box = composer(page);
   await expect(box).toHaveValue("");
-  await expect(page.locator("button.send")).not.toBeDisabled();
+  await expect(page.locator("button.send")).toBeDisabled();
 });

@@ -80,10 +80,10 @@ test("the 2a composer controls are labeled and touch-safe", async ({
 }) => {
   const controls = [
     page.getByRole("button", { name: "Attach images" }),
-    // After 33195e14e187 the idle+empty composer labels this "Send empty
-    // prompt to continue" (a continue-signal affordance), so the accessible
-    // name is no longer stable. The `button.send` class is the stable hook;
-    // the test then asserts the aria-label is any non-empty string.
+    // The idle+empty composer labels this "Send" (issue #74 removed the old
+    // "Send empty prompt to continue" continue-signal affordance). The
+    // `button.send` class is the stable hook; the test asserts the aria-label
+    // is any non-empty string.
     page.locator("button.send"),
     page.getByTestId("mobile-session-controls-trigger"),
   ];
