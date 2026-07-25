@@ -34,7 +34,7 @@ test("Setup Docker button opens the container setup sheet", async ({ page }) => 
   const switcher = page.getByTestId("host-switcher");
   await switcher.getByTestId("host-switcher-trigger").click();
   await switcher.getByTestId("host-switcher-setup-docker").click();
-  await expect(page.getByTestId("container-setup-panel")).toBeVisible();
+  await expect(page.getByTestId("computer-setup-panel")).toBeVisible();
   await expect(page.getByTestId("cs-ssh-input")).toBeVisible();
 });
 
@@ -93,7 +93,7 @@ test("Provisioning reaches ready and closes the sheet", async ({ page }) => {
   await setState(page, id, "ready");
 
   // Sheet should close on success.
-  await expect(page.getByTestId("container-setup-panel")).toBeHidden({ timeout: 10000 });
+  await expect(page.getByTestId("computer-setup-panel")).toBeHidden({ timeout: 10000 });
 });
 
 test("Exact-name fallback saves without provisioning", async ({ page }) => {
@@ -115,7 +115,7 @@ test("Exact-name fallback saves without provisioning", async ({ page }) => {
   await page.getByTestId("cs-save-later").click();
 
   // Sheet should close.
-  await expect(page.getByTestId("container-setup-panel")).toBeHidden({ timeout: 10000 });
+  await expect(page.getByTestId("computer-setup-panel")).toBeHidden({ timeout: 10000 });
 });
 
 test("Customize target shows inspection details", async ({ page }) => {
@@ -136,4 +136,65 @@ test("Customize target shows inspection details", async ({ page }) => {
   await expect(page.getByTestId("cs-root-input")).toBeVisible();
   // Backing line should show persistent volume.
   await expect(page.getByTestId("cs-backing")).toContainText("Persistent");
+});
+
+test("SSH fields remain visible after Docker discovery (AC.7)", async ({ page }) => {
+  const switcher = page.getByTestId("host-switcher");
+  await switcher.getByTestId("host-switcher-trigger").click();
+  await switcher.getByTestId("host-switcher-setup-docker").click();
+
+  await page.getByTestId("cs-ssh-input").fill("user@dev.example.com");
+  await page.getByTestId("cs-test-ssh").click();
+  await expect(page.getByTestId("cs-ssh-summary")).toBeVisible({ timeout: 10000 });
+
+  // SSH input should still be visible and editable in the container picker stage.
+  await expect(page.getByTestId("cs-ssh-input")).toBeVisible();
+  await expect(page.getByTestId("cs-name-input")).toBeVisible();
+});
+
+test("Editing SSH after discovery invalidates stale results (AC.8)", async ({ page }) => {
+  const switcher = page.getByTestId("host-switcher");
+  await switcher.getByTestId("host-switcher-trigger").click();
+  await switcher.getByTestId("host-switcher-setup-docker").click();
+
+  await page.getByTestId("cs-ssh-input").fill("user@dev.example.com");
+  await page.getByTestId("cs-test-ssh").click();
+  await expect(page.getByTestId("cs-ssh-summary")).toBeVisible({ timeout: 10000 });
+
+  // Edit the SSH destination — should invalidate the picker.
+  await page.getByTestId("cs-ssh-input").fill("user@changed.example.com");
+
+  // The picker summary should be gone, and we should be back at connection fields.
+  await expect(page.getByTestId("cs-ssh-summary")).toBeHidden();
+  // The test button should be visible again (connection fields stage).
+  await expect(page.getByTestId("cs-test-ssh")).toBeVisible();
+});
+
+test("Name suggestion appears when selecting a container (AC.9)", async ({ page }) => {
+  const switcher = page.getByTestId("host-switcher");
+  await switcher.getByTestId("host-switcher-trigger").click();
+  await switcher.getByTestId("host-switcher-setup-docker").click();
+
+  await page.getByTestId("cs-ssh-input").fill("user@dev.example.com");
+  await page.getByTestId("cs-test-ssh").click();
+  await expect(page.getByTestId("cs-ssh-summary")).toBeVisible({ timeout: 10000 });
+
+  // Select a container — name should be auto-suggested.
+  await page.getByTestId("cs-container-work-api-dev").click();
+  await expect(page.getByTestId("cs-name-input")).toHaveValue("Work API Dev");
+});
+
+test("User-entered name is never overwritten by suggestion (AC.9)", async ({ page }) => {
+  const switcher = page.getByTestId("host-switcher");
+  await switcher.getByTestId("host-switcher-trigger").click();
+  await switcher.getByTestId("host-switcher-setup-docker").click();
+
+  await page.getByTestId("cs-name-input").fill("My Custom Name");
+  await page.getByTestId("cs-ssh-input").fill("user@dev.example.com");
+  await page.getByTestId("cs-test-ssh").click();
+  await expect(page.getByTestId("cs-ssh-summary")).toBeVisible({ timeout: 10000 });
+
+  // Select a container — the user-entered name should be preserved.
+  await page.getByTestId("cs-container-work-api-dev").click();
+  await expect(page.getByTestId("cs-name-input")).toHaveValue("My Custom Name");
 });

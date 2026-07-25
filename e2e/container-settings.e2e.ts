@@ -41,7 +41,7 @@ async function createDockerProfile(page: import("@playwright/test").Page): Promi
   // Drive to ready — setState triggers coordinator.refreshHosts so the
   // provisioning watcher $effect sees the state transition.
   await setState(page, id, "ready");
-  await expect(page.getByTestId("container-setup-panel")).toBeHidden({ timeout: 10000 });
+  await expect(page.getByTestId("computer-setup-panel")).toBeHidden({ timeout: 10000 });
   // The ConnectionSheet may auto-show during provisioning. Dismiss it if present
   // so it doesn't intercept clicks when we later open Settings.
   const csPanel = page.getByTestId("connection-sheet-panel");
@@ -67,16 +67,19 @@ test("Docker profile appears in Computers section with Docker tag", async ({ pag
   await expect(page.locator(".host-option").filter({ hasText: "Work API Dev" })).toContainText("▣");
 });
 
-test("Setup button on Docker profile opens edit dialog", async ({ page }) => {
+test("Edit button on Docker profile opens edit dialog (AC.10, AC.11)", async ({ page }) => {
   await createDockerProfile(page);
   await openSettings(page, "computers");
 
   const row = page.locator("[data-testid^='computer-row-']").filter({ hasText: "Work API Dev" });
-  await row.getByRole("button", { name: "Setup" }).click();
-  await expect(page.getByTestId("container-setup-panel")).toBeVisible();
+  await row.getByRole("button", { name: "Edit" }).click();
+  await expect(page.getByTestId("computer-setup-panel")).toBeVisible();
   // Edit stage should show the read-only exec env.
   await expect(page.getByTestId("cs-edit-exec-env")).toBeVisible();
   await expect(page.getByTestId("cs-edit-exec-env")).toContainText("Docker container");
+  await expect(page.getByTestId("cs-edit-exec-env")).toContainText("immutable");
+  // Docker target section should be present.
+  await expect(page.getByTestId("cs-edit-docker-target")).toBeVisible();
 });
 
 test("Edit dialog shows reconnect now / later buttons", async ({ page }) => {
@@ -84,8 +87,8 @@ test("Edit dialog shows reconnect now / later buttons", async ({ page }) => {
   await openSettings(page, "computers");
 
   const row = page.locator("[data-testid^='computer-row-']").filter({ hasText: "Work API Dev" });
-  await row.getByRole("button", { name: "Setup" }).click();
-  await expect(page.getByTestId("container-setup-panel")).toBeVisible();
+  await row.getByRole("button", { name: "Edit" }).click();
+  await expect(page.getByTestId("computer-setup-panel")).toBeVisible();
 
   await expect(page.getByTestId("cs-reconnect-now")).toBeVisible();
   await expect(page.getByTestId("cs-reconnect-later")).toBeVisible();
@@ -94,7 +97,7 @@ test("Edit dialog shows reconnect now / later buttons", async ({ page }) => {
 test("Settings has Setup Docker container button", async ({ page }) => {
   await openSettings(page, "computers");
   await page.getByTestId("settings-setup-docker").click();
-  await expect(page.getByTestId("container-setup-panel")).toBeVisible();
+  await expect(page.getByTestId("computer-setup-panel")).toBeVisible();
   await expect(page.getByTestId("cs-ssh-input")).toBeVisible();
 });
 
@@ -109,7 +112,7 @@ test("Container not running state shows in Computers section", async ({ page }) 
   await page.getByTestId("cs-exact-name-link").click();
   await page.getByTestId("cs-exact-input").fill("stopped-container");
   await page.getByTestId("cs-save-later").click();
-  await expect(page.getByTestId("container-setup-panel")).toBeHidden({ timeout: 10000 });
+  await expect(page.getByTestId("computer-setup-panel")).toBeHidden({ timeout: 10000 });
 
   // Check it appears in Settings as disconnected.
   await openSettings(page, "computers");

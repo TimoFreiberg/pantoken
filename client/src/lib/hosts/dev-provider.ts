@@ -34,6 +34,8 @@ export interface DevHostControls {
   getInspection(containerName: string): ContainerInspection | null;
   /** Set the inspection data for a container name. */
   setInspection(containerName: string, inspection: ContainerInspection): void;
+  /** Toggle whether Docker container targets are supported (PWA-degradation test hook). */
+  setSupportsContainerTargets(enabled: boolean): void;
   setFailure(id: string, label: string, action?: string, detail?: string): void;
 }
 
@@ -113,6 +115,9 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
   const containerIdMap = new Map<string, string>(); // hostId → current containerId
   // Pre-registered risks to apply to the next docker profile created (for e2e).
   let nextDockerRisks: PendingRisk[] | null = null;
+  // Mutable toggle for supportsContainerTargets (default true; tests opt into
+  // the false/PWA-degradation path via setSupportsContainerTargets).
+  let supportsDockerFlag = true;
 
   /** Check whether all pending risks for a host have been acknowledged. */
   function allRisksAcknowledged(hostId: string, risks: PendingRisk[]): boolean {
@@ -347,7 +352,7 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
       }
     },
     // ── Docker container target methods ────────────────────────────────────
-    supportsContainerTargets: () => true,
+    supportsContainerTargets: () => supportsDockerFlag,
     testSshAndListContainers: async (_sshDestination, _port?) => {
       const containers = containerPickerMap.get("__default__") ?? DEV_CONTAINERS;
       return {
@@ -375,5 +380,6 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
     driveReplacement,
     getInspection,
     setInspection,
+    setSupportsContainerTargets: (enabled: boolean) => { supportsDockerFlag = enabled; },
   };
 }

@@ -1,5 +1,11 @@
 # Implementation task: Docker container remote connection UI
 
+> **Note:** The two-component split (`RemoteProfileForm` for Host profiles +
+> `ContainerSetupSheet` for Docker profiles) has been resolved into a single
+> `ComputerSetupSheet` component that owns both the Host and Docker branches,
+> driven by explicit launch intent. `RemoteProfileForm` has been removed. This
+> brief remains the authoritative design reference for the merged component.
+
 Implement the Docker-container remote-connection UX described below. Treat this
 document as the complete task brief; do not rely on prior chat context. Read
 `AGENTS.md`, `QUALITY.md`, `docs/ui-conventions.md`, `docs/DESIGN.md`,

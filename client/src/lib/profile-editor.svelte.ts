@@ -1,47 +1,52 @@
 import type { RemoteProfile } from "./hosts/types.js";
 
+/**
+ * Execution environment selected at profile-creation time. Immutable once a
+ * profile is saved — editing a profile always derives its environment from
+ * the persisted `RemoteProfile.executionTarget`.
+ */
+export type ExecutionEnvironment = "host" | "dockerContainer";
+
+/**
+ * Explicit launch intent for the computer-setup sheet. Makes invalid
+ * combinations impossible: "new" carries the initial environment, "edit"
+ * carries the profile (whose executionTarget determines the environment).
+ */
+export type ComputerSetupIntent =
+  | { kind: "new"; initialTarget: ExecutionEnvironment }
+  | { kind: "edit"; profile: RemoteProfile };
+
 // Shared profile editor state. Manages the open/close state of the
-// RemoteProfileForm sheet and the profile being edited (or null for "add new").
+// ComputerSetupSheet and the launch intent (new host / new docker / edit).
 // Same singleton pattern as image-viewer.svelte.ts.
-//
-// The `containerWizard` flag selects between the simple form
-// (RemoteProfileForm) and the interactive Docker setup flow
-// (ContainerSetupSheet). Both watch `profileEditor.open`, but only one
-// renders at a time based on this flag.
 
 class ProfileEditorState {
   open = $state(false);
   editing = $state<RemoteProfile | null>(null);
-  containerWizard = $state(false);
+  intent = $state<ComputerSetupIntent | null>(null);
 
   openNew(): void {
     this.editing = null;
-    this.containerWizard = false;
+    this.intent = { kind: "new", initialTarget: "host" };
     this.open = true;
   }
 
-  openNewContainer(): void {
+  openNewDocker(): void {
     this.editing = null;
-    this.containerWizard = true;
+    this.intent = { kind: "new", initialTarget: "dockerContainer" };
     this.open = true;
   }
 
   openEdit(profile: RemoteProfile): void {
     this.editing = profile;
-    this.containerWizard = false;
-    this.open = true;
-  }
-
-  openEditContainer(profile: RemoteProfile): void {
-    this.editing = profile;
-    this.containerWizard = true;
+    this.intent = { kind: "edit", profile };
     this.open = true;
   }
 
   close(): void {
     this.open = false;
     this.editing = null;
-    this.containerWizard = false;
+    this.intent = null;
   }
 }
 

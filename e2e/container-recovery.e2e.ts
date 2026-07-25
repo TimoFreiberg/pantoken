@@ -49,7 +49,7 @@ async function createAndProvisionDockerProfile(page: import("@playwright/test").
   // Drive to ready — setState triggers coordinator.refreshHosts so the
   // provisioning watcher $effect sees the state transition.
   await setState(page, id, "ready");
-  await expect(page.getByTestId("container-setup-panel")).toBeHidden({ timeout: 10000 });
+  await expect(page.getByTestId("computer-setup-panel")).toBeHidden({ timeout: 10000 });
   return id;
 }
 

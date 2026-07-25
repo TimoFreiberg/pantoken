@@ -33,7 +33,7 @@ test("Setup sheet is full-screen on phone", async ({ page }) => {
   await switcher.getByTestId("host-switcher-trigger").click();
   await switcher.getByTestId("host-switcher-setup-docker").click();
 
-  const panel = page.getByTestId("container-setup-panel");
+  const panel = page.getByTestId("computer-setup-panel");
   await expect(panel).toBeVisible();
   // Full-screen: no scrim on phone.
   await expect(page.locator(".scrim")).toBeHidden();
@@ -108,7 +108,7 @@ test("Interactive elements meet 44px touch target minimum", async ({ page }) => 
   await switcher.getByTestId("host-switcher-setup-docker").click();
 
   // The close button should be at least 44px.
-  const closeBtn = page.getByTestId("container-setup-close");
+  const closeBtn = page.getByTestId("computer-setup-close");
   const box = await closeBtn.boundingBox();
   expect(box).not.toBeNull();
   if (box) {

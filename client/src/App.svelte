@@ -20,8 +20,7 @@
   import AttentionShelf from "./components/AttentionShelf.svelte";
   import TokenGate from "./components/TokenGate.svelte";
   import Settings from "./components/Settings.svelte";
-  import RemoteProfileForm from "./components/RemoteProfileForm.svelte";
-  import ContainerSetupSheet from "./components/ContainerSetupSheet.svelte";
+  import ComputerSetupSheet from "./components/ComputerSetupSheet.svelte";
   import ConnectionSheet from "./components/ConnectionSheet.svelte";
   import PlanView from "./components/PlanView.svelte";
   import Tooltip from "./components/Tooltip.svelte";
@@ -166,6 +165,7 @@
           setPendingRisksForNextDocker: provider.setPendingRisksForNextDocker,
           setPreflightPhase: provider.setPreflightPhase,
           setContainerPicker: provider.setContainerPicker,
+          setSupportsContainerTargets: provider.setSupportsContainerTargets,
           driveProvisioningPhase: provider.driveProvisioningPhase,
           driveReplacement: provider.driveReplacement,
           setInspection: provider.setInspection,
@@ -545,8 +545,7 @@
 </div>
 <Settings coordinator={hostCoordinator} />
 {#if hostCoordinator.multiHostCapable}
-  <RemoteProfileForm coordinator={hostCoordinator} />
-  <ContainerSetupSheet coordinator={hostCoordinator} />
+  <ComputerSetupSheet coordinator={hostCoordinator} />
   <ConnectionSheet coordinator={hostCoordinator} />
 {/if}
 {#if !store.draft}

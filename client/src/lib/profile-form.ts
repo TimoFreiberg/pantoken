@@ -1,5 +1,5 @@
-// Pure validation logic for the RemoteProfileForm. Extracted so it can be
-// unit-tested without a DOM, and shared between the form component and tests.
+// Pure validation logic for the ComputerSetupSheet. Extracted so it can be
+// unit-tested without a DOM, and shared between the setup component and tests.
 //
 // No Svelte, no DOM — pure functions.
 

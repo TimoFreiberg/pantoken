@@ -2,13 +2,16 @@
   import { tick } from "svelte";
   import { overlayHistory, PHONE_MQ } from "../lib/overlay-history.js";
   import { profileEditor } from "../lib/profile-editor.svelte.js";
+  import { validateProfileDraft, type ProfileFormDraft } from "../lib/profile-form.js";
   import type { HostCoordinator } from "../lib/hosts.svelte.js";
   import type {
     ContainerInspection,
     ContainerSummary,
     PendingRisk,
+    PolytokenPolicy,
     RemoteProfile,
     TestSshResult,
+    XdgMode,
   } from "../lib/hosts/types.js";
   import type { HostProvider } from "../lib/hosts/provider.js";
   import {
@@ -30,7 +33,8 @@
   const provider: HostProvider = coordinator.hostProvider;
 
   // ── Dialog state ──────────────────────────────────────────────────────────
-  const open = $derived(profileEditor.open && profileEditor.containerWizard);
+  // Only one setup component now — open follows profileEditor.open directly.
+  const open = $derived(profileEditor.open);
   const editing = $derived(profileEditor.editing);
   let phone = $state(false);
   let panelEl = $state<HTMLDivElement>();
@@ -39,17 +43,17 @@
 
   // ── Setup state machine ──────────────────────────────────────────────────
   type Stage =
-    | "sshFields" // Stage 1: SSH fields + segmented control
-    | "testing" // SSH test in progress
+    | "connectionFields" // SSH fields + segmented control + Advanced
+    | "testingSsh" // SSH test in progress
     | "sshFailed" // SSH test failed
-    | "containerPicker" // Stage 2: container picker
+    | "choosingContainer" // Container picker
     | "exactName" // Exact-name fallback
-    | "reviewRisks" // Risk panel
+    | "reviewingRisks" // Risk panel
     | "provisioning" // Four-phase provisioning
     | "provisioningFailed" // Provisioning failure
-    | "edit"; // Edit dialog
+    | "editing"; // Edit dialog
 
-  let stage = $state<Stage>("sshFields");
+  let stage = $state<Stage>("connectionFields");
   let nameTouched = $state(false);
   let rootTouched = $state(false);
 
@@ -58,8 +62,10 @@
   let sshDestination = $state("");
   let port = $state(22);
   let execEnv = $state<"host" | "docker">("docker");
+  let polytokenPolicy = $state<PolytokenPolicy>("requireExisting");
+  let remoteRootOverride = $state("");
   let serverPath = $state("");
-  let xdgMode = $state<"isolated" | "shared">("isolated");
+  let xdgMode = $state<XdgMode>("isolated");
   let advancedOpen = $state(false);
   let customizeOpen = $state(false);
 
@@ -78,6 +84,7 @@
   // Container user + root (from inspection / customize)
   let containerUser = $state("");
   let pantokenRoot = $state("");
+  let workdir = $state("");
 
   // Risk state
   let pendingRisks = $state<PendingRisk[]>([]);
@@ -90,8 +97,16 @@
   let savedProfileId = $state<string | null>(null);
   let backgrounded = $state(false);
 
+  // Save error (migrated from RemoteProfileForm's error/errorDetail pattern)
+  let error = $state<string | null>(null);
+  let errorDetail = $state<string | null>(null);
+
   // Edit state
   let editProfile = $state<RemoteProfile | null>(null);
+
+  // Snapshot of SSH fields at the time of the last successful test, for
+  // invalidation (Phase 3h). null = no test performed yet.
+  let testedSnapshot = $state<{ sshDestination: string; port: number; execEnv: "host" | "docker" } | null>(null);
 
   // Dirty check — whether any form fields have been modified.
   let dirty = $derived(
@@ -100,7 +115,10 @@
     selectedContainer !== null ||
     exactContainerName !== "" ||
     containerUser !== "" ||
-    pantokenRoot !== "",
+    pantokenRoot !== "" ||
+    workdir !== "" ||
+    remoteRootOverride !== "" ||
+    polytokenPolicy !== "requireExisting",
   );
 
   // ── Computed ─────────────────────────────────────────────────────────────
@@ -120,6 +138,21 @@
   const sshHost = $derived(redactSshDestination(sshDestination).host);
   const isEphemeralOnly = $derived(
     pendingRisks.length === 1 && pendingRisks[0]?.kind === "ephemeralData",
+  );
+
+  // Primary action label derived from execEnv (Phase 3b).
+  const primaryLabel = $derived(
+    execEnv === "host" ? "Test SSH & connect" : "Test SSH & find containers",
+  );
+
+  // Whether the connection-fields block should render (visible through the
+  // Docker discovery path — Phase 3a).
+  const showConnectionFields = $derived(
+    stage === "connectionFields" ||
+    stage === "testingSsh" ||
+    stage === "sshFailed" ||
+    stage === "choosingContainer" ||
+    stage === "exactName",
   );
 
   // Provisioning phase labels
@@ -142,15 +175,20 @@
     if (open && !prevOpen) {
       previousFocus = document.activeElement as HTMLElement | null;
       resetState();
+      // Derive initial execEnv from the launch intent.
+      const intent = profileEditor.intent;
+      if (intent?.kind === "new") {
+        execEnv = intent.initialTarget === "dockerContainer" ? "docker" : "host";
+      }
       if (editing) {
         void loadEditProfile(editing);
       }
-      overlayHistory.opened("container-setup", closeFromHistory);
+      overlayHistory.opened("computer-setup", closeFromHistory);
       historyTracked = phone;
       void focusPanel();
     }
     if (!open && prevOpen) {
-      overlayHistory.closed("container-setup");
+      overlayHistory.closed("computer-setup");
       historyTracked = false;
     }
     prevOpen = open;
@@ -159,6 +197,10 @@
   async function focusPanel(): Promise<void> {
     await tick();
     panelEl?.focus();
+    // First-field focus: focus the Name input on open (migrated from
+    // RemoteProfileForm).
+    await tick();
+    panelEl?.querySelector<HTMLInputElement>("#cs-name")?.focus();
   }
 
   function closeFromHistory(): void {
@@ -178,7 +220,7 @@
     if (stage === "provisioning") {
       // Once provisioning starts, close = Run in background.
       backgrounded = true;
-      overlayHistory.closed("container-setup");
+      overlayHistory.closed("computer-setup");
       historyTracked = false;
       profileEditor.close();
       restoreFocus();
@@ -187,20 +229,22 @@
     if (dirty && stage !== "provisioningFailed") {
       if (!window.confirm("Discard changes?")) return;
     }
-    overlayHistory.closed("container-setup");
+    overlayHistory.closed("computer-setup");
     historyTracked = false;
     profileEditor.close();
     restoreFocus();
   }
 
   function resetState(): void {
-    stage = "sshFields";
+    stage = "connectionFields";
     nameTouched = false;
     rootTouched = false;
     name = "";
     sshDestination = "";
     port = 22;
     execEnv = "docker";
+    polytokenPolicy = "requireExisting";
+    remoteRootOverride = "";
     serverPath = "";
     xdgMode = "isolated";
     advancedOpen = false;
@@ -215,6 +259,7 @@
     inspectionError = null;
     containerUser = "";
     pantokenRoot = "";
+    workdir = "";
     pendingRisks = [];
     riskError = null;
     provisioningPhase = 1;
@@ -223,17 +268,22 @@
     savedProfileId = null;
     backgrounded = false;
     editProfile = null;
+    error = null;
+    errorDetail = null;
+    testedSnapshot = null;
   }
 
   async function loadEditProfile(profile: RemoteProfile): Promise<void> {
     const loaded = await provider.getProfile(profile.id);
     if (!loaded) return;
     editProfile = loaded;
-    stage = "edit";
+    stage = "editing";
     name = loaded.label;
     nameTouched = true;
     sshDestination = loaded.sshDestination;
     port = loaded.port ?? 22;
+    polytokenPolicy = loaded.polytokenPolicy;
+    remoteRootOverride = loaded.remoteRootOverride ?? "";
     serverPath = loaded.serverPath ?? "";
     xdgMode = loaded.xdgMode;
     if (loaded.executionTarget.kind === "dockerContainer") {
@@ -241,22 +291,95 @@
       exactContainerName = loaded.executionTarget.containerName;
       containerUser = loaded.executionTarget.user;
       pantokenRoot = loaded.executionTarget.pantokenRoot;
+      workdir = loaded.executionTarget.workdir ?? "";
     } else {
       execEnv = "host";
     }
   }
 
+  // ── SSH invalidation after a successful test (Phase 3h) ───────────────────
+  // Watch SSH destination/port/execEnv for changes when past connectionFields.
+  // On mismatch, clear derived state and return to connectionFields.
+  $effect(() => {
+    // Read the reactive values so this effect re-runs on change.
+    const currentSsh = sshDestination;
+    const currentPort = port;
+    const currentEnv = execEnv;
+    const snapshot = testedSnapshot;
+    if (!snapshot) return;
+    // Only invalidate when we're in a post-test stage.
+    if (
+      stage !== "choosingContainer" &&
+      stage !== "exactName" &&
+      stage !== "reviewingRisks" &&
+      stage !== "provisioning" &&
+      stage !== "provisioningFailed"
+    )
+      return;
+    if (
+      snapshot.sshDestination === currentSsh &&
+      snapshot.port === currentPort &&
+      snapshot.execEnv === currentEnv
+    )
+      return;
+    // SSH value changed after a successful test — invalidate stale results.
+    testResult = null;
+    testError = null;
+    selectedContainer = null;
+    exactContainerName = "";
+    inspection = null;
+    inspectionError = null;
+    pendingRisks = [];
+    riskError = null;
+    testedSnapshot = null;
+    stage = "connectionFields";
+    // Preserve user-entered Name (nameTouched stays true). Recompute suggestion
+    // only if !nameTouched.
+    if (!nameTouched) {
+      name = "";
+    }
+  });
+
+  // ── Validation (Phase 3g) ─────────────────────────────────────────────────
+  function toDraft(): ProfileFormDraft {
+    const isDocker = execEnv === "docker";
+    return {
+      label: name,
+      sshDestination,
+      port: String(port),
+      remoteRootOverride,
+      serverPath,
+      executionTarget: isDocker
+        ? {
+            kind: "dockerContainer",
+            containerName: exactContainerName,
+            user: containerUser,
+            pantokenRoot,
+          }
+        : { kind: "host" },
+      dockerContainerName: exactContainerName,
+      dockerUser: containerUser,
+      dockerWorkdir: workdir,
+      dockerPantokenRoot: pantokenRoot,
+    };
+  }
+
   // ── SSH test ──────────────────────────────────────────────────────────────
   async function runTest(): Promise<void> {
     if (!sshDestination.trim()) return;
-    stage = "testing";
+    // Note: Name is optional until after a successful SSH test — the build
+    // functions auto-suggest a name if none is entered. Validation runs at
+    // save time (reconnectNow/reconnectLater) where the name is pre-filled.
+    error = null;
+    errorDetail = null;
+    stage = "testingSsh";
     testError = null;
     testResult = null;
     testSubStep = 0;
 
     // Simulate sub-steps for the status box.
     const stepTimer = setInterval(() => {
-      testSubStep = Math.min(testSubStep + 1, 2);
+      testSubStep = Math.min(testSubStep + 1, execEnv === "host" ? 0 : 2);
     }, 400);
 
     try {
@@ -272,6 +395,8 @@
           };
           return;
         }
+        // Record the tested snapshot for invalidation.
+        testedSnapshot = { sshDestination, port, execEnv: "host" };
         // Suggest name if untouched.
         if (!nameTouched) {
           name = humanizeSshHost(sshDestination);
@@ -293,7 +418,9 @@
         };
         return;
       }
-      stage = "containerPicker";
+      // Record the tested snapshot for invalidation.
+      testedSnapshot = { sshDestination, port, execEnv: "docker" };
+      stage = "choosingContainer";
     } catch (err) {
       clearInterval(stepTimer);
       stage = "sshFailed";
@@ -308,12 +435,12 @@
   }
 
   function retryTest(): void {
-    stage = "sshFields";
+    stage = "connectionFields";
     testError = null;
   }
 
   function editSshFields(): void {
-    stage = "sshFields";
+    stage = "connectionFields";
     testError = null;
   }
 
@@ -349,7 +476,7 @@
   }
 
   function backToPicker(): void {
-    stage = "containerPicker";
+    stage = "choosingContainer";
     exactContainerName = "";
   }
 
@@ -381,13 +508,15 @@
       label: name || humanizeContainerName(containerName),
       sshDestination,
       port: port || 22,
-      polytokenPolicy: "requireExisting",
+      polytokenPolicy,
+      remoteRootOverride: remoteRootOverride || undefined,
       serverPath: serverPath || undefined,
       xdgMode,
       executionTarget: {
         kind: "dockerContainer",
         containerName,
         user: containerUser || "root",
+        workdir: workdir || undefined,
         pantokenRoot: pantokenRoot || suggestPantokenRoot("/root"),
       },
       riskAcknowledgements: editProfile?.riskAcknowledgements ?? {},
@@ -401,7 +530,8 @@
       label: name || humanizeSshHost(sshDestination),
       sshDestination,
       port: port || 22,
-      polytokenPolicy: "requireExisting",
+      polytokenPolicy,
+      remoteRootOverride: remoteRootOverride || undefined,
       serverPath: serverPath || undefined,
       xdgMode,
       executionTarget: { kind: "host" },
@@ -410,84 +540,96 @@
   }
 
   async function saveAndStore(profile: RemoteProfile, startProvisioning: boolean): Promise<void> {
-    const saved = await provider.addProfile(profile);
-    savedProfileId = saved.id;
-    await coordinator.refreshHosts();
-    await coordinator.loadProfiles();
+    try {
+      const saved = await provider.addProfile(profile);
+      savedProfileId = saved.id;
+      await coordinator.refreshHosts();
+      await coordinator.loadProfiles();
 
-    if (startProvisioning) {
-      stage = "provisioning";
-      provisioningPhase = 1;
-      // Start the connection — this will transition through preflight/acknowledgement.
-      try {
-        await coordinator.connectHost(saved.id);
-        // Check if the host is now in awaitingAcknowledgement.
-        const hosts = await provider.listHosts();
-        const host = hosts.find((h) => h.id === saved.id);
-        if (host?.state === "awaitingAcknowledgement" && host.pendingRisks) {
-          // Filter to only risks that need re-acknowledgement (not previously
-          // acknowledged with a valid fingerprint). Socket acks come from the
-          // profile's dockerSocketFingerprint (backend-persisted).
-          // Only re-prompt risks that are invalidated or new.
-          const allRisks = host.pendingRisks;
-          const neededKinds = new Set(
-            risksNeedingAcknowledgement(
-              editProfile?.riskAcknowledgements ?? saved.riskAcknowledgements ?? {},
-              {
-                containerId: inspection?.containerId ?? "",
-                pantokenRoot,
-                backingKey: backingLine,
-                hasSocketMount,
-                socketMountKey: inspection ? findSocketMount(inspection.mounts)?.source : undefined,
-              },
-            ),
-          );
-          pendingRisks = allRisks.filter((r) => neededKinds.has(r.kind));
-          if (pendingRisks.length > 0) {
-            stage = "reviewRisks";
-          } else {
-            // All risks already acknowledged — auto-accept and continue.
-            for (const risk of allRisks) {
-              await provider.acknowledgeRisk(savedProfileId, risk.id, risk.fingerprint);
-            }
-            await provider.resumeConnection(savedProfileId);
-            await coordinator.refreshHosts();
-            const hosts2 = await provider.listHosts();
-            const host2 = hosts2.find((h) => h.id === savedProfileId);
-            if (host2?.state === "ready") {
-              provisioningPhase = 4;
-              onComplete();
+      if (startProvisioning) {
+        stage = "provisioning";
+        provisioningPhase = 1;
+        // Start the connection — this will transition through preflight/acknowledgement.
+        try {
+          await coordinator.connectHost(saved.id);
+          // Check if the host is now in awaitingAcknowledgement.
+          const hosts = await provider.listHosts();
+          const host = hosts.find((h) => h.id === saved.id);
+          if (host?.state === "awaitingAcknowledgement" && host.pendingRisks) {
+            // Filter to only risks that need re-acknowledgement (not previously
+            // acknowledged with a valid fingerprint). Socket acks come from the
+            // profile's dockerSocketFingerprint (backend-persisted).
+            // Only re-prompt risks that are invalidated or new.
+            const allRisks = host.pendingRisks;
+            const neededKinds = new Set(
+              risksNeedingAcknowledgement(
+                editProfile?.riskAcknowledgements ?? saved.riskAcknowledgements ?? {},
+                {
+                  containerId: inspection?.containerId ?? "",
+                  pantokenRoot,
+                  backingKey: backingLine,
+                  hasSocketMount,
+                  socketMountKey: inspection ? findSocketMount(inspection.mounts)?.source : undefined,
+                },
+              ),
+            );
+            pendingRisks = allRisks.filter((r) => neededKinds.has(r.kind));
+            if (pendingRisks.length > 0) {
+              stage = "reviewingRisks";
             } else {
-              stage = "provisioning";
-              provisioningPhase = 2;
+              // All risks already acknowledged — auto-accept and continue.
+              for (const risk of allRisks) {
+                await provider.acknowledgeRisk(savedProfileId, risk.id, risk.fingerprint);
+              }
+              await provider.resumeConnection(savedProfileId);
+              await coordinator.refreshHosts();
+              const hosts2 = await provider.listHosts();
+              const host2 = hosts2.find((h) => h.id === savedProfileId);
+              if (host2?.state === "ready") {
+                provisioningPhase = 4;
+                onComplete();
+              } else {
+                stage = "provisioning";
+                provisioningPhase = 2;
+              }
             }
+          } else if (host?.state === "failed") {
+            provisioningFailed = {
+              title: host.failureLabel ?? "Connection failed",
+              message: host.failureLabel ?? "Connection failed",
+              detail: host.failureDetail,
+            };
+            stage = "provisioningFailed";
+          } else if (host?.state === "ready") {
+            // Already ready (dev provider may skip provisioning).
+            provisioningPhase = 4;
+            onComplete();
           }
-        } else if (host?.state === "failed") {
+        } catch (err) {
+          const e = err as Error;
           provisioningFailed = {
-            title: host.failureLabel ?? "Connection failed",
-            message: host.failureLabel ?? "Connection failed",
-            detail: host.failureDetail,
+            title: "Connection failed",
+            message: e.message,
           };
           stage = "provisioningFailed";
-        } else if (host?.state === "ready") {
-          // Already ready (dev provider may skip provisioning).
-          provisioningPhase = 4;
-          onComplete();
         }
-      } catch (err) {
-        const e = err as Error;
-        provisioningFailed = {
-          title: "Connection failed",
-          message: e.message,
-        };
-        stage = "provisioningFailed";
+      } else {
+        // Saved without provisioning — close the dialog directly (no dirty check).
+        overlayHistory.closed("computer-setup");
+        historyTracked = false;
+        profileEditor.close();
+        restoreFocus();
       }
-    } else {
-      // Saved without provisioning — close the dialog directly (no dirty check).
-      overlayHistory.closed("container-setup");
-      historyTracked = false;
-      profileEditor.close();
-      restoreFocus();
+    } catch (err) {
+      const message = (err as Error)?.message ?? "Failed to save computer";
+      const detail = err instanceof Error
+        ? (err.cause ? String(err.cause) : err.stack ?? err.toString())
+        : typeof err === "string" ? err : JSON.stringify(err, null, 2);
+      error = message;
+      errorDetail = detail !== message && detail !== "{}" ? detail : null;
+      console.error("[ComputerSetupSheet] Failed to save computer:", err);
+      // Return to connection fields so the user can retry.
+      stage = "connectionFields";
     }
   }
 
@@ -526,7 +668,7 @@
 
   function chooseAnotherPath(): void {
     // Return to the customize target disclosure for the ephemeral-only case.
-    stage = "containerPicker";
+    stage = "choosingContainer";
     customizeOpen = true;
     pendingRisks = [];
   }
@@ -550,23 +692,61 @@
   }
 
   // ── Edit dialog actions ───────────────────────────────────────────────────
-  function reconnectNow(): void {
+  async function reconnectNow(): Promise<void> {
     if (!editProfile) return;
+    // Validate before saving.
+    const validationError = validateProfileDraft(toDraft());
+    if (validationError) {
+      error = validationError;
+      errorDetail = null;
+      return;
+    }
+    error = null;
+    errorDetail = null;
     const updated = buildEditProfile();
-    void provider.updateProfile(updated).then(async () => {
+    try {
+      await provider.updateProfile(updated);
       await coordinator.refreshHosts();
       if (editProfile) {
         await coordinator.connectHost(editProfile.id);
       }
       requestClose();
-    });
+    } catch (err) {
+      const message = (err as Error)?.message ?? "Failed to save computer";
+      const detail = err instanceof Error
+        ? (err.cause ? String(err.cause) : err.stack ?? err.toString())
+        : typeof err === "string" ? err : JSON.stringify(err, null, 2);
+      error = message;
+      errorDetail = detail !== message && detail !== "{}" ? detail : null;
+      console.error("[ComputerSetupSheet] Failed to save computer:", err);
+    }
   }
 
-  function reconnectLater(): void {
+  async function reconnectLater(): Promise<void> {
     if (!editProfile) return;
+    // Validate before saving.
+    const validationError = validateProfileDraft(toDraft());
+    if (validationError) {
+      error = validationError;
+      errorDetail = null;
+      return;
+    }
+    error = null;
+    errorDetail = null;
     const updated = buildEditProfile();
-    void provider.updateProfile(updated).then(() => coordinator.refreshHosts());
-    requestClose();
+    try {
+      await provider.updateProfile(updated);
+      await coordinator.refreshHosts();
+      requestClose();
+    } catch (err) {
+      const message = (err as Error)?.message ?? "Failed to save computer";
+      const detail = err instanceof Error
+        ? (err.cause ? String(err.cause) : err.stack ?? err.toString())
+        : typeof err === "string" ? err : JSON.stringify(err, null, 2);
+      error = message;
+      errorDetail = detail !== message && detail !== "{}" ? detail : null;
+      console.error("[ComputerSetupSheet] Failed to save computer:", err);
+    }
   }
 
   function buildEditProfile(): RemoteProfile {
@@ -576,6 +756,8 @@
       label: name,
       sshDestination,
       port: port || 22,
+      polytokenPolicy,
+      remoteRootOverride: remoteRootOverride || undefined,
       serverPath: serverPath || undefined,
       xdgMode,
       executionTarget: editProfile.executionTarget.kind === "dockerContainer"
@@ -583,26 +765,50 @@
             kind: "dockerContainer",
             containerName: exactContainerName || editProfile.executionTarget.containerName,
             user: containerUser || editProfile.executionTarget.user,
+            workdir: workdir || undefined,
             pantokenRoot: pantokenRoot || editProfile.executionTarget.pantokenRoot,
           }
         : { kind: "host" },
     };
   }
 
-  // ── Keyboard ───────────────────────────────────────────────────────────────
-  function onKey(e: KeyboardEvent): void {
-    if (e.key === "Escape" && open) {
-      e.preventDefault();
-      if (phone && stage !== "sshFields" && stage !== "edit") {
-        // On phone, back goes to previous stage.
-        if (stage === "exactName") backToPicker();
-        else if (stage === "containerPicker") stage = "sshFields";
-        else requestClose();
-      } else {
-        requestClose();
+  // ── Keyboard (Phase 3f: capture-phase hotkey ownership) ───────────────────
+  // Exclusive hotkey ownership while the sheet is open. Registered as a
+  // capture-phase listener so it fires BEFORE the composer's bubble-phase
+  // type-to-focus / Enter-to-send handler. When no input is focused
+  // (focus-drift case), absorb printable keystrokes and Enter and refocus the
+  // first input so the composer's activeElement check sees an INPUT and bails.
+  $effect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent): void {
+      // Escape closes the sheet (or goes back a stage on phone).
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (phone && stage !== "connectionFields" && stage !== "editing") {
+          if (stage === "exactName") backToPicker();
+          else if (stage === "choosingContainer") stage = "connectionFields";
+          else requestClose();
+        } else {
+          requestClose();
+        }
+        return;
+      }
+      // While the sheet is open, absorb printable keystrokes and Enter so they
+      // never reach the composer's type-to-focus / Enter-to-send handler.
+      if (e.key.length === 1 || e.key === "Enter") {
+        const el = document.activeElement as HTMLElement | null;
+        if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) {
+          // The focused input will handle the key — don't interfere.
+          return;
+        }
+        // No input focused: prevent the keystroke from reaching the composer.
+        e.preventDefault();
+        panelEl?.querySelector<HTMLInputElement>("#cs-name")?.focus();
       }
     }
-  }
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
+  });
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   function onNameInput(e: Event): void {
@@ -652,9 +858,9 @@
   });
 
   const dialogTitle = $derived(
-    stage === "edit" ? "Edit computer" :
+    stage === "editing" ? "Edit computer" :
     stage === "provisioning" || stage === "provisioningFailed" ? `Connecting to ${name || "Docker target"}` :
-    stage === "reviewRisks" ? "Review risks" :
+    stage === "reviewingRisks" ? "Review risks" :
     "Add computer",
   );
 
@@ -663,10 +869,10 @@
   );
 
   const footerRight = $derived.by(() => {
-    if (stage === "containerPicker") {
+    if (stage === "choosingContainer") {
       return `SSH: ${sshDestination}:${port} · Docker container`;
     }
-    if (stage === "reviewRisks") {
+    if (stage === "reviewingRisks") {
       return `${pendingRisks.length} risk${pendingRisks.length === 1 ? "" : "s"} detected · one click to accept all`;
     }
     if (stage === "provisioning") {
@@ -677,9 +883,23 @@
     }
     return "";
   });
-</script>
 
-<svelte:window onkeydown={onKey} />
+  // Testing sub-steps: Host shows only SSH connection; Docker shows all three.
+  const testingSubSteps = $derived(
+    execEnv === "host"
+      ? [`Connecting to ${sshHost} via SSH…`]
+      : [
+          `Connecting to ${sshHost} via SSH…`,
+          "Checking Docker access…",
+          "Listing running containers…",
+        ],
+  );
+
+  const policyOptions = [
+    { value: "requireExisting" as const, label: "Require existing" },
+    { value: "offerInstall" as const, label: "Offer install" },
+  ];
+</script>
 
 {#if open}
   <div class="scrim" onclick={() => requestClose()} role="presentation"></div>
@@ -689,15 +909,15 @@
     role="dialog"
     aria-modal="true"
     aria-label={dialogTitle}
-    data-testid="container-setup-panel"
+    data-testid="computer-setup-panel"
     tabindex="-1"
   >
     <header class="phead">
-      {#if phone && stage !== "sshFields" && stage !== "edit"}
+      {#if phone && stage !== "connectionFields" && stage !== "editing"}
         <button class="mobile-back" type="button" aria-label="Back" onclick={() => {
           if (stage === "exactName") backToPicker();
-          else if (stage === "containerPicker") stage = "sshFields";
-          else if (stage === "reviewRisks") stage = "containerPicker";
+          else if (stage === "choosingContainer") stage = "connectionFields";
+          else if (stage === "reviewingRisks") stage = "choosingContainer";
           else requestClose();
         }}>
           <span class="back-chevron"><Chevron size={14} /></span>
@@ -705,14 +925,14 @@
         </button>
       {/if}
       <h2>{dialogTitle}</h2>
-      <button class="close-btn" onclick={() => requestClose()} data-testid="container-setup-close">
+      <button class="close-btn" onclick={() => requestClose()} data-testid="computer-setup-close">
         {closeLabel}
       </button>
     </header>
 
     <div class="body">
-      <!-- ── Stage 1: SSH fields + segmented control ─────────────────────── -->
-      {#if stage === "sshFields" || stage === "testing" || stage === "sshFailed"}
+      <!-- ── Connection fields (visible through Docker discovery path) ──── -->
+      {#if showConnectionFields}
         <div class="field">
           <label for="cs-name">Name <span class="opt">(optional)</span></label>
           <input
@@ -768,14 +988,14 @@
           {/if}
         </div>
 
-        {#if stage === "testing"}
+        {#if stage === "testingSsh"}
           <div class="testing-box" data-testid="cs-testing">
             <div class="testing-spinner">
               <span class="spinner" aria-hidden="true"></span>
-              <span>Testing SSH & finding containers…</span>
+              <span>{execEnv === "host" ? "Testing SSH…" : "Testing SSH & finding containers…"}</span>
             </div>
             <div class="sub-steps">
-              {#each ["Connecting to " + sshHost + " via SSH…", "Checking Docker access…", "Listing running containers…"] as step, i}
+              {#each testingSubSteps as step, i}
                 <div class="sub-step" class:done={testSubStep > i} class:active={testSubStep === i}>
                   {#if testSubStep > i}<span class="check">✓</span>{:else if testSubStep === i}<span class="spinner-sm" aria-hidden="true"></span>{:else}<span class="dot">•</span>{/if}
                   {step}
@@ -783,7 +1003,7 @@
               {/each}
             </div>
           </div>
-        {:else}
+        {:else if stage !== "choosingContainer" && stage !== "exactName"}
           <Button
             variant="primary"
             block
@@ -791,7 +1011,7 @@
             onclick={() => void runTest()}
             data-testid="cs-test-ssh"
           >
-            Test SSH & find containers
+            {primaryLabel}
           </Button>
         {/if}
 
@@ -806,12 +1026,25 @@
           </div>
         {/if}
 
-        <!-- Advanced disclosure -->
+        <!-- Advanced disclosure (full parity — Phase 3e) -->
         <button class="disclosure" onclick={() => advancedOpen = !advancedOpen} aria-expanded={advancedOpen}>
           {advancedOpen ? "▾" : "▸"} Advanced
         </button>
         {#if advancedOpen}
           <div class="advanced-body">
+            <div class="field">
+              <div class="field-label">Polytoken policy</div>
+              <SegmentedControl
+                ariaLabel="Polytoken policy"
+                options={policyOptions}
+                value={polytokenPolicy}
+                onchange={(v: PolytokenPolicy) => polytokenPolicy = v}
+              />
+            </div>
+            <div class="field">
+              <label for="cs-root-override">Remote-root override <span class="opt">(optional)</span></label>
+              <input id="cs-root-override" type="text" placeholder="/custom/pantoken-root" value={remoteRootOverride} oninput={(e) => remoteRootOverride = (e.target as HTMLInputElement).value} data-testid="cs-root-override-input" />
+            </div>
             <div class="field">
               <label for="cs-server-path">Server binary path</label>
               <input id="cs-server-path" type="text" placeholder="Default" value={serverPath} oninput={(e) => serverPath = (e.target as HTMLInputElement).value} />
@@ -832,18 +1065,11 @@
         {/if}
       {/if}
 
-      <!-- ── Stage 2: Container picker ───────────────────────────────────── -->
-      {#if stage === "containerPicker" && testResult}
+      <!-- ── Container picker (appended below connection fields) ─────────── -->
+      {#if stage === "choosingContainer" && testResult}
         <div class="ssh-summary" data-testid="cs-ssh-summary">
           ● SSH connected to {sshHost} · Docker permission: {testResult.dockerPermission}
         </div>
-
-        {#if !nameTouched}
-          <div class="field">
-            <label for="cs-name-2">Name <span class="opt">(optional)</span></label>
-            <input id="cs-name-2" type="text" placeholder="e.g. Work API Dev" value={name} oninput={onNameInput} data-testid="cs-name-input-2" />
-          </div>
-        {/if}
 
         <div class="section-label">Running containers ({containers.length})</div>
 
@@ -908,6 +1134,10 @@
                   <p class="hint">Default = selected user's home + /.local/share/pantoken. Never persists ~.</p>
                   {#if backingLine}<p class="backing-line" data-testid="cs-backing">{backingLine}</p>{/if}
                 </div>
+                <div class="field">
+                  <label for="cs-workdir">Workdir <span class="opt">(optional)</span></label>
+                  <input id="cs-workdir" type="text" placeholder="/workspace" value={workdir} oninput={(e) => workdir = (e.target as HTMLInputElement).value} data-testid="cs-workdir-input" />
+                </div>
               {:else}
                 <p class="hint">Loading inspection…</p>
               {/if}
@@ -943,7 +1173,7 @@
       {/if}
 
       <!-- ── Review risks panel ───────────────────────────────────────────── -->
-      {#if stage === "reviewRisks"}
+      {#if stage === "reviewingRisks"}
         <div class="risks-panel" data-testid="cs-risks-panel">
           <h3>Review risks before connecting</h3>
           <p class="risks-sub">
@@ -1031,7 +1261,7 @@
       {/if}
 
       <!-- ── Edit dialog ─────────────────────────────────────────────────── -->
-      {#if stage === "edit" && editProfile}
+      {#if stage === "editing" && editProfile}
         <div class="field">
           <label for="cs-edit-name">Name</label>
           <input id="cs-edit-name" type="text" value={name} oninput={onNameInput} data-testid="cs-edit-name" />
@@ -1039,7 +1269,7 @@
         <div class="field">
           <label for="cs-edit-ssh">SSH destination</label>
           <div class="ssh-row">
-            <input id="cs-edit-ssh" type="text" value={sshDestination} oninput={(e) => sshDestination = (e.target as HTMLInputElement).value} />
+            <input id="cs-edit-ssh" type="text" value={sshDestination} oninput={(e) => sshDestination = (e.target as HTMLInputElement).value} data-testid="cs-edit-ssh" />
             <input type="number" value={port} oninput={(e) => port = Number((e.target as HTMLInputElement).value) || 22} class="port-input" />
           </div>
         </div>
@@ -1067,6 +1297,10 @@
               <input id="cs-edit-root" type="text" value={pantokenRoot} oninput={onRootInput} data-testid="cs-edit-root" />
               {#if backingLine}<p class="backing-line">{backingLine}</p>{/if}
             </div>
+            <div class="field">
+              <label for="cs-edit-workdir">Workdir <span class="opt">(optional)</span></label>
+              <input id="cs-edit-workdir" type="text" placeholder="/workspace" value={workdir} oninput={(e) => workdir = (e.target as HTMLInputElement).value} data-testid="cs-edit-workdir" />
+            </div>
           </div>
         {/if}
         <button class="disclosure" onclick={() => advancedOpen = !advancedOpen} aria-expanded={advancedOpen}>
@@ -1074,6 +1308,19 @@
         </button>
         {#if advancedOpen}
           <div class="advanced-body">
+            <div class="field">
+              <div class="field-label">Polytoken policy</div>
+              <SegmentedControl
+                ariaLabel="Polytoken policy"
+                options={policyOptions}
+                value={polytokenPolicy}
+                onchange={(v: PolytokenPolicy) => polytokenPolicy = v}
+              />
+            </div>
+            <div class="field">
+              <label for="cs-edit-root-override">Remote-root override <span class="opt">(optional)</span></label>
+              <input id="cs-edit-root-override" type="text" placeholder="/custom/pantoken-root" value={remoteRootOverride} oninput={(e) => remoteRootOverride = (e.target as HTMLInputElement).value} data-testid="cs-edit-root-override" />
+            </div>
             <div class="field">
               <label for="cs-edit-server">Server binary path</label>
               <input id="cs-edit-server" type="text" value={serverPath} oninput={(e) => serverPath = (e.target as HTMLInputElement).value} />
@@ -1085,7 +1332,25 @@
           </div>
         {/if}
         <div class="reconnect-notice" data-testid="cs-reconnect-notice">
-          ⚠ Reconnection required. Changing container selection, user, or root saves a new profile and keeps the old connection live until you reconnect.
+          {#if execEnv === "docker"}
+            ⚠ Reconnection required. Changing container selection, user, or root saves a new profile and keeps the old connection live until you reconnect.
+          {:else}
+            Saving updates the profile. Reconnect to apply SSH/port changes.
+          {/if}
+        </div>
+      {/if}
+
+      <!-- ── Save error block (migrated from RemoteProfileForm) ──────────── -->
+      {#if error}
+        <div class="error-block" role="alert" data-testid="cs-form-error">
+          <p class="error-msg">{error}</p>
+          {#if errorDetail}
+            <details class="error-details">
+              <summary>Show details</summary>
+              <pre class="error-detail-text">{errorDetail}</pre>
+              <button type="button" class="error-copy" onclick={() => navigator.clipboard.writeText(errorDetail ?? "")}>Copy</button>
+            </details>
+          {/if}
         </div>
       {/if}
     </div>
@@ -1096,10 +1361,10 @@
         {#if safelyCancellable && stage === "provisioning"}
           <Button variant="danger" onclick={cancelSetup} data-testid="cs-cancel-setup">Cancel setup</Button>
         {/if}
-      {:else if stage === "edit"}
-        <Button onclick={reconnectLater} data-testid="cs-reconnect-later">Reconnect later</Button>
-        <Button variant="primary" onclick={reconnectNow} data-testid="cs-reconnect-now">Reconnect now</Button>
-      {:else if stage !== "reviewRisks"}
+      {:else if stage === "editing"}
+        <Button onclick={() => void reconnectLater()} data-testid="cs-reconnect-later">Reconnect later</Button>
+        <Button variant="primary" onclick={() => void reconnectNow()} data-testid="cs-reconnect-now">Reconnect now</Button>
+      {:else if stage !== "reviewingRisks"}
         <Button onclick={requestClose} data-testid="cs-cancel-setup">Cancel setup</Button>
       {/if}
       {#if footerRight}
@@ -1169,7 +1434,7 @@
     gap: 12px;
   }
   .field { display: flex; flex-direction: column; gap: 4px; }
-  .field label { font-size: 13px; font-weight: 500; color: var(--text); }
+  .field label, .field-label { font-size: 13px; font-weight: 500; color: var(--text); }
   .opt { font-weight: 400; color: var(--text-muted); }
   .field input, .container-search {
     border: 1px solid var(--border-strong);
@@ -1220,6 +1485,30 @@
   .error-title { font-size: 13px; font-weight: 600; color: var(--danger); margin-bottom: 4px; }
   .error-msg { font-size: 12px; color: var(--text-muted); line-height: 1.45; }
   .error-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .error-block {
+    border: 1px solid var(--danger);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
+  }
+  .error-block .error-msg { font-size: 13px; color: var(--danger); margin: 0; }
+  .error-details { margin-top: 6px; }
+  .error-details summary {
+    font-size: 12px; color: var(--text-muted); cursor: pointer;
+    min-height: 32px; display: flex; align-items: center;
+  }
+  .error-detail-text {
+    font-size: 11px; font-family: var(--font-mono, monospace);
+    color: var(--text-muted); margin: 6px 0 0; white-space: pre-wrap;
+    word-break: break-all; max-height: 200px; overflow-y: auto;
+    background: var(--surface-sunken); padding: 8px; border-radius: 4px;
+  }
+  .error-copy {
+    font: inherit; font-size: 11px; color: var(--accent);
+    background: none; border: 0; cursor: pointer; padding: 4px 0;
+    min-height: 32px;
+  }
+  .error-copy:hover { color: var(--text); }
   .ssh-summary {
     font-size: 12px; color: var(--text-muted);
     padding: 8px 10px; border-radius: var(--radius-sm);
