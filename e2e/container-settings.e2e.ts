@@ -36,7 +36,7 @@ async function createDockerProfile(page: import("@playwright/test").Page): Promi
   // Get the saved profile id from the provider's profile list.
   const id = await page.evaluate(() => {
     const hosts = (window as unknown as { __pantokenHosts?: { listProfiles: () => Promise<{ id: string; label: string }[]> } }).__pantokenHosts;
-    return hosts?.listProfiles().then((ps) => ps.find((p) => p.label === "Work API Dev")?.id ?? "");
+    return (hosts?.listProfiles() ?? Promise.resolve([])).then((ps) => ps.find((p) => p.label === "Work API Dev")?.id ?? "");
   });
   // Drive to ready — setState triggers coordinator.refreshHosts so the
   // provisioning watcher $effect sees the state transition.
