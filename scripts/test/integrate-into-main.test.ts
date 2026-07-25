@@ -70,6 +70,8 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(tempDir, { recursive: true, force: true });
+  // Also clean up the origin dir created alongside tempDir
+  rmSync(tempDir + "-origin.git", { recursive: true, force: true });
 });
 
 describeOrSkip("integrate-into-main.sh jj primitives", () => {
@@ -660,5 +662,39 @@ describeOrSkip("integrate-into-main.sh squash enforcement", () => {
       tempDir,
     );
     expect(result.stdout.trim()).toBe("0");
+  });
+});
+
+describeOrSkip("integrate-into-main.sh tolerance (AC.5)", () => {
+  test("integrate_tolerates_missing_session_id: exits 0 with no .autopilot-session-id, no commits above main", () => {
+    createJjRepoWithOrigin(tempDir);
+
+    // .merge-lock is gitignored in the real repo (so jj's colocated snapshot
+    // ignores it). The temp repo lacks a .gitignore, so jj would snapshot the
+    // lock file into a new commit on top of the immutable (pushed) @, creating
+    // a phantom non-empty commit that defeats the no-commits early-exit.
+    // Mirror the real repo's ignore by committing .gitignore as part of base.
+    writeFileSync(join(tempDir, ".gitignore"), ".merge-lock\n");
+
+    // Create a base commit (including the .gitignore) and push to establish main@origin
+    writeFileSync(join(tempDir, "base.txt"), "base\n");
+    run(["jj", "describe", "-m", "base"], tempDir);
+    run(["jj", "git", "push", "--bookmark", "main"], tempDir);
+
+    // Deliberately DO NOT create .autopilot-session-id.
+    // No commits above main (working copy is empty, on top of main).
+    // The script should acquire the lock with CURRENT_SESSION="" and exit 0
+    // at the "no non-empty commits" early-exit.
+    const result = run(
+      ["bash", INTEGRATE_SH, "42"],
+      tempDir,
+      // PANTOKEN_REPO_ROOT must point to tempDir so the lock file lands there
+      // (not the real repo root).
+      { PANTOKEN_REPO_ROOT: tempDir },
+    );
+
+    expect(result.exitCode).toBe(0);
+    // Lock should be released after the no-op early-exit.
+    expect(existsSync(join(tempDir, ".merge-lock"))).toBe(false);
   });
 });
