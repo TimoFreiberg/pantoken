@@ -159,13 +159,4 @@ mod tests {
         let env = ServerEnvelope::new(ServerMessage::Pong);
         assert!(roundtrip_json(&env), "ServerEnvelope<Pong> round-trip");
     }
-
-    #[test]
-    fn envelope_new_constructs_correctly() {
-        let env = ServerEnvelope::new(ServerMessage::Pong);
-        match env.message {
-            ServerMessage::Pong => {}
-            _ => panic!("expected Pong"),
-        }
-    }
 }

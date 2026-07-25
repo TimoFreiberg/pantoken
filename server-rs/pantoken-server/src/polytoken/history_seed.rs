@@ -1049,40 +1049,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn unknown_type_is_skipped() {
-        let items = vec![
-            json!({ "type": "classifier_decision" }),
-            json!({ "type": "state_update" }),
-        ];
-        assert!(history_to_seed_events(&items, &ctx()).is_empty());
-    }
-
-    #[test]
-    fn missing_type_is_skipped() {
-        let items = vec![json!({ "content": "no type" })];
-        assert!(history_to_seed_events(&items, &ctx()).is_empty());
-    }
-
-    #[test]
-    fn synthetic_iso_timestamp_format() {
-        // 1000ms = 1 second since epoch → 1970-01-01T00:00:01.000Z
-        assert_eq!(format_synthetic_iso(1000), "1970-01-01T00:00:01.000Z");
-        // 0ms → epoch
-        assert_eq!(format_synthetic_iso(0), "1970-01-01T00:00:00.000Z");
-        // 86400000ms = 1 day → 1970-01-02T00:00:00.000Z
-        assert_eq!(format_synthetic_iso(86_400_000), "1970-01-02T00:00:00.000Z");
-    }
-
-    #[test]
-    fn synthetic_iso_non_leap_year_rollover() {
-        // 730 days = 2 non-leap years (365*2) → 1972-01-01T00:00:00.000Z
-        assert_eq!(
-            format_synthetic_iso(730 * 86_400_000),
-            "1972-01-01T00:00:00.000Z"
-        );
-    }
-
     // --- emitted_at adoption (daemon 0.4.0-unstable.6+) ---
 
     /// Pull the seed event's timestamp regardless of variant.

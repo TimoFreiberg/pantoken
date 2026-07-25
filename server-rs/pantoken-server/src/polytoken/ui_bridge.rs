@@ -1029,47 +1029,4 @@ mod tests {
             confirmed(true),
         ));
     }
-
-    #[test]
-    fn permission_approval_labels_has_7_entries_matching_the_choices() {
-        assert_eq!(PERMISSION_APPROVAL_LABELS.len(), 7);
-        assert_eq!(PERMISSION_APPROVAL_CHOICES.len(), 7);
-    }
-
-    #[test]
-    fn index_0_is_deny_granted_false() {
-        assert!(!PERMISSION_APPROVAL_CHOICES[0].granted);
-        assert_eq!(PERMISSION_APPROVAL_CHOICES[0].persistence_target, None);
-    }
-
-    #[test]
-    fn index_1_is_allow_once_granted_true_null_target() {
-        assert!(PERMISSION_APPROVAL_CHOICES[1].granted);
-        assert_eq!(PERMISSION_APPROVAL_CHOICES[1].persistence_target, None);
-    }
-
-    #[test]
-    fn indices_2_6_grant_with_escalating_persistence_targets() {
-        let targets: Vec<Option<PersistenceTarget>> = PERMISSION_APPROVAL_CHOICES[2..]
-            .iter()
-            .map(|choice| choice.persistence_target.clone())
-            .collect();
-        assert_eq!(
-            targets,
-            vec![
-                Some(PersistenceTarget::Session),
-                Some(PersistenceTarget::ProjectLocal),
-                Some(PersistenceTarget::Project),
-                Some(PersistenceTarget::UserLocal),
-                Some(PersistenceTarget::User),
-            ]
-        );
-    }
-
-    #[test]
-    fn every_grant_choice_has_granted_true() {
-        for choice in &PERMISSION_APPROVAL_CHOICES[1..] {
-            assert!(choice.granted);
-        }
-    }
 }

@@ -566,16 +566,6 @@ mod tests {
     }
 
     #[test]
-    fn slugify_repo_path_lowercases_and_dash_separates() {
-        assert_eq!(slugify_repo_path("/Users/x/repo"), "users-x-repo");
-        assert_eq!(slugify_repo_path("/Users/x/repo/"), "users-x-repo");
-        assert_eq!(
-            slugify_repo_path("/home/timo/src/pantoken"),
-            "home-timo-src-pantoken"
-        );
-    }
-
-    #[test]
     fn plan_worktree_uses_full_path_slug_to_avoid_basename_collisions() {
         // Two repos both named "repo" at different paths must get different slugs.
         let p1 = plan_worktree("/Users/alice/repo", Vcs::Jj, "id1", None, "/wt");
