@@ -8,11 +8,8 @@ import {
   filterModels,
   filterNames,
   splitExternalQuery,
-  staleServerFiles,
   stepLevel,
   type AtItem,
-  type CachedServerFiles,
-  type FreshServerFiles,
 } from "./file-autocomplete.js";
 
 describe("extractAtQuery", () => {
