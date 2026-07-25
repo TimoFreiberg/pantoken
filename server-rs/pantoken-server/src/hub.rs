@@ -4550,19 +4550,68 @@ mod hub_models_tests {
     // guard for the lease-conflict routing the e2e singleton exercises.
 
     #[test]
-    fn classify_lease_conflict_passes_message_and_session_switch_kind() {
-        let (message, kind) = classify_switch_error(
-            "another TUI is attached to this session (\"tui\" pid 99999, lease expires in 30s). Detach it there (/detach) or wait 30s for its lease to lapse.",
-        );
-        assert_eq!(kind.as_deref(), Some("session-switch"));
-        assert!(message.contains("another TUI is attached"));
-    }
+    fn classify_switch_error_branches() {
+        // (input, expected_kind, message_must_contain)
+        let cases: &[(&str, Option<&str>, &str)] = &[
+            (
+                "another TUI is attached to this session (\"tui\" pid 99999, lease expires in 30s). Detach it there (/detach) or wait 30s for its lease to lapse.",
+                Some("session-switch"),
+                "another TUI is attached",
+            ),
+            (
+                "lease claim failed (409): held by other",
+                Some("session-switch"),
+                "Detach it there",
+            ),
+            (
+                "polytoken daemon exited early (status exit status: 1):\nstderr: bad args",
+                Some("session-switch"),
+                "exited immediately",
+            ),
+            (
+                "daemon health probe failed",
+                Some("session-switch"),
+                "Couldn't reach the session daemon",
+            ),
+            (
+                "polytoken daemon failed to start: config parse error near line 12",
+                Some("session-switch"),
+                "daemon failed to start",
+            ),
+            (
+                "daemon did not become healthy within 10s",
+                Some("session-switch"),
+                "took too long to start",
+            ),
+            (
+                "request timed out reaching daemon",
+                Some("session-switch"),
+                "Couldn't reach the session daemon",
+            ),
+            (
+                "could not resolve session id from path /x.jsonl",
+                Some("session-switch"),
+                "path wasn't recognized",
+            ),
+            (
+                "something totally unexpected",
+                None,
+                "session switch failed: something totally unexpected",
+            ),
+        ];
 
-    #[test]
-    fn classify_lease_claim_409_falls_back_to_detach_message() {
-        let (message, kind) = classify_switch_error("lease claim failed (409): held by other");
-        assert_eq!(kind.as_deref(), Some("session-switch"));
-        assert!(message.contains("Detach it there"));
+        for (input, expected_kind, must_contain) in cases {
+            let (message, kind) = classify_switch_error(input);
+            assert_eq!(
+                kind.as_deref(),
+                *expected_kind,
+                "kind mismatch for input: {input}"
+            );
+            assert!(
+                message.contains(*must_contain),
+                "message must contain '{must_contain}': {message}\ninput: {input}"
+            );
+        }
     }
 
     #[test]
@@ -4583,64 +4632,6 @@ mod hub_models_tests {
         // offer a "Retry" action for a failure that can never succeed.
         assert!(!message.contains("another TUI is attached"));
         assert!(!message.contains("lease to lapse"));
-    }
-
-    #[test]
-    fn classify_daemon_exited_early_is_session_switch_kind() {
-        let (message, kind) = classify_switch_error(
-            "polytoken daemon exited early (status exit status: 1):\nstderr: bad args",
-        );
-        assert_eq!(kind.as_deref(), Some("session-switch"));
-        assert!(message.contains("exited immediately"));
-    }
-
-    #[test]
-    fn classify_daemon_health_probe_failed_reads_as_unreachable() {
-        let (message, kind) = classify_switch_error("daemon health probe failed");
-        assert_eq!(kind.as_deref(), Some("session-switch"));
-        assert!(message.contains("Couldn't reach the session daemon"));
-    }
-
-    #[test]
-    fn classify_daemon_failed_to_start_surfaces_detail() {
-        let (message, kind) = classify_switch_error(
-            "polytoken daemon failed to start: config parse error near line 12",
-        );
-        assert_eq!(kind.as_deref(), Some("session-switch"));
-        assert!(message.contains("config parse error near line 12"));
-        assert!(message.contains("daemon failed to start"));
-    }
-
-    #[test]
-    fn classify_daemon_timeout_to_start() {
-        let (message, kind) = classify_switch_error("daemon did not become healthy within 10s");
-        assert_eq!(kind.as_deref(), Some("session-switch"));
-        assert!(message.contains("took too long to start"));
-    }
-
-    #[test]
-    fn classify_connection_refused() {
-        let (message, kind) = classify_switch_error("request timed out reaching daemon");
-        assert_eq!(kind.as_deref(), Some("session-switch"));
-        assert!(message.contains("Couldn't reach the session daemon"));
-    }
-
-    #[test]
-    fn classify_unresolved_path() {
-        let (message, kind) =
-            classify_switch_error("could not resolve session id from path /x.jsonl");
-        assert_eq!(kind.as_deref(), Some("session-switch"));
-        assert!(message.contains("path wasn't recognized"));
-    }
-
-    #[test]
-    fn classify_unknown_error_falls_back_to_generic_no_kind() {
-        let (message, kind) = classify_switch_error("something totally unexpected");
-        assert!(
-            kind.is_none(),
-            "unknown errors must not get a session-switch kind"
-        );
-        assert!(message.contains("session switch failed: something totally unexpected"));
     }
 
     /// `client_count()` mirrors TS `clientCount()` — 0 on a fresh hub, increments
