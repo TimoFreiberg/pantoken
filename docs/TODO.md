@@ -75,7 +75,22 @@ discussion before becoming a gate (or being rejected).
       the fake daemon has no `/rewind` route, so a branch under `PANTOKEN_DRIVER=fake`
       404s into the generic-error path. (d) Doc drift: `protocol/src/wire.ts` still
       describes branch as the daemon's `/tree`+navigateTree; it's a destructive POST
-      `/rewind`.
+      `/rewind`. (e) `domains` was `Vec::new()` (empty) — a semantic no-op; fixed to
+      send all three valid domains (`conversation`, `todos`, `flags`). The daemon's
+      OpenAPI spec does not enumerate valid domain values; they were discovered
+      empirically against polytoken 0.5.3. See
+      `rewind_experiment_results.md` in the session dir for full evidence.
+- [ ] **Finer-grained rewind domain menu** (deferred from the domains fix above):
+      the rewind button currently sends all three domains (`conversation`, `todos`,
+      `flags`) unconditionally. A right-click / long-press context menu on the
+      rewind button could offer finer-grained control — e.g., "rewind conversation
+      only" (keep todos/flags), "rewind conversation + todos" (keep flags), or the
+      default "rewind all." Needs UX design: menu placement, mobile long-press
+      behavior (phone-first), default label, and whether `conversation`-only is
+      useful given the unknown cascade question (does `conversation` alone already
+      reset todos/flags internally? untested). The store's `branch(entryId)` entry
+      point would take an optional `domains` param flowing through WS → hub →
+      `branch_from` → `RewindRequest`.
 - [ ] **clear_queue + SessionAction live-driver test gaps** (found 2026-07-10):
       the `clear_queue_drains_daemon_queue` test uses a 1-item fake `/turn/input`
       fixture, so its `deletes == 1` assertion can't tell "one DELETE per item" from

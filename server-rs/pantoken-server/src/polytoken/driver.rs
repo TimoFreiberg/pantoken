@@ -2583,7 +2583,16 @@ impl PantokenDriver for PolytokenDriver {
         if let Some(sid) = &session_id {
             if let Some(ws) = self.inner.get_warm(sid) {
                 let req = RewindRequest {
-                    domains: Vec::new(),
+                    // All three valid rewind domains: conversation (transcript),
+                    // todos, and flags. Sending [] is a semantic no-op (the daemon
+                    // returns 202 with domains_applied: [] and changes nothing).
+                    // Discovered empirically against polytoken 0.5.3 — the daemon's
+                    // OpenAPI spec does not enumerate valid domain values.
+                    domains: vec![
+                        "conversation".to_string(),
+                        "todos".to_string(),
+                        "flags".to_string(),
+                    ],
                     to_message_index: None,
                     to_prompt_id: Some(entry_id.clone()),
                 };
