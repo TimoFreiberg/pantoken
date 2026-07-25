@@ -6,122 +6,31 @@ const ref: SessionRef = { workspaceId: "w", sessionId: "s" };
 const base = (over: Partial<SessionDriverEvent> = {}) =>
   ({ sessionRef: ref, timestamp: "t", ...over }) as SessionDriverEvent;
 
+// Core folding cases that duplicate the shared fold corpus
+// (server-rs/pantoken-protocol/tests/fold-corpus/, run against BOTH TS and
+// Rust folds via state.corpus.test.ts + fold_corpus.rs) were cut.
+// Deleted cases + their corpus coverage:
+// - assistant-delta accumulation/timestamp → assistant-delta-accumulation.json
+// - user-message timestamp/references → user-message.json, user-message-with-references.json
+// - queuedMessageStarted references → queued-message-started.json
+// - queueUpdated → queue-updated.json
+// - tool-call-closes-assistant; later-text-starts-new → multi-turn.json
+// - tool lifecycle (running->ok, span stamps, still-running) → tool-lifecycle.json
+// - runCompleted/runFailed interrupts tool → tool-interrupted.json, run-failed.json
+// - dialog/permission queue + resolve → host-ui-approval.json
+// - ambient status upserts/clears; widget → ambient-widgets.json
+// - extensionCompatibilityIssue → extension-compat-issue.json
+// - runFailed sets failed status + error notice → run-failed.json
+// - snapshot updates title/status/config → session-updated-meta.json
+// - idle sessionUpdated closes open assistant → assistant-turn-complete.json
+//
+// TS-unique cases kept below: customMessage inject, thinking/text channel
+// separation, tool-failure, idle-sessionUpdated guard, interrupted:true,
+// notify→notice, mid-turn notice, running snapshot leaves assistant open.
+// Plus the overwrite-guard semantics block (preserve-on-omit, clear-on-null,
+// clear-on-empty) — NOT in the corpus and load-bearing.
+
 describe("foldEvent", () => {
-  test("accumulates assistant text deltas into one item", () => {
-    const s = foldAll([
-      base({ type: "assistantDelta", text: "Hello ", channel: "text" }),
-      base({ type: "assistantDelta", text: "world", channel: "text" }),
-    ]);
-    expect(s.items).toHaveLength(1);
-    expect(s.items[0]).toMatchObject({
-      kind: "assistant",
-      text: "Hello world",
-      streaming: true,
-    });
-  });
-
-  test("assistant item records the timestamp of its first delta only", () => {
-    const s = foldAll([
-      base({
-        type: "assistantDelta",
-        text: "a",
-        channel: "text",
-        timestamp: "t1",
-      }),
-      base({
-        type: "assistantDelta",
-        text: "b",
-        channel: "text",
-        timestamp: "t2",
-      }),
-    ]);
-    expect(s.items[0]).toMatchObject({ kind: "assistant", ts: "t1" });
-  });
-
-  test("user message carries its event timestamp", () => {
-    const s = foldAll([
-      base({ type: "userMessage", id: "u1", text: "hi", timestamp: "t1" }),
-    ]);
-    expect(s.items[0]).toMatchObject({ kind: "user", text: "hi", ts: "t1" });
-  });
-
-  test("user message carries resolved references onto the folded item", () => {
-    // A live send resolved an `@skill:debug` mention — PromptAccepted.resolved_references,
-    // mapped onto the emitted userMessage event (driver.rs prompt()) — must ride onto
-    // the folded UserItem unchanged. Mirrors the Rust
-    // fold_user_message_carries_resolved_references test (parity requirement).
-    const s = foldAll([
-      base({
-        type: "userMessage",
-        id: "u1",
-        text: "@skill:debug please",
-        timestamp: "t1",
-        references: [{ kind: "skill", name: "debug" }],
-      }),
-    ]);
-    expect(s.items[0]).toMatchObject({
-      kind: "user",
-      text: "@skill:debug please",
-      references: [{ kind: "skill", name: "debug" }],
-    });
-  });
-
-  test("queuedMessageStarted carries the drained item's resolved references", () => {
-    // The daemon only resolves a queued item's `@`-refs at drain time
-    // (PendingTurnInputDrained.resolved_references), so `references` rides the queued
-    // message envelope itself, not a fresh userMessage. Mirrors the Rust
-    // fold_queued_message_started_surfaces_user_and_dequeues test (parity requirement).
-    const s = initialSessionState();
-    foldEvent(
-      s,
-      base({
-        type: "queuedMessageStarted",
-        message: {
-          id: "q1",
-          mode: "steer",
-          text: "queued",
-          createdAt: "t1",
-          updatedAt: "t1",
-          references: [{ kind: "file", name: "bar.md" }],
-        },
-      }),
-    );
-    expect(s.items[0]).toMatchObject({
-      kind: "user",
-      text: "queued",
-      references: [{ kind: "file", name: "bar.md" }],
-    });
-  });
-
-  test("queueUpdated replaces the full queue and omitted snapshots preserve it", () => {
-    const queued = {
-      id: "q1",
-      mode: "steer" as const,
-      text: "Inspect first",
-      createdAt: "t1",
-      updatedAt: "t1",
-    };
-    const s = initialSessionState();
-    foldEvent(s, base({ type: "queueUpdated", messages: [queued] }));
-    expect(s.queued).toEqual([queued]);
-    foldEvent(
-      s,
-      base({
-        type: "sessionUpdated",
-        snapshot: {
-          ref,
-          workspace: { workspaceId: "w", path: "/w" },
-          title: "T",
-          status: "running",
-          updatedAt: "t2",
-        },
-      }),
-    );
-    expect(s.queued).toEqual([queued]);
-    foldEvent(s, base({ type: "queueUpdated", messages: [] }));
-    expect(s.queued).toEqual([]);
-  });
-
   test("customMessage folds to an inject item and closes the open assistant", () => {
     const s = foldAll([
       base({ type: "assistantDelta", text: "final", channel: "text" }),
@@ -160,79 +69,6 @@ describe("foldEvent", () => {
     expect(a.text).toBe("answer");
   });
 
-  test("a tool call closes the open assistant; later text starts a new item", () => {
-    const s = foldAll([
-      base({ type: "assistantDelta", text: "before", channel: "text" }),
-      base({ type: "toolStarted", callId: "c1", toolName: "bash" }),
-      base({ type: "assistantDelta", text: "after", channel: "text" }),
-    ]);
-    expect(s.items.map((i) => i.kind)).toEqual([
-      "assistant",
-      "tool",
-      "assistant",
-    ]);
-  });
-
-  test("tool lifecycle: running -> ok with output", () => {
-    const s = foldAll([
-      base({
-        type: "toolStarted",
-        callId: "c1",
-        toolName: "bash",
-        input: { command: "ls" },
-      }),
-      base({ type: "toolUpdated", callId: "c1", text: "partial" }),
-      base({
-        type: "toolFinished",
-        callId: "c1",
-        success: true,
-        output: "done",
-      }),
-    ]);
-    expect(s.items[0]).toMatchObject({
-      kind: "tool",
-      status: "ok",
-      text: "partial",
-      output: "done",
-    });
-  });
-
-  test("tool span stamps startedAt/finishedAt from event timestamps", () => {
-    const s = foldAll([
-      base({
-        type: "toolStarted",
-        callId: "c1",
-        toolName: "bash",
-        timestamp: "100",
-      }),
-      base({
-        type: "toolFinished",
-        callId: "c1",
-        success: true,
-        output: "ok",
-        timestamp: "1340",
-      }),
-    ]);
-    expect(s.items[0]).toMatchObject({
-      kind: "tool",
-      startedAt: "100",
-      finishedAt: "1340",
-    });
-  });
-
-  test("a still-running tool has startedAt but no finishedAt", () => {
-    const s = foldAll([
-      base({
-        type: "toolStarted",
-        callId: "c1",
-        toolName: "bash",
-        timestamp: "100",
-      }),
-    ]);
-    expect(s.items[0]).toMatchObject({ kind: "tool", startedAt: "100" });
-    expect((s.items[0] as { finishedAt?: string }).finishedAt).toBeUndefined();
-  });
-
   test("tool failure marks error", () => {
     const s = foldAll([
       base({ type: "toolStarted", callId: "c1", toolName: "bash" }),
@@ -244,34 +80,6 @@ describe("foldEvent", () => {
       }),
     ]);
     expect(s.items[0]).toMatchObject({ status: "error" });
-  });
-
-  test("runCompleted interrupts a tool with no matching result", () => {
-    const s = foldAll([
-      base({
-        type: "toolStarted",
-        callId: "c1",
-        toolName: "answer",
-        timestamp: "100",
-      }),
-      base({
-        type: "runCompleted",
-        timestamp: "250",
-        snapshot: {
-          ref,
-          workspace: { workspaceId: "w", path: "/p" },
-          title: "t",
-          status: "idle",
-          updatedAt: "250",
-        },
-      }),
-    ]);
-    expect(s.items[0]).toMatchObject({
-      kind: "tool",
-      status: "interrupted",
-      startedAt: "100",
-      finishedAt: "250",
-    });
   });
 
   test("an idle sessionUpdated does not interrupt a live tool", () => {
@@ -301,22 +109,6 @@ describe("foldEvent", () => {
     });
   });
 
-  test("runFailed interrupts a tool with no matching result", () => {
-    const s = foldAll([
-      base({ type: "toolStarted", callId: "c1", toolName: "bash" }),
-      base({
-        type: "runFailed",
-        timestamp: "failed-at",
-        error: { message: "aborted" },
-      }),
-    ]);
-    expect(s.items[0]).toMatchObject({
-      kind: "tool",
-      status: "interrupted",
-      finishedAt: "failed-at",
-    });
-  });
-
   test("a toolFinished with interrupted:true sets status interrupted", () => {
     // The seed builder (history_to_seed_events) emits synthetic ToolFinished
     // with interrupted:true for orphaned tool_use blocks whose tool_result was
@@ -339,92 +131,6 @@ describe("foldEvent", () => {
     });
   });
 
-  test("dialog requests queue as pending approvals and resolve away", () => {
-    const s = initialSessionState();
-    foldEvent(
-      s,
-      base({
-        type: "hostUiRequest",
-        request: { kind: "confirm", requestId: "r1", title: "t", message: "m" },
-      }),
-    );
-    expect(s.pendingApprovals).toHaveLength(1);
-    // duplicate request id is ignored
-    foldEvent(
-      s,
-      base({
-        type: "hostUiRequest",
-        request: { kind: "confirm", requestId: "r1", title: "t", message: "m" },
-      }),
-    );
-    expect(s.pendingApprovals).toHaveLength(1);
-    foldEvent(s, base({ type: "hostUiResolved", requestId: "r1" }));
-    expect(s.pendingApprovals).toHaveLength(0);
-  });
-
-  test("permission dialog request queues + resolves like other dialogs", () => {
-    const s = initialSessionState();
-    foldEvent(
-      s,
-      base({
-        type: "hostUiRequest",
-        request: {
-          kind: "permission",
-          requestId: "perm1",
-          title: "Run bash?",
-          toolName: "shell_exec",
-          toolInput: '{"command":"ls"}',
-          options: ["Deny", "Allow once", "Allow for session"],
-        },
-      }),
-    );
-    expect(s.pendingApprovals).toHaveLength(1);
-    expect(s.pendingApprovals[0]).toMatchObject({
-      kind: "permission",
-      requestId: "perm1",
-    });
-    foldEvent(s, base({ type: "hostUiResolved", requestId: "perm1" }));
-    expect(s.pendingApprovals).toHaveLength(0);
-  });
-
-  test("ambient status upserts and clears; widget keyed", () => {
-    const s = initialSessionState();
-    foldEvent(
-      s,
-      base({
-        type: "hostUiRequest",
-        request: {
-          kind: "status",
-          requestId: "x",
-          key: "branch",
-          text: "main",
-        },
-      }),
-    );
-    expect(s.ambient.statuses.branch).toBe("main");
-    foldEvent(
-      s,
-      base({
-        type: "hostUiRequest",
-        request: { kind: "status", requestId: "x", key: "branch" },
-      }),
-    );
-    expect(s.ambient.statuses.branch).toBeUndefined();
-    foldEvent(
-      s,
-      base({
-        type: "hostUiRequest",
-        request: {
-          kind: "widget",
-          requestId: "w",
-          key: "todo",
-          lines: ["a", "b"],
-        },
-      }),
-    );
-    expect(s.ambient.widgets.todo?.lines).toEqual(["a", "b"]);
-  });
-
   test("notify becomes a notice item", () => {
     const s = foldAll([
       base({
@@ -442,68 +148,6 @@ describe("foldEvent", () => {
       level: "warning",
       text: "hi",
     });
-  });
-
-  test("extensionCompatibilityIssue becomes a warning notice", () => {
-    const s = foldAll([
-      base({
-        type: "extensionCompatibilityIssue",
-        issue: {
-          capability: "custom",
-          classification: "terminal-only",
-          message: "Custom UI is not available in the pantoken remote.",
-        },
-      }),
-    ]);
-    expect(s.items[0]).toMatchObject({
-      kind: "notice",
-      level: "warning",
-      text: 'Extension capability "custom" is terminal-only: Custom UI is not available in the pantoken remote.',
-    });
-  });
-
-  test("runFailed sets failed status and an error notice", () => {
-    const s = foldAll([
-      base({ type: "runFailed", error: { message: "529 overloaded" } }),
-    ]);
-    expect(s.status).toBe("failed");
-    expect(s.items[0]).toMatchObject({ kind: "notice", level: "error" });
-  });
-
-  test("snapshot events update title/status/config", () => {
-    const s = foldAll([
-      base({
-        type: "sessionOpened",
-        snapshot: {
-          ref,
-          workspace: { workspaceId: "w", path: "/p" },
-          title: "My session",
-          status: "running",
-          updatedAt: "t",
-          config: { modelId: "claude-opus-4-8" },
-        },
-      }),
-    ]);
-    expect(s.title).toBe("My session");
-    expect(s.status).toBe("running");
-    expect(s.config.modelId).toBe("claude-opus-4-8");
-  });
-
-  test("an idle sessionUpdated snapshot closes the open assistant", () => {
-    const s = foldAll([
-      base({ type: "assistantDelta", text: "answer", channel: "text" }),
-      base({
-        type: "sessionUpdated",
-        snapshot: {
-          ref,
-          workspace: { workspaceId: "w", path: "/p" },
-          title: "t",
-          status: "idle",
-          updatedAt: "t",
-        },
-      }),
-    ]);
-    expect(s.items[0]).toMatchObject({ kind: "assistant", streaming: false });
   });
 
   test("a mid-turn notice closes the open assistant (no orphaned caret)", () => {
@@ -544,10 +188,13 @@ describe("foldEvent", () => {
     expect(s.items[0]).toMatchObject({ kind: "assistant", streaming: true });
   });
 
+  // ── Overwrite-guard semantics (NOT in the corpus, load-bearing) ───────────
+  // preserve-on-omit, clear-on-null, clear-on-empty for facet/goal/flags/todos/
+  // activePlan/permissionMonitor. The daemon sends snapshots that may omit or
+  // null these fields; the fold must distinguish "omit" (preserve) from
+  // "null"/"empty" (clear).
+
   test("snapshot.facet propagates to state.facet (the badge data path)", () => {
-    // Without the foldEvent guard, facet lands on the wire snapshot but is dropped
-    // at the fold, so store.session.facet is always undefined and the badge never
-    // renders. This is the test that would have caught the critical gap.
     const s = foldAll([
       base({
         type: "sessionUpdated",
@@ -565,9 +212,6 @@ describe("foldEvent", () => {
   });
 
   test("a snapshot without facet leaves an existing state.facet intact", () => {
-    // Mirrors usage's overwrite-guarded semantics: a snapshot that carries facet
-    // overwrites; one that omits it (older daemon, usage-less mock abort) must
-    // not blank a known facet.
     const s = initialSessionState();
     foldEvent(
       s,
@@ -584,7 +228,6 @@ describe("foldEvent", () => {
       }),
     );
     expect(s.facet).toBe("plan");
-    // A later snapshot that omits facet must not erase the known value.
     foldEvent(
       s,
       base({
@@ -602,8 +245,6 @@ describe("foldEvent", () => {
   });
 
   test("snapshot.permissionMonitor propagates to state.permissionMonitor (the badge data path)", () => {
-    // Same overwrite-guarded semantics as facet: a snapshot that carries
-    // permissionMonitor overwrites; one that omits it must not blank a known mode.
     const s = foldAll([
       base({
         type: "sessionUpdated",
@@ -637,7 +278,6 @@ describe("foldEvent", () => {
       }),
     );
     expect(s.permissionMonitor).toBe("autonomous");
-    // A later snapshot that omits permissionMonitor must not erase the known value.
     foldEvent(
       s,
       base({
@@ -673,8 +313,6 @@ describe("foldEvent", () => {
   });
 
   test("a snapshot without activePlan leaves an existing state.activePlan intact", () => {
-    // Same overwrite-guarded semantics as facet: omitting activePlan must not
-    // blank a known plan (an older/partial snapshot shouldn't erase live plan state).
     const s = initialSessionState();
     const planText = "# My Plan\nDo the thing.";
     foldEvent(
@@ -692,7 +330,6 @@ describe("foldEvent", () => {
       }),
     );
     expect(s.activePlan).toBe(planText);
-    // A later snapshot that omits activePlan must not erase the known value.
     foldEvent(
       s,
       base({
@@ -710,9 +347,6 @@ describe("foldEvent", () => {
   });
 
   test("snapshot.goal propagates to state.goal (the badge data path)", () => {
-    // Same data path as facet: a snapshot carrying goal must land on state.goal
-    // so the StatusHeader GoalBadge renders. Without the foldEvent guard the
-    // field would ride the wire snapshot but be dropped at the fold.
     const goal = { summary: "Ship feature X", lifecycle: "active" };
     const s = foldAll([
       base({
@@ -731,9 +365,6 @@ describe("foldEvent", () => {
   });
 
   test("a snapshot without goal leaves an existing state.goal intact", () => {
-    // Mirrors facet's overwrite-guarded semantics: a snapshot that carries goal
-    // overwrites; one that omits it (older daemon, partial snapshot) must not
-    // blank a known goal.
     const goal = { summary: "Ship feature X", lifecycle: "active" };
     const s = initialSessionState();
     foldEvent(
@@ -751,7 +382,6 @@ describe("foldEvent", () => {
       }),
     );
     expect(s.goal).toEqual(goal);
-    // A later snapshot that omits goal must not erase the known value.
     foldEvent(
       s,
       base({
@@ -769,10 +399,6 @@ describe("foldEvent", () => {
   });
 
   test("snapshot.goal = null clears state.goal (the cleared-goal data path)", () => {
-    // The daemon sends current_goal: null when a goal is cleared. The projection
-    // maps that to goal: null, and the fold must clear state.goal (→ undefined)
-    // so the GoalBadge hides. This is the null/cleared state that facet/activePlan
-    // don't have — distinct from the "omit" case above.
     const goal = { summary: "Ship feature X", lifecycle: "active" };
     const s = initialSessionState();
     foldEvent(
@@ -790,7 +416,6 @@ describe("foldEvent", () => {
       }),
     );
     expect(s.goal).toEqual(goal);
-    // A later snapshot carrying goal: null clears it.
     foldEvent(
       s,
       base({
@@ -847,7 +472,6 @@ describe("foldEvent", () => {
       }),
     );
     expect(s.flags).toEqual(flags);
-    // A later snapshot that omits flags must not erase the known value.
     foldEvent(
       s,
       base({
@@ -882,7 +506,6 @@ describe("foldEvent", () => {
       }),
     );
     expect(s.flags).toEqual(flags);
-    // A later snapshot carrying flags: [] clears it.
     foldEvent(
       s,
       base({
