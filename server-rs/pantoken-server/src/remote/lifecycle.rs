@@ -211,6 +211,7 @@ mod tests {
             Some(dir.path().to_path_buf()),
             String::new(),
             0,
+            0,
         );
         std::mem::forget(dir);
         (hub, driver)

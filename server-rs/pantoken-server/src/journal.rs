@@ -8,6 +8,8 @@
 //! Invariant: at every instant, `fold_all(build_seed(journal).events)` ≡
 //! the state a connected client folded.
 
+use std::time::Instant;
+
 use pantoken_protocol::session_driver::{
     AssistantDeltaChannel, HostUiRequest, SessionDriverEvent, SessionEventBase, SessionRef,
     SessionSnapshot, WorkspaceRef,
@@ -53,6 +55,10 @@ pub struct SessionJournal {
     /// clone on every `refresh_usage` tick). `None` when the journal was created
     /// with an empty seed and no event has been ingested yet.
     pub session_ref: Option<SessionRef>,
+    /// Last time an event was appended to this journal. Used by the hub's
+    /// idle-journal eviction pass to drop journals for viewer-less, unwarm
+    /// sessions that have been idle past `journal_idle_evict_ms`.
+    pub last_activity: Instant,
 }
 
 pub fn create_journal(epoch: u64, seed: &[SessionDriverEvent]) -> SessionJournal {
@@ -63,6 +69,7 @@ pub fn create_journal(epoch: u64, seed: &[SessionDriverEvent]) -> SessionJournal
         tail: Vec::new(),
         tail_bytes: 0,
         session_ref: seed.first().map(|e| e.session_ref().clone()),
+        last_activity: Instant::now(),
     }
 }
 
@@ -75,6 +82,7 @@ pub fn bump_epoch(j: &mut SessionJournal, epoch: u64, seed: &[SessionDriverEvent
     j.tail.clear();
     j.tail_bytes = 0;
     j.session_ref = seed.first().map(|e| e.session_ref().clone());
+    j.last_activity = Instant::now();
 }
 
 /// Cheap byte-size estimate for eviction heuristics. Sums the lengths of the
@@ -145,6 +153,7 @@ pub fn append_event(j: &mut SessionJournal, ev: SessionDriverEvent) -> u64 {
     };
     j.tail.push(frame);
     j.tail_bytes += j.tail.last().unwrap().bytes;
+    j.last_activity = Instant::now();
 
     while j.tail.len() > TAIL_MAX_FRAMES || j.tail_bytes > TAIL_MAX_BYTES {
         if j.tail.is_empty() {

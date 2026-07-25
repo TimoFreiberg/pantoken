@@ -1934,6 +1934,11 @@ pub struct MockDriver {
     /// Mutable fixture todos for the todo delete path. Seeded from the `context`
     /// script's snapshot; `delete_todo` removes from here.
     todos: Arc<Mutex<Vec<TodoItem>>>,
+    /// Test-controllable set of "warm" session IDs. The mock has no real daemon,
+    /// so `has_warm_session` checks this set instead. Empty by default (matching
+    /// the trait default of `false`); tests insert session IDs to simulate warm
+    /// daemon attachments for journal-eviction testing.
+    warm_sessions: Arc<Mutex<std::collections::HashSet<SessionId>>>,
 }
 
 /// Handle to a currently-running script, so the next `play_script` can flush it.
@@ -2006,6 +2011,7 @@ impl MockDriver {
             config: Arc::new(Mutex::new(mock_default_config())),
             jobs: Arc::new(Mutex::new(mock_default_jobs())),
             todos: Arc::new(Mutex::new(mock_default_todos())),
+            warm_sessions: Arc::new(Mutex::new(std::collections::HashSet::new())),
         }
     }
 
@@ -2037,6 +2043,18 @@ impl MockDriver {
         self.generation.fetch_add(1, Ordering::Relaxed);
         *self.in_flight.lock() = None;
         self.pending_dialogs.lock().clear();
+    }
+
+    /// Mark a session as "warm" (has a live daemon attachment) for testing
+    /// journal-eviction logic. The mock has no real daemon, so this simulates
+    /// the warm state that `has_warm_session` checks.
+    pub fn add_warm_session(&self, sid: SessionId) {
+        self.warm_sessions.lock().insert(sid);
+    }
+
+    /// Remove a session from the "warm" set (simulate daemon crash/detach).
+    pub fn remove_warm_session(&self, sid: &SessionId) {
+        self.warm_sessions.lock().remove(sid);
     }
 
     fn play_script(&self, steps: Vec<ScriptStep>) {
@@ -4570,5 +4588,10 @@ impl PantokenDriver for MockDriver {
         self.queues.lock().clear();
         self.dirty_worktrees.lock().clear();
         self.reaped_worktrees.lock().clear();
+        self.warm_sessions.lock().clear();
+    }
+
+    fn has_warm_session(&self, sid: &SessionId) -> bool {
+        self.warm_sessions.lock().contains(sid)
     }
 }

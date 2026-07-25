@@ -41,7 +41,7 @@ use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use futures_util::FutureExt;
 use pantoken_protocol::session_driver::{
@@ -55,7 +55,7 @@ use pantoken_protocol::wire::{
 };
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
-use tracing::error;
+use tracing::{error, info};
 
 use crate::driver::{NewSessionOptsData, PantokenDriver, TodoDeleteError};
 use crate::journal::{
@@ -242,6 +242,9 @@ pub struct SessionHub {
     data_dir: Option<PathBuf>,
     build_sha: String,
     delta_flush_ms: u64,
+    /// Idle timeout (ms) for evicting viewer-less, unwarm session journals.
+    /// ≤0 disables eviction. Set from `Config::journal_idle_evict_ms`.
+    journal_idle_evict_ms: i64,
 
     /// Injectable seam for opening the data dir in the platform file manager.
     /// Defaults to the real spawn; tests override it to exercise the failure
@@ -326,6 +329,7 @@ impl SessionHub {
         data_dir: Option<PathBuf>,
         build_sha: String,
         delta_flush_ms: u64,
+        journal_idle_evict_ms: i64,
     ) -> Arc<Mutex<Self>> {
         let hub = Arc::new(Mutex::new(Self {
             driver,
@@ -337,6 +341,7 @@ impl SessionHub {
             data_dir,
             build_sha,
             delta_flush_ms,
+            journal_idle_evict_ms,
             open_in_file_manager: Box::new(default_open_in_file_manager),
             journals: HashMap::new(),
             pending_deltas: HashMap::new(),
@@ -2370,6 +2375,67 @@ impl SessionHub {
         self.session_list_dirty
     }
 
+    /// Evict journals for sessions that are viewer-less, not running, and
+    /// have no warm daemon attachment, if they've been idle longer than
+    /// `journal_idle_evict_ms`. Called from the live-refresh tick.
+    fn evict_idle_journals(&mut self) {
+        if self.journal_idle_evict_ms <= 0 {
+            return;
+        }
+        // Never evict during a session swap — the source session's journal
+        // may still hold buffered events the swap needs.
+        if self.swaps_in_flight > 0 {
+            return;
+        }
+        let threshold = Duration::from_millis(self.journal_idle_evict_ms as u64);
+        let now = Instant::now();
+
+        // Collect victims — can't remove while iterating the same HashMap.
+        let victims: Vec<SessionId> = self
+            .journals
+            .iter()
+            .filter(|(sid, j)| {
+                // Never evict the default-focus session.
+                if self.default_focus_id.as_ref() == Some(*sid) {
+                    return false;
+                }
+                // Never evict a session with active viewers.
+                if self.has_viewer(sid) {
+                    return false;
+                }
+                // Never evict a running session.
+                if self.running.contains(*sid) {
+                    return false;
+                }
+                // Never evict a session that's initializing (warm-up in progress).
+                if self.initializing.contains(*sid) {
+                    return false;
+                }
+                // Never evict a session with a pending delta (in-flight coalescing).
+                if self.pending_deltas.contains_key(*sid) {
+                    return false;
+                }
+                // Must be idle long enough.
+                if now.duration_since(j.last_activity) < threshold {
+                    return false;
+                }
+                // Must have no warm daemon attachment.
+                !self.driver.has_warm_session(sid)
+            })
+            .map(|(sid, _)| (*sid).clone())
+            .collect();
+
+        for sid in &victims {
+            self.drop_pending(sid);
+            self.journals.remove(sid);
+            info!(
+                "[hub] evicted idle journal for session {sid} \
+                 (no viewers, no warm session, idle >= {:?})",
+                threshold
+            );
+        }
+    }
+
     /// Enqueue a live-refresh pass: rebroadcast the session list if dirty, then
     /// refresh usage for running sessions. Called by the periodic ticker in
     /// main.rs. Follows the same hub_ops pattern as `spawn_connect_lists` and
@@ -2379,7 +2445,8 @@ impl SessionHub {
     pub fn enqueue_live_refresh(&self) {
         let dirty = self.session_list_dirty;
         let refresh_usage = self.sync_live_refresh();
-        if !dirty && !refresh_usage {
+        let should_evict = !self.journals.is_empty() && self.journal_idle_evict_ms > 0;
+        if !dirty && !refresh_usage && !should_evict {
             return;
         }
         let driver = self.driver.clone();
@@ -2396,6 +2463,10 @@ impl SessionHub {
                     if refresh_usage {
                         let mut h = hub.lock();
                         h.refresh_usage();
+                    }
+                    if should_evict {
+                        let mut h = hub.lock();
+                        h.evict_idle_journals();
                     }
                 })
             }),
@@ -3290,6 +3361,7 @@ mod hub_models_tests {
             None,
             "test-sha".into(),
             10,
+            0,
         );
         let hub_for_events = hub.clone();
         driver.subscribe(Box::new(move |ev| hub_for_events.lock().on_event(ev)));
@@ -3492,6 +3564,7 @@ mod hub_models_tests {
             None,
             "test-sha".into(),
             10,
+            0,
         );
         match hub.lock().pantoken_settings_msg() {
             ServerMessage::PantokenSettings { env, .. } => {
@@ -3517,6 +3590,7 @@ mod hub_models_tests {
             Some(tmp.path().to_path_buf()),
             "test-sha".into(),
             10,
+            0,
         );
         hub.lock().set_open_in_file_manager(|_| Err("boom".into()));
 
@@ -3549,6 +3623,7 @@ mod hub_models_tests {
             None,
             "test-sha".into(),
             10,
+            0,
         );
 
         let (client_key, _tx, mut rx) = hub.lock().add_client(None);
@@ -4679,6 +4754,7 @@ mod hub_models_tests {
             None,
             "test-sha".into(),
             10,
+            0,
         );
 
         // Notifications only fire once someone has connected and then left.
@@ -5141,5 +5217,204 @@ mod hub_models_tests {
             );
         }
         // If we reach here, no panic occurred — the test passes.
+    }
+
+    // ── Journal eviction tests ────────────────────────────────────────────
+
+    /// Build a hub with `journal_idle_evict_ms` set (eviction enabled).
+    fn test_hub_with_eviction(evict_ms: i64) -> (Arc<MockDriver>, Arc<Mutex<SessionHub>>) {
+        let driver = Arc::new(MockDriver::new());
+        let (tx, _rx) = hub_op_channel();
+        let hub = SessionHub::new(
+            driver.clone(),
+            tx,
+            None,
+            250,
+            "test-server".into(),
+            None,
+            "test-sha".into(),
+            10,
+            evict_ms,
+        );
+        (driver, hub)
+    }
+
+    /// Create a journal for a session by directly inserting one (bypasses the
+    /// normal switch_to path — we only need a journal to exist).
+    fn insert_test_journal(hub: &Arc<Mutex<SessionHub>>, sid: &str) {
+        let sref = session_ref_for(sid);
+        let seed = vec![SessionDriverEvent::SessionOpened {
+            base: SessionEventBase {
+                session_ref: sref,
+                timestamp: ts(),
+                run_id: None,
+            },
+            snapshot: crate::polytoken::event_map::snapshot_from_state(
+                None,
+                &session_ref_for(sid),
+                &pantoken_protocol::session_driver::WorkspaceRef {
+                    workspace_id: "ws".into(),
+                    path: "/repo".into(),
+                    display_name: None,
+                },
+                pantoken_protocol::session_driver::SessionStatus::Idle,
+                &ts(),
+                None,
+                None,
+            ),
+        }];
+        let mut h = hub.lock();
+        let epoch = h.next_epoch();
+        h.set_journal(sid.into(), create_journal(epoch, &seed));
+    }
+
+    /// AC.1: A journal for a session with no viewers, no running turn, no warm
+    /// daemon, idle past the threshold, is evicted.
+    #[test]
+    fn evict_idle_journal_after_timeout() {
+        let (_driver, hub) = test_hub_with_eviction(50);
+        insert_test_journal(&hub, "idle-session");
+        assert!(hub.lock().has_journal(&"idle-session".to_string()));
+
+        // Wait past the eviction threshold (50ms).
+        std::thread::sleep(std::time::Duration::from_millis(80));
+        hub.lock().evict_idle_journals();
+
+        assert!(
+            !hub.lock().has_journal(&"idle-session".to_string()),
+            "idle journal should be evicted after timeout"
+        );
+    }
+
+    /// AC.2: A journal for a session with an active viewer is never evicted.
+    #[test]
+    fn active_journal_not_evicted() {
+        let (_driver, hub) = test_hub_with_eviction(50);
+        insert_test_journal(&hub, "viewed-session");
+
+        // Add a client focused on the session.
+        let (client_key, _tx, _rx) = hub.lock().add_client(None);
+        hub.lock()
+            .set_client_focus(client_key, "viewed-session".into());
+        assert!(hub.lock().has_viewer(&"viewed-session".to_string()));
+
+        std::thread::sleep(std::time::Duration::from_millis(80));
+        hub.lock().evict_idle_journals();
+
+        assert!(
+            hub.lock().has_journal(&"viewed-session".to_string()),
+            "journal with active viewer must not be evicted"
+        );
+    }
+
+    /// AC.3: A journal for a running session is never evicted.
+    #[test]
+    fn running_journal_not_evicted() {
+        let (_driver, hub) = test_hub_with_eviction(50);
+        insert_test_journal(&hub, "running-session");
+
+        // Mark the session as running.
+        let sid = "running-session".to_string();
+        hub.lock().set_running(&sid, true);
+        assert!(hub.lock().running.contains("running-session"));
+
+        std::thread::sleep(std::time::Duration::from_millis(80));
+        hub.lock().evict_idle_journals();
+
+        assert!(
+            hub.lock().has_journal(&"running-session".to_string()),
+            "journal for running session must not be evicted"
+        );
+    }
+
+    /// AC.4: The default-focus session's journal is never evicted.
+    #[test]
+    fn default_focus_journal_not_evicted() {
+        let (_driver, hub) = test_hub_with_eviction(50);
+
+        // The default-focus session is set during seed_default. The mock
+        // driver seeds a greeting session, so it should already have a journal.
+        // Verify it exists, then try to evict it.
+        let default_sid = hub
+            .lock()
+            .default_focus_id
+            .clone()
+            .expect("default focus should be set by seed_default");
+        assert!(hub.lock().has_journal(&default_sid));
+
+        std::thread::sleep(std::time::Duration::from_millis(80));
+        hub.lock().evict_idle_journals();
+
+        assert!(
+            hub.lock().has_journal(&default_sid),
+            "default-focus journal must not be evicted"
+        );
+    }
+
+    /// AC.6: Setting `journal_idle_evict_ms = 0` disables eviction entirely.
+    #[test]
+    fn eviction_disabled_when_zero() {
+        let (_driver, hub) = test_hub_with_eviction(0);
+        insert_test_journal(&hub, "idle-session");
+        assert!(hub.lock().has_journal(&"idle-session".to_string()));
+
+        std::thread::sleep(std::time::Duration::from_millis(80));
+        hub.lock().evict_idle_journals();
+
+        assert!(
+            hub.lock().has_journal(&"idle-session".to_string()),
+            "journal must not be evicted when eviction is disabled (0)"
+        );
+    }
+
+    /// A journal that was recently active (within the threshold) is not evicted.
+    #[test]
+    fn recently_active_journal_not_evicted() {
+        let (_driver, hub) = test_hub_with_eviction(200);
+        insert_test_journal(&hub, "recent-session");
+        assert!(hub.lock().has_journal(&"recent-session".to_string()));
+
+        // Only wait 50ms — well under the 200ms threshold.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        hub.lock().evict_idle_journals();
+
+        assert!(
+            hub.lock().has_journal(&"recent-session".to_string()),
+            "recently active journal must not be evicted"
+        );
+    }
+
+    /// AC.5: A journal for a session with a warm daemon attachment is never
+    /// evicted, even when idle past the threshold. Uses MockDriver's
+    /// `add_warm_session` to simulate a live daemon attachment.
+    #[test]
+    fn warm_session_journal_not_evicted() {
+        let (driver, hub) = test_hub_with_eviction(50);
+        insert_test_journal(&hub, "warm-session");
+
+        // Mark the session as warm (simulates a live daemon attachment).
+        driver.add_warm_session("warm-session".into());
+        assert!(driver.has_warm_session(&"warm-session".to_string()));
+
+        std::thread::sleep(std::time::Duration::from_millis(80));
+        hub.lock().evict_idle_journals();
+
+        assert!(
+            hub.lock().has_journal(&"warm-session".to_string()),
+            "journal for warm session must not be evicted"
+        );
+
+        // Now simulate daemon crash: remove the warm session.
+        driver.remove_warm_session(&"warm-session".to_string());
+        assert!(!driver.has_warm_session(&"warm-session".to_string()));
+
+        // Wait past the threshold again, then evict.
+        std::thread::sleep(std::time::Duration::from_millis(80));
+        hub.lock().evict_idle_journals();
+
+        assert!(
+            !hub.lock().has_journal(&"warm-session".to_string()),
+            "journal for crashed-daemon session should be evicted after warm removal"
+        );
     }
 }

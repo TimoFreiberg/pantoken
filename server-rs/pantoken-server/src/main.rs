@@ -214,6 +214,7 @@ async fn main() {
         Some(cfg.data_dir.clone()),
         option_env!("PANTOKEN_BUILD_SHA").unwrap_or("").to_string(),
         cfg.delta_flush_ms,
+        cfg.journal_idle_evict_ms,
     );
 
     // Debug drivers (mock/fake) must never spawn a real file-manager window —
@@ -669,6 +670,10 @@ async fn run_remote_runtime_mode() {
             .unwrap_or(600000),
         live_refresh_ms: 1000,
         delta_flush_ms: 50,
+        journal_idle_evict_ms: std::env::var("PANTOKEN_JOURNAL_IDLE_EVICT_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(300000),
     });
 
     let hub = SessionHub::new(
@@ -680,6 +685,7 @@ async fn run_remote_runtime_mode() {
         Some(run_dir.clone()),
         option_env!("PANTOKEN_BUILD_SHA").unwrap_or("").to_string(),
         cfg.delta_flush_ms,
+        cfg.journal_idle_evict_ms,
     );
 
     tokio::spawn(run_hub_op_applier(hub.clone(), hub_op_rx));
@@ -716,6 +722,7 @@ mod tests {
             idle_reap_ms: 0,
             live_refresh_ms: 1000,
             delta_flush_ms: 0,
+            journal_idle_evict_ms: 0,
         };
         let (hub_ops, _rx) = hub_op_channel();
         let driver: Arc<dyn PantokenDriver> =
@@ -728,6 +735,7 @@ mod tests {
             "test-server".into(),
             Some(dir.path().to_path_buf()),
             String::new(),
+            0,
             0,
         );
         let push = PushService::new(dir.path(), "mailto:test@example.com".into());

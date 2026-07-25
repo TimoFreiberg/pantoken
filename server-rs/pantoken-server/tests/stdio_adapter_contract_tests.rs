@@ -43,6 +43,7 @@ async fn test_env() -> SessionEnv {
         idle_reap_ms: 0,
         live_refresh_ms: 1000,
         delta_flush_ms: 0,
+        journal_idle_evict_ms: 0,
     };
     let driver: Arc<dyn PantokenDriver> = Arc::new(MockDriver::new());
     let (hub_ops, hub_op_rx) = hub_op_channel();
@@ -54,6 +55,7 @@ async fn test_env() -> SessionEnv {
         "test-server-id".into(),
         Some(dir.path().to_path_buf()),
         String::new(),
+        0,
         0,
     );
     tokio::spawn(run_hub_op_applier(hub.clone(), hub_op_rx));

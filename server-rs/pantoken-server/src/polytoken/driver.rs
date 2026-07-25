@@ -3347,6 +3347,10 @@ impl PantokenDriver for PolytokenDriver {
         self.inner.warm.read().len()
     }
 
+    fn has_warm_session(&self, sid: &SessionId) -> bool {
+        self.inner.warm.read().contains_key(sid)
+    }
+
     async fn dispose_idle_warm(&self) {
         // Dispose all warm sessions that don't have a turn in flight.
         // Retains durable session metadata (journal/store persists).

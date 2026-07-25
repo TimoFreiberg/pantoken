@@ -111,6 +111,9 @@ pub struct Config {
     pub live_refresh_ms: u64,
     /// Flush window (ms) for server-side coalescing of streamed assistantDeltas.
     pub delta_flush_ms: u64,
+    /// Idle timeout (ms) before a viewer-less, non-running, unwarm session's
+    /// journal is evicted from memory. ≤0 disables eviction.
+    pub journal_idle_evict_ms: i64,
 }
 
 pub fn load() -> Config {
@@ -143,6 +146,7 @@ pub fn load() -> Config {
     let idle_reap_ms = env_parse("PANTOKEN_IDLE_REAP_MS", 10 * 60 * 1000);
     let live_refresh_ms = env_parse("PANTOKEN_LIVE_REFRESH_MS", 1000);
     let delta_flush_ms = env_parse("PANTOKEN_DELTA_FLUSH_MS", 50);
+    let journal_idle_evict_ms = env_parse("PANTOKEN_JOURNAL_IDLE_EVICT_MS", 5 * 60 * 1000);
 
     Config {
         port,
@@ -156,6 +160,7 @@ pub fn load() -> Config {
         idle_reap_ms,
         live_refresh_ms,
         delta_flush_ms,
+        journal_idle_evict_ms,
     }
 }
 
@@ -202,6 +207,7 @@ mod tests {
             idle_reap_ms: 600000,
             live_refresh_ms: 1000,
             delta_flush_ms: 50,
+            journal_idle_evict_ms: 0,
         };
         assert!(token_ok(None, &cfg));
         assert!(token_ok(Some("anything"), &cfg));
@@ -269,6 +275,7 @@ mod tests {
             idle_reap_ms: 600000,
             live_refresh_ms: 1000,
             delta_flush_ms: 50,
+            journal_idle_evict_ms: 0,
         }
     }
 

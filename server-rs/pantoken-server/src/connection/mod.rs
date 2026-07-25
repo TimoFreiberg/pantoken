@@ -407,6 +407,7 @@ mod tests {
             idle_reap_ms: 0,
             live_refresh_ms: 1000,
             delta_flush_ms: 0,
+            journal_idle_evict_ms: 0,
         };
         let (hub_ops, _hub_op_rx) = hub_op_channel();
         let driver: Arc<dyn PantokenDriver> = Arc::new(MockDriver::new());
@@ -418,6 +419,7 @@ mod tests {
             "test-server-id".into(),
             Some(dir.path().to_path_buf()),
             String::new(),
+            0,
             0,
         );
         // Leak the tempdir so the hub's paths stay valid for the test's lifetime.

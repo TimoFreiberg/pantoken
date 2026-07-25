@@ -2662,6 +2662,7 @@ async fn make_remote_runtime(idle_reap_ms: i64) -> RemoteRuntimeFixture {
         idle_reap_ms,
         live_refresh_ms: 1000,
         delta_flush_ms: 50,
+        journal_idle_evict_ms: 0,
     });
     let driver_arc: Arc<dyn pantoken_server::driver::PantokenDriver> = Arc::new(driver.clone());
     let hub = SessionHub::new(
@@ -2673,6 +2674,7 @@ async fn make_remote_runtime(idle_reap_ms: i64) -> RemoteRuntimeFixture {
         Some(run_dir.clone()),
         "".into(),
         cfg.delta_flush_ms,
+        cfg.journal_idle_evict_ms,
     );
     let hub_op_handle = tokio::spawn(run_hub_op_applier(hub.clone(), hub_op_rx));
 
@@ -3056,6 +3058,7 @@ async fn active_turn_prevents_idle_gc_real() {
         idle_reap_ms: 1000,
         live_refresh_ms: 1000,
         delta_flush_ms: 50,
+        journal_idle_evict_ms: 0,
     });
     let driver_arc: Arc<dyn pantoken_server::driver::PantokenDriver> = Arc::new(driver.clone());
     let hub = SessionHub::new(
@@ -3067,6 +3070,7 @@ async fn active_turn_prevents_idle_gc_real() {
         Some(run_dir.clone()),
         "".into(),
         cfg.delta_flush_ms,
+        cfg.journal_idle_evict_ms,
     );
     let _hub_op_handle = tokio::spawn(run_hub_op_applier(hub.clone(), hub_op_rx));
     let socket_path = layout::private_socket(&root_path);

@@ -305,6 +305,14 @@ pub trait PantokenDriver: Send + Sync {
         0
     }
 
+    /// Whether a specific session has a warm daemon attachment. Used by the
+    /// hub's idle-journal eviction to avoid dropping a journal for a session
+    /// whose daemon is still alive (the user may return). Default `false`
+    /// (matching `warm_session_count`'s default); `PolytokenDriver` overrides.
+    fn has_warm_session(&self, _sid: &SessionId) -> bool {
+        false
+    }
+
     /// Dispose idle warm session attachments (tear down SSE + close clients)
     /// while retaining durable session metadata (the journal/store persists
     /// so the session is resumable). The `PolytokenDriver` impl delegates to

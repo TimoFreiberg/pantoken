@@ -134,6 +134,19 @@ FetchState/RefetchQueue effects are implemented. The `Arc<PolytokenInner>` split
 resolved the `&self`-vs-`Arc<Self>` structural knot. 19 live-path integration
 tests cover the live path.
 
+### Journal idle eviction
+
+The hub evicts journals for sessions that have no viewers, no running turn,
+and no warm daemon attachment once they've been idle past
+`PANTOKEN_JOURNAL_IDLE_EVICT_MS` (default 5 min; ≤0 disables). This closes the
+gap where a daemon crash leaves a journal in the hub's `journals` HashMap
+forever — the SSE reconnect loop never emits a synthetic `sessionClosed`, so
+the existing removal path never fires. The eviction pass runs from the existing
+live-refresh ticker (no new timer/thread); it's purely synchronous under the
+hub lock. A new `has_warm_session` driver trait method (default `false`;
+`PolytokenDriver` overrides) prevents evicting journals for sessions with live
+daemons.
+
 ## Wrong turns to undo
 
 1. **Fake-daemon architecture — resolved.** The original fake daemon was buried
