@@ -42,9 +42,15 @@ function fakeEnv(opts?: { phone?: boolean }) {
 }
 
 describe("overlay history", () => {
-  test("open pushes one entry; back gesture closes the overlay", () => {
+  test("open/close/back sequences: open pushes one entry, UI close consumes it, reopen works", () => {
+    // Three open→close→back permutations consolidated:
+    // (a) open → back gesture closes
+    // (b) open → UI close consumes entry (no double-close)
+    // (c) open → UI close → reopen → back gesture
     const f = fakeEnv();
     const oh = createOverlayHistory(f.env);
+
+    // (a) open → back gesture closes
     let open = true;
     oh.opened("ctx", () => (open = false));
     expect(f.entryCount()).toBe(1);
@@ -52,24 +58,17 @@ describe("overlay history", () => {
     expect(open).toBe(false);
     expect(oh.depth()).toBe(0);
     expect(f.entryCount()).toBe(0);
-  });
 
-  test("UI close consumes the pushed entry without re-closing", () => {
-    const f = fakeEnv();
-    const oh = createOverlayHistory(f.env);
+    // (b) open → UI close consumes entry without re-closing
     let closes = 0;
     oh.opened("ctx", () => closes++);
-    oh.closed("ctx"); // scrim tap / ✕ — store already set its state closed
+    oh.closed("ctx");
     expect(f.entryCount()).toBe(0);
     expect(oh.depth()).toBe(0);
-    // Our own back() must not invoke the close callback again.
-    expect(closes).toBe(0);
-  });
+    expect(closes).toBe(0); // own back() didn't invoke close callback
 
-  test("open → UI close → open → back gesture: second entry works", () => {
-    const f = fakeEnv();
-    const oh = createOverlayHistory(f.env);
-    let open = false;
+    // (c) open → UI close → reopen → back gesture
+    open = false;
     oh.opened("ctx", () => (open = false));
     oh.closed("ctx");
     open = true;
