@@ -176,70 +176,7 @@ describe("HostCoordinator reconnectRequired detection", () => {
   });
 });
 
-describe("HostCoordinator everConnected tracking", () => {
-  test("hasEverConnected returns false before connect, true after", async () => {
-    const { provider } = createFakeHostProvider([
-      descriptor("local"),
-      descriptor("remote-1", { state: "disconnected", wsUrl: undefined }),
-    ]);
-    const coordinator = new HostCoordinator(provider);
-    await coordinator.init();
-
-    expect(coordinator.hasEverConnected("remote-1")).toBe(false);
-
-    await coordinator.connectHost("remote-1");
-    expect(coordinator.hasEverConnected("remote-1")).toBe(true);
-  });
-});
-
-describe("HostCoordinator risk/acknowledgement delegation", () => {
-  test("acknowledgeRisk delegates to provider", async () => {
-    const { provider, setPendingRisks } = createFakeHostProvider([
-      descriptor("local"),
-      descriptor("remote-1", { state: "disconnected", wsUrl: undefined }),
-    ]);
-    const coordinator = new HostCoordinator(provider);
-    await coordinator.init();
-
-    const risk = {
-      id: "risk-1",
-      kind: "rootExecution" as const,
-      fingerprint: "abc123",
-      title: "Running as root",
-      explanation: "This container runs as root",
-      consequences: "Data loss possible",
-      continueLabel: "Allow root",
-    };
-    setPendingRisks("remote-1", [risk]);
-
-    // The fake provider's acknowledgeRisk checks the risk exists and fingerprint matches.
-    await coordinator.acknowledgeRisk("remote-1", "risk-1", "abc123");
-    // Should not throw.
-  });
-
-  test("cancelConnection delegates to provider and refreshes", async () => {
-    const { provider } = createFakeHostProvider([
-      descriptor("local"),
-      descriptor("remote-1", { state: "disconnected", wsUrl: undefined }),
-    ]);
-    const coordinator = new HostCoordinator(provider);
-    await coordinator.init();
-
-    await coordinator.cancelConnection("remote-1");
-    // Should not throw; the fake provider sets state to disconnected.
-    const summary = coordinator.summaries.find((s) => s.descriptor.id === "remote-1");
-    expect(summary?.descriptor.state).toBe("disconnected");
-  });
-
-  test("resumeConnection delegates to provider", async () => {
-    const { provider } = createFakeHostProvider([
-      descriptor("local"),
-      descriptor("remote-1", { state: "disconnected", wsUrl: undefined }),
-    ]);
-    const coordinator = new HostCoordinator(provider);
-    await coordinator.init();
-
-    await coordinator.resumeConnection("remote-1");
-    // Should not throw.
-  });
-});
+// The everConnected tracking test and the 3 risk/acknowledgement delegation
+// tests ("should not throw") were cut — they verified pure pass-through to the
+// provider with no transformation. The reconnectRequired detection tests above
+// were kept: they pin real connection-affecting field-change detection logic.
