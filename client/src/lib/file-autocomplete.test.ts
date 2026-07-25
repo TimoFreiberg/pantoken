@@ -10,6 +10,7 @@ import {
   splitExternalQuery,
   stepLevel,
   type AtItem,
+  type BuildAtItemsParams,
 } from "./file-autocomplete.js";
 
 describe("extractAtQuery", () => {
@@ -174,174 +175,219 @@ describe("filterFiles", () => {
     expect(filterFiles(FILES, "zzz")).toEqual([]);
   });
 
-  // ── Edge-case tests from the at-mention fixture comparison (issue #63) ──
+  // ── Edge-case fixtures from the at-mention fixture comparison (issue #63) ──
   // These encode the agreed behavior (mimic polytoken's TUI) as a regression
-  // guard. Each test mirrors a file structure from parity/fixtures/at-mention-fixture/
-  // and asserts the exact ranked order observed in the polytoken TUI.
+  // guard. Each row mirrors a file structure from parity/fixtures/at-mention-fixture/
+  // and asserts the exact ranked order observed in the polytoken TUI. One row per
+  // (files, query) → expected assertion: the multi-query fixtures above are
+  // flattened so every assertion survives as a named case in the table.
 
-  test("test_case_sensitivity — lowercase, mixed, and ALL CAPS all match case-insensitively", () => {
-    const files: readonly FileInfo[] = [
-      f("server.rs"),
-      f("caps/Server.rs"),
-      f("docs/server-selection-rest-api.md"),
-      f("src/server/", true),
-      f("src/server/lookup.rs"),
-    ];
-    // All three case variants produce the same ordering — polytoken is
-    // case-insensitive for file matching.
-    const expected = [
-      "server.rs",
-      "caps/Server.rs",
-      "docs/server-selection-rest-api.md",
-      "src/server/",
-      "src/server/lookup.rs",
-    ];
-    expect(paths(filterFiles(files, "server"))).toEqual(expected);
-    expect(paths(filterFiles(files, "Server"))).toEqual(expected);
-    expect(paths(filterFiles(files, "SERVER"))).toEqual(expected);
-  });
-
-  test("test_cross_dir_deranking — basename-prefix outranks segment-prefix", () => {
-    // "server": server.rs is path-prefix (tier 0); caps/Server.rs and
-    // docs/server-selection-rest-api.md are basename-prefix (tier 1);
-    // src/server/ is basename-prefix (tier 1); src/server/lookup.rs is
-    // segment-prefix (tier 2, "server" is an interior segment, basename
-    // "lookup.rs" does not start with "server"). Tier order determines ranking.
-    const files: readonly FileInfo[] = [
-      f("src/server/lookup.rs"),
-      f("src/server/", true),
-      f("docs/server-selection-rest-api.md"),
-      f("caps/Server.rs"),
-      f("server.rs"),
-    ];
-    expect(paths(filterFiles(files, "server"))).toEqual([
-      "server.rs", // tier 0: path-prefix
-      "caps/Server.rs", // tier 1: basename-prefix (alphabetical)
-      "docs/server-selection-rest-api.md", // tier 1: basename-prefix
-      "src/server/", // tier 1: basename-prefix
-      "src/server/lookup.rs", // tier 2: segment-prefix (interior segment)
-    ]);
-  });
-
-  test("test_suffix_matching — suffix matches via fuzzy subsequence", () => {
-    // "test": test-utils.ts and utils-test.ts both match. test-utils.ts is
-    // path-prefix (tier 0); utils-test.ts is segment-prefix (tier 2, "test"
-    // at the start of the basename after "utils-"). Wait — "utils-test.ts"
-    // basename starts with "utils", not "test". "test" appears after the "-"
-    // separator → tier 3 (word-boundary). docs/server-selection-rest-api.md
-    // matches "test" as a fuzzy subsequence (t-e-s-t in "rest-api"? no —
-    // in "selection-rest-api": t in "selection", e in "rest", s in "rest",
-    // t in "rest" → fuzzy tier 4).
-    const files: readonly FileInfo[] = [
-      f("docs/server-selection-rest-api.md"),
-      f("utils-test.ts"),
-      f("test-utils.ts"),
-    ];
-    expect(paths(filterFiles(files, "test"))).toEqual([
-      "test-utils.ts", // tier 0: path-prefix
-      "utils-test.ts", // tier 3: word-boundary (after "-")
-      "docs/server-selection-rest-api.md", // tier 4: fuzzy
-    ]);
-  });
-
-  test("test_typo_leniency — fuzzy matching catches transposition typos", () => {
-    // "srselrs" (scrambled "src/selection.rs") matches via fuzzy subsequence.
-    // "servre" (transposition of "server") matches "server-selection-rest-api".
-    // "conifg" (transposition of "config") matches nothing — no path has the
-    // right subsequence.
-    const files: readonly FileInfo[] = [
-      f("src/selection.rs"),
-      f("src/server/lookup.rs"),
-      f("docs/server-selection-rest-api.md"),
-      f("config.ts"),
-    ];
-    // srselrs → s-r-s-e-l-r-s: matches src/selection.rs (s,r,c,/,s,e,l,...,r,s)
-    expect(paths(filterFiles(files, "srselrs"))).toEqual([
-      "src/selection.rs",
-      "src/server/lookup.rs",
-      "docs/server-selection-rest-api.md",
-    ]);
-    // servre → s-e-r-v-r-e: matches docs/server-selection-rest-api.md
-    expect(paths(filterFiles(files, "servre"))).toEqual([
-      "docs/server-selection-rest-api.md",
-    ]);
-    // conifg → c-o-n-i-f-g: no path contains this subsequence
-    // (config.ts = c-o-n-f-i-g; "conifg" needs 'i' before 'f', but "config"
-    // has 'f' before 'i' → no subsequence match)
-    expect(paths(filterFiles(files, "conifg"))).toEqual([]);
-  });
-
-  test("test_dir_before_file_tiebreaker — alphabetical within same tier (no dir preference)", () => {
-    // Polytoken does NOT rank directories before files within the same tier.
-    // Same-tier matches break purely alphabetically by path.
-    // "index": index/ (dir, tier 0) and index/deep.ts (file, tier 0) both
-    // start with "index". Alphabetical: "index/" < "index/deep.ts" (shorter
-    // prefix sorts first). Then client/index.ts and src/index.ts (both tier 1,
-    // basename-prefix) sort alphabetically by directory: "client" < "src".
-    const files: readonly FileInfo[] = [
-      f("src/index.ts"),
-      f("client/index.ts"),
-      f("index/deep.ts"),
-      f("index/", true),
-    ];
-    expect(paths(filterFiles(files, "index"))).toEqual([
-      "index/", // tier 0, alphabetical first (shorter string)
-      "index/deep.ts", // tier 0, alphabetical second
-      "client/index.ts", // tier 1 (basename-prefix), "client" < "src"
-      "src/index.ts", // tier 1 (basename-prefix)
-    ]);
-  });
-
-  test("test_trailing_slash — directory drill-down shows dir + children", () => {
-    // A trailing slash in the query triggers directory drill-down: the matching
-    // directory and its immediate children are shown.
-    const files: readonly FileInfo[] = [
-      f("index/", true),
-      f("index/deep.ts"),
-      f("index/deep/nested.ts"), // not an immediate child (2 levels deep)
-      f("client/index.ts"), // not a child of index/
-    ];
-    expect(paths(filterFiles(files, "index/"))).toEqual([
-      "index/",
-      "index/deep.ts",
-    ]);
-  });
-
-  test("test_dotfile_handling — dotfiles hidden in default mode, visible with include_ignored", () => {
-    // Dotfiles are excluded from the file index by default (the server's
-    // GET /files hides them). When present in the index (include_ignored),
-    // they match normally. The .env file is gitignored, .eslintrc.json is
-    // a visible dotfile. Both only appear when the toggle is on.
-    const files: readonly FileInfo[] = [
-      f(".env"),
-      f(".eslintrc.json"),
-      f("config.ts"),
-    ];
-    // ".env" matches .env (path-prefix) only — .eslintrc.json has no 'v'.
-    expect(paths(filterFiles(files, ".env"))).toEqual([".env"]);
-    // ".esl" matches .eslintrc.json (path-prefix) only.
-    expect(paths(filterFiles(files, ".esl"))).toEqual([".eslintrc.json"]);
-  });
-
-  test("test_gitignored_files — gitignored files only match when in the index", () => {
-    // The filterFiles function only sees what's in the index. Gitignored files
-    // (dist/bundle.js, server.log) are excluded by the server's GET /files in
-    // default mode. When include_ignored is on, they appear in the index and
-    // match normally. This test verifies filterFiles handles them correctly
-    // when they ARE in the index.
-    const filesWithIgnored: readonly FileInfo[] = [
-      f("dist/bundle.js"),
-      f("server.log"),
-      f("server.rs"),
-    ];
-    expect(paths(filterFiles(filesWithIgnored, "bundle"))).toEqual([
-      "dist/bundle.js",
-    ]);
-    expect(paths(filterFiles(filesWithIgnored, "server"))).toEqual([
-      "server.log", // tier 0: path-prefix
-      "server.rs", // tier 0: path-prefix (alphabetical: "server.log" < "server.rs")
-    ]);
-  });
+  type FilterCase = {
+    name: string;
+    files: readonly FileInfo[];
+    query: string;
+    expected: string[];
+  };
+  const filterCases: readonly FilterCase[] = [
+    {
+      // Case-insensitive: lowercase, mixed, and ALL CAPS all match the same order.
+      name: "case sensitivity — lowercase",
+      files: [
+        f("server.rs"),
+        f("caps/Server.rs"),
+        f("docs/server-selection-rest-api.md"),
+        f("src/server/", true),
+        f("src/server/lookup.rs"),
+      ],
+      query: "server",
+      expected: [
+        "server.rs",
+        "caps/Server.rs",
+        "docs/server-selection-rest-api.md",
+        "src/server/",
+        "src/server/lookup.rs",
+      ],
+    },
+    {
+      name: "case sensitivity — mixed case",
+      files: [
+        f("server.rs"),
+        f("caps/Server.rs"),
+        f("docs/server-selection-rest-api.md"),
+        f("src/server/", true),
+        f("src/server/lookup.rs"),
+      ],
+      query: "Server",
+      expected: [
+        "server.rs",
+        "caps/Server.rs",
+        "docs/server-selection-rest-api.md",
+        "src/server/",
+        "src/server/lookup.rs",
+      ],
+    },
+    {
+      name: "case sensitivity — ALL CAPS",
+      files: [
+        f("server.rs"),
+        f("caps/Server.rs"),
+        f("docs/server-selection-rest-api.md"),
+        f("src/server/", true),
+        f("src/server/lookup.rs"),
+      ],
+      query: "SERVER",
+      expected: [
+        "server.rs",
+        "caps/Server.rs",
+        "docs/server-selection-rest-api.md",
+        "src/server/",
+        "src/server/lookup.rs",
+      ],
+    },
+    {
+      // server.rs path-prefix (tier 0); caps/Server.rs, docs/server-selection…,
+      // src/server/ basename-prefix (tier 1); src/server/lookup.rs segment-prefix
+      // (tier 2). Tier order determines ranking; alphabetical within a tier.
+      name: "cross-dir deranking — basename-prefix outranks segment-prefix",
+      files: [
+        f("src/server/lookup.rs"),
+        f("src/server/", true),
+        f("docs/server-selection-rest-api.md"),
+        f("caps/Server.rs"),
+        f("server.rs"),
+      ],
+      query: "server",
+      expected: [
+        "server.rs",
+        "caps/Server.rs",
+        "docs/server-selection-rest-api.md",
+        "src/server/",
+        "src/server/lookup.rs",
+      ],
+    },
+    {
+      // test-utils.ts path-prefix (tier 0); utils-test.ts word-boundary (tier 3,
+      // "test" after "-"); docs/server-selection-rest-api.md fuzzy (tier 4).
+      name: "suffix matching — suffix matches via fuzzy subsequence",
+      files: [
+        f("docs/server-selection-rest-api.md"),
+        f("utils-test.ts"),
+        f("test-utils.ts"),
+      ],
+      query: "test",
+      expected: [
+        "test-utils.ts",
+        "utils-test.ts",
+        "docs/server-selection-rest-api.md",
+      ],
+    },
+    {
+      // srselrs → fuzzy subsequence of src/selection.rs (s,r,c,/,s,e,l,…,r,s).
+      // Also matches src/server/lookup.rs and docs/server-selection-rest-api.md.
+      name: "typo leniency — srselrs matches scrambled src/selection.rs",
+      files: [
+        f("src/selection.rs"),
+        f("src/server/lookup.rs"),
+        f("docs/server-selection-rest-api.md"),
+        f("config.ts"),
+      ],
+      query: "srselrs",
+      expected: [
+        "src/selection.rs",
+        "src/server/lookup.rs",
+        "docs/server-selection-rest-api.md",
+      ],
+    },
+    {
+      // servre → transposition of "server": matches docs/server-selection-rest-api.md.
+      name: "typo leniency — servre matches server-selection-rest-api",
+      files: [
+        f("src/selection.rs"),
+        f("src/server/lookup.rs"),
+        f("docs/server-selection-rest-api.md"),
+        f("config.ts"),
+      ],
+      query: "servre",
+      expected: ["docs/server-selection-rest-api.md"],
+    },
+    {
+      // conifg → c-o-n-i-f-g: "config" is c-o-n-f-i-g (f before i), so no
+      // subsequence match — nothing matches.
+      name: "typo leniency — conifg matches nothing",
+      files: [
+        f("src/selection.rs"),
+        f("src/server/lookup.rs"),
+        f("docs/server-selection-rest-api.md"),
+        f("config.ts"),
+      ],
+      query: "conifg",
+      expected: [],
+    },
+    {
+      // No dir-before-file preference within a tier: alphabetical by path only.
+      // index/ and index/deep.ts both tier 0 ("index/" sorts first as shorter);
+      // client/index.ts and src/index.ts both tier 1, "client" < "src".
+      name: "dir-before-file tiebreaker — alphabetical within same tier",
+      files: [
+        f("src/index.ts"),
+        f("client/index.ts"),
+        f("index/deep.ts"),
+        f("index/", true),
+      ],
+      query: "index",
+      expected: [
+        "index/",
+        "index/deep.ts",
+        "client/index.ts",
+        "src/index.ts",
+      ],
+    },
+    {
+      // Trailing slash → directory drill-down: the dir + its immediate children.
+      name: "trailing slash — directory drill-down shows dir + children",
+      files: [
+        f("index/", true),
+        f("index/deep.ts"),
+        f("index/deep/nested.ts"),
+        f("client/index.ts"),
+      ],
+      query: "index/",
+      expected: ["index/", "index/deep.ts"],
+    },
+    {
+      // ".env" matches .env (path-prefix) only — .eslintrc.json has no 'v'.
+      name: "dotfile handling — .env matches .env only",
+      files: [f(".env"), f(".eslintrc.json"), f("config.ts")],
+      query: ".env",
+      expected: [".env"],
+    },
+    {
+      // ".esl" matches .eslintrc.json (path-prefix) only.
+      name: "dotfile handling — .esl matches .eslintrc.json only",
+      files: [f(".env"), f(".eslintrc.json"), f("config.ts")],
+      query: ".esl",
+      expected: [".eslintrc.json"],
+    },
+    {
+      name: "gitignored files — bundle matches dist/bundle.js",
+      files: [f("dist/bundle.js"), f("server.log"), f("server.rs")],
+      query: "bundle",
+      expected: ["dist/bundle.js"],
+    },
+    {
+      // Both server.log and server.rs are tier 0 (path-prefix); alphabetical
+      // puts "server.log" < "server.rs".
+      name: "gitignored files — server matches log then rs alphabetically",
+      files: [f("dist/bundle.js"), f("server.log"), f("server.rs")],
+      query: "server",
+      expected: ["server.log", "server.rs"],
+    },
+  ];
+  for (const { name, files, query, expected } of filterCases) {
+    test(`fixture: ${name}`, () => {
+      expect(paths(filterFiles(files, query))).toEqual(expected);
+    });
+  }
 });
 
 describe("classifyAtQuery", () => {
@@ -599,238 +645,263 @@ describe("buildAtItems", () => {
     models: MODELS,
   };
 
-  test("skill mode is a full takeover — only skill items, filtered", () => {
-    const items = buildAtItems({ ...base, query: "skill:jo" });
-    expect(items).toEqual([
-      { kind: "skill", name: "journal" },
-    ] satisfies AtItem[]);
-  });
-
-  test("subagent mode via shorthand is a full takeover", () => {
-    const items = buildAtItems({ ...base, query: "a:rev" });
-    expect(items).toEqual([
-      { kind: "subagent", name: "reviewer" },
-    ] satisfies AtItem[]);
-  });
-
-  test("model mode is a full takeover", () => {
-    const items = buildAtItems({ ...base, query: "m:sonnet" });
-    expect(items).toEqual([
-      { kind: "model", model: MODELS[1] },
-    ] satisfies AtItem[]);
-  });
-
-  test("takeover mode with an empty partial returns the whole kind list", () => {
-    const items = buildAtItems({ ...base, query: "skill:" });
-    expect(items).toEqual([
-      { kind: "skill", name: "debug" },
-      { kind: "skill", name: "journal" },
-    ] satisfies AtItem[]);
-  });
-
-  test("external mode with no server results yet: empty (never falls back to the local index)", () => {
-    expect(buildAtItems({ ...base, query: "~/Documents" })).toEqual([]);
-    expect(buildAtItems({ ...base, query: "/etc/hosts" })).toEqual([]);
-    expect(buildAtItems({ ...base, query: "../sibling" })).toEqual([]);
-  });
-
-  test("external mode maps server-resolved files straight to file rows — no badges, no sigils", () => {
-    const external = [f("~/notes.md"), f("~/projects", true)];
-    const items = buildAtItems({ ...base, query: "~/", serverFiles: external });
-    expect(items).toEqual([
-      { kind: "file", file: f("~/notes.md") },
-      { kind: "file", file: f("~/projects", true) },
-    ] satisfies AtItem[]);
-  });
-
-  test("external mode ignores the local file index entirely, even when it would match", () => {
-    // `files` (the local project index) is deliberately irrelevant here — a query
-    // like "~/README" must never surface the local index's "README.md".
-    const items = buildAtItems({
-      ...base,
-      query: "~/README",
-      serverFiles: [f("~/README.md")],
+  // Each row is one (params → expected) assertion. The multi-query tests below
+  // are flattened so every assertion survives as a named case in the table.
+  // `base` is spread for the common case; rows that deviate pass their own params.
+  type BuildCase = {
+    name: string;
+    params: BuildAtItemsParams;
+    expected?: AtItem[];
+    expectedLength?: number;
+  };
+  const buildCases: readonly BuildCase[] = [
+    {
+      // skill: full takeover — only skill items, filtered to the partial.
+      name: "skill mode is a full takeover — only skill items, filtered",
+      params: { ...base, query: "skill:jo" },
+      expected: [{ kind: "skill", name: "journal" }],
+    },
+    {
+      name: "subagent mode via shorthand is a full takeover",
+      params: { ...base, query: "a:rev" },
+      expected: [{ kind: "subagent", name: "reviewer" }],
+    },
+    {
+      name: "model mode is a full takeover",
+      params: { ...base, query: "m:sonnet" },
+      expected: [{ kind: "model", model: MODELS[1]! }],
+    },
+    {
+      name: "takeover mode with an empty partial returns the whole kind list",
+      params: { ...base, query: "skill:" },
+      expected: [
+        { kind: "skill", name: "debug" },
+        { kind: "skill", name: "journal" },
+      ],
+    },
+    {
+      // External mode never falls back to the local index — three lead-ins.
+      name: "external mode — ~/Documents with no server results: empty",
+      params: { ...base, query: "~/Documents" },
+      expected: [],
+    },
+    {
+      name: "external mode — /etc/hosts with no server results: empty",
+      params: { ...base, query: "/etc/hosts" },
+      expected: [],
+    },
+    {
+      name: "external mode — ../sibling with no server results: empty",
+      params: { ...base, query: "../sibling" },
+      expected: [],
+    },
+    {
+      // Server-resolved external files map straight to file rows — no badges, no sigils.
+      name: "external mode maps server-resolved files straight to file rows",
+      params: {
+        ...base,
+        query: "~/",
+        serverFiles: [f("~/notes.md"), f("~/projects", true)],
+      },
+      expected: [
+        { kind: "file", file: f("~/notes.md") },
+        { kind: "file", file: f("~/projects", true) },
+      ],
+    },
+    {
+      // The local project index is deliberately irrelevant in external mode —
+      // "~/README" must never surface the local "README.md".
+      name: "external mode ignores the local file index even when it would match",
+      params: {
+        ...base,
+        query: "~/README",
+        serverFiles: [f("~/README.md")],
+      },
+      expected: [{ kind: "file", file: f("~/README.md") }],
+    },
+    {
+      name: "external mode caps results at `limit`",
+      params: {
+        ...base,
+        query: "~/",
+        serverFiles: Array.from({ length: 5 }, (_, i) => f(`~/file${i}.txt`)),
+        limit: 3,
+      },
+      expectedLength: 3,
+    },
+    {
+      name: "bare @ (empty partial): files only, no kind noise, no sigils",
+      params: { ...base, query: "" },
+      expected: [
+        { kind: "file", file: f("README.md") },
+        { kind: "file", file: f("store", true) },
+        { kind: "file", file: f("store.ts") },
+      ],
+    },
+    {
+      // Empty/unindexed cwd: no files for a bare `@` — fall back to sigil rows
+      // so skill:/subagent:/model: stay discoverable instead of an empty menu.
+      name: "bare @ with zero file candidates falls back to the sigil rows",
+      params: {
+        files: [],
+        serverFiles: [],
+        skills: SKILLS,
+        subagents: SUBAGENTS,
+        models: MODELS,
+        query: "",
+      },
+      expected: [
+        { kind: "sigil", prefix: "skill:", label: "browse skills…" },
+        { kind: "sigil", prefix: "subagent:", label: "browse subagents…" },
+        { kind: "sigil", prefix: "model:", label: "browse models…" },
+      ],
+    },
+    {
+      name: "bare @ with zero files AND empty skill/subagent lists still offers model: (always available)",
+      params: {
+        files: [],
+        serverFiles: [],
+        skills: [],
+        subagents: [],
+        models: [],
+        query: "",
+      },
+      expected: [{ kind: "sigil", prefix: "model:", label: "browse models…" }],
+    },
+    {
+      // serverFiles alone suppresses the sigil fallback just like local files —
+      // there IS something to show, so don't inject sigil noise.
+      name: "bare @ with server file extras (no local index) is not treated as zero candidates",
+      params: {
+        files: [],
+        serverFiles: [f("README.md")],
+        skills: SKILLS,
+        subagents: SUBAGENTS,
+        models: MODELS,
+        query: "",
+      },
+      expected: [{ kind: "file", file: f("README.md") }],
+    },
+    {
+      // "sk" matches the file + the skill: sigil, but not subagent:/model:.
+      name: "'sk' shows the skill: sigil after file matches, not subagent:/model:",
+      params: {
+        files: [f("skills-doc.md"), f("readme.md")],
+        serverFiles: [],
+        skills: SKILLS, // neither "debug" nor "journal" contains "sk"
+        subagents: SUBAGENTS, // neither contains "sk"
+        models: MODELS, // none contain "sk"
+        query: "sk",
+      },
+      expected: [
+        { kind: "file", file: f("skills-doc.md") },
+        { kind: "sigil", prefix: "skill:", label: "browse skills…" },
+      ],
+    },
+    {
+      name: "'s' matches both the skill: and subagent: sigils (not model:)",
+      params: {
+        files: [f("readme.md")], // no "s" in "readme.md"
+        serverFiles: [],
+        skills: SKILLS, // no "s" in "debug"/"journal"
+        subagents: SUBAGENTS, // no "s" in "reviewer"/"explorer"
+        models: [],
+        query: "s",
+      },
+      expected: [
+        { kind: "sigil", prefix: "skill:", label: "browse skills…" },
+        { kind: "sigil", prefix: "subagent:", label: "browse subagents…" },
+      ],
+    },
+    {
+      name: "empty skill/subagent lists suppress their sigils; model: with 'm' is exempt",
+      params: {
+        files: [],
+        serverFiles: [],
+        skills: [],
+        subagents: [],
+        models: [], // still offers the model: sigil — models are always available
+        query: "m",
+      },
+      expected: [{ kind: "sigil", prefix: "model:", label: "browse models…" }],
+    },
+    {
+      // "s" with all-empty source lists matches no sigil → empty.
+      name: "empty skill/subagent lists suppress their sigils; 's' yields empty",
+      params: {
+        files: [],
+        serverFiles: [],
+        skills: [],
+        subagents: [],
+        models: [],
+        query: "s",
+      },
+      expected: [],
+    },
+    {
+      name: "project mode appends badged skill/subagent/model matches after files, sigils last",
+      params: {
+        files: [f("modelo.txt")], // matches "model" as an interior/prefix substring
+        serverFiles: [],
+        skills: ["model-skill"],
+        subagents: ["model-agent"],
+        models: [m("x/model-9", "Model Nine")],
+        query: "model",
+      },
+      expected: [
+        { kind: "file", file: f("modelo.txt") },
+        { kind: "skill", name: "model-skill" },
+        { kind: "subagent", name: "model-agent" },
+        { kind: "model", model: m("x/model-9", "Model Nine") },
+        { kind: "sigil", prefix: "model:", label: "browse models…" },
+      ],
+    },
+    {
+      // No file/subagent/model matches "x" — just the capped, sorted skill badges.
+      // (no sigil: "x" isn't a prefix of any sigil word).
+      name: "badged matches per kind are capped at 5, alphabetical among equal ranks",
+      params: {
+        files: [],
+        serverFiles: [],
+        skills: ["x7", "x1", "x6", "x2", "x5", "x3", "x4"],
+        subagents: [],
+        models: [],
+        query: "x",
+      },
+      expected: [
+        { kind: "skill", name: "x1" },
+        { kind: "skill", name: "x2" },
+        { kind: "skill", name: "x3" },
+        { kind: "skill", name: "x4" },
+        { kind: "skill", name: "x5" },
+      ],
+    },
+    {
+      name: "server file extras are merged in after local matches, deduped by path",
+      params: {
+        files: [f("foo/a.ts")],
+        serverFiles: [f("foo/a.ts"), f("bar/a.ts")],
+        skills: [],
+        subagents: [],
+        models: [],
+        query: "a.ts",
+      },
+      expected: [
+        { kind: "file", file: f("foo/a.ts") },
+        { kind: "file", file: f("bar/a.ts") },
+      ],
+    },
+  ];
+  for (const { name, params, expected, expectedLength } of buildCases) {
+    test(name, () => {
+      const items = buildAtItems(params);
+      if (expectedLength !== undefined) {
+        expect(items).toHaveLength(expectedLength);
+      } else {
+        expect(items).toEqual(expected satisfies AtItem[]);
+      }
     });
-    expect(items).toEqual([
-      { kind: "file", file: f("~/README.md") },
-    ] satisfies AtItem[]);
-  });
-
-  test("external mode caps results at `limit`", () => {
-    const many = Array.from({ length: 5 }, (_, i) => f(`~/file${i}.txt`));
-    const items = buildAtItems({
-      ...base,
-      query: "~/",
-      serverFiles: many,
-      limit: 3,
-    });
-    expect(items).toHaveLength(3);
-  });
-
-  test("bare @ (empty partial): files only, no kind noise, no sigils", () => {
-    const items = buildAtItems({ ...base, query: "" });
-    expect(items).toEqual([
-      { kind: "file", file: f("README.md") },
-      { kind: "file", file: f("store", true) },
-      { kind: "file", file: f("store.ts") },
-    ] satisfies AtItem[]);
-  });
-
-  test("bare @ with zero file candidates falls back to the sigil rows", () => {
-    // Empty/unindexed cwd: no files at all for a bare `@`. Without the fallback this
-    // would be an empty menu (no way to discover skill:/subagent:/model:).
-    const items = buildAtItems({
-      files: [],
-      serverFiles: [],
-      skills: SKILLS,
-      subagents: SUBAGENTS,
-      models: MODELS,
-      query: "",
-    });
-    expect(items).toEqual([
-      { kind: "sigil", prefix: "skill:", label: "browse skills…" },
-      { kind: "sigil", prefix: "subagent:", label: "browse subagents…" },
-      { kind: "sigil", prefix: "model:", label: "browse models…" },
-    ] satisfies AtItem[]);
-  });
-
-  test("bare @ with zero files AND empty skill/subagent lists still offers model: (always available)", () => {
-    const items = buildAtItems({
-      files: [],
-      serverFiles: [],
-      skills: [],
-      subagents: [],
-      models: [],
-      query: "",
-    });
-    expect(items).toEqual([
-      { kind: "sigil", prefix: "model:", label: "browse models…" },
-    ] satisfies AtItem[]);
-  });
-
-  test("bare @ with server file extras (but no local index) is not treated as zero candidates", () => {
-    // serverFiles alone should suppress the sigil fallback just like local files do —
-    // there IS something to show, so don't also inject sigil noise.
-    const items = buildAtItems({
-      files: [],
-      serverFiles: [f("README.md")],
-      skills: SKILLS,
-      subagents: SUBAGENTS,
-      models: MODELS,
-      query: "",
-    });
-    expect(items).toEqual([
-      { kind: "file", file: f("README.md") },
-    ] satisfies AtItem[]);
-  });
-
-  test("'sk' shows the skill: sigil after file matches, but not subagent:/model:", () => {
-    const items = buildAtItems({
-      files: [f("skills-doc.md"), f("readme.md")],
-      serverFiles: [],
-      skills: SKILLS, // neither "debug" nor "journal" contains "sk"
-      subagents: SUBAGENTS, // neither contains "sk"
-      models: MODELS, // none contain "sk"
-      query: "sk",
-    });
-    expect(items).toEqual([
-      { kind: "file", file: f("skills-doc.md") },
-      { kind: "sigil", prefix: "skill:", label: "browse skills…" },
-    ] satisfies AtItem[]);
-  });
-
-  test("'s' matches both the skill: and subagent: sigils (not model:)", () => {
-    const items = buildAtItems({
-      files: [f("readme.md")], // no "s" in "readme.md"
-      serverFiles: [],
-      skills: SKILLS, // no "s" in "debug"/"journal"
-      subagents: SUBAGENTS, // no "s" in "reviewer"/"explorer"
-      models: [],
-      query: "s",
-    });
-    expect(items).toEqual([
-      { kind: "sigil", prefix: "skill:", label: "browse skills…" },
-      { kind: "sigil", prefix: "subagent:", label: "browse subagents…" },
-    ] satisfies AtItem[]);
-  });
-
-  test("empty skill/subagent lists suppress their sigils; model: sigil is exempt", () => {
-    const items = buildAtItems({
-      files: [],
-      serverFiles: [],
-      skills: [],
-      subagents: [],
-      models: [], // still offers the model: sigil — models are always available
-      query: "m",
-    });
-    expect(items).toEqual([
-      { kind: "sigil", prefix: "model:", label: "browse models…" },
-    ] satisfies AtItem[]);
-
-    const noSigils = buildAtItems({
-      files: [],
-      serverFiles: [],
-      skills: [],
-      subagents: [],
-      models: [],
-      query: "s",
-    });
-    expect(noSigils).toEqual([]);
-  });
-
-  test("project mode appends badged skill/subagent/model matches after files, sigils last", () => {
-    const items = buildAtItems({
-      files: [f("modelo.txt")], // matches "model" as an interior/prefix substring
-      serverFiles: [],
-      skills: ["model-skill"],
-      subagents: ["model-agent"],
-      models: [m("x/model-9", "Model Nine")],
-      query: "model",
-    });
-    expect(items).toEqual([
-      { kind: "file", file: f("modelo.txt") },
-      { kind: "skill", name: "model-skill" },
-      { kind: "subagent", name: "model-agent" },
-      { kind: "model", model: m("x/model-9", "Model Nine") },
-      { kind: "sigil", prefix: "model:", label: "browse models…" },
-    ] satisfies AtItem[]);
-  });
-
-  test("badged matches per kind are capped at 5, alphabetical among equal ranks", () => {
-    const manySkills = ["x7", "x1", "x6", "x2", "x5", "x3", "x4"];
-    const items = buildAtItems({
-      files: [],
-      serverFiles: [],
-      skills: manySkills,
-      subagents: [],
-      models: [],
-      query: "x",
-    });
-    // No file "x" matches, no subagents, no models — just the capped, sorted skill
-    // badges (no sigil: "x" isn't a prefix of any sigil word).
-    expect(items).toEqual([
-      { kind: "skill", name: "x1" },
-      { kind: "skill", name: "x2" },
-      { kind: "skill", name: "x3" },
-      { kind: "skill", name: "x4" },
-      { kind: "skill", name: "x5" },
-    ] satisfies AtItem[]);
-  });
-
-  test("server file extras are merged in after local matches, deduped by path", () => {
-    const items = buildAtItems({
-      files: [f("foo/a.ts")],
-      serverFiles: [f("foo/a.ts"), f("bar/a.ts")],
-      skills: [],
-      subagents: [],
-      models: [],
-      query: "a.ts",
-    });
-    expect(items).toEqual([
-      { kind: "file", file: f("foo/a.ts") },
-      { kind: "file", file: f("bar/a.ts") },
-    ] satisfies AtItem[]);
-  });
+  }
 });
 
 describe("splitExternalQuery", () => {
@@ -860,270 +931,5 @@ describe("splitExternalQuery", () => {
       dirPrefix: "~",
       partial: "proj",
     });
-  });
-});
-
-describe("staleServerFiles", () => {
-  const f = (path: string, isDirectory = false): FileInfo => ({
-    path,
-    isDirectory,
-  });
-
-  // External-mode fixtures: the synthetic `~` home's children (mock_external_tree).
-  const HOME_CHILDREN: readonly FileInfo[] = [
-    f("~/notes.md"),
-    f("~/todo.txt"),
-    f("~/projects", true),
-  ];
-
-  const fresh = (items: readonly FileInfo[], query: string, includeIgnored = false): FreshServerFiles => ({
-    items,
-    query,
-    includeIgnored,
-  });
-
-  const cache = (
-    files: readonly FileInfo[],
-    query: string,
-    mode: "external" | "project",
-    includeIgnored = false,
-  ): CachedServerFiles => ({
-    files,
-    query,
-    mode,
-    includeIgnored,
-  });
-
-  test("AC.3 — fresh match returns fresh.items, not the re-filtered cache", () => {
-    const cached = cache(HOME_CHILDREN, "~/", "external");
-    // The fresh response matches the current query + toggle → return fresh items.
-    const result = staleServerFiles(
-      fresh(HOME_CHILDREN, "~/p", false),
-      cached,
-      "~/p",
-      "external",
-      false,
-    );
-    expect(result).toBe(HOME_CHILDREN);
-  });
-
-  test("AC.2 — external in-flight: re-filters cached results by the trailing partial", () => {
-    // Cached results answered `~/` (all home children). Now the user typed `~/p`
-    // — the fresh response hasn't arrived yet, so re-filter the cache by "p".
-    const cached = cache(HOME_CHILDREN, "~/", "external");
-    const result = staleServerFiles(
-      fresh([], "~/old", false), // stale: server still echoes the old query
-      cached,
-      "~/p",
-      "external",
-      false,
-    );
-    const paths = result.map((r) => r.path);
-    // Only ~/projects contains "p" as a substring.
-    expect(paths).toEqual(["~/projects"]);
-  });
-
-  test("AC.2 — external in-flight: narrowing further re-filters by the new partial", () => {
-    // Cached answered `~/p` → only ~/projects matched. Now typing `~/pr` — re-filter
-    // the cached ~/projects by "pr".
-    const cached = cache([f("~/projects", true)], "~/p", "external");
-    const result = staleServerFiles(
-      fresh([], "~/p", false), // stale
-      cached,
-      "~/pr",
-      "external",
-      false,
-    );
-    const paths = result.map((r) => r.path);
-    expect(paths).toEqual(["~/projects"]);
-  });
-
-  test("AC.2 — external in-flight: a partial that matches nothing returns empty", () => {
-    const cached = cache(HOME_CHILDREN, "~/", "external");
-    const result = staleServerFiles(
-      fresh([], "~/old", false),
-      cached,
-      "~/zzz",
-      "external",
-      false,
-    );
-    expect(result).toEqual([]);
-  });
-
-  test("AC.2 — external empty partial (same dir listing): returns cached head unchanged", () => {
-    // Cached answered `~/` (empty partial). User re-types `~/` — same dir-prefix,
-    // empty partial → filterFiles returns the cached head.
-    const cached = cache(HOME_CHILDREN, "~/", "external");
-    const result = staleServerFiles(
-      fresh([], "~/old", false),
-      cached,
-      "~/",
-      "external",
-      false,
-    );
-    expect(result.map((r) => r.path)).toEqual([
-      "~/notes.md",
-      "~/todo.txt",
-      "~/projects",
-    ]);
-  });
-
-  test("AC.5 — external drill-down (dir-prefix change) returns []", () => {
-    // Cache holds `~`'s children (~/notes.md, ~/todo.txt, ~/projects).
-    // User accepted ~/projects/ and is now browsing ~/projects/blog — the cache's
-    // dir-prefix is `~`, the current query's is `~/projects` → mismatch → [].
-    const cached = cache(HOME_CHILDREN, "~/", "external");
-    const result = staleServerFiles(
-      fresh([], "~/old", false),
-      cached,
-      "~/projects/b",
-      "external",
-      false,
-    );
-    expect(result).toEqual([]);
-  });
-
-  test("AC.5 — external drill-down: empty partial on a different dir still returns []", () => {
-    // Even with an empty partial (bare `~/projects/`), the dir-prefix guard fires
-    // first — the parent dir's children must not show as candidates for the new dir.
-    const cached = cache(HOME_CHILDREN, "~/", "external");
-    const result = staleServerFiles(
-      fresh([], "~/old", false),
-      cached,
-      "~/projects/",
-      "external",
-      false,
-    );
-    expect(result).toEqual([]);
-  });
-
-  test("AC.2 — project mode in-flight: re-filters cached results by the full query", () => {
-    // Project-mode server results are full-tree path matches, so re-filter by the
-    // full atQ (no dir-prefix guard, no partial split).
-    const cachedFiles: readonly FileInfo[] = [
-      f("src/server.ts"),
-      f("src/client.ts"),
-      f("lib/utils.ts"),
-    ];
-    const cached = cache(cachedFiles, "serv", "project");
-    const result = staleServerFiles(
-      fresh([], "old", false), // stale
-      cached,
-      "server",
-      "project",
-      false,
-    );
-    expect(result.map((r) => r.path)).toEqual(["src/server.ts"]);
-  });
-
-  test("AC.3 — project mode fresh match returns fresh.items", () => {
-    const cachedFiles: readonly FileInfo[] = [f("src/old.ts")];
-    const cached = cache(cachedFiles, "old", "project");
-    const freshItems: readonly FileInfo[] = [f("src/server.ts")];
-    const result = staleServerFiles(
-      fresh(freshItems, "server", false),
-      cached,
-      "server",
-      "project",
-      false,
-    );
-    expect(result).toBe(freshItems);
-  });
-
-  test("AC.6 — cross-mode isolation: project cache is ignored in external mode", () => {
-    const cached = cache([f("src/server.ts")], "serv", "project");
-    const result = staleServerFiles(
-      fresh([], "~/old", false), // stale
-      cached,
-      "~/s",
-      "external",
-      false,
-    );
-    expect(result).toEqual([]);
-  });
-
-  test("AC.6 — cross-mode isolation: external cache is ignored in project mode", () => {
-    const cached = cache(HOME_CHILDREN, "~/", "external");
-    const result = staleServerFiles(
-      fresh([], "old", false), // stale
-      cached,
-      "notes",
-      "project",
-      false,
-    );
-    expect(result).toEqual([]);
-  });
-
-  test("AC.6 — cross-toggle isolation: ignoreOff mismatch skips the cache", () => {
-    // Cache has includeIgnored=false. Current ignoreOff=true → skip cache → [].
-    const cached = cache(HOME_CHILDREN, "~/", "external", false);
-    const result = staleServerFiles(
-      fresh([], "~/old", true), // stale (server echoes old query, toggle=true)
-      cached,
-      "~/p",
-      "external",
-      true, // current ignoreOff
-    );
-    expect(result).toEqual([]);
-  });
-
-  test("AC.6 — cross-toggle: matching ignoreOff uses the cache", () => {
-    // Cache has includeIgnored=true. Current ignoreOff=true → use cache, re-filter.
-    // Both ~/projects and ~/.secrets contain "s" as a subsequence, so both match.
-    const cached = cache(
-      [f("~/projects", true), f("~/.secrets")],
-      "~/",
-      "external",
-      true,
-    );
-    const result = staleServerFiles(
-      fresh([], "~/old", true), // stale
-      cached,
-      "~/s",
-      "external",
-      true,
-    );
-    // With fuzzy matching, ~/.secrets scores higher: "s" matches right after the
-    // "." word boundary (position 3), while in ~/projects "s" is at the end (pos 9).
-    // Both match; ~/.secrets ranks first by score.
-    expect(result.map((r) => r.path)).toEqual(["~/.secrets", "~/projects"]);
-  });
-
-  test("no cache (null) returns []", () => {
-    const result = staleServerFiles(
-      fresh([], "old", false),
-      null,
-      "~/p",
-      "external",
-      false,
-    );
-    expect(result).toEqual([]);
-  });
-
-  test("external root-anchored: same dir-prefix re-filters by partial", () => {
-    // /etc/ho → dir-prefix /etc, partial "ho". Cache answered /etc/ (dir-prefix
-    // /etc, empty partial) → same dir → re-filter by "ho".
-    const cached = cache([f("/etc/hosts")], "/etc/", "external");
-    const result = staleServerFiles(
-      fresh([], "/etc/old", false),
-      cached,
-      "/etc/ho",
-      "external",
-      false,
-    );
-    expect(result.map((r) => r.path)).toEqual(["/etc/hosts"]);
-  });
-
-  test("external root-anchored: different dir-prefix returns []", () => {
-    // /etc → dir-prefix /. Cache answered / (dir-prefix /) → mismatch with /etc → [].
-    const cached = cache([f("/etc")], "/", "external");
-    const result = staleServerFiles(
-      fresh([], "/old", false),
-      cached,
-      "/etc/ho",
-      "external",
-      false,
-    );
-    expect(result).toEqual([]);
   });
 });
