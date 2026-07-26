@@ -15,8 +15,6 @@ export interface PendingPrompt {
   sessionId?: string;
   newSession?: {
     cwd?: string;
-    worktree?: boolean;
-    baseBranch?: string;
     model?: { modelId: string };
     thinking?: string;
     facet?: string;
@@ -105,8 +103,6 @@ function toPlainPrompt(prompt: PendingPrompt): PendingPrompt {
     newSession: prompt.newSession
       ? {
           cwd: prompt.newSession.cwd,
-          worktree: prompt.newSession.worktree,
-          baseBranch: prompt.newSession.baseBranch,
           model: prompt.newSession.model
             ? {
                 modelId: prompt.newSession.model.modelId,

@@ -1609,8 +1609,6 @@ impl SessionHub {
             }
             ClientMessage::NewSession {
                 cwd,
-                worktree,
-                base_branch,
                 model,
                 thinking,
                 facet,
@@ -1631,8 +1629,6 @@ impl SessionHub {
                 let driver = self.driver.clone();
                 let opts = NewSessionOptsData {
                     cwd: cwd.clone(),
-                    worktree: *worktree,
-                    base_branch: base_branch.clone(),
                     model: model.as_ref().map(|m| crate::driver::NewSessionModel {
                         model_id: m.model_id.clone(),
                     }),
@@ -1732,26 +1728,12 @@ impl SessionHub {
                     "set_archived",
                     Box::new(move |hub| {
                         Box::pin(async move {
-                            match driver.set_archived(path, archived).await {
-                                result if result.worktree_retained.is_some() => {
-                                    let wr = result.worktree_retained.unwrap();
-                                    let h = hub.lock();
-                                    h.send_to_client(
-                                        client_key,
-                                        ServerMessage::WorktreeRetained {
-                                            path: wr.path,
-                                            reason: wr.reason,
-                                        },
-                                    );
-                                }
-                                _ => {
-                                    // Re-broadcast the session list
-                                    let sessions = driver.list_sessions().await;
-                                    let default_cwd = std::env::var("HOME").unwrap_or_default();
-                                    let mut h = hub.lock();
-                                    h.broadcast_session_list_with(sessions, default_cwd);
-                                }
-                            }
+                            driver.set_archived(path, archived).await;
+                            // Re-broadcast the session list
+                            let sessions = driver.list_sessions().await;
+                            let default_cwd = std::env::var("HOME").unwrap_or_default();
+                            let mut h = hub.lock();
+                            h.broadcast_session_list_with(sessions, default_cwd);
                         })
                     }),
                 );
@@ -1769,37 +1751,6 @@ impl SessionHub {
                         Box::pin(async move {
                             driver.rename_session(path, name).await;
                             // Re-broadcast the session list
-                            let sessions = driver.list_sessions().await;
-                            let default_cwd = std::env::var("HOME").unwrap_or_default();
-                            let mut h = hub.lock();
-                            h.broadcast_session_list_with(sessions, default_cwd);
-                        })
-                    }),
-                );
-            }
-            ClientMessage::CleanupWorktree { path, force } => {
-                let driver = self.driver.clone();
-                let path = path.clone();
-                let force = force.unwrap_or(false);
-                self.hub_ops.enqueue(
-                    "cleanup_worktree",
-                    Box::new(move |hub| {
-                        Box::pin(async move {
-                            let result = driver.cleanup_worktree(path, force).await;
-                            if !result.removed {
-                                let h = hub.lock();
-                                h.send_to_client(
-                                    client_key,
-                                    ServerMessage::Error {
-                                        message: format!(
-                                            "worktree not removed: {}",
-                                            result.reason.unwrap_or("unknown reason".into())
-                                        ),
-                                        kind: None,
-                                    },
-                                );
-                            }
-                            // Re-broadcast the session list either way
                             let sessions = driver.list_sessions().await;
                             let default_cwd = std::env::var("HOME").unwrap_or_default();
                             let mut h = hub.lock();
@@ -2013,27 +1964,6 @@ impl SessionHub {
                             h.send_to_client(
                                 client_key,
                                 ServerMessage::PathStat { stat, request_id },
-                            );
-                        })
-                    }),
-                );
-            }
-            ClientMessage::ListBranches { path, request_id } => {
-                let driver = self.driver.clone();
-                let path = path.clone();
-                let request_id = *request_id;
-                self.hub_ops.enqueue(
-                    "list_branches",
-                    Box::new(move |hub| {
-                        Box::pin(async move {
-                            let listing = driver.list_branches(path.clone()).await;
-                            let h = hub.lock();
-                            h.send_to_client(
-                                client_key,
-                                ServerMessage::BranchList {
-                                    listing,
-                                    request_id,
-                                },
                             );
                         })
                     }),
@@ -3809,8 +3739,6 @@ mod hub_models_tests {
             client_key,
             ClientMessage::NewSession {
                 cwd: Some("/workspace".into()),
-                worktree: None,
-                base_branch: None,
                 model: None,
                 thinking: None,
                 facet: None,
@@ -3866,8 +3794,6 @@ mod hub_models_tests {
             client_key,
             ClientMessage::NewSession {
                 cwd: Some("/workspace".into()),
-                worktree: None,
-                base_branch: None,
                 model: None,
                 thinking: None,
                 facet: None,

@@ -55,11 +55,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use pantoken_daemon_types::*;
 use pantoken_protocol::session_driver::{
-    AtRefs, BackgroundJob, BranchList, CommandInfo, DirListing, FileInfo, HostUiRequest,
-    HostUiResponse, ImageContent, JobKind, JobStatusKind, ModelDefaults, ModelOption, NotifyLevel,
-    PathStat, PermissionMonitorMode, SessionClosedReason, SessionDriverEvent, SessionEventBase,
-    SessionId, SessionListEntry, SessionRef, SessionSnapshot, SessionStatus, SessionUsage,
-    WorkspaceId, WorkspaceRef, WorktreeInfo,
+    AtRefs, BackgroundJob, CommandInfo, DirListing, FileInfo, HostUiRequest, HostUiResponse,
+    ImageContent, JobKind, JobStatusKind, ModelDefaults, ModelOption, NotifyLevel, PathStat,
+    PermissionMonitorMode, SessionClosedReason, SessionDriverEvent, SessionEventBase, SessionId,
+    SessionListEntry, SessionRef, SessionSnapshot, SessionStatus, SessionUsage, WorkspaceId,
+    WorkspaceRef,
 };
 use pantoken_protocol::wire::{DeliveryMode, LoginEnvStatus, McpAction, SessionAction};
 use parking_lot::{Mutex, RwLock};
@@ -70,8 +70,8 @@ use async_trait::async_trait;
 
 use crate::archive_store::ArchiveStore;
 use crate::driver::{
-    ArchiveResult, BranchResult, ClearQueueResult, NewSessionOptsData, PantokenDriver,
-    TodoDeleteDependent, TodoDeleteError, WorktreeCleanupResult, WorktreeRetained,
+    BranchResult, ClearQueueResult, NewSessionOptsData, PantokenDriver, TodoDeleteDependent,
+    TodoDeleteError,
 };
 use crate::polytoken::config_watcher;
 use crate::polytoken::daemon_client::{
@@ -88,8 +88,6 @@ use crate::polytoken::ui_bridge::{PendingInterrogative, build_interrogative_resp
 use crate::shared::login_env::{self, CapturedLoginEnv};
 use crate::shared::session_list::merge_session_lists;
 use crate::shared::warm_cap::eviction_plan;
-use crate::shared::worktree::{self, WorktreeMeta};
-use crate::worktree_store::WorktreeStore;
 use pantoken_protocol::session_driver::ModelCatalogDiagnostic;
 
 /// A warm session: a daemon client + accumulator + cached state.
@@ -159,9 +157,6 @@ struct PolytokenInner {
     is_fake: bool,
     fake_control: Option<FakeControlHub>,
     warm_cap: i64,
-    /// Root dir for centralized session worktrees: `<data_dir>/worktrees`. Each
-    /// worktree lands under `<worktree_root>/<repo-slug>/<name>/`.
-    worktree_root: PathBuf,
     /// The captured login-shell env, threaded into every daemon spawn so the
     /// daemon gets the user's real PATH + tool env. `None` only when capture
     /// ran but produced no env (a degraded state — spawn gets the inherited env).
@@ -171,7 +166,6 @@ struct PolytokenInner {
     /// (see `pantoken_settings_msg`).
     login_env_status: RwLock<LoginEnvStatus>,
     archive_store: Mutex<ArchiveStore>,
-    worktree_store: Mutex<WorktreeStore>,
     /// Warm recency order: oldest→newest by focus. `eviction_plan` reads this
     /// slice; `focus` moves a session to the back (most-recent). Faithful to
     /// TS's insertion-ordered `Map` (where `focus` deletes + re-inserts). The
@@ -222,8 +216,8 @@ impl PolytokenDriver {
     /// Construct the live polytoken driver. Eagerly captures the login-shell env
     /// once (mirroring `polytoken-driver.ts:175-178`) so every daemon spawn gets
     /// the user's real PATH + tool env, and so the Settings panel's login-env
-    /// status is correct from t0. Constructs the archive + worktree stores under
-    /// `data_dir`. `warm_cap` bounds the warm pool (≤0 = unbounded).
+    /// status is correct from t0. Constructs the archive store under `data_dir`.
+    /// `warm_cap` bounds the warm pool (≤0 = unbounded).
     pub async fn new(
         data_dir: PathBuf,
         bin_path: String,
@@ -260,11 +254,9 @@ impl PolytokenDriver {
                 bin_path,
                 is_fake,
                 warm_cap,
-                worktree_root: data_dir.join("worktrees"),
                 login_env: Mutex::new(login_env),
                 login_env_status: RwLock::new(status),
                 archive_store: Mutex::new(ArchiveStore::new(data_dir.join("archived.json"))),
-                worktree_store: Mutex::new(WorktreeStore::new(data_dir.join("worktrees.json"))),
                 order: Mutex::new(Vec::new()),
                 warm: RwLock::new(HashMap::new()),
                 subscribers: Mutex::new(Vec::new()),
@@ -321,11 +313,9 @@ impl PolytokenDriver {
                 bin_path,
                 is_fake,
                 warm_cap,
-                worktree_root: data_dir.join("worktrees"),
                 login_env: Mutex::new(login_env),
                 login_env_status: RwLock::new(status),
                 archive_store: Mutex::new(ArchiveStore::new(data_dir.join("archived.json"))),
-                worktree_store: Mutex::new(WorktreeStore::new(data_dir.join("worktrees.json"))),
                 order: Mutex::new(Vec::new()),
                 warm: RwLock::new(HashMap::new()),
                 subscribers: Mutex::new(Vec::new()),
@@ -350,38 +340,6 @@ impl PolytokenDriver {
     /// concrete-typed callers keep working.
     pub fn login_env_status(&self) -> LoginEnvStatus {
         <Self as PantokenDriver>::login_env_status(self)
-    }
-
-    /// Reap the pantoken worktree at `cwd` if one is live: remove it (honoring
-    /// `force`), tombstone it in the store on success, or report why it was
-    /// retained. Shared by `set_archived` and `cleanup_worktree`. Takes the
-    /// worktree meta under the lock, drops the guard, then awaits the removal
-    /// (lock-across-await discipline).
-    async fn reap_worktree(&self, cwd: &str, force: bool) -> ReapOutcome {
-        let meta = {
-            let store = self.inner.worktree_store.lock();
-            store.live(cwd).cloned()
-        };
-        let Some(meta) = meta else {
-            return ReapOutcome::NoWorktree;
-        };
-        match worktree::remove(&meta, force).await {
-            Ok(res) if res.removed => {
-                self.inner.worktree_store.lock().mark_reaped(cwd);
-                ReapOutcome::Reaped
-            }
-            Ok(res) => ReapOutcome::Retained(
-                res.reason
-                    .unwrap_or_else(|| "uncommitted changes".to_string()),
-            ),
-            // A genuine command/fs failure (not a dirty worktree, which is the
-            // `Ok(res)` arm above). Log it — fail-loud, mirroring TS's
-            // `console.error` in `setArchived`'s reap catch — then retain.
-            Err(e) => {
-                warn!("worktree reap failed for {cwd}: {e}");
-                ReapOutcome::Retained(e)
-            }
-        }
     }
 }
 
@@ -577,26 +535,6 @@ impl PolytokenInner {
             .and_then(|s| s.project_cwd.clone().or_else(|| s.cwd.clone()))
             .filter(|cwd| !cwd.is_empty())
             .or_else(|| Self::cwd_for_session(&self.sessions_dir, &ws.client.session_id))
-    }
-
-    /// True if any currently-warm session's cwd matches `cwd` — i.e. the session
-    /// owning this worktree is active and its worktree must not be force-reaped.
-    /// Defense-in-depth behind the client-side Undo↔Delete-anyway correlation:
-    /// even if the client race loses (Undo's `openSession` hasn't settled
-    /// server-side before "Delete anyway" fires), the server refuses to
-    /// destroy a live session's worktree. Checks *all* warm sessions, not just
-    /// the most-recently-focused one — the invariant is "no live session's
-    /// worktree gets destroyed."
-    fn warm_session_owns_cwd(&self, cwd: &str) -> bool {
-        let warm = self.warm.read();
-        for ws in warm.values() {
-            if let Some(c) = self.warm_cwd(ws) {
-                if c == cwd {
-                    return true;
-                }
-            }
-        }
-        false
     }
 
     fn target_warm_for_read(&self, session_id: Option<&SessionId>) -> Option<Arc<WarmSession>> {
@@ -996,20 +934,6 @@ impl PolytokenInner {
             snapshot,
         });
         events
-    }
-
-    /// The worktree field for a session's cwd, or `None`. Resolved from the
-    /// worktree store at list time (pantoken's own flag — polytoken has no concept).
-    /// Carries `name` + `reaped` so the sidebar can show a tooltip + a tombstoned
-    /// indicator. Mirrors `polytoken-driver.ts:827-839` `worktreeFieldFor`.
-    fn worktree_field_for(cwd: &str, store: &WorktreeStore) -> Option<WorktreeInfo> {
-        let meta = store.get(cwd)?;
-        Some(WorktreeInfo {
-            path: meta.path.clone(),
-            base: meta.base.clone(),
-            name: meta.name.clone(),
-            reaped: store.is_reaped(cwd).then_some(true),
-        })
     }
 
     /// Build a `WarmSession` from an already-connected client: claim the lease,
@@ -1575,17 +1499,6 @@ impl PolytokenInner {
     }
 }
 
-/// Outcome of reaping a pantoken worktree at a session cwd. Shared by
-/// `set_archived` and `cleanup_worktree`.
-enum ReapOutcome {
-    /// No live pantoken worktree registered at this cwd — nothing to reap.
-    NoWorktree,
-    /// The worktree was removed and tombstoned in the store.
-    Reaped,
-    /// The worktree was left in place (dirty or removal failed); carries the reason.
-    Retained(String),
-}
-
 #[async_trait]
 impl PantokenDriver for PolytokenDriver {
     fn subscribe(&self, listener: Box<dyn Fn(SessionDriverEvent) + Send + Sync>) -> usize {
@@ -1840,27 +1753,19 @@ impl PantokenDriver for PolytokenDriver {
 
     async fn list_sessions(&self) -> Vec<SessionListEntry> {
         let sessions_dir = self.inner.sessions_dir.clone();
-        // Resolve pantoken's own side-flags from the stores (not polytoken's
-        // concern): the archive flag + the worktree indicator, keyed by the
-        // session path / cwd. Mirrors `polytoken-driver.ts:1078-1080`.
+        // Resolve pantoken's own archive flag from the store, keyed by the
+        // session path. Mirrors `polytoken-driver.ts:1078-1080`.
         let archive_store = self.inner.archive_store.lock();
-        let worktree_store = self.inner.worktree_store.lock();
         let on_disk = sessions_registry::list_cold_sessions(
             &sessions_dir,
             sessions_registry::ListColdSessionsOpts {
                 archived_for: Box::new(|session_json_path| archive_store.has(session_json_path)),
-                // The archive WRITE side is `set_archived` (below), which flips
-                // this flag; the read here overlays it onto the session list.
-                worktree_for: Some(Box::new(|cwd| {
-                    PolytokenInner::worktree_field_for(cwd, &worktree_store)
-                })),
             },
         );
-        // The borrow of `archive_store`/`worktree_store` ends here; drop the
-        // guards before acquiring `warm` below (deadlock class: a guard held
-        // across another lock acquire).
+        // The borrow of `archive_store` ends here; drop the guard before
+        // acquiring `warm` below (deadlock class: a guard held across another
+        // lock acquire).
         drop(archive_store);
-        drop(worktree_store);
 
         // Merge warm-pool entries (a session flushed but not yet on disk is
         // merged in via merge_session_lists). Live usage is overlaid only where
@@ -1870,7 +1775,6 @@ impl PantokenDriver for PolytokenDriver {
         let mut warm_usage: HashMap<String, SessionUsage> = HashMap::new();
         let warm = self.inner.warm.read().clone();
         let archive_store = self.inner.archive_store.lock();
-        let worktree_store = self.inner.worktree_store.lock();
         for (sid, ws) in warm.iter() {
             let title = ws
                 .last_state
@@ -1892,7 +1796,6 @@ impl PantokenDriver for PolytokenDriver {
                 parent_session_path: None,
                 usage: None,
                 archived: archive_store.has(session_path.to_string_lossy().as_ref()),
-                worktree: PolytokenInner::worktree_field_for(&cwd, &worktree_store),
             });
             if let Some(state) = ws.last_state.read().as_ref() {
                 if let Some(u) = event_map::usage_from_state(Some(state)) {
@@ -1901,7 +1804,6 @@ impl PantokenDriver for PolytokenDriver {
             }
         }
         drop(archive_store);
-        drop(worktree_store);
 
         let merged = merge_session_lists(&on_disk, &warm_entries);
         // Overlay live usage onto the winning entry (disk supersedes the warm
@@ -1918,91 +1820,11 @@ impl PantokenDriver for PolytokenDriver {
             .collect()
     }
 
-    /// Remove a pantoken-created worktree at `path` (== a session cwd) and tombstone
-    /// it. The store index is the gate — we never touch a worktree pantoken didn't
-    /// create. `force=false` leaves a dirty worktree in place (returns
-    /// `removed:false` + a reason). Mirrors `polytoken-driver.ts:1380-1387`
-    /// (`cleanupWorktree` → `reapWorktree`, `:862-872`).
-    async fn cleanup_worktree(&self, path: String, force: bool) -> WorktreeCleanupResult {
-        // Active-session guard: never reap a worktree whose owning session is
-        // warm (a live SSE attachment). Defense-in-depth against a client race
-        // where an archive Undo's `openSession` hasn't settled before a stale
-        // "Delete anyway" toast fires `cleanupWorktree`. Scoped to
-        // `cleanup_worktree` (the explicit cleanup path) ONLY — NOT the shared
-        // `reap_worktree`, because `set_archived` (the archive path) also calls
-        // `reap_worktree` with `force=false`, and archiving the focused session
-        // is the primary archive use case (the server's session is still warm
-        // at that point). A guard in `reap_worktree` would spuriously retain
-        // clean worktrees on normal archive. In practice the client only calls
-        // `cleanup_worktree` with `force=true` (the "Delete anyway" toast), but
-        // the guard fires unconditionally here — a `force=false` cleanup of an
-        // active session's worktree is also refused (a cold session's clean
-        // worktree would be reaped by `reap_worktree` regardless).
-        if self.inner.warm_session_owns_cwd(&path) {
-            return WorktreeCleanupResult {
-                removed: false,
-                reason: Some("session is active".to_string()),
-            };
-        }
-        match self.reap_worktree(&path, force).await {
-            ReapOutcome::NoWorktree => WorktreeCleanupResult {
-                removed: false,
-                reason: Some("no pantoken worktree at this path".to_string()),
-            },
-            ReapOutcome::Reaped => WorktreeCleanupResult {
-                removed: true,
-                reason: None,
-            },
-            ReapOutcome::Retained(reason) => WorktreeCleanupResult {
-                removed: false,
-                reason: Some(reason),
-            },
-        }
-    }
-
-    /// Set/clear the archived flag for a session, reaping its worktree on
-    /// archive. Mirrors `polytoken-driver.ts:1351` `setArchived`: flipping the
-    /// flag is enough for the list overlay (the read side already consults the
-    /// archive store); on archive we also reap a live worktree. A dirty
-    /// worktree is retained and surfaced, matching TS's `if (!meta) return`
-    /// no-retention case vs the dirty-worktree branch. The retained `reason` is
-    /// the concrete reason `worktree::remove` returns (e.g. "worktree has
-    /// uncommitted changes"), surfaced verbatim.
-    async fn set_archived(&self, path: String, archived: bool) -> ArchiveResult {
+    /// Set/clear the archived flag for a session. Mirrors `polytoken-driver.ts:1351`
+    /// `setArchived`: flipping the flag is enough for the list overlay (the read
+    /// side already consults the archive store).
+    async fn set_archived(&self, path: String, archived: bool) {
         self.inner.archive_store.lock().set(&path, archived);
-        if !archived {
-            return ArchiveResult::default();
-        }
-        // The archive key (and thus `path`) is the session's `session.json`
-        // path — `.../sessions/<session_id>/session.json`. Derive the session id
-        // by walking up one dir, mirroring TS `sessionIdFromPath`
-        // (`polytoken-driver.ts:844`). This intentionally differs from the plan's
-        // "file stem" note: `file_stem` of a `session.json` path is "session", so
-        // the reap would never fire; the parent-dir name is the real id.
-        let session_path = std::path::Path::new(&path);
-        let session_id =
-            if session_path.file_name().and_then(|s| s.to_str()) == Some("session.json") {
-                session_path
-                    .parent()
-                    .and_then(|p| p.file_name())
-                    .and_then(|s| s.to_str())
-                    .map(str::to_string)
-            } else {
-                None
-            };
-        let Some(session_id) = session_id else {
-            return ArchiveResult::default();
-        };
-        let Some(cwd) = PolytokenInner::cwd_for_session(&self.inner.sessions_dir, &session_id)
-        else {
-            return ArchiveResult::default();
-        };
-        match self.reap_worktree(&cwd, false).await {
-            ReapOutcome::NoWorktree | ReapOutcome::Reaped => ArchiveResult::default(),
-            ReapOutcome::Retained(reason) => ArchiveResult {
-                worktree_retained: Some(WorktreeRetained { path: cwd, reason }),
-            },
-        }
     }
 
     fn login_env_status(&self) -> LoginEnvStatus {
@@ -2414,26 +2236,6 @@ impl PantokenDriver for PolytokenDriver {
         if !path.is_dir() {
             return Err(format!("not a directory: {cwd}"));
         }
-        let mut cwd = cwd;
-
-        // If the draft asked for an isolated worktree, create one against the
-        // cwd and record it in the worktree store; the session then runs in the
-        // worktree dir. Mirrors `polytoken-driver.ts:1184-1188`.
-        // Track the meta so a later failure in this call reaps it (otherwise the
-        // worktree dir + store entry leak).
-        let mut created_worktree: Option<WorktreeMeta> = None;
-        if opts.worktree.unwrap_or(false) {
-            let meta = worktree::create(
-                &cwd,
-                None,
-                opts.base_branch.as_deref(),
-                &self.inner.worktree_root,
-            )
-            .await?;
-            self.inner.worktree_store.lock().add(meta.clone());
-            cwd = meta.path.clone();
-            created_worktree = Some(meta);
-        }
 
         // Spawn + health + lease + state + SSE subscribe + insert into the warm
         // pool, all via warm_session. The session id comes back from the spawn.
@@ -2555,17 +2357,6 @@ impl PantokenDriver for PolytokenDriver {
             }
             Err(e) => {
                 error!("new_session warm failed: {e}");
-                // A worktree was created in THIS call but the spawn/warm failed,
-                // so reap it (dir + store entry) rather than leaving an orphan.
-                if let Some(meta) = created_worktree {
-                    if let Err(reap_err) = worktree::remove(&meta, true).await {
-                        warn!(
-                            "failed to reap worktree {} after new_session failure: {reap_err}",
-                            meta.path
-                        );
-                    }
-                    self.inner.worktree_store.lock().mark_reaped(&meta.path);
-                }
                 Err(e)
             }
         }
@@ -2944,24 +2735,6 @@ impl PantokenDriver for PolytokenDriver {
             exists: p.exists(),
             is_dir: p.is_dir(),
             path: resolved,
-        }
-    }
-
-    async fn list_branches(&self, path: String) -> BranchList {
-        match worktree::list_branches(&path).await {
-            Ok(branches) => BranchList {
-                path,
-                branches,
-                error: None,
-            },
-            Err(e) => {
-                warn!("list_branches failed for {path}: {e}");
-                BranchList {
-                    path,
-                    branches: vec![],
-                    error: Some(true),
-                }
-            }
         }
     }
 
@@ -3515,8 +3288,6 @@ mod tests {
                 detail: None,
             }),
             archive_store: Mutex::new(ArchiveStore::new(PathBuf::new())),
-            worktree_store: Mutex::new(WorktreeStore::new(PathBuf::new())),
-            worktree_root: PathBuf::new(),
             order: Mutex::new(order),
             warm: RwLock::new(HashMap::new()),
             subscribers: Mutex::new(Vec::new()),
@@ -5260,85 +5031,6 @@ mod tests {
             vec!["debug".to_string(), "journal".to_string()]
         );
         assert_eq!(refs.subagents, vec!["reviewer".to_string()]);
-    }
-
-    /// Build a `WarmSession` whose cached `last_state` reports `project_cwd`.
-    fn warm_with_project_cwd(session_id: &str, project_cwd: &str) -> Arc<WarmSession> {
-        let ws = warm_for(session_id);
-        *ws.last_state.write() = Some(SessionStateSnapshot {
-            active_facet: "execute".into(),
-            active_model: None,
-            active_plan: None,
-            active_reasoning_effort: None,
-            adventurous_handoff_active: None,
-            available_models: None,
-            available_skills: None,
-            available_subagents: None,
-            context_usage: None,
-            current_goal: None,
-            cwd: None,
-            cwd_stack_depth: None,
-            env: std::collections::HashMap::new(),
-            flags: vec![],
-            latest_compaction_summary: None,
-            mcp_servers: None,
-            most_recent_assistant_text: None,
-            pending_interrogatives: None,
-            plugin_config: serde_json::Value::Null,
-            project_cwd: Some(project_cwd.into()),
-            session_title: None,
-            source_control: None,
-            symlink_warnings: None,
-            todos: vec![],
-            turn_in_flight: None,
-        });
-        ws
-    }
-
-    /// `cleanup_worktree(force=true)` refuses when the owning session is warm,
-    /// then reaps after dispose. Tests the full guard path, not just the predicate.
-    #[tokio::test]
-    async fn cleanup_worktree_refuses_active_session_then_reaps_after_dispose() {
-        let worktree_path = "/repo/my-project-worktree";
-        let session_id = "sess-active";
-
-        // Warm session whose cached `last_state.project_cwd` matches the worktree path.
-        let dir = tempfile::tempdir().expect("tempdir");
-        let sessions_dir = dir.path().join("sessions");
-        write_session_json(&sessions_dir, session_id, worktree_path);
-        let mut inner = inner_with_order(vec![session_id.to_string()], 64);
-        inner.sessions_dir = sessions_dir;
-        inner.warm.write().insert(
-            session_id.to_string(),
-            warm_with_project_cwd(session_id, worktree_path),
-        );
-        let driver = PolytokenDriver {
-            inner: Arc::new(inner),
-        };
-
-        // Guard fires: owning session is warm → refuse to force-reap.
-        let result = driver
-            .cleanup_worktree(worktree_path.to_string(), true)
-            .await;
-        assert!(
-            !result.removed,
-            "should refuse to reap an active session's worktree"
-        );
-        assert_eq!(result.reason.as_deref(), Some("session is active"));
-
-        // Dispose the warm session → guard no longer fires → reap_worktree runs.
-        driver.inner.warm.write().remove(session_id);
-        let result2 = driver
-            .cleanup_worktree(worktree_path.to_string(), true)
-            .await;
-        assert!(
-            !result2.removed,
-            "no worktree registered, so reap reports none"
-        );
-        assert_eq!(
-            result2.reason.as_deref(),
-            Some("no pantoken worktree at this path")
-        );
     }
 
     /// C1/AC.5: the subscriber channel is unbounded — emitting >256 events

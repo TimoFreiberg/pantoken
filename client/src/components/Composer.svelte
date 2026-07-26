@@ -165,21 +165,6 @@
       store.focusComposer();
     }
   }
-  // Fetch branches when worktree is toggled on and we haven't loaded them for this
-  // exact cwd yet. startDraft pre-fetches on draft load, so this is the fallback for
-  // the cwd-changed case (setDraftCwd clears branchList). Skip when the list is
-  // already fresh for this cwd to avoid a redundant re-fetch on off→on toggles.
-  $effect(() => {
-    if (
-      store.draft?.worktree &&
-      store.branchList?.path !== store.draft.cwd &&
-      !store.branchList &&
-      !store.branchLoading &&
-      store.draft.cwd
-    ) {
-      store.queryBranches(store.draft.cwd);
-    }
-  });
   // Starting a draft unmounts this Composer (App.svelte guards it with {#if !store.draft}).
   // Clean up the mobile controls overlay entry on teardown so the overlay-history stack
   // doesn't strand a stale "session-controls" entry that would break browser back.
@@ -1195,8 +1180,8 @@
       return;
     }
     // New-session draft shortcut: Escape (with an empty prompt and no slash menu open)
-    // abandons the draft. ⌥P / ⌥W are handled by the window keydown listener so they
-    // also work before the textarea is focused (⌘N leaves it blurred).
+    // abandons the draft. ⌥P is handled by the window keydown listener so it
+    // also works before the textarea is focused (⌘N leaves it blurred).
     if (drafting) {
       if (e.key === "Escape" && !slashOpen && !mcpArgOpen && !facetArgOpen && !goalArgOpen && !atOpen && !store.composerDraft.trim()) {
         e.preventDefault();
@@ -1590,18 +1575,13 @@
       // re-open the picker underneath it.
       if (lightboxIndex !== null) return;
       // New-session draft shortcuts also work when the textarea isn't focused yet
-      // (⌘N leaves it blurred): ⌥P toggles the project picker, ⌥W the worktree chip.
+      // (⌘N leaves it blurred): ⌥P toggles the project picker.
       // Handle ⌥P before the picker guards so it can also close an open picker.
       if (drafting && e.altKey && e.code === "KeyP") {
         e.preventDefault();
         // ⌥P toggles the project menu; if the DirPicker is open it closes that instead.
         if (pickingCwd) pickingCwd = false;
         else projectMenuOpen = !projectMenuOpen;
-        return;
-      }
-      if (drafting && e.altKey && e.code === "KeyW") {
-        e.preventDefault();
-        store.toggleDraftWorktree();
         return;
       }
       // The directory picker owns the keyboard while open (arrows / Enter / Esc to
@@ -1723,95 +1703,6 @@
           {cwdBase}
           <Chevron open={projectMenuOpen} variant="menu" size={10} />
         </button>
-        <button
-          class="chip toggle-chip"
-          data-testid="draft-worktree-control"
-          class:on={store.draft.worktree}
-          aria-pressed={store.draft.worktree}
-          aria-label={store.draft.worktree
-            ? "Disable worktree isolation"
-            : "Enable worktree isolation"}
-          title="Isolate this session in a jj/git worktree of the project, leaving the main tree clean (⌥W)"
-          onclick={() => store.toggleDraftWorktree()}
-        >
-          worktree
-          {#if store.draft.worktree}<span class="chip-check" aria-hidden="true">✓</span>{/if}
-        </button>
-        {#if store.draft.worktree}
-          {@const branches = store.branchList?.branches ?? []}
-          {@const loading = store.branchLoading}
-          {@const error = store.branchList?.error === true}
-          {@const truncated = branches.length === 100}
-          {@const baseBranch = store.draft.baseBranch}
-          <MenuBadge
-            label={baseBranch || "default"}
-            title={`Base branch: ${baseBranch || "default (auto-detected)"} — click to change`}
-            testid="draft-branch-control"
-            ariaLabel="Select base branch"
-            groupTitle="Base branch"
-            count={branches.length + 1}
-            initialSel={0}
-            badgeClass="chip"
-            minWidth="140px"
-            maxWidth="min(120ch, 50vw)"
-            closeLabel="Close branch menu"
-            overlayId="branch-picker"
-            onSelect={(i) =>
-              i === 0
-                ? store.setDraftBaseBranch(undefined)
-                : store.setDraftBaseBranch(branches[i - 1]!)}
-          >
-            {#snippet body({ sel, close })}
-              {#if loading}
-                <div class="branch-status">Loading branches…</div>
-              {:else if error}
-                <div class="branch-status branch-error">
-                  Couldn't list branches — not a repo or the command failed.
-                </div>
-              {:else if branches.length === 0}
-                <div class="branch-status">No branches found.</div>
-              {:else}
-                <button
-                  type="button"
-                  class="branch-option"
-                  class:selected={!baseBranch}
-                  class:hl={sel === 0}
-                  data-i={0}
-                  role="option"
-                  aria-selected={!baseBranch}
-                  title="Use the auto-detected default branch"
-                  onclick={() => {
-                    store.setDraftBaseBranch(undefined);
-                    close();
-                  }}
-                >
-                  <span class="branch-name">default (auto)</span>
-                </button>
-                {#each branches as branch, i (branch)}
-                  <button
-                    type="button"
-                    class="branch-option"
-                    class:selected={branch === baseBranch}
-                    class:hl={sel === i + 1}
-                    data-i={i + 1}
-                    role="option"
-                    aria-selected={branch === baseBranch}
-                    title={branch}
-                    onclick={() => {
-                      store.setDraftBaseBranch(branch);
-                      close();
-                    }}
-                  >
-                    <span class="branch-name">{branch}</span>
-                  </button>
-                {/each}
-                {#if truncated}
-                  <div class="branch-truncated">List capped at 100 branches.</div>
-                {/if}
-              {/if}
-            {/snippet}
-          </MenuBadge>
-        {/if}
       </div>
     {/if}
 
@@ -2202,55 +2093,6 @@
   .chip:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
-  }
-  .chip-check {
-    display: inline-grid;
-    place-items: center;
-    width: 12px;
-    font-size: 11px;
-    line-height: 1;
-  }
-  /* Branch picker options (rendered inside MenuBadge's panel body snippet).
-     Mirror PermissionBadge's .item chrome so the branch picker shares the same
-     look as the other composer pop-ups: 12.5px font, --surface-sunken hover. */
-  .branch-option {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    text-align: left;
-    background: transparent;
-    border: none;
-    border-radius: var(--radius-sm);
-    padding: 6px 8px;
-    cursor: pointer;
-    color: var(--text);
-    font-size: 12.5px;
-  }
-  .branch-option.hl {
-    background: var(--surface-sunken);
-  }
-  .branch-option.selected {
-    font-weight: 600;
-  }
-  .branch-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .branch-status {
-    padding: 6px 8px;
-    color: var(--text-muted);
-    font-size: 12.5px;
-  }
-  .branch-error {
-    color: var(--text-danger, var(--text-muted));
-  }
-  .branch-truncated {
-    padding: 4px 8px;
-    color: var(--text-faint);
-    font-size: 11px;
-    font-style: italic;
   }
   .box-wrap {
     /* Anchor for the slash menu, which pops upward from just above the box. */

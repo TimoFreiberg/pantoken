@@ -43,8 +43,6 @@ test("draft chips live in one scope row above the composer surface, not in the s
   const surface = page.getByTestId("composer-surface");
   await expect(scope).toHaveCount(1);
   await expect(scope.getByTestId("draft-project-control")).toHaveCount(1);
-  await expect(scope.getByTestId("draft-worktree-control")).toHaveCount(1);
-  await expect(scope.getByTestId("draft-branch-control")).toHaveCount(0);
 
   const scopeBox = await scope.boundingBox();
   const surfaceBox = await surface.boundingBox();
@@ -56,7 +54,6 @@ test("draft chips live in one scope row above the composer surface, not in the s
 
   const status = page.getByTestId("composer-status-row");
   await expect(status.getByTestId("draft-project-control")).toHaveCount(0);
-  await expect(status.getByTestId("draft-worktree-control")).toHaveCount(0);
   await expect(status.getByTestId("permission-badge")).toBeVisible();
 });
 
@@ -96,25 +93,6 @@ test("non-drafting state has no scope row and composer surface keeps rounded cor
 
   const surface = page.getByTestId("composer-surface");
   await expect(surface).not.toHaveCSS("border-top-left-radius", "0px");
-});
-
-test("keyboard shortcuts toggle picker and worktree while drafting", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-
-  // ⌥P opens the project menu.
-  await page.keyboard.press("Alt+p");
-  await expect(page.getByTestId("project-menu")).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(page.getByTestId("project-menu")).toBeHidden();
-
-  // ⌥W toggles the worktree chip's aria-pressed.
-  const worktree = page.getByTestId("draft-worktree-control");
-  await expect(worktree).toHaveAttribute("aria-pressed", "false");
-  await page.keyboard.press("Alt+w");
-  await expect(worktree).toHaveAttribute("aria-pressed", "true");
 });
 
 test("existing sessions keep the composer at the bottom", async ({ page }) => {

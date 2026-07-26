@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
 import {
   archiveRow,
-  createWorktreeSession,
   drive,
   gotoFresh,
   openSidebar,
@@ -92,76 +91,6 @@ test("the surviving undo restores the most recently archived session", async ({
   await expect(
     sidebar.locator(".row-wrap").filter({ hasText: "Wire up the WebSocket bridge" }),
   ).toBeVisible();
-});
-
-test("an unrelated worktree-retained notice coexists with a new archive undo", async ({
-  page,
-}) => {
-  // A dirty worktree archive produces BOTH an archive-Undo toast and a
-  // "Worktree kept" (Delete anyway) toast.
-  await createWorktreeSession(page, "dirty");
-  const sidebar = page.getByTestId("sidebar");
-
-  const dirtyRow = sidebar.locator(".row-wrap").filter({ has: page.locator(".wt") });
-  await dirtyRow.locator(".row").click({ button: "right" });
-  await sidebar.getByRole("menuitem", { name: "Archive", exact: true }).click();
-
-  // Both toasts are present.
-  await expect(
-    sidebar.getByTestId("toast").filter({ hasText: "Archived" }),
-  ).toBeVisible();
-  await expect(
-    sidebar.getByTestId("toast").filter({ hasText: "Worktree kept" }),
-  ).toBeVisible();
-
-  // Now archive a clean (fixture) session — its Undo must NOT displace the
-  // unrelated "Worktree kept" toast (AC.4: independence — no shared kind).
-  await archiveRow(page, "Explore the fold reducer");
-
-  await expect(
-    page
-      .getByTestId("sidebar-notice")
-      .getByTestId("toast")
-      .filter({ hasText: "Archived" }),
-  ).toHaveCount(1);
-  await expect(
-    page
-      .getByTestId("sidebar-notice")
-      .getByTestId("toast")
-      .filter({ hasText: "Worktree kept" }),
-  ).toHaveCount(1);
-});
-
-test("clicking undo dismisses the live delete-anyway toast for that worktree", async ({
-  page,
-}) => {
-  // Archive a dirty-worktree session: produces Undo + "Delete anyway".
-  await createWorktreeSession(page, "dirty");
-  const sidebar = page.getByTestId("sidebar");
-
-  const dirtyRow = sidebar.locator(".row-wrap").filter({ has: page.locator(".wt") });
-  await dirtyRow.locator(".row").click({ button: "right" });
-  await sidebar.getByRole("menuitem", { name: "Archive", exact: true }).click();
-
-  const deleteAnyway = sidebar
-    .getByTestId("toast")
-    .filter({ hasText: "Worktree kept" });
-  await expect(deleteAnyway).toBeVisible();
-
-  // AC.5: clicking Undo dismisses the correlated "Delete anyway" toast so it
-  // can't force-delete the restored session's worktree.
-  const undo = sidebar
-    .getByTestId("toast")
-    .filter({ hasText: "Archived" })
-    .getByRole("button", { name: "Undo" });
-  await undo.click();
-
-  await expect(
-    page
-      .getByTestId("sidebar-notice")
-      .getByTestId("toast")
-      .filter({ hasText: "Worktree kept" }),
-  ).toHaveCount(0);
 });
 
 test("stop unconfirmed state appears on the stop button, not as a chat notice or sidebar error", async ({

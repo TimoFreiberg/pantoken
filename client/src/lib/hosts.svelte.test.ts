@@ -155,7 +155,7 @@ function descriptor(
 function helloMsg(serverId: string, label: string): ServerMessage {
   return {
     type: "hello",
-    protocolVersion: 5,
+    protocolVersion: 6,
     serverId,
     serverLabel: label,
     dataDir: "/tmp",

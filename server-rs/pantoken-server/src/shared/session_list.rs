@@ -66,7 +66,6 @@ mod tests {
             parent_session_path: None,
             usage: None,
             archived: false,
-            worktree: None,
         }
     }
 

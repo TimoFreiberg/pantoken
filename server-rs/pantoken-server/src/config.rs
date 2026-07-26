@@ -7,10 +7,9 @@ use std::path::{Path, PathBuf};
 
 /// Default data dir, XDG-conformant: `$XDG_DATA_HOME/pantoken`, falling back to
 /// `~/.local/share/pantoken`. This is DATA (persists across restarts, precious user
-/// state) — session worktrees hold real user work, conversation history is user data,
-/// and the archive/worktree indices are sources of truth, not caches. Pre-0.6 this
-/// lived under `~/.local/state/pantoken`; `migrate_legacy_data_dir()` moves existing
-/// installs on startup.
+/// state) — conversation history is user data, and the archive index is a source
+/// of truth, not a cache. Pre-0.6 this lived under `~/.local/state/pantoken`;
+/// `migrate_legacy_data_dir()` moves existing installs on startup.
 fn default_data_dir() -> PathBuf {
     let data_home = std::env::var("XDG_DATA_HOME")
         .ok()
@@ -285,6 +284,9 @@ mod tests {
         let legacy = temp.path().join(".local").join("state").join("pantoken");
         let new_dir = temp.path().join(".local").join("share").join("pantoken");
         std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("archived.json"), "{}").unwrap();
+        // Old installs may still carry this removed store; migration must move it
+        // without trying to parse or claim ownership of the file.
         std::fs::write(legacy.join("worktrees.json"), "{}").unwrap();
 
         // Point both XDG vars at the temp root so default_data_dir and
@@ -303,8 +305,12 @@ mod tests {
 
         assert!(new_dir.exists(), "new dir should exist after migration");
         assert!(
-            new_dir.join("worktrees.json").exists(),
+            new_dir.join("archived.json").exists(),
             "file should have moved"
+        );
+        assert!(
+            new_dir.join("worktrees.json").exists(),
+            "legacy worktree file should be tolerated and moved"
         );
         assert!(!legacy.exists(), "legacy dir should be gone");
 

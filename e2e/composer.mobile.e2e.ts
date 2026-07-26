@@ -67,19 +67,16 @@ test("mobile: new-session scope-row chips stay tappable above the composer surfa
 
   const scope = page.getByTestId("scope-row");
   const project = page.getByTestId("draft-project-control");
-  const worktree = page.getByTestId("draft-worktree-control");
   const vw = page.viewportSize()!.width;
 
   await expect(scope).toHaveCount(1);
   await expect(scope.getByTestId("draft-project-control")).toHaveCount(1);
-  await expect(scope.getByTestId("draft-worktree-control")).toHaveCount(1);
   const visibleProjectBase = (await project.innerText()).trim();
   expect(visibleProjectBase).not.toBe("");
   await expect(project).toHaveAccessibleName(
     `${visibleProjectBase} — choose a project`,
   );
-  await expect(worktree).toHaveAccessibleName("Enable worktree isolation");
-  for (const control of [project, worktree]) {
+  for (const control of [project]) {
     await expect(control).toBeVisible();
     const box = await control.boundingBox();
     expect(box).not.toBeNull();
@@ -119,9 +116,6 @@ test("mobile: new-session scope-row chips stay tappable above the composer surfa
   await page.keyboard.press("Escape");
   await expect(projectMenu).toBeHidden();
   await expect(project).toHaveAttribute("aria-expanded", "false");
-  await worktree.click();
-  await expect(worktree).toHaveAttribute("aria-pressed", "true");
-  await expect(worktree).toHaveAccessibleName("Disable worktree isolation");
 });
 
 test("mobile: send button is disabled when the composer is empty (issue #74)", async ({

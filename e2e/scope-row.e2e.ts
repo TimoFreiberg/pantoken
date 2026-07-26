@@ -16,7 +16,6 @@ test("scope controls render once in a compact row above the composer", async ({
   await expect(page.getByTestId("draft-setup")).toHaveCount(0);
   await expect(page.getByTestId("draft-project-control")).toHaveCount(1);
   await expect(scope.getByTestId("draft-project-control")).toHaveCount(1);
-  await expect(scope.getByTestId("draft-worktree-control")).toHaveCount(1);
 
   const metrics = await scope.evaluate((element) => {
     const css = getComputedStyle(element);
@@ -47,43 +46,7 @@ test("scope controls render once in a compact row above the composer", async ({
 
   const status = page.getByTestId("composer-status-row");
   await expect(status.getByTestId("draft-project-control")).toHaveCount(0);
-  await expect(status.getByTestId("draft-worktree-control")).toHaveCount(0);
   await expect(status.getByTestId("permission-badge")).toBeVisible();
   await expect(status.getByTestId("facet-badge")).toBeVisible();
   await expect(status.getByTestId("model-badge")).toBeVisible();
-});
-
-test("scope controls preserve picker exclusion and worktree branch behavior", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-
-  const project = page.getByTestId("draft-project-control");
-  const worktree = page.getByTestId("draft-worktree-control");
-  await project.click();
-  const projectMenu = page.getByTestId("project-menu");
-  await expect(projectMenu).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(projectMenu).toBeHidden();
-
-  await worktree.click();
-  const branch = page.getByTestId("draft-branch-control");
-  await expect(worktree).toHaveAttribute("aria-pressed", "true");
-  await expect(branch).toBeVisible();
-  await branch.click();
-  await expect(
-    page.getByRole("listbox", { name: "Select base branch" }),
-  ).toBeVisible();
-  await expect(projectMenu).toBeHidden();
-
-  await page.keyboard.press("Escape");
-  await expect(
-    page.getByRole("listbox", { name: "Select base branch" }),
-  ).toBeHidden();
-  await project.click();
-  await expect(projectMenu).toBeVisible();
-  await expect(
-    page.getByRole("listbox", { name: "Select base branch" }),
-  ).toBeHidden();
 });

@@ -71,9 +71,9 @@
         : s.ambient.title || s.title || "pantoken",
   );
 
-  // The "where am I" subtitle. The folded snapshot carries no cwd/worktree, so we
+  // The "where am I" subtitle. The folded snapshot carries no cwd, so we
   // read the active session's list entry (same lookup the sidebar uses) — its cwd
-  // is the project, its worktree.base the parent repo for worktree sessions.
+  // is the project.
   const entry = $derived(
     store.sessions.find((e) => e.sessionId === s.ref?.sessionId),
   );
@@ -84,15 +84,11 @@
         ? "starting…"
         : opening
           ? "opening…"
-          : sessionSubtitle({ cwd: entry?.cwd, worktreeBase: entry?.worktree?.base }),
+          : sessionSubtitle({ cwd: entry?.cwd }),
   );
-  // Hover reveals the full path(s) the basename(s) elide.
+  // Hover reveals the full path the basename elides.
   const subtitleTitle = $derived(
-    drafting || !entry?.cwd
-      ? undefined
-      : entry.worktree
-        ? `Worktree ${entry.cwd} (of ${entry.worktree.base})`
-        : entry.cwd,
+    drafting || !entry?.cwd ? undefined : entry.cwd,
   );
   const selectedHost = $derived(
     coordinator.multiHostCapable

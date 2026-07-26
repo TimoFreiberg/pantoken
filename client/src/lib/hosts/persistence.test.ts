@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { loadDraftConfigMap } from "../store.svelte.js";
 import {
   LEGACY_KEYS,
   loadNamespacedMap,
@@ -8,6 +9,17 @@ import {
 
 afterEach(() => {
   localStorage.clear();
+});
+
+describe("legacy draft config tolerance", () => {
+  test("ignores removed worktree fields without throwing", () => {
+    localStorage.setItem(
+      "pantoken.draftConfig",
+      JSON.stringify({ "n:/repo": { worktree: true, baseBranch: "main" } }),
+    );
+    const loaded = loadDraftConfigMap();
+    expect(loaded["n:/repo"]).toBeUndefined();
+  });
 });
 
 describe("namespacedKey", () => {
@@ -60,17 +72,17 @@ describe("loadNamespacedMap / persistNamespacedMap", () => {
 
   test("identical cwds on two servers do not collide", () => {
     const cwd = "/home/user/project";
-    const mapA = { [`n:${cwd}`]: { worktree: true } };
-    const mapB = { [`n:${cwd}`]: { worktree: false } };
+    const mapA = { [`n:${cwd}`]: { model: "claude" } };
+    const mapB = { [`n:${cwd}`]: { model: "gpt" } };
 
     persistNamespacedMap("draftConfig", "server-A", mapA);
     persistNamespacedMap("draftConfig", "server-B", mapB);
 
     expect(loadNamespacedMap("draftConfig", "server-A")[`n:${cwd}`]).toEqual({
-      worktree: true,
+      model: "claude",
     });
     expect(loadNamespacedMap("draftConfig", "server-B")[`n:${cwd}`]).toEqual({
-      worktree: false,
+      model: "gpt",
     });
   });
 

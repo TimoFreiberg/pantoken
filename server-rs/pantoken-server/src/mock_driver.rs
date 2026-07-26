@@ -16,8 +16,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
 
 use crate::driver::{
-    ArchiveResult, BranchResult, ClearQueueResult, NewSessionOptsData, PantokenDriver,
-    TodoDeleteError, WorktreeCleanupResult, WorktreeRetained,
+    BranchResult, ClearQueueResult, NewSessionOptsData, PantokenDriver, TodoDeleteError,
 };
 use async_trait::async_trait;
 
@@ -649,7 +648,6 @@ fn mock_session_list() -> Vec<SessionListEntry> {
             last_user_message_at: iso_ago(6 * 60_000),
             parent_session_path: None,
             archived: false,
-            worktree: None,
         },
         SessionListEntry {
             session_id: "older-session".into(),
@@ -668,7 +666,6 @@ fn mock_session_list() -> Vec<SessionListEntry> {
             last_user_message_at: iso_ago(2 * 60 * 60 * 1000 + 60_000),
             parent_session_path: None,
             archived: false,
-            worktree: None,
         },
         SessionListEntry {
             session_id: "scratch-session".into(),
@@ -683,7 +680,6 @@ fn mock_session_list() -> Vec<SessionListEntry> {
             last_user_message_at: iso_ago(6 * 60 * 60 * 1000 - 60_000),
             parent_session_path: None,
             archived: false,
-            worktree: None,
         },
         // Regression fixture for the cold-restore collapse bug (docs/TODO.md): its
         // seed (`restored_session_seed`) mimics `history_to_seed_events` +
@@ -703,7 +699,6 @@ fn mock_session_list() -> Vec<SessionListEntry> {
             last_user_message_at: iso_ago(90 * 60_000 + 60_000),
             parent_session_path: None,
             archived: false,
-            worktree: None,
         },
         SessionListEntry {
             session_id: "archived-session".into(),
@@ -718,7 +713,6 @@ fn mock_session_list() -> Vec<SessionListEntry> {
             last_user_message_at: iso_ago(5 * day),
             parent_session_path: None,
             archived: true,
-            worktree: None,
         },
         SessionListEntry {
             session_id: "stale-session".into(),
@@ -733,33 +727,8 @@ fn mock_session_list() -> Vec<SessionListEntry> {
             last_user_message_at: iso_ago(10 * day),
             parent_session_path: None,
             archived: false,
-            worktree: None,
         },
     ]
-}
-
-/// Seed the `worktrees` map from the fixture session list — faithful port of TS
-/// `seedWorktrees(SESSION_LIST)`: every entry whose `worktree` is set contributes
-/// `{ base, name }` keyed by its cwd. The static `mock_session_list()` baseline
-/// carries no worktree rows, so this yields an empty map (as in TS where SESSION_LIST
-/// has no worktree entries either); `new_session(worktree: true)` populates it.
-fn seed_worktrees(
-    sessions: &[SessionListEntry],
-) -> std::collections::HashMap<String, WorktreeMeta> {
-    sessions
-        .iter()
-        .filter_map(|s| {
-            s.worktree.as_ref().map(|w| {
-                (
-                    s.cwd.clone(),
-                    WorktreeMeta {
-                        base: w.base.clone(),
-                        name: w.name.clone(),
-                    },
-                )
-            })
-        })
-        .collect()
 }
 
 /// Resolve picker paths like the live driver: expand `~`, normalize `.`/`..`,
@@ -798,7 +767,7 @@ fn mock_resolve(path: Option<&str>) -> String {
 /// absolute path under BOTH `$HOME` and `/Users/timo` (the fixture-cwd prefix) so
 /// the picker has content regardless of the dev host's `$HOME`; child names are
 /// stable. `demo`/`elsewhere` are empty project dirs e2e navigates into; `dirty`
-/// simulates uncommitted changes (archive keeps its worktree). The picker
+/// simulates a project with uncommitted changes. The picker
 /// (`list_dir`) reads this; `stat_path` reports existence from it. The mock never
 /// touches the real disk.
 fn mock_dir_tree() -> &'static std::collections::HashMap<String, Vec<String>> {
@@ -1043,12 +1012,6 @@ fn mock_session_seed(path: &str) -> Vec<SessionDriverEvent> {
             "Noted — nothing else here.",
         ),
         "/sessions/restored-session.jsonl" => restored_session_seed(),
-        "/sessions/wt-session.jsonl" => session_seed(
-            "wt-session",
-            "Worktree session",
-            "session in a worktree",
-            "This session runs in a worktree of the parent project.",
-        ),
         _ => session_seed(
             "unknown",
             "Session",
@@ -1668,8 +1631,8 @@ fn prompt_reply_script(
 
 /// The synthetic sidebar row prepended for a freshly-created session — faithful
 /// port of TS `NEW_SESSION_ENTRY` (fixtures.ts), spread with the resolved cwd +
-/// a cwd-derived session id by `new_session`. Empty preview/count, not archived,
-/// no worktree field (listSessions overlays that). Timestamps are `isoAgo(0)` — a
+/// a cwd-derived session id by `new_session`. Empty preview/count, not archived.
+/// Timestamps are `isoAgo(0)` — a
 /// REAL RFC3339 now (NOT the mock clock's `ts()`): the client sorts rows by
 /// `updatedAt` lexicographically, and `ts()` returns a zero-padded 10-digit mock
 /// string (e.g. "0000037045") that sorts BEFORE the fixture rows' real ISO
@@ -1690,13 +1653,12 @@ fn new_session_entry(session_id: &str, cwd: &str) -> SessionListEntry {
         parent_session_path: None,
         usage: None,
         archived: false,
-        worktree: None,
     }
 }
 
 /// Seed events for a freshly created (empty) session — faithful port of TS
 /// `newSessionSeed`. `dir`/`config` are the ALREADY-RESOLVED cwd + config — the
-/// `new_session` driver method derives them (worktree suffix, chosen model's
+/// `new_session` driver method derives them (chosen model's
 /// thinking levels) the way TS `newSession()` does before calling `newSessionSeed`.
 /// Returns the seed events + the sessionOpened snapshot (so the caller can
 /// remember it for the deferred first-prompt flow).
@@ -1848,13 +1810,6 @@ pub struct MockDriver {
     /// One-shot: when set, the next `new_session()` returns no seed events then clears
     /// (armed via `run_script("failnewsession")`). Mirrors TS `failNextNewSession`.
     fail_next_new_session: Arc<AtomicBool>,
-    /// One-shot list_branches() error injector (armed via
-    /// `run_script("failbranchlist")`). The next `list_branches` returns an error.
-    fail_next_branch_list: Arc<AtomicBool>,
-    /// One-shot list_branches() long-name injector (armed via
-    /// `run_script("longbranchlist")`). The next `list_branches` includes a
-    /// very-long-named branch so e2e can assert truncation + title tooltip.
-    long_next_branch_list: Arc<AtomicBool>,
     /// One-shot openSession() 409 lease-conflict injector (armed via
     /// `run_script("failsession")`). Mirrors TS `failNextSession`. The next
     /// `open_session` throws the lease-conflict message (matching the real
@@ -1901,26 +1856,11 @@ pub struct MockDriver {
     next_script_id: AtomicU64,
     /// Mutable session list — `mock_session_list()` at construction + reset, with a
     /// synthetic "new" row PREPENDED by `new_session` (mirrors TS `this.sessions`).
-    /// `list_sessions` returns this overlaid with worktree/archive state. The TS
+    /// `list_sessions` returns this. The TS
     /// mock served this mutable list so a freshly-created session appears in the
     /// sidebar immediately; the Rust mock previously returned the static list and a
     /// new session never showed up.
     sessions: Arc<Mutex<Vec<SessionListEntry>>>,
-    /// Worktrees the mock "created" (the `-worktree` sibling dirs), keyed by the
-    /// worktree cwd (== the session's cwd) → {base, name}. Mirrors the TS
-    /// `worktrees` map (seeded from SESSION_LIST at construction + reset) so
-    /// `list_sessions` flags worktree-backed rows with their parent project for
-    /// grouping, and cleanup/archive only ever touch mock worktrees.
-    worktrees: Arc<Mutex<std::collections::HashMap<String, WorktreeMeta>>>,
-    /// cwds of mock worktrees created under a `dirty` project — simulate
-    /// uncommitted changes so archive keeps them + reports `worktreeRetained`
-    /// (mirrors TS `dirtyWorktrees`).
-    dirty_worktrees: Arc<Mutex<std::collections::HashSet<String>>>,
-    /// cwds whose worktree dir has been reaped (cleaned up / archived). Tombstone:
-    /// the meta stays in `worktrees` so the orphaned session keeps grouping under
-    /// its parent project, but the live affordances + ownership gate drop it
-    /// (mirrors TS `reapedWorktrees`).
-    reaped_worktrees: Arc<Mutex<std::collections::HashSet<String>>>,
     /// Per-session queued input overlay. Mirrors TS MockDriver.queues: queueUpdated
     /// events replace the client queue, and openSession overlays queuedMessages on
     /// seed snapshots so reconnect/session refocus preserve queued rows.
@@ -1976,14 +1916,6 @@ struct PendingDialog {
     session_ref: SessionRef,
 }
 
-/// A mock worktree's parent-project metadata, keyed by the worktree cwd in the
-/// `worktrees` map. Mirrors TS `{ base, name }` — `base` is the parent project
-/// dir the worktree groups under, `name` the worktree's own dir name.
-struct WorktreeMeta {
-    base: String,
-    name: String,
-}
-
 impl MockDriver {
     pub fn new() -> Self {
         Self {
@@ -1992,8 +1924,6 @@ impl MockDriver {
             generation: Arc::new(AtomicU64::new(0)),
             last_created: Mutex::new(None),
             fail_next_new_session: Arc::new(AtomicBool::new(false)),
-            fail_next_branch_list: Arc::new(AtomicBool::new(false)),
-            long_next_branch_list: Arc::new(AtomicBool::new(false)),
             fail_next_session: Arc::new(AtomicBool::new(false)),
             abort_delay_ms: AtomicU64::new(0),
             new_session_seed_delay_ms: AtomicU64::new(0),
@@ -2004,9 +1934,6 @@ impl MockDriver {
             in_flight: Arc::new(Mutex::new(None)),
             next_script_id: AtomicU64::new(0),
             sessions: Arc::new(Mutex::new(mock_session_list())),
-            worktrees: Arc::new(Mutex::new(seed_worktrees(&mock_session_list()))),
-            dirty_worktrees: Arc::new(Mutex::new(std::collections::HashSet::new())),
-            reaped_worktrees: Arc::new(Mutex::new(std::collections::HashSet::new())),
             queues: Arc::new(Mutex::new(HashMap::new())),
             config: Arc::new(Mutex::new(mock_default_config())),
             jobs: Arc::new(Mutex::new(mock_default_jobs())),
@@ -2460,36 +2387,8 @@ impl PantokenDriver for MockDriver {
     }
 
     async fn list_sessions(&self) -> Vec<SessionListEntry> {
-        // Faithful port of TS `listSessions()`: clone the mutable `sessions` list
-        // and overlay each row's `worktree` field from the driver's `worktrees` map
-        // (carrying `reaped` from the tombstone set). The static baseline rows carry
-        // no worktree meta; rows `new_session` created under `worktree: true` do, so
-        // the sidebar groups them under their parent project and shows the path chip.
-        // (TS also overlays a transient `liveCountBumps` on `userMessageCount`; the
-        // Rust mock never tracked that overlay — it's exercised only by specs outside
-        // this fix's scope, so it's omitted here to avoid changing get_usage behavior.)
-        let worktrees = self.worktrees.lock();
-        let reaped = self.reaped_worktrees.lock();
-        self.sessions
-            .lock()
-            .iter()
-            .map(|s| {
-                let mut s = s.clone();
-                if let Some(meta) = worktrees.get(&s.cwd) {
-                    s.worktree = Some(WorktreeInfo {
-                        path: s.cwd.clone(),
-                        base: meta.base.clone(),
-                        name: meta.name.clone(),
-                        reaped: if reaped.contains(&s.cwd) {
-                            Some(true)
-                        } else {
-                            None
-                        },
-                    });
-                }
-                s
-            })
-            .collect()
+        // Clone the mutable `sessions` list. Rows `new_session` created prepend a synthetic "new" row.
+        self.sessions.lock().clone()
     }
 
     async fn open_session(&self, path: String) -> Result<Vec<SessionDriverEvent>, String> {
@@ -2592,64 +2491,27 @@ impl PantokenDriver for MockDriver {
         if seed_delay > 0 {
             tokio::time::sleep(Duration::from_millis(seed_delay)).await;
         }
-        // Faithful port of TS `newSession()`: resolve the cwd (applying a
-        // `-worktree` suffix when the draft asked for an isolated worktree) and
-        // build a config carrying the chosen model's availableThinkingLevels +
-        // the draft's (or default) thinking level, then hand the resolved dir +
-        // config to `newSessionSeed`. Remember the snapshot so the first prompt
-        // streams under this session's own ref — mirrors the real driver's
-        // apply-on-create. Also records the worktree (so listSessions flags it) and
-        // prepends a synthetic "new" row to the mutable session list (so the new
-        // session appears in the sidebar immediately) — both faithful to TS.
+        // Faithful port of TS `newSession()`: resolve the cwd and build a config
+        // carrying the chosen model's availableThinkingLevels + the draft's (or
+        // default) thinking level, then hand the resolved dir + config to
+        // `newSessionSeed`. Remember the snapshot so the first prompt streams
+        // under this session's own ref — mirrors the real driver's apply-on-create.
+        // Prepends a synthetic "new" row to the mutable session list (so the new
+        // session appears in the sidebar immediately) — faithful to TS.
         let NewSessionOptsData {
             cwd,
-            worktree,
-            base_branch,
             model,
             thinking,
             facet,
             permission_monitor,
         } = opts;
-        // base_branch is accepted but unused by the mock — the mock doesn't call
-        // worktree::create; it just suffixes "-worktree" to the dir.
-        let _ = &base_branch;
         // base = cwd?.trim() || NEW_SESSION_ENTRY.cwd  (== WORKSPACE_PATH)
-        let base = cwd
+        let dir = cwd
             .as_deref()
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .unwrap_or_else(|| WORKSPACE_PATH.to_string());
-        // dir = worktree ? `${base.replace(/\/+$/, "")}-worktree` : base
-        // (clone in the non-worktree arm so `base` stays live for the worktree record below.)
-        let dir = if worktree.unwrap_or(false) {
-            format!("{}-worktree", base.trim_end_matches('/'))
-        } else {
-            base.clone()
-        };
-        // Record the worktree so listSessions flags the row with its parent project
-        // for grouping + shows the isolated-path chip. A `dirty` base simulates
-        // uncommitted changes (archive keeps it + reports worktreeRetained).
-        // Mirrors TS: worktrees.set(dir, { base, name: `pantoken-mock-${dir}` });
-        // dirtyWorktrees.add(dir) when /(^|\/)dirty$/.test(base).
-        if worktree.unwrap_or(false) {
-            self.worktrees.lock().insert(
-                dir.clone(),
-                WorktreeMeta {
-                    base: base.clone(),
-                    name: format!("pantoken-mock-{dir}"),
-                },
-            );
-            if base
-                .rsplit('/')
-                .next()
-                .map(|seg| seg == "dirty")
-                .unwrap_or(false)
-                || base == "dirty"
-            {
-                self.dirty_worktrees.lock().insert(dir.clone());
-            }
-        }
         // sessionId = dir === NEW_SESSION_ENTRY.cwd ? NEW_SESSION_ENTRY.sessionId : `new-${dir}`
         let session_id = if dir == WORKSPACE_PATH {
             "new-session".to_string()
@@ -2701,62 +2563,13 @@ impl PantokenDriver for MockDriver {
         Ok(events)
     }
 
-    async fn set_archived(&self, path: String, archived: bool) -> ArchiveResult {
-        // Faithful port of TS `setArchived()`: flip the row's `archived` flag in the
-        // mutable session list, then — on archive — reap a (clean) mock worktree so
-        // the indicator clears. A dirty worktree is kept and reported back so the
-        // client explains the leftover (exactly as the real driver does).
-        {
-            let mut sessions = self.sessions.lock();
-            for s in sessions.iter_mut() {
-                if s.path == path {
-                    s.archived = archived;
-                }
+    async fn set_archived(&self, path: String, archived: bool) {
+        // Flip the row's `archived` flag in the mutable session list.
+        let mut sessions = self.sessions.lock();
+        for s in sessions.iter_mut() {
+            if s.path == path {
+                s.archived = archived;
             }
-        }
-        if archived {
-            let cwd = self
-                .sessions
-                .lock()
-                .iter()
-                .find(|s| s.path == path)
-                .map(|s| s.cwd.clone());
-            if let Some(cwd) = cwd {
-                let has_wt = self.worktrees.lock().contains_key(&cwd);
-                let already_reaped = self.reaped_worktrees.lock().contains(&cwd);
-                if has_wt && !already_reaped {
-                    if self.dirty_worktrees.lock().contains(&cwd) {
-                        return ArchiveResult {
-                            worktree_retained: Some(WorktreeRetained {
-                                path: cwd,
-                                reason: "uncommitted changes".into(),
-                            }),
-                        };
-                    }
-                    // Tombstone, don't delete: keep the meta so the session keeps grouping.
-                    self.reaped_worktrees.lock().insert(cwd);
-                }
-            }
-        }
-        ArchiveResult::default()
-    }
-
-    async fn cleanup_worktree(&self, path: String, _force: bool) -> WorktreeCleanupResult {
-        // Faithful port of TS `cleanupWorktree()`. Mock worktrees are always clean,
-        // so force is moot — just tombstone (mark reaped) rather than delete so the
-        // orphaned session keeps grouping under its parent project.
-        let has_wt = self.worktrees.lock().contains_key(&path);
-        let already_reaped = self.reaped_worktrees.lock().contains(&path);
-        if !has_wt || already_reaped {
-            return WorktreeCleanupResult {
-                removed: false,
-                reason: Some("no pantoken worktree at this path".into()),
-            };
-        }
-        self.reaped_worktrees.lock().insert(path);
-        WorktreeCleanupResult {
-            removed: true,
-            reason: None,
         }
     }
 
@@ -2889,39 +2702,6 @@ impl PantokenDriver for MockDriver {
             path: abs,
             exists,
             is_dir: exists,
-        }
-    }
-
-    async fn list_branches(&self, path: String) -> BranchList {
-        // One-shot failure injection (armed via run_script("failbranchlist")).
-        if self.fail_next_branch_list.swap(false, Ordering::SeqCst) {
-            return BranchList {
-                path,
-                branches: vec![],
-                error: Some(true),
-            };
-        }
-        // One-shot long-name injection (armed via run_script("longbranchlist")).
-        // Adds a very-long-named branch so e2e can assert panel truncation +
-        // title tooltip. Cleared after one call (one-shot, like failbranchlist).
-        let long = self.long_next_branch_list.swap(false, Ordering::SeqCst);
-        // Synthetic branch list for any non-empty path (the mock's repos are
-        // fixture paths, not real repos). Gives e2e tests branches to select.
-        let mut branches = vec![
-            "develop".to_string(),
-            "feature-test".to_string(),
-            "main".to_string(),
-        ];
-        if long {
-            branches.push(
-                "feature/very-long-branch-name-that-exceeds-the-panel-max-width-and-requires-truncation"
-                    .to_string(),
-            );
-        }
-        BranchList {
-            path,
-            branches,
-            error: None,
         }
     }
 
@@ -3377,7 +3157,6 @@ impl PantokenDriver for MockDriver {
                         last_user_message_at: iso_ago((i + 1) * 60_000),
                         parent_session_path: None,
                         archived: false,
-                        worktree: None,
                     });
                 }
                 return;
@@ -4475,14 +4254,6 @@ impl PantokenDriver for MockDriver {
                 self.fail_next_new_session.store(true, Ordering::SeqCst);
                 return;
             }
-            "failbranchlist" => {
-                self.fail_next_branch_list.store(true, Ordering::SeqCst);
-                return;
-            }
-            "longbranchlist" => {
-                self.long_next_branch_list.store(true, Ordering::SeqCst);
-                return;
-            }
             "failsession" => {
                 // Arm a one-shot openSession() 409 lease-conflict (consumed by the
                 // next switch). Faithful port of TS `runScript("failsession")`
@@ -4525,33 +4296,6 @@ impl PantokenDriver for MockDriver {
                 });
                 return;
             }
-            // Inject a session whose cwd is a pantoken-created worktree dir, with
-            // matching `WorktreeMeta` so `list_sessions` attaches `WorktreeInfo`
-            // (base = WORKSPACE_PATH). Lets the e2e drive the UI into the
-            // "worktree session is focused → ⌘N / sidebar +" scenario without a
-            // real worktree. Lock worktrees BEFORE sessions — `list_sessions`
-            // locks in that order (worktrees → sessions), so matching it avoids
-            // an AB-BA deadlock.
-            "worktree-session" => {
-                let wt_dir = format!("{}-worktree", WORKSPACE_PATH.trim_end_matches('/'));
-                self.worktrees.lock().insert(
-                    wt_dir.clone(),
-                    WorktreeMeta {
-                        base: WORKSPACE_PATH.to_string(),
-                        name: "pantoken-mock-wt".into(),
-                    },
-                );
-                let mut sessions = self.sessions.lock();
-                sessions.insert(0, SessionListEntry {
-                    session_id: "wt-session".into(),
-                    path: "/sessions/wt-session.jsonl".into(),
-                    cwd: wt_dir,
-                    display_name: Some("Worktree session".into()),
-                    preview: "session in a worktree".into(),
-                    ..new_session_entry("wt-session", WORKSPACE_PATH)
-                });
-                return;
-            }
             _ => {
                 warn!("[mock] run_script: {name} (not yet implemented)");
                 return;
@@ -4567,27 +4311,21 @@ impl PantokenDriver for MockDriver {
         reset_ts();
         *self.last_created.lock() = None;
         self.fail_next_new_session.store(false, Ordering::SeqCst);
-        self.fail_next_branch_list.store(false, Ordering::SeqCst);
-        self.long_next_branch_list.store(false, Ordering::SeqCst);
         self.fail_next_session.store(false, Ordering::SeqCst);
         self.abort_delay_ms.store(0, Ordering::SeqCst);
         self.new_session_seed_delay_ms.store(0, Ordering::SeqCst);
         self.abort_settle_delay_ms.store(0, Ordering::SeqCst);
         *self.adventurous_handoff.lock().unwrap() = false;
         *self.goal.lock().unwrap() = None;
-        // Restore the mutable session/worktree state to the fixture baseline —
-        // faithful port of TS `reset()`: `this.sessions = SESSION_LIST.map(...)`,
-        // `this.worktrees = seedWorktrees(SESSION_LIST)`, clear dirty/reaped sets.
-        // Without this, a `new_session`-created row + its worktree meta survive
-        // `/debug/reset` and leak into the next test's sidebar.
+        // Restore the mutable session state to the fixture baseline —
+        // faithful port of TS `reset()`: `this.sessions = SESSION_LIST.map(...)`.
+        // Without this, a `new_session`-created row survives `/debug/reset`
+        // and leaks into the next test's sidebar.
         *self.sessions.lock() = mock_session_list();
-        *self.worktrees.lock() = seed_worktrees(&mock_session_list());
         *self.config.lock() = mock_default_config();
         *self.jobs.lock() = mock_default_jobs();
         *self.todos.lock() = mock_default_todos();
         self.queues.lock().clear();
-        self.dirty_worktrees.lock().clear();
-        self.reaped_worktrees.lock().clear();
         self.warm_sessions.lock().clear();
     }
 

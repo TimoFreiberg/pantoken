@@ -100,8 +100,6 @@ describe("prompt-outbox", () => {
     const proxyNewSession = new Proxy(
       {
         cwd: "/tmp",
-        worktree: true,
-        baseBranch: "main",
         model: new Proxy({ modelId: "gpt-4" }, {}),
         thinking: "high",
       },

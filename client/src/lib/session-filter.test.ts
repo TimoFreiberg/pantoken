@@ -42,29 +42,8 @@ describe("isStale", () => {
 });
 
 describe("projectCwdOf", () => {
-  test("a worktree session resolves to its parent repo (worktree.base)", () => {
-    const s = entry({
-      cwd: "/proj-pantoken-abc",
-      worktree: { path: "/proj-pantoken-abc", base: "/proj", name: "pantoken-abc" },
-    });
-    expect(projectCwdOf(s)).toBe("/proj");
-  });
-
-  test("a normal session (no worktree field) resolves to its own cwd", () => {
+  test("a session resolves to its own cwd", () => {
     const s = entry({ cwd: "/proj" });
-    expect(projectCwdOf(s)).toBe("/proj");
-  });
-
-  test("a reaped worktree session still resolves to its parent (base retained)", () => {
-    const s = entry({
-      cwd: "/proj-pantoken-abc",
-      worktree: {
-        path: "/proj-pantoken-abc",
-        base: "/proj",
-        name: "pantoken-abc",
-        reaped: true,
-      },
-    });
     expect(projectCwdOf(s)).toBe("/proj");
   });
 });
@@ -195,69 +174,6 @@ describe("filterSessions", () => {
     ];
     const { groups } = filterSessions(sessions, active);
     expect(groups.map((g) => g.cwd)).toEqual(["/active-proj"]);
-  });
-
-  test("a pantoken-created worktree session groups under its parent project (base), not its own cwd", () => {
-    const sessions = [
-      entry({
-        path: "/wt",
-        cwd: "/proj-pantoken-abc",
-        lastUserMessageAt: isoAgo(1000),
-        worktree: { path: "/proj-pantoken-abc", base: "/proj", name: "pantoken-abc" },
-      }),
-      entry({ path: "/main", cwd: "/proj", lastUserMessageAt: isoAgo(3000) }),
-    ];
-    const { groups } = filterSessions(sessions, active);
-    // One group keyed by the parent project, not two — and no group labelled
-    // "proj-pantoken-abc".
-    expect(groups.map((g) => g.cwd)).toEqual(["/proj"]);
-    // Interleaved most-recently-used first: the worktree session (newer) above the main one.
-    expect(groups[0].items.map((i) => i.path)).toEqual(["/wt", "/main"]);
-  });
-
-  test("a worktree session whose parent base has no other sessions still forms a group labelled by the parent", () => {
-    const sessions = [
-      entry({
-        path: "/wt",
-        cwd: "/proj-pantoken-abc",
-        worktree: { path: "/proj-pantoken-abc", base: "/proj", name: "pantoken-abc" },
-      }),
-    ];
-    const { groups } = filterSessions(sessions, active);
-    expect(groups.map((g) => g.cwd)).toEqual(["/proj"]); // parent basename, not worktree's
-  });
-
-  test("a reaped worktree session still groups under its parent (base retained)", () => {
-    const sessions = [
-      entry({
-        path: "/wt",
-        cwd: "/proj-pantoken-abc",
-        // Worktree dir cleaned up: `reaped` set, but `base` retained so grouping survives.
-        worktree: {
-          path: "/proj-pantoken-abc",
-          base: "/proj",
-          name: "pantoken-abc",
-          reaped: true,
-        },
-      }),
-      entry({ path: "/main", cwd: "/proj" }),
-    ];
-    const { groups } = filterSessions(sessions, active);
-    // Still one group under the parent — no lonely "proj-pantoken-abc" group after reaping.
-    expect(groups.map((g) => g.cwd)).toEqual(["/proj"]);
-    expect(groups[0].items.map((i) => i.path).sort()).toEqual(["/main", "/wt"]);
-  });
-
-  test("a hand-made workspace (no `worktree` field) keeps its own group", () => {
-    const sessions = [
-      entry({ path: "/main", cwd: "/proj" }),
-      entry({ path: "/ws", cwd: "/proj-pantoken-abc" }), // no worktree field → own group
-    ];
-    const { groups } = filterSessions(sessions, active);
-    expect(groups.map((g) => g.cwd).sort()).toEqual([
-      "/proj",
-      "/proj-pantoken-abc",
-    ]);
   });
 
   test("search matches name, preview, and path; query is independent of hiddenCount", () => {

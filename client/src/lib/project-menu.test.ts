@@ -33,21 +33,6 @@ describe("deriveKnownProjects", () => {
     expect(cwds).toEqual(["/proj/pantoken", "/proj/scratch"]);
   });
 
-  test("groups worktree sessions under their base", () => {
-    const sessions = [
-      entry({
-        sessionId: "wt",
-        cwd: "/proj/pantoken-wt",
-        worktree: { path: "/proj/pantoken-wt", base: "/proj/pantoken", name: "pantoken-wt" },
-      }),
-      entry({ sessionId: "main", cwd: "/proj/pantoken" }),
-    ];
-    const projects = deriveKnownProjects(sessions);
-    expect(projects).toHaveLength(1);
-    expect(projects[0]!.cwd).toBe("/proj/pantoken");
-    expect(projects[0]!.name).toBe("pantoken");
-  });
-
   test("sorts by most-recently-used first", () => {
     const sessions = [
       entry({ sessionId: "old", cwd: "/proj/old", lastUserMessageAt: isoAgo(60_000 * 60) }),

@@ -20,7 +20,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use pantoken_protocol::session_driver::{SessionListEntry, WorktreeInfo};
+use pantoken_protocol::session_driver::SessionListEntry;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -193,14 +193,13 @@ pub fn list_session_ids(sessions_dir: &Path) -> Vec<String> {
 /// Options for building a cold session entry.
 pub struct ColdSessionOpts {
     pub archived: bool,
-    pub worktree: Option<WorktreeInfo>,
 }
 
 /// Build a `SessionListEntry` for a COLD session (no daemon spawned) from its
 /// on-disk `session.json`. `path` is the `session.json` file path — the stable
 /// switch key the client sends to `openSession` (mirrors the daemon's
-/// .jsonl-path key). `archived` + `worktree` are resolved by the caller
-/// (pantoken-side stores) since they're pantoken's own flags, not polytoken's. Returns
+/// .jsonl-path key). `archived` is resolved by the caller (pantoken-side store)
+/// since it's pantoken's own flag, not polytoken's. Returns
 /// `None` when the session has no readable `session.json` (a failed startup) —
 /// those dirs are skipped.
 pub fn cold_session_entry(
@@ -280,7 +279,6 @@ fn cold_session_entry_from_meta(
         parent_session_path,
         usage: None,
         archived: opts.archived,
-        worktree: opts.worktree,
     }
 }
 
@@ -318,17 +316,13 @@ pub fn write_overridden_title(session_json_path: &Path, title: &str) -> std::io:
     fs::write(session_json_path, out)
 }
 
-/// Callbacks the caller provides to resolve pantoken-side flags.
-type WorktreeResolver<'a> = dyn Fn(&str) -> Option<WorktreeInfo> + Send + Sync + 'a;
-
 pub struct ListColdSessionsOpts<'a> {
     pub archived_for: Box<dyn Fn(&str) -> bool + Send + Sync + 'a>,
-    pub worktree_for: Option<Box<WorktreeResolver<'a>>>,
 }
 
 /// List every cold session on disk as `SessionListEntry`s. Sessions with no
-/// `session.json` (failed startups) are skipped. The `worktreeFor`/`archivedFor`
-/// callbacks resolve pantoken's own side-flags keyed by the session path.
+/// `session.json` (failed startups) are skipped. The `archivedFor` callback
+/// resolves pantoken's own archive flag keyed by the session path.
 pub fn list_cold_sessions(
     sessions_dir: &Path,
     opts: ListColdSessionsOpts<'_>,
@@ -336,28 +330,14 @@ pub fn list_cold_sessions(
     let mut out: Vec<SessionListEntry> = Vec::new();
     for id in list_session_ids(sessions_dir) {
         let session_dir = sessions_dir.join(&id);
-        // Resolve worktree from the session's cwd (the worktree dir == session
-        // cwd). Read the json first to get cwd, then resolve the worktree flag,
-        // then build the entry with both resolved — cold_session_entry takes
-        // the resolved flags.
         let meta = match read_session_json(&session_dir) {
             Some(m) => m,
             None => continue,
         };
-        let cwd = if meta.project_path.is_empty() {
-            session_dir.to_string_lossy().to_string()
-        } else {
-            meta.project_path.clone()
-        };
-        let worktree = opts.worktree_for.as_ref().and_then(|f| (f)(&cwd));
         let session_json_path = session_dir.join("session.json");
         let archived = (opts.archived_for)(&session_json_path.to_string_lossy());
-        let entry = cold_session_entry_from_meta(
-            &session_dir,
-            &id,
-            &meta,
-            ColdSessionOpts { archived, worktree },
-        );
+        let entry =
+            cold_session_entry_from_meta(&session_dir, &id, &meta, ColdSessionOpts { archived });
         out.push(entry);
     }
     out
@@ -371,7 +351,6 @@ mod tests {
     //! single `ENV_MUTEX` (the `serial_test` crate is not a dev-dep here).
 
     use super::*;
-    use pantoken_protocol::session_driver::WorktreeInfo;
     use std::fs;
     use std::path::PathBuf;
     use std::sync::Mutex;
@@ -566,10 +545,7 @@ mod tests {
         let entry = cold_session_entry(
             &dir.path().join("abc123"),
             "abc123",
-            ColdSessionOpts {
-                archived: false,
-                worktree: None,
-            },
+            ColdSessionOpts { archived: false },
         )
         .expect("should build an entry");
 
@@ -594,10 +570,7 @@ mod tests {
         let entry = cold_session_entry(
             &dir.path().join("never-renamed"),
             "never-renamed",
-            ColdSessionOpts {
-                archived: false,
-                worktree: None,
-            },
+            ColdSessionOpts { archived: false },
         )
         .expect("should build an entry");
         assert_eq!(entry.display_name, None);
@@ -621,10 +594,7 @@ mod tests {
         let entry = cold_session_entry(
             &dir.path().join("renamed"),
             "renamed",
-            ColdSessionOpts {
-                archived: false,
-                worktree: None,
-            },
+            ColdSessionOpts { archived: false },
         )
         .expect("should build an entry");
         assert_eq!(entry.display_name.as_deref(), Some("My Custom Title"));
@@ -645,10 +615,7 @@ mod tests {
         let entry = cold_session_entry(
             &dir.path().join("inferred"),
             "inferred",
-            ColdSessionOpts {
-                archived: false,
-                worktree: None,
-            },
+            ColdSessionOpts { archived: false },
         )
         .expect("should build an entry");
         assert_eq!(entry.display_name.as_deref(), Some("Daemon Inferred Title"));
@@ -669,10 +636,7 @@ mod tests {
         let entry = cold_session_entry(
             &dir.path().join("both"),
             "both",
-            ColdSessionOpts {
-                archived: false,
-                worktree: None,
-            },
+            ColdSessionOpts { archived: false },
         )
         .expect("should build an entry");
         assert_eq!(entry.display_name.as_deref(), Some("Operator Rename"));
@@ -702,15 +666,8 @@ mod tests {
         )
         .unwrap();
 
-        let entry = cold_session_entry(
-            &session_dir,
-            "s1",
-            ColdSessionOpts {
-                archived: false,
-                worktree: None,
-            },
-        )
-        .expect("should build an entry");
+        let entry = cold_session_entry(&session_dir, "s1", ColdSessionOpts { archived: false })
+            .expect("should build an entry");
         assert_eq!(entry.display_name.as_deref(), Some("Some Title"));
     }
 
@@ -721,10 +678,7 @@ mod tests {
             cold_session_entry(
                 &dir.path().join("failed"),
                 "failed",
-                ColdSessionOpts {
-                    archived: false,
-                    worktree: None,
-                },
+                ColdSessionOpts { archived: false },
             )
             .is_none()
         );
@@ -744,10 +698,7 @@ mod tests {
         let entry = cold_session_entry(
             &dir.path().join("no-turn"),
             "no-turn",
-            ColdSessionOpts {
-                archived: false,
-                worktree: None,
-            },
+            ColdSessionOpts { archived: false },
         )
         .expect("should build an entry");
         // No preview → last activity wasn't a user turn → fall back to createdAt.
@@ -769,10 +720,7 @@ mod tests {
         let entry = cold_session_entry(
             &dir.path().join("child"),
             "child",
-            ColdSessionOpts {
-                archived: false,
-                worktree: None,
-            },
+            ColdSessionOpts { archived: false },
         )
         .expect("should build an entry");
         assert_eq!(entry.parent_session_path.as_deref(), Some("parent-id"));
@@ -790,10 +738,7 @@ mod tests {
         let entry = cold_session_entry(
             &dir.path().join("solo"),
             "solo",
-            ColdSessionOpts {
-                archived: false,
-                worktree: None,
-            },
+            ColdSessionOpts { archived: false },
         )
         .expect("should build an entry");
         assert!(entry.parent_session_path.is_none());
@@ -802,7 +747,7 @@ mod tests {
     // ── list_cold_sessions ────────────────────────────────────────────────
 
     #[test]
-    fn list_cold_sessions_merges_archive_and_worktree_flags() {
+    fn list_cold_sessions_merges_archive_flags() {
         let dir = make_sessions_dir(&[
             (
                 "s1",
@@ -830,18 +775,6 @@ mod tests {
             dir.path(),
             ListColdSessionsOpts {
                 archived_for: Box::new(move |p: &str| archived_paths.contains(p)),
-                worktree_for: Some(Box::new(|cwd: &str| {
-                    if cwd == "/p1" {
-                        Some(WorktreeInfo {
-                            path: "/p1".to_string(),
-                            base: "/repo".to_string(),
-                            name: "wt-name".to_string(),
-                            reaped: None,
-                        })
-                    } else {
-                        None
-                    }
-                })),
             },
         );
         // "failed" is skipped (no session.json).
@@ -855,17 +788,7 @@ mod tests {
             .find(|e| e.session_id == "s2")
             .expect("s2 present");
         assert!(!s1.archived);
-        assert_eq!(
-            s1.worktree,
-            Some(WorktreeInfo {
-                path: "/p1".to_string(),
-                base: "/repo".to_string(),
-                name: "wt-name".to_string(),
-                reaped: None,
-            })
-        );
         assert!(s2.archived);
-        assert!(s2.worktree.is_none());
     }
 
     #[test]
@@ -874,7 +797,6 @@ mod tests {
             Path::new("/nonexistent"),
             ListColdSessionsOpts {
                 archived_for: Box::new(|_| false),
-                worktree_for: None,
             },
         );
         assert!(entries.is_empty());
@@ -893,10 +815,7 @@ mod tests {
         let entry = cold_session_entry(
             &dir.path().join("s1"),
             "s1",
-            ColdSessionOpts {
-                archived: false,
-                worktree: None,
-            },
+            ColdSessionOpts { archived: false },
         )
         .expect("should still build an entry");
         assert_eq!(entry.display_name.as_deref(), Some("Renamed While Cold"));

@@ -175,7 +175,6 @@ test("new-session project controls remain available and config survives reload",
   const composer = page.getByPlaceholder("Describe a task or ask a question…");
   await composer.fill("Persist the new-session draft");
   await expect(page.getByTestId("draft-project-control")).toBeVisible();
-  await page.getByTestId("draft-worktree-control").click();
   await page.getByTestId("mobile-session-controls-trigger").click();
   const dialog = page.getByRole("dialog", { name: "Session controls" });
   await dialog.getByRole("radio", { name: /Plan/ }).check();
@@ -190,10 +189,6 @@ test("new-session project controls remain available and config survives reload",
   await expect(
     page.getByPlaceholder("Describe a task or ask a question…"),
   ).toHaveValue("Persist the new-session draft");
-  await expect(page.getByTestId("draft-worktree-control")).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
   await expect(
     page.getByTestId("mobile-session-controls-trigger"),
   ).toContainText("Plan");

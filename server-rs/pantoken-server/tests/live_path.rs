@@ -1518,7 +1518,7 @@ async fn clear_queue_drains_daemon_queue_and_returns_texts() {
 }
 
 // ===========================================================================
-// new_session wiring: cwd resolution, worktree, login-env, warm-cap eviction, invalid-cwd errors
+// new_session wiring: cwd resolution, login-env, warm-cap eviction, invalid-cwd errors
 // ===========================================================================
 
 #[tokio::test]
@@ -1654,130 +1654,6 @@ async fn warm_cap_never_evicts_in_flight() {
     );
 }
 
-/// Uses a real `git init` tempdir repo (git, not jj, so it runs on CI where git
-/// is present). Skipped (not failed) if git is unavailable, mirroring the
-/// `worktree.rs` integration test convention.
-#[tokio::test]
-async fn new_session_worktree_isolates_cwd() {
-    let _guard = OVERRIDE_MUTEX.lock().await;
-
-    // Skip if git isn't available (CI always has it, but be defensive).
-    if tokio::process::Command::new("git")
-        .arg("--version")
-        .output()
-        .await
-        .is_err()
-    {
-        eprintln!("skipping worktree isolation test: git executable unavailable");
-        return;
-    }
-
-    // Set up a real git repo in a tempdir.
-    let repo_tmp = tempfile::tempdir().expect("tempdir");
-    let repo = repo_tmp.path().join("repo");
-    std::fs::create_dir(&repo).expect("mkdir repo");
-
-    async fn git(repo: &std::path::Path, args: &[&str]) {
-        let out = tokio::process::Command::new("git")
-            .arg("-C")
-            .arg(repo)
-            .args(args)
-            .output()
-            .await
-            .expect("git");
-        assert!(
-            out.status.success(),
-            "git -C {} {} failed: {}",
-            repo.display(),
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
-    // git init + an initial commit (a worktree needs at least one commit).
-    git(&repo, &["init"]).await;
-    std::fs::write(repo.join("README.md"), "hello\n").expect("write");
-    git(&repo, &["add", "README.md"]).await;
-    git(
-        &repo,
-        &[
-            "-c",
-            "user.email=pantoken@example.test",
-            "-c",
-            "user.name=Pantoken Test",
-            "commit",
-            "-m",
-            "initial",
-        ],
-    )
-    .await;
-
-    // Install the multi-spawn override so the spawn goes to the fake daemon
-    // (no real polytoken binary). The synthetic idle scenario suffices — we
-    // only need the session to warm; the worktree is created by the driver
-    // BEFORE the spawn.
-    let scenario = synthetic_idle_scenario();
-    let override_guard = fake_daemon::MultiSpawnOverrideGuard::install(scenario, "worktree-cwd");
-    let handle = override_guard.handle();
-
-    let (driver, dir) = make_driver().await;
-
-    let _seed = driver
-        .new_session(NewSessionOptsData {
-            cwd: Some(repo.to_string_lossy().to_string()),
-            worktree: Some(true),
-            ..Default::default()
-        })
-        .await
-        .expect("new_session with worktree");
-
-    // The spawned session's cwd should be a worktree path: centralized under
-    // the data dir's worktrees root (not a sibling of the repo). We get the
-    // cwd from the list_sessions warm entry (the fake daemon writes no
-    // session.json, so only the warm entry surfaces).
-    let listed = driver.list_sessions().await;
-    let entry = listed
-        .into_iter()
-        .find(|e| {
-            handle
-                .spawned()
-                .iter()
-                .any(|s| s.session_id == e.session_id)
-        })
-        .expect("the warmed session should appear in list_sessions");
-
-    let session_cwd = &entry.cwd;
-    assert_ne!(
-        session_cwd,
-        &repo.to_string_lossy().to_string(),
-        "session cwd should be the worktree path, not the repo itself"
-    );
-    // The worktree is centralized under <data_dir>/worktrees/<repo-slug>/<name>/.
-    let worktree_path = std::path::Path::new(session_cwd);
-    let worktrees_root = dir.path().join("worktrees");
-    assert!(
-        worktree_path.starts_with(&worktrees_root),
-        "worktree path {session_cwd} should be under the data dir's worktrees root ({})",
-        worktrees_root.display()
-    );
-    assert!(
-        worktree_path.is_dir(),
-        "the worktree dir should exist on disk: {session_cwd}"
-    );
-
-    // The WorktreeStore should record the worktree for this cwd. We verify via
-    // the worktree indicator on the list_sessions entry (it's surfaced from
-    // the store via worktree_field_for).
-    assert!(
-        entry.worktree.is_some(),
-        "list_sessions should surface the worktree indicator for a worktree session"
-    );
-    let wt = entry.worktree.as_ref().unwrap();
-    assert_eq!(
-        wt.path, *session_cwd,
-        "worktree indicator path should match the session cwd"
-    );
-}
-
 /// A driver constructed with an injected `login_env` threads that env into every
 /// daemon spawn. We build the driver via `new_with_login_env` with a known env
 /// map, install the multi-spawn override, call `new_session`, and assert the
@@ -1859,7 +1735,7 @@ async fn new_session_invalid_cwd_errors_specifically() {
 }
 
 #[tokio::test]
-async fn list_sessions_overlays_archive_and_worktree_flags() {
+async fn list_sessions_overlays_archive_flags() {
     // No override mutex needed — no spawn override is installed, no daemon is
     // spawned. This test only exercises the cold-session listing path.
     let data_dir = tempfile::tempdir().expect("tempdir");
@@ -1892,24 +1768,7 @@ async fn list_sessions_overlays_archive_and_worktree_flags() {
     )
     .expect("write archive index");
 
-    // Seed the WorktreeStore on disk: it loads a JSON *array* of
-    // `PersistedWorktree` objects (each flattens WorktreeMeta + an optional
-    // `reaped` flag). The worktree key is the cwd (project_path) — see
-    // list_sessions: it calls `worktree_field_for(cwd, &worktree_store)`.
-    let worktree_file = data_dir.path().join("worktrees.json");
-    let wt_seed = serde_json::json!([{
-        "path": project_path,
-        "base": "/home/user",
-        "vcs": "git",
-        "name": "pantoken-archive-wt"
-    }]);
-    std::fs::write(
-        &worktree_file,
-        serde_json::to_string_pretty(&wt_seed).unwrap(),
-    )
-    .expect("write worktree store");
-
-    // Construct the driver — it loads both stores from disk on construction.
+    // Construct the driver — it loads the store from disk on construction.
     let driver = PolytokenDriver::new_with_login_env(
         data_dir.path().to_path_buf(),
         "polytoken".into(),
@@ -1930,17 +1789,6 @@ async fn list_sessions_overlays_archive_and_worktree_flags() {
         entry.archived,
         "archived flag should be true (sourced from ArchiveStore); got false"
     );
-
-    // The worktree indicator is the real store value (Some).
-    let wt = entry
-        .worktree
-        .as_ref()
-        .expect("worktree indicator should be Some (sourced from WorktreeStore)");
-    assert_eq!(
-        wt.path, project_path,
-        "worktree indicator path should match the session cwd"
-    );
-    assert_eq!(wt.name, "pantoken-archive-wt");
 }
 
 #[tokio::test]
@@ -2014,188 +1862,6 @@ async fn set_archived_persists_and_overlays() {
     assert!(
         !arr.contains(&session_json_path_str),
         "archived.json should not contain the path after unarchiving"
-    );
-}
-
-/// Shared fixture for the `set_archived` worktree-reap tests: a real git repo, a
-/// worktree session created via `new_session(worktree: true)`, and a written
-/// `session.json` so `set_archived` can resolve the session cwd (the fake daemon
-/// writes none). All tempdirs, the spawn override, and the override-mutex guard
-/// are kept alive in the returned struct for the whole test body. Returns `None`
-/// when git is unavailable so the caller can skip (not fail).
-struct WorktreeFixture {
-    _repo_tmp: tempfile::TempDir,
-    _data_dir: tempfile::TempDir,
-    _override_guard: fake_daemon::MultiSpawnOverrideGuard,
-    _mutex_guard: tokio::sync::MutexGuard<'static, ()>,
-    driver: PolytokenDriver,
-    /// The session.json path — the archive key passed to `set_archived`.
-    archive_key: String,
-    /// The worktree cwd (a sibling of the repo) registered in the store.
-    cwd: String,
-}
-
-async fn setup_worktree_session(label: &'static str) -> Option<WorktreeFixture> {
-    let mutex_guard = OVERRIDE_MUTEX.lock().await;
-
-    if tokio::process::Command::new("git")
-        .arg("--version")
-        .output()
-        .await
-        .is_err()
-    {
-        eprintln!("skipping {label}: git executable unavailable");
-        return None;
-    }
-
-    // Real git repo with one commit (a worktree needs at least one commit).
-    let repo_tmp = tempfile::tempdir().expect("tempdir");
-    let repo = repo_tmp.path().join("repo");
-    std::fs::create_dir(&repo).expect("mkdir repo");
-    async fn git(repo: &std::path::Path, args: &[&str]) {
-        let out = tokio::process::Command::new("git")
-            .arg("-C")
-            .arg(repo)
-            .args(args)
-            .output()
-            .await
-            .expect("git");
-        assert!(
-            out.status.success(),
-            "git -C {} {} failed: {}",
-            repo.display(),
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
-    git(&repo, &["init"]).await;
-    std::fs::write(repo.join("README.md"), "hello\n").expect("write");
-    git(&repo, &["add", "README.md"]).await;
-    git(
-        &repo,
-        &[
-            "-c",
-            "user.email=pantoken@example.test",
-            "-c",
-            "user.name=Pantoken Test",
-            "commit",
-            "-m",
-            "initial",
-        ],
-    )
-    .await;
-
-    let scenario = synthetic_idle_scenario();
-    let override_guard = fake_daemon::MultiSpawnOverrideGuard::install(scenario, label);
-    let handle = override_guard.handle();
-
-    let (driver, data_dir) = make_driver().await;
-
-    driver
-        .new_session(NewSessionOptsData {
-            cwd: Some(repo.to_string_lossy().to_string()),
-            worktree: Some(true),
-            ..Default::default()
-        })
-        .await
-        .expect("new_session with worktree");
-
-    let entry = driver
-        .list_sessions()
-        .await
-        .into_iter()
-        .find(|e| {
-            handle
-                .spawned()
-                .iter()
-                .any(|s| s.session_id == e.session_id)
-        })
-        .expect("the warmed worktree session should appear in list_sessions");
-    let cwd = entry.cwd.clone();
-    let archive_key = entry.path.clone();
-
-    // The fake daemon writes no session.json; write one so `set_archived` can
-    // resolve the session cwd from the archive key (a real daemon writes this).
-    let session_json_path = std::path::PathBuf::from(&archive_key);
-    std::fs::create_dir_all(session_json_path.parent().unwrap()).expect("mkdir session dir");
-    let json = serde_json::json!({
-        "session_id": entry.session_id,
-        "project_path": cwd,
-        "created_at": "2025-01-01T00:00:00Z",
-        "last_activity_at": "2025-01-01T00:00:00Z",
-    });
-    std::fs::write(&session_json_path, serde_json::to_string(&json).unwrap())
-        .expect("write session.json");
-
-    Some(WorktreeFixture {
-        _repo_tmp: repo_tmp,
-        _data_dir: data_dir,
-        _override_guard: override_guard,
-        _mutex_guard: mutex_guard,
-        driver,
-        archive_key,
-        cwd,
-    })
-}
-
-#[tokio::test]
-async fn set_archived_reaps_clean_worktree() {
-    let Some(fx) = setup_worktree_session("set_archived_reaps_clean_worktree").await else {
-        return;
-    };
-    assert!(
-        std::path::Path::new(&fx.cwd).is_dir(),
-        "worktree should exist before archiving"
-    );
-
-    let result = fx.driver.set_archived(fx.archive_key.clone(), true).await;
-    assert!(
-        result.worktree_retained.is_none(),
-        "a clean worktree should be reaped, not retained"
-    );
-    assert!(
-        !std::path::Path::new(&fx.cwd).exists(),
-        "the clean worktree dir should be removed from disk"
-    );
-
-    let entry = fx
-        .driver
-        .list_sessions()
-        .await
-        .into_iter()
-        .find(|e| e.cwd == fx.cwd)
-        .expect("session should still be listed after archiving");
-    assert_eq!(
-        entry.worktree.as_ref().and_then(|w| w.reaped),
-        Some(true),
-        "the store should tombstone the reaped worktree"
-    );
-}
-
-#[tokio::test]
-async fn set_archived_retains_dirty_worktree() {
-    let Some(fx) = setup_worktree_session("set_archived_retains_dirty_worktree").await else {
-        return;
-    };
-    // Dirty the worktree with an uncommitted (untracked) file.
-    std::fs::write(
-        std::path::Path::new(&fx.cwd).join("dirty.txt"),
-        "uncommitted\n",
-    )
-    .expect("write dirty file");
-
-    let result = fx.driver.set_archived(fx.archive_key.clone(), true).await;
-    let retained = result
-        .worktree_retained
-        .expect("a dirty worktree should be retained");
-    assert_eq!(retained.path, fx.cwd, "retained path should be the cwd");
-    assert_eq!(
-        retained.reason, "worktree has uncommitted changes",
-        "retained reason should be the concrete reason from worktree::remove"
-    );
-    assert!(
-        std::path::Path::new(&fx.cwd).is_dir(),
-        "a retained (dirty) worktree should stay on disk"
     );
 }
 

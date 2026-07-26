@@ -26,8 +26,10 @@ import type {
 // into the single `sessionAction` envelope (a stale client's old-shape
 // setModel/compact/… now fail serde on the server); 3→4 = correlated directory
 // picker queries, preventing stale remote replies from replacing newer results;
-// 4→5 = listBranches/branchList worktree branch selector.
-export const PROTOCOL_VERSION = 5;
+// 4→5 = listBranches/branchList worktree branch selector; 5→6 = worktree support
+// removed (worktree/baseBranch fields, listBranches/branchList/cleanupWorktree/
+// worktreeRetained messages, WorktreeInfo).
+export const PROTOCOL_VERSION = 6;
 
 /** Pantoken-local settings (distinct from the daemon's global/session config). Persisted
  *  server-side in `pantoken-settings.json`, broadcast to every client, edited from the
@@ -84,23 +86,6 @@ export interface DirListing {
   /** True when `path` couldn't be read (missing / not a directory / no permission).
    *  `entries` is then empty and the client surfaces the failure instead of showing
    *  it as an empty folder. */
-  readonly error?: boolean;
-}
-
-/** Local branch names of a repo at a given path, for the new-session worktree
- *  branch selector. The server shells out to `git branch` / `jj bookmark list`
- *  on its own filesystem (the agent runs server-side). The client sends
- *  {@link listBranches} and renders this as the branch picker dropdown.
- *  Capped server-side at 100 entries; `branches.length === 100` signals potential
- *  truncation. Empty when the path isn't a repo or the command failed (`error`). */
-export interface BranchList {
-  /** Echoes the query request so clients can discard out-of-order remote replies. */
-  readonly requestId: number;
-  /** The resolved absolute path that was queried. Echoes the request. */
-  readonly path: string;
-  /** Local branch names, sorted. Empty if not a repo or error. Capped at 100. */
-  readonly branches: readonly string[];
-  /** True when the path isn't a jj/git repo or the command failed. */
   readonly error?: boolean;
 }
 
@@ -246,10 +231,6 @@ export type ServerMessage =
    *  Carries the resolved `path` so a client that navigated on can drop a stale response.
    *  See {@link DirListing}. */
   | ({ type: "dirListing" } & DirListing)
-  /** Local branch names for the new-session worktree branch selector, in reply to
-   *  {@link listBranches}. Carries the resolved `path` so a client that navigated
-   *  on can drop a stale response. See {@link BranchList}. */
-  | ({ type: "branchList" } & BranchList)
   /** A path-existence check for the new-session dir picker's inline validation hint,
    *  in reply to {@link statPath}. Echoes the request `path` so the client can drop a
    *  stale response. See {@link PathStat}. */
@@ -306,11 +287,6 @@ export type ServerMessage =
       steering: readonly string[];
       followUp: readonly string[];
     }
-  /** After archiving a session whose cwd was a pantoken worktree, the server tried to reap
-   *  it but kept it (it was dirty — uncommitted changes). Sent ONLY to the archiving
-   *  client so its archived toast can explain the leftover and offer a force-delete.
-   *  `path` == the worktree dir (== the session's cwd), the key `cleanupWorktree` takes. */
-  | { type: "worktreeRetained"; path: string; reason: string }
   /** Correlated outcome for one stop attempt. `accepted` means the daemon accepted
    *  the request; the transcript still has to receive a terminal event before the
    *  client may call the turn stopped. */
@@ -425,8 +401,6 @@ export type ClientMessage =
     }
   /** Create a fresh session and make it active. `cwd` (an absolute dir, D12
    *  arbitrary GUI paths) picks the workspace; omit it for $HOME.
-   *  `worktree`: create an isolated jj/git worktree of `cwd` and run the session
-   *  there, leaving the main tree clean (like the Claude app's worktree toggle).
    *  `model`/`thinking`: apply this model + thinking level at creation, so the
    *  new-session draft's config carries through without mutating the daemon's global
    *  defaults. `prompt`: deliver this as the first message once the session is
@@ -435,10 +409,6 @@ export type ClientMessage =
   | {
       type: "newSession";
       cwd?: string;
-      worktree?: boolean;
-      /** When worktree is on, base the new worktree on this branch (jj `-r` /
-       *  git commit-ish). Omitted = auto-detect (main → master → first branch). */
-      baseBranch?: string;
       model?: { modelId: string };
       thinking?: string;
       /** Apply this facet at creation (draft-picked, e.g. start straight in plan). */
@@ -454,18 +424,13 @@ export type ClientMessage =
   | { type: "listSessions" }
   /** Archive or unarchive a session (by its .jsonl `path`, the stable switch key).
    *  The flag is pantoken-side state (D-archive); the server persists it and re-broadcasts
-   *  the session list so every client's active-only filter updates. Archiving a session
-   *  whose cwd is a pantoken-created worktree also reaps that worktree when it's clean. */
+   *  the session list so every client's active-only filter updates. */
   | { type: "setArchived"; path: string; archived: boolean }
   /** Rename a session (by its .jsonl `path`). Writes the daemon's session display name (a
    *  `session_info` entry); the server re-broadcasts the session list so every client's
    *  sidebar updates, and a warm session's header title updates live. Empty `name` is a
    *  no-op server-side (the client shouldn't submit one). */
   | { type: "renameSession"; path: string; name: string }
-  /** Remove a pantoken-created worktree (by its `path` == the session's cwd). `force`
-   *  discards uncommitted changes; without it the server refuses a dirty worktree and
-   *  reports back. The server re-broadcasts the session list (clearing the indicator). */
-  | { type: "cleanupWorktree"; path: string; force?: boolean }
   /** Detach from a session: release Pantoken's TUI attachment lease so an external
    *  client (terminal polytoken CLI) can take over. The daemon stays alive; the
    *  session reappears as idle in the sidebar. Recovery for when Pantoken wedges. */
@@ -506,10 +471,6 @@ export type ClientMessage =
    *  dir picker's inline validation hint (debounced). The server responds with
    *  {@link pathStat}. */
   | { type: "statPath"; path: string; requestId: number }
-  /** List local branches of a repo on the SERVER's filesystem for the new-session
-   *  worktree branch selector. `path` is the repo directory (required — branches
-   *  are always repo-scoped). The server responds with {@link branchList}. */
-  | { type: "listBranches"; path: string; requestId: number }
   /** Apply the staged desktop update now (the sidebar card's button). The server marks
    *  it applying and the shell's updater picks it up on its next /update/state poll —
    *  install the bundle, relaunch. No-op if nothing is staged. */

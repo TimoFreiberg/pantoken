@@ -52,13 +52,12 @@ export function settleStopOperation(
 }
 
 /** The new-session draft's configurable fields. Mirrors the inline `$state`
- *  type in `store.svelte.ts` (cwd + worktree + the model/thinking/facet/
+ *  type in `store.svelte.ts` (cwd + the model/thinking/facet/
  *  permissionMonitor overrides). Extracted here so pure helpers operating on
  *  a draft can be unit-tested without instantiating the Svelte 5 rune-based
  *  store singleton. */
 export interface DraftConfig {
   cwd: string;
-  worktree: boolean;
   model?: { modelId: string };
   thinking?: string;
   /** Facet to start the session in (undefined = the daemon's default, execute). */

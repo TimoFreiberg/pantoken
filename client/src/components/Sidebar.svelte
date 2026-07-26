@@ -77,9 +77,7 @@
   }
 
   // The cwd of the currently-active session, used to prefill the new-dir input so
-  // "new session near where I am" is one keystroke, not a full path retype. Resolves
-  // the parent project (worktree.base) so a worktree session's draft defaults to its
-  // parent repo, matching the sidebar group it appears under.
+  // "new session near where I am" is one keystroke, not a full path retype.
   const activeCwd = $derived.by(() => {
     const s = store.sessions.find((s) => s.sessionId === store.viewedSessionId);
     return s ? projectCwdOf(s) : "";
@@ -190,9 +188,6 @@
   // path (one at a time); `menuPos` is where to paint it.
   type MenuPos = { top: number; left?: number; right?: number };
   let menuFor = $state<string | null>(null);
-  // Worktree cleanup is destructive, so it's a two-step: the first click arms it (this
-  // holds the session path being confirmed), the second actually removes.
-  let confirmCleanup = $state<string | null>(null);
   let menuPos = $state<MenuPos | null>(null);
   let menuEl = $state<HTMLDivElement | null>(null);
   let menuTrigger = $state<HTMLElement | null>(null);
@@ -222,7 +217,6 @@
       const restore = menuTrigger;
       menuFor = null;
       menuPos = null;
-      confirmCleanup = null;
       menuTrigger = null;
       restoreSheetFocus(restore);
     });
@@ -257,7 +251,6 @@
     const restore = menuTrigger;
     menuFor = null;
     menuPos = null;
-    confirmCleanup = null;
     menuTrigger = null;
     overlayHistory.closed("session-actions");
     restoreSheetFocus(restore);
@@ -326,17 +319,8 @@
   // fixed popover from its row). The click listener is deferred so the opening click doesn't
   // immediately re-close it. While open, `a` archives/unarchives, `r` renames, and `l`
   // reloads the targeted session — unless focus is in a text field, where they should type.
-  async function copyWorktreePath(s: SessionListEntry): Promise<void> {
-    if (s.worktree) await store.copyToClipboard(s.worktree.path);
-    closeMenu();
-  }
   async function copySessionId(s: SessionListEntry): Promise<void> {
     await store.copyToClipboard(s.sessionId);
-    closeMenu();
-  }
-  function cleanupWorktree(s: SessionListEntry): void {
-    // Second click confirms; force-removes (the menu label warns it discards changes).
-    if (s.worktree) store.cleanupWorktree(s.worktree.path, true);
     closeMenu();
   }
   $effect(() => {
@@ -393,8 +377,8 @@
     // Only a scroll that can move the popover's anchor closes it: something INSIDE the
     // sidebar scrolling (the session list), caught via capture since scroll doesn't bubble.
     // NOT an unrelated pane — the transcript auto-scrolling mid-stream would otherwise slam
-    // the menu shut the instant you open it on a freshly-created, still-streaming session
-    // (the worktree cleanup e2e flaked on exactly this). Resize always detaches it.
+    // the menu shut the instant you open it on a freshly-created, still-streaming session.
+    // Resize always detaches it.
     const onScroll = (e: Event): void => {
       const t = e.target as HTMLElement | null;
       if (t && typeof t.closest === "function" && t.closest(".sidebar"))
@@ -973,30 +957,6 @@
                         {#if s.archived}
                           <span class="tag">archived</span>
                         {/if}
-                        {#if s.worktree && !s.worktree.reaped}
-                          <span
-                            class="wt"
-                            title={`Worktree: ${s.worktree.path}`}
-                            aria-label="worktree"
-                          >
-                            <svg
-                              viewBox="0 0 24 24"
-                              width="12"
-                              height="12"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="2"
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              aria-hidden="true"
-                            >
-                              <line x1="6" y1="3" x2="6" y2="15" />
-                              <circle cx="18" cy="6" r="3" />
-                              <circle cx="6" cy="18" r="3" />
-                              <path d="M18 9a9 9 0 0 1-9 9" />
-                            </svg>
-                          </span>
-                        {/if}
                         <!-- Right-edge slot: attention badge or in-progress spinner only. The
                              resting last-activity timestamp used to live here too, but now
                              lives in its own .row-time element (hover-revealed, left of the ⋯)
@@ -1080,7 +1040,7 @@
        $derived from store.sessions.find(...), and when the server pushes a new session list
        (every sessionList / attention / live-count tick) the derived re-runs and can briefly
        resolve to null mid-update — keying the menu's mount on it unmounts+remounts the
-       DOM, detaching buttons mid-click-action (the worktree cleanup tests hit this
+       DOM, detaching buttons mid-click-action (the context menu tests hit this
        deterministically: "element was detached from the DOM, retrying" → 30s timeout).
        `menuFor` only changes on explicit open/close, so the menu stays mounted across
        list pushes. Position is `fixed` (viewport-relative), so lifting it out of the
@@ -1106,34 +1066,6 @@
       </div>
       <div class="sheet-actions">
         {#if menuSession}
-          {#if menuSession.worktree && !menuSession.worktree.reaped}
-            <button
-              class="menu-item"
-              role={viewportWidth <= 859 ? undefined : "menuitem"}
-              title={`Copy the worktree path to the clipboard: ${menuSession.worktree.path}`}
-              onclick={() => copyWorktreePath(menuSession)}
-              >Copy worktree path</button
-            >
-            {#if confirmCleanup === menuSession.path}
-              <button
-                class="menu-item danger"
-                role={viewportWidth <= 859 ? undefined : "menuitem"}
-                data-testid="confirm-cleanup-worktree"
-                title="Permanently remove the worktree from disk — discards any uncommitted changes"
-                onclick={() => cleanupWorktree(menuSession)}
-                >Confirm: delete worktree</button
-              >
-            {:else}
-              <button
-                class="menu-item"
-                role={viewportWidth <= 859 ? undefined : "menuitem"}
-                data-testid="cleanup-worktree"
-                title="Remove this worktree from disk, freeing the isolated copy (asks to confirm)"
-                onclick={() => (confirmCleanup = menuSession.path)}
-                >Clean up worktree…</button
-              >
-            {/if}
-          {/if}
           <button
             class="menu-item"
             role={viewportWidth <= 859 ? undefined : "menuitem"}
@@ -1792,8 +1724,8 @@
   :global(.row-menu[aria-expanded="true"]) {
     background: var(--surface);
   }
-  /* Only the status/time slot yields to the ⋯ overlay on hover — the worktree glyph (and
-     any tag) stay put so they remain visible and hoverable while the menu trigger shows. */
+  /* Only the status/time slot yields to the ⋯ overlay on hover — any tag stays put
+     so it remains visible and hoverable while the menu trigger shows. */
   .row-wrap:hover .status {
     opacity: 0;
   }
@@ -1967,7 +1899,7 @@
   /* Draft rows fade their trailing meta (incl. the Draft label) on hover so the
      discard × overlays cleanly without competing for the same space — mirroring the
      .status fade for session rows. Scoped to .draft-row only to avoid fading .meta
-     on regular session rows (which carry worktree glyphs and tags). */
+     on regular session rows (which carry tags). */
   .row.draft-row .meta {
     transition: opacity 0.1s ease;
   }
@@ -2033,7 +1965,7 @@
   .row[data-status="read"]:not(.active) .name {
     color: var(--text-muted);
   }
-  /* Right-edge cluster: worktree glyph, optional tag, and the status/time slot. Shrinks
+  /* Right-edge cluster: optional tag and the status/time slot. Shrinks
      to its content so the title takes the rest of the line. */
   .meta {
     display: flex;

@@ -176,38 +176,6 @@ test("sheet actions copy, rename, and archive without selecting the row", async 
   ).toBeVisible();
 });
 
-test("worktree cleanup keeps its destructive two-step confirmation", async ({
-  page,
-}) => {
-  const sidebar = page.getByTestId("sidebar");
-  await sidebar
-    .getByTestId("sidebar-new-session")
-    .getByText("New session")
-    .click();
-  await page.getByRole("button", { name: "Enable worktree isolation" }).click();
-  const composer = page.getByPlaceholder(
-    "Describe a task or ask a question…",
-  );
-  await composer.fill("mobile worktree cleanup");
-  await page.getByRole("button", { name: "Create session and send" }).click();
-
-  await openSidebar(page);
-  const worktreeRow = sidebar
-    .locator("li.row-wrap")
-    .filter({ has: page.locator(".wt") });
-  await expect(worktreeRow).toBeVisible();
-  await worktreeRow.getByTestId("session-menu").click();
-  const sheet = page.getByRole("dialog", { name: "Session actions" });
-  await expect(
-    sheet.getByRole("button", { name: "Copy worktree path" }),
-  ).toBeVisible();
-  await sheet.getByTestId("cleanup-worktree").click();
-  await expect(sheet.getByTestId("confirm-cleanup-worktree")).toBeVisible();
-  await expectTapTarget(sheet.getByTestId("confirm-cleanup-worktree"), 48);
-  await sheet.getByTestId("confirm-cleanup-worktree").click();
-  await expect(sidebar.locator(".wt")).toHaveCount(0);
-});
-
 test("selecting a session closes Sessions and the filter preference persists", async ({
   page,
 }) => {

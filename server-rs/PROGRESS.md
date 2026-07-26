@@ -67,10 +67,10 @@ review-approved.
   background-model *application* to turns is separate follow-up.
 - `mock_driver.rs` — direct port of TS MockDriver; all fixture scripts present;
   e2e wiring works end-to-end.
-- `shared/` modules — `worktree_name` (2), `warm_cap` (10), `session_list` (4),
-  `login_env` (11 pure + impure wired), `worktree` (8+1 git), `archive_store`
-  (5), `worktree_store` (10) — all ported with tests and wired into the live
-  `PolytokenDriver` (Phase 5). `set_archived` + `login_env_status` also wired
+- `shared/` modules — `warm_cap` (10), `session_list` (4), `login_env`
+  (11 pure + impure wired), and `archive_store` (5) are ported with tests and
+  wired into the live `PolytokenDriver` (Phase 5). `set_archived` +
+  `login_env_status` also wired
   (2026-07-07 "leg 1" cleanup).
 - `fake_daemon.rs` — runtime-controllable in-process fake daemon
   (`PANTOKEN_DRIVER=fake`); corpus-backed dev surface (`/debug/reset` + `mock` WS
@@ -156,12 +156,10 @@ daemons.
    Playwright tier (D21).
 
 2. **Live-path bugs — all resolved.** SSE per-event spawning, FetchState/
-   RefetchQueue no-ops, `$HOME` workspace fabrication, `opts.worktree`/
-   `login_env` drops, `list_sessions` hardcoded closures, `warm_cap` unenforced,
+   RefetchQueue no-ops, `$HOME` workspace fabrication, `login_env` drops,
+   `list_sessions` hardcoded closures, `warm_cap` unenforced,
    `set_archived`/`login_env_status` unwired — all fixed and tested (Phases 2,
-   5, A). One out-of-scope gap remains: the reload re-warm-via-attach path
-   needs `startup.json` (session-registry/worktree port); the harness asserts
-   disposal + no-deadlock, not re-warm emission.
+   5, A).
 
 3. **Silent-degradation — mostly resolved.** Remaining open spots:
    - ✅ `/push/*` endpoints wired (Phase 3, 2026-07-07): VAPID keygen +
@@ -272,7 +270,7 @@ faithfully.
 - [x] `shared/` modules ported with tests and wired into live driver (Phase 5).
       ✅ `sessions-registry` (15 tests) ported (2026-07-08): the Rust module
       had no tests; all 15 TS cases now mirrored (mtime sort, cold-entry
-      fallbacks, archive/worktree merge).
+      fallbacks, archive-flag merge).
 - [x] `open_session` `$HOME` fabrication fixed (reads real cwd from
       `session.json`).
 

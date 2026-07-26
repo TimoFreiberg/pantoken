@@ -7,9 +7,9 @@
 use async_trait::async_trait;
 use pantoken_protocol::session_driver::ModelCatalogDiagnostic;
 use pantoken_protocol::session_driver::{
-    AtRefs, BackgroundJob, BranchList, CommandInfo, DirListing, FileInfo, HostUiResponse,
-    ImageContent, ModelDefaults, ModelOption, PathStat, PermissionMonitorMode, SessionDriverEvent,
-    SessionId, SessionListEntry, SessionUsage,
+    AtRefs, BackgroundJob, CommandInfo, DirListing, FileInfo, HostUiResponse, ImageContent,
+    ModelDefaults, ModelOption, PathStat, PermissionMonitorMode, SessionDriverEvent, SessionId,
+    SessionListEntry, SessionUsage,
 };
 use pantoken_protocol::wire::{DeliveryMode, LoginEnvStatus, SessionAction};
 
@@ -19,9 +19,6 @@ use pantoken_protocol::wire::{DeliveryMode, LoginEnvStatus, SessionAction};
 #[derive(Debug, Clone, Default)]
 pub struct NewSessionOptsData {
     pub cwd: Option<String>,
-    pub worktree: Option<bool>,
-    /// Base branch for worktree creation (jj `-r` / git commit-ish). None = auto-detect.
-    pub base_branch: Option<String>,
     pub model: Option<NewSessionModel>,
     pub thinking: Option<String>,
     /// Facet to apply at creation (the draft's pick, e.g. start straight in plan).
@@ -42,18 +39,6 @@ pub struct ClearQueueResult {
     pub follow_up: Vec<String>,
 }
 
-/// Result of archiving a session — may include a retained worktree.
-#[derive(Debug, Clone, Default)]
-pub struct ArchiveResult {
-    pub worktree_retained: Option<WorktreeRetained>,
-}
-
-#[derive(Debug, Clone)]
-pub struct WorktreeRetained {
-    pub path: String,
-    pub reason: String,
-}
-
 /// Result of branching from a tree entry.
 #[derive(Debug, Clone, Default)]
 pub struct BranchResult {
@@ -61,13 +46,6 @@ pub struct BranchResult {
     pub editor_text: Option<String>,
     pub cancelled: bool,
     pub aborted: Option<bool>,
-}
-
-/// Result of cleaning up a worktree.
-#[derive(Debug, Clone, Default)]
-pub struct WorktreeCleanupResult {
-    pub removed: bool,
-    pub reason: Option<String>,
 }
 
 /// The driver seam. Both the mock (fake daemon) and the real polytoken driver
@@ -113,15 +91,8 @@ pub trait PantokenDriver: Send + Sync {
     /// Sessions on disk available to open.
     async fn list_sessions(&self) -> Vec<SessionListEntry>;
 
-    /// Remove a pantoken-created worktree at `path`.
-    async fn cleanup_worktree(&self, _path: String, _force: bool) -> WorktreeCleanupResult {
-        WorktreeCleanupResult::default()
-    }
-
     /// Archive or unarchive a session by its .jsonl path.
-    async fn set_archived(&self, _path: String, _archived: bool) -> ArchiveResult {
-        ArchiveResult::default()
-    }
+    async fn set_archived(&self, _path: String, _archived: bool) {}
 
     /// The captured login-shell env status, surfaced in the Settings panel. The
     /// live `PolytokenDriver` overrides this with its real capture; mock/default
@@ -227,16 +198,6 @@ pub trait PantokenDriver: Send + Sync {
 
     /// Quick existence + type check for a path.
     async fn stat_path(&self, path: String) -> PathStat;
-
-    /// List local branches of a repo at `path` for the worktree branch selector.
-    /// Returns empty branches + `error: Some(true)` when not supported.
-    async fn list_branches(&self, _path: String) -> BranchList {
-        BranchList {
-            path: _path,
-            branches: vec![],
-            error: Some(true),
-        }
-    }
 
     /// Background jobs (subagent + shell) running in the daemon. The hub calls
     /// this on every snapshot refresh and broadcasts `JobsList`.

@@ -118,27 +118,6 @@ export async function chooseProjectDir(page: Page, name: string): Promise<void> 
   await expect(picker).toBeHidden();
 }
 
-/** Create a worktree-backed session at /Users/timo/src/<project>
- *  and leave the sidebar open. `project="dirty"` simulates uncommitted changes so
- *  archive keeps the worktree + emits `worktreeRetained`. */
-export async function createWorktreeSession(
-  page: Page,
-  project = "demo",
-): Promise<void> {
-  await openSidebar(page);
-  await page
-    .getByTestId("sidebar")
-    .getByTestId("sidebar-new-session")
-    .getByText("New session")
-    .click();
-  await page.getByRole("button", { name: "worktree" }).click();
-  await chooseProjectDir(page, project);
-  const composer = page.getByPlaceholder("Describe a task or ask a question…");
-  await composer.fill("get started");
-  await composer.press("Enter");
-  await openSidebar(page);
-}
-
 /** Archive a session row via its right-click context menu. */
 export async function archiveRow(page: Page, rowText: string): Promise<void> {
   const sidebar = page.getByTestId("sidebar");

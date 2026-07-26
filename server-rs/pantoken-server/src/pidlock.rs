@@ -1,6 +1,6 @@
 //! PID lock + stable server identity. Nothing structurally stops two pantoken
 //! processes from sharing one data dir, and if they do they fight over the
-//! archive/worktree/push stores and — the real hazard — the VAPID keypair,
+//! archive/push stores and — the real hazard — the VAPID keypair,
 //! whose regeneration silently invalidates every phone's push subscription.
 //! So on startup we take an exclusive lock at `dataDir/pantoken.pid`.
 //!
@@ -119,7 +119,7 @@ impl std::fmt::Display for LockHeldError {
             f,
             "pantoken is already running: pid {} holds the lock at {} (data dir {}). \
              Refusing to start a second server on the same data dir — two servers \
-             would corrupt the archive/worktree/push stores and regenerating the \
+             would corrupt the archive/push stores and regenerating the \
              VAPID keypair would invalidate every phone's push subscription. \
              Stop that process, or point this one at a different PANTOKEN_DATA_DIR.",
             self.pid,

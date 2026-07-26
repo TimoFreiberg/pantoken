@@ -5,7 +5,6 @@
 
 import {
   type BackgroundJob,
-  type BranchList,
   type CommandInfo,
   type DirListing,
   type PathStat,
@@ -90,7 +89,6 @@ import {
   setResumeProvider,
 } from "./ws.svelte.js";
 import { applyCorrelatedResponse } from "./correlated-response.js";
-import { pickDefaultBranch } from "./branch-default.js";
 import {
   loadNamespacedMap,
   loadNamespacedScalar,
@@ -114,8 +112,7 @@ export interface Toast {
    *  Used by the archive-Undo notice so a second archive replaces the first (AC.2/AC.3). */
   kind?: string;
   /** Correlation key (typically a session cwd). Notices sharing a key are related and can
-   *  invalidate each other — e.g. an archive Undo dismisses a live "Delete anyway" toast
-   *  for the same session's worktree so it can't force-delete the restored worktree. */
+   *  invalidate each other — e.g. an archive Undo dismisses a live toast for the same session. */
   correlationKey?: string;
 }
 
@@ -289,12 +286,6 @@ class PantokenStore {
   pathStat = $state<PathStat | null>(null);
   private dirRequestId = 0;
   private statRequestId = 0;
-  // New-session worktree branch selector: local branches for the draft's cwd.
-  // Null until branches are first queried. Capped at 100 entries server-side.
-  branchList = $state<BranchList | null>(null);
-  // True while a `listBranches` is in flight, for the picker's loading hint.
-  branchLoading = $state(false);
-  private branchRequestId = 0;
   // Settings panel: the agent's global model defaults + favorites. Server-authoritative,
   // delivered like `models`.
   modelDefaults = $state<ModelDefaults>({ favorites: [] });
@@ -328,11 +319,11 @@ class PantokenStore {
   // durable backing store, stashed on switch / debounced keystroke / pagehide. Pure client
   // state — no protocol change.
   private draftMap = $state<Record<string, string>>(loadDraftMap());
-  // Per new-session-draft config that isn't carried by composerDraft text — the worktree
-  // toggle plus any explicit model/thinking override. Keyed identically to draftMap
-  // (`n:<cwd>`) so a switch / reload restores it; startDraft rebuilds the draft from defaults
-  // and would otherwise drop it. Stores only what diverges from the default (worktree:true,
-  // and a model/thinking that isn't the current global default) — absence means "use default".
+  // Per new-session-draft config that isn't carried by composerDraft text — any
+  // explicit model/thinking override. Keyed identically to draftMap (`n:<cwd>`)
+  // so a switch / reload restores it; startDraft rebuilds the draft from defaults
+  // and would otherwise drop it. Stores only what diverges from the default (a
+  // model/thinking that isn't the current global default) — absence means "use default".
   private draftConfigMap =
     $state<Record<string, StoredDraftConfig>>(loadDraftConfigMap());
   // Per-session (and per new-session-draft) submit log: every prompt the user has SENT,
@@ -344,16 +335,13 @@ class PantokenStore {
   private promptHistory = $state<Record<string, string[]>>(loadPromptHistory());
   // New-session draft (Claude-app style): when non-null the main pane shows the
   // config chips + composer for a session that does NOT exist yet. Creation is
-  // deferred — submitDraft() sends `newSession` (cwd/worktree/model/thinking + the
+  // deferred — submitDraft() sends `newSession` (cwd/model/thinking + the
   // first prompt) atomically, so nothing hits the server until the user sends.
   // Convention (docs/DECISIONS.md D17): every field settable here should survive a
   // session switch / reload — persist it via draftConfigMap unless there's a concrete
   // reason it can't be (then add an e2e round-trip in e2e/drafts.e2e.ts).
   draft = $state<{
     cwd: string;
-    worktree: boolean;
-    /** Base branch for worktree creation (jj `-r` / git commit-ish). Undefined = auto-detect. */
-    baseBranch?: string;
     model?: { modelId: string };
     thinking?: string;
     /** Facet to start the session in (undefined = the daemon's default, execute). */
@@ -634,8 +622,7 @@ class PantokenStore {
   }
 
   /** ⌘N — open a new-session draft, defaulting its project to the one you're in (the
-   *  focused session's parent project — a worktree session resolves to its repo base,
-   *  not the worktree dir), else the last project you selected, else the server's
+   *  focused session's project), else the last project you selected, else the server's
    *  default ($HOME). Already drafting → just refocus the composer. */
   newSessionHotkey(): void {
     if (this.draft) {
@@ -727,18 +714,16 @@ class PantokenStore {
       persistDraftMap(this.draftMap);
     }
   }
-  /** Persist the active new-session draft's config (worktree toggle + explicit model/thinking
+  /** Persist the active new-session draft's config (explicit model/thinking
    *  override) under its `n:<cwd>` key, so a session switch / reload restores it (startDraft
    *  rebuilds the draft from defaults and would otherwise drop it). Stores only what diverges
-   *  from the default: worktree:true, and a model/thinking that isn't the current global
+   *  from the default: a model/thinking that isn't the current global
    *  default — so an untouched draft keeps tracking the default rather than pinning a stale one. */
   private persistDraftConfig(): void {
     if (!this.draft) return;
     const key = this.composerDraftKey;
     const def = this.modelDefaults;
     const cfg: StoredDraftConfig = {};
-    if (this.draft.worktree) cfg.worktree = true;
-    if (this.draft.baseBranch) cfg.baseBranch = this.draft.baseBranch;
     const m = this.draft.model;
     if (m && m.modelId !== def.modelId) cfg.model = m;
     if (this.draft.thinking && this.draft.thinking !== def.thinkingLevel)
@@ -753,8 +738,6 @@ class PantokenStore {
       cfg.permissionMonitor = this.draft.permissionMonitor;
     if (this.draft.adventurousHandoff) cfg.adventurousHandoff = true;
     if (
-      cfg.worktree ||
-      cfg.baseBranch ||
       cfg.model ||
       cfg.thinking ||
       cfg.facet ||
@@ -1333,28 +1316,6 @@ class PantokenStore {
         if (!stat.accepted) break;
         this.pathStat = stat.value;
         break;
-      case "branchList": {
-        const result = applyCorrelatedResponse(
-          this.branchRequestId,
-          this.branchList,
-          msg.requestId,
-          {
-            requestId: msg.requestId,
-            path: msg.path,
-            branches: [...msg.branches],
-            error: msg.error,
-          },
-        );
-        if (!result.accepted) break;
-        this.branchList = result.value;
-        this.branchLoading = false;
-        // Auto-select the default branch when none is explicitly set.
-        if (this.draft && !this.draft.baseBranch && result.value) {
-          const def = pickDefaultBranch(result.value.branches);
-          if (def) this.draft.baseBranch = def;
-        }
-        break;
-      }
       case "editorPrefill":
         // A branch landed on a user prompt — its text comes back to re-edit. Per-client
         // (only the requester), so it's handled here, not in the shared foldEvent. The
@@ -1525,20 +1486,6 @@ class PantokenStore {
           }
         }
         break;
-      case "worktreeRetained": {
-        // Archive reaped the session but kept its worktree (dirty). Explain the leftover
-        // and offer a force-delete so it isn't a mystery directory on disk.
-        const path = msg.path;
-        this.sidebarNotice(`Worktree kept — ${msg.reason}`, {
-          correlationKey: path,
-          action: {
-            label: "Delete anyway",
-            run: () => this.cleanupWorktree(path, true),
-          },
-          durationMs: 12000,
-        });
-        break;
-      }
     }
   }
 
@@ -1656,9 +1603,7 @@ class PantokenStore {
     this.files = { query: "", items: [], includeIgnored: false };
     this.dirListing = null;
     this.pathStat = null;
-    this.branchList = null;
     this.dirLoading = false;
-    this.branchLoading = false;
     this.modelDefaults = { favorites: [] };
     this.pantokenSettings = { loginShell: null, backgroundModel: null };
     this.loginEnv = { activeShell: null, ok: false };
@@ -1706,7 +1651,6 @@ class PantokenStore {
     this.lastError = null;
     this.dirRequestId = 0;
     this.statRequestId = 0;
-    this.branchRequestId = 0;
 
     // Transient UI state (reset to defaults).
     this.searchOpen = false;
@@ -1790,8 +1734,6 @@ class PantokenStore {
             type: "newSession",
             promptId: prompt.promptId,
             cwd: prompt.newSession?.cwd,
-            worktree: prompt.newSession?.worktree,
-            baseBranch: prompt.newSession?.baseBranch,
             model: prompt.newSession?.model,
             thinking: prompt.newSession?.thinking,
             facet: prompt.newSession?.facet,
@@ -1949,7 +1891,7 @@ class PantokenStore {
     }
   }
 
-  /** Bring a failed new-session draft back into view: its config (cwd/worktree/model/
+  /** Bring a failed new-session draft back into view: its config (cwd/model/
    *  thinking) → chips, its prompt text/images → the composer, and drop the now-consumed
    *  outbox entry. Mirrors startDraft's stash-then-flip, but seeds from the failed prompt
    *  instead of model defaults, and persists the text immediately (a second stash) so a
@@ -1964,8 +1906,6 @@ class PantokenStore {
     const ns = prompt.newSession;
     this.draft = {
       cwd: ns?.cwd ?? "",
-      worktree: ns?.worktree ?? false,
-      baseBranch: ns?.baseBranch,
       model: ns?.model,
       thinking: ns?.thinking,
       facet: ns?.facet ?? "execute",
@@ -2190,14 +2130,6 @@ class PantokenStore {
     const requestId = ++this.statRequestId;
     this.pathStat = null;
     send({ type: "statPath", path, requestId });
-  }
-  /** List local branches of a repo on the SERVER's filesystem for the new-session
-   *  worktree branch selector. The reply arrives as a `branchList` message (it
-   *  echoes a request ID so the picker can drop a stale response). */
-  queryBranches(path: string): void {
-    this.branchLoading = true;
-    const requestId = ++this.branchRequestId;
-    send({ type: "listBranches", path, requestId });
   }
   /** Rewind the session to a prior tree entry (the daemon's /rewind — destructive:
    *  drops the target entry and everything after). The server re-seeds every
@@ -2451,7 +2383,6 @@ class PantokenStore {
     const d = this.modelDefaults;
     this.draft = {
       cwd,
-      worktree: false,
       model: d.modelId ? { modelId: d.modelId } : undefined,
       thinking: d.thinkingLevel,
       facet: "execute",
@@ -2462,15 +2393,13 @@ class PantokenStore {
     };
     // Restore this project's pending new-session draft, if any (key now resolves to n:cwd).
     this.loadDraft(this.composerDraftKey);
-    // Restore this project's persisted draft config (text rides draftMap; worktree + any
-    // model/thinking override ride draftConfigMap, both keyed by n:<cwd>). Each field falls
+    // Restore this project's persisted draft config (text rides draftMap; any
+    // model/thinking override rides draftConfigMap, both keyed by n:<cwd>). Each field falls
     // back to the default seed when absent.
     const saved = this.draftConfigMap[this.composerDraftKey];
     if (saved)
       this.draft = {
         ...this.draft,
-        worktree: saved.worktree ?? this.draft.worktree,
-        baseBranch: saved.baseBranch ?? this.draft.baseBranch,
         model: saved.model ?? this.draft.model,
         thinking: saved.thinking ?? this.draft.thinking,
         facet: saved.facet ?? this.draft.facet,
@@ -2482,18 +2411,6 @@ class PantokenStore {
     // Record the draft view for ⌘[ / ⌘] history and remember its project for ⌘N.
     this.pushNav({ kind: "draft", cwd });
     if (cwd) this.setLastProjectCwd(cwd);
-    // Pre-fetch branches for this cwd so the worktree chip shows the auto-detected
-    // default (e.g. "main") the instant the toggle is enabled — no "default" → "main"
-    // flicker. The branchList reply handler auto-selects baseBranch when none is set.
-    // Skip when already fresh for this cwd or a fetch is in flight (avoids a
-    // redundant request on re-entering a draft whose list already arrived).
-    if (
-      cwd &&
-      this.branchList?.path !== cwd &&
-      !this.branchLoading
-    ) {
-      this.queryBranches(cwd);
-    }
   }
   cancelDraft(): void {
     // Keep the new-session draft for next time, then drop back to the active session's draft.
@@ -2530,62 +2447,7 @@ class PantokenStore {
         delete this.draftMap[oldKey];
         persistDraftMap(this.draftMap);
       }
-      // The worktree pref follows the draft to its new project key.
-      if (oldKey in this.draftConfigMap) delete this.draftConfigMap[oldKey];
       this.persistDraftConfig(); // re-writes the live config under newKey (+ persists)
-      // Clear stale branch list from the old repo; the picker re-fetches for the new cwd.
-      this.branchList = null;
-    }
-  }
-  toggleDraftWorktree(): void {
-    if (this.draft) {
-      const worktree = !this.draft.worktree;
-      // Capture whether baseBranch was an explicit user pick before the toggle.
-      // An auto-detected default (set by the branchList reply handler or re-derived
-      // below) must NOT be persisted — otherwise the draft pins a stale default
-      // instead of tracking the repo's current default on reopen (persistDraftConfig
-      // writes baseBranch whenever it's truthy). Only an explicit setDraftBaseBranch
-      // pick persists.
-      const hadExplicitBranch = !!this.draft.baseBranch;
-      this.draft = { ...this.draft, worktree };
-      if (worktree) {
-        // Turning ON. With pre-fetch in startDraft, branches are usually already
-        // loaded for this cwd. Re-derive the auto-detected default from the cached
-        // list instead of blanking baseBranch — blanking would leave it stuck at
-        // undefined (the branchList reply handler only fires on a NEW reply, and no
-        // new fetch happens when the list is already fresh). When the list isn't
-        // fresh yet (e.g. cwd changed via the dir picker), fall back to undefined so
-        // the on-toggle reactive fetch + reply handler re-select.
-        const fresh =
-          this.branchList?.path === this.draft.cwd && !this.branchList?.error;
-        if (fresh && this.branchList!.branches.length) {
-          this.draft.baseBranch = pickDefaultBranch(this.branchList!.branches);
-        } else {
-          this.draft.baseBranch = undefined;
-        }
-      } else {
-        // Turning OFF: clear branch selection + cached list.
-        this.draft.baseBranch = undefined;
-        this.branchList = null;
-      }
-      // Persist the worktree toggle. If baseBranch was auto-derived (not an explicit
-      // user pick), temporarily clear it so persistDraftConfig doesn't pin a stale
-      // default — the draft keeps tracking the repo's current default on reopen.
-      if (!hadExplicitBranch) {
-        const derived = this.draft.baseBranch;
-        this.draft.baseBranch = undefined;
-        this.persistDraftConfig();
-        this.draft.baseBranch = derived;
-      } else {
-        this.persistDraftConfig();
-      }
-    }
-  }
-  /** Set the worktree base branch (undefined = auto-detect). Persists immediately. */
-  setDraftBaseBranch(branch: string | undefined): void {
-    if (this.draft) {
-      this.draft.baseBranch = branch;
-      this.persistDraftConfig();
     }
   }
   /** Commit the draft: create the session and deliver its first prompt in one
@@ -2606,8 +2468,6 @@ class PantokenStore {
       images,
       newSession: {
         cwd: d.cwd.trim() || undefined,
-        worktree: d.worktree || undefined,
-        baseBranch: d.baseBranch,
         model: d.model,
         thinking: d.thinking,
         facet: d.facet && d.facet !== "execute" ? d.facet : undefined,
@@ -3159,8 +3019,7 @@ class PantokenStore {
     }
   }
   /** Dismiss every notice in `scope` whose `correlationKey` matches `key`. Used by the
-   *  archive-Undo action to invalidate a live "Delete anyway" toast for the same session's
-   *  worktree, so it can't fire `cleanupWorktree` on the restored session (AC.5). */
+   *  archive-Undo action to invalidate a live toast for the same session. */
   dismissNoticeByCorrelation(scope: NoticeScope, key: string): void {
     if (scope === "sidebar") {
       this.sidebarToasts = this.sidebarToasts.filter((t) => t.correlationKey !== key);
@@ -3189,8 +3048,7 @@ class PantokenStore {
       // Archiving the session you're looking at: it would otherwise linger (pinned as the
       // viewed row) until you navigated away by hand. Flip into a new-session draft for the
       // same project so the row drops immediately and you land on a prompt page rather than
-      // the just-archived transcript. A pantoken worktree session's cwd may be reaped on
-      // archive, so draft into the parent repo (`worktree.base`) instead of the dead dir.
+      // the just-archived transcript.
       const viewedId = this.session.ref?.sessionId ?? this.activeSessionId;
       const archivingFocused = s != null && s.sessionId === viewedId;
       if (archivingFocused) this.startDraft(projectCwdOf(s));
@@ -3201,8 +3059,7 @@ class PantokenStore {
         action: {
           label: "Undo",
           run: () => {
-            // AC.5 (high-risk case): invalidate any live "Delete anyway" toast for this
-            // session's worktree so it can't force-delete the restored session's worktree.
+            // Invalidate any live toast for this session so it can't fire on the restored session.
             if (cwd) this.dismissNoticeByCorrelation("sidebar", cwd);
             this.setArchived(path, false);
             // Restore the prior view too, if archiving had navigated us into a draft.
@@ -3223,11 +3080,6 @@ class PantokenStore {
     );
     send({ type: "renameSession", path, name: next });
   }
-  /** Remove a pantoken-created worktree (by its path == the session cwd). `force` discards
-   *  uncommitted changes. The server re-broadcasts the list, clearing the indicator. */
-  cleanupWorktree(path: string, force = false): void {
-    send({ type: "cleanupWorktree", path, force });
-  }
   /** Reload a session from scratch (by its .jsonl path): the server disposes the warm
    *  session and re-warms it from disk, rebuilding the agent's context anew (config + extensions
    *  loaded fresh). The recovery path for a session an extension bug has wedged — fix the
@@ -3242,7 +3094,7 @@ class PantokenStore {
   detachSession(path: string): void {
     send({ type: "detachSession", path });
   }
-  /** Copy text to the clipboard (worktree path, session id, …). Returns whether it
+  /** Copy text to the clipboard (session id, …). Returns whether it
    *  succeeded so the caller can flash feedback; degrades quietly where the clipboard
    *  API is unavailable (insecure context / older browser). */
   async copyToClipboard(text: string): Promise<boolean> {
@@ -3559,12 +3411,10 @@ function persistDraftMap(map: Record<string, string>): void {
   }
 }
 
-/** Persisted per-new-session-draft config not carried by the composer text: the worktree
- *  toggle plus an explicit model/thinking override. Keyed `n:<cwd>` in draftConfigMap. Every
+/** Persisted per-new-session-draft config not carried by the composer text: an
+ *  explicit model/thinking override. Keyed `n:<cwd>` in draftConfigMap. Every
  *  field is optional — absence means "fall back to the global default at draft-open". */
 type StoredDraftConfig = {
-  worktree?: boolean;
-  baseBranch?: string;
   model?: { modelId: string };
   thinking?: string;
   facet?: string;
@@ -3575,7 +3425,7 @@ type StoredDraftConfig = {
 /** Read per-new-session-draft config from localStorage. Tolerant of a missing / corrupt
  *  value — a lost draft config is never worth a thrown boot. Each field is validated and
  *  kept only when well-formed; an entry left with nothing is dropped. */
-function loadDraftConfigMap(): Record<string, StoredDraftConfig> {
+export function loadDraftConfigMap(): Record<string, StoredDraftConfig> {
   if (typeof window === "undefined") return {};
   try {
     const raw = localStorage.getItem(DRAFT_CONFIG_KEY);
@@ -3586,8 +3436,6 @@ function loadDraftConfigMap(): Record<string, StoredDraftConfig> {
     for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
       if (!v || typeof v !== "object") continue;
       const rec = v as {
-        worktree?: unknown;
-        baseBranch?: unknown;
         model?: unknown;
         thinking?: unknown;
         facet?: unknown;
@@ -3595,9 +3443,6 @@ function loadDraftConfigMap(): Record<string, StoredDraftConfig> {
         adventurousHandoff?: unknown;
       };
       const cfg: StoredDraftConfig = {};
-      if (rec.worktree === true) cfg.worktree = true;
-      if (typeof rec.baseBranch === "string" && rec.baseBranch !== "")
-        cfg.baseBranch = rec.baseBranch;
       const m = rec.model as { modelId?: unknown } | null;
       if (m && typeof m.modelId === "string")
         cfg.model = { modelId: m.modelId };
@@ -3618,8 +3463,6 @@ function loadDraftConfigMap(): Record<string, StoredDraftConfig> {
         cfg.permissionMonitor = pm;
       if (rec.adventurousHandoff === true) cfg.adventurousHandoff = true;
       if (
-        cfg.worktree ||
-        cfg.baseBranch ||
         cfg.model ||
         cfg.thinking ||
         cfg.facet ||

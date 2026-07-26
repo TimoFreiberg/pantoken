@@ -9,7 +9,7 @@ import {
 } from "./store-helpers.js";
 
 function emptyDraft(cwd = "/proj"): DraftConfig {
-  return { cwd, worktree: false };
+  return { cwd };
 }
 
 const FULL_DEFAULTS: ModelDefaults = {

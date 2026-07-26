@@ -11,8 +11,7 @@
 //! `~/.local/share/pantoken` (XDG `DATA`) — the same tier the local server
 //! now uses (see `config.rs`). The two roots hold different things:
 //!
-//! - **Local** (`XDG_DATA_HOME`): archive/worktree indices + session worktrees
-//!   — sources of truth, not cache.
+//! - **Local** (`XDG_DATA_HOME`): archive index — source of truth, not cache.
 //! - **Remote** (`XDG_DATA_HOME` / `~/.local/share`): provisioned binaries +
 //!   runtime sockets + durable session metadata.
 //!

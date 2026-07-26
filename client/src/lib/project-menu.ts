@@ -11,7 +11,7 @@ import {
 } from "./session-filter.js";
 
 export interface KnownProject {
-  /** The project directory (worktree sessions group under their base via projectCwdOf). */
+  /** The project directory. */
   cwd: string;
   /** Basename of cwd (mirrors session-filter.ts projectName). */
   name: string;
@@ -21,8 +21,7 @@ export interface KnownProject {
 }
 
 /** Derive the set of known projects from the session list, deduplicated by
- *  project cwd (using projectCwdOf — worktree sessions group under their base).
- *  Sorted by most-recently-used first (newest interaction on top). */
+ *  project cwd. Sorted by most-recently-used first (newest interaction on top). */
 export function deriveKnownProjects(
   sessions: readonly SessionListEntry[],
 ): KnownProject[] {
