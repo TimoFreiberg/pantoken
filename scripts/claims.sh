@@ -152,17 +152,9 @@ _release_stale_claim() {
   mv "$tmp" "$CLAIMS_FILE"
   echo "Recovered stale claim for issue #$issue_number ($reason)" >&2
 
-  # Clean up orphaned workspace (lock already held — safe to do I/O here)
-  local repo_root="${PANTOKEN_REPO_ROOT:-/Users/timo/src/pantoken}"
-  local ws_name="issue-$issue_number"
-  local ws_dir="$repo_root/.workspaces/issue-$issue_number"
-  if [ -d "$ws_dir" ]; then
-    # Forget the workspace from jj, then remove the directory
-    cd "$repo_root" 2>/dev/null && jj workspace forget "$ws_name" 2>/dev/null || true
-    rm -rf "$ws_dir"
-    echo "Cleaned up orphaned workspace $ws_name" >&2
-    cd "$CLAIMS_DIR" 2>/dev/null || true
-  fi
+  # Workspace lifecycle is owned by the implement-issue agent. Never delete a
+  # registered workspace during stale-claim recovery; it may contain work.
+  echo "Workspace issue-$issue_number retained for explicit integration/cleanup." >&2
 }
 
 # Recover stale claims: check if daemon PID is still alive.

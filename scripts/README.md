@@ -17,8 +17,8 @@ just implement-issue 42
 1. **`just implement-issue <url>`** → `scripts/implement-issue.ts`
    - Fetches and validates the issue title/body with `gh --repo TimoFreiberg/pantoken`
    - Extracts image references and, in normal mode, downloads valid images into a unique owned context directory with a manifest
-   - Creates a jj workspace at `.workspaces/issue-<N>` (matching the jj workspace name), spawns a headless polytoken daemon, and seeds it via authenticated HTTP: bypass_plus permissions, plan facet, adventurous handoff, and the single rendered prompt; the daemon's plan-handoff setting creates the goal at the configured point
-   - Opens a zellij tab with the TUI and returns immediately; the tab owns cleanup after the TUI exits: it releases the issue claim, kills the daemon, removes the context directory, and attempts workspace cleanup (forget + rm). If the workspace has unpushed commits or dirty changes, it is retained with a pointer to `just cleanup-workspace <name>`
+   - Spawns a headless polytoken daemon in the default jj workspace, stores issue context/session handoff data under `.pantoken-issue-context`, and seeds it via authenticated HTTP: bypass_plus permissions, plan facet, adventurous handoff, and the single rendered prompt.
+   - Opens a zellij tab from the default workspace and returns immediately; the tab releases the issue claim, kills the daemon, and removes only the owned context. The agent creates, integrates, and cleans its issue workspace.
    - `--dry-run` performs only the read-only issue query; it creates no claims, files, downloads, processes, daemon requests, or workspaces
 
 2. **The agent** (inside the TUI) starts with an interactive clarification phase:
@@ -59,11 +59,11 @@ Manual override: `rm .merge-lock`
 ## Stop hook: integration guard
 
 Implementer sessions get a dedicated **project-level** hook installed into
-each issue workspace. Before spawning the daemon, the launcher copies
-`scripts/polytoken-config/hooks.json` into `<workspace>/.polytoken/hooks.json`.
-Polytoken discovers project hooks from `.polytoken/hooks.json` and merges
-them with any global hooks — so the implementer inherits the user's normal
-config (models, providers, permissions) while still getting the stop guard.
+each issue workspace after the agent enters it. The seed/in-session bootstrap
+copies `scripts/polytoken-config/hooks.json` into
+`<workspace>/.polytoken/hooks.json`. Polytoken discovers project hooks from
+`.polytoken/hooks.json` and merges them with global hooks, so the implementer
+inherits the user's normal config while still getting the stop guard.
 
 The hook (`stop-check-integration.sh`) checks `jj log -r 'main..@ ~ empty()'`
 for unpushed commits. If any exist, it returns `continue` with a redirect
@@ -72,25 +72,35 @@ integration is complete. A redirect counter (`.autopilot-stop-redirects`,
 capped at 3) prevents infinite loops. After 3 redirects, the agent is allowed
 to stop — it will have the integration instructions in its context.
 
-The launcher writes `.autopilot-issue-number` and `.autopilot-config-dir`
-into the workspace so the hook knows which issue is being implemented and
-where to find the hook script.
+After entering the workspace, the agent writes `.autopilot-issue-number`,
+`.autopilot-config-dir`, `.autopilot-session-id`, and the workspace handoff so
+the hook knows which issue and project directory to inspect.
 
-## Workspace cleanup
+## Workspace lifecycle
 
-When the TUI exits, the zellij post-exit cleanup string automatically calls
-`scripts/cleanup-workspace.sh` to forget the jj workspace and remove its
-directory. The script **guards against data loss**: it refuses to forget a
-workspace that has uncommitted working changes or unpushed commits
-(`main..@ ~ empty()` is non-empty). In those cases the workspace is retained,
-and a message points to the manual recipe:
+The agent owns the issue workspace lifecycle:
 
 ```bash
-just cleanup-workspace issue-42
+scripts/create-workspace.sh issue-42 [revision]
+# run the printed pushd command, bootstrap files and metadata
+just integrate-into-main 42
+scripts/cleanup-current-workspace.sh
+# run the printed popd command
 ```
 
-Exit codes: `0` = cleaned up (or already absent), `1` = retained (dirty or
-unpushed).
+The creator runs only from the registered default workspace and validates names,
+revisions, and collisions. Cleanup runs only from the registered current
+workspace directly beneath `.workspaces`; it checks clean files, no non-empty
+commits above `main`, and tree equality with `main` before forgetting the
+workspace and removing its directory. It prints an actionable integration
+message and leaves registration/files intact on failure. Forgetting a workspace
+does not delete reachable jj commits; preserve or integrate anything valuable
+before cleanup. The old `cleanup-workspace.sh` remains a legacy manual helper.
+
+The launcher stores `session-id` and `workspace-dir` in the owned context. After
+entering the workspace, copy the session id to `.autopilot-session-id`, install
+`.polytoken/hooks.json`, and write the issue/config/workspace markers before
+integration.
 
 **Legacy directories:** prior versions used `.workspaces/pantoken-issue-<N>`
 as the directory name (mismatching the jj workspace name `issue-<N>`). Those
@@ -104,12 +114,14 @@ rm -rf .workspaces/pantoken-issue-*
 ## Files
 
 ```
-justfile                          — entry points (implement-issue, integrate-into-main, cleanup-workspace)
+justfile                          — entry points (implement-issue, integrate-into-main, create-workspace, cleanup-current-workspace, legacy cleanup-workspace)
 scripts/
   implement-issue.ts              — typed launcher, context downloader, renderer, and daemon seeder
   implement-issue.sh               — compatibility wrapper (`exec bun run scripts/implement-issue.ts "$@"`)
   seed-prompt.md                  — the agent's initial prompt template
-  cleanup-workspace.sh            — guarded jj workspace forget + directory removal
+  create-workspace.sh             — default-workspace-only jj workspace creator
+  cleanup-current-workspace.sh     — integrated current-workspace forget + removal
+  cleanup-workspace.sh             — legacy name-based manual cleanup helper
   integrate-into-main.sh          — jj linearize + push (lock, fetch, rebase, test, bookmark, push)
   claims.sh                       — issue claim/release/stale-recovery
   polytoken-config/               — source for the project-level hook (copied into each workspace's .polytoken/)
@@ -133,6 +145,6 @@ scripts/
 - `just` — command runner
 - Bun — runs `scripts/implement-issue.ts` and the repository test suite
 
-The launcher owns a unique `issue-*` directory under `.pantoken-issue-context/` during normal execution. It stores `issue-body.md`, downloaded images, and `manifest.json`; the zellij tab removes that context after the TUI exits. The parent directory is gitignored. When the TUI exits, the workspace is automatically cleaned up (forget + rm) if integration is complete; if unpushed commits or dirty changes remain, the workspace is retained and `just cleanup-workspace <name>` removes it later. Screenshot downloads are bounded, content-type checked, and failed downloads are never listed as local screenshots.
+The launcher owns a unique `issue-*` directory under `.pantoken-issue-context/` during normal execution. It stores `issue-body.md`, downloaded images, `manifest.json`, and daemon session/workspace handoff files; the zellij tab removes that context after the TUI exits. The parent directory is gitignored. Workspace integration and cleanup are performed explicitly by the agent with `just integrate-into-main <N>` and `scripts/cleanup-current-workspace.sh`. Screenshot downloads are bounded, content-type checked, and failed downloads are never listed as local screenshots.
 
 `integrate-into-main.sh` exits `0` on success, `2` on conflicts with the lock retained for the resolving session, and `1` for other failures. `INTEGRATE_DRY_RUN=1` skips push and issue close but still exercises the local integration decision path.

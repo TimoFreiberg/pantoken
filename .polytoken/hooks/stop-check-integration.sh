@@ -26,11 +26,20 @@
 set -euo pipefail
 
 MAX_REDIRECTS=3
-REDIRECT_FILE="$PWD/.implement-issue-stop-redirects"
+PROJECT_DIR="${POLYTOKEN_PROJECT_DIR:-}"
+if [ -z "$PROJECT_DIR" ] || [ ! -d "$PROJECT_DIR" ]; then PROJECT_DIR="$PWD"; fi
+if [ -f "$PROJECT_DIR/.autopilot-workspace-dir" ]; then
+  handoff=$(cat "$PROJECT_DIR/.autopilot-workspace-dir" 2>/dev/null || true)
+  [ -d "$handoff" ] && PROJECT_DIR="$handoff"
+fi
+REDIRECT_FILE="$PROJECT_DIR/.implement-issue-stop-redirects"
 
 issue_number=""
-if [ -f "$PWD/.implement-issue-number" ]; then
-  issue_number=$(cat "$PWD/.implement-issue-number" 2>/dev/null || true)
+if [ -f "$PROJECT_DIR/.implement-issue-number" ]; then
+  issue_number=$(cat "$PROJECT_DIR/.implement-issue-number" 2>/dev/null || true)
+fi
+if [ -z "$issue_number" ] && [ -f "$PROJECT_DIR/.autopilot-issue-number" ]; then
+  issue_number=$(cat "$PROJECT_DIR/.autopilot-issue-number" 2>/dev/null || true)
 fi
 
 # Not an implementer session — let it stop normally.

@@ -142,13 +142,17 @@ describe("claims.sh", () => {
     expect(claims.claims).toHaveLength(1);
   });
 
-  test("recover_stale_claims removes workspace dir at .workspaces/issue-<N> (AC.8)", () => {
+  test("recover_stale_claims preserves unintegrated workspace dir and registration (AC.8)", () => {
     // Use a temp dir as PANTOKEN_REPO_ROOT so we can verify the path fix
     // ($repo_root/.workspaces/issue-$N instead of the old
     //  $repo_root/../pantoken-issue-$N).
     const repoRoot = mkdtempSync(join(process.env.TMPDIR || "/tmp", "stale-ws-test-"));
     const wsDir = join(repoRoot, ".workspaces", "issue-23");
     mkdirSync(wsDir, { recursive: true });
+    const jjInit = spawnSync("jj", ["git", "init", "--colocate", repoRoot], { encoding: "utf-8" });
+    if (jjInit.status !== 0) throw new Error(jjInit.stderr);
+    const add = spawnSync("jj", ["workspace", "add", wsDir, "--name", "issue-23", "-r", "@"], { cwd: repoRoot, encoding: "utf-8" });
+    if (add.status !== 0) throw new Error(add.stderr);
     writeFileSync(join(wsDir, "marker.txt"), "stale\n");
     expect(existsSync(wsDir)).toBe(true);
 
@@ -161,8 +165,9 @@ describe("claims.sh", () => {
     const claims = readClaims() as { claims: unknown[] };
     expect(claims.claims).toHaveLength(0);
 
-    // The workspace directory was removed
-    expect(existsSync(wsDir)).toBe(false);
+    // Stale recovery never bypasses integration-safe workspace cleanup.
+    expect(existsSync(wsDir)).toBe(true);
+    expect(readFileSync(join(wsDir, "marker.txt"), "utf8")).toBe("stale\n");
 
     rmSync(repoRoot, { recursive: true, force: true });
   });

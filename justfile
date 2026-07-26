@@ -14,7 +14,17 @@ implement-issue *args:
 integrate-into-main issue-number:
     scripts/integrate-into-main.sh {{issue-number}}
 
-# Forget a jj workspace and delete its directory (guards against dirty/unpushed).
+# Create an issue workspace from the default jj workspace.
+# Usage: just create-workspace <name> [revision]
+create-workspace name revision="main":
+    scripts/create-workspace.sh {{name}} {{revision}}
+
+# Clean up the current integrated issue workspace (must run inside it).
+# Usage: just cleanup-current-workspace
+cleanup-current-workspace:
+    scripts/cleanup-current-workspace.sh
+
+# Legacy manual name-based cleanup; prefer cleanup-current-workspace.
 # Usage: just cleanup-workspace <workspace-name>
 cleanup-workspace workspace-name:
     scripts/cleanup-workspace.sh {{workspace-name}}

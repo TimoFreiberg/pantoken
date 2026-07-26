@@ -58,10 +58,10 @@ export function formatComments(comments: Comment[]): string {
   return comments.map((c, i) => `### Comment ${i + 1} — @${c.author} (${c.createdAt})\n\n${c.body}`).join("\n\n---\n\n");
 }
 
-export function renderPrompt(template: string, issue: IssueReference & Issue, screenshots: Screenshot[], dryRun = false): string {
+export function renderPrompt(template: string, issue: IssueReference & Issue, screenshots: Screenshot[], dryRun = false, contextDir?: string): string {
   const list = screenshots.filter((s) => s.status === "downloaded").map((s) => `- ${s.localPath} (read with file_read to view this screenshot)`).join("\n") || "(no screenshots in this issue)";
   const sourceList = screenshots.map((s) => `- ${s.sourceUrl}`).join("\n") || "(no image references)";
-  return template.replaceAll("{{ISSUE_NUMBER}}", String(issue.number)).replaceAll("{{ISSUE_URL}}", issue.url).replaceAll("{{ISSUE_TITLE}}", issue.title).replaceAll("{{ISSUE_BODY}}", issue.body).replaceAll("{{ISSUE_COMMENTS}}", formatComments(issue.comments)).replaceAll("{{ISSUE_IMAGES}}", dryRun ? `${sourceList}\n\n(Normal mode will download these under its owned context directory.)` : list);
+  return template.replaceAll("{{ISSUE_NUMBER}}", String(issue.number)).replaceAll("{{ISSUE_URL}}", issue.url).replaceAll("{{ISSUE_TITLE}}", issue.title).replaceAll("{{ISSUE_BODY}}", issue.body).replaceAll("{{ISSUE_COMMENTS}}", formatComments(issue.comments)).replaceAll("{{ISSUE_IMAGES}}", dryRun ? `${sourceList}\n\n(Normal mode will download these under its owned context directory.)` : list).replaceAll("{{ISSUE_CONTEXT_DIR}}", contextDir ?? "<issue-context-dir>");
 }
 
 export function parseDaemonOutput(output: string, structured?: { session_id?: string; port?: number }): { sessionId: string; port: number } {
@@ -74,8 +74,7 @@ export function parseDaemonOutput(output: string, structured?: { session_id?: st
 }
 
 export function plannedCommands(issue: IssueReference, repoRoot: string): string[][] {
-  const ws = resolve(repoRoot, ".workspaces", `issue-${issue.number}`);
-  return [["jj", "workspace", "add", ws, "--name", `issue-${issue.number}`, "--revision", "main"], ["bun", "install"], ["polytoken", "new", "--no-attach"], ["zellij", "action", "new-tab", "--cwd", ws, "--", "polytoken", "attach", "<session_id>"]];
+  return [["polytoken", "new", "--no-attach"], ["scripts/create-workspace.sh", `issue-${issue.number}`], ["pushd", resolve(repoRoot, ".workspaces", `issue-${issue.number}`)], ["bun", "install"], ["zellij", "action", "new-tab", "--cwd", repoRoot, "--", "polytoken", "attach", "<session_id>"]];
 }
 
 /**
@@ -85,19 +84,16 @@ export function plannedCommands(issue: IssueReference, repoRoot: string): string
  *   1. Attach to the polytoken session (the TUI itself — exit code captured).
  *   2. Release the issue claim.
  *   3. Kill the daemon if a PID was provided.
- *   4. Remove the context directory ($5).
- *   5. Attempt workspace cleanup via cleanup-workspace.sh ($6); if it fails
- *      (dirty/unpushed), print a message but do NOT alter $status (the TUI
- *      exit code) — the `|| echo` guard ensures cleanup failure is non-fatal.
- *   6. Exit with the TUI's original status.
+ *   4. Remove the owned context directory ($5).
+ *   5. Exit with the TUI's original status. Workspace integration and cleanup
+ *      are performed explicitly by the agent inside the issue workspace.
  *
- * Positional args ($1..$6):
+ * Positional args ($1..$5):
  *   $1 = sessionId
  *   $2 = claims.sh path (sourced for init_claims + release_claim)
  *   $3 = issue number
  *   $4 = daemon PID (or "0" if none)
  *   $5 = context directory path
- *   $6 = cleanup-workspace.sh path
  */
 export function zellijCleanupCommand(
   sessionId: string,
@@ -105,15 +101,12 @@ export function zellijCleanupCommand(
   issueNumber: number,
   daemonPid: string | undefined,
   contextPath: string,
-  scriptDir: string,
+  _scriptDir: string,
 ): { command: string; args: string[] } {
-  const wsName = `issue-${issueNumber}`;
-  const cleanupScript = join(scriptDir, "cleanup-workspace.sh");
-  const cleanupPart = `bash "$6" "${wsName}" || echo "Workspace retained (uncommitted or unpushed changes). Clean up later: just cleanup-workspace ${wsName}" >&2`;
-  const shString = `polytoken attach "$1"; status=$?; source "$2"; init_claims; release_claim "$3"; if [ "$4" != 0 ]; then kill "$4" 2>/dev/null || true; fi; rm -rf "$5"; ${cleanupPart}; exit $status`;
+  const shString = `polytoken attach "$1"; status=$?; source "$2"; init_claims; release_claim "$3"; if [ "$4" != 0 ]; then kill "$4" 2>/dev/null || true; fi; rm -rf -- "$5"; exit $status`;
   return {
     command: "sh",
-    args: ["-c", shString, "--", sessionId, claimsPath, String(issueNumber), daemonPid ?? "0", contextPath, cleanupScript],
+    args: ["-c", shString, "--", sessionId, claimsPath, String(issueNumber), daemonPid ?? "0", contextPath],
   };
 }
 
@@ -161,9 +154,9 @@ export type LauncherOptions = { runner?: CommandRunner; http?: HttpClient; env?:
 export async function runLauncher(args: string[], options: LauncherOptions = {}): Promise<void> {
   const runner = options.runner ?? bunCommandRunner; const http = options.http ?? fetch; const print = options.print ?? console.log; const dryRun = args.includes("--dry-run");
   const issue = parseIssueReference(args); const repoRoot = resolve(options.env?.PANTOKEN_REPO_ROOT ?? process.env.PANTOKEN_REPO_ROOT ?? resolve(SCRIPT_DIR, "..")); const data = await fetchIssue(issue, runner); const urls = extractImageUrls([data.body, ...data.comments.map((c) => c.body)].join("\n")); const template = await readFile(TEMPLATE_PATH, "utf8");
-  if (dryRun) { const prompt = renderPrompt(template, { ...issue, ...data }, urls.map((sourceUrl) => ({ sourceUrl, status: "failed" as const })), true); print(`DRY RUN — no filesystem, claims, downloads, or mutating commands\n\nIssue #${issue.number}: ${data.title}\n${issue.url}\n\nPlanned commands:\n${plannedCommands(issue, repoRoot).map((c) => `  ${c.join(" ")}`).join("\n")}\n\nPrompt:\n${prompt}`); return; }
-  const contextRoot = join(repoRoot, ".pantoken-issue-context"); await mkdir(contextRoot, { recursive: true }); const context = await mkdtemp(join(contextRoot, "issue-")); let claimed = false; let handedOff = false; let workspace = resolve(repoRoot, ".workspaces", `issue-${issue.number}`); let daemonPid: string | undefined;
-  try { await claimCommand(runner, "claim_issue", issue.number); claimed = true; await mkdir(join(context, "images")); const screenshots = await downloadScreenshots(urls, join(context, "images"), http); await writeFile(join(context, "issue-body.md"), data.body); await writeFile(join(context, "manifest.json"), JSON.stringify(screenshots, null, 2)); await mkdir(join(repoRoot, ".workspaces"), { recursive: true }); await command(runner, "jj", ["workspace", "add", workspace, "--name", `issue-${issue.number}`, "--revision", "main"], { cwd: repoRoot }); await command(runner, "bun", ["install"], { cwd: workspace }); await mkdir(join(workspace, ".polytoken"), { recursive: true }); await writeFile(join(workspace, ".polytoken", "hooks.json"), await readFile(HOOKS_CONFIG_PATH, "utf8")); const spawned = await command(runner, "polytoken", ["new", "--no-attach"], { cwd: workspace }); const parsed = parseDaemonOutput(spawned.stdout); const startup = join(process.env.HOME ?? "", ".local/share/polytoken/sessions", parsed.sessionId, "startup.json"); const startupData = await waitForDaemonReady(startup); daemonPid = typeof startupData.pid === "number" ? String(startupData.pid) : undefined; await writeFile(join(workspace, ".autopilot-session-id"), parsed.sessionId); await writeFile(join(workspace, ".autopilot-issue-number"), String(issue.number)); await writeFile(join(workspace, ".autopilot-config-dir"), POLYTOKEN_CONFIG_DIR); const tokenPath = typeof startupData.credential_file_path === "string" ? startupData.credential_file_path : undefined; const token = tokenPath ? JSON.parse(await readFile(tokenPath, "utf8")).token : startupData.token; if (typeof token !== "string" || !token) throw new Error("daemon startup did not provide a credential"); const connection = { sessionId: parsed.sessionId, port: parsed.port, token, baseUrl: `http://localhost:${parsed.port}` }; await claimCommand(runner, "update_claim_session", issue.number, parsed.sessionId); await daemonRequest(connection, "/facet", { method: "POST", body: JSON.stringify({ facet: "plan" }) }, http); await daemonRequest(connection, "/permission-monitor", { method: "POST", body: JSON.stringify({ mode: "bypass_plus" }) }, http); const handoff = await daemonRequest(connection, "/adventurous-handoff", {}, http) as any; if (!handoff?.enabled) await daemonRequest(connection, "/adventurous-handoff", { method: "POST" }, http); const prompt = renderPrompt(template, { ...issue, ...data }, screenshots); await daemonRequest(connection, "/prompt", { method: "POST", body: JSON.stringify({ content: prompt }) }, http); const cleanup = zellijCleanupCommand(parsed.sessionId, join(SCRIPT_DIR, "claims.sh"), issue.number, daemonPid, context, SCRIPT_DIR); await command(runner, "zellij", ["action", "new-tab", "--cwd", workspace, "--name", `#${issue.number}`, "--", cleanup.command, ...cleanup.args]); handedOff = true; print(`TUI started in a new zellij tab. Workspace retained for integration check: ${workspace}`); } finally { if (!handedOff) { if (claimed) await claimCommand(runner, "release_claim", issue.number).catch(() => undefined); if (daemonPid) await runner("kill", [daemonPid]).catch(() => undefined); await rm(context, { recursive: true, force: true }).catch(() => undefined); } }
+  if (dryRun) { const prompt = renderPrompt(template, { ...issue, ...data }, urls.map((sourceUrl) => ({ sourceUrl, status: "failed" as const })), true, join(repoRoot, ".pantoken-issue-context", `issue-${issue.number}`)); print(`DRY RUN — no filesystem, claims, downloads, or mutating commands\n\nIssue #${issue.number}: ${data.title}\n${issue.url}\n\nPlanned commands:\n${plannedCommands(issue, repoRoot).map((c) => `  ${c.join(" ")}`).join("\n")}\n\nPrompt:\n${prompt}`); return; }
+  const contextRoot = join(repoRoot, ".pantoken-issue-context"); await mkdir(contextRoot, { recursive: true }); const context = await mkdtemp(join(contextRoot, "issue-")); let claimed = false; let handedOff = false; let daemonPid: string | undefined;
+  try { await claimCommand(runner, "claim_issue", issue.number); claimed = true; await mkdir(join(context, "images")); const screenshots = await downloadScreenshots(urls, join(context, "images"), http); await writeFile(join(context, "issue-body.md"), data.body); await writeFile(join(context, "manifest.json"), JSON.stringify(screenshots, null, 2)); const spawned = await command(runner, "polytoken", ["new", "--no-attach"], { cwd: repoRoot }); const parsed = parseDaemonOutput(spawned.stdout); const startup = join(process.env.HOME ?? "", ".local/share/polytoken/sessions", parsed.sessionId, "startup.json"); const startupData = await waitForDaemonReady(startup); daemonPid = typeof startupData.pid === "number" ? String(startupData.pid) : undefined; await writeFile(join(context, "session-id"), parsed.sessionId); await writeFile(join(context, "workspace-dir"), resolve(repoRoot, ".workspaces", `issue-${issue.number}`)); const tokenPath = typeof startupData.credential_file_path === "string" ? startupData.credential_file_path : undefined; const token = tokenPath ? JSON.parse(await readFile(tokenPath, "utf8")).token : startupData.token; if (typeof token !== "string" || !token) throw new Error("daemon startup did not provide a credential"); const connection = { sessionId: parsed.sessionId, port: parsed.port, token, baseUrl: `http://localhost:${parsed.port}` }; await claimCommand(runner, "update_claim_session", issue.number, parsed.sessionId); await daemonRequest(connection, "/facet", { method: "POST", body: JSON.stringify({ facet: "plan" }) }, http); await daemonRequest(connection, "/permission-monitor", { method: "POST", body: JSON.stringify({ mode: "bypass_plus" }) }, http); const handoff = await daemonRequest(connection, "/adventurous-handoff", {}, http) as any; if (!handoff?.enabled) await daemonRequest(connection, "/adventurous-handoff", { method: "POST" }, http); const prompt = renderPrompt(template, { ...issue, ...data }, screenshots, false, context); await daemonRequest(connection, "/prompt", { method: "POST", body: JSON.stringify({ content: prompt }) }, http); const cleanup = zellijCleanupCommand(parsed.sessionId, join(SCRIPT_DIR, "claims.sh"), issue.number, daemonPid, context, SCRIPT_DIR); await command(runner, "zellij", ["action", "new-tab", "--cwd", repoRoot, "--name", `#${issue.number}`, "--", cleanup.command, ...cleanup.args]); handedOff = true; print(`TUI started in a new zellij tab. The agent will create workspace issue-${issue.number}.`); } finally { if (!handedOff) { if (claimed) await claimCommand(runner, "release_claim", issue.number).catch(() => undefined); if (daemonPid) await runner("kill", [daemonPid]).catch(() => undefined); await rm(context, { recursive: true, force: true }).catch(() => undefined); } }
 }
 
 if (import.meta.main) { runLauncher(Bun.argv.slice(2)).catch((error) => { console.error(`ERROR: ${error instanceof Error ? error.message : String(error)}`); process.exit(1); }); }

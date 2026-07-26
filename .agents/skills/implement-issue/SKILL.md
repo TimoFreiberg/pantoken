@@ -1,108 +1,70 @@
 ---
+name: implement-issue
 description: Implement a GitHub issue end-to-end. Clarify, plan, execute, review, and integrate into main.
 ---
 
 # Implement GitHub Issue #{{ISSUE_NUMBER}}
 
-You are implementing a GitHub issue. The issue number is provided in the
-prompt that invoked this skill (e.g. `@skill:implement-issue 42`, `#42`, or `https://github.com/User/repo/issues/42`).
-Extract the issue number from the prompt; if no number is present, ask the
-user which issue to implement before proceeding.
+You are implementing a GitHub issue. Extract the issue number from the invoking prompt.
 
-## Step 0: Fetch the issue and bootstrap the worktree
+## Step 0: Fetch and bootstrap the issue workspace
 
-1. Run the fetch script with the issue number to pull the issue body, comments, and screenshots:
+From the repository's **default jj workspace** (the repository root), fetch the issue:
 
-   ```bash
-   bash scripts/gh-issue-fetch.sh <issue-number>
-   ```
+```bash
+bash scripts/gh-issue-fetch.sh <issue-number>
+```
 
-   This writes the issue body + comments to a temp `issue.md`, downloads any
-   screenshots to a temp `images/` dir, and writes `.implement-issue-number`
-   (the marker the stop hook reads). Read the printed paths.
+Read the printed issue and screenshots. The harness does not provide an implementation worktree. Create and enter one now, and do not implement in the default workspace:
 
-2. **Read the issue.** Read `issue.md` with `file_read`. Read each downloaded
-   screenshot with `file_read` (it renders images). Do not re-download or
-   re-fetch the issue — everything you need is local now.
+```bash
+scripts/create-workspace.sh issue-<N>
+# run the printed: pushd <absolute-workspace-dir>
+bun install
+mkdir -p .polytoken
+cp scripts/polytoken-config/hooks.json .polytoken/hooks.json
+printf '%s\n' '<N>' > .autopilot-issue-number
+printf '%s\n' "$PWD/scripts/polytoken-config" > .autopilot-config-dir
+printf '%s\n' "$POLYTOKEN_SESSION_ID" > .autopilot-session-id
+default_root=$(jj workspace list -T 'name ++ "\t" ++ root ++ "\n"' | awk -F '\t' '$1 == "default" { print $2 }')
+printf '%s\n' "$PWD" > "$default_root/.autopilot-workspace-dir"
+```
 
-3. **Ensure you're in a worktree.** If you're in the base repo of the current
-   project, enter a `jj workspace`.
-
-3. **Bootstrap the worktree.** If this session is running in a fresh worktree
-   (the `implement-issue` workflow uses `worktree=true`), `node_modules` will
-   be absent. Run `bun install` before any build or test command:
-
-   ```bash
-   bun install
-   ```
-
-## Your task
-
-You are an issue implementation agent. Follow these steps in order. Do NOT
-skip steps.
-
-This session has a two-phase interaction contract:
-
-- **Clarification phase:** Before planning or changing code, inspect the issue
-  and the relevant product/code context. Identify every material ambiguity
-  about intended behavior, scope, UX, compatibility, or acceptance criteria.
-  Ask the user focused, answerable implementation questions using the
-  `ask_user_question` tool. Group related questions into one interaction where
-  practical. Wait for the answers and incorporate them into the plan.
-- **Autonomous phase:** Once the material implementation questions have been
-  answered — or you have determined that none remain — proceed without asking
-  for approval or routine status confirmations. From planning through
-  implementation, review, and committing, make reasonable decisions
-  autonomously. Ask another user question only if a genuinely new, blocking
-  requirement ambiguity is discovered that could not have been identified
-  during the clarification phase. This phase ends with the implementation
-  commit(s) merging into main.
+For in-session execution, use the current Polytoken session id from the harness session environment/metadata in `.autopilot-session-id`. If the daemon was started from the default workspace, `.autopilot-workspace-dir` is the explicit handoff that makes the stop hook inspect this issue workspace; `POLYTOKEN_PROJECT_DIR` is authoritative when supplied. Verify all markers and the installed hook before running integration.
 
 ## Step 1: Clarify implementation intent
 
-1. This phase is read-only.
-2. Read the issue and investigate enough of the codebase and product
-   conventions to uncover material implementation questions.
-3. Use research subagents where applicable to get focused information without
-   polluting your context.
-4. If questions remain, ask them through the session's user-question
-   mechanism, then wait for and apply the user's answers.
-5. If no questions remain, continue immediately.
+Read the issue and investigate relevant code. Ask focused questions only for material ambiguity. When clarification is complete, continue autonomously without routine approval.
 
 ## Step 2: Plan
 
-Write and review the plan only after clarification is complete.
-
-1. You should be in plan facet already. If not, `switch_facet` to plan.
-2. Investigate the codebase.
-3. Write a plan with `write_plan`.
-4. Run the `plan-reviewer` subagent on your plan. Fix or rebut every finding.
-   Repeat until there are no critical or high findings.
-5. Call `handoff_plan` to hand off to the execute facet.
+Investigate the codebase, write and review the plan, and preserve clarification → plan → execute → review ordering.
 
 ## Step 3: Execute
 
-After handoff approval:
-
-1. Implement the plan.
-3. Commit with `Fixes #<N>` in the commit message (on its own line, after the
-   subject). This links the commit to the GitHub issue.
+Implement the plan. Commit exactly one non-empty implementation commit whose message includes `Fixes #<N>` on its own line after the subject. Do not push directly.
 
 ## Step 4: Review implementation
 
-1. Use the `quality-review` skill to review your implementation.
-2. Fix or rebut every finding. Repeat the review until clean.
-3. Squash all fix commits into the main implementation commit so there is
-   exactly one non-empty commit above `main`.
+Use the `quality-review` skill, fix or rebut findings, and ensure there is exactly one non-empty commit above `main`.
 
-## Step 5: Integrate into main
+## Step 5: Integrate and clean up
 
-A stop hook (`check-integration-before-stop`) will guide you on how to integrate
-your commit into `main`.
+From the issue workspace, run:
+
+```bash
+just integrate-into-main <N>
+jj diff --summary
+jj log -r 'main..@ ~ empty()' --no-graph
+jj diff --from main --to @
+scripts/cleanup-current-workspace.sh
+popd
+```
+
+Cleanup is deliberately refused before integration and will not delete an unintegrated or dirty workspace. Run `popd` only after the current-workspace cleanup script prints `now run popd`.
 
 ## Constraints
 
-- Do NOT push directly — use `just integrate-into-main`.
-- Commit message MUST include `Fixes #<N>`.
-- All `gh` commands MUST include `--repo TimoFreiberg/pantoken`.
-- Squash all commits into one before integrating.
+- All `gh` commands include `--repo TimoFreiberg/pantoken`.
+- Do not push directly; use `just integrate-into-main`.
+- Keep the commit message's `Fixes #<N>` line and squash all implementation fixes before integration.

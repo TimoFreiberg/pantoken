@@ -20,7 +20,12 @@ if ! [[ "$ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
   exit 1
 fi
 
-REPO_ROOT="${PANTOKEN_REPO_ROOT:-/Users/timo/src/pantoken}"
+REPO_ROOT="${PANTOKEN_REPO_ROOT:-$(jj root 2>/dev/null || true)}"
+if [ -z "$REPO_ROOT" ]; then
+  echo "ERROR: run from a jj workspace or set PANTOKEN_REPO_ROOT" >&2
+  exit 1
+fi
+REPO_ROOT=$(cd "$REPO_ROOT" && pwd -P)
 LOCK_FILE="$REPO_ROOT/.merge-lock"
 STALE_THRESHOLD=1800  # 30 minutes in seconds
 POLL_INTERVAL=2       # seconds between lock polls

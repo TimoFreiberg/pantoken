@@ -27,14 +27,12 @@ describe("implement-issue helpers", () => {
     expect(() => parseDaemonOutput("port=1234")).toThrow("session_id");
   });
 
-  test("plans workspace under <repo>/.workspaces based off main", () => {
+  test("plans default-workspace daemon and agent-owned workspace lifecycle", () => {
     const cmds = plannedCommands({ number: 42, url: "x", input: "42" }, "/repo/root");
-    const wsAdd = cmds[0]!;
-    expect(wsAdd.slice(0, 3)).toEqual(["jj", "workspace", "add"]);
-    expect(wsAdd).toContain("/repo/root/.workspaces/issue-42");
-    expect(wsAdd).toContain("--revision");
-    expect(wsAdd).toContain("main");
-    const polytokenNew = cmds[2]!;
+    expect(cmds[0]).toEqual(["polytoken", "new", "--no-attach"]);
+    expect(cmds[1]).toEqual(["scripts/create-workspace.sh", "issue-42"]);
+    expect(cmds[2]).toEqual(["pushd", "/repo/root/.workspaces/issue-42"]);
+    const polytokenNew = cmds[0]!;
     expect(polytokenNew).not.toContain("--config-dir");
     expect(polytokenNew).toContain("new");
     expect(polytokenNew).toContain("--no-attach");
@@ -73,25 +71,23 @@ describe("implement-issue helpers", () => {
     expect(result.command).toBe("sh");
     // args[0] = -c, args[1] = sh -c string, args[2] = "--", args[3..] = positional params
     const shString = result.args[1]!;
-    // Invokes the cleanup script via bash "$6"
-    expect(shString).toContain('bash "$6"');
-    // Correct workspace name
-    expect(shString).toContain("issue-42");
-    // Cleanup failure is non-fatal
-    expect(shString).toContain("|| echo");
+    // Cleanup is agent-owned, not launcher-owned.
+    expect(shString).not.toContain("cleanup-workspace");
+    expect(shString).not.toContain("workspace forget");
+    expect(shString).toContain('rm -rf -- "$5"');
     // Exits with the TUI's original status
     expect(shString).toContain("exit $status");
     // exit $status is the final command
     expect(shString.lastIndexOf("exit $status")).toBe(shString.length - "exit $status".length);
 
-    // Positional args: $1..$6
+    // Positional args: $1..$5
     const positional = result.args.slice(3);
     expect(positional[0]).toBe("abc");           // $1 = sessionId
     expect(positional[1]).toBe("/path/to/claims.sh"); // $2 = claims.sh
     expect(positional[2]).toBe("42");            // $3 = issue number
     expect(positional[3]).toBe("123");           // $4 = daemon PID
     expect(positional[4]).toBe("/tmp/context");  // $5 = context path
-    expect(positional[5]).toBe("/scripts/cleanup-workspace.sh"); // $6 = script path
+    expect(positional.length).toBe(5);
   });
 
   test("zellijCleanupCommand handles undefined daemonPid as 0 (AC.6)", () => {
