@@ -2,19 +2,27 @@
 
 ## Goal
 
-Produce a design + migration plan for removing pantoken's "new-session draft"
-concept, **committed to the repo at `docs/abandon-drafts-design.md`**. Under the
-new model, clicking `+` (sidebar top button, a project group's `+` header) or
-pressing ⌘N creates a real, empty session immediately — spawning the daemon and
-switching to it — instead of deferring creation until the first prompt is sent.
-This eliminates the entire class of "draft leaks the previous session's state"
-bugs, of which issue #91 (stale skills in `@skill:` autocomplete) is one instance.
+Remove pantoken's "new-session draft" concept. Under the new model, clicking
+`+` (sidebar top button or a project group's `+` header) creates a **real,
+empty session immediately** — spawning the daemon and switching to it — instead
+of deferring creation until the first prompt is sent. Sessions the user
+abandons without typing anything are **eagerly reaped** (warm cache, sidebar,
+and durable state), so stray `+` clicks leave no trace. This eliminates the
+entire class of "draft leaks the previous session's state" bugs, of which
+issue #91 (stale skills in `@skill:` autocomplete) is one instance.
 
-> **Scope of "immediately":** the `+`/⌘N entry points create on click (daemon
-> spawns). The *boot* path is deliberately lighter — when no session restores,
-> a landing state defers creation to first interaction rather than spawning a
-> daemon at cold start. See Q4. This split (immediate on explicit action,
-> deferred on passive boot) is an explicit design decision, not a contradiction.
+Two operator-settled scope calls shape this design (2026-07-26):
+
+- **Workspaces leave the GUI entirely.** Workspace isolation is repo tooling's
+  job: the `implement-issue` skill enters a `jj workspace` itself
+  (`scripts/implement-issue.ts:78` already does `jj workspace add` on the CLI
+  path), and polytoken's `pushd`/`popd` tools change the agent's cwd
+  in-session. The GUI's worktree toggle, branch picker, and cleanup UI are
+  deleted outright (Q1).
+- **No deferred-create stage anywhere.** The composer is always bound to a
+  real session. Boot-with-no-restore and ⌘N land on a **project chooser view**
+  (pure navigation — no composer, no pretend session), not on a landing that
+  acts like a session without being one (Q3/Q4).
 
 ## Background — why the draft concept exists and what it costs
 
@@ -38,15 +46,15 @@ sees stale state. Today this is patched with `!store.draft` gates in
 view, right context panel, etc. **`startDraft` (line 2441) does not clear
 `atRefs` (skills/subagents)** — unlike `openSession` (line 2251, which does) —
 so the previous session's skills leak into the draft's `@skill:` autocomplete.
-That is issue #91 exactly. `docs/TODO.md:59` records a prior round of the same
-bug class.
+That is issue #91 exactly. `docs/TODO.md` records prior rounds of the same bug
+class.
 
 ### Why a "just clear atRefs" fix is insufficient
 
 Skills come from a **running daemon's** `GET /state.available_skills`
 (`polytoken/driver.rs::list_at_refs`, line 2833). A draft has no session, so
-`list_at_refs(None)` returns empty. Files don't have this problem because drafts
-use a **server fallback** scoped to the draft cwd (`Composer.svelte:567`,
+`list_at_refs(None)` returns empty. Files don't have this problem because
+drafts use a **server fallback** scoped to the draft cwd (`Composer.svelte:567`,
 `drafting` forces fallback). Skills have no fallback — they read `store.atRefs`
 directly. So clearing `atRefs` on draft would make `@skill:` *empty* during
 draft composition: the wrong-skills bug becomes a no-skills bug. The pivot
@@ -61,11 +69,11 @@ ModelPicker.svelte, MobileSessionControls.svelte). Plus a persistence layer
 (`draftMap`/`draftConfigMap`/`pendingDrafts`/`composerDraftKey` + localStorage)
 and an e2e suite (`e2e/drafts.e2e.ts`).
 
-## The central tradeoff: daemon spawns on click
+## The central tradeoff: daemon spawns on click — defused by eager reaping
 
 `new_session` (`polytoken/driver.rs:2389`) → `warm_session` (line 1281) →
 `spawn_daemon` spawns a **real daemon process immediately**, even if the user
-never types. Existing mitigations:
+never types. Existing bounds:
 
 - **Warm cap (8, LRU):** `PANTOKEN_WARM_CAP` default 8; creating a 9th evicts
   the least-recently-used warm attachment (`config.rs:142`). Durable session
@@ -74,167 +82,171 @@ never types. Existing mitigations:
   (`config.rs:143`); an untouched session's warm attachment is reaped after
   10 min, durable row persists.
 
-So the cost is bounded: stray `+` clicks leave daemon processes for up to 10
-minutes and churn the warm pool. The polytoken TUI accepts this tradeoff
-(`docs/DECISIONS.md:39`: "support any feature the polytoken tui supports").
-This design accepts it too — and adds an **empty-first eviction** rule (Q5
-below) so the churn cost lands on throwaway empty sessions, not real work.
+The load-bearing mitigation is new: **eager reaping of empty, default-settings
+sessions** (Q5). An abandoned empty session is destroyed outright — warm
+daemon, sidebar row, and durable state — so stray `+` clicks leave nothing
+behind for the cap or reaper to ever see. The polytoken TUI accepts the
+spawn-on-click tradeoff (`docs/DECISIONS.md:39`: "support any feature the
+polytoken tui supports"); with eager reaping, pantoken accepts it too and
+pays almost nothing for it.
 
 ## Resolved design questions
 
-### Q1. Worktree toggle — must be decided pre-creation
+### Q1. Workspaces — removed from the GUI entirely
 
-**Finding:** worktrees are created *during* `new_session` server-side
-(`polytoken/driver.rs:2425`, `worktree::create`). There is **no live "convert
-session to worktree" action** — the daemon is already running in the base cwd by
-the time the session exists. All other draft config fields (model, thinking,
-facet, permission-monitor, adventurous-handoff) **do** have live `SessionAction`
-endpoints (`SetModel`, `SetThinking`, `SetFacet`, `SetPermissionMonitor`,
-`ToggleAdventurousHandoff` — `wire.rs:518,528,531,534,507`), so they can become
-live switches on the running session.
+**Decision:** pantoken no longer creates, displays, or cleans up
+workspaces/worktrees. The whole feature is deleted end-to-end:
 
-**Decision:** The worktree choice is made **before** the session is created, in
-the pre-create chooser (Q3). Two entry shapes:
+- **Protocol:** `worktree`/`baseBranch` on `newSession` (`wire.ts:428–439`),
+  the `listBranches`/`branchList` request/reply (`wire.ts:510,249`),
+  `cleanupWorktree` (`wire.ts:465`), the `worktreeRetained` notice
+  (`wire.ts:313`), and `WorktreeInfo` on `SessionListEntry`
+  (`session-driver.ts:328–343`). `PROTOCOL_VERSION` (wire.ts:30) bumps 5→6.
+- **Server:** the driver-trait methods `cleanup_worktree` (`driver.rs:117`)
+  and `list_branches` (`driver.rs:233`), the `worktree`/`base_branch` options
+  on `NewSessionOpts` (`driver.rs:22–23`), the hub handlers
+  (`hub.rs:1612,1736,1785`), `shared/worktree.rs`, `worktree_store.rs`,
+  `worktree_name`, the mock driver's worktree maps
+  (`mock_driver.rs:1909–1923`), and the `worktree::create` call in
+  `polytoken/driver.rs:2425`.
+- **Client:** the Composer worktree chip + branch picker
+  (`Composer.svelte:168–180,1728–1745`), store plumbing (`branchList`,
+  `queryBranches`, `cleanupWorktree`, the `worktreeRetained` handler, and the
+  draft's `worktree`/`baseBranch` fields), the Sidebar worktree glyph +
+  context-menu cleanup + copy-path (`Sidebar.svelte:330–339,976–980,
+  1109–1135`), the StatusHeader worktree subtitle (`StatusHeader.svelte:
+  87–94`), worktree-aware grouping in `session-filter.ts`/`project-menu.ts`,
+  and the `worktree` field in `prompt-outbox.ts` (18,108).
+- **E2E:** worktree coverage in `composer-chrome.e2e.ts` (~lines 284–460),
+  `composer.mobile.e2e.ts` (70–124), `drafts.e2e.ts` (58–91),
+  `sessions.e2e.ts` (445–519), `sessions-view.mobile.e2e.ts` (204–207),
+  `notice-placement.e2e.ts` (102,139), and `helpers.ts::createWorktreeSession`
+  (121–134).
 
-- **Project `+` header** (known cwd): a **left-click creates a plain session
-  immediately**; the worktree option lives behind a **right-click context menu**
-  on the same `+` button ("New worktree session in `<repo>`"). This keeps the
-  common one-tap default fast (no inline choice to trip over) while making
-  worktree discoverable via the same right-click pattern the sidebar already
-  uses on session rows (`Sidebar.svelte:947`, `openMenu`). The context menu is
-  the "easiest obvious fix" for the worktree special case per the operator.
-- **⌘N / top `+`** (chooser): the dedicated new-session chooser view (Q3)
-  includes a worktree toggle, in the same way the current draft chip does.
+**Why this is right, not just bold:** the worktree toggle was the *only* draft
+config field with no live post-create path (worktrees are created during
+`new_session`; there is no "convert session to worktree" action). Every other
+field has a live `SessionAction` endpoint (`wire.rs:518,528,531,534,507`).
+Removing workspaces makes the config model uniform — **everything** is a live
+switch on a running session — and deletes the special-case UI that uniformity
+would otherwise have to carry (right-click menus, pre-create toggles, branch
+pre-fetch).
 
-**Alternative considered (rejected):** an inline "New / New worktree" choice
-revealed on left-click of the project `+`. Rejected — it adds a tap to the
-common path; right-click keeps the default one-tap and co-locates worktree
-where power-users already look (the existing context-menu pattern).
+**Where isolation lives now:** repo tooling. The `implement-issue` skill
+already instructs entering a `jj workspace`; the CLI path
+(`scripts/implement-issue.ts:78`) runs `jj workspace add` and
+`scripts/cleanup-workspace.sh` reaps it. Polytoken's `pushd`/`popd` tools let
+any session relocate its agent into a workspace on demand. A session whose
+agent entered a workspace keeps its recorded cwd at the base repo — sidebar
+grouping, file-mention scoping, and `/debug/state` are unaffected.
 
-**Future note (out of scope here):** polytoken has a `pushd`/`popd` tool, so
-worktree-style isolation *could* eventually be created in-session rather than
-pre-creation. That path isn't baked yet; the right-click pre-create worktree is
-the interim fix. A later issue can explore in-session workspace creation.
+**Accepted loss:** historical pantoken-created worktree sessions lose their
+sidebar glyph, group-under-base behavior, and the "Clean up worktree…" menu
+item. For a single-user tool this is cosmetic; cleanup is
+`jj workspace forget` / the repo's cleanup script.
 
-**Migration note:** the worktree base-branch picker (`branchList` /
-`queryBranches`) currently pre-fetches on `startDraft` (`store.svelte.ts:2490`).
-Under the pivot it pre-fetches when the worktree toggle is selected in the
-pre-create chooser, before the create call.
+### Q2. Config chips — live session switches (now universal)
 
-### Q2. Config chips — become live session switches
-
-**Decision:** Model, thinking, facet, permission-monitor, and
-adventurous-handoff all become **live `SessionAction`s on the running session**,
-applied immediately via the existing endpoints. This is *cleaner* than today's
-deferred "apply on create" logic (`polytoken/driver.rs:2459–2510`, which
-collects failures as notices because the journal doesn't exist yet). The chips
-render from `store.session` (the real session's reported state) instead of
-`store.draft`.
+Model, thinking, facet, permission-monitor, and adventurous-handoff all become
+**live `SessionAction`s on the running session**, applied immediately via the
+existing endpoints. This is *cleaner* than today's deferred "apply on create"
+logic (`polytoken/driver.rs:2459–2510`, which collects failures as notices
+because the journal doesn't exist yet). The chips render from `store.session`
+(the real session's reported state) instead of `store.draft`. With workspaces
+gone (Q1), there are **no exceptions** — every configurable thing has a live
+post-create path.
 
 **Persistence:** per-session composer text already keys `s:<sessionId>`
-(`composerDraftKey`, line 675) for live sessions — this path already works and
-survives reload. Config overrides that were persisted per-draft (`n:<cwd>`) are
-no longer needed: once the session exists, its config is the daemon's own state,
-re-fetched on open. If a "default model/facet per project" preference is still
-wanted, that becomes a *preference* layer (applied as the first live action
-after create), not a draft-persistence layer.
+(`composerDraftKey`, line 675) for live sessions — this path works today and
+survives reload. Per-draft config persistence (`n:<cwd>`) is no longer needed:
+once the session exists, its config is the daemon's own state, re-fetched on
+open. If a "default model/facet per project" preference is still wanted, that
+becomes a *preference* layer (applied as the first live action after create),
+not a draft-persistence layer.
 
-### Q3. ⌘N / top `+` — a dedicated new-session chooser view
+### Q3. The new-session chooser — one entry view for ⌘N, top `+`, and boot
 
-**Finding:** `ProjectMenu.svelte` exists today as a dropdown overlay (lists known
-projects ranked by recency + "New project…" → `DirPicker`), opened from the
-draft's project chip (`Composer.svelte:1716`, `draft-project-control`).
+**Decision:** ⌘N, the top sidebar `+`, and boot-with-no-restore all open a
+**dedicated new-session chooser view** — a full-pane view offering only
+project-selection affordances: a **recent-projects list** (reuse
+`lib/project-menu.ts`'s ranking), a **"Browse…" button** → `DirPicker`, and
+nothing else. Picking a project creates the session immediately in that cwd.
 
-**Decision:** ⌘N and the top sidebar `+` open a **dedicated new-session chooser
-view** — a full-pane view (not a dropdown) that offers only project-selection
-affordances: a **recent-projects list** (reuse `lib/project-menu.ts`'s ranking),
-a **"Browse…" button** → `DirPicker`, and a **worktree toggle** (Q1). Picking a
-project (or browsing to one) creates the session immediately in that cwd. The
-default landing (no project chosen yet) defaults to `$HOME` (the existing
-`defaultNewSessionCwd`, `store.svelte.ts:171`).
+**Fast path:** the chooser opens with the **last active project
+pre-selected**, so ⌘N, Enter creates a session in the project you were just
+in — the common case stays two keystrokes. A different project is one
+arrow-down away.
 
-**Why a view, not a dropdown:** the chooser is the entry surface for a brand-new
-session — making it a real view (like the boot landing) gives it room for the
-recent list + browse + worktree toggle without cramming them into a popover,
-and it reads naturally as "where am I starting this?" rather than a config chip.
+**Project `+` header** (known cwd): creates immediately, no chooser, no
+right-click menu (the worktree option it would have held is gone, Q1).
 
-**Fast path:** the chooser opens with the top project pre-highlighted, so Enter
-creates immediately — one keystroke to confirm. This preserves the speed of
-today's ⌘N-then-type flow while still surfacing the chooser (a different project
-is one arrow-down away). The project `+` header needs no chooser (its cwd is
-known), so it skips straight to creation.
-
-### Q4. Boot landing — create-on-interact, not on boot
-
-**Finding:** today `startDraft(defaultNewSessionCwd)` fires on boot when no
-session restores (`store.svelte.ts:1490,1524`) and on boot-restore failure.
+### Q4. Boot landing — the chooser, not a composer
 
 **Decision:** on boot, if a session restores, open it (unchanged). If none
-restores, show a **landing state** (the `NewSession.svelte` "What would you like
-to work on?" prompt can be repurposed as a non-draft landing) that creates the
-session on first interaction (first prompt or first config pick) — *not*
-auto-spawning a daemon on boot. This avoids a daemon spawn at cold start for a
-user who may just be glancing at the app. The landing composes the first prompt
-+ any config picks, then issues one `newSession` (the server already supports
-bundling the first prompt in `new_session`, `hub.rs:1654`).
+restores, show the **chooser view** (Q3). There is no composer without a
+session, no landing-state config object, no bundled-first-prompt create. The
+composer is *always* bound to a real session, so the stale-state bug class has
+no overlay to live in — this is stronger than the earlier "landing with
+scoped state" idea, which kept a miniature draft (config picks taking exactly
+one path into a bundled `newSession`) and with it a miniature version of the
+same risk.
 
-**This is the one place a "deferred create" survives** — but it's a true landing
-(no `store.draft` overlay over a stale `store.session`; the landing is a
-distinct empty state), so it does not reintroduce the stale-state bug class.
+Boot also never *restores* an empty+default session (Q5): one left behind by
+a killed client is reaped on sight rather than reopened.
 
-**Leak-free mechanism:** the landing's pre-create config picks live in a
-dedicated **landing-state object scoped to the landing component** — *not*
-`store.draft`, and *not* readable by `App.svelte`'s gated surfaces
-(approvals/plan view/right context panel all read `store.session`, which the
-landing leaves null/empty). The only path the landing's config takes is into the
-single bundled `newSession` call; once the session is created, the landing
-object is discarded and config is re-fetched from the real session's state.
-This is what distinguishes it from `store.draft`, which overlayed `store.session`
-and leaked into every surface that read it.
+### Q5. Eager reaping of empty sessions
 
-### Q5. Warm-pool eviction — empty sessions evicted first
+**Decision:** sessions that are **empty** (no prompt accepted) **and
+default-settings** (no live config `SessionAction` applied since creation)
+are ephemeral:
 
-**Finding:** the warm cap evicts the least-recently-focused *idle* session when a
-9th warms (`polytoken/driver.rs:1175`, `shared/warm_cap.rs::eviction_plan`). The
-`evictable` predicate skips running sessions (mid-turn) and the protected id; it
-does **not** prefer empty sessions. So spamming `+` can evict a real (idle, but
-populated) session's daemon to make room for a throwaway empty one — the worst
-case of the daemon-churn risk.
+- **Navigate away / close:** leaving an empty+default session (switching to
+  another session, opening the chooser, quitting) destroys it: the client
+  sends a new `destroySession`-style message, the server reaps the warm
+  daemon, deletes the durable session state, and broadcasts removal; the
+  sidebar row disappears. Stray `+` clicks leave **no trace**.
+- **Boot:** restore skips empty+default sessions; the server reaps any it
+  finds rather than reopening them (Q4).
+- **Warm-cap backstop:** keep a cheap empty-first rule at the cap (evict
+  never-prompted sessions before populated ones) so even sessions that escape
+  eager reaping churn out before real work. `shared/warm_cap.rs::eviction_plan`
+  stays a pure LRU function; the call site (`driver.rs:1175`) does the
+  two-pass (empty-only predicate first, plain LRU for the remainder).
+- **Idle reaper:** unchanged (10-min bound on anything untouched).
 
-**Decision:** add an **empty-first** priority to eviction. Among evictable (idle)
-sessions, evict **empty** (never-prompted) sessions before any session that has
-a transcript. Only when no empty sessions remain does it fall back to plain LRU.
-Concretely: add a `has_prompt` signal on `WarmSession` (a new field, e.g.
-`has_prompt: AtomicBool`, set when the first prompt is accepted via the prompt
-path). Note: `user_message_count` exists on `SessionListEntry`
-(`session_driver.rs:502`) but is hardcoded to `0` for warm sessions
-(`driver.rs:1888`, `sessions_registry.rs:276` — the daemon's `SessionStateSnapshot`
-does not expose a per-session message count), so this is net-new tracking, not a
-reuse of an existing signal.
+**Race-safety:** the "empty" flag must flip **synchronously on the client at
+submit** (before any navigate-away can interleave) and server-side when the
+prompt is accepted. A fast send-then-switch must never reap a session whose
+first prompt is in flight.
 
-**Mechanism:** `eviction_plan` is a pure function that iterates `order`
-(oldest→newest LRU) and picks the first N evictable ids — it has no notion of
-priority. Preserve its contract + existing tests unchanged by doing **two passes
-at the call site** (`driver.rs:1175`): first call `eviction_plan` with an
-`evictable` predicate that requires `has_prompt == false` (empty sessions only);
-if that doesn't yield enough victims, call again with the original predicate
-(plain LRU) for the remainder. This keeps `shared/warm_cap.rs` untouched.
+**Net-new server capability:** there is no delete-session path today — only
+`setArchived` (`wire.ts:459`). Both drivers need a destroy operation (mock:
+trivial, sessions are in-memory fixtures; polytoken: reap the warm attachment
+and delete the registry row). **Open implementation question for that phase:**
+whether the polytoken daemon exposes session deletion. If it does not, the
+fallback is a pantoken-side tombstone (reap the warm attachment, hide the row
+from `list_sessions`) — the process is gone and the session is invisible,
+which achieves the UX goal; a leftover registry entry on disk is harmless.
 
-**Effect:** spamming `+` only ever reaps throwaway empty sessions until none are
-left — real work is protected. This directly defuses the daemon-churn risk: the
-cost of stray clicks now lands entirely on sessions the user never used.
-
-**Why not also evict empty sessions under the idle reaper sooner?** The idle
-reaper (10 min) already bounds the lifetime of any untouched warm attachment. The
-empty-first rule changes *which* session loses its daemon at cap time, not
-*when* an idle one is reaped — they compose cleanly.
+**Why not the old empty-first-only plan:** an earlier draft of this design
+kept abandoned empty sessions around (durable rows, sidebar entries) and only
+prioritized them for warm-cap eviction. The operator rejected that: empty
+sessions are noise, not data. Eager reaping is strictly cleaner and makes the
+warm-cap rule a backstop instead of the mechanism.
 
 ## What gets removed
+
+**Worktree/workspace machinery (phase 1 — the first implementation chunk):**
+the full Q1 list above — protocol messages, driver-trait methods, hub
+handlers, `shared/worktree*.rs` + `worktree_store.rs`, mock-driver worktree
+state, client chip/picker/glyph/menus, and all worktree e2e coverage.
+
+**Draft machinery (later phases):**
 
 - `store.draft` and the entire `draft`/`draftMap`/`draftConfigMap`/
   `pendingDrafts`/`composerDraftKey` (`n:<cwd>`) machinery
   (`store.svelte.ts:330–765`, ~106 references in that file alone).
-- `NewSession.svelte` as a draft view (repurposed as the boot landing, Q4).
+- `NewSession.svelte` as a draft view (the chooser replaces it; Q3/Q4).
 - Sidebar draft rows (`pendingDrafts`, the floating draft row, `discardDraft`).
 - The `creatingSession` placeholder + `submitDraft` deferred-create contract
   (replaced by immediate `newSession`).
@@ -245,127 +257,121 @@ empty-first rule changes *which* session loses its daemon at cap time, not
 - `e2e/drafts.e2e.ts` (replaced by new-session-creates-immediately tests).
 - The "Draft persistence" decision in `docs/DECISIONS.md:47` — **must be
   revised** to record the pivot and its rationale (kills the stale-state bug
-  class; daemon-spawn-on-click accepted as the tradeoff, bounded by warm cap +
-  idle reaper).
+  class; daemon-spawn-on-click accepted, defused by eager reaping).
 
-## Migration path (for the follow-up implementation issue)
+## Migration path
 
-Phased so each step leaves the app working:
+Phased so each step leaves the app working. Phase 1 is the first
+implementation chunk; the rest follow as their own issues.
 
-1. **Pre-create chooser (Q1 + Q3):** build the `ProjectMenu`-based `+`/⌘N entry
-   with the worktree toggle, calling `newSession` immediately on pick. Land
-   *alongside* the existing draft path (feature-flagged) so both work during
-   migration.
-2. **Live config switches (Q2):** ensure the config chips issue live
-   `SessionAction`s post-create. (Most already exist for live sessions; verify
-   the post-create-immediate path.)
-3. **Boot landing (Q4):** repurpose `NewSession.svelte` as a true landing that
-   creates on first interaction.
-4. **Empty-first eviction (Q5):** add a `has_prompt` field on `WarmSession`
-   (set when the first prompt is accepted), and do the two-pass `eviction_plan`
-   call at `driver.rs:1175` so empty (never-prompted) sessions are evicted before
-   any with a transcript. Unit-test the new two-pass policy in `driver.rs`'s test
-   module (the call-site behavior; `shared/warm_cap.rs` stays untouched per Q5).
-5. **Remove the draft overlay:** delete `store.draft` + persistence layer +
-   sidebar draft rows + `creatingSession` placeholder + `submitDraft`.
-6. **Remove the `!store.draft` gates** in `App.svelte` — surfaces read the real
-   session. Verify each formerly-gated surface (approvals, plan view, right
-   context panel, context-pressure cue) behaves correctly against an empty
-   freshly-created session.
-7. **Remove the server-side deferred-apply logic** in `polytoken/driver.rs`.
-8. **Rewrite e2e:** replace `e2e/drafts.e2e.ts` with new-session-creates-
-   immediately tests; update `e2e/file-mention.e2e.ts` (the draft-cwd
-   fallback test at line 19 changes shape — a fresh empty session *has* a cwd
-   and its skills load via the normal `atRefs` push).
-9. **Revise `docs/DECISIONS.md`** "Draft persistence" entry.
+1. **Remove worktree support end-to-end (Q1).** Pure deletion across
+   protocol/server/client/e2e. Independent of the draft pivot, shrinks the
+   draft surface (the draft carries `worktree`/`baseBranch` today), and lands
+   the protocol 5→6 bump before the noisier refactor.
+2. **Destroy-session capability + eager reaping (Q5).** New wire message +
+   driver-trait method (mock + polytoken), client reap-on-navigate-away,
+   boot-time skip-and-reap, warm-cap empty-first backstop. Must land *before*
+   create-on-click so stray clicks never accumulate.
+3. **Chooser view + create-on-click (Q3/Q4).** Build the chooser (recent
+   projects + Browse…, last-active pre-selected), wire ⌘N/top-`+`/boot to it,
+   project `+` header creates immediately. Sessions are real from this phase
+   on; the draft still exists underneath until phase 4–5, so land this
+   feature-flagged alongside the old path if the diff gets uncomfortable.
+4. **Live config switches (Q2).** Verify the chips issue live `SessionAction`s
+   post-create on the immediate-create path (most already work for live
+   sessions).
+5. **Remove the draft overlay.** Delete `store.draft` + persistence layer +
+   sidebar draft rows + `creatingSession` placeholder + `submitDraft`, then
+   the `!store.draft` gates in `App.svelte`, then the server-side
+   deferred-apply logic (`polytoken/driver.rs:2459–2510`). Verify each
+   formerly-gated surface (approvals, plan view, right context panel,
+   context-pressure cue) against an empty freshly-created session.
+6. **Rewrite e2e.** Replace `e2e/drafts.e2e.ts` with new-session-creates-
+   immediately tests (project `+` header, ⌘N chooser fast path, boot landing,
+   eager reap on navigate-away, config chips as live switches); update
+   `e2e/file-mention.e2e.ts` (the draft-cwd fallback test at line 19 changes
+   shape — a fresh empty session *has* a cwd and its skills load via the
+   normal `atRefs` push). Make `mock_driver.rs::list_at_refs` session/cwd-aware
+   and add the #91 regression test (A→B skills isolation).
+7. **Docs.** Revise `docs/DECISIONS.md:47` ("Draft persistence") and add a
+   `docs/TODO.md` cross-reference to this design as the structural fix for
+   the whole stale-state bug class.
 
 ## Acceptance Criteria
 
-These validate the *design* is complete and actionable for a follow-up
-implementation issue — they are not code-testable in this issue (no code is
-written). They are verified by **operator review against the codebase**, not by
-the document asserting its own sections exist.
+These validate the *design* is complete and actionable — no code is written by
+this document. Verified by operator review against the codebase.
 
-- **AC.1** The design resolves all five open questions (worktree, config chips,
-  ⌘N chooser, boot landing, warm-pool eviction) with a concrete decision
-  grounded in the codebase.
-  Verified by: operator review confirms each question has a concrete decision,
-  and each decision's file:line citation is accurate against the repo
-  (spot-checked by plan-reviewer).
-- **AC.2** The design identifies the full removal surface (what gets deleted)
-  and the migration phasing. Verified by: operator review confirms the
-  removal-surface list and migration phases are complete against a grep of
-  `store.draft`/draft-persistence references in the client tree (the ~166
-  references / 10 files named in "Scale of the draft concept").
+- **AC.1** The design resolves all five questions (workspaces, config chips,
+  chooser, boot landing, eager reaping) with concrete decisions grounded in
+  the codebase. Verified by: operator review confirms each decision's
+  file:line citations against the repo.
+- **AC.2** The design identifies the full removal surface (worktree machinery
+  + draft machinery) and the migration phasing. Verified by: operator review
+  against a grep of `worktree` and `store.draft`/draft-persistence references.
 - **AC.3** The design names the decision it revises (DECISIONS.md "Draft
-  persistence") and the new tradeoff (daemon-on-click, bounded by warm cap +
-  idle reaper). Verified by: operator review confirms the DECISIONS.md entry is
-  cited (line 47) and the warm-cap/idle-reaper bounds are real
-  (`config.rs:142,143`, checked against the repo).
-- **AC.4** The design confirms all draft config fields have a live post-create
-  path (so nothing is lost), singling out worktree as the one pre-create-only
-  field. Verified by: operator review confirms each config field maps to a live
-  `SessionAction` endpoint (`wire.rs:518,528,531,534,507`) and worktree is
-  created only at `new_session` (`driver.rs:2425`), with no live "convert"
-  action — checked against the repo.
+  persistence", line 47) and the new tradeoff (daemon-on-click, defused by
+  eager reaping; warm cap + idle reaper as backstops). Verified by: operator
+  review confirms the bounds are real (`config.rs:142,143`).
+- **AC.4** The design confirms every remaining config field has a live
+  post-create path, with workspaces removed as the one field that didn't.
+  Verified by: operator review confirms each field maps to a live
+  `SessionAction` endpoint (`wire.rs:518,528,531,534,507`).
 
 ## Test Strategy
 
-No code is written in this issue, so no tests are written here. The design
-*specifies* the test shape the follow-up implementation issue must satisfy:
+No code is written by this document; it specifies the test shape each
+follow-up phase must satisfy:
 
-- The follow-up must add an e2e test reproducing issue #91's scenario: create a
-  session in project A, `+` a session in project B (with B-specific skills),
-  type `@skill:` in B, and assert B's skills (not A's) appear. Against the mock
-  this requires making `mock_driver.rs::list_at_refs` session/cwd-aware (today
-  it returns a fixed list regardless of session, `mock_driver.rs:2781`).
-- The follow-up must replace `e2e/drafts.e2e.ts` with new-session-creates-
-  immediately tests covering: project `+` header (immediate create), ⌘N chooser,
-  worktree toggle pre-create, boot landing, config chips as live switches.
-- **Test-infrastructure gap flagged:** the current mock driver cannot reproduce
-  per-project skill differences, so a regression test for #91's exact scenario
-  is not possible until `list_at_refs` is made session/cwd-aware in the mock.
-  This is implementation work for the follow-up issue, explicitly called out
-  here so it isn't missed.
+- **Phase 1 (worktree removal):** green `bun run check`, `bun test`,
+  `bun run check:rs`, and `bun run test:e2e` with all worktree specs deleted;
+  wire-protocol unit tests updated for the 5→6 bump.
+- **Phase 2 (eager reap):** Rust unit tests for destroy-session in both
+  drivers + the two-pass warm-cap call site; e2e for reap-on-navigate-away
+  and boot skip-and-reap; a regression test that a send-then-fast-switch never
+  reaps a session whose first prompt is in flight.
+- **Phase 6:** the #91 regression e2e (session in project A, `+` a session in
+  project B with B-specific skills, `@skill:` shows B's skills) — requires
+  making `mock_driver.rs::list_at_refs` session/cwd-aware (today it returns a
+  fixed list regardless of session, `mock_driver.rs:2781`).
+- **Test-infrastructure gap flagged:** until that mock change lands, #91's
+  exact scenario cannot be regression-tested. It is implementation work
+  inside phase 6, explicitly called out so it isn't missed.
 
 ## Review Strategy
 
-This is a design doc. It should be reviewed by the operator (the author of the
-"Draft persistence" decision) for agreement before a follow-up implementation
-issue is filed. The `plan-reviewer` subagent checks the plan shape against the
-spec; since no code ships, implementation review does not apply.
+This design doc is reviewed by the operator (author of the "Draft persistence"
+decision). Each implementation phase goes through the repo's normal review
+(the `quality-review` skill) before integrating.
 
 ## Documentation Strategy
 
-- Revise `docs/DECISIONS.md` "Draft persistence" (line 47) — **in the follow-up
-  implementation issue**, not this design doc (this issue records the decision
-  to pivot; the DECISIONS.md edit lands with the code).
-- Add a note to `docs/TODO.md` near line 59 (the prior "new session view leaked
-  previous session's state" entry) cross-referencing this design as the
-  structural fix for the whole bug class. **In the follow-up implementation
-  issue**, not this design doc.
+- This document is the design record; it lands ahead of the code.
+- `docs/DECISIONS.md:47` revision and the `docs/TODO.md` cross-reference land
+  in phase 7 (with the code they describe), not here.
+- Phase 1 updates `server-rs/PROGRESS.md` where it credits the ported
+  worktree modules (lines 70–72,159) and sweeps `docs/` for worktree
+  references that become stale.
 
 ## Risks, Blockers, and Required Decisions
 
-- **Risk: cannot regression-test #91's exact scenario.** The mock driver's
-  `list_at_refs` returns a fixed skill list regardless of session
-  (`mock_driver.rs:2781`), so the follow-up must first make it session/cwd-aware
-  before the A→B skills-isolation e2e test can be written. Until that
-  infrastructure work lands, the #91 regression is unguarded. (Surfaced in Test
-  Strategy too; this entry mirrors it here per the plan-spec's requirement that
-  test-infrastructure gaps appear in Risks.)
-- **Risk: daemon-spawn churn.** Stray `+` clicks spawn daemons. Mitigated by
-  warm cap (8) + idle reaper (10 min), and **further defused by empty-first
-  eviction (Q5)** — stray clicks only ever evict throwaway empty sessions, never
-  real work. If this still proves too costly in practice, the boot-landing
-  "create-on-interact" pattern (Q4) could be extended to the `+`/⌘N path as a
-  fallback — but that reintroduces a deferred-create overlay, so it should only
-  be done if churn is observed as a real problem despite Q5.
-- **Risk: worktree UX.** The pre-create worktree toggle is the one piece with no
-  existing live-switch fallback. The right-click "New worktree session" on the
-  project `+` header is new UI; the default left-click stays one-tap.
-- **Risk: large refactor surface.** ~166 references. Phased migration (feature-
-  flagged alongside the old path) mitigates this; each phase ships independently.
-- **Decision required from operator (already answered):** scope = design-first,
-  no code. The five open questions are resolved in this doc; if the operator
-  disagrees with any resolution, that blocks the follow-up implementation issue.
+- **Open question (phase 2): daemon-side session deletion.** Whether the
+  polytoken daemon can delete a session from its registry is unverified. If
+  not, the pantoken-side tombstone fallback (Q5) achieves the UX goal. This
+  must be resolved at the start of phase 2, not discovered mid-refactor.
+- **Risk: daemon-spawn churn.** Defused by eager reaping (Q5) — abandoned
+  empties are destroyed, not pooled — with warm cap + idle reaper as
+  backstops. If churn is still observed in practice, revisit; do *not*
+  reintroduce a deferred-create overlay as the fix.
+- **Risk: workspaces leave the GUI.** Historical worktree sessions lose
+  glyph/grouping/cleanup UI (accepted, Q1). Manual isolation is now
+  agent-driven (`pushd` into a `jj workspace`) — a product call the operator
+  has made; if it proves painful, the fix belongs in repo tooling, not back
+  in the GUI.
+- **Risk: large refactor surface.** ~166 draft references + the worktree
+  surface. Phasing keeps each step shippable; phase 1 is deliberately the
+  simplest (pure deletion) to build momentum and shrink later diffs.
+- **Decisions already settled by the operator (2026-07-26):** design-first
+  scope; workspaces removed from the GUI entirely; no deferred-create stage
+  (composer always bound to a real session); eager reaping of empty+default
+  sessions; chooser with last-active project pre-selected.
