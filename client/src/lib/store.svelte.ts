@@ -1145,6 +1145,23 @@ class PantokenStore {
         // One-time migration of legacy unnamespaced localStorage data to the
         // namespaced key for this server. Idempotent — a no-op if already done.
         migrateLegacyPersistence(msg.serverId);
+        // Reload per-client state from the namespaced keys now that the serverId
+        // is known. The store initialized draftMap etc. from the legacy non-
+        // namespaced keys at construction; after migration the namespaced keys
+        // are authoritative. This also covers the reload case where the draft
+        // was persisted to the namespaced key but the store read the stale
+        // legacy key at boot.
+        this.draftMap = loadNamespacedMap<string>("composerDrafts", msg.serverId);
+        this.draftConfigMap = loadNamespacedMap("draftConfig", msg.serverId);
+        this.promptHistory = loadNamespacedMap("promptHistory", msg.serverId);
+        const cwd = loadNamespacedScalar("lastProjectCwd", msg.serverId);
+        if (cwd !== null) this.lastProjectCwd = cwd;
+        // Reload the composer draft for the active session (if any) since
+        // draftMap was just refreshed. This must happen before any
+        // maybeOpenBootDraft → openSession → stashDraft, otherwise the empty
+        // boot-time composerDraft overwrites the persisted draft.
+        const bootActiveId = this.activeSessionId ?? this.session.ref?.sessionId;
+        if (bootActiveId) this.loadDraft(`s:${bootActiveId}`);
         void this.hydrateOutbox(msg.serverId);
         // The server names the bundle it is SERVING; if it differs from the one
         // we're RUNNING, the server updated underneath this tab/PWA (sw.js is
@@ -1195,8 +1212,12 @@ class PantokenStore {
         this.maybeFinishCreating();
         // Prompt-less create-on-click: there's no prompt row to wait for, so the
         // seed itself means the session is ready — clear the warm-up placeholder.
-        if (this.creatingSession && this.creatingSession.promptId === undefined)
+        if (this.creatingSession && this.creatingSession.promptId === undefined) {
           this.creatingSession = null;
+          // Mark the session as lifecycle-accepted so boot restore doesn't reap it
+          // (createSession doesn't go through openSession, which does this).
+          if (built.ref) this.markLifecycleAccepted(built.ref.sessionId);
+        }
         if (this.bootRestoreInFlight && built.ref)
           this.bootRestoreInFlight = false;
         // A seed lands after a successful switch — clear the retry capture
@@ -2229,8 +2250,9 @@ class PantokenStore {
     }
     // Save the draft we're leaving (the new-session draft, or the prior session's text)
     // before the composer re-points; navigating to a session exits any new-session draft
-    // or the chooser.
-    this.stashDraft();
+    // or the chooser. Skip during boot restore — the composer hasn't been loaded yet,
+    // so stashing would overwrite the persisted draft with an empty string.
+    if (!this.bootRestoreInFlight) this.stashDraft();
     this.draft = null;
     this.chooserOpen = false;
     // Navigating away abandons any in-flight "creating session" placeholder — its
