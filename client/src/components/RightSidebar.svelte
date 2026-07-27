@@ -71,6 +71,15 @@
   function copyPath(path: string): void {
     void store.copyToClipboard(path);
   }
+
+  /** Middle-ellipsize a path for compact display: if longer than ~40 chars, show
+   *  `…/last-two-segments` (e.g. `…/pantoken/client`). Short paths pass through. */
+  function middleEllipsize(path: string): string {
+    if (path.length <= 40) return path;
+    const parts = path.split("/").filter(Boolean);
+    if (parts.length <= 2) return path;
+    return `…/${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
+  }
 </script>
 
 <aside
@@ -230,6 +239,28 @@
       {/if}
     </section>
   </div>
+
+  {#if s.cwd}
+    <footer class="session-footer" data-testid="session-footer">
+      <div class="section-head">
+        <span class="section-title">Working directory</span>
+        {#if s.cwdStackDepth && s.cwdStackDepth > 0}
+          <span class="section-count" data-testid="cwd-stack-depth">
+            Stack · {s.cwdStackDepth}
+          </span>
+        {/if}
+      </div>
+      <button
+        class="cwd-path"
+        data-testid="cwd-path"
+        title={s.cwd}
+        aria-label="Copy working directory {s.cwd} to clipboard"
+        onclick={() => copyPath(s.cwd!)}
+      >
+        {middleEllipsize(s.cwd)}
+      </button>
+    </footer>
+  {/if}
 </aside>
 
 <TodoDetail />
@@ -586,6 +617,38 @@
     font-size: 11px;
     color: var(--text-faint);
   }
+  /* Pinned working-directory footer — sits below the scrolling .content so it
+     stays visible regardless of scroll position. */
+  .session-footer {
+    flex-shrink: 0;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid color-mix(in srgb, var(--border) 52%, transparent);
+  }
+  .cwd-path {
+    display: block;
+    width: 100%;
+    text-align: left;
+    font-family: var(--font-mono, monospace);
+    font-size: 11.5px;
+    color: var(--text);
+    background: none;
+    border: none;
+    border-radius: 6px;
+    padding: 4px 6px;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: background 0.1s ease, color 0.1s ease;
+  }
+  .cwd-path:hover {
+    background: var(--surface-sunken);
+    color: var(--accent);
+  }
+  .cwd-path:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
   /* Phone: a full-screen context view that slides in from the right (an iOS
      "push", not a drawer — no scrim, nothing peeks out behind it). Stays mounted
      while closed (translated off-screen) so the slide can animate. */
@@ -618,8 +681,9 @@
       display: block;
     }
     .content {
-      /* Clear the home indicator; the top inset rides on .top's padding. */
-      padding-bottom: calc(8px + env(safe-area-inset-bottom));
+      /* The session footer carries the safe-area-inset-bottom padding on mobile;
+         .content just needs a small gap above it. */
+      padding-bottom: 8px;
     }
   }
   @media (prefers-reduced-motion: reduce) {

@@ -287,6 +287,15 @@ export interface SessionSnapshot {
    *  Drives the Settings "MCP" tab. Updates on snapshot refresh (lifecycle events
    *  trigger fetchState → re-snapshot). */
   readonly mcpServers?: readonly McpServerInfo[];
+  /** The session's live working directory (from the daemon's
+   *  SessionStateSnapshot.cwd). Undefined means the snapshot didn't carry it
+   *  (older daemon — preserve existing state). Drives the RightSidebar footer
+   *  + header subtitle deviation. */
+  readonly cwd?: string;
+  /** The directory-stack depth (from the daemon's
+   *  SessionStateSnapshot.cwd_stack_depth). Undefined means unknown; 0 means
+   *  at the session root. Shown as a badge in the RightSidebar footer when > 0. */
+  readonly cwdStackDepth?: number;
 }
 
 /**

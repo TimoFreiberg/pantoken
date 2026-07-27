@@ -295,6 +295,8 @@ pub fn meta_seed_events(
         flags: Some(state.flags.clone()),
         todos: Some(state.todos.clone()),
         mcp_servers: Some(state.mcp_servers.clone()),
+        cwd: state.cwd.clone(),
+        cwd_stack_depth: state.cwd_stack_depth,
         queued_messages: Some(state.queued.clone()),
         running_run_id: None,
     };
@@ -453,6 +455,8 @@ mod tests {
             flags: None,
             todos: None,
             mcp_servers: None,
+            cwd: None,
+            cwd_stack_depth: None,
         }
     }
 
@@ -689,6 +693,8 @@ mod tests {
         let mut state = initial_session_state();
         state.title = "My Session".into();
         state.facet = Some("plan".into());
+        state.cwd = Some("/Users/timo/src/pantoken/client".into());
+        state.cwd_stack_depth = Some(2);
         state
             .ambient
             .statuses
@@ -710,6 +716,13 @@ mod tests {
         // Title + facet should be preserved
         assert_eq!(folded.title, "My Session");
         assert_eq!(folded.facet, Some("plan".to_string()));
+        // cwd + stack depth should be preserved (projected from folded state,
+        // not dropped as None on sessionReset re-seed).
+        assert_eq!(
+            folded.cwd,
+            Some("/Users/timo/src/pantoken/client".to_string())
+        );
+        assert_eq!(folded.cwd_stack_depth, Some(2));
         // Ambient status should be preserved
         assert_eq!(
             folded.ambient.statuses.get("build"),

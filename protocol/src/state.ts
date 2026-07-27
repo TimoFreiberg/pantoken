@@ -154,6 +154,13 @@ export interface SessionState {
   todos: TodoItem[];
   /** MCP servers for this session. Same overwrite-guard as flags/todos. */
   mcpServers: McpServerInfo[];
+  /** The session's live working directory. Undefined until a snapshot carries
+   *  it (older daemon). Same overwrite-guarded semantics as flags/todos. Drives
+   *  the RightSidebar footer + header subtitle deviation. */
+  cwd?: string;
+  /** The directory-stack depth. Undefined means unknown; 0 means at root. Same
+   *  overwrite-guarded semantics as cwd. */
+  cwdStackDepth?: number;
   items: TranscriptItem[];
   /** Blocking dialogs awaiting a response, in arrival order. */
   pendingApprovals: HostUiRequest[];
@@ -300,6 +307,10 @@ export function foldEvent(
       if (s.todos !== undefined) state.todos = [...s.todos];
       // MCP servers: same overwrite-guard as flags/todos.
       if (s.mcpServers !== undefined) state.mcpServers = [...s.mcpServers];
+      // cwd + stack depth: same overwrite-guard as flags/todos. A snapshot
+      // carrying them replaces; one that omits them preserves the known value.
+      if (s.cwd !== undefined) state.cwd = s.cwd;
+      if (s.cwdStackDepth !== undefined) state.cwdStackDepth = s.cwdStackDepth;
       // Queue changes have their own authoritative `queueUpdated` event. A snapshot that
       // carries the queue replaces it (including []); an older/partial snapshot that omits
       // the field must not erase live queue state.

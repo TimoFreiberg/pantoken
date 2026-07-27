@@ -426,6 +426,8 @@ pub fn history_to_seed_events(
                             flags: None,
                             todos: None,
                             mcp_servers: None,
+                            cwd: None,
+                            cwd_stack_depth: None,
                         },
                     });
                 }
@@ -465,6 +467,8 @@ pub fn history_to_seed_events(
                             flags: None,
                             todos: None,
                             mcp_servers: None,
+                            cwd: None,
+                            cwd_stack_depth: None,
                         },
                     });
                 }

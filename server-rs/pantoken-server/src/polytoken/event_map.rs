@@ -510,6 +510,8 @@ pub fn snapshot_from_state(
         flags,
         todos,
         mcp_servers,
+        cwd: state.and_then(|s| s.cwd.clone()),
+        cwd_stack_depth: state.and_then(|s| s.cwd_stack_depth),
     }
 }
 
@@ -2376,6 +2378,8 @@ mod tests {
                 flags: None,
                 todos: None,
                 mcp_servers: None,
+                cwd: None,
+                cwd_stack_depth: None,
             }
         }
 
@@ -4190,6 +4194,19 @@ mod tests {
                 lifecycle: "active".to_string(),
             }))
         );
+
+        // cwd: projected from the daemon's cwd field.
+        let mut st = base_state();
+        st.cwd = Some("/Users/timo/src/pantoken/client".to_string());
+        assert_eq!(
+            snap_from(Some(&st)).cwd.as_deref(),
+            Some("/Users/timo/src/pantoken/client")
+        );
+
+        // cwd_stack_depth: projected from the daemon's cwd_stack_depth field.
+        let mut st = base_state();
+        st.cwd_stack_depth = Some(2);
+        assert_eq!(snap_from(Some(&st)).cwd_stack_depth, Some(2));
     }
 
     #[test]
@@ -4201,6 +4218,8 @@ mod tests {
         assert!(snap.goal.is_none(), "goal");
         assert!(snap.flags.is_none(), "flags");
         assert!(snap.todos.is_none(), "todos");
+        assert!(snap.cwd.is_none(), "cwd");
+        assert!(snap.cwd_stack_depth.is_none(), "cwd_stack_depth");
     }
 
     #[test]

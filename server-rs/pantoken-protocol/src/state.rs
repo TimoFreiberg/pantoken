@@ -215,6 +215,14 @@ pub struct SessionState {
     pub todos: Vec<TodoItem>,
     #[serde(default, rename = "mcpServers")]
     pub mcp_servers: Vec<McpServerInfo>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub cwd: Option<String>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        rename = "cwdStackDepth"
+    )]
+    pub cwd_stack_depth: Option<i64>,
     pub items: Vec<TranscriptItem>,
     #[serde(rename = "pendingApprovals")]
     pub pending_approvals: Vec<HostUiRequest>,
@@ -240,6 +248,8 @@ pub fn initial_session_state() -> SessionState {
         flags: Vec::new(),
         todos: Vec::new(),
         mcp_servers: Vec::new(),
+        cwd: None,
+        cwd_stack_depth: None,
         items: Vec::new(),
         pending_approvals: Vec::new(),
         ambient: AmbientState::default(),
@@ -361,6 +371,13 @@ pub fn fold_event(state: &mut SessionState, ev: &SessionDriverEvent) {
             }
             if let Some(m) = &snapshot.mcp_servers {
                 state.mcp_servers = m.clone();
+            }
+            // cwd + stack depth: same overwrite-guard as flags/todos/mcp_servers.
+            if let Some(c) = &snapshot.cwd {
+                state.cwd = Some(c.clone());
+            }
+            if let Some(d) = snapshot.cwd_stack_depth {
+                state.cwd_stack_depth = Some(d);
             }
             if let Some(q) = &snapshot.queued_messages {
                 state.queued = q.clone();
@@ -790,6 +807,8 @@ mod tests {
             flags: None,
             todos: None,
             mcp_servers: None,
+            cwd: None,
+            cwd_stack_depth: None,
         }
     }
 

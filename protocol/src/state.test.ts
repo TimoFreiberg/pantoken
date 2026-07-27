@@ -592,4 +592,71 @@ describe("foldEvent", () => {
     );
     expect(s.todos).toEqual(todos);
   });
+
+  test("snapshot.cwd propagates to state.cwd (the sidebar footer data path)", () => {
+    const s = foldAll([
+      base({
+        type: "sessionUpdated",
+        snapshot: {
+          ref,
+          workspace: { workspaceId: "w", path: "/p" },
+          title: "t",
+          status: "idle",
+          updatedAt: "t",
+          cwd: "/home/user/project/sub",
+        },
+      }),
+    ]);
+    expect(s.cwd).toBe("/home/user/project/sub");
+  });
+
+  test("a snapshot without cwd leaves an existing state.cwd intact", () => {
+    const s = initialSessionState();
+    foldEvent(
+      s,
+      base({
+        type: "sessionUpdated",
+        snapshot: {
+          ref,
+          workspace: { workspaceId: "w", path: "/p" },
+          title: "t",
+          status: "idle",
+          updatedAt: "t1",
+          cwd: "/home/user/project/sub",
+        },
+      }),
+    );
+    expect(s.cwd).toBe("/home/user/project/sub");
+    foldEvent(
+      s,
+      base({
+        type: "sessionUpdated",
+        snapshot: {
+          ref,
+          workspace: { workspaceId: "w", path: "/p" },
+          title: "t",
+          status: "idle",
+          updatedAt: "t2",
+        },
+      }),
+    );
+    expect(s.cwd).toBe("/home/user/project/sub");
+  });
+
+  test("snapshot.cwdStackDepth propagates to state.cwdStackDepth", () => {
+    const s = foldAll([
+      base({
+        type: "sessionUpdated",
+        snapshot: {
+          ref,
+          workspace: { workspaceId: "w", path: "/p" },
+          title: "t",
+          status: "idle",
+          updatedAt: "t",
+          cwdStackDepth: 2,
+        },
+      }),
+    ]);
+    expect(s.cwdStackDepth).toBe(2);
+  });
 });

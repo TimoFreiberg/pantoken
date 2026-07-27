@@ -278,3 +278,89 @@ test("client-side jobs refresh updates UI after mock script", async ({
   // The old jobs should be gone.
   await expect(jobs).not.toContainText("researcher");
 });
+
+// ── Working directory footer (cwd + stack depth) ─────────────────────────
+
+test("the session footer shows the cwd and stack-depth badge", async ({
+  page,
+}) => {
+  await openPanel(page);
+  await drive(page, "cwd");
+
+  const footer = page.getByTestId("session-footer");
+  await expect(footer).toBeVisible();
+  await expect(footer).toContainText("Working directory");
+
+  // The cwd path is middle-ellipsized but the full path is in the title attr.
+  const cwdPath = page.getByTestId("cwd-path");
+  await expect(cwdPath).toHaveAttribute(
+    "title",
+    "/Users/timo/src/pantoken/client",
+  );
+  await expect(cwdPath).toContainText("pantoken/client");
+
+  // Stack-depth badge shows when > 0.
+  const badge = page.getByTestId("cwd-stack-depth");
+  await expect(badge).toBeVisible();
+  await expect(badge).toContainText("Stack · 2");
+});
+
+test("clicking the cwd path copies the full path to clipboard", async ({
+  page,
+}) => {
+  await openPanel(page);
+  await drive(page, "cwd");
+
+  await page.getByTestId("cwd-path").click();
+
+  const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clipboard).toBe("/Users/timo/src/pantoken/client");
+});
+
+test("the footer shows the project root with no stack badge at depth 0", async ({
+  page,
+}) => {
+  await openPanel(page);
+  await drive(page, "cwdroot");
+
+  const footer = page.getByTestId("session-footer");
+  await expect(footer).toBeVisible();
+
+  const cwdPath = page.getByTestId("cwd-path");
+  await expect(cwdPath).toHaveAttribute(
+    "title",
+    "/Users/timo/src/pantoken",
+  );
+
+  // No stack-depth badge when depth is 0.
+  await expect(page.getByTestId("cwd-stack-depth")).toHaveCount(0);
+});
+
+test("the footer stays pinned when the sidebar content overflows", async ({
+  page,
+}) => {
+  // Force a small viewport so the context fixture's content overflows.
+  await page.setViewportSize({ width: 1280, height: 400 });
+  await openPanel(page);
+  // Drive "cwd" first to set the live cwd (footer renders), then "context"
+  // to populate flagged files + todos + jobs (forces overflow). The fold's
+  // overwrite-guard preserves cwd since "context"'s snapshot omits it.
+  await drive(page, "cwd");
+  await drive(page, "context");
+
+  const footer = page.getByTestId("session-footer");
+  await expect(footer).toBeVisible();
+
+  // The footer must be within the viewport (not scrolled off-screen).
+  const footerBox = await footer.boundingBox();
+  expect(footerBox).not.toBeNull();
+  expect(footerBox!.y + footerBox!.height).toBeLessThanOrEqual(400);
+
+  // The .content div must be scrollable (overflowing).
+  const content = page.locator(".right-sidebar .content");
+  const isScrollable = await content.evaluate((el) => {
+    const h = el as HTMLElement;
+    return h.scrollHeight > h.clientHeight;
+  });
+  expect(isScrollable).toBe(true);
+});

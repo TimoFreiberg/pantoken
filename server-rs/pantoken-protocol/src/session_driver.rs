@@ -470,6 +470,14 @@ pub struct SessionSnapshot {
         rename = "mcpServers"
     )]
     pub mcp_servers: Option<Vec<McpServerInfo>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub cwd: Option<String>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        rename = "cwdStackDepth"
+    )]
+    pub cwd_stack_depth: Option<i64>,
 }
 
 // ── Session list entry ─────────────────────────────────────────────────

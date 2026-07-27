@@ -80,11 +80,16 @@
         ? "starting…"
         : opening
           ? "opening…"
-          : sessionSubtitle({ cwd: entry?.cwd }),
+          : sessionSubtitle({ cwd: entry?.cwd, liveCwd: s.cwd }),
   );
-  // Hover reveals the full path the basename elides.
+  // Hover reveals the full path the basename elides — the live cwd when it
+  // deviates from the project root, otherwise the project root itself.
   const subtitleTitle = $derived(
-    chooserUp || !entry?.cwd ? undefined : entry.cwd,
+    chooserUp || !entry?.cwd
+      ? undefined
+      : s.cwd && s.cwd !== entry.cwd
+        ? s.cwd
+        : entry.cwd,
   );
   const selectedHost = $derived(
     coordinator.multiHostCapable

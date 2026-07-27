@@ -56,6 +56,22 @@ test("the header subtitle shows the active session's project (cwd basename)", as
   await expect(subtitle).toHaveText("scratch");
 });
 
+test("the header subtitle shows a cwd deviation after pushd", async ({
+  page,
+}) => {
+  const subtitle = page.locator("header .sub .path");
+  // At the project root: just the basename.
+  await expect(subtitle).toHaveText("pantoken");
+
+  // Drive the cwd mock → live cwd is a subdirectory with stack depth 2.
+  await drive(page, "cwd");
+  await expect(subtitle).toHaveText("pantoken › client");
+
+  // Reset to root: deviation suffix disappears.
+  await drive(page, "cwdroot");
+  await expect(subtitle).toHaveText("pantoken");
+});
+
 test("an empty launch restores this client's last-focused session", async ({
   page,
 }) => {

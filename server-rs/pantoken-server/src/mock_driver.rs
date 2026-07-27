@@ -492,6 +492,8 @@ fn snap(
         flags,
         todos,
         mcp_servers: Some(mock_mcp_servers()),
+        cwd: None,
+        cwd_stack_depth: None,
     }
 }
 
@@ -969,6 +971,8 @@ fn mock_session_seed(path: &str) -> Vec<SessionDriverEvent> {
             flags: None,
             todos: None,
             mcp_servers: None,
+            cwd: None,
+            cwd_stack_depth: None,
         };
         vec![
             SessionDriverEvent::SessionOpened {
@@ -1164,6 +1168,8 @@ fn restored_session_seed() -> Vec<SessionDriverEvent> {
         flags: None,
         todos: None,
         mcp_servers: None,
+        cwd: None,
+        cwd_stack_depth: None,
     };
     vec![
         // The leading snapshot (build_branch_seed's first element).
@@ -1705,6 +1711,8 @@ fn new_session_seed(
         flags: None,
         todos: None,
         mcp_servers: None,
+        cwd: None,
+        cwd_stack_depth: None,
     };
     let events = vec![SessionDriverEvent::SessionOpened {
         base: SessionEventBase {
@@ -3575,6 +3583,31 @@ impl PantokenDriver for MockDriver {
                 s.push(ScriptStep { wait_ms: 80, event: SessionDriverEvent::SessionUpdated { base: base(), snapshot: mock_snapshot(SessionStatus::Idle) } });
                 s
             }
+            // Drives the cwd footer + header subtitle deviation: a live cwd set to
+            // a project subdirectory with a non-zero stack depth (pushd'd twice).
+            "cwd" => {
+                let mut s = snap(SessionStatus::Idle, None, None, None, None, None);
+                s.cwd = Some("/Users/timo/src/pantoken/client".into());
+                s.cwd_stack_depth = Some(2);
+                vec![
+                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated {
+                        base: base(),
+                        snapshot: s,
+                    } },
+                ]
+            }
+            // Resets to the project root with depth 0 (no stack badge, no deviation).
+            "cwdroot" => {
+                let mut s = snap(SessionStatus::Idle, None, None, None, None, None);
+                s.cwd = Some("/Users/timo/src/pantoken".into());
+                s.cwd_stack_depth = Some(0);
+                vec![
+                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated {
+                        base: base(),
+                        snapshot: s,
+                    } },
+                ]
+            }
             "error" => {
                 let mut s = vec![
                     ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated { base: base(), snapshot: mock_snapshot(SessionStatus::Running) } },
@@ -3741,6 +3774,7 @@ impl PantokenDriver for MockDriver {
                     permission_monitor: None, adventurous_handoff: None,
                     notification_autodrain: None, active_plan: None, goal: None,
                     flags: None, todos: None, mcp_servers: None,
+                    cwd: None, cwd_stack_depth: None,
                 };
                 vec![
                     ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated { base: SessionEventBase { session_ref: ref_id.clone(), timestamp: ts(), run_id: None }, snapshot: snap_bg(SessionStatus::Running) } },
@@ -3761,6 +3795,7 @@ impl PantokenDriver for MockDriver {
                     permission_monitor: None, adventurous_handoff: None,
                     notification_autodrain: None, active_plan: None, goal: None,
                     flags: None, todos: None, mcp_servers: None,
+                    cwd: None, cwd_stack_depth: None,
                 };
                 let b = || SessionEventBase { session_ref: ref_id.clone(), timestamp: ts(), run_id: None };
                 vec![
