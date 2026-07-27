@@ -175,11 +175,11 @@
           pantoken · {hostIdentity}
         </span>
       {/if}
-      {#if !drafting && s.goal}
+      {#if !chooserUp && !creating && s.goal}
         <span class="dot-sep">·</span>
         <GoalBadge />
       {/if}
-      {#if !drafting}
+      {#if !chooserUp && !creating}
         {#each statuses as [key, text] (key)}
           <span class="dot-sep">·</span>
           <span class="amb">{text}</span>
@@ -206,7 +206,7 @@
         <span class="bell-label">{push === "denied" ? "Blocked" : "Retry"}</span>
       </button>
     {/if}
-    {#if s.activePlan && !drafting}
+    {#if s.activePlan && !chooserUp && !creating}
       <IconButton
         data-testid="plan-view-toggle"
         title="View the active plan (⌘P)"
@@ -227,9 +227,10 @@
     <!-- Reopen the collapsed context panel. Lives flush at the header's trailing
          edge — i.e. exactly where the panel's own collapse control sits once it's
          open — so collapse/expand is the same pixel, clickable back and forth.
-         Hidden while drafting: the panel itself is unmounted there. The
+         Hidden while the chooser or warm-up is up: the panel itself is
+         unmounted there. The
          panel-right icon faces the panel it summons. -->
-    {#if !store.rightSidebarOpen && !drafting}
+    {#if !store.rightSidebarOpen && !chooserUp && !creating}
       <IconButton
         class="context-entry"
         data-testid="context-open"
