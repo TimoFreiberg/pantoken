@@ -19,5 +19,8 @@ export default defineConfig({
     // service environment and fail outside it — pre-existing, unrelated to
     // the Vitest migration. See docs/toolchain-baseline.md.
     testTimeout: 30_000,
+    // Use forks pool for more stable teardown (avoids EnvironmentTeardownError
+    // race conditions with async console.log in worker threads).
+    pool: "forks",
   },
 });
