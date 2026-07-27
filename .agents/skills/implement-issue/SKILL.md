@@ -19,7 +19,9 @@ bun install
 bash scripts/gh-issue-fetch.sh <issue-number>
 ```
 
-Read the printed issue and screenshots. 
+Read the printed issue and screenshots.
+
+**Record the absolute workspace path** from the `just create-workspace` output (which prints the `pushd` command with the absolute path). Write it into the plan *now*, as the first implementation step — don't hold it in context until you write the rest of the plan in Step 2. The plan→execute handoff clears the working directory back to the repo root, so this path is the only thing that survives. Don't substitute a relative path; the execute facet may start from a different working directory.
 
 ## Step 1: Clarify implementation intent
 
@@ -29,6 +31,7 @@ Read the issue and investigate relevant code. Ask focused questions only for mat
 
 Investigate the codebase, write and review the plan. The plan must instruct the execute phase to:
 
+0. **Enter the workspace** — `pushd <absolute-workspace-dir>` (the path recorded in Step 0). The plan→execute handoff resets the working directory to the repo root, so execute must re-enter the issue workspace before any other step. The workspace, `node_modules`, and `.implement-issue-number` marker already exist on disk from Step 0 — don't recreate them.
 1. **Implement** the plan faithfully.
 2. **Review** using the `quality-review` skill — fix or rebut all findings, loop until clean.
 3. **Integrate** — From this point on, a stop hook will guide you. Squash all commits into one, ensure the commit message includes `Fixes #<issue-number>` on its own line, then call `just integrate-into-main <issue-number>`. If it exits 2 (conflicts), resolve them with the `jj-resolve-conflicts` skill and retry. The stop hook will redirect you here if you try to stop before integrating.

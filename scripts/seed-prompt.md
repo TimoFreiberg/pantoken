@@ -26,7 +26,7 @@ bun install
 bash scripts/gh-issue-fetch.sh {{ISSUE_NUMBER}}
 ```
 
-The stop hook writes `.implement-issue-session-id` from its environment; no manual copy needed. The workspace inherits the committed `.polytoken/hooks.json` (no per-workspace hook copy needed), and the stop hook gates on `.workspaces` + `.implement-issue-number` (written by `gh-issue-fetch.sh` when run from the workspace).
+A `post_tool_use` hook (`stamp-session-id.sh`) writes `.implement-issue-session-id` from `POLYTOKEN_SESSION_ID` on `pushd` into the workspace — no manual copy needed. The workspace inherits the committed `.polytoken/hooks.json` (no per-workspace hook copy needed). The stop hook searches `.workspaces/` for a workspace with both `.implement-issue-number` (written by `gh-issue-fetch.sh`) and `.implement-issue-session-id` matching the current session.
 
 ## Task
 

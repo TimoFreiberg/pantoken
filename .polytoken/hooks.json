@@ -3,7 +3,15 @@
     "name": "check-integration-before-stop",
     "event": "stop",
     "handler": {
-      "bash": "[ -f .implement-issue-number ] && exec .polytoken/hooks/stop-check-integration.sh; exit 0"
+      "bash": "exec .polytoken/hooks/stop-check-integration.sh"
+    }
+  },
+  {
+    "name": "stamp-session-id-on-pushd",
+    "event": "post_tool_use",
+    "matcher": "pushd",
+    "handler": {
+      "bash": "exec .polytoken/hooks/stamp-session-id.sh"
     }
   }
 ]

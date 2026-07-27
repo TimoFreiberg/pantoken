@@ -98,11 +98,12 @@ message and leaves registration/files intact on failure. Forgetting a workspace
 does not delete reachable jj commits; preserve or integrate anything valuable
 before cleanup. The old `cleanup-workspace.sh` remains a legacy manual helper.
 
-The launcher stores daemon session handoff data in the owned context. The stop
-hook writes `.implement-issue-session-id` from its `POLYTOKEN_SESSION_ID`
-environment variable — no manual copy needed. After entering the workspace,
+The launcher stores daemon session handoff data in the owned context. A
+`post_tool_use` hook (`stamp-session-id.sh`) fires on `pushd` into a
+`.workspaces/` direct child and writes `.implement-issue-session-id` from
+`POLYTOKEN_SESSION_ID` — no manual copy needed. After entering the workspace,
 fetch the issue with `gh-issue-fetch.sh` (which writes
-`.implement-issue-number`). The hook is inherited from the tracked
+`.implement-issue-number`). The hooks are inherited from the tracked
 `.polytoken/hooks.json` — no per-workspace copy needed.
 
 **Legacy directories:** prior versions used `.workspaces/pantoken-issue-<N>`
