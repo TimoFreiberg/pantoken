@@ -578,7 +578,9 @@ mod tests {
             json,
             r#"{"type":"destroySession","path":"/sessions/demo/session.json"}"#
         );
-        assert_eq!(serde_json::from_str::<ClientMessage>(&json).unwrap(), msg);
+        // Compare via re-serialization since ClientMessage doesn't derive PartialEq.
+        let parsed = serde_json::from_str::<ClientMessage>(&json).unwrap();
+        assert_eq!(serde_json::to_string(&parsed).unwrap(), json);
     }
 
     #[test]
