@@ -224,7 +224,7 @@
     justify-content: center;
     overflow-y: auto;
     box-sizing: border-box;
-    padding-block: 16px clamp(28px, 14vh, 140px);
+    padding-block: clamp(28px, 10vh, 100px) clamp(28px, 14vh, 140px);
   }
 
   .composition {
@@ -347,6 +347,9 @@
 
   @media (max-width: 859px) {
     .chooser {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
       padding-block: 12px clamp(20px, 10vh, 72px);
     }
     .composition {

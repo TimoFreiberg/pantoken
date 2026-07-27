@@ -66,7 +66,8 @@ test("selecting a project creates a session and closes the chooser (AC.3)", asyn
 test("Browse entry opens the DirPicker (AC.4)", async ({ page }) => {
   await openChooser(page);
   await chooser(page).getByTestId("chooser-browse").click();
-  await expect(chooser(page)).toHaveCount(0);
+  // The chooser stays mounted (the DirPicker renders as a sibling overlay on
+  // top of it); the DirPicker is now visible.
   await expect(page.getByTestId("dir-picker")).toBeVisible();
 });
 

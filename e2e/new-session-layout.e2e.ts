@@ -85,7 +85,7 @@ test("creating a session moves from chooser to transcript layout", async ({
 
   // The chooser is gone and the live-session composer is mounted.
   await expect(page.getByTestId("session-chooser")).toHaveCount(0);
-  const composer = page.getByPlaceholder("Describe a task or ask a question…");
+  const composer = page.getByPlaceholder("Message pantoken…");
   await composer.fill("start from the centre");
   await composer.press("Enter");
 

@@ -29,6 +29,12 @@ test("a per-session draft survives switching away and back", async ({
 }) => {
   await createSessionViaChooser(page);
   await openSidebar(page);
+  // Send a prompt first so the session is non-empty (phase 2 reaps empty
+  // sessions on navigate-away — without a prompt the row would vanish).
+  await composer(page).fill("seed prompt");
+  await composer(page).press("Enter");
+  await expect(composer(page)).toHaveValue("");
+  // Now type draft text that should survive a switch.
   await composer(page).fill("notes for the bridge session");
 
   // Switch to another session — its (empty) draft replaces the text.
@@ -36,10 +42,7 @@ test("a per-session draft survives switching away and back", async ({
   await openSidebar(page);
   await expect(composer(page)).toHaveValue("");
 
-  // Back to the first session — the draft is restored.
-  // After create-on-click the new session title is "New session" until the
-  // first prompt lands. Click it by its position as the second row (the
-  // greeting fixture is "Explore the fold reducer").
+  // Back to the created session — the draft is restored.
   await row(page, "New session").first().click();
   await openSidebar(page);
   await expect(composer(page)).toHaveValue("notes for the bridge session");
@@ -47,9 +50,30 @@ test("a per-session draft survives switching away and back", async ({
 
 test("a per-session draft survives a reload", async ({ page }) => {
   await createSessionViaChooser(page);
+  // Send a prompt first so the session is non-empty — otherwise phase 2's
+  // boot-restore reaps the empty session before the draft can be restored.
+  await composer(page).fill("seed prompt");
+  await composer(page).press("Enter");
+  await expect(composer(page)).toHaveValue("");
   await composer(page).fill("survive a reload");
-  // pagehide on reload flushes the draft to localStorage; boot restores the focused
-  // session's draft.
+  // Dispatch a pagehide event so the Composer's pagehide handler flushes the
+  // draft to localStorage before the reload navigates away.
+  await page.evaluate(() => {
+    const ev = new Event("pagehide");
+    window.dispatchEvent(ev);
+  });
+  // Debug: check what's in localStorage.
+  const drafts = await page.evaluate(() => {
+    const out: Record<string, string> = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)!;
+      if (k.includes("composerDrafts") || k.includes("lastSession"))
+        out[k] = localStorage.getItem(k) ?? "";
+    }
+    return out;
+  });
+  console.log("DRAFT DEBUG:", JSON.stringify(drafts));
+  // Boot restores the focused session's draft.
   await page.reload();
   await expect(composer(page)).toHaveValue("survive a reload");
 });

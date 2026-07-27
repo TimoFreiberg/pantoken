@@ -116,7 +116,8 @@ test("replacing the composer consumes an open controls history entry", async ({
   ).toBeVisible();
 
   await page.keyboard.press("Control+n");
-  // ⌘N opens the chooser (replaces the old draft placeholder).
+  // ⌘N opens the chooser, which replaces the session-controls overlay via
+  // overlay history (peer navigation reuses one root history entry).
   await expect(page.getByTestId("session-chooser")).toBeVisible();
   await expect(page.getByRole("dialog", { name: "Session controls" })).toBeHidden();
   await expect
@@ -127,7 +128,7 @@ test("replacing the composer consumes an open controls history entry", async ({
             ?.pantokenOverlay ?? null,
       ),
     )
-    .toBeNull();
+    .toBe("session-chooser");
 });
 
 test("crossing to desktop closes controls without changing desktop composer chrome", async ({

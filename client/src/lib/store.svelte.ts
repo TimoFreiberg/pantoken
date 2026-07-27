@@ -635,10 +635,12 @@ class PantokenStore {
    *  The viewed-session pin only holds while it's actually on screen: in a new-session
    *  draft the transcript is replaced by the draft form, so the previously-viewed session
    *  isn't shown and shouldn't be force-kept. This is what lets `setArchived` drop the
-   *  focused row — it flips into a draft, and the pin releases. */
+   *  focused row — it flips into a draft/chooser, and the pin releases. Phase 3
+   *  replaced drafts with the chooser + creatingSession warm-up — the transcript is
+   *  hidden in both, so the pin must release there too. */
   get pinnedSidebarIds(): ReadonlySet<string> {
     const ids = new Set(this.runningIds);
-    if (!this.draft) {
+    if (!this.draft && !this.chooserOpen && !this.creatingSession) {
       if (this.viewedSessionId) ids.add(this.viewedSessionId);
     }
     return ids;
@@ -733,7 +735,7 @@ class PantokenStore {
     const key = this.composerDraftKey;
     if (this.composerDraft.trim()) this.draftMap[key] = this.composerDraft;
     else delete this.draftMap[key];
-    persistDraftMap(this.draftMap);
+    this.persistDrafts();
   }
   /** Load the saved draft for `key` into the live composer (empty if none). */
   private loadDraft(key: string): void {
@@ -743,6 +745,17 @@ class PantokenStore {
   private clearStoredDraft(key: string): void {
     if (key in this.draftMap) {
       delete this.draftMap[key];
+      this.persistDrafts();
+    }
+  }
+  /** Persist the draft map to localStorage. Uses the namespaced key when
+   *  serverId is known (so it's read back by loadPerClientState); falls back
+   *  to the legacy non-namespaced key before hello arrives (picked up by the
+   *  one-time migration). */
+  private persistDrafts(): void {
+    if (this.serverId) {
+      persistNamespacedMap("composerDrafts", this.serverId, this.draftMap);
+    } else {
       persistDraftMap(this.draftMap);
     }
   }
@@ -2238,6 +2251,11 @@ class PantokenStore {
         const pc = projectCwdOf(entry);
         if (pc) this.setLastProjectCwd(pc);
       }
+      // Opening a session is an explicit user choice — mark it lifecycle-accepted
+      // so the boot-restore path doesn't destroy it for being "empty+default"
+      // (fixture sessions opened but never prompted from this client would
+      // otherwise be reaped on the next boot restore).
+      if (id) this.markLifecycleAccepted(id);
     }
     // Same session (e.g. tapped the active row while drafting) — we've exited the draft
     // and restored its text; nothing to switch.
@@ -2432,6 +2450,15 @@ class PantokenStore {
       // (this path skips openSession, so nothing else records it).
       this.loadDraft(`s:${this.activeSessionId}`);
       this.pushNav({ kind: "session", sessionId: this.activeSessionId });
+      // openSession would have set lastProjectCwd from the session's cwd; this path
+      // skips it, so do it here so the chooser's pre-selection is correct on first boot.
+      const booted = this.sessions.find(
+        (s) => s.sessionId === this.activeSessionId,
+      );
+      if (booted) {
+        const pc = projectCwdOf(booted);
+        if (pc) this.setLastProjectCwd(pc);
+      }
     }
   }
 
@@ -2572,7 +2599,7 @@ class PantokenStore {
   discardDraft(key: string): void {
     if (key in this.draftMap) {
       delete this.draftMap[key];
-      persistDraftMap(this.draftMap);
+      this.persistDrafts();
     }
     this.clearStoredDraftConfig(key);
     if (this.draft && this.composerDraftKey === key) {
@@ -2592,7 +2619,7 @@ class PantokenStore {
     if (oldKey !== newKey) {
       if (oldKey in this.draftMap) {
         delete this.draftMap[oldKey];
-        persistDraftMap(this.draftMap);
+        this.persistDrafts();
       }
       this.persistDraftConfig(); // re-writes the live config under newKey (+ persists)
     }

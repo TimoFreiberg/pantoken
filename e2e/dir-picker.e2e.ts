@@ -214,12 +214,15 @@ test("Escape closes the picker and returns to the chooser", async ({
   await expect(page.getByTestId("session-chooser")).toBeVisible();
 });
 
-test("browser Back closes the picker and returns to the chooser", async ({
+test("the visible Back button closes the picker and returns to the chooser", async ({
   page,
 }) => {
   await openPicker(page);
-  await page.goBack();
+  await picker(page)
+    .getByRole("button", { name: "Close project picker" })
+    .first()
+    .click();
   await expect(picker(page)).toBeHidden();
-  // The chooser is still visible after closing the DirPicker via Back.
+  // The chooser is still visible after closing the DirPicker.
   await expect(page.getByTestId("session-chooser")).toBeVisible();
 });

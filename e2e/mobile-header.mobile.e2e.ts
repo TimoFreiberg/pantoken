@@ -57,7 +57,9 @@ test("the chooser does not expose inactive-session Context", async ({
 }) => {
   await openSidebar(page);
   await page.getByTestId("sidebar-new-session").getByRole("button").click();
-  await openSidebar(page);
+  // afterNavigate closes the sidebar drawer on mobile — the chooser is now
+  // the active overlay. Don't reopen the sidebar (that would replace the
+  // chooser via overlay history and defeat the test).
   // The sidebar Context button is gone entirely; the header entry hides while
   // the chooser is open (same gate as the old draft: !chooserOpen).
   await expect(page.getByTestId("session-chooser")).toBeVisible();

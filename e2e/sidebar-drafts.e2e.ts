@@ -43,6 +43,12 @@ test("a created session nests under its project and survives navigating away", a
     1,
   );
 
+  // Send a prompt so the session is non-empty — phase 2 reaps empty sessions
+  // on navigate-away (without a prompt the row would vanish).
+  const composer = page.getByPlaceholder("Message pantoken…");
+  await composer.fill("keep me alive");
+  await composer.press("Enter");
+
   // Navigate to an existing session — the new session row stays (idle).
   await sessionRow(page, "Explore the fold reducer").click();
   await openSidebar(page);

@@ -53,7 +53,10 @@ test("a failed create-on-click via ⌘N→Enter returns to the chooser", async (
 
   // Arm the failure, then Enter selects the pre-selected project.
   await drive(page, "failnewsession");
-  await page.keyboard.press("Enter");
+  // Re-focus the chooser input (drive() clicks the dev bar button, moving focus
+  // away from the chooser's search field — Enter would otherwise re-activate the
+  // dev bar button instead of selecting the pre-selected project).
+  await page.getByLabel("Filter projects").press("Enter");
 
   // The warm-up is cleared and the chooser returns.
   await expect(page.getByTestId("working-indicator")).toHaveCount(0);
