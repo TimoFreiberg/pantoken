@@ -30,7 +30,7 @@ describe("implement-issue helpers", () => {
   test("plans default-workspace daemon and agent-owned workspace lifecycle", () => {
     const cmds = plannedCommands({ number: 42, url: "x", input: "42" }, "/repo/root");
     expect(cmds[0]).toEqual(["polytoken", "new", "--no-attach"]);
-    expect(cmds[1]).toEqual(["scripts/create-workspace.sh", "issue-42"]);
+    expect(cmds[1]).toEqual(["just", "create-workspace", "issue-42"]);
     expect(cmds[2]).toEqual(["pushd", "/repo/root/.workspaces/issue-42"]);
     const polytokenNew = cmds[0]!;
     expect(polytokenNew).not.toContain("--config-dir");

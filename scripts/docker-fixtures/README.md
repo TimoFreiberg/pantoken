@@ -35,7 +35,7 @@ On the remote server:
 
 ```bash
 # Create all 13 fixtures
-bash scripts/docker-fixtures/setup-all.sh
+just docker-fixtures-setup
 
 # Verify
 docker ps -a --filter name=pantoken-
@@ -53,13 +53,13 @@ Then in the pantoken desktop app, create a profile pointing at this server:
 When done:
 
 ```bash
-bash scripts/docker-fixtures/teardown-all.sh
+just docker-fixtures-teardown
 ```
 
 ## Fixture Reference
 
 Each fixture is independently runnable and idempotent (tears down + recreates):
-`bash scripts/docker-fixtures/01-healthy.sh`
+`bash scripts/docker-fixtures/01-healthy.sh` (individual fixtures remain direct helpers)
 
 | # | Script | Container name | User | polytoken | Expected pantoken behavior |
 |---|--------|---------------|------|-----------|---------------------------|

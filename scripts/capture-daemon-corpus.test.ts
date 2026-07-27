@@ -12,7 +12,7 @@
 // Regenerate the golden after an intentional canon change (BOTH files together):
 //   cp server-rs/tests/canon-parity/non-canonical.json \
 //      server-rs/tests/canon-parity/ts-canonical.golden.json
-//   bun run scripts/capture-daemon-corpus.ts --recanon \
+//   just capture-daemon-corpus --recanon \
 //      server-rs/tests/canon-parity/ts-canonical.golden.json
 
 import { expect, test } from "bun:test";

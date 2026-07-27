@@ -2,7 +2,7 @@
 // publish.ts — build and publish a desktop release (the bundled .app: shell + compiled
 // hub + client) plus the static updater manifest the running apps poll.
 //
-//   bun scripts/desktop/publish.ts --repo <owner/name> [--dry-run] [--skip-build]
+//   just publish --repo <owner/name> [--dry-run] [--skip-build]
 //
 // The repo is a GitHub RELEASES repo (public: installed apps download from it without
 // credentials) — it does NOT have to be the code remote. Override via

@@ -160,7 +160,7 @@ SSE corpus, deliberately pinned and bumped explicitly via
 and polytoken's installers fetch latest-unstable (not pinned), so a
 regenerate-in-CI gate is fragile against version skew. Freshness is a
 documented local discipline: after bumping polytoken, run
-`bun run scripts/codegen-polytoken-rs.ts` and commit the regenerated `lib.rs`.
+`just codegen-polytoken-rs` and commit the regenerated `lib.rs`.
 
 ## Remote deployment: envelope-vs-raw wire format (Option A)
 

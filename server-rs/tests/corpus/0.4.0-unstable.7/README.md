@@ -93,15 +93,14 @@ When the daemon version bumps and a fresh capture is needed:
 
 1. Bump the version in `scripts/capture-daemon-corpus.ts` (the `VERSION`
    constant) and create the matching corpus dir.
-2. Run `bun run scripts/capture-daemon-corpus.ts` against a throwaway isolated
-   daemon (the script uses `parity/lib.ts`'s `isolationEnv` so it never touches
-   a prod daemon's sessions/config). **This spends provider money** — it drives
-   real model turns. It is the deliberate, separate, operator-run step.
+2. Run `just capture-daemon-corpus` against a throwaway isolated daemon (the
+   script uses `parity/lib.ts`'s `isolationEnv` so it never touches a prod daemon's
+   sessions/config). **This spends provider money** — it drives real model turns.
+   It is the deliberate, separate, operator-run step.
 3. The script writes one `<scenario>.json` per scenario into the version dir,
    already canonicalized. To re-apply canonicalization to committed files without
-   re-capturing or spending model tokens, run
-   `bun run scripts/capture-daemon-corpus.ts --recanon` (or pass explicit file
-   paths after `--recanon`).
+   re-capturing or spending model tokens, run `just capture-daemon-corpus --recanon`
+   (or pass explicit file paths after `--recanon`).
 4. Run `cd server-rs && cargo test corpus` — the loader test confirms every seed
    event still deserializes into the real `SseEnvelope`/`DaemonEvent` and that
    canonicalization is still idempotent. If a daemon event shape changed, this

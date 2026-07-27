@@ -66,7 +66,7 @@ run `bun run check:rs` from the repo root for the same locally.
 Daemon wire types are auto-generated from the polytoken binary's OpenAPI spec:
 
 ```bash
-bun run scripts/codegen-polytoken-rs.ts
+just codegen-polytoken-rs
 ```
 
 This runs `polytoken openapi` and generates `pantoken-daemon-types/src/lib.rs` with

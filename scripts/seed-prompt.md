@@ -20,7 +20,7 @@
 The launcher runs the daemon and TUI from the repository's default jj workspace. It does not create or install into an issue workspace. From the default workspace, run:
 
 ```bash
-scripts/create-workspace.sh issue-{{ISSUE_NUMBER}}
+just create-workspace issue-{{ISSUE_NUMBER}}
 # run the printed: pushd <absolute-workspace-dir>
 bun install
 mkdir -p .polytoken
@@ -49,7 +49,7 @@ just integrate-into-main {{ISSUE_NUMBER}}
 jj diff --summary
 jj log -r 'main..@ ~ empty()' --no-graph
 jj diff --from main --to @
-scripts/cleanup-current-workspace.sh
+just cleanup-current-workspace
 popd
 ```
 

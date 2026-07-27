@@ -7,7 +7,7 @@
 // (or `kind` where the spec says so), camelCase field names via
 // `#[serde(rename_all = "camelCase")]` where appropriate.
 //
-// Run: `bun run scripts/codegen-polytoken-rs.ts`
+// Run: `just codegen-polytoken-rs`
 //
 // The binary path is resolved the same way pantoken resolves it at runtime:
 // $PATH, or $PANTOKEN_POLYTOKEN_BIN.
@@ -376,7 +376,7 @@ async function main() {
 //! file keeps a crate-level dead_code allowance. Do not copy this pattern into
 //! hand-written server modules; annotate those gaps at item level instead.
 //!
-//! Regenerate after a polytoken bump: \`bun run scripts/codegen-polytoken-rs.ts\`
+//! Regenerate after a polytoken bump: \`just codegen-polytoken-rs\`
 //! DO NOT EDIT MANUALLY.
 
 #![allow(dead_code)]
@@ -390,7 +390,7 @@ async function main() {
 //
 // The live corpus tests are the true spec-drift gate; this constant is a floor.
 //
-// Regenerate: \`bun run scripts/codegen-polytoken-rs.ts\`
+// Regenerate: \`just codegen-polytoken-rs\`
 `,
     `//! Compatibility target: the polytoken daemon version this build was codegen'd
 //! against. Sourced from \`polytoken --version\` at codegen, NOT from \`info.version\`
@@ -515,7 +515,7 @@ pub const POLYTOKEN_DAEMON_TARGET_VERSION: &str = "${daemonVersion}";
       `(${output.split("\n").length} lines, ${Object.keys(schemas).length} schemas, ` +
       `${variantCount} DaemonEvent variants)`,
   );
-  console.log("  regenerate after a polytoken bump: bun run scripts/codegen-polytoken-rs.ts");
+  console.log("  regenerate after a polytoken bump: just codegen-polytoken-rs");
 }
 
 function sortedKeys<T>(obj: Record<string, T>): string[] {

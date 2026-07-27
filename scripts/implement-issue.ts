@@ -74,7 +74,7 @@ export function parseDaemonOutput(output: string, structured?: { session_id?: st
 }
 
 export function plannedCommands(issue: IssueReference, repoRoot: string): string[][] {
-  return [["polytoken", "new", "--no-attach"], ["scripts/create-workspace.sh", `issue-${issue.number}`], ["pushd", resolve(repoRoot, ".workspaces", `issue-${issue.number}`)], ["bun", "install"], ["zellij", "action", "new-tab", "--cwd", repoRoot, "--", "polytoken", "attach", "<session_id>"]];
+  return [["polytoken", "new", "--no-attach"], ["just", "create-workspace", `issue-${issue.number}`], ["pushd", resolve(repoRoot, ".workspaces", `issue-${issue.number}`)], ["bun", "install"], ["zellij", "action", "new-tab", "--cwd", repoRoot, "--", "polytoken", "attach", "<session_id>"]];
 }
 
 /**

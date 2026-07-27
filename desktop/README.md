@@ -139,7 +139,7 @@ pointing a machine at alternative hosting (e.g. a tailnet static dir).
 The normal path is one command; CI does the heavy lifting:
 
 ```bash
-bun scripts/desktop/release.ts            # --patch (default), --minor, --major, --version X.Y.Z
+just release                                # --patch (default), --minor, --major, --version X.Y.Z
 ```
 
 It bumps the version (tauri.conf.json + Cargo.toml + lock), commits `Release vX.Y.Z`,

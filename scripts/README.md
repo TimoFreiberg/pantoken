@@ -81,10 +81,10 @@ the hook knows which issue and project directory to inspect.
 The agent owns the issue workspace lifecycle:
 
 ```bash
-scripts/create-workspace.sh issue-42 [revision]
+just create-workspace issue-42 [revision]
 # run the printed pushd command, bootstrap files and metadata
 just integrate-into-main 42
-scripts/cleanup-current-workspace.sh
+just cleanup-current-workspace
 # run the printed popd command
 ```
 
@@ -117,7 +117,7 @@ rm -rf .workspaces/pantoken-issue-*
 justfile                          — entry points (implement-issue, integrate-into-main, create-workspace, cleanup-current-workspace, legacy cleanup-workspace)
 scripts/
   implement-issue.ts              — typed launcher, context downloader, renderer, and daemon seeder
-  implement-issue.sh               — compatibility wrapper (`exec bun run scripts/implement-issue.ts "$@"`)
+  implement-issue.sh               — compatibility wrapper for older callers (`exec bun run scripts/implement-issue.ts "$@"`)
   seed-prompt.md                  — the agent's initial prompt template
   create-workspace.sh             — default-workspace-only jj workspace creator
   cleanup-current-workspace.sh     — integrated current-workspace forget + removal
@@ -145,6 +145,6 @@ scripts/
 - `just` — command runner
 - Bun — runs `scripts/implement-issue.ts` and the repository test suite
 
-The launcher owns a unique `issue-*` directory under `.pantoken-issue-context/` during normal execution. It stores `issue-body.md`, downloaded images, `manifest.json`, and daemon session/workspace handoff files; the zellij tab removes that context after the TUI exits. The parent directory is gitignored. Workspace integration and cleanup are performed explicitly by the agent with `just integrate-into-main <N>` and `scripts/cleanup-current-workspace.sh`. Screenshot downloads are bounded, content-type checked, and failed downloads are never listed as local screenshots.
+The launcher owns a unique `issue-*` directory under `.pantoken-issue-context/` during normal execution. It stores `issue-body.md`, downloaded images, `manifest.json`, and daemon session/workspace handoff files; the zellij tab removes that context after the TUI exits. The parent directory is gitignored. Workspace integration and cleanup are performed explicitly by the agent with `just integrate-into-main <N>` and `just cleanup-current-workspace. Screenshot downloads are bounded, content-type checked, and failed downloads are never listed as local screenshots.
 
 `integrate-into-main.sh` exits `0` on success, `2` on conflicts with the lock retained for the resolving session, and `1` for other failures. `INTEGRATE_DRY_RUN=1` skips push and issue close but still exercises the local integration decision path.

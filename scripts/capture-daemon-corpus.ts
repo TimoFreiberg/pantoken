@@ -20,8 +20,8 @@
 // it spends money. That's why this is a manual, opt-in tool, not part of `bun test`.
 //
 // ─── USAGE ──────────────────────────────────────────────────────────────────
-//   bun run scripts/capture-daemon-corpus.ts <scenario> [--write]
-//   bun run scripts/capture-daemon-corpus.ts streaming-turn --write
+//   just capture-daemon-corpus <scenario> [--write]
+//   just capture-daemon-corpus streaming-turn --write
 //     <scenario>  one of the registered scenarios (see SCENARIOS below)
 //     --write     write the canonicalized JSON to the corpus dir; omit for a dry-run
 //                 that prints to stdout so you can eyeball before committing.
@@ -792,8 +792,8 @@ async function main() {
   const write = rest.includes("--write");
   if (!scenarioName || !(scenarioName in SCENARIOS)) {
     console.error(
-      `usage: bun run scripts/capture-daemon-corpus.ts <scenario> [--write]\n` +
-        `       bun run scripts/capture-daemon-corpus.ts --recanon [file...]\n` +
+      `usage: just capture-daemon-corpus <scenario> [--write]\n` +
+        `       just capture-daemon-corpus --recanon [file...]\n` +
         `scenarios: ${Object.keys(SCENARIOS).join(", ")}`,
     );
     process.exit(1);

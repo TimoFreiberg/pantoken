@@ -3,7 +3,7 @@
 // (the tag push triggers ci.yml's release-prepare job, which builds signed while
 // the gates run; release publishes via publish.ts once the gates pass).
 //
-//   bun scripts/desktop/release.ts [--patch|--minor|--major|--version X.Y.Z]
+//   just release [--patch|--minor|--major|--version X.Y.Z]
 //                                  [--dry-run] [--no-push]
 //
 // Default bump: --patch. What it does, in order:

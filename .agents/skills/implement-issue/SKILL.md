@@ -18,7 +18,7 @@ bash scripts/gh-issue-fetch.sh <issue-number>
 Read the printed issue and screenshots. The harness does not provide an implementation worktree. Create and enter one now, and do not implement in the default workspace:
 
 ```bash
-scripts/create-workspace.sh issue-<N>
+just create-workspace issue-<N>
 # run the printed: pushd <absolute-workspace-dir>
 bun install
 mkdir -p .polytoken
@@ -57,7 +57,7 @@ just integrate-into-main <N>
 jj diff --summary
 jj log -r 'main..@ ~ empty()' --no-graph
 jj diff --from main --to @
-scripts/cleanup-current-workspace.sh
+just cleanup-current-workspace
 popd
 ```
 
