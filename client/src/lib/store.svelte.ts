@@ -2478,21 +2478,11 @@ class PantokenStore {
    *  Reaps the previous empty+default session if switching (phase 2 integration).
    *  Returns true if the message was sent. */
   createSession(cwd: string): boolean {
-    // Reap the previous empty+default session if switching (reuse the
-    // lifecycleAccepted/lifecycleConfigured guard from openSession).
-    const previous = this.sessions.find(
-      (s) => s.path === this.activeSessionPath,
-    );
-    const switching = this.activeSessionPath !== null && previous != null;
-    if (switching) {
-      const sid = previous.sessionId;
-      if (
-        !this.lifecycleAccepted.has(sid) &&
-        !this.lifecycleConfigured.has(sid)
-      ) {
-        this.destroySession(previous.path);
-      }
-    }
+    // Note: we do NOT reap the previous session here. Reaping happens in
+    // openSession when navigating away from an empty+default session. The
+    // hub's newSession handler switches focus server-side, and the seed for
+    // the new session will arrive shortly. If the user navigates back to the
+    // old session (which had content), it won't be reaped (lifecycle guards).
     // Stash any draft text before leaving (dead path, but idempotent).
     this.stashDraft();
     this.draft = null;
