@@ -19,7 +19,7 @@ check:
 
 # Run the project unit tests (normal, non-live).
 test:
-    bun test
+    bun run test
 
 # Quick local gate: check followed by unit tests; no Rust, E2E, or live work.
 quality:
