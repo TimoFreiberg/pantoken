@@ -128,16 +128,21 @@ export { type StopState } from "./store-helpers.js";
  * responds at all. */
 const STOP_CONFIRMATION_TIMEOUT_MS = 500;
 
-/** A view in the back/forward navigation history (⌘[ / ⌘]): a focused session, or a
- *  pending new-session draft identified by its project cwd. Client-only view state. */
+/** A view in the back/forward navigation history (⌘[ / ⌘]): a focused session, a
+ *  pending new-session draft identified by its project cwd, or the session chooser.
+ *  Client-only view state. */
 type NavEntry =
-  { kind: "session"; sessionId: string } | { kind: "draft"; cwd: string };
+  | { kind: "session"; sessionId: string }
+  | { kind: "draft"; cwd: string }
+  | { kind: "chooser" };
 
 function navEntryEquals(a: NavEntry, b: NavEntry): boolean {
   if (a.kind !== b.kind) return false;
   return a.kind === "session"
     ? a.sessionId === (b as { sessionId: string }).sessionId
-    : a.cwd === (b as { cwd: string }).cwd;
+    : a.kind === "draft"
+      ? a.cwd === (b as { cwd: string }).cwd
+      : true;
 }
 
 class PantokenStore {
@@ -340,6 +345,10 @@ class PantokenStore {
   // Convention (docs/DECISIONS.md D17): every field settable here should survive a
   // session switch / reload — persist it via draftConfigMap unless there's a concrete
   // reason it can't be (then add an e2e round-trip in e2e/drafts.e2e.ts).
+  //
+  // Dead code — phase 5 removes this. No entry point reaches the draft path after
+  // phase 3 replaced it with create-on-click / the chooser. Kept so the draft
+  // machinery stays functional if re-wired, but `store.draft` is never set.
   draft = $state<{
     cwd: string;
     model?: { modelId: string };
@@ -352,21 +361,32 @@ class PantokenStore {
      *  toggle, since the daemon has no set-at-spawn endpoint — only a toggle). */
     adventurousHandoff?: boolean;
   } | null>(null);
-  // A newSession prompt was just submitted and we're awaiting the new session's first
-  // authoritative seed from the server (session warm-up can take a beat). Holds the
-  // submitted prompt (id + content). While set, the transcript renders a fresh/empty
-  // session seeded with this first-prompt row + a "Starting session…" indicator — instead
-  // of flashing the previously focused session's transcript, which `this.session` still
-  // holds until the seed swaps it in. Cleared once that prompt's real userMessage
-  // lands in the focused transcript (maybeFinishCreating), or on navigation / failure.
+  // The new-session chooser view. When true, the main pane shows the chooser
+  // (recent-projects list + Browse…). Selecting a project or browsing calls
+  // createSession(cwd), which sends a prompt-less newSession and transitions to
+  // the creatingSession warm-up placeholder until the seed lands.
+  chooserOpen = $state(false);
+  // A newSession was just submitted and we're awaiting the new session's first
+  // authoritative seed from the server (session warm-up can take a beat). For a
+  // prompt-carrying submit (the draft path), holds the submitted prompt (id +
+  // content) and the draft's config picks so composer badges don't flash to
+  // daemon defaults during the warm-up window. For prompt-less create-on-click
+  // (the chooser path), `promptId`/`text`/`images` are all undefined — the only
+  // signal is "a session is starting" (WorkingIndicator / StatusHeader read the
+  // non-null check). The seed handler clears the prompt-less variant (no prompt
+  // row to wait for); the prompt-carrying variant is cleared by
+  // maybeFinishCreating once the real userMessage lands. Cleared on navigation /
+  // failure too.
   creatingSession = $state<{
-    promptId: string;
-    text: string;
+    // Undefined for prompt-less create-on-click (the chooser path).
+    promptId?: string;
+    text?: string;
     images?: ImageContent[];
     createdAt: string;
     // The draft's picks at submit time — carried so the composer badges don't
     // flash to daemon defaults during the warm-up window before the seed lands.
     // Same values sent in the newSession request; the seed usually echoes them.
+    // All undefined for prompt-less create-on-click (daemon defaults).
     facet?: string;
     model?: { modelId: string };
     thinking?: string;
@@ -563,10 +583,20 @@ class PantokenStore {
       } finally {
         this.navigating = false;
       }
-    } else {
+    } else if (entry.kind === "draft") {
+      // Dead code — phase 5 removes the draft path. Historical draft nav entries
+      // (from before the chooser swap) land on the chooser instead.
       this.navigating = true;
       try {
-        this.startDraft(entry.cwd);
+        this.openChooser();
+      } finally {
+        this.navigating = false;
+      }
+    } else {
+      // chooser
+      this.navigating = true;
+      try {
+        this.openChooser();
       } finally {
         this.navigating = false;
       }
@@ -630,18 +660,11 @@ class PantokenStore {
     if (next) this.openSession(next.path);
   }
 
-  /** ⌘N — open a new-session draft, defaulting its project to the one you're in (the
-   *  focused session's project), else the last project you selected, else the server's
-   *  default ($HOME). Already drafting → just refocus the composer. */
+  /** ⌘N — open the new-session chooser. The chooser pre-selects the last-active
+   *  project and creates a real session on selection. Already open → no-op. */
   newSessionHotkey(): void {
-    if (this.draft) {
-      this.focusComposer();
-      return;
-    }
-    const viewedId = this.session.ref?.sessionId ?? this.activeSessionId;
-    const active = this.sessions.find((s) => s.sessionId === viewedId);
-    const cwd = active ? projectCwdOf(active) : "";
-    this.startDraft(cwd || this.lastProjectCwd || this.defaultNewSessionCwd);
+    if (this.chooserOpen) return;
+    this.openChooser();
   }
 
   /** Remember the most recently selected project (a session's cwd, or a draft's target);
@@ -830,14 +853,14 @@ class PantokenStore {
     // than the outbox so it survives the prompt's ACK, which deletes the pending entry a
     // beat before the server echoes the message back.
     const creating = this.creatingSession;
-    if (creating && !existing.has(creating.promptId)) {
+    if (creating && creating.promptId !== undefined && !existing.has(creating.promptId)) {
       const pending = this.pendingPrompts.find(
         (p) => p.promptId === creating.promptId,
       );
       items.push({
         kind: "user",
         id: creating.promptId,
-        text: creating.text,
+        text: creating.text ?? "",
         images: creating.images,
         ts: creating.createdAt,
         // Mirror the in-flight delivery cue while the outbox entry is still live; once
@@ -873,10 +896,11 @@ class PantokenStore {
    *  `05f4jw-rust`: an orphaned tool_use whose tool_result was lost to a
    *  context_cleared). */
   get turnActive(): boolean {
-    // When drafting a new session, the main pane shows the new-session form —
-    // not any running session. Hide streaming controls so the stop button and
-    // steer/follow-up UI don't leak across from the previously-viewed session.
-    if (this.draft) return false;
+    // When drafting a new session or the chooser is open, the main pane shows
+    // the new-session view — not any running session. Hide streaming controls
+    // so the stop button and steer/follow-up UI don't leak across from the
+    // previously-viewed session.
+    if (this.draft || this.chooserOpen) return false;
     const status = this.session.status;
     if (status === "running") return true;
     if (status === "failed") return false;
@@ -1064,7 +1088,9 @@ class PantokenStore {
   /** Tear down the "creating new session" placeholder once its first prompt has actually
    *  landed in the focused transcript. Tied to the real item (not the seed or the
    *  ACK) so the optimistic first-prompt row hands off to the authoritative one without a
-   *  gap — the overlay keeps showing it right up until `existing.has(promptId)` is true. */
+   *  gap — the overlay keeps showing it right up until `existing.has(promptId)` is true.
+   *  For prompt-less create-on-click (no promptId), this is a no-op — the seed handler
+   *  clears the placeholder instead (see onServer's "seed" case). */
   private maybeFinishCreating(): void {
     const id = this.creatingSession?.promptId;
     if (id !== undefined && this.session.items.some((item) => item.id === id))
@@ -1128,7 +1154,7 @@ class PantokenStore {
         // fallback is a re-seed onto the landing — so remember the session
         // we're viewing (captured now, before that fallback seed overwrites
         // `session`) to re-assert once the list arrives.
-        if (this.booted && !this.draft)
+        if (this.booted && !this.draft && !this.chooserOpen && !this.creatingSession)
           this.reconnectFocusId = this.session.ref?.sessionId ?? null;
         this.booted = true;
         // Re-assert a seed request that was stranded by a closed socket.
@@ -1154,6 +1180,10 @@ class PantokenStore {
         // A seed for the session we're creating may already carry its first prompt
         // (or none yet — the userMessage event folds in next). Either way, hand off.
         this.maybeFinishCreating();
+        // Prompt-less create-on-click: there's no prompt row to wait for, so the
+        // seed itself means the session is ready — clear the warm-up placeholder.
+        if (this.creatingSession && this.creatingSession.promptId === undefined)
+          this.creatingSession = null;
         if (this.bootRestoreInFlight && built.ref)
           this.bootRestoreInFlight = false;
         // A seed lands after a successful switch — clear the retry capture
@@ -1436,6 +1466,17 @@ class PantokenStore {
           : null;
         break;
       case "error":
+        // Prompt-less create-on-click failure: the server sends an Error with
+        // kind: None + "Could not create the new session" when has_first_prompt
+        // is false and new_session fails. Clear the warm-up placeholder and
+        // return to the chooser so the user isn't stuck on "Starting session…".
+        if (
+          this.creatingSession &&
+          this.creatingSession.promptId === undefined
+        ) {
+          this.creatingSession = null;
+          this.chooserOpen = true;
+        }
         if (msg.message === "unauthorized") {
           this.unauthorized = true;
           // Rejected after we'd connected → a token expired/was revoked mid-session,
@@ -1457,7 +1498,7 @@ class PantokenStore {
           if (this.bootRestoreInFlight) {
             this.bootRestoreInFlight = false;
             if (this.serverId) clearLastSession(this.serverId);
-            this.startDraft(this.defaultNewSessionCwd);
+            this.openChooser();
           }
           // A lease conflict (409) is retryable: the operator /detach in the TUI
           // or waits for the lease to lapse, then taps Retry to re-send openSession.
@@ -1491,7 +1532,7 @@ class PantokenStore {
           ) {
             this.bootRestoreInFlight = false;
             if (this.serverId) clearLastSession(this.serverId);
-            this.startDraft(this.defaultNewSessionCwd);
+            this.openChooser();
           }
         }
         break;
@@ -2174,9 +2215,11 @@ class PantokenStore {
       }
     }
     // Save the draft we're leaving (the new-session draft, or the prior session's text)
-    // before the composer re-points; navigating to a session exits any new-session draft.
+    // before the composer re-points; navigating to a session exits any new-session draft
+    // or the chooser.
     this.stashDraft();
     this.draft = null;
+    this.chooserOpen = false;
     // Navigating away abandons any in-flight "creating session" placeholder — its
     // optimistic prompt row must not bleed onto the session we're switching to.
     this.creatingSession = null;
@@ -2361,7 +2404,9 @@ class PantokenStore {
     if (
       this.activeSessionId === null &&
       this.session.ref === null &&
-      this.draft === null
+      this.draft === null &&
+      !this.chooserOpen &&
+      !this.creatingSession
     ) {
       const savedId = loadLastSession(this.serverId);
       const saved = savedId
@@ -2380,7 +2425,7 @@ class PantokenStore {
         clearLastSession(this.serverId);
       }
       if (savedId) clearLastSession(this.serverId);
-      this.startDraft(this.defaultNewSessionCwd);
+      this.openChooser();
     } else if (!this.draft && this.activeSessionId) {
       // Booted/reconnected straight onto a session — restore its saved draft so a reload
       // doesn't lose a half-typed prompt, and seed it as the initial back/forward entry
@@ -2399,15 +2444,89 @@ class PantokenStore {
   private maybeRestoreFocus(): void {
     const want = this.reconnectFocusId;
     this.reconnectFocusId = null;
-    if (!want || this.draft) return;
+    if (!want || this.draft || this.chooserOpen || this.creatingSession) return;
     if (this.session.ref?.sessionId === want) return;
     const target = this.sessions.find((s) => s.sessionId === want);
     if (target) this.openSession(target.path);
   }
 
+  /** Open the new-session chooser view. Records a nav entry for back/forward.
+   *  Idempotent if already open. Stashes any in-flight draft text (harmless —
+   *  the draft path is dead code, but stashDraft is idempotent). */
+  openChooser(): void {
+    if (this.chooserOpen) return;
+    this.stashDraft();
+    this.draft = null;
+    this.creatingSession = null;
+    this.openingSession = null;
+    this.searchOpen = false;
+    this.chooserOpen = true;
+    this.pushNav({ kind: "chooser" });
+  }
+
+  /** Close the chooser view (Escape / backdrop click / successful create). */
+  closeChooser(): void {
+    this.chooserOpen = false;
+  }
+
+  /** Create a real session immediately via prompt-less newSession (create-on-click).
+   *  Sends `{ type: "newSession", cwd }` with no prompt — the daemon spawns with
+   *  default config (model/facet/permissionMonitor/adventurousHandoff all daemon
+   *  defaults; a user who wants non-default toggles them on the live session after
+   *  creation via the existing SessionAction endpoints). Transitions to the
+   *  creatingSession warm-up placeholder until the seed lands, which clears it.
+   *  Reaps the previous empty+default session if switching (phase 2 integration).
+   *  Returns true if the message was sent. */
+  createSession(cwd: string): boolean {
+    // Reap the previous empty+default session if switching (reuse the
+    // lifecycleAccepted/lifecycleConfigured guard from openSession).
+    const previous = this.sessions.find(
+      (s) => s.path === this.activeSessionPath,
+    );
+    const switching = this.activeSessionPath !== null && previous != null;
+    if (switching) {
+      const sid = previous.sessionId;
+      if (
+        !this.lifecycleAccepted.has(sid) &&
+        !this.lifecycleConfigured.has(sid)
+      ) {
+        this.destroySession(previous.path);
+      }
+    }
+    // Stash any draft text before leaving (dead path, but idempotent).
+    this.stashDraft();
+    this.draft = null;
+    this.chooserOpen = false;
+    this.openingSession = null;
+    this.searchOpen = false;
+    // Blank session state so the old transcript doesn't bleed through during
+    // the warm-up window (mirrors submitDraft's blanking).
+    this.session = initialSessionState();
+    this.seedSessionId = null;
+    this.seedEpoch = 0;
+    this.seedSeq = 0;
+    this.seedRequested = false;
+    this.pendingSeedRequest = false;
+    // Prompt-less warm-up placeholder: no promptId/text — the seed handler
+    // clears it (there's no prompt row to wait for).
+    this.creatingSession = {
+      createdAt: new Date().toISOString(),
+    };
+    // Send the newSession message directly (not via enqueuePrompt — there's no
+    // prompt to durably deliver). No model/facet/permissionMonitor/adventurousHandoff
+    // — the session spawns with daemon defaults (config applied post-create).
+    const sent = send({ type: "newSession", cwd: cwd.trim() || undefined });
+    if (!sent) return false;
+    if (cwd.trim()) this.setLastProjectCwd(cwd.trim());
+    return true;
+  }
+
   /** Open the new-session draft. `cwd` prefills the project (the sidebar passes the
    *  group's cwd, or the active session's). Model/thinking seed from the agent's global
-   *  defaults so the chips reflect what a plain new session would use. */
+   *  defaults so the chips reflect what a plain new session would use.
+   *
+   *  Dead code — phase 5 removes this. No entry point reaches startDraft after
+   *  phase 3 replaced it with openChooser / createSession. */
   startDraft(cwd = ""): void {
     // Save whatever session/draft we're leaving before flipping into the new draft.
     this.stashDraft();
@@ -3120,7 +3239,7 @@ class PantokenStore {
       // the just-archived transcript.
       const viewedId = this.session.ref?.sessionId ?? this.activeSessionId;
       const archivingFocused = s != null && s.sessionId === viewedId;
-      if (archivingFocused) this.startDraft(projectCwdOf(s));
+      if (archivingFocused) this.openChooser();
       const cwd = s?.cwd;
       this.sidebarNotice(`Archived “${label}”`, {
         kind: "archive-undo",
