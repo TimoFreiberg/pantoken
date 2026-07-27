@@ -5,23 +5,6 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-/** Open the project menu and choose `/Users/timo/src/<name>` via the DirPicker. */
-async function chooseProjectDir(
-  page: import("@playwright/test").Page,
-  name: string,
-): Promise<void> {
-  await page.getByTestId("draft-project-control").click();
-  await page.getByTestId("project-menu").getByText("New project…").click();
-  await page.mouse.move(0, 0);
-  const picker = page.getByTestId("dir-picker");
-  await expect(picker).toBeVisible();
-  const input = picker.getByLabel("Project directory path");
-  await input.fill(`/Users/timo/src/${name}/`);
-  await expect(picker.getByTestId("use-current-directory")).toBeVisible();
-  await picker.getByTestId("use-current-directory").click();
-  await expect(picker).toBeHidden();
-}
-
 test("the sidebar groups sessions by project and switches the active one", async ({
   page,
 }) => {
@@ -106,7 +89,7 @@ test("an empty launch restores this client's last-focused session", async ({
   ).toBeVisible();
 });
 
-test("a stale last-focused session falls back to the home draft", async ({
+test("a stale last-focused session falls back to the chooser", async ({
   page,
 }) => {
   const key = await page.evaluate(() => {
@@ -121,9 +104,8 @@ test("a stale last-focused session falls back to the home draft", async ({
   await page.request.get("/debug/reset?bootstrap=0");
   await page.reload();
 
-  await expect(
-    page.getByPlaceholder("Describe a task or ask a question…"),
-  ).toBeVisible();
+  // With no restorable session, the chooser appears (phase 3 boot-with-no-restore).
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
   expect(await page.evaluate((k) => localStorage.getItem(k), key)).toBeNull();
 });
 
@@ -224,44 +206,51 @@ test("relative timestamps tick forward as time passes", async ({ page }) => {
   await expect(time).toHaveText(`${before + 5}m`);
 });
 
-test("a project's + button opens a new-session draft for that dir", async ({
+test("a project's + button creates a session immediately in that dir", async ({
   page,
 }) => {
   await openSidebar(page);
+  const beforeCount = await page.getByTestId("sidebar").locator(".row").count();
+
   await page
     .getByTestId("sidebar")
     .getByRole("button", { name: "New session in pantoken" })
     .click();
-  // Deferred creation: the centred real composer carries the chosen project +
-  // default model without creating a session until its first send.
-  await expect(page.getByTestId("new-session")).toBeVisible();
-  await expect(page.getByText("What would you like to work on?")).toBeVisible();
-  await expect(page.getByText("Created when you send")).toBeVisible();
-  await expect(page.getByTestId("draft-project-control")).toHaveAttribute(
-    "title",
-    /\/Users\/timo\/src\/pantoken/,
+
+  // Create-on-click: the session is created immediately — no chooser, no draft.
+  await expect(page.getByTestId("session-chooser")).toHaveCount(0);
+  // A new session row appears.
+  await expect(page.getByTestId("sidebar").locator(".row")).toHaveCount(
+    beforeCount + 1,
   );
-  await expect(
-    page.getByRole("button", { name: /Claude Opus 4\.8/ }),
-  ).toBeVisible();
 });
 
-test("a session can be started in a directory chosen via the browser", async ({
+test("a session can be started in a directory chosen via the chooser's Browse", async ({
   page,
 }) => {
   await openSidebar(page);
   const sidebar = page.getByTestId("sidebar");
+  const beforeCount = await sidebar.locator(".row").count();
 
-  await sidebar.getByTestId("sidebar-new-session").getByText("New session").click();
-  // The project lives as a chip in the composer; click it to browse for the directory.
-  await chooseProjectDir(page, "elsewhere");
-  // Sending the first prompt is what actually creates the session (atomic).
-  const composer = page.getByPlaceholder("Describe a task or ask a question…");
-  await composer.fill("kick things off");
-  await composer.press("Enter");
+  // Open the chooser, then use Browse… to pick a directory via the DirPicker.
+  await sidebar.getByTestId("sidebar-new-session").locator(".new-btn").click();
+  await page.getByTestId("chooser-browse").click();
+  const picker = page.getByTestId("dir-picker");
+  await expect(picker).toBeVisible();
+  const input = picker.getByLabel("Project directory path");
+  await input.fill("/Users/timo/src/elsewhere/");
+  await expect(picker.getByTestId("use-current-directory")).toBeVisible();
+  await picker.getByTestId("use-current-directory").click();
+  await expect(picker).toBeHidden();
+
+  // A session is created immediately in the chosen dir.
+  await expect(page.getByTestId("session-chooser")).toHaveCount(0);
 
   // A new project group appears for the chosen dir.
   await openSidebar(page); // (closed by afterNavigate on the mobile drawer)
+  await expect(page.getByTestId("sidebar").locator(".row")).toHaveCount(
+    beforeCount + 1,
+  );
   await expect(
     page.getByTestId("sidebar").getByText("elsewhere", { exact: true }),
   ).toBeVisible();
@@ -355,17 +344,6 @@ test("reopening the sidebar starts compact; search focuses only after activation
   // Explicit desktop activation mounts and focuses Search.
   await sidebar.getByTestId("sidebar-search-toggle").click();
   await expect(sidebar.getByTestId("sidebar-search-input")).toBeFocused();
-});
-
-test("clicking the project chip opens the project menu", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  await page.getByTestId("sidebar").getByTestId("sidebar-new-session").getByText("New session").click();
-  await page.getByTestId("draft-project-control").click();
-  // The chip now opens the project menu (the full browse/pick flow lives in
-  // dir-picker.e2e.ts); here we only assert the chip surfaces the menu.
-  await expect(page.getByTestId("project-menu")).toBeVisible();
 });
 
 test("a project with >5 sessions shows a 'Show more' button that reveals the rest", async ({

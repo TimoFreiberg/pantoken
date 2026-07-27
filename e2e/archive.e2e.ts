@@ -170,7 +170,7 @@ test("pressing 'a' while the menu is open archives the targeted session", async 
   ).toHaveCount(0);
 });
 
-test("archiving the focused session drops its row and opens a new-session draft", async ({
+test("archiving the focused session drops its row and opens the chooser", async ({
   page,
 }) => {
   await openSidebar(page);
@@ -189,14 +189,14 @@ test("archiving the focused session drops its row and opens a new-session draft"
   await sidebar.getByRole("menuitem", { name: "Archive", exact: true }).click();
 
   // Archiving what you're reading is an explicit "put this away" gesture, so the row
-  // drops from the active view and the main pane flips to a new-session draft for the
-  // same project (rather than leaving you staring at the archived transcript).
+  // drops from the active view and the main pane flips to the chooser (rather than
+  // leaving you staring at the archived transcript).
   await expect(
     sidebar
       .locator(".row-wrap")
       .filter({ hasText: "Wire up the WebSocket bridge" }),
   ).toHaveCount(0);
-  await expect(page.getByTestId("new-session")).toBeVisible();
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
 
   // Undo restores both: the session un-archives AND we're put back on its transcript.
   const toast = sidebar.getByTestId("toast").filter({ hasText: "Archived" });
@@ -206,7 +206,7 @@ test("archiving the focused session drops its row and opens a new-session draft"
       .locator(".row-wrap")
       .filter({ hasText: "Wire up the WebSocket bridge" }),
   ).toBeVisible();
-  await expect(page.getByTestId("new-session")).toHaveCount(0);
+  await expect(page.getByTestId("session-chooser")).toHaveCount(0);
 });
 
 test("the overflow menu archives a session, hiding it from the active list", async ({

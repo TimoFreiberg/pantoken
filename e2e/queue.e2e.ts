@@ -21,6 +21,9 @@ test("queued modes survive reconnect and session refocus", async ({ page }) => {
 
   await openSidebar(page);
   await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
+  // The chooser replaces the session view — the queue tray is session-bound
+  // and hides while the chooser is open.
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
   await expect(page.getByTestId("queue-tray")).toHaveCount(0);
   await openSidebar(page);
   await page.getByTestId("sidebar").locator(".row", { hasText: ACTIVE }).click();

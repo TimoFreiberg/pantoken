@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { gotoFresh, openSidebar } from "./helpers.js";
 
 // The facet picker (in the composer chrome) switches the active facet. Clicking
@@ -338,17 +338,17 @@ test("Shift+Tab does not fire when the slash menu is open", async ({
   await expect(badge).toHaveText("Execute");
 });
 
-// Regression: opening the facet menu via Shift+Tab and closing it, then opening
-// and closing a new-session draft (which unmounts + remounts Composer via
-// App.svelte `{#if !store.draft}`), must NOT auto-pop the facet menu. Root
-// cause: MenuBadge's lastOpenN was reset to 0 on remount while store.
-// facetMenuOpenN (monotonic, never reset) still held a prior value > 0, so the
-// effect re-fired open=true. Fixed by making lastOpenN a null sentinel that
-// syncs on the first post-(re)mount observation without opening.
-test("the facet menu does not auto-open after a draft remount", async ({
+// Regression: opening the facet menu via Shift+Tab and closing it, then switching
+// sessions (which unmounts + remounts Composer via App.svelte's {#if} block),
+// must NOT auto-pop the facet menu. Root cause: MenuBadge's lastOpenN was reset
+// to 0 on remount while store.facetMenuOpenN (monotonic, never reset) still
+// held a prior value > 0, so the effect re-fired open=true. Fixed by making
+// lastOpenN a null sentinel that syncs on the first post-(re)mount observation
+// without opening.
+test("the facet menu does not auto-open after a Composer remount", async ({
   page,
 }) => {
-  // AC.2 — open the facet menu once via Shift+Tab, then close it.
+  // Open the facet menu once via Shift+Tab, then close it.
   const badge = page.getByTestId("facet-badge");
   await expect(badge).toHaveText("Execute");
   await page.getByPlaceholder("Message pantoken…").focus();
@@ -360,156 +360,23 @@ test("the facet menu does not auto-open after a draft remount", async ({
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
 
-  // Open a new-session draft, then abandon it by switching to an existing
-  // session in the sidebar. This unmounts Composer (store.draft set) and
-  // remounts it against the existing session (store.draft cleared) — resetting
-  // MenuBadge's local state. The greeting session's facet is unchanged
-  // ("Execute") since Shift+Tab no longer rotates, so the post-remount trace is
-  // clean regardless of which session we land on.
-  await openSidebar(page);
-  await page
-    .getByTestId("sidebar")
-    .getByTestId("sidebar-new-session")
-    .getByText("New session")
-    .click();
-  await expect(
-    page.getByPlaceholder("Describe a task or ask a question…"),
-  ).toBeVisible();
+  // Switch to a different session — this unmounts and remounts Composer,
+  // resetting MenuBadge's local state. The greeting session's facet is
+  // unchanged ("Execute") since Shift+Tab no longer rotates.
   await openSidebar(page);
   await page
     .getByTestId("sidebar")
     .locator(".row", { hasText: "Explore the fold reducer" })
     .click();
-  // Composer is remounted against the existing session (Execute facet).
+  // Composer is remounted against the existing session.
   await expect(page.getByPlaceholder("Message pantoken…")).toBeVisible();
-  await expect(badge).toHaveText("Execute");
 
   // The facet menu must NOT have auto-popped on the remount.
   await expect(page.getByRole("listbox", { name: "Facet" })).toHaveCount(0);
 
-  // AC.4 (post-remount variant) — a fresh Shift+Tab still opens the menu
-  // (without rotating). Badge stays "Execute".
+  // A fresh Shift+Tab still opens the menu (without rotating).
   await page.getByPlaceholder("Message pantoken…").focus();
   await page.keyboard.press("Shift+Tab");
   await expect(badge).toHaveText("Execute");
   await expect(page.getByRole("listbox", { name: "Facet" })).toBeVisible();
 });
-
-// --- Draft-mode tests ---
-// While a new-session draft is open, store.session still points at the previously
-// focused session. The facet badge + Shift+Tab must read/write the DRAFT, not the
-// old session. These tests guard against the regression where the draft view mutated
-// the focused session instead.
-
-test("clicking the facet badge in the draft opens the dropdown for the DRAFT's facet, not the session's", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  // The greeting session is focused — its facet badge reads "Execute".
-  const liveBadge = page.getByTestId("facet-badge");
-  await expect(liveBadge).toHaveText("Execute");
-
-  // Open a new-session draft.
-  await page
-    .getByTestId("sidebar")
-    .getByTestId("sidebar-new-session")
-    .getByText("New session")
-    .click();
-  await expect(page.getByTestId("new-session")).toBeVisible();
-  // The draft's facet badge also reads "Execute" (the draft default).
-  const draftBadge = page.getByTestId("facet-badge");
-  await expect(draftBadge).toHaveText("Execute");
-
-  // Click the badge to open the dropdown for the draft's facet. Press "2" to select Plan.
-  await draftBadge.click();
-  const panel = page.locator(".panel[role='listbox']");
-  await expect(panel).toBeVisible();
-  await page.keyboard.press("2");
-  await expect(draftBadge).toHaveText("Plan");
-
-  // Navigate back to the old session — its facet must be unchanged ("Execute").
-  await openSidebar(page);
-  await row(page, "Wire up the WebSocket bridge").click();
-  await expect(page.getByTestId("facet-badge")).toHaveText("Execute");
-});
-
-test("Shift+Tab in the new-session draft opens the menu without rotating; Enter commits the draft pick", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  // The greeting session is focused — its facet badge reads "Execute".
-  const liveBadge = page.getByTestId("facet-badge");
-  await expect(liveBadge).toHaveText("Execute");
-
-  // Open a new-session draft.
-  await page
-    .getByTestId("sidebar")
-    .getByTestId("sidebar-new-session")
-    .getByText("New session")
-    .click();
-  await expect(page.getByTestId("new-session")).toBeVisible();
-  const draftBadge = page.getByTestId("facet-badge");
-  await expect(draftBadge).toHaveText("Execute");
-
-  // Focus the composer textarea and Shift+Tab to open the facet menu — no
-  // rotation, badge stays "Execute".
-  await page.getByPlaceholder("Describe a task or ask a question…").focus();
-  await page.keyboard.press("Shift+Tab");
-  await expect(draftBadge).toHaveText("Execute");
-  const panel = page.getByRole("listbox", { name: "Facet" });
-  await expect(panel).toBeVisible();
-
-  // Shift+Tab moves the highlight to Plan (no commit). Enter commits the
-  // highlighted facet (Plan) to the draft and closes the menu.
-  await page.keyboard.press("Shift+Tab");
-  await expect(panel.getByRole("option", { name: "Plan" })).toHaveClass(/hl/);
-  await expect(draftBadge).toHaveText("Execute");
-  await page.keyboard.press("Enter");
-  await expect(panel).not.toBeVisible();
-  await expect(draftBadge).toHaveText("Plan");
-
-  // Navigate back to the old session — its facet must be unchanged ("Execute").
-  await openSidebar(page);
-  await row(page, "Wire up the WebSocket bridge").click();
-  await expect(page.getByTestId("facet-badge")).toHaveText("Execute");
-
-  // Navigate back to the draft — the draft's committed pick (Plan) is preserved.
-  await openSidebar(page);
-  await page
-    .getByTestId("sidebar")
-    .getByTestId("sidebar-new-session")
-    .getByText("New session")
-    .click();
-  await expect(page.getByTestId("new-session")).toBeVisible();
-  await expect(page.getByTestId("facet-badge")).toHaveText("Plan");
-});
-
-test("clicking the facet badge in the draft view toggles the draft, not the old session", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  await page
-    .getByTestId("sidebar")
-    .getByTestId("sidebar-new-session")
-    .getByText("New session")
-    .click();
-  await expect(page.getByTestId("new-session")).toBeVisible();
-
-  const draftBadge = page.getByTestId("facet-badge");
-  await expect(draftBadge).toHaveText("Execute");
-
-  // Open the picker and select Plan — this writes to the draft.
-  await draftBadge.click();
-  await page.getByRole("option", { name: "Plan" }).click();
-  await expect(draftBadge).toHaveText("Plan");
-
-  // Navigate back to the old session — its facet is unchanged.
-  await openSidebar(page);
-  await row(page, "Wire up the WebSocket bridge").click();
-  await expect(page.getByTestId("facet-badge")).toHaveText("Execute");
-});
-
-// Helper used by draft-mode tests: click a sidebar row by title.
-function row(page: Page, title: string) {
-  return page.getByTestId("sidebar").locator(".row", { hasText: title });
-}

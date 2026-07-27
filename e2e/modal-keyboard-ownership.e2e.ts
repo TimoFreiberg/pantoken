@@ -86,7 +86,7 @@ test("⌘⇧J does not toggle the context panel while Settings is open", async (
 test.describe("other global shortcuts are suppressed while Settings is open", () => {
   for (const [label, combo, assertInert] of [
     ["⌘B (sidebar)", "Control+b", assertSidebarUnchanged],
-    ["⌘N (new-session draft)", "Control+n", assertNoDraft],
+    ["⌘N (session chooser)", "Control+n", assertNoChooser],
     ["⌘K (sidebar search)", "Control+k", assertNoSidebarSearch],
     ["⌘[ (back)", "Control+[", assertActiveSessionUnchanged],
     ["⌘] (forward)", "Control+]", assertActiveSessionUnchanged],
@@ -119,7 +119,7 @@ test.describe("other global shortcuts are suppressed while Settings is open", ()
     page,
   }) => {
     // The default greeting fixture has active_plan: None, which makes the ⌘P
-    // handler (gated `if (!store.draft && store.session.activePlan)`) a no-op
+    // handler (gated `if (!store.chooserOpen && !store.creatingSession && store.session.activePlan)`) a no-op
     // with or without the guard — a vacuous test. Seed an active plan first
     // (BEFORE opening Settings, since the guard would suppress ⌘P otherwise).
     await drive(page, "planview");
@@ -254,8 +254,8 @@ async function assertSidebarUnchanged(page: import("@playwright/test").Page) {
   await expect(page.getByTestId("sidebar")).toHaveAttribute("data-open", "true");
 }
 
-async function assertNoDraft(page: import("@playwright/test").Page) {
-  await expect(page.getByTestId("new-session")).toHaveCount(0);
+async function assertNoChooser(page: import("@playwright/test").Page) {
+  await expect(page.getByTestId("session-chooser")).toHaveCount(0);
 }
 
 async function assertNoSidebarSearch(page: import("@playwright/test").Page) {

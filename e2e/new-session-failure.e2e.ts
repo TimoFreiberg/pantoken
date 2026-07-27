@@ -1,94 +1,64 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { drive, gotoFresh, openSidebar } from "./helpers.js";
 
-// When creating a new session fails before any session exists (e.g. the real driver's
-// `jj workspace add` hits a stale working copy), the draft must NOT silently vanish:
-// the first prompt was already cleared from the composer on submit, and a failed
-// new-session prompt has no transcript surface, so without recovery the text is lost.
+// When creating a new session fails (e.g. the real driver's daemon spawn
+// hits an error), the warm-up placeholder must NOT leave the user stuck on a
+// "Starting session…" view. The error handler clears `creatingSession` and
+// reopens the chooser so the user can retry or pick a different project.
 // `drive(page, "failnewsession")` arms a one-shot mock newSession() rejection.
-
-const draftBox = (page: Page) =>
-  page.getByPlaceholder("Describe a task or ask a question…");
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("a failed new session auto-restores its draft when the pane is free", async ({
+test("a failed create-on-click clears the warm-up placeholder and returns to the chooser", async ({
   page,
 }) => {
+  // Open the chooser.
   await openSidebar(page);
   await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
 
-  await drive(page, "failnewsession"); // arm the one-shot creation failure
-  const prompt = "build the worktree and start hacking";
-  await draftBox(page).fill(prompt); // refocuses the composer
-  await draftBox(page).press("Enter"); // submit -> creation fails server-side
+  // Arm the one-shot creation failure BEFORE selecting a project (the mock
+  // rejects the next newSession() call).
+  await drive(page, "failnewsession");
 
-  // The draft comes back with the prompt intact (no competing draft -> auto-restore).
-  await expect(draftBox(page)).toHaveValue(prompt);
+  // Select a project — createSession fires immediately, the mock fails.
+  await page
+    .getByTestId("session-chooser")
+    .locator(".result.project")
+    .first()
+    .click();
+
+  // The warm-up indicator must NOT be stuck — creatingSession is cleared.
+  await expect(page.getByTestId("working-indicator")).toHaveCount(0);
+
+  // The chooser reappears so the user can retry.
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
+
+  // The error is surfaced (lastError renders in the sidebar as an alert).
+  await expect(page.getByRole("alert")).toContainText(
+    "Could not create the new session",
+  );
 });
 
-test("a failed new session offers a restore toast when another draft is in progress", async ({
+test("a failed create-on-click via ⌘N→Enter returns to the chooser", async ({
   page,
 }) => {
   await openSidebar(page);
-  // Arm the failure while still connected, then drop the socket so the doomed
-  // newSession is queued (not yet attempted) and we can set up a competing draft.
+
+  // ⌘N opens the chooser.
+  await page.keyboard.press("Control+n");
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
+
+  // Arm the failure, then Enter selects the pre-selected project.
   await drive(page, "failnewsession");
-  await page.evaluate(() =>
-    window.dispatchEvent(new Event("pantoken:test-disconnect")),
+  await page.keyboard.press("Enter");
+
+  // The warm-up is cleared and the chooser returns.
+  await expect(page.getByTestId("working-indicator")).toHaveCount(0);
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText(
+    "Could not create the new session",
   );
-  await expect(
-    page.getByText("Offline — the agent keeps running"),
-  ).toBeVisible();
-
-  // Draft A: submit offline -> queued, draft cleared.
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  await draftBox(page).fill("the doomed session");
-  await draftBox(page).press("Enter");
-
-  // Draft B: start a different draft and type into it (the one we must not clobber).
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  await draftBox(page).fill("a different idea I'm typing");
-
-  // Reconnect -> the queued newSession flushes and fails. Draft B is non-empty, so the
-  // recovery offers a sticky toast rather than overwriting it.
-  await page.getByRole("button", { name: "Reconnect" }).click();
-  await expect(
-    page.getByText("New session couldn't start — restore your prompt?"),
-  ).toBeVisible();
-  await expect(draftBox(page)).toHaveValue("a different idea I'm typing");
-
-  // Taking the offer swaps in the recovered prompt.
-  await page.getByRole("button", { name: "Restore", exact: true }).click();
-  await expect(draftBox(page)).toHaveValue("the doomed session");
-});
-
-test("a failed new session overwrites an empty competing draft without a toast", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  await drive(page, "failnewsession");
-  await page.evaluate(() =>
-    window.dispatchEvent(new Event("pantoken:test-disconnect")),
-  );
-  await expect(
-    page.getByText("Offline — the agent keeps running"),
-  ).toBeVisible();
-
-  // Draft A: submit offline -> queued, draft cleared.
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  await draftBox(page).fill("the doomed session");
-  await draftBox(page).press("Enter");
-
-  // Draft B: opened but left empty — nothing to lose, so recovery overwrites it.
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  await expect(draftBox(page)).toHaveValue("");
-
-  await page.getByRole("button", { name: "Reconnect" }).click();
-  await expect(draftBox(page)).toHaveValue("the doomed session");
-  await expect(
-    page.getByText("New session couldn't start — restore your prompt?"),
-  ).toBeHidden();
 });

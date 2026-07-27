@@ -8,25 +8,23 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-const draftBox = (page: Page) =>
-  page.getByPlaceholder("Describe a task or ask a question…");
+const chooser = (page: Page) => page.getByTestId("session-chooser");
 const title = (page: Page) => page.locator("header .title");
 function row(page: Page, name: string) {
   return page.getByTestId("sidebar").locator(".row", { hasText: name });
 }
 
-test("⌘N opens a new-session draft in the current project", async ({
-  page,
-}) => {
-  // Boot lands on the bridge session (project "pantoken"); no draft yet.
-  await expect(draftBox(page)).toBeHidden();
+test("⌘N opens the session chooser", async ({ page }) => {
+  // Boot lands on the bridge session (project "pantoken"); no chooser yet.
+  await expect(chooser(page)).toHaveCount(0);
 
   await page.keyboard.press("Control+n");
 
-  await expect(draftBox(page)).toBeVisible();
-  await expect(title(page)).toHaveText("New session");
-  // The draft defaults to the focused session's project (pantoken).
-  await expect(page.locator("header .sub .path")).toHaveText("pantoken");
+  await expect(chooser(page)).toBeVisible();
+  // The chooser pre-selects the last-active project (pantoken).
+  await expect(
+    chooser(page).getByTestId("chooser-project-pantoken"),
+  ).toHaveAttribute("aria-current", "true");
 });
 
 test("⌘[ and ⌘] step back and forward through visited sessions", async ({
@@ -77,18 +75,18 @@ test("window.__pantokenNav steps back and forward like ⌘[ / ⌘]", async ({
   await expect(title(page)).toContainText("Explore the fold reducer");
 });
 
-test("back history reaches a new-session draft", async ({ page }) => {
+test("back history reaches the chooser", async ({ page }) => {
   await openSidebar(page);
-  // session → draft, then back lands on the session again.
+  // session → chooser, then back lands on the session again.
   await page.keyboard.press("Control+n");
-  await expect(draftBox(page)).toBeVisible();
+  await expect(chooser(page)).toBeVisible();
 
   await page.keyboard.press("Control+[");
-  await expect(draftBox(page)).toBeHidden();
+  await expect(chooser(page)).toHaveCount(0);
   await expect(title(page)).toContainText("Wire up the WebSocket bridge");
 
   await page.keyboard.press("Control+]");
-  await expect(title(page)).toHaveText("New session");
+  await expect(chooser(page)).toBeVisible();
 });
 
 test("Ctrl+Tab / Ctrl+Shift+Tab cycle through sessions in sidebar order", async ({

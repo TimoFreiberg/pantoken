@@ -46,19 +46,16 @@ test("⌘P toggles the plan view overlay", async ({ page }) => {
   await expect(page.getByTestId("plan-view")).toHaveCount(0);
 });
 
-test("a new-session draft hides the plan button and makes ⌘P inert", async ({
+test("the chooser hides the plan button and makes ⌘P inert", async ({
   page,
 }) => {
   await drive(page, "planview");
   await expect(page.getByTestId("plan-view-toggle")).toBeVisible();
 
-  // In the draft view store.session still holds the previous session's plan, but
-  // PlanView is unmounted — the button must hide and ⌘P must not flip its state.
+  // In the chooser view the Plan button must hide and ⌘P must not flip its state.
   await openSidebar(page);
   await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  await expect(
-    page.getByPlaceholder("Describe a task or ask a question…"),
-  ).toBeVisible();
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
   await expect(page.getByTestId("plan-view-toggle")).toHaveCount(0);
 
   await page.keyboard.press("Meta+p");

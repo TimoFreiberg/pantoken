@@ -16,41 +16,6 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("a draft's @-mention searches the draft cwd via the server; a real session doesn't", async ({
-  page,
-}) => {
-  const box = ta(page);
-
-  // A real (focused) session never fires the server fallback — its small index isn't
-  // truncated — so the cwd-only marker is absent. The menu stays open with "No matches"
-  // (issue #53: always-visible in @-context) rather than hiding entirely.
-  await box.click();
-  await page.keyboard.type("@DRAFT-CWD");
-  await expect(menu(page)).toBeVisible();
-  await expect(menu(page)).toContainText("No matches");
-  await box.fill("");
-
-  // A new-session draft searches via the server fallback scoped to its target cwd, so the
-  // cwd-derived marker appears — and ordinary fixture files still resolve too.
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  // The draft renders its own Composer inside the sidebar's .new-session — target that
-  // one specifically (the main bottom composer is also still in the DOM).
-  const draftBox = page.locator(".new-session .composer-wrap textarea");
-  await draftBox.click();
-  await page.keyboard.type("@DRAFT-CWD");
-  await expect(menu(page)).toBeVisible();
-  await expect(
-    menu(page).getByText("DRAFT-CWD.md", { exact: false }),
-  ).toBeVisible();
-
-  await draftBox.fill("");
-  await draftBox.click();
-  await page.keyboard.type("@Composer");
-  await expect(
-    menu(page).getByText("client/src/components/Composer.svelte"),
-  ).toBeVisible();
-});
-
 test("@skill: lists the available skills; Enter inserts the canonical form", async ({
   page,
 }) => {

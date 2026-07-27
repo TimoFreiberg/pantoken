@@ -8,7 +8,10 @@ import { gotoFresh, openSidebar } from "./helpers.js";
 // active" error), so the observable signal is the *absence* of the notice: the
 // notice is the side effect of a real request, so its absence proves no request
 // was sent. Switching to a *different* facet still sends the request (regression
-// guard), and the draft (new-session) path writes to the draft (no wire message).
+// guard).
+//
+// Under create-on-click (phase 3), there is no draft — config is applied as
+// live SessionActions after creation. Draft-specific tests have been removed.
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
@@ -78,89 +81,44 @@ test("selecting a different facet still switches", async ({ page }) => {
   );
 });
 
-test("facet selection while drafting writes to the draft", async ({ page }) => {
-  // AC.8 — while a new-session draft is open, selecting a facet writes to the
-  // draft (no daemon request, no error). The handoff toggle is now visible on
-  // the Plan row while drafting, but it only edits the draft field (no daemon
-  // request), so only the facet pick is exercised here.
-  await openSidebar(page);
-  await page
-    .getByTestId("sidebar")
-    .getByTestId("sidebar-new-session")
-    .getByText("New session")
-    .click();
-  await expect(page.getByTestId("new-session")).toBeVisible();
-  const draftBadge = page.getByTestId("facet-badge");
-  await expect(draftBadge).toHaveText("Execute");
+// Regression: opening the facet menu via Shift+Tab and closing it, then switching
+// sessions (which unmounts + remounts Composer via App.svelte's {#if} block),
+// must NOT auto-pop the facet menu. Root cause: MenuBadge's lastOpenN was reset
+// to 0 on remount while store.facetMenuOpenN (monotonic, never reset) still
+// held a prior value > 0, so the effect re-fired open=true. Fixed by making
+// lastOpenN a null sentinel that syncs on the first post-(re)mount observation
+// without opening.
+test("the facet menu does not auto-open after a Composer remount", async ({
+  page,
+}) => {
+  // Open the facet menu once via Shift+Tab, then close it.
+  const badge = page.getByTestId("facet-badge");
+  await expect(badge).toHaveText("Execute");
+  await page.getByPlaceholder("Message pantoken…").focus();
+  await page.keyboard.press("Shift+Tab");
+  // No rotation — badge stays "Execute".
+  await expect(badge).toHaveText("Execute");
+  const panel = page.getByRole("listbox", { name: "Facet" });
+  await expect(panel).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
 
-  const before = await page.locator(".row.notice .ntext").count();
-  // Open the picker and select Plan — writes to the draft, no wire message.
-  await draftBadge.click();
-  await page.getByRole("option", { name: "Plan" }).click();
-  await expect(draftBadge).toHaveText("Plan");
-  // No new notice (draft path sends no wire message) and no error.
-  await expect(page.locator(".row.notice .ntext")).toHaveCount(before);
-  await expect(page.locator(".row.error")).toHaveCount(0);
-
-  // Navigate back to the old session — its facet is unchanged ("Execute"),
-  // proving the draft pick didn't leak into the live session.
+  // Switch to a different session — this unmounts and remounts Composer,
+  // resetting MenuBadge's local state.
   await openSidebar(page);
   await page
     .getByTestId("sidebar")
     .locator(".row", { hasText: "Explore the fold reducer" })
     .click();
-  await expect(page.getByTestId("facet-badge")).toHaveText("Execute");
-});
+  // Composer is remounted against the existing session.
+  await expect(page.getByPlaceholder("Message pantoken…")).toBeVisible();
 
-test("handoff flush is draft-guarded: committing a facet pick while drafting sends no handoff request", async ({
-  page,
-}) => {
-  // Set up: switch the live session to Plan and enable adventurous handoff, so
-  // store.session.adventurousHandoff is true. Then open a draft and commit a
-  // facet pick — the handoff flush must NOT fire (it's draft-guarded), even
-  // though pendingHandoff (snapshotted from the live session's true value)
-  // differs from the draft's (nonexistent) handoff state.
-  await page.getByTestId("facet-badge").click();
-  await page.getByRole("option", { name: "Plan" }).click();
-  await page.getByTestId("facet-badge").click();
-  const toggle = page.getByTestId("adventurous-handoff");
-  await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-checked", "true");
-  // Commit the handoff toggle (Plan is already active → only the flush fires).
-  await page.getByRole("listbox", { name: "Facet" }).press("Enter");
-  await expect(page.locator(".row.notice .ntext").last()).toContainText(
-    "Adventurous handoff enabled",
-  );
+  // The facet menu must NOT have auto-popped on the remount.
+  await expect(page.getByRole("listbox", { name: "Facet" })).toHaveCount(0);
 
-  // Now open a new-session draft. The live session's handoff is on; the draft
-  // has its own handoff state (defaults to off). The toggle is visible on the
-  // Plan row while drafting but only edits the draft field — no daemon request
-  // fires. The draft view has its own (empty) transcript, so we assert no
-  // notices appear at all.
-  await openSidebar(page);
-  await page
-    .getByTestId("sidebar")
-    .getByTestId("sidebar-new-session")
-    .getByText("New session")
-    .click();
-  await expect(page.getByTestId("new-session")).toBeVisible();
-  const draftBadge = page.getByTestId("facet-badge");
-  await expect(draftBadge).toHaveText("Execute");
-  // Draft transcript starts empty — no notices.
-  await expect(page.locator(".row.notice .ntext")).toHaveCount(0);
-
-  // Open the facet menu and commit a facet pick (Plan) via Enter. The handoff
-  // flush must NOT fire — no notice appears. setFacet also writes to the draft
-  // (no wire message), so no notice from that either. The toggle appears on
-  // the Plan row but is draft-aware (edits the draft, no daemon call).
-  await draftBadge.click();
-  const panel = page.getByRole("listbox", { name: "Facet" });
-  await expect(panel).toBeVisible();
-  // Move highlight to Plan and commit.
-  await panel.press("ArrowDown");
-  await panel.press("Enter");
-  await expect(draftBadge).toHaveText("Plan");
-  // No notice: setFacet wrote to the draft (no wire), and the handoff flush
-  // was draft-guarded (suppressed).
-  await expect(page.locator(".row.notice .ntext")).toHaveCount(0);
+  // A fresh Shift+Tab still opens the menu (without rotating). Badge stays the
+  // existing session's facet.
+  await page.getByPlaceholder("Message pantoken…").focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(page.getByRole("listbox", { name: "Facet" })).toBeVisible();
 });

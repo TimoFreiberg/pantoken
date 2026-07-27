@@ -52,13 +52,15 @@ test("Settings is an icon-only sidebar button and Context lives in the header", 
   await expect(page.getByTestId("settings-panel")).toBeVisible();
 });
 
-test("a new-session draft does not expose inactive-session Context", async ({
+test("the chooser does not expose inactive-session Context", async ({
   page,
 }) => {
   await openSidebar(page);
   await page.getByTestId("sidebar-new-session").getByRole("button").click();
   await openSidebar(page);
-  // The sidebar Context button is gone entirely; the header entry hides while drafting.
+  // The sidebar Context button is gone entirely; the header entry hides while
+  // the chooser is open (same gate as the old draft: !chooserOpen).
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
   await expect(page.getByTestId("sidebar-context")).toHaveCount(0);
   await expect(page.getByTestId("context-open")).toHaveCount(0);
   await expect(page.getByTestId("settings-toggle")).toBeVisible();

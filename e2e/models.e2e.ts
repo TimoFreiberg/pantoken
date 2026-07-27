@@ -244,17 +244,17 @@ test("no-effort models show a select button instead of the effort control", asyn
   );
 });
 
-// Regression: opening the model picker via ⌘⇧M and closing it, then opening and
-// closing a new-session draft (which unmounts + remounts Composer via
-// App.svelte `{#if !store.draft}`), must NOT auto-pop the picker. Root cause:
-// ModelPicker's lastHotkeyN was reset to 0 on remount while store.hotkeyAction
-// (monotonic, never reset) still held a prior {n:1}, so the effect re-fired
-// toggle(true). Fixed by initializing lastHotkeyN to the current store value
-// at mount (mirrors Transcript's lastSendN = store.promptSentN).
-test("the model picker does not auto-open after a draft remount", async ({
+// Regression: opening the model picker via ⌘⇧M and closing it, then switching
+// sessions (which unmounts + remounts Composer via App.svelte's {#if} block),
+// must NOT auto-pop the picker. Root cause: ModelPicker's lastHotkeyN was
+// reset to 0 on remount while store.hotkeyAction (monotonic, never reset)
+// still held a prior {n:1}, so the effect re-fired toggle(true). Fixed by
+// initializing lastHotkeyN to the current store value at mount (mirrors
+// Transcript's lastSendN = store.promptSentN).
+test("the model picker does not auto-open after a Composer remount", async ({
   page,
 }) => {
-  // AC.1 — open the picker once via hotkey, then close it.
+  // Open the picker once via hotkey, then close it.
   const composer = page.getByPlaceholder("Message pantoken…");
   await composer.click();
   await expect(composer).toBeFocused();
@@ -264,19 +264,8 @@ test("the model picker does not auto-open after a draft remount", async ({
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
 
-  // Open a new-session draft, then abandon it by switching to an existing
-  // session in the sidebar. This unmounts Composer (store.draft set) and
-  // remounts it against the existing session (store.draft cleared) — resetting
-  // ModelPicker's local state.
-  await openSidebar(page);
-  await page
-    .getByTestId("sidebar")
-    .getByTestId("sidebar-new-session")
-    .getByText("New session")
-    .click();
-  await expect(
-    page.getByPlaceholder("Describe a task or ask a question…"),
-  ).toBeVisible();
+  // Switch to a different session — this unmounts and remounts Composer,
+  // resetting ModelPicker's local state.
   await openSidebar(page);
   await page
     .getByTestId("sidebar")
@@ -288,8 +277,8 @@ test("the model picker does not auto-open after a draft remount", async ({
   // The model picker must NOT have auto-popped on the remount.
   await expect(page.locator(".mp .panel")).toHaveCount(0);
 
-  // AC.3 (post-remount variant) — a fresh ⌘⇧M still opens the picker and
-  // focuses the filter, proving the hotkey path works after a remount.
+  // A fresh ⌘⇧M still opens the picker and focuses the filter, proving the
+  // hotkey path works after a remount.
   await page.getByPlaceholder("Message pantoken…").click();
   await page.keyboard.press("Control+Shift+M");
   await expect(page.locator(".mp .panel")).toBeVisible();

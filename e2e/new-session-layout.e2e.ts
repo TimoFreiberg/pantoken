@@ -5,85 +5,47 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("deferred new sessions centre the real composer without the old hero", async ({
+test("the chooser centres its composition without the old hero", async ({
   page,
 }) => {
   await openSidebar(page);
   await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
 
-  const view = page.getByTestId("new-session");
-  const composer = view.getByRole("group", { name: "Message composer" });
+  const view = page.getByTestId("session-chooser");
   await expect(
     view.getByRole("heading", { name: "What would you like to work on?" }),
   ).toBeVisible();
-  await expect(composer).toHaveCount(1);
-  await expect(view.getByText("Created when you send")).toBeVisible();
-  await expect(view.getByText("Nothing is created until you send")).toHaveCount(
+  // The chooser has a search input, not a composer.
+  await expect(view.getByLabel("Filter projects")).toBeVisible();
+  await expect(view.getByRole("listbox", { name: "Choose a project" })).toHaveCount(1);
+  // No composer is mounted while the chooser is open.
+  await expect(page.getByRole("group", { name: "Message composer" })).toHaveCount(
     0,
   );
-  await expect(view.getByRole("button", { name: /Cancel/ })).toHaveCount(0);
 
+  // The composition is vertically centred-ish (top-aligned with generous padding,
+  // not pinned to the bottom like a live-session composer).
   const viewBox = await view.boundingBox();
-  const composerBox = await composer.boundingBox();
+  const headingBox = await view
+    .getByRole("heading", { name: "What would you like to work on?" })
+    .boundingBox();
   expect(viewBox).not.toBeNull();
-  expect(composerBox).not.toBeNull();
-  const centre = composerBox!.y + composerBox!.height / 2;
-  const relativeCentre = (centre - viewBox!.y) / viewBox!.height;
-  expect(relativeCentre).toBeGreaterThan(0.32);
-  expect(relativeCentre).toBeLessThan(0.55);
+  expect(headingBox).not.toBeNull();
+  const headingCentre = headingBox!.y + headingBox!.height / 2;
+  const relativeCentre = (headingCentre - viewBox!.y) / viewBox!.height;
+  expect(relativeCentre).toBeGreaterThan(0.05);
+  expect(relativeCentre).toBeLessThan(0.4);
 });
 
-test("draft chips live in one scope row above the composer surface, not in the status row", async ({
-  page,
-}) => {
+test("the chooser shows project rows and a Browse entry", async ({ page }) => {
   await openSidebar(page);
   await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
 
-  const scope = page.getByTestId("scope-row");
-  const surface = page.getByTestId("composer-surface");
-  await expect(scope).toHaveCount(1);
-  await expect(scope.getByTestId("draft-project-control")).toHaveCount(1);
-
-  const scopeBox = await scope.boundingBox();
-  const surfaceBox = await surface.boundingBox();
-  expect(scopeBox).not.toBeNull();
-  expect(surfaceBox).not.toBeNull();
-  expect(scopeBox!.y + scopeBox!.height).toBeLessThanOrEqual(
-    surfaceBox!.y + 0.5,
-  );
-
-  const status = page.getByTestId("composer-status-row");
-  await expect(status.getByTestId("draft-project-control")).toHaveCount(0);
-  await expect(status.getByTestId("permission-badge")).toBeVisible();
-});
-
-test("scope row preserves a quiet rounded surface and slim controls", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-
-  const scope = page.getByTestId("scope-row");
-  const surface = page.getByTestId("composer-surface");
-  const styles = await scope.evaluate((element) => {
-    const css = getComputedStyle(element);
-    return {
-      background: css.backgroundColor,
-      pageBackground: getComputedStyle(document.body).backgroundColor,
-      radius: css.borderTopLeftRadius,
-      border: css.border,
-      marginBottom: css.marginBottom,
-      height: element.getBoundingClientRect().height,
-    };
-  });
-  expect(styles.background).not.toBe("rgba(0, 0, 0, 0)");
-  expect(styles.background).not.toBe(styles.pageBackground);
-  expect(styles.radius).not.toBe("0px");
-  expect(styles.border).toMatch(/0px|none/);
-  expect(styles.marginBottom).toBe("0px");
-  expect(styles.height).toBeLessThanOrEqual(34);
-  await expect(scope.locator(".chip").first()).toHaveCSS("font-size", "12px");
-  await expect(surface).not.toHaveCSS("border-top-left-radius", "0px");
+  const view = page.getByTestId("session-chooser");
+  // The mock fixtures have projects: pantoken, retry-lib, scratch.
+  await expect(view.getByTestId("chooser-project-pantoken")).toBeVisible();
+  await expect(view.getByTestId("chooser-project-retry-lib")).toBeVisible();
+  await expect(view.getByTestId("chooser-browse")).toBeVisible();
 });
 
 test("non-drafting state has no scope row and composer surface keeps rounded corners", async ({
@@ -110,20 +72,24 @@ test("existing sessions keep the composer at the bottom", async ({ page }) => {
   );
 });
 
-test("first send moves directly from centred draft to transcript layout", async ({
+test("creating a session moves from chooser to transcript layout", async ({
   page,
 }) => {
   const oldPrompt = page.getByText("Add a /health route to the server");
   await openSidebar(page);
   await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  await page
-    .getByPlaceholder("Describe a task or ask a question…")
-    .fill("start from the centre");
-  await page
-    .getByPlaceholder("Describe a task or ask a question…")
-    .press("Enter");
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
 
-  await expect(page.getByTestId("new-session")).toHaveCount(0);
+  // Select the pantoken project (pre-selected) — Enter creates a session.
+  await page.getByLabel("Filter projects").press("Enter");
+
+  // The chooser is gone and the live-session composer is mounted.
+  await expect(page.getByTestId("session-chooser")).toHaveCount(0);
+  const composer = page.getByPlaceholder("Describe a task or ask a question…");
+  await composer.fill("start from the centre");
+  await composer.press("Enter");
+
+  await expect(page.getByTestId("session-chooser")).toHaveCount(0);
   await expect(page.locator(".row.user .bubble").first()).toHaveText(
     "start from the centre",
   );
@@ -139,15 +105,13 @@ test("first send moves directly from centred draft to transcript layout", async 
   expect(Math.abs(bottomGap)).toBeLessThan(2);
 });
 
-test("draft Escape remains available after removing the central Cancel button", async ({
-  page,
-}) => {
+test("chooser Escape closes back to the previous view", async ({ page }) => {
   await openSidebar(page);
   await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  const input = page.getByPlaceholder("Describe a task or ask a question…");
-  await input.focus();
-  await input.press("Escape");
-  await expect(page.getByTestId("new-session")).toHaveCount(0);
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("session-chooser")).toHaveCount(0);
   await expect(
     page.getByText("Add a /health route to the server"),
   ).toBeVisible();

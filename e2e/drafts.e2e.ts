@@ -10,9 +10,24 @@ function row(page: Page, title: string) {
   return page.getByTestId("sidebar").locator(".row", { hasText: title });
 }
 
+/** Open the chooser via the sidebar + button and create a session in the
+ *  first (pre-selected) project. Returns when the transcript view is live. */
+async function createSessionViaChooser(page: Page): Promise<void> {
+  await openSidebar(page);
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
+  await page
+    .getByTestId("session-chooser")
+    .locator(".result.project")
+    .first()
+    .click();
+  await expect(page.getByTestId("session-chooser")).toHaveCount(0);
+}
+
 test("a per-session draft survives switching away and back", async ({
   page,
 }) => {
+  await createSessionViaChooser(page);
   await openSidebar(page);
   await composer(page).fill("notes for the bridge session");
 
@@ -22,12 +37,16 @@ test("a per-session draft survives switching away and back", async ({
   await expect(composer(page)).toHaveValue("");
 
   // Back to the first session — the draft is restored.
-  await row(page, "Wire up the WebSocket bridge").click();
+  // After create-on-click the new session title is "New session" until the
+  // first prompt lands. Click it by its position as the second row (the
+  // greeting fixture is "Explore the fold reducer").
+  await row(page, "New session").first().click();
   await openSidebar(page);
   await expect(composer(page)).toHaveValue("notes for the bridge session");
 });
 
 test("a per-session draft survives a reload", async ({ page }) => {
+  await createSessionViaChooser(page);
   await composer(page).fill("survive a reload");
   // pagehide on reload flushes the draft to localStorage; boot restores the focused
   // session's draft.
@@ -35,57 +54,10 @@ test("a per-session draft survives a reload", async ({ page }) => {
   await expect(composer(page)).toHaveValue("survive a reload");
 });
 
-test("a pending new-session draft is restored when you reopen the new view", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  const draftBox = page.getByPlaceholder("Describe a task or ask a question…");
-  await draftBox.fill("a brand-new idea");
-
-  // Navigate to an existing session — exits the draft (composer reflects that session).
-  await row(page, "Explore the fold reducer").click();
-  await openSidebar(page);
-  await expect(composer(page)).toHaveValue("");
-
-  // Reopen the new-session view (same project) — the idea is still there.
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  await expect(
-    page.getByPlaceholder("Describe a task or ask a question…"),
-  ).toHaveValue("a brand-new idea");
-});
-
-// Pick a non-default model (Sonnet) and a non-default thinking level (high)
-// using the combined picker, then assert the badge reflects both.
-async function pickNonDefaultModelAndThinking(page: Page): Promise<void> {
-  // Open the combined picker.
-  await page.getByTestId("model-badge").click();
-  const panel = page.locator(".mp .panel");
-  const filter = panel.getByPlaceholder("Type to filter…");
-
-  // Arrow down to Claude Sonnet 4.6, then cycle effort to "high".
-  await filter.press("ArrowDown");
-  await filter.press("ArrowRight");
-  await filter.press("ArrowRight");
-
-  // Enter applies the combined model + effort.
-  await filter.press("Enter");
-  await expect(page.getByTestId("model-badge")).toContainText(
-    "Claude Sonnet 4.6",
-  );
-  await expect(page.getByTestId("model-badge")).toContainText("high");
-}
-
-async function expectNonDefaultModelAndThinking(page: Page): Promise<void> {
-  await expect(page.getByTestId("model-badge")).toContainText(
-    "Claude Sonnet 4.6",
-  );
-  await expect(page.getByTestId("model-badge")).toContainText("high");
-}
-
 test("sending a prompt clears its stored draft (no resurrection on return)", async ({
   page,
 }) => {
+  await createSessionViaChooser(page);
   await openSidebar(page);
   const box = composer(page);
   await box.fill("ephemeral");
@@ -95,29 +67,29 @@ test("sending a prompt clears its stored draft (no resurrection on return)", asy
   // Leave and come back — the sent draft must NOT reappear.
   await row(page, "Explore the fold reducer").click();
   await openSidebar(page);
-  await row(page, "Wire up the WebSocket bridge").click();
+  // The created session's title updates to something non-default after the
+  // prompt lands; find it by excluding the two fixture session titles.
+  await row(page, "New session").first().click();
   await openSidebar(page);
   await expect(composer(page)).toHaveValue("");
 });
 
-test("a new-session draft hides the focused session's tasklist pill", async ({
+test("the chooser hides the focused session's tasklist pill", async ({
   page,
 }) => {
   await drive(page, "ambient");
   const pill = page.getByRole("button", { name: /3 tasks/ });
   await expect(pill).toBeVisible();
 
-  // Opening the new-session view is a client overlay over the focused session;
-  // that session's tasklist must not bleed into the fresh draft (which has none).
+  // Opening the chooser is a client overlay; the focused session's tasklist
+  // must not bleed into the chooser (which has none).
   await openSidebar(page);
   await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  await expect(
-    page.getByPlaceholder("Describe a task or ask a question…"),
-  ).toBeVisible();
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
   await expect(pill).toBeHidden();
 });
 
-test("a new-session draft hides the previous session's goal badge and ambient statuses", async ({
+test("the chooser hides the previous session's goal badge and ambient statuses", async ({
   page,
 }) => {
   // Set a goal + ambient statuses on the focused session.
@@ -135,13 +107,11 @@ test("a new-session draft hides the previous session's goal badge and ambient st
   // The document title should reflect the focused session.
   await expect(page).toHaveTitle("Wire up the WebSocket bridge · pantoken");
 
-  // Open a new-session draft — the previous session's goal badge, ambient
-  // statuses, and title must not bleed into the fresh draft view.
+  // Open the chooser — the previous session's goal badge, ambient statuses,
+  // and title must not bleed into the chooser view.
   await openSidebar(page);
   await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  await expect(
-    page.getByPlaceholder("Describe a task or ask a question…"),
-  ).toBeVisible();
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
   await expect(badge).toHaveCount(0);
   await expect(page.locator(".hdr .amb")).toHaveCount(0);
   await expect(page).toHaveTitle("New session · pantoken");
@@ -155,207 +125,25 @@ test("a new-session draft hides the previous session's goal badge and ambient st
   await expect(page).toHaveTitle("Wire up the WebSocket bridge · pantoken");
 });
 
-test("a new-session draft hides the previous session's dialogs and context panel", async ({
+test("the chooser hides the previous session's dialogs and context panel", async ({
   page,
 }) => {
   // Raise a blocking confirm on the focused session.
   await drive(page, "confirm");
   await expect(page.getByRole("dialog")).toBeVisible();
 
-  // The draft view must not show the OTHER session's approval popup, nor its
+  // The chooser must not show the OTHER session's approval popup, nor its
   // context panel (flags/jobs/todos) or the panel's pop-in tab.
   await openSidebar(page);
   await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  await expect(
-    page.getByPlaceholder("Describe a task or ask a question…"),
-  ).toBeVisible();
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
   await expect(page.getByRole("dialog")).toBeHidden();
   await expect(page.getByTestId("right-sidebar")).toBeHidden();
   await expect(page.getByTestId("context-open")).toBeHidden();
-  // The document title is neutral while drafting — not the previous session's.
-  await expect(page).toHaveTitle("New session · pantoken");
 
   // Returning to the session re-surfaces the still-pending dialog.
   await openSidebar(page);
   await row(page, "Wire up the WebSocket bridge").click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page).toHaveTitle("Wire up the WebSocket bridge · pantoken");
-});
-
-test("facet badge click in a new-session draft changes the DRAFT's facet, not the session's", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  const badge = page.getByTestId("facet-badge");
-  await expect(badge).toContainText("Execute");
-
-  // Click the badge to open the facet menu; pick Plan — only the draft's pick moves.
-  await badge.click();
-  await page.getByRole("option", { name: "Plan" }).click();
-  await expect(badge).toContainText("Plan");
-
-  // Exit the draft to a live session — its facet must be untouched.
-  await row(page, "Explore the fold reducer").click();
-  await expect(badge).toContainText("Execute");
-
-  // Reopen the draft — the plan pick survived (rides draftConfigMap).
-  await openSidebar(page);
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  await expect(badge).toContainText("Plan");
-});
-
-test("submitting a draft carries its facet into the created session", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  const badge = page.getByTestId("facet-badge");
-  await expect(badge).toContainText("Execute");
-  await badge.click();
-  await page.getByRole("option", { name: "Plan" }).click();
-  await expect(badge).toContainText("Plan");
-
-  const box = composer(page);
-  await box.fill("start in plan mode");
-  await box.press("Enter");
-  // The created session's seed snapshot carries the facet pick, so the badge
-  // still shows Plan once the real session swaps in (not the daemon default).
-  await expect(page.getByText("start in plan mode").first()).toBeVisible();
-  await expect(badge).toContainText("Plan");
-});
-
-// --- Facet + permission-monitor as draft settings ---
-// Facets are dynamic — the daemon derives arbitrary names from facet files, so a
-// CUSTOM facet (the mock offers "research" alongside the execute/plan builtins) must
-// persist just like the builtins. This guards the bug where persistDraftConfig stored
-// any divergent facet but loadDraftConfigMap only re-accepted "execute"/"plan", so a
-// custom pick was silently dropped on reload and the draft reverted to Execute.
-test("a draft's CUSTOM facet survives leaving/reopening and a reload", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-
-  // Pick the custom facet (not a builtin) via the facet badge picker.
-  await page.getByTestId("facet-badge").click();
-  await page.getByRole("option", { name: "Research" }).click();
-  await expect(page.getByTestId("facet-badge")).toHaveText("Research");
-
-  // Navigate to an existing session — exits the draft.
-  await row(page, "Explore the fold reducer").click();
-  await openSidebar(page);
-  await expect(composer(page)).toHaveValue("");
-
-  // Reopen the new-session view (same project) — the custom pick rides draftConfigMap.
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  await expect(page.getByTestId("facet-badge")).toHaveText("Research");
-
-  // And survives a full reload: pagehide flushes draftConfigMap to localStorage, boot
-  // restores it. Without the fix, loadDraftConfigMap drops "research" and this reverts
-  // to "Execute".
-  await page.reload();
-  await openSidebar(page);
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  await expect(page.getByTestId("facet-badge")).toHaveText("Research");
-});
-
-// --- Warm-up badge consistency ---
-// The composer's selector badges (facet, model/thinking, permission-monitor) must
-// not flash to daemon defaults during the session warm-up window — they should show
-// the draft's picks until the authoritative seed arrives. These tests arm a 2s
-// new-session seed delay (via the `slownewsession` mock script) so the warm-up
-// window is wide enough to assert the badge holds the draft's value mid-warm-up,
-// proving it never flashed to the default.
-
-async function armSlowNewSession(page: Page): Promise<void> {
-  await drive(page, "slownewsession");
-}
-
-test("a plan-facet draft's badge does not flash to Execute during warm-up", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  const badge = page.getByTestId("facet-badge");
-  await badge.click();
-  await page.getByRole("option", { name: "Plan" }).click();
-  await expect(badge).toHaveText("Plan");
-
-  await armSlowNewSession(page);
-  const box = composer(page);
-  await box.fill("start in plan mode");
-  await box.press("Enter");
-
-  // The warm-up window is open (seed delayed 2s). The badge must hold "Plan"
-  // through it — never flashing to "Execute" (the default).
-  await expect(page.getByTestId("working-indicator")).toBeVisible();
-  await expect(badge).toHaveText("Plan");
-
-  // After the seed lands, the badge is still "Plan" (the seed carries facet: "plan").
-  await expect(page.getByText("On it — the session's up")).toBeVisible();
-  await expect(badge).toHaveText("Plan");
-});
-
-test("a non-default model draft's badge does not flash during warm-up", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  await pickNonDefaultModelAndThinking(page);
-
-  await armSlowNewSession(page);
-  const box = composer(page);
-  await box.fill("use sonnet with high thinking");
-  await box.press("Enter");
-
-  await expect(page.getByTestId("working-indicator")).toBeVisible();
-  await expectNonDefaultModelAndThinking(page);
-
-  await expect(page.getByText("On it — the session's up")).toBeVisible();
-  await expectNonDefaultModelAndThinking(page);
-});
-
-test("a non-default permission-monitor draft's badge does not flash during warm-up", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  await page.getByTestId("permission-badge").click();
-  const panel = page.getByRole("listbox", { name: "Permission mode" });
-  await panel.getByRole("option", { name: /^Bypass[^+]/ }).click();
-  await expect(page.getByTestId("permission-badge")).toContainText("Bypass");
-
-  await armSlowNewSession(page);
-  const box = composer(page);
-  await box.fill("run with bypass permissions");
-  await box.press("Enter");
-
-  await expect(page.getByTestId("working-indicator")).toBeVisible();
-  await expect(page.getByTestId("permission-badge")).toContainText("Bypass");
-
-  await expect(page.getByText("On it — the session's up")).toBeVisible();
-  await expect(page.getByTestId("permission-badge")).toContainText("Bypass");
-});
-
-test("a default draft's badges stay consistent through warm-up", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  await expect(page.getByTestId("facet-badge")).toHaveText("Execute");
-  await expect(page.getByTestId("permission-badge")).toContainText("Bypass+");
-
-  await armSlowNewSession(page);
-  const box = composer(page);
-  await box.fill("just a plain session");
-  await box.press("Enter");
-
-  await expect(page.getByTestId("working-indicator")).toBeVisible();
-  await expect(page.getByTestId("facet-badge")).toHaveText("Execute");
-  await expect(page.getByTestId("permission-badge")).toContainText("Bypass+");
-
-  await expect(page.getByText("On it — the session's up")).toBeVisible();
-  await expect(page.getByTestId("facet-badge")).toHaveText("Execute");
-  await expect(page.getByTestId("permission-badge")).toContainText("Bypass+");
 });

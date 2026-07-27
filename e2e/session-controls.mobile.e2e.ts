@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { gotoFresh, openSidebar } from "./helpers.js";
+import { gotoFresh } from "./helpers.js";
 
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nWQAAAAASUVORK5CYII=",
@@ -116,7 +116,8 @@ test("replacing the composer consumes an open controls history entry", async ({
   ).toBeVisible();
 
   await page.keyboard.press("Control+n");
-  await expect(page.getByPlaceholder("Describe a task or ask a question…")).toBeVisible();
+  // ⌘N opens the chooser (replaces the old draft placeholder).
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
   await expect(page.getByRole("dialog", { name: "Session controls" })).toBeHidden();
   await expect
     .poll(() =>
@@ -165,33 +166,6 @@ test("draft text and attachment survive opening, changes, and closing", async ({
   await expect(
     page.getByTestId("mobile-session-controls-trigger"),
   ).toContainText("Bypass");
-});
-
-test("new-session project controls remain available and config survives reload", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  const composer = page.getByPlaceholder("Describe a task or ask a question…");
-  await composer.fill("Persist the new-session draft");
-  await expect(page.getByTestId("draft-project-control")).toBeVisible();
-  await page.getByTestId("mobile-session-controls-trigger").click();
-  const dialog = page.getByRole("dialog", { name: "Session controls" });
-  await dialog.getByRole("radio", { name: /Plan/ }).check();
-  await dialog.getByRole("button", { name: "Back" }).click();
-  await expect(
-    page.getByTestId("mobile-session-controls-trigger"),
-  ).toContainText("Plan");
-
-  await page.reload();
-  await openSidebar(page);
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  await expect(
-    page.getByPlaceholder("Describe a task or ask a question…"),
-  ).toHaveValue("Persist the new-session draft");
-  await expect(
-    page.getByTestId("mobile-session-controls-trigger"),
-  ).toContainText("Plan");
 });
 
 test("attach is visually bare while its transparent hit target stays 44px", async ({

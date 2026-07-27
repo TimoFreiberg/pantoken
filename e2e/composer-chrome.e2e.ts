@@ -183,109 +183,34 @@ test("the model picker opens and closes", async ({ page }) => {
   await expect(page.locator(".mp .panel").first()).not.toBeVisible();
 });
 
-test("new-session controls use calm chrome and pair permission with facet", async ({
+test("the chooser view shows a search input and project list, not a composer", async ({
   page,
 }) => {
   await openSidebar(page);
   await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
 
-  const project = page.getByTestId("draft-project-control");
-  const permission = page.getByTestId("permission-badge");
-  const facet = page.getByTestId("facet-badge");
-  const model = page.getByTestId("model-badge");
-  const scopeControls = [project];
-  const statusControls = [permission, facet, model];
-  const controls = [...scopeControls, ...statusControls];
+  // The chooser has a search input (filter projects), not a composer textarea.
+  await expect(page.getByLabel("Filter projects")).toBeVisible();
+  await expect(page.getByPlaceholder("Describe a task or ask a question…")).toHaveCount(0);
 
-  await expect(page.getByTestId("composer-facet-slot")).toHaveCount(0);
+  // The chooser has no draft-project-control, permission-badge, facet-badge,
+  // or model-badge — those live on the live session's composer, not the chooser.
+  await expect(page.getByTestId("draft-project-control")).toHaveCount(0);
+  await expect(page.getByTestId("scope-row")).toHaveCount(0);
+
+  // The chooser renders project rows and a Browse… button.
   await expect(
-    page.locator("[data-testid='composer-status-row'] .status-left"),
-  ).not.toContainText("new session");
-
-  // Every selector uses the same neutral typography. The facet badge carries a
-  // facet-state text tint (execute = amber), so its color differs — but its
-  // background is now neutral (matching the other composer badges), per issue
-  // #47. We compare typography across all controls, and color/bg/border across
-  // the non-facet controls only.
-  const styles = await Promise.all(
-    controls.map((control) =>
-      control.evaluate((el) => {
-        const css = getComputedStyle(el);
-        return {
-          fontFamily: css.fontFamily,
-          fontSize: css.fontSize,
-          letterSpacing: css.letterSpacing,
-          color: css.color,
-          backgroundColor: css.backgroundColor,
-          borderColor: css.borderColor,
-        };
-      }),
-    ),
-  );
-  // Typography is uniform within each surface. Scope controls intentionally use
-  // compact 12px type while the status controls retain their existing size.
-  for (const group of [scopeControls, statusControls]) {
-    const groupStyles = group.map(
-      (control) => styles[controls.indexOf(control)]!,
-    );
-    const base = groupStyles[0]!;
-    for (const style of groupStyles.slice(1)) {
-      expect(style.fontFamily).toEqual(base.fontFamily);
-      expect(style.fontSize).toEqual(base.fontSize);
-      expect(style.letterSpacing).toEqual(base.letterSpacing);
-    }
-  }
-  // Color/background/border are uniform within each surface, with the facet
-  // badge's state tint excluded from the status comparison.
-  for (const group of [
-    scopeControls,
-    statusControls.filter((control) => control !== facet),
-  ]) {
-    const groupStyles = group.map(
-      (control) => styles[controls.indexOf(control)]!,
-    );
-    const neutralBase = groupStyles[0]!;
-    for (const style of groupStyles.slice(1)) {
-      expect(style.color).toEqual(neutralBase.color);
-      expect(style.backgroundColor).toEqual(neutralBase.backgroundColor);
-      expect(style.borderColor).toEqual(neutralBase.borderColor);
-    }
-  }
-  // The facet badge has a non-neutral color (execute = amber tint).
-  const facetStyle = styles[controls.indexOf(facet)]!;
-  const neutralColor = await project.evaluate(
-    (el) => getComputedStyle(el).color,
-  );
-  expect(facetStyle.color).not.toEqual(neutralColor);
-
-  // AC.1: the facet badge background is now neutral (transparent), matching the
-  // other status badges — no colored tint.
-  const statusNeutralBase = styles[controls.indexOf(permission)]!;
-  expect(facetStyle.backgroundColor).toEqual(statusNeutralBase.backgroundColor);
-
-  // AC.3: on hover, the facet badge background is the neutral --surface-sunken
-  // (same as the other badges), not a colored tint.
-  const hoveredSurface = await resolvedToken(
-    page,
-    "background-color",
-    "--surface-sunken",
-  );
-  await facet.hover();
-  await expect
-    .poll(async () => {
-      const css = await facet.evaluate(
-        (el) => getComputedStyle(el).backgroundColor,
-      );
-      return css;
-    })
-    .toBe(hoveredSurface);
+    page.getByTestId("session-chooser").locator(".result.project").first(),
+  ).toBeVisible();
+  await expect(page.getByTestId("chooser-browse")).toBeVisible();
 });
 
 // --- Empty prompts are forbidden (issue #74) ---
 // The polytoken daemon forbids empty prompts, so the frontend blocks sending
 // an empty prompt in ALL states — idle (previously a "continue" signal per
-// issue #21, now removed), mid-turn (empty steer), and drafting (empty first
-// message). An image-only prompt is still valid. Issue #74 supersedes #21.
+// issue #21, now removed), mid-turn (empty steer), and on a live session.
+// An image-only prompt is still valid. Issue #74 supersedes #21.
 
 const composerTextarea = (page: import("@playwright/test").Page) =>
   page.getByTestId("composer-box").locator("textarea");
@@ -424,20 +349,6 @@ test("send button is disabled when empty during a streaming turn", async ({
     "Queue a message…",
   );
   // The composer is empty; the send button must be disabled (empty steer blocked).
-  await expect(composerTextarea(page)).toHaveValue("");
-  await expect(sendButton(page)).toBeDisabled();
-});
-
-test("send button is disabled when drafting a new session and the composer is empty", async ({
-  page,
-}) => {
-  // Open a new-session draft via keyboard shortcut (Ctrl+N on CI Chromium).
-  await page.keyboard.press("Control+n");
-  // Confirm drafting is active — the placeholder switches to the draft prompt.
-  await expect(composerTextarea(page)).toHaveAttribute(
-    "placeholder",
-    "Describe a task or ask a question…",
-  );
   await expect(composerTextarea(page)).toHaveValue("");
   await expect(sendButton(page)).toBeDisabled();
 });

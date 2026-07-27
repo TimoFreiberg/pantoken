@@ -1,52 +1,29 @@
 import { expect, test } from "@playwright/test";
-import { gotoFresh, openSidebar } from "./helpers.js";
+import { gotoFresh } from "./helpers.js";
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("scope controls render once in a compact row above the composer", async ({
+// The scope controls (permission, facet, model badges) live in the composer's
+// status row on a live session. Under create-on-click (phase 3), the draft-only
+// scope-row (with its draft-project-control project chip) no longer renders —
+// the chooser handles project selection instead. This test verifies the live
+// session's composer chrome is intact.
+test("scope controls render in the composer status row on a live session", async ({
   page,
 }) => {
-  await openSidebar(page);
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-
-  const scope = page.getByTestId("scope-row");
-  const surface = page.getByTestId("composer-surface");
+  // The draft-only scope-row and project chip should not be present.
   await expect(page.getByTestId("draft-setup")).toHaveCount(0);
-  await expect(page.getByTestId("draft-project-control")).toHaveCount(1);
-  await expect(scope.getByTestId("draft-project-control")).toHaveCount(1);
-
-  const metrics = await scope.evaluate((element) => {
-    const css = getComputedStyle(element);
-    const pageBackground = getComputedStyle(document.body).backgroundColor;
-    const row = element.getBoundingClientRect();
-    const card = document
-      .querySelector(".composer-surface")!
-      .getBoundingClientRect();
-    return {
-      background: css.backgroundColor,
-      pageBackground,
-      radius: css.borderTopLeftRadius,
-      height: row.height,
-      belowCard: row.bottom > card.top + 0.5,
-      insideCard: element.closest(".composer-surface") !== null,
-      marginBottom: css.marginBottom,
-    };
-  });
-  expect(metrics.background).not.toBe("rgba(0, 0, 0, 0)");
-  expect(metrics.background).not.toBe(metrics.pageBackground);
-  expect(metrics.radius).not.toBe("0px");
-  expect(metrics.height).toBeLessThanOrEqual(34);
-  expect(metrics.belowCard).toBe(false);
-  expect(metrics.insideCard).toBe(false);
-  expect(metrics.marginBottom).toBe("0px");
-  await expect(scope.locator(".chip").first()).toHaveCSS("font-size", "12px");
-  await expect(surface).toBeVisible();
+  await expect(page.getByTestId("draft-project-control")).toHaveCount(0);
+  await expect(page.getByTestId("scope-row")).toHaveCount(0);
 
   const status = page.getByTestId("composer-status-row");
-  await expect(status.getByTestId("draft-project-control")).toHaveCount(0);
+  await expect(status).toBeVisible();
   await expect(status.getByTestId("permission-badge")).toBeVisible();
   await expect(status.getByTestId("facet-badge")).toBeVisible();
   await expect(status.getByTestId("model-badge")).toBeVisible();
+
+  // The composer surface is visible (the live session's input box).
+  await expect(page.getByTestId("composer-surface")).toBeVisible();
 });

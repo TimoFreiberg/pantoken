@@ -59,63 +59,46 @@ test("mobile: the session-controls summary never overflows the viewport", async 
   await expect(page.getByTestId("model-badge")).toBeHidden();
 });
 
-test("mobile: new-session scope-row chips stay tappable above the composer surface", async ({
+test("mobile: the chooser's search input and project rows are touch-safe", async ({
   page,
 }) => {
   await openSidebar(page);
   await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
 
-  const scope = page.getByTestId("scope-row");
-  const project = page.getByTestId("draft-project-control");
   const vw = page.viewportSize()!.width;
 
-  await expect(scope).toHaveCount(1);
-  await expect(scope.getByTestId("draft-project-control")).toHaveCount(1);
-  const visibleProjectBase = (await project.innerText()).trim();
-  expect(visibleProjectBase).not.toBe("");
-  await expect(project).toHaveAccessibleName(
-    `${visibleProjectBase} — choose a project`,
-  );
-  for (const control of [project]) {
-    await expect(control).toBeVisible();
-    const box = await control.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.width).toBeGreaterThanOrEqual(44);
-    expect(box!.height).toBeGreaterThanOrEqual(44);
-    expect(box!.x).toBeGreaterThanOrEqual(0);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(vw + 0.5);
-  }
+  // The search input is full-width and touch-safe (≥44px).
+  const search = page.getByLabel("Filter projects");
+  await expect(search).toBeVisible();
+  const searchBox = await search.boundingBox();
+  expect(searchBox).not.toBeNull();
+  expect(searchBox!.height).toBeGreaterThanOrEqual(44);
+  expect(searchBox!.x).toBeGreaterThanOrEqual(0);
+  expect(searchBox!.x + searchBox!.width).toBeLessThanOrEqual(vw + 0.5);
 
-  await expect(
-    page.getByTestId("mobile-session-controls-trigger"),
-  ).toBeVisible();
+  // Project rows are touch-safe (≥44px) and within the viewport.
+  const projectRow = page
+    .getByTestId("session-chooser")
+    .locator(".result.project")
+    .first();
+  await expect(projectRow).toBeVisible();
+  const rowBox = await projectRow.boundingBox();
+  expect(rowBox).not.toBeNull();
+  expect(rowBox!.height).toBeGreaterThanOrEqual(44);
+  expect(rowBox!.x).toBeGreaterThanOrEqual(0);
+  expect(rowBox!.x + rowBox!.width).toBeLessThanOrEqual(vw + 0.5);
 
-  await project.click();
-  await expect(project).toHaveAttribute("aria-expanded", "true");
-  const projectMenu = page.getByTestId("project-menu");
-  await expect(projectMenu).toBeVisible();
-  const projectFilter = projectMenu.getByRole("textbox", {
-    name: "Filter projects",
-  });
-  await expect(projectFilter).toBeVisible();
-  for (const [name, landmark] of [
-    ["project menu", projectMenu],
-    ["project filter", projectFilter],
-  ] as const) {
-    const box = await landmark.boundingBox();
-    expect(box, `${name} should render`).not.toBeNull();
-    expect(box!.x).toBeGreaterThanOrEqual(0);
-    expect(box!.y).toBeGreaterThanOrEqual(0);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(vw + 0.5);
-    expect(box!.y + box!.height).toBeLessThanOrEqual(
-      page.viewportSize()!.height + 0.5,
-    );
-  }
-  await projectFilter.fill("pan");
-  await expect(projectFilter).toHaveValue("pan");
-  await page.keyboard.press("Escape");
-  await expect(projectMenu).toBeHidden();
-  await expect(project).toHaveAttribute("aria-expanded", "false");
+  // The Browse… button is also touch-safe.
+  const browse = page.getByTestId("chooser-browse");
+  await expect(browse).toBeVisible();
+  const browseBox = await browse.boundingBox();
+  expect(browseBox).not.toBeNull();
+  expect(browseBox!.height).toBeGreaterThanOrEqual(44);
+
+  // No scope-row or draft-project-control in the chooser.
+  await expect(page.getByTestId("scope-row")).toHaveCount(0);
+  await expect(page.getByTestId("draft-project-control")).toHaveCount(0);
 });
 
 test("mobile: send button is disabled when the composer is empty (issue #74)", async ({

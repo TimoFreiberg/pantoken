@@ -69,13 +69,11 @@ test("Esc closes the box and clears highlights", async ({ page }) => {
   await expect.poll(() => currentHighlighted(page)).toBe(false);
 });
 
-test("⌘F does nothing while drafting a new session (no transcript)", async ({
+test("⌘F does nothing while the chooser is open (no transcript)", async ({
   page,
 }) => {
-  await page.keyboard.press("Control+n"); // open a new-session draft
-  await expect(
-    page.getByPlaceholder("Describe a task or ask a question…"),
-  ).toBeVisible();
+  await page.keyboard.press("Control+n"); // open the chooser
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
   await page.keyboard.press("Control+f");
   await expect(box(page)).toBeHidden();
 });

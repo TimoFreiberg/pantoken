@@ -5,25 +5,17 @@ test.beforeEach(async ({ page }) => gotoFresh(page));
 
 const picker = (page: Page) => page.getByTestId("dir-picker");
 const pathInput = (page: Page) => page.getByLabel("Project directory path");
-const projectChip = (page: Page) => page.getByTestId("draft-project-control");
-const draftBox = (page: Page) =>
-  page.getByPlaceholder("Describe a task or ask a question…");
 
-async function openDraft(page: Page): Promise<void> {
+/** Open the chooser, then the DirPicker via the Browse… button. */
+async function openPicker(page: Page): Promise<void> {
   await openSidebar(page);
   await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  await expect(draftBox(page)).toBeVisible();
-}
-
-async function openPicker(page: Page): Promise<void> {
-  await openDraft(page);
-  await projectChip(page).click();
-  await expect(page.getByTestId("project-menu")).toBeVisible();
-  await page.getByTestId("project-menu").getByText("New project…").click();
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
+  await page.getByTestId("chooser-browse").click();
   await expect(picker(page)).toBeVisible();
   // Move the mouse off the picker's result list so no mouseenter fires on a
-  // directory row (the click on "New project…" lands mid-screen, and the
-  // DirPicker's centered dialog can open with its results under the cursor).
+  // directory row (the click on Browse… lands mid-screen, and the DirPicker's
+  // centered dialog can open with its results under the cursor).
   await page.mouse.move(0, 0);
   await expect(pathInput(page)).toBeFocused();
   await expect(page.getByTestId("use-current-directory")).toBeVisible();
@@ -64,9 +56,11 @@ test("prefix matches lead fuzzy matches and directories navigate before selectio
   await expect(page.getByTestId("use-current-directory")).toBeVisible();
   await expect(picker(page)).toBeVisible();
 
+  // Pressing Enter again on an exact path selects it — createSession fires and
+  // both the picker and chooser disappear.
   await pathInput(page).press("Enter");
   await expect(picker(page)).toBeHidden();
-  await expect(projectChip(page)).toContainText("pi");
+  await expect(page.getByTestId("session-chooser")).toHaveCount(0);
 });
 
 test("arrow and Emacs-style keys move the active directory before opening it", async ({
@@ -127,7 +121,9 @@ test("Tab completes the selected directory and exact current paths can be chosen
   await expect(pathInput(page)).toHaveValue("/Users/timo/src/scratch/");
   await expect(page.getByTestId("use-current-directory")).toBeVisible();
   await page.getByTestId("use-current-directory").click();
-  await expect(projectChip(page)).toContainText("scratch");
+  // Picking a dir calls createSession — both picker and chooser close.
+  await expect(picker(page)).toBeHidden();
+  await expect(page.getByTestId("session-chooser")).toHaveCount(0);
 });
 
 test("Tab never commits an already exact directory", async ({ page }) => {
@@ -208,26 +204,22 @@ test("unreadable paths show a bounded error and rapid typing keeps the latest re
   ).toHaveCount(0);
 });
 
-test("Escape closes without abandoning the draft and restores composer focus", async ({
+test("Escape closes the picker and returns to the chooser", async ({
   page,
 }) => {
-  await openDraft(page);
-  await draftBox(page).fill("keep me");
-  await projectChip(page).click();
-  await expect(page.getByTestId("project-menu")).toBeVisible();
-  await page.getByTestId("project-menu").getByText("New project…").click();
+  await openPicker(page);
   await pathInput(page).press("Escape");
   await expect(picker(page)).toBeHidden();
-  await expect(draftBox(page)).toHaveValue("keep me");
-  // Issue #54: closing the DirPicker returns focus to the composer textarea
-  // (typing a prompt is the common next step), not the project chip.
-  await expect(draftBox(page)).toBeFocused();
+  // The chooser is still open after closing the DirPicker.
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
 });
 
-test("⌥P opens the project menu without changing the draft", async ({ page }) => {
-  await openDraft(page);
-  await draftBox(page).focus();
-  await draftBox(page).press("Alt+p");
-  await expect(page.getByTestId("project-menu")).toBeVisible();
-  await expect(draftBox(page)).toHaveValue("");
+test("browser Back closes the picker and returns to the chooser", async ({
+  page,
+}) => {
+  await openPicker(page);
+  await page.goBack();
+  await expect(picker(page)).toBeHidden();
+  // The chooser is still visible after closing the DirPicker via Back.
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
 });
