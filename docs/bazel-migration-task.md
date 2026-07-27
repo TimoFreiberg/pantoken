@@ -18,35 +18,37 @@ toolchain baseline → Node portability → pnpm experiment ──────�
 
 The pnpm experiment does **not** need to block the initial Bazel proof of concept. It should land before substantial JavaScript/frontend targets move into Bazel.
 
-## Current assessment: the `just` entry point
+## Phase 1 — Complete: the `just` entry point
 
-**Status: substantially implemented, but not complete.**
+**Status: complete.**
 
-The repository already has a `justfile`, and `just --list` is useful. It currently exposes:
+The `justfile` now exposes discoverable, delegation-only recipes for every routine
+workflow, thin-wrapping the authoritative package, Rust, Playwright, and release
+scripts:
 
+- setup (`install` → `bun install --frozen-lockfile`);
 - development (`dev`);
-- issue/workspace automation;
-- Rust daemon type generation;
-- desktop build, release, and publish scripts;
+- aggregate TypeScript/client checks (`check` → `bun run check`);
+- unit tests (`test` → `bun test`);
+- Rust fmt/clippy/nextest (`check-rs` → `bun run check:rs`);
+- frontend production build (`build-client` → `bun run build`);
+- default and live E2E tiers (`e2e`, `e2e-live`);
+- a quick default quality gate (`quality` → `check` + `test`);
 - headless artifact build, validation, smoke testing, and metadata merging;
-- Docker fixture setup and teardown.
+- desktop release and publish scripts.
 
-The existing recipes delegate to scripts rather than duplicating their behavior, which is the right foundation. The recent `Route project tooling through just` change also establishes the intended direction.
+There is no standalone JS formatter (no Prettier/Biome is configured); formatting is
+covered by `cargo fmt --check` inside `check-rs`. `README.md` and `AGENTS.md` now lead
+with `just` commands and note that direct `bun`/`cargo`/Playwright commands remain
+supported for targeted debugging.
 
-However, the primary quality and development workflows are still documented and invoked directly through Bun/Cargo. The `justfile` does not yet provide discoverable recipes for:
+This satisfies Ticket 1's acceptance criteria: `just --list` reveals the workflows,
+every routine workflow has a recipe or an explicit reason it remains direct, recipes
+are delegation-only, and direct ecosystem commands remain available.
 
-- install/prerequisite guidance;
-- the aggregate TypeScript/client check (`bun run check`);
-- unit tests (`bun test`);
-- Rust formatting, clippy, and nextest (`bun run check:rs`);
-- frontend production build;
-- default and live E2E tiers;
-- a clearly named quick/default quality gate;
-- formatting or other routine validation where an authoritative command exists.
+### Ticket 1 — Finish making `just` the project tooling entry point ✅
 
-`README.md` and `AGENTS.md` still lead with direct Bun commands. Therefore step 1 should be treated as a small finishing ticket, not as a reason to delay the migration roadmap.
-
-### Ticket 1 — Finish making `just` the project tooling entry point
+**Status: complete.** (Original spec retained below for the record.)
 
 **Goal:** Make `just` the discoverable interface for supported setup, development, checks, tests, builds, E2E, and release validation without making direct ecosystem commands unavailable.
 
@@ -67,6 +69,13 @@ However, the primary quality and development workflows are still documented and 
 - Existing CI and local checks remain green.
 
 ## Migration tickets
+
+> These tickets are intended to be tracked as GitHub issues. Each is self-contained —
+> copy the **Goal** / **Tasks** (or **Scope**) / **Exit gate** as the issue body and the
+> heading as the title. Cross-references like "Ticket N" should be replaced with issue
+> links (`#NN`) once the issues exist. The
+> [Non-negotiable safeguards](#non-negotiable-safeguards) apply to every migration
+> ticket; consider linking this roadmap from each issue.
 
 ### Ticket 2 — Pin and baseline the current toolchain
 
