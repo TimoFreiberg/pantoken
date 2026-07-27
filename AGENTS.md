@@ -95,6 +95,12 @@ gate** (`rust-server` job in `.github/workflows/ci.yml`: `cargo fmt --check` +
 `cargo clippy --locked --all-targets -- -D warnings` + `cargo nextest run`);
 run `just check-rs` locally for the same three checks.
 
+**Dual-runtime (Bun + Node):** tests run via Vitest under both `bun run test`
+(Bun) and `npx vitest run` (Node); scripts run under both `bun run` (Bun) and
+`npx tsx` (Node). `bun:test` is retired; `vitest.config.ts` configures the
+runner. `scripts/lib/node-compat.ts` provides Node-compatible helpers
+(`spawnAsync`, `spawnManaged`, `isMain`, `sleep`) that replace Bun-specific APIs.
+
 **Implementing an issue — two paths:**
 - **CLI path** (out-of-session orchestration): `just implement-issue <issue-url>`
   runs `scripts/implement-issue.ts`, which spawns a polytoken daemon, and

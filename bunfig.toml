@@ -3,6 +3,8 @@
 # Project-local on purpose: Bun ignores a *global* bunfig for these keys
 # (bun #28726), and the cooldown is what dodges fresh npm malware.
 
+# [test] is superseded by vitest.config.ts (setupFiles, include patterns).
+# Kept for reference; Vitest handles test preload via its own config.
 [test]
 preload = ["./test-setup.ts"]
 

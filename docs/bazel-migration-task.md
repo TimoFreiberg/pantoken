@@ -94,19 +94,19 @@ See [`docs/toolchain-baseline.md`](toolchain-baseline.md) for the baseline.
 
 **Exit gate:** The baseline scenarios and tool versions are documented and reproducible from a clean checkout.
 
-### Ticket 3 — Remove Bun runtime and test-runner coupling
+### Ticket 3 — Remove Bun runtime and test-runner coupling ✅
+
+**Status:** Complete ([issue #98](https://github.com/TimoFreiberg/pantoken/issues/98)).
 
 **Goal:** Make TypeScript scripts and tests Node-compatible while retaining Bun as the package manager for now.
 
-**Tasks:**
-
-- Inventory Bun-specific APIs, test imports, script execution, CI assumptions, and release tooling.
-- Move scripts/tests to Node-compatible execution without behavior changes.
-- Preserve subprocess, signal, filesystem, environment, and exit-code semantics, especially in issue integration, deployment, desktop release, and headless update tooling.
-- Keep the existing Bun workflow green during the transition.
-- Do not maintain permanent duplicate Bun and Node test suites.
-
-**Exit gate:** The same test and script behavior works through the portable runtime, while the current Bun workflow remains usable.
+**Done:**
+- Replaced `bun:test` with Vitest across all 56 test files (import swap).
+- Added `vitest.config.ts` with `setupFiles`, include patterns, forks pool.
+- Created `scripts/lib/node-compat.ts` with `spawnAsync`, `spawnManaged`, `streamText`, `isMain`, `sleep` helpers.
+- Migrated all `Bun.spawn`, `Bun.file`, `Bun.write`, `Bun.sleep`, `Bun.connect`, `Bun.resolveSync`, `import.meta.main/dir/path` usages to Node-standard equivalents.
+- Tests pass under both `bunx vitest run` (Bun) and `npx vitest run` (Node).
+- `just quality` (check + test) passes.
 
 ### Ticket 4 — Experimentally migrate package management to pnpm
 

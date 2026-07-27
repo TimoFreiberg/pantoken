@@ -14,6 +14,9 @@ This baseline was established for [Bazel migration Ticket 2](https://github.com/
 |------|---------|---------------|----------|
 | Bun  | 1.3.11  | `packageManager` field in `package.json` | `package.json` |
 | Rust | 1.97.1  | `rust-toolchain.toml` (channel + components) | `rust-toolchain.toml` |
+| Node | 26.5.0  | system-installed (no pin yet) | — |
+| Vitest | 4.1.x | devDependency | `package.json` |
+| tsx | 4.23.x | devDependency | `package.json` |
 
 ### Bun
 
@@ -30,6 +33,17 @@ encourages version alignment).
 
 **To update Bun:** change the version in `package.json`'s `packageManager`
 field and run `bun install` to regenerate `bun.lock`.
+
+### Dual-runtime transition (Bun + Node)
+
+The project is in a dual-runtime transition: Bun remains the package manager
+and primary runtime, but all TypeScript scripts and tests are now Node-compatible.
+Tests run via **Vitest** under both `bunx vitest run` (Bun) and `npx vitest run`
+(Node). Scripts run under both `bun run` (Bun) and `npx tsx` (Node). The
+`bun:test` runner is retired; `bunfig.toml [test]` is superseded by
+`vitest.config.ts`. Bun-specific runtime APIs (`Bun.spawn`, `Bun.file`,
+`Bun.sleep`, `import.meta.main`, `import.meta.dir`) are replaced with
+Node-standard equivalents via `scripts/lib/node-compat.ts`.
 
 ### Rust
 
