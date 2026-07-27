@@ -633,11 +633,15 @@
     store.openSession(s.path);
     afterNavigate();
   }
-  // Open the new-session draft (config chips + first prompt live in the main pane's
-  // composer; creation is deferred until send). `cwd` prefills the project: the group's
-  // dir from a project "+" header, or the active session's dir from the top button.
-  function startDraft(cwd: string): void {
-    store.startDraft(cwd);
+  // Open the new-session chooser (top sidebar +). The chooser shows recent
+  // projects + Browse… and creates a real session on selection.
+  function openChooser(): void {
+    store.openChooser();
+    afterNavigate();
+  }
+  // Create a session immediately in a project (project group "+" header).
+  function createSession(cwd: string): void {
+    store.createSession(cwd);
     afterNavigate();
   }
   function openSettings(): void {
@@ -763,7 +767,7 @@
     <button
       class="new-btn"
       aria-label="New session"
-      onclick={() => startDraft(activeCwd)}
+      onclick={() => openChooser()}
     >
       <span class="plus" aria-hidden="true">+</span> New session
       <kbd class="hotkey-hint">⌘N</kbd>
@@ -793,6 +797,9 @@
     }}
   >
     {#snippet draftRow(d: (typeof pendingDrafts)[number], showTag: boolean)}
+      <!-- Dead code — phase 5 removes this. No entry point creates drafts
+           after phase 3, so store.draft is always null and the draftRow
+           snippet is never rendered. Kept for phase 5 removal. -->
       <div class="row-line">
         <button
           class="row draft-row"
@@ -801,7 +808,7 @@
           title={d.active
             ? `New session in ${d.cwd || "home"} — current draft`
             : `Resume new-session draft in ${d.cwd || "home"}`}
-          onclick={() => startDraft(d.cwd)}
+          onclick={() => openChooser()}
         >
           <span class="name">New session</span>
           <span class="meta">
@@ -820,7 +827,7 @@
         >
       </div>
     {/snippet}
-    {#if topDrafts.length}
+    {#if store.draft && topDrafts.length}
       <div class="draft-top">
         {#each topDrafts as d (d.key)}
           <div class="row-wrap">{@render draftRow(d, true)}</div>
@@ -865,14 +872,14 @@
               class="project-new"
               size="sm"
               aria-label={`New session in ${basename(g.cwd)}`}
-              onclick={() => startDraft(g.cwd)}>+</IconButton
+              onclick={() => createSession(g.cwd)}>+</IconButton
             >
           </div>
           {#if !collapsed[g.cwd]}
             <ul transition:reveal>
-              {#each groupDraftsFor(g.cwd) as d (d.key)}
+              {#if store.draft}{#each groupDraftsFor(g.cwd) as d (d.key)}
                 <li class="row-wrap">{@render draftRow(d, false)}</li>
-              {/each}
+              {/each}{/if}
               {#each (isExpanded ? g.items : split.visible) as s (s.path)}
                 {@const st = store.sessionStatus(s.sessionId)}
                 {@const activity = store.sessionActivity(s.sessionId)}

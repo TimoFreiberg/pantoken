@@ -14,6 +14,7 @@
   import Transcript from "./components/Transcript.svelte";
   import WorkingIndicator from "./components/WorkingIndicator.svelte";
   import NewSession from "./components/NewSession.svelte";
+  import SessionChooser from "./components/SessionChooser.svelte";
   import Composer from "./components/Composer.svelte";
   import QnaInline from "./components/QnaInline.svelte";
   import ApprovalLayer from "./components/ApprovalLayer.svelte";
@@ -81,9 +82,10 @@
   // own hotkeys and are not agent-initiated.
   const activeAttentionSurfaces = $derived.by(() => {
     const surfaces: AttentionSurface[] = ["transcript"];
-    // While drafting, store.session is the previous session and its qna/approval
-    // cards are unmounted (App gates them on !store.draft) — don't offer them.
-    if (store.draft) return surfaces;
+    // While the chooser or warm-up placeholder is up, store.session is the
+    // previous session and its qna/approval cards are unmounted (App gates
+    // them on !chooserOpen && !creatingSession) — don't offer them.
+    if (store.chooserOpen || store.creatingSession) return surfaces;
     if (store.session.pendingApprovals.some((r) => r.kind === "qna"))
       surfaces.push("qna");
     if (store.session.pendingApprovals.some((r) => r.kind !== "qna"))
@@ -97,7 +99,7 @@
   let attentionSessionId: string | undefined;
   $effect(() => {
     const sessionId = store.session.ref?.sessionId;
-    const pending = store.draft ? [] : store.session.pendingApprovals;
+    const pending = store.chooserOpen || store.creatingSession ? [] : store.session.pendingApprovals;
     if (sessionId !== attentionSessionId) {
       attentionSessionId = sessionId;
       attention.resetMobile();
@@ -295,7 +297,7 @@
   // tab strip / app switcher instead of always reading "pantoken" (DESIGN.md SHOULD).
   // Ambient title wins over the folded snapshot title, mirroring StatusHeader.
   $effect(() => {
-    if (store.draft) {
+    if (store.chooserOpen) {
       document.title = "New session · pantoken";
       return;
     }
@@ -332,7 +334,8 @@
     // plan exists, and a second modal stacking behind the scrim is the bug we avoid.)
     if (
       store.planViewOpen &&
-      !store.draft &&
+      !store.chooserOpen &&
+      !store.creatingSession &&
       (e.metaKey || e.ctrlKey) &&
       !e.altKey &&
       !e.shiftKey &&
@@ -410,9 +413,10 @@
         break;
       case "f":
       case "F":
-        // ⌘F — find in transcript. While drafting there's nothing to search, so we let
-        // the browser's native find handle the draft form (no preventDefault).
-        if (store.draft) break;
+        // ⌘F — find in transcript. While the chooser or warm-up placeholder is up
+        // there's nothing to search, so let the browser's native find handle the
+        // chooser form (no preventDefault).
+        if (store.chooserOpen || store.creatingSession) break;
         e.preventDefault();
         store.openSearch();
         break;
@@ -433,9 +437,10 @@
       case "p":
       case "P":
         // ⌘P — toggle the plan view overlay (only when a plan exists). Inert
-        // while drafting: store.session is the PREVIOUS session and PlanView is
-        // unmounted in the draft view, so toggling would only flip invisible state.
-        if (!store.draft && store.session.activePlan) {
+        // while the chooser or warm-up placeholder is up: store.session is the
+        // PREVIOUS session and PlanView is unmounted, so toggling would only
+        // flip invisible state.
+        if (!store.chooserOpen && !store.creatingSession && store.session.activePlan) {
           e.preventDefault();
           store.togglePlanView();
         }
@@ -444,10 +449,11 @@
         // ⌘\ / Ctrl+\ — cycle focus through active agent-driven attention surfaces
         // (transcript → qna → approval → …). Each cycled-away-from surface
         // collapses to a pill. No-op when a user-driven modal owns the keyboard,
-        // or while drafting (the qna/approval surfaces belong to the previous
-        // session and are unmounted in the draft view).
+        // or while the chooser or warm-up placeholder is up (the qna/approval
+        // surfaces belong to the previous session and are unmounted).
         if (
-          store.draft ||
+          store.chooserOpen ||
+          store.creatingSession ||
           store.settingsOpen ||
           store.planViewOpen ||
           imageViewer.index !== null
@@ -503,8 +509,13 @@
     <div class="chat">
       <ConnectionBanner />
       <ChatNotice />
-      {#if store.draft}
-        <NewSession />
+      {#if store.chooserOpen}
+        <SessionChooser />
+      {:else if store.creatingSession}
+        <!-- Warm-up placeholder: the session is being created. WorkingIndicator
+             reads creatingSession to show "Starting session…". The transcript
+             area is blank (session state was reset on create). -->
+        <WorkingIndicator />
       {:else}
         <Transcript />
         <WorkingIndicator />
@@ -519,19 +530,19 @@
         </div>
       {/if}
       <!-- QnaInline/ApprovalLayer read store.session, which still holds the
-           PREVIOUS session while a new-session draft is up — hide them there so
-           its dialogs can't pop over the draft form (sidebar attention still
-           points at them). -->
-      {#if !store.draft}
+           PREVIOUS session while a new-session chooser or warm-up placeholder
+           is up — hide them there so their dialogs can't pop over the chooser
+           (sidebar attention still points at them). -->
+      {#if !store.chooserOpen && !store.creatingSession}
         <QnaInline />
       {/if}
-      {#if !store.draft}
+      {#if !store.chooserOpen && !store.creatingSession}
         <AttentionShelf />
       {/if}
-      {#if !store.draft}
+      {#if !store.chooserOpen && !store.creatingSession}
         <Composer />
       {/if}
-      {#if !store.draft}
+      {#if !store.chooserOpen && !store.creatingSession}
         <ApprovalLayer />
       {/if}
     </div>
@@ -539,7 +550,7 @@
   <!-- No right edge pop-in arrow: the collapsed context panel reopens from the header's
        trailing-edge chevron (StatusHeader), which lands on the same pixel as the panel's
        own collapse chevron — so collapse/expand is one repeatable click. (⌘⇧J too.) -->
-  {#if !store.draft}
+  {#if !store.chooserOpen && !store.creatingSession}
     <RightSidebar />
   {/if}
 </div>
@@ -548,7 +559,7 @@
   <ComputerSetupSheet coordinator={hostCoordinator} />
   <ConnectionSheet coordinator={hostCoordinator} />
 {/if}
-{#if !store.draft}
+{#if !store.chooserOpen && !store.creatingSession}
   <PlanView />
 {/if}
 <!-- Shared full-screen viewer for any read-only transcript image (user attachments,
