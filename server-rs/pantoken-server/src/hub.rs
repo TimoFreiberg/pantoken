@@ -223,7 +223,7 @@ fn server_label() -> String {
         .and_then(|output| String::from_utf8(output.stdout).ok())
         .map(|label| label.trim().to_string())
         .filter(|label| !label.is_empty())
-        .unwrap_or_else(|| "Pantoken server".to_string())
+        .unwrap_or_else(|| "This computer".to_string())
 }
 
 /// The session hub. Owns journals, client map, running/attention tracking,

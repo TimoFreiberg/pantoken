@@ -27,7 +27,7 @@ test("desktop picker is local-first, exposes identity, and closes on Escape/outs
 
 test("collapsed sidebar keeps the selected host identity in the header", async ({ page }) => {
   await page.getByRole("button", { name: "Collapse sidebar" }).click();
-  await expect(page.getByTestId("header-host-identity")).toContainText("pantoken · Dev computer");
+  await expect(page.getByTestId("header-host-identity")).toContainText("Dev computer");
 });
 
 test("browser single-host mode suppresses native host controls", async ({ page }) => {

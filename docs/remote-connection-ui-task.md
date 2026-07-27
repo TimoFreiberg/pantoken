@@ -312,7 +312,7 @@ OS/browser back gesture closes it before navigating away.
 
 When the sidebar is collapsed, include the active computer name in the header. When the
 sidebar is open, still include a compact computer identity in the header subtitle, e.g.
-`pantoken · Studio Mini`. The user must be able to identify the target machine without
+`Studio Mini`. The user must be able to identify the target machine without
 opening a menu.
 
 The existing `serverLabel` remains authoritative after hello. Reconcile it with the saved

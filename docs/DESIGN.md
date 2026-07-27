@@ -127,7 +127,7 @@ against traversal.
 The native/equivalent multi-host client presents a local-first computer switcher directly
 above **New session** in the sessions sidebar. The selected computer's saved profile label
 and redacted destination are shown in the switcher, and the session header includes a
-compact `pantoken · <host>` identity even when the sidebar is collapsed. Switching hosts
+compact `<host>` identity even when the sidebar is collapsed. Switching hosts
 clears the visible server-scoped store before adopting cached/authoritative bootstrap, so
 transcripts and new-session defaults remain scoped to the selected computer.
 

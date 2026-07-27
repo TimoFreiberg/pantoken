@@ -177,7 +177,7 @@
       {#if selectedHost}
         <span class="dot-sep host-sep">·</span>
         <span class="host-identity" data-testid="header-host-identity" title={selectedHost.descriptor.subtitle || "This computer"}>
-          pantoken · {hostIdentity}
+          {hostIdentity}
         </span>
       {/if}
       {#if !chooserUp && !creating && s.goal}

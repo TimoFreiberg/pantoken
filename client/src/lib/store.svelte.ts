@@ -154,7 +154,7 @@ class PantokenStore {
   openingSession = $state<SessionListEntry | null>(null);
   serverId = $state<string | null>(loadLastServerId());
   /** Human-readable identity of the machine whose filesystem/project paths we browse. */
-  serverLabel = $state("Pantoken server");
+  serverLabel = $state("This computer");
   /** The server's data directory (absolute path), broadcast in `hello`. Shown in Settings
    *  with copy + reveal-in-Finder actions. Empty string until hello arrives (or when the
    *  server didn't provide one — older/mock servers). */
@@ -175,7 +175,7 @@ class PantokenStore {
   // session was already active). Prevents reconnects from re-opening a draft the
   // operator dismissed.
   bootDraftHandled = $state(false);
-  // True only while boot is reopening the last session saved for this Pantoken server.
+  // True only while boot is reopening the last session saved for this server.
   // If the disk entry disappears between list + open, the switch error clears the stale
   // preference and falls back to the normal $HOME draft instead of leaving a blank pane.
   private bootRestoreInFlight = false;
@@ -1691,7 +1691,7 @@ class PantokenStore {
     this.loginShellPendingRestart = false;
     this.backgroundModelWarning = undefined;
     this.serverId = null;
-    this.serverLabel = "Pantoken server";
+    this.serverLabel = "This computer";
     this.dataDir = "";
     this.ready = false;
     this.unauthorized = false;
@@ -2410,7 +2410,7 @@ class PantokenStore {
     return null;
   }
   /** On boot, if no session is active (empty landing), restore this client's last
-   *  focused session for the current Pantoken server. If none survives, open a new-session
+   *  focused session for the current server. If none survives, open a new-session
    *  draft at $HOME so the operator lands on a prompt page rather than a blank transcript.
    *  Fires at most once per store instance (reconnects don't re-open a dismissed
    *  draft), and only when both the seed and the sessionList have arrived —
