@@ -73,6 +73,10 @@ cleanup-workspace workspace-name:
 
 # --- Code generation, fixtures, and validation ---
 
+# Capture representative toolchain baseline timings (prints markdown table).
+baseline-timings:
+    bash scripts/capture-baseline-timings.sh
+
 # Build the Rust sidecar used by the desktop app (platform-specific).
 build-hub *args:
     bun scripts/desktop/build-hub.ts {{ args }}

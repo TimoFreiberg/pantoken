@@ -76,7 +76,7 @@ jobs:
           restore-keys: bun-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       # The Rust server is the only server now; e2e boots it via `cargo run`.
-      - uses: dtolnay/rust-toolchain@stable
+      # Rust toolchain is pinned via rust-toolchain.toml; rustup auto-installs it.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
@@ -185,7 +185,7 @@ jobs:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Rust toolchain is pinned via rust-toolchain.toml; rustup auto-installs it.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
@@ -220,7 +220,7 @@ jobs:
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
       - run: bun install --frozen-lockfile
-      - uses: dtolnay/rust-toolchain@stable
+      # Rust toolchain is pinned via rust-toolchain.toml; rustup auto-installs it.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
@@ -303,7 +303,7 @@ jobs:
           key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
           restore-keys: bun-${{ runner.os }}-
       - run: bun install --frozen-lockfile
-      - uses: dtolnay/rust-toolchain@stable
+      # Rust toolchain is pinned via rust-toolchain.toml; rustup auto-installs it.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
