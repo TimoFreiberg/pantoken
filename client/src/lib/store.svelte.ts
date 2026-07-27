@@ -1757,15 +1757,21 @@ class PantokenStore {
 
   /** Enqueue + send a prompt. Returns the new outbox promptId on success (truthy), or
    *  null on failure (still connecting / local-storage write failed). */
-  private lifecycleAccepted = new Set<string>();
-  private lifecycleConfigured = new Set<string>();
+  private lifecycleAccepted = new Set<string>(loadLifecycleState().accepted);
+  private lifecycleConfigured = new Set<string>(loadLifecycleState().configured);
 
   private markLifecycleAccepted(sessionId: string | undefined): void {
-    if (sessionId) this.lifecycleAccepted.add(sessionId);
+    if (sessionId) {
+      this.lifecycleAccepted.add(sessionId);
+      persistLifecycleState(this.lifecycleAccepted, this.lifecycleConfigured);
+    }
   }
 
   private markLifecycleConfigured(sessionId: string | undefined): void {
-    if (sessionId) this.lifecycleConfigured.add(sessionId);
+    if (sessionId) {
+      this.lifecycleConfigured.add(sessionId);
+      persistLifecycleState(this.lifecycleAccepted, this.lifecycleConfigured);
+    }
   }
 
   private async enqueuePrompt(
@@ -3390,6 +3396,39 @@ function persistLastServerId(serverId: string): void {
     localStorage.setItem(LAST_SERVER_KEY, serverId);
   } catch {
     // Best effort — this only enables pre-hello recovery after a reload.
+  }
+}
+
+const LIFECYCLE_KEY = "pantoken.sessionLifecycle.v1";
+
+function loadLifecycleState(): { accepted: string[]; configured: string[] } {
+  if (typeof window === "undefined") return { accepted: [], configured: [] };
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(LIFECYCLE_KEY) ?? "null");
+    if (!value || typeof value !== "object") return { accepted: [], configured: [] };
+    const record = value as { accepted?: unknown; configured?: unknown };
+    return {
+      accepted: Array.isArray(record.accepted)
+        ? record.accepted.filter((id): id is string => typeof id === "string")
+        : [],
+      configured: Array.isArray(record.configured)
+        ? record.configured.filter((id): id is string => typeof id === "string")
+        : [],
+    };
+  } catch {
+    return { accepted: [], configured: [] };
+  }
+}
+
+function persistLifecycleState(accepted: Set<string>, configured: Set<string>): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(
+      LIFECYCLE_KEY,
+      JSON.stringify({ version: 1, accepted: [...accepted], configured: [...configured] }),
+    );
+  } catch {
+    // Best effort; server-side lifecycle remains authoritative.
   }
 }
 

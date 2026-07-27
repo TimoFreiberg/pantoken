@@ -1442,7 +1442,10 @@ impl SessionHub {
                             if let Err(error) = result {
                                 hub.lock().send_to_client(
                                     client_key,
-                                    ServerMessage::Error { message: error },
+                                    ServerMessage::Error {
+                                        message: error,
+                                        kind: Some("sessionAction".into()),
+                                    },
                                 );
                             }
                         })
@@ -1461,11 +1464,27 @@ impl SessionHub {
                                 Ok(()) => {
                                     let sessions = driver.list_sessions().await;
                                     let default_cwd = std::env::var("HOME").unwrap_or_default();
-                                    hub.lock().broadcast_session_list_with(sessions, default_cwd);
+                                    let mut h = hub.lock();
+                                    for conn in h.clients.values_mut() {
+                                        if conn.focused_id.as_deref() == Some(
+                                            std::path::Path::new(&path)
+                                                .parent()
+                                                .and_then(std::path::Path::file_name)
+                                                .and_then(|name| name.to_str())
+                                                .unwrap_or_default(),
+                                        ) {
+                                            conn.focused_id = None;
+                                            conn.pending_switch = None;
+                                        }
+                                    }
+                                    h.broadcast_session_list_with(sessions, default_cwd);
                                 }
                                 Err(error) => hub.lock().send_to_client(
                                     client_key,
-                                    ServerMessage::Error { message: error },
+                                    ServerMessage::Error {
+                                        message: error,
+                                        kind: Some("destroySession".into()),
+                                    },
                                 ),
                             }
                         })

@@ -2431,7 +2431,7 @@ impl PantokenDriver for MockDriver {
             self.last_created.lock().take();
         }
         self.pending_dialogs.lock().retain(|_, dialog| {
-            dialog.session_ref.session_id.as_deref() != Some(entry.session_id.as_str())
+            dialog.session_ref.session_id.as_str() != entry.session_id.as_str()
         });
         self.cancel_timers();
         Ok(())
