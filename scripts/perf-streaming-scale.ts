@@ -3,15 +3,17 @@
 
 import { realpathSync } from "node:fs";
 import { dirname } from "node:path";
+import { createRequire } from "node:module";
 import { foldEvent, initialSessionState } from "../protocol/src/index.js";
 
 // Two-hop resolution through the Bun store — see perf-streaming.ts.
+const require = createRequire(import.meta.url);
 const markstreamReal = realpathSync(
-  Bun.resolveSync("markstream-svelte", `${process.cwd()}/client`),
+  require.resolve("markstream-svelte", { paths: [`${process.cwd()}/client`] }),
 );
-const parserPath = Bun.resolveSync(
+const parserPath = require.resolve(
   "stream-markdown-parser",
-  dirname(markstreamReal),
+  { paths: [dirname(markstreamReal)] },
 );
 const { parseMarkdownToStructure, getMarkdown } = await import(parserPath);
 

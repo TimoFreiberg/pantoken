@@ -18,10 +18,12 @@
 // lint job uses this — tauri-build's copy_binaries just needs the file to exist,
 // not a real release binary. Dev and release-prepare keep the default --release.
 
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
+import { isAbsolute, join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnManaged, isMain } from "../lib/node-compat.js";
 
-const repoRoot = resolve(import.meta.dir, "../..");
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const cargoRoot = join(repoRoot, "server-rs");
 
 /** Resolve Cargo's effective target directory before spawning it. Cargo resolves
@@ -57,7 +59,7 @@ export function hostTriple(
   return triple;
 }
 
-if (import.meta.main) {
+if (isMain()) {
   const debug = process.argv.includes("--debug");
   const profile = debug ? "debug" : "release";
   const outDir = join(repoRoot, "desktop", "binaries");
@@ -72,7 +74,7 @@ if (import.meta.main) {
   // to exist for tauri-build's externalBin staging.
   const cargoArgs = ["cargo", "build", "--bin", "pantoken-server"];
   if (!debug) cargoArgs.push("--release");
-  const build = Bun.spawn(cargoArgs, {
+  const build = spawnManaged(cargoArgs, {
     cwd: cargoRoot,
     env: { ...process.env, CARGO_TARGET_DIR: targetDir },
     stdout: "inherit",
@@ -90,6 +92,6 @@ if (import.meta.main) {
   }
   copyFileSync(built, outfile);
 
-  const size = (Bun.file(outfile).size / 1024 / 1024).toFixed(1);
+  const size = (statSync(outfile).size / 1024 / 1024).toFixed(1);
   console.log(`server compiled → ${outfile} (${size} MB)`);
 }

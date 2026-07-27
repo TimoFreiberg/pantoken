@@ -25,7 +25,10 @@
 
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { readFile, writeFile } from "node:fs/promises";
+import { spawnAsync, spawnManaged, streamText, isMain } from "../lib/node-compat.js";
 import {
   DESKTOP_ASSET,
   DESKTOP_SIGNATURE,
@@ -36,7 +39,7 @@ import {
   releaseAssetUrl,
 } from "./release-constants";
 
-const repoRoot = resolve(import.meta.dir, "../..");
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const bundleDir = process.env.PANTOKEN_RELEASE_BUNDLE_DIR
   ? resolve(repoRoot, process.env.PANTOKEN_RELEASE_BUNDLE_DIR)
   : join(repoRoot, "target", "release", "bundle", "macos");
@@ -47,7 +50,7 @@ function fail(msg: string): never {
 }
 
 async function sha256(path: string): Promise<string> {
-  const bytes = await Bun.file(path).arrayBuffer();
+  const bytes = await readFile(path);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -55,7 +58,7 @@ async function sha256(path: string): Promise<string> {
 async function validateRetainedHeadlessBundle(dir: string, tag: string, version: string): Promise<void> {
   const metadataPath = join(dir, "release-metadata.json");
   if (!existsSync(metadataPath)) fail(`retained release metadata missing: ${metadataPath}`);
-  const metadata = await Bun.file(metadataPath).json() as {
+  const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as {
     tag?: string;
     version?: string;
     buildSha?: string;
@@ -121,17 +124,13 @@ async function capture(
   cmd: string[],
   opts: { cwd?: string; env?: Record<string, string> } = {},
 ): Promise<CaptureResult> {
-  const proc = Bun.spawn(cmd, {
+  const result = await spawnAsync(cmd, {
     cwd: opts.cwd,
     env: opts.env ? { ...process.env, ...opts.env } : undefined,
     stdout: "pipe",
     stderr: "pipe",
   });
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  return { code: await proc.exited, stdout, stderr };
+  return { code: result.code ?? -1, stdout: result.stdout, stderr: result.stderr };
 }
 
 /** Run loudly (inherited stdio), throw on failure. For the build. */
@@ -139,13 +138,13 @@ async function run(
   cmd: string[],
   opts: { cwd?: string; env?: Record<string, string> } = {},
 ): Promise<void> {
-  const proc = Bun.spawn(cmd, {
+  const result = await spawnAsync(cmd, {
     cwd: opts.cwd,
     env: opts.env ? { ...process.env, ...opts.env } : undefined,
     stdout: "inherit",
     stderr: "inherit",
   });
-  if ((await proc.exited) !== 0)
+  if ((result.code ?? 1) !== 0)
     fail(`\`${cmd.join(" ")}\` failed — see output above`);
 }
 
@@ -207,7 +206,7 @@ function signingEnv(): Record<string, string> {
   };
 }
 
-if (import.meta.main) {
+if (isMain()) {
   const { repo, dryRun, skipBuild, mustMatchTag } = parseArgs(
     process.argv.slice(2),
   );
@@ -235,9 +234,10 @@ if (import.meta.main) {
   // again below against the BUILT bundle. Skipped with --skip-build, where existing
   // artifacts (not the config) are what's being published.
   if (mustMatchTag && !skipBuild) {
-    const conf = (await Bun.file(
+    const conf = JSON.parse(await readFile(
       join(repoRoot, "desktop", "tauri.conf.json"),
-    ).json()) as { version?: string };
+      "utf8",
+    )) as { version?: string };
     if (`v${conf.version}` !== mustMatchTag) {
       fail(
         `tag ${mustMatchTag} does not match tauri.conf.json version ${conf.version} — ` +
@@ -306,7 +306,7 @@ if (import.meta.main) {
   }
 
   // ── compose latest.json ──
-  const signature = (await Bun.file(sig).text()).trim();
+  const signature = (await readFile(sig, "utf8")).trim();
   const manifest = {
     version,
     pub_date: new Date().toISOString(),
@@ -318,7 +318,7 @@ if (import.meta.main) {
     },
   };
   const manifestPath = join(bundleDir, "latest.json");
-  await Bun.write(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
   const head = await capture(["git", "-C", repoRoot, "rev-parse", "HEAD"]);
   const sha = head.code === 0 ? head.stdout.trim() : "unknown";

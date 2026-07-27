@@ -30,6 +30,7 @@ import {
   type Paths,
 } from "./lib.ts";
 import { ensureProject } from "./project.ts";
+import { spawnAsync, sleep, isMain } from "../scripts/lib/node-compat.js";
 
 const TMUX_SESSION = "parity";
 
@@ -45,20 +46,17 @@ async function tmux(
   args: string[],
   opts: { check?: boolean } = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
-  const proc = Bun.spawn({
-    cmd: [TMUX_BIN, "-L", p.tmuxSocket, ...args],
+  const result = await spawnAsync([TMUX_BIN, "-L", p.tmuxSocket, ...args], {
     stdout: "pipe",
     stderr: "pipe",
   });
-  const code = await proc.exited;
-  const stdout = await new Response(proc.stdout).text();
-  const stderr = await new Response(proc.stderr).text();
+  const code = result.code ?? -1;
   if (opts.check && code !== 0) {
     throw new Error(
-      `tmux ${args.join(" ")} failed (${code}): ${stderr.trim()}`,
+      `tmux ${args.join(" ")} failed (${code}): ${result.stderr.trim()}`,
     );
   }
-  return { code, stdout, stderr };
+  return { code, stdout: result.stdout, stderr: result.stderr };
 }
 
 async function hasSession(p: Paths): Promise<boolean> {
@@ -113,7 +111,7 @@ async function waitForNewSession(
     const live = await polytokenSessions(p);
     const fresh = live.find((s) => !before.has(s.sessionId));
     if (fresh) return fresh;
-    await Bun.sleep(250);
+    await sleep(250);
   }
   return null;
 }
@@ -175,7 +173,7 @@ export async function tuiCommand(
     case "prompt": {
       const text = rest.join(" ");
       await sendKeys(p, [text], true);
-      await Bun.sleep(150); // let the TUI settle the input before submit
+      await sleep(150); // let the TUI settle the input before submit
       await sendKeys(p, ["Enter"], false);
       break;
     }
@@ -210,7 +208,7 @@ export async function tuiCommand(
       while (Date.now() < deadline) {
         const live = await polytokenSessions(p);
         if (!id || !live.some((s) => s.sessionId === id)) break;
-        await Bun.sleep(200);
+        await sleep(200);
       }
       break;
     }
@@ -233,7 +231,7 @@ export async function tuiCommand(
   }
 }
 
-if (import.meta.main) {
+if (isMain()) {
   try {
     await tuiCommand(process.argv.slice(2));
   } catch (e) {

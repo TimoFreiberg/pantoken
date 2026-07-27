@@ -54,7 +54,9 @@ import {
   readdirSync,
   writeFileSync,
 } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnManaged, streamText, sleep, isMain, type ManagedProcess } from "./lib/node-compat.js";
 import {
   POLYTOKEN_BIN,
   type Paths,
@@ -63,6 +65,8 @@ import {
   paths,
   renderConfig,
 } from "../parity/lib";
+
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
 /** Read a fresh daemon's startup.json (state/pid/port). Inlined from parity/lib.ts
  *  — its readStartupJson is not exported; the on-disk path layout is stable. Only
@@ -82,7 +86,7 @@ function readStartupJson(
 
 const CORPUS_VERSION = "0.4.0-unstable.7";
 const CORPUS_DIR = join(
-  import.meta.dir,
+  SCRIPT_DIR,
   "..",
   "server-rs",
   "tests",
@@ -324,7 +328,7 @@ function assertScenarioFile(value: unknown, file: string): asserts value is Scen
 }
 
 function recanonPath(arg: string): string {
-  return isAbsolute(arg) ? arg : resolve(import.meta.dir, "..", arg);
+  return isAbsolute(arg) ? arg : resolve(SCRIPT_DIR, "..", arg);
 }
 
 function recanonFile(file: string): void {
@@ -406,7 +410,7 @@ async function spawnFreshDaemon(
   p: Paths,
   permissionMatcher: "bypass_plus" | "standard",
 ): Promise<{
-  proc: ReturnType<typeof Bun.spawn>;
+  proc: ManagedProcess;
   port: number;
   sessionId: string;
 }> {
@@ -454,8 +458,8 @@ async function spawnFreshDaemon(
       : "version: 2\n",
   );
   const sessionId = freshSessionId();
-  const proc = Bun.spawn({
-    cmd: [
+  const proc = spawnManaged(
+    [
       POLYTOKEN_BIN,
       "daemon",
       "--project-dir",
@@ -467,14 +471,16 @@ async function spawnFreshDaemon(
       "--global-config-dir",
       captureGlobalConfigDir,
     ],
-    env: {
-      ...process.env,
-      ...isolationEnv(p),
-      XDG_CONFIG_HOME: captureConfigHome,
+    {
+      env: {
+        ...process.env,
+        ...isolationEnv(p),
+        XDG_CONFIG_HOME: captureConfigHome,
+      },
+      stdout: "pipe",
+      stderr: "pipe",
     },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  );
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     const su = readStartupJson(sessionId, p);
@@ -488,9 +494,9 @@ async function spawnFreshDaemon(
     if (su?.state === "failed" && su.pid === proc.pid) {
       throw new Error(`fresh daemon failed: ${su.message ?? "no message"}`);
     }
-    await Bun.sleep(100);
+    await sleep(100);
   }
-  const err = await new Response(proc.stderr).text().catch(() => "");
+  const err = await streamText(proc.stderr).catch(() => "");
   proc.kill();
   throw new Error(
     `fresh daemon not ready in 20s${err ? `\n${err.slice(0, 400)}` : ""}`,
@@ -625,7 +631,7 @@ const SCENARIOS: Record<string, Scenario> = {
           const t = (f.event as { type?: string })?.type ?? "";
           return t === "interrogative" || t.includes("interrogative");
         });
-        if (!interro) await Bun.sleep(200);
+        if (!interro) await sleep(200);
       }
       if (!interro) {
         throw new Error(
@@ -672,7 +678,7 @@ const SCENARIOS: Record<string, Scenario> = {
         auq = ctx.sse.find(
           (f) => (f.event as { type?: string })?.type === "ask_user_question",
         );
-        if (!auq) await Bun.sleep(200);
+        if (!auq) await sleep(200);
       }
       if (!auq) {
         throw new Error(
@@ -763,7 +769,7 @@ const SCENARIOS: Record<string, Scenario> = {
           (f) => (f.event as { type?: string })?.type === "message_complete",
         ).length;
         if (done >= 2) break;
-        await Bun.sleep(200);
+        await sleep(200);
       }
       await ctx.call("GET", "/state");
     },
@@ -849,7 +855,7 @@ async function main() {
     while (Date.now() < deadline) {
       if (sse.some((f) => (f.event as { type?: string })?.type === type))
         return;
-      await Bun.sleep(100);
+      await sleep(100);
     }
     throw new Error(`timed out waiting ${timeoutMs}ms for event '${type}'`);
   };
@@ -905,9 +911,9 @@ async function main() {
 }
 
 // Only auto-run the capture CLI when invoked directly. Guarding on
-// `import.meta.main` lets the cross-language parity test import
+// `isMain()` lets the cross-language parity test import
 // `canonicalizeScenario` without spawning a daemon on import.
-if (import.meta.main) {
+if (isMain()) {
   main().catch((e) => {
     console.error(`capture failed: ${e instanceof Error ? e.message : e}`);
     process.exit(1);

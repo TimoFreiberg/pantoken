@@ -20,9 +20,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { canonicalizeScenario } from "./capture-daemon-corpus";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PARITY_DIR = join(
-  import.meta.dir,
+  SCRIPT_DIR,
   "..",
   "server-rs",
   "tests",

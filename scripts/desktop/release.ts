@@ -16,9 +16,12 @@
 // --no-push stops after step 4 and prints the push commands. --dry-run only prints
 // what would happen. Requires a colocated jj+git checkout (this repo is one).
 
-import { join, resolve } from "node:path";
+import { join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { readFile, writeFile } from "node:fs/promises";
+import { spawnAsync, isMain } from "../lib/node-compat.js";
 
-const repoRoot = resolve(import.meta.dir, "../..");
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const confPath = join(repoRoot, "desktop", "tauri.conf.json");
 const cargoPath = join(repoRoot, "desktop", "Cargo.toml");
 
@@ -28,18 +31,14 @@ function fail(msg: string): never {
 }
 
 async function capture(cmd: string[], cwd?: string): Promise<string> {
-  const proc = Bun.spawn(cmd, {
+  const result = await spawnAsync(cmd, {
     cwd: cwd ?? repoRoot,
     stdout: "pipe",
     stderr: "pipe",
   });
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  if ((await proc.exited) !== 0)
-    fail(`\`${cmd.join(" ")}\` failed:\n${stderr.trim() || stdout.trim()}`);
-  return stdout;
+  if (result.code !== 0)
+    fail(`\`${cmd.join(" ")}\` failed:\n${result.stderr.trim() || result.stdout.trim()}`);
+  return result.stdout;
 }
 
 export function bumpVersion(
@@ -54,13 +53,13 @@ export function bumpVersion(
   return `${major}.${minor}.${patch + 1}`;
 }
 
-if (import.meta.main) {
+if (isMain()) {
   const argv = process.argv.slice(2);
   const dryRun = argv.includes("--dry-run");
   const noPush = argv.includes("--no-push");
   const vIdx = argv.indexOf("--version");
 
-  const conf = (await Bun.file(confPath).json()) as { version?: string };
+  const conf = JSON.parse(await readFile(confPath, "utf8")) as { version?: string };
   const current = conf.version ?? "";
   const next =
     vIdx >= 0
@@ -95,20 +94,20 @@ if (import.meta.main) {
   }
 
   // ── bump ──
-  const confText = await Bun.file(confPath).text();
+  const confText = await readFile(confPath, "utf8");
   const confNeedle = `"version": "${current}"`;
   if (!confText.includes(confNeedle))
     fail(`couldn't find ${confNeedle} in tauri.conf.json`);
-  await Bun.write(
+  await writeFile(
     confPath,
     confText.replace(confNeedle, `"version": "${next}"`),
   );
 
-  const cargoText = await Bun.file(cargoPath).text();
+  const cargoText = await readFile(cargoPath, "utf8");
   const cargoNeedle = `version = "${current}"`;
   if (!cargoText.includes(cargoNeedle))
     fail(`couldn't find ${cargoNeedle} in Cargo.toml`);
-  await Bun.write(
+  await writeFile(
     cargoPath,
     cargoText.replace(cargoNeedle, `version = "${next}"`),
   );

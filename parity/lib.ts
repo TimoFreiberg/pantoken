@@ -18,6 +18,7 @@ import { createServer, type AddressInfo } from "node:net";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { spawnAsync, spawnManaged, streamText, sleep } from "../scripts/lib/node-compat.js";
 
 export const POLYTOKEN_BIN = process.env.PANTOKEN_POLYTOKEN_BIN ?? "polytoken";
 export const TMUX_BIN = process.env.PANTOKEN_PARITY_TMUX_BIN ?? "tmux";
@@ -258,12 +259,11 @@ export function freePort(): Promise<number> {
 
 /** Is `bin` resolvable on PATH? (`command -v`, exit 0 = found.) */
 export async function commandOnPath(bin: string): Promise<boolean> {
-  const proc = Bun.spawn({
-    cmd: ["sh", "-c", `command -v ${bin}`],
+  const result = await spawnAsync(["sh", "-c", `command -v ${bin}`], {
     stdout: "ignore",
     stderr: "ignore",
   });
-  return (await proc.exited) === 0;
+  return (result.code ?? 1) === 0;
 }
 
 // --- run-env tracking (what `up` launched; what `down` tears down) ---
@@ -361,14 +361,12 @@ export function parseLiveSessionIds(stdout: string): string[] {
 export async function polytokenSessions(
   p: Paths = paths(),
 ): Promise<LiveSession[]> {
-  const proc = Bun.spawn({
-    cmd: [POLYTOKEN_BIN, "sessions", "--sessions-dir", p.sessionsDir],
+  const result = await spawnAsync([POLYTOKEN_BIN, "sessions", "--sessions-dir", p.sessionsDir], {
     env: { ...process.env, ...isolationEnv(p) },
     stdout: "pipe",
     stderr: "pipe",
   });
-  await proc.exited;
-  const stdout = await new Response(proc.stdout).text();
+  const stdout = result.stdout;
   const out: LiveSession[] = [];
   for (const id of parseLiveSessionIds(stdout)) {
     const su = readStartupJson(id, p);
@@ -417,8 +415,8 @@ export async function withDaemonHistory<T>(
   ensureEnv(p); // guarantee the generated config exists before the daemon loads it
   const meta = readSessionJson(sessionId, p);
   const cwd = meta?.project_path || p.project;
-  const proc = Bun.spawn({
-    cmd: [
+  const proc = spawnManaged(
+    [
       POLYTOKEN_BIN,
       "daemon",
       "--project-dir",
@@ -431,10 +429,12 @@ export async function withDaemonHistory<T>(
       "--global-config-dir",
       p.globalConfigDir,
     ],
-    env: { ...process.env, ...isolationEnv(p) },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+    {
+      env: { ...process.env, ...isolationEnv(p) },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
   let port: number | null = null;
   try {
     const deadline = Date.now() + 20_000;
@@ -451,10 +451,10 @@ export async function withDaemonHistory<T>(
       if (su?.state === "failed" && su.pid === proc.pid) {
         throw new Error(`resume daemon failed: ${su.message ?? "no message"}`);
       }
-      await Bun.sleep(100);
+      await sleep(100);
     }
     if (port == null) {
-      const err = await new Response(proc.stderr).text().catch(() => "");
+      const err = await streamText(proc.stderr).catch(() => "");
       throw new Error(
         `resume daemon for ${sessionId} not ready in 20s${err ? `\nstderr: ${err.slice(0, 400)}` : ""}`,
       );

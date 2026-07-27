@@ -14,11 +14,14 @@
 
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { resolve, join } from "node:path";
+import { resolve, join, dirname } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { spawnAsync } from "./lib/node-compat.js";
 
 const BIN_ENV = "PANTOKEN_POLYTOKEN_BIN";
-const OUT_PATH = resolve(import.meta.dir, "../server-rs/pantoken-daemon-types/src/lib.rs");
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const OUT_PATH = resolve(SCRIPT_DIR, "../server-rs/pantoken-daemon-types/src/lib.rs");
 
 function resolveBin(): string {
   if (process.env[BIN_ENV]) return process.env[BIN_ENV];
@@ -313,18 +316,15 @@ async function main() {
   const bin = resolveBin();
 
   // Capture the OpenAPI spec
-  const proc = Bun.spawn({
-    cmd: [bin, "openapi"],
+  const result = await spawnAsync([bin, "openapi"], {
     stdout: "pipe",
     stderr: "pipe",
   });
-  const exitCode = await proc.exited;
-  if (exitCode !== 0) {
-    const err = await new Response(proc.stderr).text();
-    console.error(`polytoken openapi failed (exit ${exitCode}): ${err}`);
+  if (result.code !== 0) {
+    console.error(`polytoken openapi failed (exit ${result.code}): ${result.stderr}`);
     process.exit(1);
   }
-  const openapiJson = await new Response(proc.stdout).text();
+  const openapiJson = result.stdout;
 
   // Capture the daemon version from `polytoken --version`.
   //
@@ -333,18 +333,15 @@ async function main() {
   // capture the CLI version at codegen time. The live corpus tests (AC.12 in the
   // remote-deployment master plan) remain the true spec-drift gate; this constant
   // is a floor, not a proof.
-  const versionProc = Bun.spawn({
-    cmd: [bin, "--version"],
+  const versionResult = await spawnAsync([bin, "--version"], {
     stdout: "pipe",
     stderr: "pipe",
   });
-  const versionExit = await versionProc.exited;
-  if (versionExit !== 0) {
-    const err = await new Response(versionProc.stderr).text();
-    console.error(`polytoken --version failed (exit ${versionExit}): ${err}`);
+  if (versionResult.code !== 0) {
+    console.error(`polytoken --version failed (exit ${versionResult.code}): ${versionResult.stderr}`);
     process.exit(1);
   }
-  const versionRaw = (await new Response(versionProc.stdout).text()).trim();
+  const versionRaw = versionResult.stdout.trim();
   // Strip the leading "polytoken " prefix: "polytoken 0.5.0-unstable.9" → "0.5.0-unstable.9"
   const daemonVersion = versionRaw.replace(/^polytoken\s+/, "");
   const semverRe =
@@ -511,7 +508,7 @@ pub const POLYTOKEN_DAEMON_TARGET_VERSION: &str = "${daemonVersion}";
   const variantCount = daemonEvent?.oneOf?.length ?? 0;
 
   console.log(
-    `✓ generated ${OUT_PATH.replace(import.meta.dir + "/../", "")} ` +
+    `✓ generated ${OUT_PATH.replace(SCRIPT_DIR + "/../", "")} ` +
       `(${output.split("\n").length} lines, ${Object.keys(schemas).length} schemas, ` +
       `${variantCount} DaemonEvent variants)`,
   );

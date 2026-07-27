@@ -19,11 +19,13 @@ import {
   rmSync,
   readFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { isMain } from "../lib/node-compat.js";
 
-const repoRoot = resolve(import.meta.dir, "../..");
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 function fail(msg: string): never {
   console.error(`smoke-test: ${msg}`);
@@ -251,4 +253,4 @@ async function main(): Promise<void> {
   process.exit(0);
 }
 
-if (import.meta.main) main();
+if (isMain()) main();

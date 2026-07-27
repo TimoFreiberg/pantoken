@@ -17,7 +17,9 @@
 //                                     GUI→TUI handoff works without a 10-min wait
 //   XDG_DATA_HOME / XDG_CACHE_HOME (+ XDG_CONFIG_HOME if isolating) — polytoken footprint
 
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnManaged, sleep, isMain } from "../scripts/lib/node-compat.js";
 import {
   ensureEnv,
   freePort,
@@ -28,7 +30,7 @@ import {
 } from "./lib.ts";
 import { ensureProject } from "./project.ts";
 
-const REPO_ROOT = join(import.meta.dir, "..");
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Default short idle-reap for the harness (ms). Frees the exclusive lease ~quickly on an
  *  un-focused, idle session so GUI→TUI handoff via the reaper works (see flow 4b). */
@@ -46,7 +48,7 @@ async function waitForHealth(
     } catch {
       /* not listening yet */
     }
-    await Bun.sleep(150);
+    await sleep(150);
   }
   return false;
 }
@@ -87,7 +89,7 @@ export async function launch(p: Paths = paths()): Promise<void> {
     PORT: undefined,
   };
 
-  const server = Bun.spawn(["cargo", "run", "--bin", "pantoken-server"], {
+  const server = spawnManaged(["cargo", "run", "--bin", "pantoken-server"], {
     cwd: join(REPO_ROOT, "server-rs"),
     env: backendEnv,
     stdout: "inherit",
@@ -125,19 +127,14 @@ export async function launch(p: Paths = paths()): Promise<void> {
     shutdown(1);
   }
 
-  const vite = Bun.spawn(
-    // --host 127.0.0.1 so guiUrl (127.0.0.1) is reachable — Vite otherwise binds ::1
-    // (localhost), which a 127.0.0.1 curl/agent can't reach.
-    [
-      "bun",
-      "run",
-      "dev",
-      "--host",
-      "127.0.0.1",
-      "--port",
-      String(vitePort),
-      "--strictPort",
-    ],
+  // Launch Vite via the current runtime: `bun run dev` under Bun, `npx vite` under Node.
+  const isBun = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
+  const viteCmd = isBun
+    ? ["bun", "run", "dev", "--host", "127.0.0.1", "--port", String(vitePort), "--strictPort"]
+    : ["npx", "vite", "--host", "127.0.0.1", "--port", String(vitePort), "--strictPort"];
+
+  const vite = spawnManaged(
+    viteCmd,
     {
       cwd: join(REPO_ROOT, "client"),
       env: {
@@ -183,6 +180,6 @@ export async function launch(p: Paths = paths()): Promise<void> {
   await Promise.all(procs.map((proc) => proc.exited));
 }
 
-if (import.meta.main) {
+if (isMain()) {
   await launch();
 }

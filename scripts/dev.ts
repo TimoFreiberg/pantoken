@@ -17,8 +17,9 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createServer } from "node:net";
+import { createServer, createConnection } from "node:net";
 import type { AddressInfo } from "node:net";
+import { spawnManaged, sleep } from "./lib/node-compat.js";
 
 // Ask the OS for an unused TCP port (bind :0, read it back, release). Used on the auto-port
 // paths (Claude_Preview's $PORT, e2e's PANTOKEN_AUTO_PORT) so parallel — or leaked — instances
@@ -41,16 +42,13 @@ function freePort(): Promise<number> {
 // load-balances between (fresh server + stale orphan). A successful TCP connect is
 // unambiguous: someone's there.
 function portInUse(port: number): Promise<boolean> {
-  return Bun.connect({
-    hostname: "127.0.0.1",
-    port,
-    socket: { data() {} },
-  })
-    .then((sock) => {
+  return new Promise((resolve) => {
+    const sock = createConnection({ host: "127.0.0.1", port }, () => {
       sock.end();
-      return true;
-    })
-    .catch(() => false);
+      resolve(true);
+    });
+    sock.on("error", () => resolve(false));
+  });
 }
 
 // Vite's port: under Claude_Preview `autoPort` the harness assigns one and passes it as
@@ -127,7 +125,7 @@ const backendEnv = {
 // still booting — a tool like Claude_Preview returns as soon as the port listens,
 // catching the client mid-reconnect-backoff with a stale "Offline" banner and an
 // empty session list. Gating on /health makes the first WS connect succeed.
-const server = Bun.spawn(["cargo", "run", "--bin", "pantoken-server"], {
+const server = spawnManaged(["cargo", "run", "--bin", "pantoken-server"], {
   cwd: "server-rs",
   env: backendEnv,
   stdout: "inherit",
@@ -143,7 +141,7 @@ async function waitForHealth(base: string, timeoutMs = 120_000): Promise<void> {
     } catch {
       // backend not listening yet — retry until the deadline
     }
-    await Bun.sleep(150);
+    await sleep(150);
   }
   console.warn(
     `[dev] ${base}/health not ready after ${timeoutMs}ms; starting Vite anyway`,
@@ -152,7 +150,14 @@ async function waitForHealth(base: string, timeoutMs = 120_000): Promise<void> {
 
 await waitForHealth(SERVER);
 
-const vite = Bun.spawn(["bun", ...viteArgs], {
+// Launch Vite via the current runtime: `bun run dev` under Bun, `npx vite` under Node.
+// tsx is the script runner; Vite itself is launched as a child process.
+const isBun = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
+const viteCmd = isBun
+  ? ["bun", ...viteArgs]
+  : ["npx", "vite", ...(vitePort ? ["--port", vitePort] : [])];
+
+const vite = spawnManaged(viteCmd, {
   cwd: "client",
   env: {
     ...process.env,

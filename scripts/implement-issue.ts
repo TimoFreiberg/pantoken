@@ -103,11 +103,12 @@ export function zellijCleanupCommand(
 }
 
 export const bunCommandRunner: CommandRunner = async (command, args, options = {}) => {
-  const proc = Bun.spawn([command, ...args], { cwd: options.cwd, env: options.env ? { ...process.env, ...options.env } : process.env, stdout: "pipe", stderr: "pipe" });
+  const { spawnManaged, streamText } = await import("./lib/node-compat.js");
+  const proc = spawnManaged([command, ...args], { cwd: options.cwd, env: options.env ? { ...process.env, ...options.env } : process.env, stdout: "pipe", stderr: "pipe" });
   const timer = options.timeoutMs ? setTimeout(() => proc.kill(), options.timeoutMs) : undefined;
-  const [code, stdout, stderr] = await Promise.all([proc.exited, new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+  const [code, stdout, stderr] = await Promise.all([proc.exited, streamText(proc.stdout), streamText(proc.stderr)]);
   if (timer) clearTimeout(timer);
-  return { code, stdout, stderr };
+  return { code: code ?? -1, stdout, stderr };
 };
 
 async function command(runner: CommandRunner, name: string, args: string[], options?: Parameters<CommandRunner>[2]): Promise<CommandResult> { const result = await runner(name, args, options); if (result.code !== 0) throw new Error(`${name} ${args.join(" ")} failed (${result.code}): ${result.stderr || result.stdout}`); return result; }
@@ -148,4 +149,4 @@ export async function runLauncher(args: string[], options: LauncherOptions = {})
   try { await mkdir(join(context, "images")); const screenshots = await downloadScreenshots(urls, join(context, "images"), http); await writeFile(join(context, "issue-body.md"), data.body); await writeFile(join(context, "manifest.json"), JSON.stringify(screenshots, null, 2)); const spawned = await command(runner, "polytoken", ["new", "--no-attach"], { cwd: repoRoot }); const parsed = parseDaemonOutput(spawned.stdout); const startup = join(process.env.HOME ?? "", ".local/share/polytoken/sessions", parsed.sessionId, "startup.json"); const startupData = await waitForDaemonReady(startup); daemonPid = typeof startupData.pid === "number" ? String(startupData.pid) : undefined; const tokenPath = typeof startupData.credential_file_path === "string" ? startupData.credential_file_path : undefined; const token = tokenPath ? JSON.parse(await readFile(tokenPath, "utf8")).token : startupData.token; if (typeof token !== "string" || !token) throw new Error("daemon startup did not provide a credential"); const connection = { sessionId: parsed.sessionId, port: parsed.port, token, baseUrl: `http://localhost:${parsed.port}` }; await daemonRequest(connection, "/facet", { method: "POST", body: JSON.stringify({ facet: "plan" }) }, http); await daemonRequest(connection, "/permission-monitor", { method: "POST", body: JSON.stringify({ mode: "bypass_plus" }) }, http); const handoff = await daemonRequest(connection, "/adventurous-handoff", {}, http) as any; if (!handoff?.enabled) await daemonRequest(connection, "/adventurous-handoff", { method: "POST" }, http); const prompt = renderPrompt(template, { ...issue, ...data }, screenshots, false, context); await daemonRequest(connection, "/prompt", { method: "POST", body: JSON.stringify({ content: prompt }) }, http); const cleanup = zellijCleanupCommand(parsed.sessionId, daemonPid, context); await command(runner, "zellij", ["action", "new-tab", "--cwd", repoRoot, "--name", `#${issue.number}`, "--", cleanup.command, ...cleanup.args]); handedOff = true; print(`TUI started in a new zellij tab. The agent will create workspace issue-${issue.number}.`); } finally { if (!handedOff) { if (daemonPid) await runner("kill", [daemonPid]).catch(() => undefined); await rm(context, { recursive: true, force: true }).catch(() => undefined); } }
 }
 
-if (import.meta.main) { runLauncher(Bun.argv.slice(2)).catch((error) => { console.error(`ERROR: ${error instanceof Error ? error.message : String(error)}`); process.exit(1); }); }
+if (import.meta.url === `file://${process.argv[1]}`) { runLauncher(process.argv.slice(2)).catch((error) => { console.error(`ERROR: ${error instanceof Error ? error.message : String(error)}`); process.exit(1); }); }

@@ -17,6 +17,7 @@ import {
   TMUX_BIN,
   type Paths,
 } from "./lib.ts";
+import { spawnManaged, streamText, isMain } from "../scripts/lib/node-compat.js";
 
 interface Check {
   name: string;
@@ -110,14 +111,16 @@ export async function preflight(
 /** Spawn `polytoken exec` with the isolation env and confirm it produces output. A config
  *  that references an unset key fails here at load (exit ≠ 0), which is exactly the signal. */
 async function execProbe(p: Paths): Promise<{ ok: boolean; detail: string }> {
-  const proc = Bun.spawn({
-    cmd: [POLYTOKEN_BIN, "exec", `Reply with exactly: PARITY-PREFLIGHT-OK`],
-    // CRITICAL: export the isolation env so the probe tests the harness's config+sessions,
-    // not prod. exec accepts no --sessions-dir; XDG_DATA_HOME redirects it.
-    env: { ...process.env, ...isolationEnv(p) },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  const proc = spawnManaged(
+    [POLYTOKEN_BIN, "exec", `Reply with exactly: PARITY-PREFLIGHT-OK`],
+    {
+      // CRITICAL: export the isolation env so the probe tests the harness's config+sessions,
+      // not prod. exec accepts no --sessions-dir; XDG_DATA_HOME redirects it.
+      env: { ...process.env, ...isolationEnv(p) },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
   const timeout = setTimeout(() => {
     try {
       proc.kill();
@@ -127,8 +130,8 @@ async function execProbe(p: Paths): Promise<{ ok: boolean; detail: string }> {
   }, 120_000);
   const code = await proc.exited;
   clearTimeout(timeout);
-  const stdout = (await new Response(proc.stdout).text()).trim();
-  const stderr = (await new Response(proc.stderr).text()).trim();
+  const stdout = (await streamText(proc.stdout)).trim();
+  const stderr = (await streamText(proc.stderr)).trim();
   if (code !== 0) {
     const spec = p.model;
     const hint = /env var \$\w+ referenced/.test(stderr)
@@ -153,7 +156,7 @@ async function execProbe(p: Paths): Promise<{ ok: boolean; detail: string }> {
 }
 
 // CLI: `bun parity/doctor.ts [--quick]`
-if (import.meta.main) {
+if (isMain()) {
   const quick = process.argv.includes("--quick");
   const p = paths();
   const { ok, checks } = await preflight({ promptCheck: !quick }, p);

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   DESKTOP_ASSET,
   HEADLESS_ASSET,
@@ -75,7 +76,7 @@ describe("release constants", () => {
 
   test("matches the checked-in desktop config without changing its key", () => {
     const config = JSON.parse(
-      readFileSync(join(import.meta.dir, "../../desktop/tauri.conf.json"), "utf8"),
+      readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../desktop/tauri.conf.json"), "utf8"),
     ) as { plugins: { updater: { pubkey: string; endpoints: string[] } } };
     expect(config.plugins.updater.pubkey).toBe(TAURI_UPDATER_PUBLIC_KEY);
     expect(config.plugins.updater.endpoints).toEqual([desktopUpdateEndpoint()]);

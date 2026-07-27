@@ -26,10 +26,15 @@ import {
   rmSync,
   statSync,
   readFileSync,
+  openSync,
+  readSync,
+  closeSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { isMain } from "../lib/node-compat.js";
 
 const REQUIRED_FILES = [
   "VERSION",
@@ -90,10 +95,12 @@ async function main(): Promise<void> {
     console.log(`  trusted validator: OK (${trusted.stdout.trim()})`);
 
     // Step 2: Check gzip magic bytes.
-    const header = Bun.file(archivePath).slice(0, 2);
-    const bytes = new Uint8Array(await header.arrayBuffer());
-    if (bytes[0] !== 0x1f || bytes[1] !== 0x8b)
-      fail(`not a valid gzip archive (magic bytes: ${(bytes[0] ?? 0).toString(16)} ${(bytes[1] ?? 0).toString(16)})`);
+    const fd = openSync(archivePath, "r");
+    const buf = Buffer.alloc(2);
+    readSync(fd, buf, 0, 2, 0);
+    closeSync(fd);
+    if (buf[0] !== 0x1f || buf[1] !== 0x8b)
+      fail(`not a valid gzip archive (magic bytes: ${(buf[0] ?? 0).toString(16)} ${(buf[1] ?? 0).toString(16)})`);
 
     // Step 3: Extract to temp directory.
     const extractResult = spawnSync(
@@ -167,4 +174,4 @@ async function main(): Promise<void> {
   }
 }
 
-if (import.meta.main) main();
+if (isMain()) main();

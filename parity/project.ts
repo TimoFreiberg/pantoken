@@ -5,8 +5,12 @@
 // pantoken checkout (under PARITY_ROOT) so a driven session never nests in or mutates pantoken.
 
 import { cpSync, existsSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ensureEnv, paths, type Paths } from "./lib.ts";
+import { spawnAsync, isMain } from "../scripts/lib/node-compat.js";
+
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
 /** The fixture source directory copied into the test project. Defaults to
  *  `parity/fixtures/project`; override with $PANTOKEN_PARITY_FIXTURE (relative to
@@ -14,10 +18,10 @@ import { ensureEnv, paths, type Paths } from "./lib.ts";
  *  (e.g. the at-mention edge-case fixture for @-autocomplete comparison). */
 const FIXTURE = (() => {
   const override = process.env.PANTOKEN_PARITY_FIXTURE?.trim();
-  if (!override) return join(import.meta.dir, "fixtures", "project");
+  if (!override) return join(SCRIPT_DIR, "fixtures", "project");
   return override.startsWith("/")
     ? override
-    : join(import.meta.dir, "fixtures", override);
+    : join(SCRIPT_DIR, "fixtures", override);
 })();
 
 /** Recreate $PARITY_ROOT/project from the fixture and git-init + commit once. Destructive:
@@ -28,8 +32,7 @@ export async function resetProject(p: Paths = paths()): Promise<string> {
   cpSync(FIXTURE, p.project, { recursive: true });
   // git init + a single commit so trust/worktree code sees a real repo.
   const run = async (cmd: string[]) => {
-    const proc = Bun.spawn({
-      cmd,
+    const result = await spawnAsync(cmd, {
       cwd: p.project,
       env: {
         ...process.env,
@@ -41,11 +44,9 @@ export async function resetProject(p: Paths = paths()): Promise<string> {
       stdout: "pipe",
       stderr: "pipe",
     });
-    const code = await proc.exited;
-    if (code !== 0) {
-      const err = await new Response(proc.stderr).text();
+    if ((result.code ?? 1) !== 0) {
       throw new Error(
-        `${cmd.join(" ")} failed (${code}): ${err.slice(0, 300)}`,
+        `${cmd.join(" ")} failed (${result.code}): ${result.stderr.slice(0, 300)}`,
       );
     }
   };
@@ -65,7 +66,7 @@ export async function ensureProject(p: Paths = paths()): Promise<string> {
 }
 
 // CLI: `bun parity/project.ts reset|path|ensure`
-if (import.meta.main) {
+if (isMain()) {
   const cmd = process.argv[2] ?? "ensure";
   const p = paths();
   if (cmd === "path") {

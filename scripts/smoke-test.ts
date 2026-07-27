@@ -8,9 +8,11 @@
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnManaged, sleep, type ManagedProcess } from "./lib/node-compat.js";
 
-const stageDir = process.argv[2] ?? resolve(import.meta.dir, "..");
+const stageDir = process.argv[2] ?? resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.PANTOKEN_SMOKE_PORT ?? 8799);
 const base = `http://127.0.0.1:${port}`;
 
@@ -24,7 +26,7 @@ function fail(msg: string): never {
   process.exit(1);
 }
 
-let proc: ReturnType<typeof Bun.spawn> | null = null;
+let proc: ManagedProcess | null = null;
 function cleanup(): void {
   try {
     proc?.kill("SIGKILL");
@@ -41,7 +43,7 @@ function cleanup(): void {
 console.error(
   `smoke-test: booting staged server from ${serverDir} on :${port}`,
 );
-proc = Bun.spawn(["cargo", "run"], {
+proc = spawnManaged(["cargo", "run"], {
   cwd: serverDir,
   env: {
     ...process.env,
@@ -76,7 +78,7 @@ async function waitForHealth(timeoutMs = 20_000): Promise<void> {
     } catch {
       /* not listening yet */
     }
-    await Bun.sleep(150);
+    await sleep(150);
   }
   fail(`/health did not return {ok:true} within ${timeoutMs}ms`);
 }

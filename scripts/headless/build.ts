@@ -35,8 +35,11 @@ import {
   statSync,
   mkdirSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { readFile, writeFile } from "node:fs/promises";
+import { spawnAsync, spawnManaged, streamText, isMain } from "../lib/node-compat.js";
 import {
   RELEASE_REPO,
   HEADLESS_TARGETS,
@@ -45,7 +48,7 @@ import {
   assertReleaseTag,
 } from "../desktop/release-constants";
 
-const repoRoot = resolve(import.meta.dir, "../..");
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 // ── helpers ──
 
@@ -64,30 +67,26 @@ async function capture(
   cmd: string[],
   opts: { cwd?: string; env?: Record<string, string> } = {},
 ): Promise<CaptureResult> {
-  const proc = Bun.spawn(cmd, {
+  const result = await spawnAsync(cmd, {
     cwd: opts.cwd,
     env: opts.env ? { ...process.env, ...opts.env } : undefined,
     stdout: "pipe",
     stderr: "pipe",
   });
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  return { code: await proc.exited, stdout, stderr };
+  return { code: result.code ?? -1, stdout: result.stdout, stderr: result.stderr };
 }
 
 async function run(
   cmd: string[],
   opts: { cwd?: string; env?: Record<string, string> } = {},
 ): Promise<void> {
-  const proc = Bun.spawn(cmd, {
+  const result = await spawnAsync(cmd, {
     cwd: opts.cwd,
     env: opts.env ? { ...process.env, ...opts.env } : undefined,
     stdout: "inherit",
     stderr: "inherit",
   });
-  if ((await proc.exited) !== 0)
+  if ((result.code ?? 1) !== 0)
     fail(`\`${cmd.join(" ")}\` failed — see output above`);
 }
 
@@ -291,16 +290,18 @@ async function signWithMinisign(
 
     // Pipe the password via stdin so minisign doesn't prompt interactively.
     // Even an empty-password-encrypted key needs an empty line on stdin.
-    const proc = Bun.spawn(
+    const proc = spawnManaged(
       ["minisign", "-S", "-s", keyFile, "-x", `${archivePath}.sig`, "-m", archivePath],
       { stdout: "pipe", stderr: "pipe", stdin: "pipe" },
     );
-    proc.stdin.write(`${keyPassword}\n`);
-    proc.stdin.end();
-    const [stderr] = await Promise.all([
-      new Response(proc.stderr).text(),
-    ]);
+    // Start consuming stderr before writing to stdin
+    const stderrPromise = streamText(proc.stderr);
+    if (proc.stdin) {
+      proc.stdin.write(`${keyPassword}\n`);
+      proc.stdin.end();
+    }
     const code = await proc.exited;
+    const stderr = await stderrPromise;
     if (code !== 0)
       fail(`minisign sign failed: ${stderr}`);
 
@@ -343,13 +344,13 @@ async function writeMetadata(
   outputDir: string,
 ): Promise<void> {
   const metaPath = join(outputDir, "release-metadata.json");
-  await Bun.write(metaPath, `${JSON.stringify(metadata, null, 2)}\n`);
+  await writeFile(metaPath, `${JSON.stringify(metadata, null, 2)}\n`);
 }
 
 // ── file SHA-256 ──
 
 async function fileSha256(path: string): Promise<string> {
-  const data = await Bun.file(path).arrayBuffer();
+  const data = await readFile(path);
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
@@ -389,7 +390,7 @@ function copyDirRecursive(src: string, dst: string): void {
 
 // ── main ──
 
-if (import.meta.main) {
+if (isMain()) {
   const { dryRun, skipBuild, tag: cliTag, targetTriple } = parseArgs(process.argv.slice(2));
   const target = headlessTargetForTriple(targetTriple);
 
@@ -468,7 +469,7 @@ if (import.meta.main) {
   } else {
     // Non-macOS without a tag: read the version from desktop/Cargo.toml as a
     // best-effort fallback (dev/local builds only — release builds always pass --tag).
-    const cargo = await Bun.file(join(repoRoot, "desktop", "Cargo.toml")).text();
+    const cargo = await readFile(join(repoRoot, "desktop", "Cargo.toml"), "utf8");
     const m = cargo.match(/^version\s*=\s*"(\d+\.\d+\.\d+)"/m);
     if (!m) fail("could not extract version from desktop/Cargo.toml — pass --tag");
     version = m[1]!;

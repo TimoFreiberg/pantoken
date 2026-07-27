@@ -11,6 +11,8 @@
 // Used by CI to aggregate macOS + Linux build outputs before publish.
 
 import { existsSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
+import { isMain } from "../lib/node-compat.js";
 
 interface HeadlessTargetMetadata {
   targetTriple: string;
@@ -39,7 +41,7 @@ function fail(msg: string): never {
 
 async function readMetadata(path: string): Promise<ReleaseMetadata> {
   if (!existsSync(path)) fail(`metadata file not found: ${path}`);
-  return await Bun.file(path).json();
+  return JSON.parse(await readFile(path, "utf8"));
 }
 
 async function main(): Promise<void> {
@@ -92,11 +94,11 @@ async function main(): Promise<void> {
     assetSha256: mergedAssetSha256,
   };
 
-  await Bun.write(primaryPath, `${JSON.stringify(merged, null, 2)}\n`);
+  await writeFile(primaryPath, `${JSON.stringify(merged, null, 2)}\n`);
   console.log(`merged ${mergedTargets.length} headless targets into ${primaryPath}`);
   for (const t of mergedTargets) {
     console.log(`  ${t.targetTriple}: ${t.asset}`);
   }
 }
 
-if (import.meta.main) main();
+if (isMain()) main();

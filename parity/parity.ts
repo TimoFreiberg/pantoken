@@ -23,6 +23,7 @@ import {
 } from "./lib.ts";
 import { ensureProject, resetProject } from "./project.ts";
 import { tuiCommand } from "./tui.ts";
+import { spawnAsync } from "../scripts/lib/node-compat.js";
 
 const [cmd, ...rest] = process.argv.slice(2);
 const p = paths();
@@ -150,14 +151,12 @@ async function main(): Promise<number> {
 
 /** Capture the TUI pane, or null if there's no live parity tmux session. */
 async function captureTui(pp = p): Promise<string | null> {
-  const proc = Bun.spawn({
-    cmd: [TMUX_BIN, "-L", pp.tmuxSocket, "capture-pane", "-p", "-t", "parity"],
+  const result = await spawnAsync([TMUX_BIN, "-L", pp.tmuxSocket, "capture-pane", "-p", "-t", "parity"], {
     stdout: "pipe",
     stderr: "pipe",
   });
-  const code = await proc.exited;
-  if (code !== 0) return null;
-  return new Response(proc.stdout).text();
+  if ((result.code ?? 1) !== 0) return null;
+  return result.stdout;
 }
 
 process.exit(

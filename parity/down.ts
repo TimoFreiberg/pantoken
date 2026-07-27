@@ -20,18 +20,18 @@ import {
   TMUX_BIN,
   type Paths,
 } from "./lib.ts";
+import { spawnAsync, spawnManaged, streamText, sleep, isMain } from "../scripts/lib/node-compat.js";
 
 /** Is `pid` alive and does its command line look like OUR pantoken launcher (guards pid reuse)?
  *  Matches only the specific launcher/server entry points — NOT a bare `bun`, which would
  *  match any bun process (the agent harness, other dev servers) reusing a recycled pid. */
 async function isOurPantoken(pid: number): Promise<boolean> {
-  const proc = Bun.spawn({
-    cmd: ["ps", "-p", String(pid), "-o", "command="],
+  const result = await spawnAsync(["ps", "-p", String(pid), "-o", "command="], {
     stdout: "pipe",
     stderr: "pipe",
   });
-  if ((await proc.exited) !== 0) return false; // not alive
-  const cmd = (await new Response(proc.stdout).text()).trim();
+  if ((result.code ?? 1) !== 0) return false; // not alive
+  const cmd = result.stdout.trim();
   // The recorded pid is our launcher entry point: `bun run parity/launch.ts` (preview) or
   // `bun run parity/parity.ts up` (script path). Match those specifically — never bare bun.
   return /parity\/(launch|parity)\.ts/.test(cmd);
@@ -52,7 +52,7 @@ export async function down(
         /* already gone */
       }
       // Give the server's async shutdown a moment to /terminate its daemons.
-      await Bun.sleep(1500);
+      await sleep(1500);
     } else {
       console.error(
         `[parity down] recorded pid ${run.pantokenPid} not ours/alive — skipping`,
@@ -72,12 +72,10 @@ export async function down(
   }
 
   // 3. dedicated tmux server
-  const tproc = Bun.spawn({
-    cmd: [TMUX_BIN, "-L", p.tmuxSocket, "kill-server"],
+  await spawnAsync([TMUX_BIN, "-L", p.tmuxSocket, "kill-server"], {
     stdout: "ignore",
     stderr: "ignore",
   });
-  await tproc.exited;
 
   // 4. purge
   if (opts.purge) {
@@ -87,6 +85,6 @@ export async function down(
   console.error("[parity down] done");
 }
 
-if (import.meta.main) {
+if (isMain()) {
   await down({ purge: process.argv.includes("--purge") });
 }
