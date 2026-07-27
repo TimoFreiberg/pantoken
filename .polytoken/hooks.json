@@ -13,5 +13,13 @@
     "handler": {
       "bash": "exec .polytoken/hooks/stamp-session-id.sh"
     }
+  },
+  {
+    "name": "check-workspace-in-plan-before-handoff",
+    "event": "pre_tool_use",
+    "matcher": "handoff_plan",
+    "handler": {
+      "bash": "exec .polytoken/hooks/pre-handoff-check-workspace.sh"
+    }
   }
 ]
