@@ -1754,6 +1754,17 @@ class PantokenStore {
 
   /** Enqueue + send a prompt. Returns the new outbox promptId on success (truthy), or
    *  null on failure (still connecting / local-storage write failed). */
+  private lifecycleAccepted = new Set<string>();
+  private lifecycleConfigured = new Set<string>();
+
+  private markLifecycleAccepted(sessionId: string | undefined): void {
+    if (sessionId) this.lifecycleAccepted.add(sessionId);
+  }
+
+  private markLifecycleConfigured(sessionId: string | undefined): void {
+    if (sessionId) this.lifecycleConfigured.add(sessionId);
+  }
+
   private async enqueuePrompt(
     prompt: Omit<
       PendingPrompt,
@@ -1761,6 +1772,7 @@ class PantokenStore {
     >,
   ): Promise<string | null> {
     const serverId = this.serverId ?? loadLastServerId();
+    if (prompt.kind === "prompt") this.markLifecycleAccepted(prompt.sessionId);
     if (!serverId) {
       this.lastError =
         "Still connecting — your prompt is still in the composer.";
@@ -2786,6 +2798,7 @@ class PantokenStore {
       this.persistDraftConfig();
       return;
     }
+    this.markLifecycleConfigured(this.session.ref?.sessionId);
     send({
       type: "sessionAction",
       action: { kind: "setModel", modelId, thinkingLevel },
@@ -2797,6 +2810,7 @@ class PantokenStore {
       this.persistDraftConfig();
       return;
     }
+    this.markLifecycleConfigured(this.session.ref?.sessionId);
     send({ type: "sessionAction", action: { kind: "setThinking", level } });
   }
   /** Switch the facet: the draft's pick while drafting a new session (applied at
@@ -2807,6 +2821,7 @@ class PantokenStore {
       this.persistDraftConfig();
       return;
     }
+    this.markLifecycleConfigured(this.session.ref?.sessionId);
     send({ type: "sessionAction", action: { kind: "setFacet", facet } });
   }
 
@@ -2838,6 +2853,7 @@ class PantokenStore {
       this.persistDraftConfig();
       return;
     }
+    this.markLifecycleConfigured(this.session.ref?.sessionId);
     send({
       type: "sessionAction",
       action: { kind: "setPermissionMonitor", mode },
@@ -2857,11 +2873,17 @@ class PantokenStore {
    *  `sessionId` to target a specific session (e.g. post-creation toggle);
    *  omit to target the focused session (the default). */
   toggleAdventurousHandoff(sessionId?: string): void {
+    this.markLifecycleConfigured(sessionId ?? this.session.ref?.sessionId);
     send({
       type: "sessionAction",
       action: { kind: "toggleAdventurousHandoff" },
       sessionId,
     });
+  }
+
+  /** Request server-side destruction of an eligible empty session. */
+  destroySession(path: string): void {
+    send({ type: "destroySession", path });
   }
 
   /** Set the notification auto-drain flag (autodrain non-blocking notifications). */

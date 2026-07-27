@@ -295,6 +295,12 @@ export interface SessionSnapshot {
  * .jsonl file) is the switch key, since the daemon's resume/open APIs are path-based and the
  * `sessionId`/cwd can be empty for older sessions.
  */
+export type SessionLifecycle =
+  | "emptyDefault"
+  | "acceptedPrompt"
+  | "liveConfigAction"
+  | "unknown";
+
 export interface SessionListEntry {
   readonly sessionId: SessionId;
   readonly path: string;
@@ -325,6 +331,8 @@ export interface SessionListEntry {
    *  resolves it at list time). Archived sessions are hidden by the sidebar's
    *  active-only filter, alongside ones untouched for >7 days. */
   readonly archived: boolean;
+  /** Server-authoritative lifecycle. Omitted/unknown is historical and never destroyable. */
+  readonly lifecycle?: SessionLifecycle;
 }
 
 // --- Host UI (extension interaction) ---

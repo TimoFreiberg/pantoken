@@ -1879,6 +1879,9 @@ pub struct MockDriver {
     /// the trait default of `false`); tests insert session IDs to simulate warm
     /// daemon attachments for journal-eviction testing.
     warm_sessions: Arc<Mutex<std::collections::HashSet<SessionId>>>,
+    accepted_prompts: Arc<Mutex<std::collections::HashSet<SessionId>>>,
+    live_config_actions: Arc<Mutex<std::collections::HashSet<SessionId>>>,
+    empty_default: Arc<Mutex<std::collections::HashSet<SessionId>>>,
 }
 
 /// Handle to a currently-running script, so the next `play_script` can flush it.
@@ -1939,6 +1942,9 @@ impl MockDriver {
             jobs: Arc::new(Mutex::new(mock_default_jobs())),
             todos: Arc::new(Mutex::new(mock_default_todos())),
             warm_sessions: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            accepted_prompts: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            live_config_actions: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            empty_default: Arc::new(Mutex::new(std::collections::HashSet::new())),
         }
     }
 
@@ -2205,6 +2211,7 @@ impl PantokenDriver for MockDriver {
         // session's) and consume the one-shot marker. Subsequent prompts fall
         // through to the normal demo-session reply. (Mirrors TS prompt().)
         let pid = prompt_id.clone().unwrap_or_else(|| format!("u-{}", ts()));
+        let lifecycle_session_id = session_id.clone();
         if let Some(session_id) = session_id {
             let taken = {
                 let mut lc = self.last_created.lock();
@@ -2220,9 +2227,13 @@ impl PantokenDriver for MockDriver {
             };
             if let Some(created) = taken {
                 let steps = new_session_reply(&created.snapshot, &text, &pid, &images);
+                self.accepted_prompts.lock().insert(session_id);
                 self.play_script(steps);
                 return Ok(());
             }
+        }
+        if let Some(sid) = lifecycle_session_id {
+            self.accepted_prompts.lock().insert(sid);
         }
         let steps = prompt_reply_script(&text, Some(&pid), &images);
         self.play_script(steps);
@@ -2388,10 +2399,54 @@ impl PantokenDriver for MockDriver {
 
     async fn list_sessions(&self) -> Vec<SessionListEntry> {
         // Clone the mutable `sessions` list. Rows `new_session` created prepend a synthetic "new" row.
-        self.sessions.lock().clone()
+        self.sessions
+            .lock()
+            .iter()
+            .filter(|entry| !self.accepted_prompts.lock().contains(&entry.session_id)
+                && !self.live_config_actions.lock().contains(&entry.session_id))
+            .cloned()
+            .collect()
+    }
+
+    async fn destroy_session(&self, path: String) -> Result<(), String> {
+        let mut sessions = self.sessions.lock();
+        let Some(index) = sessions.iter().position(|entry| entry.path == path) else {
+            return Ok(());
+        };
+        let entry = sessions[index].clone();
+        if !self.empty_default.lock().contains(&entry.session_id)
+            || self.accepted_prompts.lock().contains(&entry.session_id)
+            || self.live_config_actions.lock().contains(&entry.session_id)
+        {
+            return Err("session is populated or configured".into());
+        }
+        sessions.remove(index);
+        drop(sessions);
+        self.warm_sessions.lock().remove(&entry.session_id);
+        self.queues.lock().remove(&entry.session_id);
+        self.accepted_prompts.lock().remove(&entry.session_id);
+        self.live_config_actions.lock().remove(&entry.session_id);
+        self.empty_default.lock().remove(&entry.session_id);
+        if self
+            .last_created
+            .lock()
+            .as_ref()
+            .map(|created| created.session_id == entry.session_id)
+            .unwrap_or(false)
+        {
+            self.last_created.lock().take();
+        }
+        self.pending_dialogs.lock().retain(|_, dialog| {
+            dialog.session_ref.session_id.as_deref() != Some(entry.session_id.as_str())
+        });
+        self.cancel_timers();
+        Ok(())
     }
 
     async fn open_session(&self, path: String) -> Result<Vec<SessionDriverEvent>, String> {
+        if !self.sessions.lock().iter().any(|entry| entry.path == path) {
+            return Err("unknown mock session path".into());
+        }
         // One-shot failure injection (armed via run_script("failsession")):
         // throw a 409 lease-conflict error before any state mutation, mirroring
         // a real claimLease 409 when the TUI holds the lease. The message matches
@@ -2525,6 +2580,7 @@ impl PantokenDriver for MockDriver {
             let mut sessions = self.sessions.lock();
             if !sessions.iter().any(|s| s.session_id == session_id) {
                 sessions.insert(0, new_session_entry(&session_id, &dir));
+                self.empty_default.lock().insert(session_id.clone());
             }
         }
         // Build the config: modelId from the draft (or the default),
@@ -2764,10 +2820,24 @@ impl PantokenDriver for MockDriver {
     // One arm per SessionAction, each a faithful port of its TS MockDriver
     // method: deterministic fixture responses so Settings toggles and the
     // context actions round-trip through hub → client in dev/e2e.
-    async fn session_action(&self, action: SessionAction, session_id: Option<SessionId>) {
+    async fn session_action(
+        &self,
+        action: SessionAction,
+        session_id: Option<SessionId>,
+    ) -> Result<(), String> {
         // Stamp events with the target session (falls back to the default mock
         // session when no target is given — the historical behavior).
         let sid = session_id.unwrap_or_else(|| SESSION_ID.to_string());
+        if matches!(
+            &action,
+            SessionAction::SetModel { .. }
+                | SessionAction::SetThinking { .. }
+                | SessionAction::SetFacet { .. }
+                | SessionAction::SetPermissionMonitor { .. }
+                | SessionAction::ToggleAdventurousHandoff
+        ) {
+            self.live_config_actions.lock().insert(sid.clone());
+        }
         let base = || SessionEventBase {
             session_ref: session_ref_for(&sid),
             timestamp: ts(),
@@ -3098,6 +3168,7 @@ impl PantokenDriver for MockDriver {
                 });
             }
         }
+        Ok(())
     }
 
     fn default_seed(&self) -> Option<Vec<SessionDriverEvent>> {
@@ -4327,6 +4398,9 @@ impl PantokenDriver for MockDriver {
         *self.todos.lock() = mock_default_todos();
         self.queues.lock().clear();
         self.warm_sessions.lock().clear();
+        self.accepted_prompts.lock().clear();
+        self.live_config_actions.lock().clear();
+        self.empty_default.lock().clear();
     }
 
     fn has_warm_session(&self, sid: &SessionId) -> bool {

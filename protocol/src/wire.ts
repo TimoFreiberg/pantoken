@@ -366,6 +366,8 @@ export type ClientMessage =
    *  `SessionAction` variant + one arm per driver; the hub routes them all
    *  identically. Omit sessionId to target the focused session. */
   | { type: "sessionAction"; action: SessionAction; sessionId?: SessionId }
+  /** Permanently reap an empty, default-settings session by its stable path. */
+  | { type: "destroySession"; path: string }
   /** Set the explicit login shell pantoken captures env from at startup (null = the
    *  `$SHELL` / OS-login-shell default). Persists server-side; the env is captured
    *  once at boot, so it applies on the next server restart. The server re-broadcasts

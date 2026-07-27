@@ -1433,10 +1433,42 @@ impl SessionHub {
                 let target = session_id.clone().or(focused_id);
                 let driver = self.driver.clone();
                 let action = action.clone();
+                let client_key = client_key;
                 self.hub_ops.enqueue(
                     "session_action",
-                    Box::new(move |_hub| {
-                        Box::pin(async move { driver.session_action(action, target).await })
+                    Box::new(move |hub| {
+                        Box::pin(async move {
+                            let result = driver.session_action(action, target).await;
+                            if let Err(error) = result {
+                                hub.lock().send_to_client(
+                                    client_key,
+                                    ServerMessage::Error { message: error },
+                                );
+                            }
+                        })
+                    }),
+                );
+            }
+            ClientMessage::DestroySession { path } => {
+                let driver = self.driver.clone();
+                let path = path.clone();
+                let client_key = client_key;
+                self.hub_ops.enqueue(
+                    "destroy_session",
+                    Box::new(move |hub| {
+                        Box::pin(async move {
+                            match driver.destroy_session(path).await {
+                                Ok(()) => {
+                                    let sessions = driver.list_sessions().await;
+                                    let default_cwd = std::env::var("HOME").unwrap_or_default();
+                                    hub.lock().broadcast_session_list_with(sessions, default_cwd);
+                                }
+                                Err(error) => hub.lock().send_to_client(
+                                    client_key,
+                                    ServerMessage::Error { message: error },
+                                ),
+                            }
+                        })
                     }),
                 );
             }

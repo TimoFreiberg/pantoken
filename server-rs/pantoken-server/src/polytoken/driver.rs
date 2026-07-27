@@ -69,6 +69,7 @@ use tracing::{debug, error, info, warn};
 use async_trait::async_trait;
 
 use crate::archive_store::ArchiveStore;
+use crate::polytoken::lifecycle_store::{LifecycleState, LifecycleStore};
 use crate::driver::{
     BranchResult, ClearQueueResult, NewSessionOptsData, PantokenDriver, TodoDeleteDependent,
     TodoDeleteError,
@@ -166,6 +167,7 @@ struct PolytokenInner {
     /// (see `pantoken_settings_msg`).
     login_env_status: RwLock<LoginEnvStatus>,
     archive_store: Mutex<ArchiveStore>,
+    lifecycle: Mutex<LifecycleStore>,
     /// Warm recency order: oldest→newest by focus. `eviction_plan` reads this
     /// slice; `focus` moves a session to the back (most-recent). Faithful to
     /// TS's insertion-ordered `Map` (where `focus` deletes + re-inserts). The
@@ -271,6 +273,7 @@ impl PolytokenDriver {
                 watch_status: Mutex::new(config_watcher::WatchStatus::Disabled),
                 watcher_handle: Mutex::new(None),
                 command_runner: default_command_runner(runner_env),
+                lifecycle: Mutex::new(LifecycleStore::new(&data_dir)),
                 fake_control,
             }),
         };
@@ -330,6 +333,7 @@ impl PolytokenDriver {
                 watch_status: Mutex::new(config_watcher::WatchStatus::Disabled),
                 watcher_handle: Mutex::new(None),
                 command_runner: default_command_runner(runner_env),
+                lifecycle: Mutex::new(LifecycleStore::new(&data_dir)),
                 fake_control: None,
             }),
         }
@@ -1538,6 +1542,16 @@ impl PantokenDriver for PolytokenDriver {
         let Some(sid) = session_id else {
             return Err("no session to prompt".into());
         };
+        {
+            let lifecycle = self.inner.lifecycle.lock();
+            lifecycle.ensure_healthy()?;
+            if matches!(
+                lifecycle.state(&sid),
+                LifecycleState::Tombstoned | LifecycleState::DestroyPending
+            ) {
+                return Err("session has been destroyed or is being destroyed".into());
+            }
+        }
         let Some(ws) = self.inner.get_warm(&sid) else {
             return Err("no warm polytoken session to prompt".into());
         };
@@ -1551,6 +1565,10 @@ impl PantokenDriver for PolytokenDriver {
             .prompt(&text, None)
             .await
             .map_err(|e| format!("prompt failed: {e}"))?;
+        self.inner
+            .lifecycle
+            .lock()
+            .set(sid.clone(), LifecycleState::AcceptedPrompt)?;
         let now = DriverMapCtx::now_ts();
         let base = SessionEventBase {
             session_ref: ws.session_ref.clone(),
@@ -1773,7 +1791,9 @@ impl PantokenDriver for PolytokenDriver {
         let now = DriverMapCtx::now_ts();
         let mut warm_entries: Vec<SessionListEntry> = Vec::new();
         let mut warm_usage: HashMap<String, SessionUsage> = HashMap::new();
+        self.inner.lifecycle.lock().ensure_healthy().ok();
         let warm = self.inner.warm.read().clone();
+        let tombstones = self.inner.lifecycle.lock().tombstones();
         let archive_store = self.inner.archive_store.lock();
         for (sid, ws) in warm.iter() {
             let title = ws
@@ -1805,7 +1825,10 @@ impl PantokenDriver for PolytokenDriver {
         }
         drop(archive_store);
 
-        let merged = merge_session_lists(&on_disk, &warm_entries);
+        let merged = merge_session_lists(&on_disk, &warm_entries)
+            .into_iter()
+            .filter(|entry| !tombstones.contains(&entry.session_id))
+            .collect::<Vec<_>>();
         // Overlay live usage onto the winning entry (disk supersedes the warm
         // placeholder, so usage set only on warmEntries would be lost on merge).
         merged
@@ -2849,12 +2872,36 @@ impl PantokenDriver for PolytokenDriver {
         }
     }
 
-    async fn session_action(&self, action: SessionAction, session_id: Option<SessionId>) {
+    async fn session_action(
+        &self,
+        action: SessionAction,
+        session_id: Option<SessionId>,
+    ) -> Result<(), String> {
         use crate::polytoken::daemon_client::McpServerAction;
-        let Some(sid) = &session_id else { return };
-        let Some(ws) = self.inner.get_warm(sid) else {
-            return;
+        let Some(sid) = &session_id else {
+            return Err("no session targeted".into());
         };
+        {
+            let lifecycle = self.inner.lifecycle.lock();
+            lifecycle.ensure_healthy()?;
+            if matches!(
+                lifecycle.state(sid),
+                LifecycleState::Tombstoned | LifecycleState::DestroyPending
+            ) {
+                return Err("session has been destroyed or is being destroyed".into());
+            }
+        }
+        let Some(ws) = self.inner.get_warm(sid) else {
+            return Err("no warm polytoken session to configure".into());
+        };
+        let blocks_lifecycle = matches!(
+            &action,
+            SessionAction::SetModel { .. }
+                | SessionAction::SetThinking { .. }
+                | SessionAction::SetFacet { .. }
+                | SessionAction::SetPermissionMonitor { .. }
+                | SessionAction::ToggleAdventurousHandoff
+        );
         let (what, result, notice) = match action {
             SessionAction::SetModel {
                 model_id,
@@ -3001,13 +3048,57 @@ impl PantokenDriver for PolytokenDriver {
             }
         };
         match result {
-            Err(e) => self.inner.report_action_error(&ws.session_ref, &what, &e),
+            Err(e) => {
+                self.inner.report_action_error(&ws.session_ref, &what, &e);
+                return Err(e);
+            }
             Ok(()) => {
                 if let Some(msg) = notice {
                     self.inner.report_action_success(&ws.session_ref, &msg);
                 }
+                if blocks_lifecycle {
+                    self.inner
+                        .lifecycle
+                        .lock()
+                        .set(sid.clone(), LifecycleState::LiveConfigAction)?;
+                }
             }
         }
+        Ok(())
+    }
+
+    async fn destroy_session(&self, path: String) -> Result<(), String> {
+        let sid = std::path::Path::new(&path)
+            .parent()
+            .and_then(std::path::Path::file_name)
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "invalid session path".to_string())?
+            .to_string();
+        let expected = self.inner.sessions_dir.join(&sid).join("session.json");
+        if std::path::Path::new(&path) != expected {
+            return Err("invalid session path".into());
+        }
+        let state = self.inner.lifecycle.lock().state(&sid);
+        if matches!(state, LifecycleState::AcceptedPrompt | LifecycleState::LiveConfigAction) {
+            return Err("session is populated or configured".into());
+        }
+        if matches!(state, LifecycleState::Tombstoned) {
+            return Ok(());
+        }
+        self.inner
+            .lifecycle
+            .lock()
+            .set(sid.clone(), LifecycleState::DestroyPending)?;
+        let warm = self.inner.warm.write().remove(&sid);
+        if let Some(ws) = warm {
+            self.inner.dispose_warm(&ws).await;
+        }
+        self.inner
+            .lifecycle
+            .lock()
+            .set(sid.clone(), LifecycleState::Tombstoned)?;
+        self.inner.order.lock().retain(|id| id != &sid);
+        Ok(())
     }
 
     fn set_session_viewers(&self, is_viewed: Box<dyn Fn(SessionId) -> bool + Send + Sync>) {

@@ -223,7 +223,18 @@ pub trait PantokenDriver: Send + Sync {
     /// they share a single lifecycle (a daemon POST whose effect arrives via
     /// later driver events), so adding an action is a `SessionAction` variant
     /// + one match arm per driver.
-    async fn session_action(&self, _action: SessionAction, _session_id: Option<SessionId>) {}
+    async fn session_action(
+        &self,
+        _action: SessionAction,
+        _session_id: Option<SessionId>,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// Permanently reap an empty, default-settings session.
+    async fn destroy_session(&self, _path: String) -> Result<(), String> {
+        Err("session destruction is not supported by this driver".into())
+    }
 
     /// The daemon's global default model/thinking for new sessions.
     async fn get_model_defaults(&self) -> ModelDefaults {

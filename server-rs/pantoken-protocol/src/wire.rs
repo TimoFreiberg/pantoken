@@ -332,6 +332,10 @@ pub enum ClientMessage {
         #[serde(skip_serializing_if = "Option::is_none", default, rename = "sessionId")]
         session_id: Option<SessionId>,
     },
+    /// Permanently reap an empty, default-settings session by its stable path.
+    DestroySession {
+        path: String,
+    },
     SetLoginShell {
         path: Option<String>,
     },
@@ -562,6 +566,16 @@ mod tests {
             workspace_id: "ws1".into(),
             session_id: "s1".into(),
         }
+    }
+
+    #[test]
+    fn roundtrip_destroy_session() {
+        let msg = ClientMessage::DestroySession {
+            path: "/sessions/demo/session.json".into(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(json, r#"{"type":"destroySession","path":"/sessions/demo/session.json"}"#);
+        assert_eq!(serde_json::from_str::<ClientMessage>(&json).unwrap(), msg);
     }
 
     #[test]
