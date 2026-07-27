@@ -654,8 +654,11 @@ test("Ctrl/Cmd+Up anchors to the scroll position, not always the last prompt", a
   expect(idx).toBeLessThan(last); // and nowhere near the live tail
   expect(await gap()).toBeGreaterThan(80); // didn't scroll back to the bottom
 
-  // The removed ⌘↑ keyboard handler no longer fires — pressing Control+ArrowUp now
-  // leaves the scroll position untouched (no navigation happens).
+  // Control+ArrowUp is now a live hotkey (scroll-to-top), but the focus gate
+  // suppresses it while the composer textarea is focused. The prompt-nav-up
+  // button click above moved focus to a <button>, so focus the textarea first
+  // to verify the gate suppresses the hotkey (scroll position untouched).
+  await page.locator("textarea").focus();
   const scrollTopBefore = await page.evaluate(() => {
     const sc = document.querySelector(".scroller") as HTMLElement;
     return sc.scrollTop;
@@ -706,6 +709,44 @@ test("Ctrl/Cmd+Up/Down step through user prompts", async ({ page }) => {
   // …and stepping past the newest returns to the live bottom.
   await downBtn.click();
   await expect.poll(atBottom).toBe(true);
+});
+
+test("⌘↑/⌘↓ scroll to top/bottom of transcript (not while typing)", async ({
+  page,
+}) => {
+  await buildMultiTurn(page, 5);
+  // Focus the scroller (tabindex=0) without clicking — click may hit a child
+  // element (message row, link, code block) and leave focus there instead.
+  // Mirrors the scrollUpViaKeyboard helper pattern (helpers.ts:185-191).
+  await page.locator(".scroller").focus();
+  // ⌘↑ scrolls to the top
+  await page.keyboard.press("Control+ArrowUp");
+  await expect.poll(() =>
+    page.evaluate(
+      () => (document.querySelector(".scroller") as HTMLElement).scrollTop,
+    ),
+  ).toBe(0);
+  // ⌘↓ scrolls to the bottom
+  await page.keyboard.press("Control+ArrowDown");
+  await expect.poll(() =>
+    page.evaluate(() => {
+      const sc = document.querySelector(".scroller") as HTMLElement;
+      return sc.scrollHeight - sc.scrollTop - sc.clientHeight;
+    }),
+  ).toBeLessThan(4);
+  // While the composer is focused, ⌘↑ does NOT scroll (focus gate).
+  // We're at the bottom (scrollTop > 0 for a tall transcript), so if the gate
+  // fails, scrollToTop() would change scrollTop to 0 — making the assertion fail.
+  await page.locator("textarea").focus();
+  const before = await page.evaluate(
+    () => (document.querySelector(".scroller") as HTMLElement).scrollTop,
+  );
+  expect(before).toBeGreaterThan(0); // sanity: we're not already at the top
+  await page.keyboard.press("Control+ArrowUp");
+  const after = await page.evaluate(
+    () => (document.querySelector(".scroller") as HTMLElement).scrollTop,
+  );
+  expect(after).toBe(before);
 });
 
 test("sending a prompt while scrolled up jumps the transcript to the bottom", async ({

@@ -645,6 +645,22 @@
     store.clearActiveUnread();
   }
 
+  /** Scroll to the oldest content (top of the transcript). Un-pins so
+   *  streaming content doesn't yank back to the bottom. Clears
+   *  `userScrolling` so the `progScrollUntil` guard in onScroll holds the
+   *  un-pinned state for the full smooth-scroll window — otherwise, when the
+   *  scroller has focus, `onScrollerKey` fires first and sets `userScrolling`,
+   *  bypassing that guard; `nextPinned` then sees `gap < 80` (starting from the
+   *  bottom) and re-pins, yanking back down. */
+  function scrollToTop(): void {
+    if (!scroller) return;
+    progScrollUntil = Date.now() + 900;
+    userScrolling = false;
+    clearTimeout(userScrollClearTimer);
+    scroller.scrollTo({ top: 0, behavior: "smooth" });
+    pinned = false;
+  }
+
   // True when the active session has content below the viewport (drives the pill).
   const showNewPill = $derived(!pinned && store.activeUnread);
 
@@ -795,11 +811,48 @@
     // drag release outside the scroller) is also cleaned up here.
     const onWindowPointerUp = () => (pointerDownOnScroller = false);
     window.addEventListener("pointerup", onWindowPointerUp);
+    // ⌘↑/⌘↓ (Ctrl↑/Ctrl↓ on non-mac) scroll to the top/bottom of the transcript.
+    // Only fires when the composer textarea (or any text input) is NOT focused,
+    // so native text-editing shortcuts (⌘↑ = cursor to beginning of text) are
+    // preserved while typing.
+    const onScrollTopBottomKey = (e: KeyboardEvent): void => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+      // Suppress while a user-driven modal owns the keyboard, or while the
+      // chooser/warm-up placeholder is up (transcript is unmounted there).
+      if (
+        store.settingsOpen ||
+        store.planViewOpen ||
+        imageViewer.index !== null ||
+        store.chooserOpen ||
+        store.creatingSession
+      )
+        return;
+      // Don't hijack native text-editing shortcuts while typing.
+      const el = document.activeElement;
+      if (
+        el &&
+        (el.tagName === "TEXTAREA" ||
+          el.tagName === "INPUT" ||
+          el.tagName === "SELECT" ||
+          (el as HTMLElement).isContentEditable)
+      )
+        return;
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        scrollToTop();
+      } else {
+        e.preventDefault();
+        scrollToBottom();
+      }
+    };
+    window.addEventListener("keydown", onScrollTopBottomKey);
     return () => {
       window.removeEventListener("pagehide", onPageHide);
       settleObserver?.disconnect();
       viewportObserver?.disconnect();
       window.removeEventListener("pointerup", onWindowPointerUp);
+      window.removeEventListener("keydown", onScrollTopBottomKey);
       clearTimeout(userScrollClearTimer);
     };
   });
