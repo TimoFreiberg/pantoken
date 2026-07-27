@@ -723,3 +723,24 @@ describeOrSkip("integrate-into-main.sh Rust gate (AC.3)", () => {
     expect(nextestPos, "Rust gate must come before bookmark-move step").toBeLessThan(bookmarkPos);
   });
 });
+
+describeOrSkip("integrate-into-main.sh cleanup hint", () => {
+  test("success path prints cleanup-current-workspace hint after success message, before release_lock", () => {
+    const script = readFileSync(INTEGRATE_SH, "utf8");
+
+    const successPos = script.indexOf("Successfully integrated issue #");
+    expect(successPos, "success message must be present").toBeGreaterThanOrEqual(0);
+
+    const hintPos = script.indexOf("just cleanup-current-workspace");
+    expect(hintPos, "cleanup hint must be present").toBeGreaterThanOrEqual(0);
+
+    expect(hintPos, "cleanup hint must come after the success message").toBeGreaterThan(successPos);
+
+    // The hint must come before release_lock on the success path, proving it
+    // sits in the flat success block (not inside a conditional or after an
+    // early exit). This is the closest a static string assertion can get to
+    // verifying the hint doesn't alter control flow.
+    const releaseLockPos = script.indexOf("release_lock", hintPos);
+    expect(releaseLockPos, "release_lock must appear after the hint").toBeGreaterThan(hintPos);
+  });
+});

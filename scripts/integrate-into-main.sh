@@ -385,6 +385,7 @@ fi
 
 # 10. Release lock and exit
 log "Successfully integrated issue #$ISSUE_NUMBER to main (commit $PUSHED_COMMIT)"
+log "You can now clean up this workspace: just cleanup-current-workspace"
 release_lock
 RELEASE_ON_EXIT=false
 exit 0

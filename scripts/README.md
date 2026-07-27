@@ -40,6 +40,7 @@ just implement-issue 42
    - Verifies at least one non-empty commit contains `Fixes #N` in its message
    - Runs `pnpm run test` + `pnpm run check` + `cargo fmt` + `cargo clippy` + `cargo nextest`
    - Advances the main bookmark, pushes
+   - Prints a cleanup hint (`just cleanup-current-workspace`) on success
    - On conflict: exits 2 (lock held), agent resolves and retries
    - Exit codes: 0=success, 2=conflicts, 1=error
 
