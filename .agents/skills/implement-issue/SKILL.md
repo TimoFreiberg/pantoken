@@ -18,7 +18,7 @@ bun install
 bash scripts/gh-issue-fetch.sh <issue-number>
 ```
 
-Read the printed issue and screenshots. The workspace inherits the committed `.polytoken/hooks.json` (no per-workspace hook copy needed), and the stop hook gates on `.workspaces` + `.implement-issue-number` (written by `gh-issue-fetch.sh` when run from the workspace). The stop hook also writes `.implement-issue-session-id` from its environment for the integration lock's same-session re-acquisition.
+Read the printed issue and screenshots. 
 
 ## Step 1: Clarify implementation intent
 
@@ -30,7 +30,7 @@ Investigate the codebase, write and review the plan. The plan must instruct the 
 
 1. **Implement** the plan faithfully.
 2. **Review** using the `quality-review` skill — fix or rebut all findings, loop until clean.
-3. **Integrate** — squash all commits into one, ensure the commit message includes `Fixes #<issue-number>` on its own line, then call `just integrate-into-main <issue-number>`. If it exits 2 (conflicts), resolve them with the `jj-resolve-conflicts` skill and retry. The stop hook will redirect you here if you try to stop before integrating.
+3. **Integrate** — From this point on, a stop hook will guide you. Squash all commits into one, ensure the commit message includes `Fixes #<issue-number>` on its own line, then call `just integrate-into-main <issue-number>`. If it exits 2 (conflicts), resolve them with the `jj-resolve-conflicts` skill and retry. The stop hook will redirect you here if you try to stop before integrating.
 4. **Clean up** — after integration succeeds (exit 0), verify with `jj log -r 'main::@'` that you're in an empty commit on top of `main`, then run `just cleanup-current-workspace`.
 
 ## Step 3: Handoff
