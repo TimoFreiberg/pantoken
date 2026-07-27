@@ -13,7 +13,7 @@
   );
 </script>
 
-{#if !store.draft && queued.length > 0}
+{#if !store.chooserOpen && !store.creatingSession && queued.length > 0}
   <section class="tray" aria-label="Queued messages" data-testid="queue-tray">
     <div class="head">
       <span class="title">Queued · {queued.length}</span>

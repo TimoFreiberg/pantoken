@@ -932,7 +932,7 @@
                     <button
                       class="row"
                       class:active={s.sessionId === store.viewedSessionId &&
-                        !store.draft}
+                        !store.chooserOpen}
                       data-status={st}
                       onclick={() => pick(s)}
                       oncontextmenu={(e) => openMenu(e, s.path)}

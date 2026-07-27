@@ -27,10 +27,10 @@
       store.hotkeyAction = { n: ++hotkeyN };
     } else if (e.key === "j" || e.key === "J") {
       // ⌘⇧J — the right context panel (todos, jobs, flagged files). Inert while
-      // drafting: the panel shows the ACTIVE session's context and is unmounted
-      // in the draft view, so a toggle here would only flip persisted state
-      // invisibly (and surprise you when the draft closes).
-      if (store.draft) return;
+      // the chooser or warm-up placeholder is up: the panel shows the ACTIVE
+      // session's context and is unmounted in those views, so a toggle here
+      // would only flip persisted state invisibly.
+      if (store.chooserOpen || store.creatingSession) return;
       e.preventDefault();
       store.toggleRightSidebar();
     }
@@ -47,24 +47,20 @@
   // title immediately instead of the prior session's.
   const opening = $derived(store.openingSession !== null);
   // The focused session is warming up (created/opened, pre-stream) — show a small
-  // spinner beside the title. Also during a deferred new session's creation gap.
+  // spinner beside the title. Also during a new session's creation gap.
   const initializing = $derived(
-    creating || opening || (!store.draft && s.status === "initializing"),
+    creating || opening || (!store.chooserOpen && s.status === "initializing"),
   );
 
-  // While drafting a new session there's no folded session yet — the header reflects
-  // the draft so it doesn't read as the (now-backgrounded) previously-active one.
-  const drafting = $derived(store.draft != null);
-  const draftDir = $derived.by(() => {
-    const c = store.draft?.cwd?.replace(/\/+$/, "") ?? "";
-    return c ? (c.split("/").pop() ?? c) : "";
-  });
+  // While the chooser is open there's no session to reflect — the header
+  // shows a neutral label instead of the (now-backgrounded) previously-active one.
+  const chooserUp = $derived(store.chooserOpen);
 
   // The active session's title (folded snapshot is authoritative; ambient title wins).
   // During an opening-session switch, show a neutral label — the list entry's
   // displayName/preview can differ from the seed's title and would flicker.
   const title = $derived(
-    drafting || creating
+    chooserUp || creating
       ? "New session"
       : opening
         ? "Opening session"
@@ -78,8 +74,8 @@
     store.sessions.find((e) => e.sessionId === s.ref?.sessionId),
   );
   const subtitle = $derived(
-    drafting
-      ? draftDir || "new session"
+    chooserUp
+      ? "new session"
       : creating
         ? "starting…"
         : opening
@@ -88,7 +84,7 @@
   );
   // Hover reveals the full path the basename elides.
   const subtitleTitle = $derived(
-    drafting || !entry?.cwd ? undefined : entry.cwd,
+    chooserUp || !entry?.cwd ? undefined : entry.cwd,
   );
   const selectedHost = $derived(
     coordinator.multiHostCapable

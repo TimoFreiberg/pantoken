@@ -92,10 +92,10 @@ export async function openSidebar(page: Page): Promise<void> {
 
 /** Ensure the right context panel (flagged files, background jobs, todos) is open.
  *  The header `context-open` entry is always visible when the panel is closed and
- *  not drafting, so this clicks it directly.
+ *  the chooser is not open, so this clicks it directly.
  *
- *  Must not be called during a draft — `context-open` is hidden while drafting
- *  (use the `⌘⇧J` hotkey via keyboard instead). */
+ *  Must not be called while the chooser or warm-up placeholder is up —
+ *  `context-open` is hidden then (use the `⌘⇧J` hotkey via keyboard instead). */
 export async function openRightSidebar(page: Page): Promise<void> {
   const panel = page.getByTestId("right-sidebar");
   if ((await panel.getAttribute("data-open")) !== "true") {
@@ -104,10 +104,40 @@ export async function openRightSidebar(page: Page): Promise<void> {
   await expect(panel).toHaveAttribute("data-open", "true");
 }
 
-/** Open the project menu and choose `/Users/timo/src/<name>` via the DirPicker. */
-export async function chooseProjectDir(page: Page, name: string): Promise<void> {
-  await page.getByTestId("draft-project-control").click();
-  await page.getByTestId("project-menu").getByText("New project…").click();
+/** Open the new-session chooser via the sidebar's top + button. */
+export async function openChooser(page: Page): Promise<void> {
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
+}
+
+/** Create a session immediately by clicking a project group's + header. */
+export async function createSessionInGroup(page: Page, groupIndex = 0): Promise<void> {
+  await page
+    .getByTestId("sidebar")
+    .locator(".group-head .project-new")
+    .nth(groupIndex)
+    .click();
+}
+
+/** Create a session via the chooser by selecting the first project, then wait
+ *  for the transcript to appear. */
+export async function createSessionViaChooser(page: Page): Promise<void> {
+  await openChooser(page);
+  await page
+    .getByTestId("session-chooser")
+    .locator(".result.project")
+    .first()
+    .click();
+  await expect(page.getByTestId("session-chooser")).toHaveCount(0);
+}
+
+/** Choose a project directory via the chooser's Browse… → DirPicker flow. */
+export async function chooseProjectDirViaChooser(
+  page: Page,
+  name: string,
+): Promise<void> {
+  await openChooser(page);
+  await page.getByTestId("chooser-browse").click();
   await page.mouse.move(0, 0);
   const picker = page.getByTestId("dir-picker");
   await expect(picker).toBeVisible();
@@ -115,7 +145,8 @@ export async function chooseProjectDir(page: Page, name: string): Promise<void> 
   await input.fill(`/Users/timo/src/${name}/`);
   await expect(picker.getByTestId("use-current-directory")).toBeVisible();
   await picker.getByTestId("use-current-directory").click();
-  await expect(picker).toBeHidden();
+  await expect(picker).toHaveCount(0);
+  await expect(page.getByTestId("session-chooser")).toHaveCount(0);
 }
 
 /** Archive a session row via its right-click context menu. */

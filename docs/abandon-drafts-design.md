@@ -277,6 +277,10 @@ implementation chunk; the rest follow as their own issues.
    project `+` header creates immediately. Sessions are real from this phase
    on; the draft still exists underneath until phase 4–5, so land this
    feature-flagged alongside the old path if the diff gets uncomfortable.
+   **Status: in progress (phase 3).** The chooser view (`SessionChooser.svelte`)
+   replaces the draft entry points; `createSession(cwd)` sends a prompt-less
+   `newSession` and transitions to the `creatingSession` warm-up placeholder. The
+   draft machinery stays as dead code until phase 5 removes it.
 4. **Live config switches (Q2).** Verify the chips issue live `SessionAction`s
    post-create on the immediate-create path (most already work for live
    sessions).
