@@ -16,7 +16,7 @@ import type { Writable, Readable } from "node:stream";
 // Replaces `import.meta.main` (Bun-specific). Works under both Bun and Node/tsx.
 
 export function isMain(): boolean {
-  return import.meta.url === pathToFileURL(process.argv[1]).href;
+  return import.meta.url === pathToFileURL(process.argv[1] ?? "").href;
 }
 
 // ── __dirname equivalent ────────────────────────────────────────────────
@@ -52,7 +52,7 @@ export interface SpawnResult {
 // .pid, .kill(), .exited (promise), and .stdin/.stdout/.stderr streams.
 export interface ManagedProcess {
   readonly pid: number;
-  kill(signal?: string): void;
+  kill(signal?: NodeJS.Signals): void;
   readonly exited: Promise<number | null>;
   readonly stdin: Writable | null;
   readonly stdout: Readable | null;
@@ -87,7 +87,7 @@ export function spawnAsync(
   opts?: SpawnOptions,
 ): Promise<SpawnResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd[0], cmd.slice(1), {
+    const child = spawn(cmd[0]!, cmd.slice(1), {
       cwd: opts?.cwd,
       env: opts?.env as NodeJS.ProcessEnv,
       stdio: buildStdioOptions(opts),
@@ -96,18 +96,14 @@ export function spawnAsync(
     let stdout = "";
     let stderr = "";
 
-    if (child.stdout) {
-      child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (d: string) => {
-        stdout += d;
-      });
-    }
-    if (child.stderr) {
-      child.stderr.setEncoding("utf8");
-      child.stderr.on("data", (d: string) => {
-        stderr += d;
-      });
-    }
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (d: string) => {
+      stdout += d;
+    });
+    child.stderr?.setEncoding("utf8");
+    child.stderr?.on("data", (d: string) => {
+      stderr += d;
+    });
 
     child.on("error", reject);
     child.on("close", (code) => {
@@ -124,7 +120,7 @@ export function spawnManaged(
   cmd: string[],
   opts?: SpawnOptions,
 ): ManagedProcess {
-  const child = spawn(cmd[0], cmd.slice(1), {
+  const child = spawn(cmd[0]!, cmd.slice(1), {
     cwd: opts?.cwd,
     env: opts?.env as NodeJS.ProcessEnv,
     stdio: buildStdioOptions(opts),
@@ -137,7 +133,7 @@ export function spawnManaged(
 
   return {
     pid: child.pid ?? -1,
-    kill: (signal?: string) => child.kill(signal),
+    kill: (signal?: NodeJS.Signals) => child.kill(signal),
     exited,
     stdin: child.stdin,
     stdout: child.stdout,

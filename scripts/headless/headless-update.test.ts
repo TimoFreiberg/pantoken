@@ -15,12 +15,16 @@ import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
 import net from "node:net";
 import { spawn, spawnSync } from "node:child_process";
+import { spawnManaged, type ManagedProcess } from "../lib/node-compat.js";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const UPDATER = join(import.meta.dir, "../../deploy/update-headless.sh");
-const FAKE_MINISIGN = join(import.meta.dir, "fake-minisign");
-const FAKE_LAUNCHCTL = join(import.meta.dir, "fake-launchctl");
-const FAKE_TAR_VALIDATE = join(import.meta.dir, "fake-tar-validate");
-const FIXTURE_SERVER = join(import.meta.dir, "fixture-server");
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const UPDATER = join(SCRIPT_DIR, "../../deploy/update-headless.sh");
+const FAKE_MINISIGN = join(SCRIPT_DIR, "fake-minisign");
+const FAKE_LAUNCHCTL = join(SCRIPT_DIR, "fake-launchctl");
+const FAKE_TAR_VALIDATE = join(SCRIPT_DIR, "fake-tar-validate");
+const FIXTURE_SERVER = join(SCRIPT_DIR, "fixture-server");
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -130,7 +134,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
   );
   copyFileSync(FAKE_TAR_VALIDATE, join(stageDir, "bin", "pantoken-tar-validate"));
   chmodSync(join(stageDir, "bin", "pantoken-tar-validate"), 0o755);
-  copyFileSync(join(import.meta.dir, "../../deploy/run.sh"), join(stageDir, "run.sh"));
+  copyFileSync(join(SCRIPT_DIR, "../../deploy/run.sh"), join(stageDir, "run.sh"));
   chmodSync(join(stageDir, "run.sh"), 0o755);
   writeFileSync(
     join(stageDir, "update.sh"),
@@ -207,7 +211,7 @@ describe("update-headless.sh integration", () => {
   let servicePort: number;
 
   // Track running updater processes for cleanup
-  const trackedProcs: ReturnType<typeof Bun.spawn>[] = [];
+  const trackedProcs: ManagedProcess[] = [];
 
   beforeEach(async () => {
     home = mkdtempSync(join(tmpdir(), "pantoken-update-"));
@@ -283,7 +287,7 @@ describe("update-headless.sh integration", () => {
       PANTOKEN_TEST_FAIL_FIRST: extra.PANTOKEN_TEST_FAIL_FIRST ?? "0",
       PANTOKEN_TEST_FAIL_VERSION: extra.PANTOKEN_TEST_FAIL_VERSION ?? "",
       PANTOKEN_TEST_FAIL_VERSIONS: extra.PANTOKEN_TEST_FAIL_VERSIONS ?? "",
-      PATH: `${join(import.meta.dir)}:${process.env.PATH}`,
+      PATH: `${join(SCRIPT_DIR)}:${process.env.PATH}`,
       ...extra,
     };
   }
@@ -295,7 +299,7 @@ describe("update-headless.sh integration", () => {
     // fake-launchctl) cannot keep the inherited FDs open. fake-launchctl
     // redirects the service's stdout/stderr to a log file + /dev/null for stdin,
     // so the pipes close when the updater process exits.
-    const proc = Bun.spawn(args, { env: testEnv(extra), stdout: "pipe", stderr: "pipe" });
+    const proc = spawnManaged(args, { env: testEnv(extra), stdout: "pipe", stderr: "pipe" });
     trackedProcs.push(proc);
     return proc;
   }
@@ -335,7 +339,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     );
     copyFileSync(FAKE_TAR_VALIDATE, join(dir, "bin", "pantoken-tar-validate"));
     chmodSync(join(dir, "bin", "pantoken-tar-validate"), 0o755);
-    copyFileSync(join(import.meta.dir, "../../deploy/run.sh"), join(dir, "run.sh"));
+    copyFileSync(join(SCRIPT_DIR, "../../deploy/run.sh"), join(dir, "run.sh"));
     chmodSync(join(dir, "run.sh"), 0o755);
     writeFileSync(join(dir, "update.sh"), "#!/bin/sh\nexec true\n", { mode: 0o755 });
     writeFileSync(join(dir, "client-dist", "index.html"), "<html><body>pantoken</body></html>");
@@ -496,7 +500,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     expect(await proc.exited).not.toBe(0);
     expect(readlinkSync(liveLink)).toBe(join(versionsDir, "1.0.0"));
     expect(readJournal(stateDir).includes("signature-verified")).toBe(false);
-    expect(await Bun.file(join(versionsDir, "2.0.0")).exists()).toBe(false);
+    expect(!existsSync(join(versionsDir, "2.0.0"))).toBe(true);
   });
 
   test("rejects unsafe archive before extraction", async () => {
@@ -511,7 +515,7 @@ with tarfile.open(${JSON.stringify(archive)}, "w:gz") as t:
     writeFileSync(`${archive}.sig`, "FAKE-SIG-OK");
     const proc = runUpdater();
     expect(await proc.exited).not.toBe(0);
-    expect(await Bun.file(join(versionsDir, "2.0.0")).exists()).toBe(false);
+    expect(!existsSync(join(versionsDir, "2.0.0"))).toBe(true);
     rmSync(unsafe, { recursive: true, force: true });
   });
 
@@ -796,9 +800,9 @@ with tarfile.open(${JSON.stringify(archive)}, "w:gz") as t:
   // ── AC.9: no static-only tests without GAP comments ─────────────
 
   test("no static-only tests without GAP comment", async () => {
-    const src = readFileSync(import.meta.path, "utf8");
+    const src = readFileSync(fileURLToPath(import.meta.url), "utf8");
     // Find all test(...) calls and check which ones use readFileSync(UPDATER)
-    // without spawning a subprocess (Bun.spawn or runUpdater).
+    // without spawning a subprocess (spawnManaged or runUpdater).
     const testRegex = /test\(["']([^"']+)["']/g;
     let match;
     while ((match = testRegex.exec(src)) !== null) {
@@ -808,9 +812,9 @@ with tarfile.open(${JSON.stringify(archive)}, "w:gz") as t:
       const endIdx = nextTestIdx === -1 ? src.length : nextTestIdx;
       const body = src.slice(startIdx, endIdx);
 
-      // Check if this test uses readFileSync(UPDATER) but doesn't call runUpdater or Bun.spawn
+      // Check if this test uses readFileSync(UPDATER) but doesn't call runUpdater or spawnManaged
       const usesStaticRead = body.includes("readFileSync(UPDATER") || body.includes('readFileSync(UPDATER, "utf8")');
-      const spawnsProcess = body.includes("runUpdater") || body.includes("Bun.spawn");
+      const spawnsProcess = body.includes("runUpdater") || body.includes("spawnManaged");
 
       if (usesStaticRead && !spawnsProcess) {
         // Look backwards from the test() call for a GAP comment on preceding lines

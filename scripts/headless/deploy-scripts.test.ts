@@ -12,12 +12,16 @@ import {
   statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { spawnAsync } from "../lib/node-compat.js";
 
-const PLIST_TEMPLATE = join(import.meta.dir, "../../deploy/com.pantoken.server.plist");
-const BOOTSTRAP_HEADLESS = join(import.meta.dir, "../../deploy/bootstrap-headless.sh");
-const BOOTSTRAP_VALIDATOR = join(import.meta.dir, "../../deploy/bootstrap-tar-validator.sh");
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+
+const PLIST_TEMPLATE = join(SCRIPT_DIR, "../../deploy/com.pantoken.server.plist");
+const BOOTSTRAP_HEADLESS = join(SCRIPT_DIR, "../../deploy/bootstrap-headless.sh");
+const BOOTSTRAP_VALIDATOR = join(SCRIPT_DIR, "../../deploy/bootstrap-tar-validator.sh");
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function readAll(path: string): string {
@@ -127,9 +131,9 @@ describe("plist template", () => {
     const tmp = join(mkdtempSync(tmpdir()), "rendered.plist");
     writeFileSync(tmp, rendered);
     // plutil lint (best-effort; fails gracefully if not on macOS).
-    const lint = Bun.spawnSync(["plutil", "-lint", tmp]);
-    if (lint.exitCode === 0) {
-      expect(lint.exitCode).toBe(0);
+    const lint = spawnSync("plutil", ["-lint", tmp]);
+    if (lint.status === 0) {
+      expect(lint.status).toBe(0);
     }
     rmSync(tmp, { force: true });
   });
@@ -138,33 +142,18 @@ describe("plist template", () => {
 // ── bootstrap-headless.sh tests ──────────────────────────────────────────────
 describe("bootstrap-headless.sh", () => {
   test("rejects missing version", async () => {
-    const proc = Bun.spawn([BOOTSTRAP_HEADLESS], { stderr: "pipe", stdout: "pipe" });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    await proc.exited;
-    expect((stdout + stderr).toLowerCase()).toContain("error");
+    const proc = await spawnAsync([BOOTSTRAP_HEADLESS], { stderr: "pipe", stdout: "pipe" });
+    expect((proc.stdout + proc.stderr).toLowerCase()).toContain("error");
   });
 
   test("rejects missing archive directory", async () => {
-    const proc = Bun.spawn([BOOTSTRAP_HEADLESS, "1.0.0"], { stderr: "pipe", stdout: "pipe" });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    await proc.exited;
-    expect((stdout + stderr).toLowerCase()).toContain("error");
+    const proc = await spawnAsync([BOOTSTRAP_HEADLESS, "1.0.0"], { stderr: "pipe", stdout: "pipe" });
+    expect((proc.stdout + proc.stderr).toLowerCase()).toContain("error");
   });
 
   test("rejects non-existent archive directory", async () => {
-    const proc = Bun.spawn([BOOTSTRAP_HEADLESS, "1.0.0", "/tmp/nonexistent-archive-dir"], { stderr: "pipe", stdout: "pipe" });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    await proc.exited;
-    expect((stdout + stderr).toLowerCase()).toContain("error");
+    const proc = await spawnAsync([BOOTSTRAP_HEADLESS, "1.0.0", "/tmp/nonexistent-archive-dir"], { stderr: "pipe", stdout: "pipe" });
+    expect((proc.stdout + proc.stderr).toLowerCase()).toContain("error");
   });
 
   test("validates archive: missing VERSION file", async () => {
@@ -189,17 +178,12 @@ describe("bootstrap-headless.sh", () => {
     // Also ensure HOME is set in the spawn env since Bun test context
     // may not export it.
     const testHome = process.env.HOME || "/Users/timo";
-    const proc = Bun.spawn([BOOTSTRAP_HEADLESS, "1.0.0", release, "--skip-daemon"], {
+    const proc = await spawnAsync([BOOTSTRAP_HEADLESS, "1.0.0", release, "--skip-daemon"], {
       stderr: "pipe",
       stdout: "pipe",
       env: { ...process.env, HOME: testHome },
     });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    await proc.exited;
-    expect(stdout + stderr).toContain("missing VERSION");
+    expect(proc.stdout + proc.stderr).toContain("missing VERSION");
     rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -207,13 +191,8 @@ describe("bootstrap-headless.sh", () => {
     const tmp = mkdtempSync(join(tmpdir(), "pantoken-bootstrap-test-"));
     const release = fixtureRelease("9.9.9", tmp);
 
-    const proc = Bun.spawn([BOOTSTRAP_HEADLESS, "1.0.0", release, "--skip-daemon"], { stderr: "pipe", stdout: "pipe" });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    await proc.exited;
-    expect(stdout + stderr).toContain("VERSION file says '9.9.9'");
+    const proc = await spawnAsync([BOOTSTRAP_HEADLESS, "1.0.0", release, "--skip-daemon"], { stderr: "pipe", stdout: "pipe" });
+    expect(proc.stdout + proc.stderr).toContain("VERSION file says '9.9.9'");
     rmSync(tmp, { recursive: true, force: true });
   });
 });
@@ -221,58 +200,33 @@ describe("bootstrap-headless.sh", () => {
 // ── bootstrap-tar-validator.sh tests ─────────────────────────────────────────
 describe("bootstrap-tar-validator.sh", () => {
   test("rejects missing --binary", async () => {
-    const proc = Bun.spawn([BOOTSTRAP_VALIDATOR], { stderr: "pipe", stdout: "pipe" });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    await proc.exited;
-    expect((stdout + stderr).toLowerCase()).toContain("error");
+    const proc = await spawnAsync([BOOTSTRAP_VALIDATOR], { stderr: "pipe", stdout: "pipe" });
+    expect((proc.stdout + proc.stderr).toLowerCase()).toContain("error");
   });
 
   test("rejects missing --sha256", async () => {
-    const proc = Bun.spawn([BOOTSTRAP_VALIDATOR, "--binary", "/dev/null"], { stderr: "pipe", stdout: "pipe" });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    await proc.exited;
-    expect((stdout + stderr).toLowerCase()).toContain("error");
+    const proc = await spawnAsync([BOOTSTRAP_VALIDATOR, "--binary", "/dev/null"], { stderr: "pipe", stdout: "pipe" });
+    expect((proc.stdout + proc.stderr).toLowerCase()).toContain("error");
   });
 
   test("rejects non-existent binary", async () => {
-    const proc = Bun.spawn([BOOTSTRAP_VALIDATOR, "/nonexistent/file", "abcd1234"], { stderr: "pipe", stdout: "pipe" });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    await proc.exited;
-    expect((stdout + stderr).toLowerCase()).toContain("error");
+    const proc = await spawnAsync([BOOTSTRAP_VALIDATOR, "/nonexistent/file", "abcd1234"], { stderr: "pipe", stdout: "pipe" });
+    expect((proc.stdout + proc.stderr).toLowerCase()).toContain("error");
   });
 
   test("rejects malformed SHA-256 (too short)", async () => {
-    const proc = Bun.spawn([BOOTSTRAP_VALIDATOR, "/dev/null", "abcd"], { stderr: "pipe", stdout: "pipe" });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    await proc.exited;
-    expect((stdout + stderr).toLowerCase()).toContain("error");
+    const proc = await spawnAsync([BOOTSTRAP_VALIDATOR, "/dev/null", "abcd"], { stderr: "pipe", stdout: "pipe" });
+    expect((proc.stdout + proc.stderr).toLowerCase()).toContain("error");
   });
 
   test("rejects SHA-256 with uppercase", async () => {
-    const proc = Bun.spawn([BOOTSTRAP_VALIDATOR, "/dev/null", "ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234"], { stderr: "pipe", stdout: "pipe" });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    await proc.exited;
-    expect((stdout + stderr).toLowerCase()).toContain("error");
+    const proc = await spawnAsync([BOOTSTRAP_VALIDATOR, "/dev/null", "ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234"], { stderr: "pipe", stdout: "pipe" });
+    expect((proc.stdout + proc.stderr).toLowerCase()).toContain("error");
   });
 });
 
 // ── mac-mini-preflight.sh tests ──────────────────────────────────────────────
-const MAC_MINI_PREFLIGHT = join(import.meta.dir, "../../deploy/mac-mini-preflight.sh");
+const MAC_MINI_PREFLIGHT = join(SCRIPT_DIR, "../../deploy/mac-mini-preflight.sh");
 
 describe("mac-mini-preflight.sh", () => {
   test("exists and is executable", () => {
@@ -282,33 +236,18 @@ describe("mac-mini-preflight.sh", () => {
   });
 
   test("rejects --setup without --version and --archive", async () => {
-    const proc = Bun.spawn([MAC_MINI_PREFLIGHT, "--setup"], { stderr: "pipe", stdout: "pipe" });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    await proc.exited;
-    expect((stdout + stderr)).toContain("--version is required");
+    const proc = await spawnAsync([MAC_MINI_PREFLIGHT, "--setup"], { stderr: "pipe", stdout: "pipe" });
+    expect((proc.stdout + proc.stderr)).toContain("--version is required");
   });
 
   test("rejects --setup with --version but without --archive", async () => {
-    const proc = Bun.spawn([MAC_MINI_PREFLIGHT, "--setup", "--version", "1.0.0"], { stderr: "pipe", stdout: "pipe" });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    await proc.exited;
-    expect((stdout + stderr)).toContain("--archive is required");
+    const proc = await spawnAsync([MAC_MINI_PREFLIGHT, "--setup", "--version", "1.0.0"], { stderr: "pipe", stdout: "pipe" });
+    expect((proc.stdout + proc.stderr)).toContain("--archive is required");
   });
 
   test("read-only checks produce structured output", async () => {
-    const proc = Bun.spawn([MAC_MINI_PREFLIGHT], { stderr: "pipe", stdout: "pipe" });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    await proc.exited;
-    const output = stdout + stderr;
+    const proc = await spawnAsync([MAC_MINI_PREFLIGHT], { stderr: "pipe", stdout: "pipe" });
+    const output = proc.stdout + proc.stderr;
     expect(output).toContain("Pantoken Mac Mini Preflight");
     expect(output).toContain("Check 1: Platform");
     expect(output).toMatch(/[✓✗⚠ℹ]/);
@@ -343,7 +282,7 @@ describe("mac-mini-preflight.sh", () => {
     writeFileSync(fakeTailscale, "#!/bin/sh\necho 'http://127.0.0.1:8787'\nexit 0\n");
     chmodSync(fakeTailscale, 0o755);
 
-    const proc = Bun.spawn([MAC_MINI_PREFLIGHT, "--setup", "--version", "1.2.3", "--archive", archiveDir], {
+    const proc = await spawnAsync([MAC_MINI_PREFLIGHT, "--setup", "--version", "1.2.3", "--archive", archiveDir], {
       stderr: "pipe",
       stdout: "pipe",
       env: {
@@ -355,12 +294,7 @@ describe("mac-mini-preflight.sh", () => {
         TAILSCALE_BIN: fakeTailscale,
       },
     });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    const exitCode = await proc.exited;
-    expect(exitCode).toBe(0);
+    expect(proc.code).toBe(0);
     expect(existsSync(join(versionsDir, "1.2.3"))).toBe(true);
     expect(existsSync(join(versionsDir, "1.2.3", "VERSION"))).toBe(true);
     expect(readlinkSync(liveLink)).toBe(join(versionsDir, "1.2.3"));
@@ -405,22 +339,20 @@ describe("mac-mini-preflight.sh", () => {
     };
 
     // First run
-    const proc1 = Bun.spawn([MAC_MINI_PREFLIGHT, "--setup", "--version", "2.0.0", "--archive", archiveDir], {
+    await spawnAsync([MAC_MINI_PREFLIGHT, "--setup", "--version", "2.0.0", "--archive", archiveDir], {
       stderr: "pipe", stdout: "pipe", env,
     });
-    await proc1.exited;
 
     // Second run — should fail because version dir already exists
     // (idempotent means re-running with the SAME version should be handled)
     // Actually, the version dir exists, so it should error. Let's test with --force on symlink.
     // The real idempotency is: re-running with same version fails at "release directory already exists"
     // which is correct behavior. Let's test the symlink idempotency instead.
-    const proc2 = Bun.spawn([MAC_MINI_PREFLIGHT, "--setup", "--version", "2.0.0", "--archive", archiveDir], {
+    const proc2 = await spawnAsync([MAC_MINI_PREFLIGHT, "--setup", "--version", "2.0.0", "--archive", archiveDir], {
       stderr: "pipe", stdout: "pipe", env,
     });
-    const exit2 = await proc2.exited;
     // Second run should fail because the version directory already exists
-    expect(exit2).not.toBe(0);
+    expect(proc2.code).not.toBe(0);
 
     rmSync(tmpHome, { recursive: true, force: true });
     rmSync(archiveDir, { recursive: true, force: true });
@@ -442,9 +374,9 @@ describe("mac-mini-preflight.sh", () => {
 
     const tmp = join(mkdtempSync(tmpdir()), "rendered.plist");
     writeFileSync(tmp, rendered);
-    const lint = Bun.spawnSync(["plutil", "-lint", tmp]);
-    if (lint.exitCode === 0) {
-      expect(lint.exitCode).toBe(0);
+    const lint = spawnSync("plutil", ["-lint", tmp]);
+    if (lint.status === 0) {
+      expect(lint.status).toBe(0);
     }
     rmSync(tmp, { force: true });
   });
