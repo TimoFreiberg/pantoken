@@ -296,10 +296,7 @@ export interface SessionSnapshot {
  * `sessionId`/cwd can be empty for older sessions.
  */
 export type SessionLifecycle =
-  | "emptyDefault"
-  | "acceptedPrompt"
-  | "liveConfigAction"
-  | "unknown";
+  "emptyDefault" | "acceptedPrompt" | "liveConfigAction" | "unknown";
 
 export interface SessionListEntry {
   readonly sessionId: SessionId;

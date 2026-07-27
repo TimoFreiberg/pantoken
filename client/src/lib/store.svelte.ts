@@ -459,7 +459,16 @@ class PantokenStore {
   // Settings panel open/closed — per-client view state, never sent upstream.
   settingsOpen = $state(false);
   // Requested settings section (set by openSettings(section) to navigate directly).
-  requestedSettingsSection = $state<"appearance" | "notifications" | "models" | "environment" | "mcp" | "token" | "computers" | null>(null);
+  requestedSettingsSection = $state<
+    | "appearance"
+    | "notifications"
+    | "models"
+    | "environment"
+    | "mcp"
+    | "token"
+    | "computers"
+    | null
+  >(null);
   _settingsSectionN = $state(0);
   // In-transcript find (⌘F) open/closed — per-client view state. The query, matches, and
   // highlight ranges live in TranscriptSearch (DOM-derived, not serializable). `searchFocusN`
@@ -1564,10 +1573,7 @@ class PantokenStore {
       const raw = localStorage.getItem("pantoken.scrollPositions");
       if (raw) {
         try {
-          localStorage.setItem(
-            `pantoken.${sid}.scrollPositions`,
-            raw,
-          );
+          localStorage.setItem(`pantoken.${sid}.scrollPositions`, raw);
         } catch {
           // Best effort.
         }
@@ -1708,10 +1714,7 @@ class PantokenStore {
     // Defense-in-depth: only flush prompts for the current server, so a stale
     // prompt from a previous host can never be sent to the wrong connection.
     for (const prompt of this.pendingPrompts)
-      if (
-        prompt.state !== "rejected" &&
-        prompt.serverId === this.serverId
-      )
+      if (prompt.state !== "rejected" && prompt.serverId === this.serverId)
         this.sendPendingPrompt(prompt.promptId);
   }
 
@@ -2002,9 +2005,7 @@ class PantokenStore {
     // restore text (the turn already produced output), skip arming entirely.
     const restoreText = opts?.restoreOnAccepted ? this.abortRestoreText : null;
     this.pendingAbortRestore =
-      restoreText != null
-        ? { text: restoreText, sessionId, requestId }
-        : null;
+      restoreText != null ? { text: restoreText, sessionId, requestId } : null;
     if (!send({ type: "abort", requestId, sessionId })) {
       // Offline: the request can't leave. The Stop button is already disabled
       // with an explanatory tooltip — that's the single contextual
@@ -2153,11 +2154,16 @@ class PantokenStore {
     send({ type: "branch", entryId });
   }
   openSession(path: string): void {
-    const previous = this.sessions.find((s) => s.path === this.activeSessionPath);
+    const previous = this.sessions.find(
+      (s) => s.path === this.activeSessionPath,
+    );
     const switching = path !== this.activeSessionPath;
     if (switching && previous) {
       const sid = previous.sessionId;
-      if (!this.lifecycleAccepted.has(sid) && !this.lifecycleConfigured.has(sid)) {
+      if (
+        !this.lifecycleAccepted.has(sid) &&
+        !this.lifecycleConfigured.has(sid)
+      ) {
         this.destroySession(previous.path);
       }
     }
@@ -2356,7 +2362,10 @@ class PantokenStore {
         ? this.sessions.find((s) => s.sessionId === savedId && !s.archived)
         : undefined;
       if (saved) {
-        if (this.lifecycleAccepted.has(saved.sessionId) || this.lifecycleConfigured.has(saved.sessionId)) {
+        if (
+          this.lifecycleAccepted.has(saved.sessionId) ||
+          this.lifecycleConfigured.has(saved.sessionId)
+        ) {
           this.bootRestoreInFlight = true;
           this.openSession(saved.path);
           return;
@@ -2553,7 +2562,16 @@ class PantokenStore {
   dismissUpdate(): void {
     this.swUpdateReady = false;
   }
-  openSettings(section?: "appearance" | "notifications" | "models" | "environment" | "mcp" | "token" | "computers"): void {
+  openSettings(
+    section?:
+      | "appearance"
+      | "notifications"
+      | "models"
+      | "environment"
+      | "mcp"
+      | "token"
+      | "computers",
+  ): void {
     this.settingsOpen = true;
     if (section) {
       this.requestedSettingsSection = section;
@@ -2561,7 +2579,16 @@ class PantokenStore {
     }
   }
   /** Open Settings and jump straight to a section (e.g. "computers"). */
-  openSettingsTo(section: "appearance" | "notifications" | "models" | "environment" | "mcp" | "token" | "computers"): void {
+  openSettingsTo(
+    section:
+      | "appearance"
+      | "notifications"
+      | "models"
+      | "environment"
+      | "mcp"
+      | "token"
+      | "computers",
+  ): void {
     this.requestedSettingsSection = section;
     this.openSettings();
   }
@@ -2761,7 +2788,8 @@ class PantokenStore {
     const d = this.draft;
     if (d) {
       const levels = d.model
-        ? this.models.find((m) => m.modelId === d.model?.modelId)?.thinkingLevels
+        ? this.models.find((m) => m.modelId === d.model?.modelId)
+            ?.thinkingLevels
         : undefined;
       return {
         modelId: d.model?.modelId,
@@ -2772,7 +2800,8 @@ class PantokenStore {
     const c = this.creatingSession;
     if (c) {
       const levels = c.model
-        ? this.models.find((m) => m.modelId === c.model?.modelId)?.thinkingLevels
+        ? this.models.find((m) => m.modelId === c.model?.modelId)
+            ?.thinkingLevels
         : undefined;
       return {
         modelId: c.model?.modelId,
@@ -2793,8 +2822,7 @@ class PantokenStore {
   /** The permission-monitor mode the composer should advertise: the draft's while a
    *  draft is open, else the active session's. Mirrors composerConfig's draft-awareness. */
   get composerPermissionMonitor(): PermissionMonitorMode {
-    if (this.draft)
-      return this.draft.permissionMonitor ?? "standard";
+    if (this.draft) return this.draft.permissionMonitor ?? "standard";
     if (this.creatingSession)
       return this.creatingSession.permissionMonitor ?? "standard";
     return this.session.permissionMonitor ?? "standard";
@@ -3055,7 +3083,9 @@ class PantokenStore {
    *  archive-Undo action to invalidate a live toast for the same session. */
   dismissNoticeByCorrelation(scope: NoticeScope, key: string): void {
     if (scope === "sidebar") {
-      this.sidebarToasts = this.sidebarToasts.filter((t) => t.correlationKey !== key);
+      this.sidebarToasts = this.sidebarToasts.filter(
+        (t) => t.correlationKey !== key,
+      );
     } else {
       this.chatToasts = this.chatToasts.filter((t) => t.correlationKey !== key);
     }

@@ -2399,13 +2399,7 @@ impl PantokenDriver for MockDriver {
 
     async fn list_sessions(&self) -> Vec<SessionListEntry> {
         // Clone the mutable `sessions` list. Rows `new_session` created prepend a synthetic "new" row.
-        self.sessions
-            .lock()
-            .iter()
-            .filter(|entry| !self.accepted_prompts.lock().contains(&entry.session_id)
-                && !self.live_config_actions.lock().contains(&entry.session_id))
-            .cloned()
-            .collect()
+        self.sessions.lock().clone()
     }
 
     async fn destroy_session(&self, path: String) -> Result<(), String> {
