@@ -19,11 +19,11 @@ use serde_json::Value;
 
 mod support;
 // The loader structs (`ScenarioFile`/`HttpEntry`/`SseFrame`/`CanonicalizationManifest`)
-// + helpers (`load_scenario`/`scenario_files`/`version_dirs`/`CORPUS_DIR`) live in
+// + helpers (`load_scenario`/`scenario_files`/`version_dirs`/`corpus_dir`) live in
 // `support::corpus` and are shared with the fake-daemon harness. The
 // canonicalization machinery below is corpus-test-only.
 use support::corpus::{
-    CORPUS_DIR, CanonicalizationManifest, HttpEntry, ScenarioFile, SseFrame, load_scenario,
+    CanonicalizationManifest, HttpEntry, ScenarioFile, SseFrame, corpus_dir, load_scenario,
     scenario_files, version_dirs,
 };
 
@@ -335,7 +335,11 @@ fn canonicalize_scenario(scenario: &mut ScenarioFile) {
 #[test]
 fn corpus_loads_and_canonicalizes() {
     let versions = version_dirs();
-    assert!(!versions.is_empty(), "no version dirs under {}", CORPUS_DIR);
+    assert!(
+        !versions.is_empty(),
+        "no version dirs under {}",
+        corpus_dir().display()
+    );
 
     for version in &versions {
         let files = scenario_files(version);
@@ -772,7 +776,24 @@ fn corpus_has_no_machine_specific_data() {
 
 #[test]
 fn canon_matches_ts_golden() {
-    let dir: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/canon-parity");
+    let dir: PathBuf = std::env::var("PANTOKEN_CANON_PARITY_DIR")
+        .map(PathBuf::from)
+        .or_else(|_| {
+            // Bazel runfiles: PANTOKEN_CANON_PARITY_FILES contains space-separated file paths.
+            // Derive the canon-parity directory from the first file's parent.
+            std::env::var("PANTOKEN_CANON_PARITY_FILES")
+                .ok()
+                .and_then(|files| {
+                    files
+                        .split_whitespace()
+                        .next()
+                        .and_then(|first| PathBuf::from(first).parent().map(|p| p.to_path_buf()))
+                })
+                .ok_or(())
+        })
+        .unwrap_or_else(|_| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/canon-parity")
+        });
     let non_canonical_path = dir.join("non-canonical.json");
     let golden_path = dir.join("ts-canonical.golden.json");
 

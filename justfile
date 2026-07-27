@@ -122,3 +122,22 @@ release *args:
 # Publish a desktop release and its updater manifest (credentials required).
 publish *args:
     pnpm exec tsx scripts/desktop/publish.ts {{ args }}
+
+# --- Bazel POC (additive, experimental) ---
+# See docs/bazel-poc-findings.md for the evaluation. Cargo/pnpm remain authoritative.
+
+# Build all server-rs Rust crates via Bazel.
+bazel-build:
+    bazel build //server-rs/...
+
+# Run all server-rs Rust tests via Bazel.
+bazel-test:
+    bazel test //server-rs/...
+
+# Build the unsigned headless archive via Bazel.
+bazel-archive:
+    bazel build //:pantoken_headless_unsigned
+
+# Run the Bazel POC measurement script.
+bazel-measure:
+    bash scripts/bazel/measure-poc.sh

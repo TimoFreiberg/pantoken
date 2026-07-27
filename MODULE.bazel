@@ -1,0 +1,42 @@
+module(
+    name = "pantoken",
+    version = "0.1.0",
+)
+
+###############################################################################
+# B A Z E L  C E N T R A L  R E G I S T R Y
+###############################################################################
+
+# https://github.com/bazelbuild/rules_rust/releases
+bazel_dep(name = "rules_rust", version = "0.71.3")
+
+# https://github.com/bazelbuild/rules_pkg/releases
+bazel_dep(name = "rules_pkg", version = "1.2.0")
+
+###############################################################################
+# T O O L C H A I N S
+###############################################################################
+
+# Rust toolchain — pinned to the same 1.97.1 the project uses via rust-toolchain.toml.
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+    edition = "2024",
+    versions = ["1.97.1"],
+)
+use_repo(rust, "rust_toolchains")
+register_toolchains("@rust_toolchains//:all")
+
+###############################################################################
+# R U S T  C R A T E S  (crate_universe)
+###############################################################################
+
+# Ingest the workspace Cargo.toml + Cargo.lock and generate Bazel repo rules
+# for all transitive dependencies. Repin after Cargo.toml/Cargo.lock changes:
+#   CARGO_BAZEL_REPIN=1 bazel sync --only=crates
+crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+crate.from_cargo(
+    name = "crates",
+    cargo_lockfile = "//:Cargo.lock",
+    manifests = ["//:Cargo.toml"],
+)
+use_repo(crate, "crates")

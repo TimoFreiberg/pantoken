@@ -21,7 +21,27 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Resolve the corpus root: `<crate>/../tests/corpus` (i.e. `server-rs/tests/corpus`).
-pub const CORPUS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/corpus");
+/// Checks PANTOKEN_CORPUS_DIR at runtime (Bazel runfiles), falls back to
+/// env!("CARGO_MANIFEST_DIR") (Cargo).
+pub fn corpus_dir() -> std::path::PathBuf {
+    if let Ok(dir) = std::env::var("PANTOKEN_CORPUS_DIR") {
+        return std::path::PathBuf::from(dir);
+    }
+    // Bazel runfiles: PANTOKEN_CORPUS_FILES contains space-separated file paths.
+    // Derive the corpus root from the first file's path (up two parents).
+    if let Ok(files) = std::env::var("PANTOKEN_CORPUS_FILES") {
+        if let Some(first) = files.split_whitespace().next() {
+            let path = std::path::PathBuf::from(first);
+            // Files are at <corpus>/<version>/<file>.json; corpus root is two parents up.
+            if let Some(version_dir) = path.parent() {
+                if let Some(corpus_root) = version_dir.parent() {
+                    return corpus_root.to_path_buf();
+                }
+            }
+        }
+    }
+    std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/corpus"))
+}
 
 // ---------------------------------------------------------------------------
 // Scenario file structs (mirror the JSON shape documented in the README)
@@ -96,7 +116,7 @@ pub struct ScenarioFile {
 /// Enumerate every `.json` scenario file under `<corpus>/<version>/`, sorted for
 /// deterministic test ordering. Fails loud if the version dir is missing.
 pub fn scenario_files(version: &str) -> Vec<PathBuf> {
-    let dir: PathBuf = PathBuf::from(CORPUS_DIR).join(version);
+    let dir: PathBuf = corpus_dir().join(version);
     assert!(
         dir.exists(),
         "corpus version dir missing: {}",
@@ -122,9 +142,7 @@ pub fn load_scenario(path: &PathBuf) -> ScenarioFile {
 
 /// Load a scenario by name from the given version dir.
 pub fn load_named(version: &str, name: &str) -> ScenarioFile {
-    let path = PathBuf::from(CORPUS_DIR)
-        .join(version)
-        .join(format!("{name}.json"));
+    let path = corpus_dir().join(version).join(format!("{name}.json"));
     assert!(path.exists(), "scenario missing: {}", path.display());
     load_scenario(&path)
 }
@@ -132,7 +150,7 @@ pub fn load_named(version: &str, name: &str) -> ScenarioFile {
 /// The version dir(s) to test. New seed corpora ship under a versioned subdir;
 /// this picks up every subdir under the corpus root.
 pub fn version_dirs() -> Vec<String> {
-    let root = PathBuf::from(CORPUS_DIR);
+    let root = corpus_dir();
     assert!(root.exists(), "corpus root missing: {}", root.display());
     let mut dirs: Vec<String> = fs::read_dir(&root)
         .unwrap_or_else(|e| panic!("read corpus root {}: {}", root.display(), e))

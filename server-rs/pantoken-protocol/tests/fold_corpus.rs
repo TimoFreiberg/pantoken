@@ -23,6 +23,18 @@ struct CorpusCase {
 }
 
 fn corpus_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("PANTOKEN_FOLD_CORPUS_DIR") {
+        return PathBuf::from(dir);
+    }
+    // Bazel runfiles: PANTOKEN_FOLD_CORPUS_FILES contains space-separated file paths.
+    // Derive the corpus directory from the first file's parent.
+    if let Ok(files) = std::env::var("PANTOKEN_FOLD_CORPUS_FILES") {
+        if let Some(first) = files.split_whitespace().next() {
+            if let Some(parent) = PathBuf::from(first).parent() {
+                return parent.to_path_buf();
+            }
+        }
+    }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fold-corpus")
 }
 

@@ -1,0 +1,17 @@
+# Bazel POC configuration — additive to Cargo/pnpm, not authoritative.
+# See docs/bazel-poc-findings.md for the evaluation.
+
+# bzlmod is default in Bazel 8+, but explicit for clarity.
+build --enable_bzlmod
+build --enable_workspace
+test --enable_workspace
+
+# Local disk cache — enables cross-workspace cache reuse (a key POC metric).
+build --disk_cache=~/.cache/bazel
+
+# Readable colored output.
+build --color=yes
+test --color=yes
+
+# Show test output on failure.
+test --test_output=errors

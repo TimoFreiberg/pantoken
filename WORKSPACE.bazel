@@ -1,0 +1,3 @@
+# Empty WORKSPACE — bzlmod (MODULE.bazel) is the sole dependency mechanism.
+# This file exists only because `bazel sync` requires WORKSPACE to be enabled
+# in Bazel 8+. All dependencies are declared in MODULE.bazel.
