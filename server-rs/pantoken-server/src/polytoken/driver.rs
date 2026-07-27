@@ -69,7 +69,6 @@ use tracing::{debug, error, info, warn};
 use async_trait::async_trait;
 
 use crate::archive_store::ArchiveStore;
-use crate::polytoken::lifecycle_store::{LifecycleState, LifecycleStore};
 use crate::driver::{
     BranchResult, ClearQueueResult, NewSessionOptsData, PantokenDriver, TodoDeleteDependent,
     TodoDeleteError,
@@ -82,6 +81,7 @@ use crate::polytoken::daemon_client::{
 use crate::polytoken::event_map::{self, DaemonEffect, FoldAccumulator, FoldResult, MapCtx};
 use crate::polytoken::fake_daemon::FakeControlHub;
 use crate::polytoken::history_seed::{self, HistoryMapCtx};
+use crate::polytoken::lifecycle_store::{LifecycleState, LifecycleStore};
 use crate::polytoken::models::{ParsedModels, model_post_key, parse_models};
 use crate::polytoken::restore_error::RestoreErrorClass;
 use crate::polytoken::sessions_registry;
@@ -1102,7 +1102,10 @@ impl PolytokenInner {
         let order = self.order.lock().clone();
         let empty_first = eviction_plan(&order, Some(&session_id), self.warm_cap, |id| {
             !self.turn_in_flight(id)
-                && matches!(self.lifecycle.lock().state(id), LifecycleState::EmptyDefault)
+                && matches!(
+                    self.lifecycle.lock().state(id),
+                    LifecycleState::EmptyDefault
+                )
         });
         let victims = if empty_first.is_empty() {
             eviction_plan(&order, Some(&session_id), self.warm_cap, |id| {
@@ -3089,7 +3092,10 @@ impl PantokenDriver for PolytokenDriver {
             return Err("invalid session path".into());
         }
         let state = self.inner.lifecycle.lock().state(&sid);
-        if matches!(state, LifecycleState::AcceptedPrompt | LifecycleState::LiveConfigAction) {
+        if matches!(
+            state,
+            LifecycleState::AcceptedPrompt | LifecycleState::LiveConfigAction
+        ) {
             return Err("session is populated or configured".into());
         }
         if matches!(state, LifecycleState::Tombstoned) {
@@ -3403,6 +3409,7 @@ mod tests {
             watch_status: Mutex::new(config_watcher::WatchStatus::Disabled),
             watcher_handle: Mutex::new(None),
             command_runner: default_command_runner(None),
+            lifecycle: Mutex::new(LifecycleStore::new(PathBuf::new())),
             fake_control: None,
         }
     }

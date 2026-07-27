@@ -1433,7 +1433,6 @@ impl SessionHub {
                 let target = session_id.clone().or(focused_id);
                 let driver = self.driver.clone();
                 let action = action.clone();
-                let client_key = client_key;
                 self.hub_ops.enqueue(
                     "session_action",
                     Box::new(move |hub| {
@@ -1455,24 +1454,26 @@ impl SessionHub {
             ClientMessage::DestroySession { path } => {
                 let driver = self.driver.clone();
                 let path = path.clone();
-                let client_key = client_key;
                 self.hub_ops.enqueue(
                     "destroy_session",
                     Box::new(move |hub| {
                         Box::pin(async move {
+                            let path_for_focus = path.clone();
                             match driver.destroy_session(path).await {
                                 Ok(()) => {
                                     let sessions = driver.list_sessions().await;
                                     let default_cwd = std::env::var("HOME").unwrap_or_default();
                                     let mut h = hub.lock();
                                     for conn in h.clients.values_mut() {
-                                        if conn.focused_id.as_deref() == Some(
-                                            std::path::Path::new(&path)
-                                                .parent()
-                                                .and_then(std::path::Path::file_name)
-                                                .and_then(|name| name.to_str())
-                                                .unwrap_or_default(),
-                                        ) {
+                                        if conn.focused_id.as_deref()
+                                            == Some(
+                                                std::path::Path::new(&path_for_focus)
+                                                    .parent()
+                                                    .and_then(std::path::Path::file_name)
+                                                    .and_then(|name| name.to_str())
+                                                    .unwrap_or_default(),
+                                            )
+                                        {
                                             conn.focused_id = None;
                                             conn.pending_switch = None;
                                         }

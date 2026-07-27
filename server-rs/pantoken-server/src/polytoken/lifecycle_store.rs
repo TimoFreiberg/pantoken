@@ -39,14 +39,22 @@ impl LifecycleStore {
         let (states, load_error) = match fs::read(&path) {
             Ok(bytes) => match serde_json::from_slice::<Persisted>(&bytes) {
                 Ok(persisted) => (persisted.states, None),
-                Err(error) => (HashMap::new(), Some(format!("invalid lifecycle store: {error}"))),
+                Err(error) => (
+                    HashMap::new(),
+                    Some(format!("invalid lifecycle store: {error}")),
+                ),
             },
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                (HashMap::new(), None)
-            }
-            Err(error) => (HashMap::new(), Some(format!("could not read lifecycle store: {error}"))),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (HashMap::new(), None),
+            Err(error) => (
+                HashMap::new(),
+                Some(format!("could not read lifecycle store: {error}")),
+            ),
         };
-        Self { path, states, load_error }
+        Self {
+            path,
+            states,
+            load_error,
+        }
     }
 
     pub fn ensure_healthy(&self) -> Result<(), String> {
@@ -54,7 +62,10 @@ impl LifecycleStore {
     }
 
     pub fn state(&self, key: &str) -> LifecycleState {
-        self.states.get(key).copied().unwrap_or(LifecycleState::Unknown)
+        self.states
+            .get(key)
+            .copied()
+            .unwrap_or(LifecycleState::Unknown)
     }
 
     pub fn is_tombstoned(&self, key: &str) -> bool {
@@ -83,8 +94,10 @@ impl LifecycleStore {
     }
 
     fn persist(&self) -> Result<(), String> {
-        let bytes = serde_json::to_vec_pretty(&Persisted { states: self.states.clone() })
-            .map_err(|error| format!("serialize lifecycle store: {error}"))?;
+        let bytes = serde_json::to_vec_pretty(&Persisted {
+            states: self.states.clone(),
+        })
+        .map_err(|error| format!("serialize lifecycle store: {error}"))?;
         let tmp = self.path.with_extension("json.tmp");
         fs::write(&tmp, bytes).map_err(|error| format!("write lifecycle store: {error}"))?;
         fs::rename(&tmp, &self.path).map_err(|error| format!("replace lifecycle store: {error}"))

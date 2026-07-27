@@ -101,7 +101,7 @@ pub enum SessionAttentionPhase {
 
 // ── ResumeToken ─────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResumeToken {
     #[serde(rename = "sessionId")]
     pub session_id: SessionId,
@@ -289,7 +289,7 @@ pub enum ServerMessage {
 
 // ── ClientMessage ───────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ClientMessage {
     Hello {
@@ -527,7 +527,7 @@ pub enum SessionAction {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NewSessionModel {
     #[serde(rename = "modelId")]
     pub model_id: String,
@@ -574,7 +574,10 @@ mod tests {
             path: "/sessions/demo/session.json".into(),
         };
         let json = serde_json::to_string(&msg).unwrap();
-        assert_eq!(json, r#"{"type":"destroySession","path":"/sessions/demo/session.json"}"#);
+        assert_eq!(
+            json,
+            r#"{"type":"destroySession","path":"/sessions/demo/session.json"}"#
+        );
         assert_eq!(serde_json::from_str::<ClientMessage>(&json).unwrap(), msg);
     }
 

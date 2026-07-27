@@ -225,7 +225,7 @@ async fn model_switches_post_full_registry_model_id() {
     );
 
     let calls_before = fake.recorded_request_bodies().len();
-    driver
+    let _ = driver
         .session_action(
             pantoken_protocol::wire::SessionAction::SetModel {
                 model_id: "deepseek/deepseek-v4-pro".into(),
@@ -2071,7 +2071,7 @@ async fn goal_no_body_actions_accept_204_without_warning() {
             .await
             .expect("new_session");
 
-        driver
+        let _ = driver
             .session_action(action.clone(), Some(fake.session_id.clone()))
             .await;
 
@@ -2187,7 +2187,7 @@ async fn goal_actions_emit_info_notice_on_success() {
             .await
             .expect("new_session");
 
-        driver
+        let _ = driver
             .session_action(action.clone(), Some(fake.session_id.clone()))
             .await;
 

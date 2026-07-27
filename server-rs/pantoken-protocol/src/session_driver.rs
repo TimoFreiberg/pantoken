@@ -83,7 +83,7 @@ pub enum SessionMessageDeliveryMode {
 
 // ── Image content ───────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ImageContent {
     Image {
@@ -531,7 +531,7 @@ pub struct QnaQuestion {
     pub multi_select: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct QnaAnswer {
     #[serde(rename = "selectedOptionIndices")]
     pub selected_option_indices: Vec<i64>,
@@ -544,7 +544,7 @@ pub struct QnaAnswer {
 /// as a tagged enum with an explicit tag derived from the payload shape.
 /// Since the TS doesn't use a discriminator field, we use serde's untagged
 /// representation and let the presence of fields disambiguate.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum HostUiResponse {
     Value {
