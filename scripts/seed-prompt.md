@@ -15,24 +15,19 @@
 
 {{ISSUE_IMAGES}}
 
-## Step 0: Create and enter the implementation workspace
+## Step 0: Create workspace and fetch issue
 
-The launcher runs the daemon and TUI from the repository's default jj workspace. It does not create or install into an issue workspace. From the default workspace, run:
+The launcher runs the daemon and TUI from the repository's default jj workspace. It does not create or install into an issue workspace. From the default workspace, create the workspace, enter it, install, then fetch the issue from inside it:
 
 ```bash
 just create-workspace issue-{{ISSUE_NUMBER}}
 # run the printed: pushd <absolute-workspace-dir>
 bun install
-mkdir -p .polytoken
-cp scripts/polytoken-config/hooks.json .polytoken/hooks.json
-printf '%s\n' '{{ISSUE_NUMBER}}' > .autopilot-issue-number
-printf '%s\n' "$PWD/scripts/polytoken-config" > .autopilot-config-dir
-cp '{{ISSUE_CONTEXT_DIR}}/session-id' .autopilot-session-id
-default_root=$(jj workspace list -T 'name ++ "\t" ++ root ++ "\n"' | awk -F '\t' '$1 == "default" { print $2 }')
-printf '%s\n' "$PWD" > "$default_root/.autopilot-workspace-dir"
+bash scripts/gh-issue-fetch.sh {{ISSUE_NUMBER}}
+cp '{{ISSUE_CONTEXT_DIR}}/session-id' .implement-issue-session-id  # integration lock session ID
 ```
 
-The launcher stores the daemon session handoff in `{{ISSUE_CONTEXT_DIR}}/session-id` and the predicted workspace in `{{ISSUE_CONTEXT_DIR}}/workspace-dir`. Copy the session id after entering the workspace, before integration. When supplied, `POLYTOKEN_PROJECT_DIR` is authoritative; `.autopilot-workspace-dir` tells the stop hook to inspect this issue workspace even though the daemon began in the default workspace. Verify the markers and installed hook.
+The launcher stores the daemon session handoff in `{{ISSUE_CONTEXT_DIR}}/session-id` and the predicted workspace in `{{ISSUE_CONTEXT_DIR}}/workspace-dir` (informational — the launcher still writes it but nothing consumes it after the `.workspaces` gating change). Copy the session id into `.implement-issue-session-id` after entering the workspace, before integration. The workspace inherits the committed `.polytoken/hooks.json` (no per-workspace hook copy needed), and the stop hook gates on `.workspaces` + `.implement-issue-number` (written by `gh-issue-fetch.sh` when run from the workspace).
 
 ## Task
 

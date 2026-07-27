@@ -6,8 +6,6 @@ import { fileURLToPath } from "node:url";
 export const REPOSITORY = "TimoFreiberg/pantoken";
 export const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 export const TEMPLATE_PATH = join(SCRIPT_DIR, "seed-prompt.md");
-export const POLYTOKEN_CONFIG_DIR = join(SCRIPT_DIR, "polytoken-config");
-export const HOOKS_CONFIG_PATH = join(POLYTOKEN_CONFIG_DIR, "hooks.json");
 
 export type IssueReference = { number: number; url: string; input: string };
 export type Comment = { author: string; body: string; createdAt: string };
@@ -82,31 +80,25 @@ export function plannedCommands(issue: IssueReference, repoRoot: string): string
  *
  * The `sh -c` string runs after the TUI exits ($? is captured into $status):
  *   1. Attach to the polytoken session (the TUI itself — exit code captured).
- *   2. Release the issue claim.
- *   3. Kill the daemon if a PID was provided.
- *   4. Remove the owned context directory ($5).
- *   5. Exit with the TUI's original status. Workspace integration and cleanup
+ *   2. Kill the daemon if a PID was provided.
+ *   3. Remove the owned context directory ($3).
+ *   4. Exit with the TUI's original status. Workspace integration and cleanup
  *      are performed explicitly by the agent inside the issue workspace.
  *
- * Positional args ($1..$5):
+ * Positional args ($1..$3):
  *   $1 = sessionId
- *   $2 = claims.sh path (sourced for init_claims + release_claim)
- *   $3 = issue number
- *   $4 = daemon PID (or "0" if none)
- *   $5 = context directory path
+ *   $2 = daemon PID (or "0" if none)
+ *   $3 = context directory path
  */
 export function zellijCleanupCommand(
   sessionId: string,
-  claimsPath: string,
-  issueNumber: number,
   daemonPid: string | undefined,
   contextPath: string,
-  _scriptDir: string,
 ): { command: string; args: string[] } {
-  const shString = `polytoken attach "$1"; status=$?; source "$2"; init_claims; release_claim "$3"; if [ "$4" != 0 ]; then kill "$4" 2>/dev/null || true; fi; rm -rf -- "$5"; exit $status`;
+  const shString = `polytoken attach "$1"; status=$?; if [ "$2" != 0 ]; then kill "$2" 2>/dev/null || true; fi; rm -rf -- "$3"; exit $status`;
   return {
     command: "sh",
-    args: ["-c", shString, "--", sessionId, claimsPath, String(issueNumber), daemonPid ?? "0", contextPath],
+    args: ["-c", shString, "--", sessionId, daemonPid ?? "0", contextPath],
   };
 }
 
@@ -119,9 +111,6 @@ export const bunCommandRunner: CommandRunner = async (command, args, options = {
 };
 
 async function command(runner: CommandRunner, name: string, args: string[], options?: Parameters<CommandRunner>[2]): Promise<CommandResult> { const result = await runner(name, args, options); if (result.code !== 0) throw new Error(`${name} ${args.join(" ")} failed (${result.code}): ${result.stderr || result.stdout}`); return result; }
-async function claimCommand(runner: CommandRunner, functionName: string, issueNumber: number, extra?: string): Promise<void> {
-  await command(runner, "bash", ["-c", `source "$1"; init_claims; ${functionName} "$2" "$3"`, "claims", join(SCRIPT_DIR, "claims.sh"), String(issueNumber), extra ?? ""]);
-}
 export async function waitForDaemonReady(startupPath: string, timeoutMs = 15_000, read: (path: string) => Promise<string> = (path) => readFile(path, "utf8")): Promise<Record<string, unknown>> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) { try { const value = JSON.parse(await read(startupPath)) as Record<string, unknown>; if (value.state === "ready") return value; } catch { /* startup file may not exist yet */ } await new Promise((resolve) => setTimeout(resolve, 100)); }
@@ -154,9 +143,9 @@ export type LauncherOptions = { runner?: CommandRunner; http?: HttpClient; env?:
 export async function runLauncher(args: string[], options: LauncherOptions = {}): Promise<void> {
   const runner = options.runner ?? bunCommandRunner; const http = options.http ?? fetch; const print = options.print ?? console.log; const dryRun = args.includes("--dry-run");
   const issue = parseIssueReference(args); const repoRoot = resolve(options.env?.PANTOKEN_REPO_ROOT ?? process.env.PANTOKEN_REPO_ROOT ?? resolve(SCRIPT_DIR, "..")); const data = await fetchIssue(issue, runner); const urls = extractImageUrls([data.body, ...data.comments.map((c) => c.body)].join("\n")); const template = await readFile(TEMPLATE_PATH, "utf8");
-  if (dryRun) { const prompt = renderPrompt(template, { ...issue, ...data }, urls.map((sourceUrl) => ({ sourceUrl, status: "failed" as const })), true, join(repoRoot, ".pantoken-issue-context", `issue-${issue.number}`)); print(`DRY RUN — no filesystem, claims, downloads, or mutating commands\n\nIssue #${issue.number}: ${data.title}\n${issue.url}\n\nPlanned commands:\n${plannedCommands(issue, repoRoot).map((c) => `  ${c.join(" ")}`).join("\n")}\n\nPrompt:\n${prompt}`); return; }
-  const contextRoot = join(repoRoot, ".pantoken-issue-context"); await mkdir(contextRoot, { recursive: true }); const context = await mkdtemp(join(contextRoot, "issue-")); let claimed = false; let handedOff = false; let daemonPid: string | undefined;
-  try { await claimCommand(runner, "claim_issue", issue.number); claimed = true; await mkdir(join(context, "images")); const screenshots = await downloadScreenshots(urls, join(context, "images"), http); await writeFile(join(context, "issue-body.md"), data.body); await writeFile(join(context, "manifest.json"), JSON.stringify(screenshots, null, 2)); const spawned = await command(runner, "polytoken", ["new", "--no-attach"], { cwd: repoRoot }); const parsed = parseDaemonOutput(spawned.stdout); const startup = join(process.env.HOME ?? "", ".local/share/polytoken/sessions", parsed.sessionId, "startup.json"); const startupData = await waitForDaemonReady(startup); daemonPid = typeof startupData.pid === "number" ? String(startupData.pid) : undefined; await writeFile(join(context, "session-id"), parsed.sessionId); await writeFile(join(context, "workspace-dir"), resolve(repoRoot, ".workspaces", `issue-${issue.number}`)); const tokenPath = typeof startupData.credential_file_path === "string" ? startupData.credential_file_path : undefined; const token = tokenPath ? JSON.parse(await readFile(tokenPath, "utf8")).token : startupData.token; if (typeof token !== "string" || !token) throw new Error("daemon startup did not provide a credential"); const connection = { sessionId: parsed.sessionId, port: parsed.port, token, baseUrl: `http://localhost:${parsed.port}` }; await claimCommand(runner, "update_claim_session", issue.number, parsed.sessionId); await daemonRequest(connection, "/facet", { method: "POST", body: JSON.stringify({ facet: "plan" }) }, http); await daemonRequest(connection, "/permission-monitor", { method: "POST", body: JSON.stringify({ mode: "bypass_plus" }) }, http); const handoff = await daemonRequest(connection, "/adventurous-handoff", {}, http) as any; if (!handoff?.enabled) await daemonRequest(connection, "/adventurous-handoff", { method: "POST" }, http); const prompt = renderPrompt(template, { ...issue, ...data }, screenshots, false, context); await daemonRequest(connection, "/prompt", { method: "POST", body: JSON.stringify({ content: prompt }) }, http); const cleanup = zellijCleanupCommand(parsed.sessionId, join(SCRIPT_DIR, "claims.sh"), issue.number, daemonPid, context, SCRIPT_DIR); await command(runner, "zellij", ["action", "new-tab", "--cwd", repoRoot, "--name", `#${issue.number}`, "--", cleanup.command, ...cleanup.args]); handedOff = true; print(`TUI started in a new zellij tab. The agent will create workspace issue-${issue.number}.`); } finally { if (!handedOff) { if (claimed) await claimCommand(runner, "release_claim", issue.number).catch(() => undefined); if (daemonPid) await runner("kill", [daemonPid]).catch(() => undefined); await rm(context, { recursive: true, force: true }).catch(() => undefined); } }
+  if (dryRun) { const prompt = renderPrompt(template, { ...issue, ...data }, urls.map((sourceUrl) => ({ sourceUrl, status: "failed" as const })), true, join(repoRoot, ".pantoken-issue-context", `issue-${issue.number}`)); print(`DRY RUN — no filesystem, downloads, or mutating commands\n\nIssue #${issue.number}: ${data.title}\n${issue.url}\n\nPlanned commands:\n${plannedCommands(issue, repoRoot).map((c) => `  ${c.join(" ")}`).join("\n")}\n\nPrompt:\n${prompt}`); return; }
+  const contextRoot = join(repoRoot, ".pantoken-issue-context"); await mkdir(contextRoot, { recursive: true }); const context = await mkdtemp(join(contextRoot, "issue-")); let handedOff = false; let daemonPid: string | undefined;
+  try { await mkdir(join(context, "images")); const screenshots = await downloadScreenshots(urls, join(context, "images"), http); await writeFile(join(context, "issue-body.md"), data.body); await writeFile(join(context, "manifest.json"), JSON.stringify(screenshots, null, 2)); const spawned = await command(runner, "polytoken", ["new", "--no-attach"], { cwd: repoRoot }); const parsed = parseDaemonOutput(spawned.stdout); const startup = join(process.env.HOME ?? "", ".local/share/polytoken/sessions", parsed.sessionId, "startup.json"); const startupData = await waitForDaemonReady(startup); daemonPid = typeof startupData.pid === "number" ? String(startupData.pid) : undefined; await writeFile(join(context, "session-id"), parsed.sessionId); await writeFile(join(context, "workspace-dir"), resolve(repoRoot, ".workspaces", `issue-${issue.number}`)); const tokenPath = typeof startupData.credential_file_path === "string" ? startupData.credential_file_path : undefined; const token = tokenPath ? JSON.parse(await readFile(tokenPath, "utf8")).token : startupData.token; if (typeof token !== "string" || !token) throw new Error("daemon startup did not provide a credential"); const connection = { sessionId: parsed.sessionId, port: parsed.port, token, baseUrl: `http://localhost:${parsed.port}` }; await daemonRequest(connection, "/facet", { method: "POST", body: JSON.stringify({ facet: "plan" }) }, http); await daemonRequest(connection, "/permission-monitor", { method: "POST", body: JSON.stringify({ mode: "bypass_plus" }) }, http); const handoff = await daemonRequest(connection, "/adventurous-handoff", {}, http) as any; if (!handoff?.enabled) await daemonRequest(connection, "/adventurous-handoff", { method: "POST" }, http); const prompt = renderPrompt(template, { ...issue, ...data }, screenshots, false, context); await daemonRequest(connection, "/prompt", { method: "POST", body: JSON.stringify({ content: prompt }) }, http); const cleanup = zellijCleanupCommand(parsed.sessionId, daemonPid, context); await command(runner, "zellij", ["action", "new-tab", "--cwd", repoRoot, "--name", `#${issue.number}`, "--", cleanup.command, ...cleanup.args]); handedOff = true; print(`TUI started in a new zellij tab. The agent will create workspace issue-${issue.number}.`); } finally { if (!handedOff) { if (daemonPid) await runner("kill", [daemonPid]).catch(() => undefined); await rm(context, { recursive: true, force: true }).catch(() => undefined); } }
 }
 
 if (import.meta.main) { runLauncher(Bun.argv.slice(2)).catch((error) => { console.error(`ERROR: ${error instanceof Error ? error.message : String(error)}`); process.exit(1); }); }

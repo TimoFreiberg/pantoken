@@ -34,7 +34,7 @@ log() { echo "[$(date '+%H:%M:%S')] $*" >&2; }
 
 # ─── Read session ID from workspace ──────────────────────────────────────────
 
-SESSION_FILE="$PWD/.autopilot-session-id"
+SESSION_FILE="$PWD/.implement-issue-session-id"
 CURRENT_SESSION=""
 if [ -f "$SESSION_FILE" ]; then
   CURRENT_SESSION=$(cat "$SESSION_FILE" 2>/dev/null || true)
@@ -347,7 +347,7 @@ if [ "${INTEGRATE_DRY_RUN:-0}" = "1" ]; then
   log "DRY RUN: skipping gh issue close"
 else
   gh issue close "$ISSUE_NUMBER" --repo TimoFreiberg/pantoken --comment "$(cat <<EOF
-<!-- autopilot -->
+<!-- implement-issue -->
 
 Implemented and pushed to main in commit $PUSHED_COMMIT.
 EOF

@@ -25,10 +25,7 @@ grindbot-config.toml
 .polytoken/state/
 .polytoken/logs/
 .merge-lock
-.autopilot-session-id
-.autopilot-issue-number
-.autopilot-config-dir
-.autopilot-stop-redirects
 .implement-issue-number
 .implement-issue-stop-redirects
+.implement-issue-session-id
 .playwright-mcp/

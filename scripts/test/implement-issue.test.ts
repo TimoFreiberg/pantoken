@@ -66,33 +66,31 @@ describe("implement-issue helpers", () => {
     expect(rendered).toContain("a comment");
   });
 
-  test("zellijCleanupCommand builds correct cleanup string and args (AC.6)", () => {
-    const result = zellijCleanupCommand("abc", "/path/to/claims.sh", 42, "123", "/tmp/context", "/scripts");
+  test("zellijCleanupCommand builds correct cleanup string and args (AC.7)", () => {
+    const result = zellijCleanupCommand("abc", "123", "/tmp/context");
     expect(result.command).toBe("sh");
     // args[0] = -c, args[1] = sh -c string, args[2] = "--", args[3..] = positional params
     const shString = result.args[1]!;
     // Cleanup is agent-owned, not launcher-owned.
     expect(shString).not.toContain("cleanup-workspace");
     expect(shString).not.toContain("workspace forget");
-    expect(shString).toContain('rm -rf -- "$5"');
+    expect(shString).toContain('rm -rf -- "$3"');
     // Exits with the TUI's original status
     expect(shString).toContain("exit $status");
     // exit $status is the final command
     expect(shString.lastIndexOf("exit $status")).toBe(shString.length - "exit $status".length);
 
-    // Positional args: $1..$5
+    // Positional args: $1..$3
     const positional = result.args.slice(3);
     expect(positional[0]).toBe("abc");           // $1 = sessionId
-    expect(positional[1]).toBe("/path/to/claims.sh"); // $2 = claims.sh
-    expect(positional[2]).toBe("42");            // $3 = issue number
-    expect(positional[3]).toBe("123");           // $4 = daemon PID
-    expect(positional[4]).toBe("/tmp/context");  // $5 = context path
-    expect(positional.length).toBe(5);
+    expect(positional[1]).toBe("123");           // $2 = daemon PID
+    expect(positional[2]).toBe("/tmp/context");  // $3 = context path
+    expect(positional.length).toBe(3);
   });
 
-  test("zellijCleanupCommand handles undefined daemonPid as 0 (AC.6)", () => {
-    const result = zellijCleanupCommand("s", "/c", 7, undefined, "/ctx", "/sd");
+  test("zellijCleanupCommand handles undefined daemonPid as 0 (AC.7)", () => {
+    const result = zellijCleanupCommand("s", undefined, "/ctx");
     const positional = result.args.slice(3);
-    expect(positional[3]).toBe("0"); // $4 = daemon PID defaults to "0"
+    expect(positional[1]).toBe("0"); // $2 = daemon PID defaults to "0"
   });
 });

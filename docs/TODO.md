@@ -228,7 +228,7 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
 
 ## 🤖 Automation
 
-- [ ] **Per-issue autopilot** (`just implement-issue <url>`) — spawns one
+- [ ] **Per-issue implement-issue** (`just implement-issue <url>`) — spawns one
       polytoken TUI agent per GitHub issue in a new zellij tab, seeded with
       bypass_plus permissions, plan facet, and adventurous handoff. The agent
       runs the full plan→review→execute→review loop using the `quality-review`

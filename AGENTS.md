@@ -88,8 +88,8 @@ run `just check-rs` locally for the same three checks.
 
 **Implementing an issue — two paths:**
 - **CLI path** (out-of-session orchestration): `just implement-issue <issue-url>`
-  runs `scripts/implement-issue.ts`, which claims the issue, spawns a worktree,
-  boots a polytoken daemon, and opens a zellij tab.
+  runs `scripts/implement-issue.ts`, which spawns a polytoken daemon, and
+  opens a zellij tab.
 - **Pantoken path** (in-session): invoke `@skill:implement-issue <N>` from a
   pantoken session. The skill runs `scripts/gh-issue-fetch.sh <N>` to fetch the
   issue body + screenshots, then drives the clarify → plan → execute → review →
@@ -119,6 +119,11 @@ agents on one working copy scramble each other's commits). A fresh worktree
 starts without `node_modules` (gitignored), so run `bun install` in it before
 building/testing. The e2e suite runs fully inside one checkout — it boots its own
 dev server — so a worktree can run it standalone.
+
+**Workspace creation:** always use `just create-workspace <name>` to create jj
+workspaces in this repo. It validates names, checks collisions, and ensures the
+workspace is created under `.workspaces/` from the default workspace. Never use
+`jj workspace add` directly.
 
 **Auto-port self-isolation (why `bun run test:e2e` and the preview "just work"):**
 the e2e suite (`PANTOKEN_AUTO_PORT=1`) and the mock preview (`scripts/dev.ts` with

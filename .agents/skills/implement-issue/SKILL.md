@@ -7,30 +7,19 @@ description: Implement a GitHub issue end-to-end. Clarify, plan, execute, review
 
 You are implementing a GitHub issue. Extract the issue number from the invoking prompt.
 
-## Step 0: Fetch and bootstrap the issue workspace
+## Step 0: Create workspace and fetch issue
 
-From the repository's **default jj workspace** (the repository root), fetch the issue:
-
-```bash
-bash scripts/gh-issue-fetch.sh <issue-number>
-```
-
-Read the printed issue and screenshots. The harness does not provide an implementation worktree. Create and enter one now, and do not implement in the default workspace:
+From the repository's **default jj workspace** (the repository root), create and enter an issue workspace, then fetch the issue from within it:
 
 ```bash
 just create-workspace issue-<N>
 # run the printed: pushd <absolute-workspace-dir>
 bun install
-mkdir -p .polytoken
-cp scripts/polytoken-config/hooks.json .polytoken/hooks.json
-printf '%s\n' '<N>' > .autopilot-issue-number
-printf '%s\n' "$PWD/scripts/polytoken-config" > .autopilot-config-dir
-printf '%s\n' "$POLYTOKEN_SESSION_ID" > .autopilot-session-id
-default_root=$(jj workspace list -T 'name ++ "\t" ++ root ++ "\n"' | awk -F '\t' '$1 == "default" { print $2 }')
-printf '%s\n' "$PWD" > "$default_root/.autopilot-workspace-dir"
+bash scripts/gh-issue-fetch.sh <issue-number>
+printf '%s\n' "${POLYTOKEN_SESSION_ID:-}" > .implement-issue-session-id  # optional — integration lock works without it
 ```
 
-For in-session execution, use the current Polytoken session id from the harness session environment/metadata in `.autopilot-session-id`. If the daemon was started from the default workspace, `.autopilot-workspace-dir` is the explicit handoff that makes the stop hook inspect this issue workspace; `POLYTOKEN_PROJECT_DIR` is authoritative when supplied. Verify all markers and the installed hook before running integration.
+Read the printed issue and screenshots. The workspace inherits the committed `.polytoken/hooks.json` (no per-workspace hook copy needed), and the stop hook gates on `.workspaces` + `.implement-issue-number` (written by `gh-issue-fetch.sh` when run from the workspace). `POLYTOKEN_SESSION_ID` may be unset in some contexts; the integration lock works without it — `integrate-into-main.sh` treats a missing session file as empty.
 
 ## Step 1: Clarify implementation intent
 

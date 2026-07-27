@@ -4,8 +4,9 @@
 # Called by the implement-issue skill at session start. Fetches the issue via
 # `gh`, extracts image URLs from the body and comments, downloads screenshots
 # to a temp dir, writes the issue body + comments to an issue.md file, and
-# writes the issue number to .implement-issue-number in the cwd (the marker the
-# stop hook reads).
+# writes the issue number to .implement-issue-number in the cwd — but ONLY
+# when the cwd is inside a `.workspaces/` subdirectory (the marker the stop
+# hook gates on).
 #
 # Usage: gh-issue-fetch.sh <issue_number>
 #
@@ -192,8 +193,19 @@ done < "$URLS_FILE"
   fi
 } > "$ISSUE_MD"
 
-# ─── Write marker file ───────────────────────────────────────────────────────
-echo "$ISSUE_NUMBER" > .implement-issue-number
+# ─── Write marker file (only under .workspaces/) ──────────────────────────────
+# Only write the marker when inside a .workspaces/ subdirectory (the issue
+# workspace). This matches the stop hook's own gating approach.
+case "$(pwd -P)" in
+  */.workspaces/*)
+    echo "$ISSUE_NUMBER" > .implement-issue-number
+    echo "Marker written: .implement-issue-number"
+    ;;
+  *)
+    echo "NOT in a .workspaces subdirectory — .implement-issue-number marker not written."
+    echo "Run from an issue workspace: just create-workspace issue-<N> && pushd .workspaces/issue-<N>"
+    ;;
+esac
 
 # ─── Print summary for the agent ─────────────────────────────────────────────
 echo "Fetched issue #${ISSUE_NUMBER}: ${TITLE}"
@@ -206,4 +218,3 @@ if [ -s "$SCREENSHOT_LOG" ]; then
 else
   echo "  (none)"
 fi
-echo "Marker written: .implement-issue-number"

@@ -18,8 +18,8 @@ just implement-issue 42
    - Fetches and validates the issue title/body with `gh --repo TimoFreiberg/pantoken`
    - Extracts image references and, in normal mode, downloads valid images into a unique owned context directory with a manifest
    - Spawns a headless polytoken daemon in the default jj workspace, stores issue context/session handoff data under `.pantoken-issue-context`, and seeds it via authenticated HTTP: bypass_plus permissions, plan facet, adventurous handoff, and the single rendered prompt.
-   - Opens a zellij tab from the default workspace and returns immediately; the tab releases the issue claim, kills the daemon, and removes only the owned context. The agent creates, integrates, and cleans its issue workspace.
-   - `--dry-run` performs only the read-only issue query; it creates no claims, files, downloads, processes, daemon requests, or workspaces
+   - Opens a zellij tab from the default workspace and returns immediately; the tab kills the daemon and removes only the owned context. The agent creates, integrates, and cleans its issue workspace.
+   - `--dry-run` performs only the read-only issue query; it creates no files, downloads, processes, daemon requests, or workspaces
 
 2. **The agent** (inside the TUI) starts with an interactive clarification phase:
    - Uses the prefetched issue context and local screenshots; it does not refetch them
@@ -58,23 +58,22 @@ Manual override: `rm .merge-lock`
 
 ## Stop hook: integration guard
 
-Implementer sessions get a dedicated **project-level** hook installed into
-each issue workspace after the agent enters it. The seed/in-session bootstrap
-copies `scripts/polytoken-config/hooks.json` into
-`<workspace>/.polytoken/hooks.json`. Polytoken discovers project hooks from
-`.polytoken/hooks.json` and merges them with global hooks, so the implementer
-inherits the user's normal config while still getting the stop guard.
+Implementer sessions get a dedicated **project-level** stop hook committed to
+the repo's `.polytoken/hooks/`. Polytoken discovers project hooks from
+`.polytoken/hooks.json` and merges them with global hooks, so every session in
+the pantoken repo inherits the user's normal config while still getting the stop
+guard. The hook only fires when the session is running inside a `.workspaces/`
+subdirectory AND `.implement-issue-number` exists.
 
 The hook (`stop-check-integration.sh`) checks `jj log -r 'main..@ ~ empty()'`
 for unpushed commits. If any exist, it returns `continue` with a redirect
 to `just integrate-into-main <N>`, preventing the agent from stopping before
-integration is complete. A redirect counter (`.autopilot-stop-redirects`,
+integration is complete. A redirect counter (`.implement-issue-stop-redirects`,
 capped at 3) prevents infinite loops. After 3 redirects, the agent is allowed
 to stop — it will have the integration instructions in its context.
 
-After entering the workspace, the agent writes `.autopilot-issue-number`,
-`.autopilot-config-dir`, `.autopilot-session-id`, and the workspace handoff so
-the hook knows which issue and project directory to inspect.
+The `.implement-issue-number` marker is written by `gh-issue-fetch.sh` when
+run from within a `.workspaces/` subdirectory (the issue workspace).
 
 ## Workspace lifecycle
 
@@ -82,7 +81,8 @@ The agent owns the issue workspace lifecycle:
 
 ```bash
 just create-workspace issue-42 [revision]
-# run the printed pushd command, bootstrap files and metadata
+# run the printed pushd command, then fetch the issue from within the workspace:
+bash scripts/gh-issue-fetch.sh 42
 just integrate-into-main 42
 just cleanup-current-workspace
 # run the printed popd command
@@ -98,9 +98,10 @@ does not delete reachable jj commits; preserve or integrate anything valuable
 before cleanup. The old `cleanup-workspace.sh` remains a legacy manual helper.
 
 The launcher stores `session-id` and `workspace-dir` in the owned context. After
-entering the workspace, copy the session id to `.autopilot-session-id`, install
-`.polytoken/hooks.json`, and write the issue/config/workspace markers before
-integration.
+entering the workspace, fetch the issue with `gh-issue-fetch.sh` (which writes
+`.implement-issue-number`), and copy the session id to
+`.implement-issue-session-id` before integration. The hook is inherited from
+the tracked `.polytoken/hooks.json` — no per-workspace copy needed.
 
 **Legacy directories:** prior versions used `.workspaces/pantoken-issue-<N>`
 as the directory name (mismatching the jj workspace name `issue-<N>`). Those
@@ -123,16 +124,15 @@ scripts/
   cleanup-current-workspace.sh     — integrated current-workspace forget + removal
   cleanup-workspace.sh             — legacy name-based manual cleanup helper
   integrate-into-main.sh          — jj linearize + push (lock, fetch, rebase, test, bookmark, push)
-  claims.sh                       — issue claim/release/stale-recovery
-  polytoken-config/               — source for the project-level hook (copied into each workspace's .polytoken/)
-    hooks.json                    — stop hook that redirects unintegrated agents
-    hooks/stop-check-integration.sh — checks for unpushed commits before letting agent stop
+  gh-issue-fetch.sh               — fetch issue body + screenshots, write .implement-issue-number marker
   README.md                       — this file
   test/
     integrate-into-main.test.ts   — jj primitive + lock logic tests
     cleanup-workspace.test.ts     — workspace cleanup guard tests (real jj repos)
-    claims.test.ts                — claim management tests
     stop-check-integration.test.ts — stop hook redirect logic tests
+    gh-issue-fetch.test.ts        — issue fetch + marker gating tests
+    implement-issue.test.ts       — launcher helper tests
+    implement-issue-skill.test.ts — skill/seed-prompt ordering tests
 ```
 
 ## Dependencies

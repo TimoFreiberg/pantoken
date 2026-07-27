@@ -423,7 +423,7 @@ describeOrSkip("integrate-into-main.sh lock logic", () => {
 
   test("lock with dead PID and same session_id allows immediate re-acquisition", () => {
     const lockFile = join(tempDir, ".merge-lock");
-    const sessionFile = join(tempDir, ".autopilot-session-id");
+    const sessionFile = join(tempDir, ".implement-issue-session-id");
     const sessionId = "test-session-123";
 
     // Write session ID file
@@ -447,7 +447,7 @@ describeOrSkip("integrate-into-main.sh lock logic", () => {
 
   test("lock with dead PID and recent timestamp (different session) blocks", () => {
     const lockFile = join(tempDir, ".merge-lock");
-    const sessionFile = join(tempDir, ".autopilot-session-id");
+    const sessionFile = join(tempDir, ".implement-issue-session-id");
     writeFileSync(sessionFile, "my-session");
 
     // Write a lock with a dead PID, different session, recent timestamp (< 30 min)
@@ -666,7 +666,7 @@ describeOrSkip("integrate-into-main.sh squash enforcement", () => {
 });
 
 describeOrSkip("integrate-into-main.sh tolerance (AC.5)", () => {
-  test("integrate_tolerates_missing_session_id: exits 0 with no .autopilot-session-id, no commits above main", () => {
+  test("integrate_tolerates_missing_session_id: exits 0 with no .implement-issue-session-id, no commits above main", () => {
     createJjRepoWithOrigin(tempDir);
 
     // .merge-lock is gitignored in the real repo (so jj's colocated snapshot
@@ -681,7 +681,7 @@ describeOrSkip("integrate-into-main.sh tolerance (AC.5)", () => {
     run(["jj", "describe", "-m", "base"], tempDir);
     run(["jj", "git", "push", "--bookmark", "main"], tempDir);
 
-    // Deliberately DO NOT create .autopilot-session-id.
+    // Deliberately DO NOT create .implement-issue-session-id.
     // No commits above main (working copy is empty, on top of main).
     // The script should acquire the lock with CURRENT_SESSION="" and exit 0
     // at the "no non-empty commits" early-exit.

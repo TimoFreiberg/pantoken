@@ -57,9 +57,9 @@ function chmod(path: string): void {
   spawnSync("chmod", ["+x", path]);
 }
 
-function runScript(issueNumber: string): { stdout: string; stderr: string; exitCode: number } {
+function runScript(issueNumber: string, cwd: string): { stdout: string; stderr: string; exitCode: number } {
   const result = spawnSync("bash", [SCRIPT, issueNumber], {
-    cwd: tempDir,
+    cwd,
     env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` },
     encoding: "utf-8",
     timeout: 15_000,
@@ -69,6 +69,13 @@ function runScript(issueNumber: string): { stdout: string; stderr: string; exitC
     stderr: result.stderr?.trim() ?? "",
     exitCode: result.status ?? -1,
   };
+}
+
+/** Create a workspace directory structure under tempDir: tempDir/.workspaces/issue-N/ */
+function makeWorkspaceCwd(issueNumber: string): string {
+  const wsDir = join(tempDir, ".workspaces", `issue-${issueNumber}`);
+  mkdirSync(wsDir, { recursive: true });
+  return wsDir;
 }
 
 describe("gh-issue-fetch.sh (AC.1)", () => {
@@ -83,11 +90,12 @@ describe("gh-issue-fetch.sh (AC.1)", () => {
     writeFakeGh(issueJson);
     writeFakeCurl();
 
-    const result = runScript("42");
+    const cwd = makeWorkspaceCwd("42");
+    const result = runScript("42", cwd);
     expect(result.exitCode).toBe(0);
 
     // .implement-issue-number written with the issue number
-    const markerPath = join(tempDir, ".implement-issue-number");
+    const markerPath = join(cwd, ".implement-issue-number");
     expect(existsSync(markerPath)).toBe(true);
     expect(readFileSync(markerPath, "utf-8").trim()).toBe("42");
 
@@ -125,10 +133,11 @@ describe("gh-issue-fetch.sh (AC.1)", () => {
     writeFakeGh(issueJson);
     writeFakeCurl();
 
-    const result = runScript("7");
+    const cwd = makeWorkspaceCwd("7");
+    const result = runScript("7", cwd);
     expect(result.exitCode).toBe(0);
 
-    expect(readFileSync(join(tempDir, ".implement-issue-number"), "utf-8").trim()).toBe("7");
+    expect(readFileSync(join(cwd, ".implement-issue-number"), "utf-8").trim()).toBe("7");
 
     const mdMatch = result.stdout.match(/issue body \+ comments: (.+)/i);
     const issueMd = readFileSync(mdMatch![1]!.trim(), "utf-8");
@@ -140,7 +149,8 @@ describe("gh-issue-fetch.sh (AC.1)", () => {
   test("exits non-zero on bad issue number", () => {
     writeFakeGh('{"title":"x","body":"y","comments":[]}');
     writeFakeCurl();
-    const result = runScript("notanumber");
+    const cwd = makeWorkspaceCwd("42");
+    const result = runScript("notanumber", cwd);
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain("positive integer");
   });
@@ -159,8 +169,55 @@ JSON
     chmod(join(fakeBin, "gh"));
     writeFakeCurl();
 
-    const result = runScript("42");
+    const cwd = makeWorkspaceCwd("42");
+    const result = runScript("42", cwd);
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain("not authenticated");
+  });
+
+  test("gh_issue_fetch_no_marker_when_not_in_workspaces (AC.3): issue.md created but .implement-issue-number NOT written", () => {
+    const issueJson = JSON.stringify({
+      title: "Test issue",
+      body: "Just text.",
+      comments: [],
+    });
+    writeFakeGh(issueJson);
+    writeFakeCurl();
+
+    // Run from the plain tempDir (NOT under .workspaces/)
+    const result = runScript("42", tempDir);
+    expect(result.exitCode).toBe(0);
+
+    // issue.md is created in $TMPDIR (always)
+    const mdMatch = result.stdout.match(/issue body \+ comments: (.+)/i);
+    expect(mdMatch).not.toBeNull();
+    expect(existsSync(mdMatch![1]!.trim())).toBe(true);
+
+    // .implement-issue-number must NOT be written to the cwd
+    expect(existsSync(join(tempDir, ".implement-issue-number"))).toBe(false);
+
+    // The output should explain why the marker was not written
+    expect(result.stdout).toContain("NOT in a .workspaces subdirectory");
+  });
+
+  test("gh_issue_fetch_writes_marker_when_in_workspaces (AC.4): .implement-issue-number IS written", () => {
+    const issueJson = JSON.stringify({
+      title: "Test issue",
+      body: "Just text.",
+      comments: [],
+    });
+    writeFakeGh(issueJson);
+    writeFakeCurl();
+
+    const cwd = makeWorkspaceCwd("42");
+    const result = runScript("42", cwd);
+    expect(result.exitCode).toBe(0);
+
+    // .implement-issue-number IS written to the workspace cwd
+    const markerPath = join(cwd, ".implement-issue-number");
+    expect(existsSync(markerPath)).toBe(true);
+    expect(readFileSync(markerPath, "utf-8").trim()).toBe("42");
+
+    expect(result.stdout).toContain("Marker written: .implement-issue-number");
   });
 });
