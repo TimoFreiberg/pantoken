@@ -50,28 +50,41 @@ Monorepo, Bun workspaces.
 
 ## Commands
 
+The normal contributor interface is `just`. Prerequisites are Bun, Rust, `just`,
+`sccache`, `cargo-nextest`, and Playwright browsers; recipes do not install or upgrade
+these tools. Run the explicit dependency install when needed, then use the mock driver
+for local UI work:
+
 ```bash
-bun install
-PANTOKEN_DRIVER=mock bun run dev   # server + client, using mock driver (no daemon needed)
-bun run dev                     # default: polytoken driver (needs a running daemon)
-bun test                        # unit tests — protocol, client, scripts
-bun run test:e2e                # Playwright — sets PANTOKEN_DRIVER=mock automatically
-bunx tsc --noEmit -p protocol/tsconfig.json   # typecheck protocol
-bunx tsc --noEmit -p tsconfig.scripts.json   # typecheck scripts/ (dev tooling)
-bunx tsc --noEmit -p tsconfig.e2e.json       # typecheck e2e/ (Playwright doesn't, by default)
-bun run --cwd client check                    # svelte-check
-bun run --cwd client build                    # prod bundle
-cd server-rs && cargo build       # build the Rust server
-cd server-rs && cargo nextest run # run all Rust tests
-cd server-rs && cargo run         # run the Rust server (reads PANTOKEN_PORT, PANTOKEN_DATA_DIR, etc.)
+just install
+PANTOKEN_DRIVER=mock just dev
+just quality                 # check + unit tests, no Rust/E2E/live work
+just check                   # aggregate TypeScript/client checks
+just test                    # unit tests
+just check-rs                # Rust fmt, clippy, and nextest
+just build-client            # client production bundle
+just e2e                    # default mock-driver Playwright suite
+just e2e-live               # corpus-backed live-driver suite
+just build-headless         # headless artifact
+just validate-headless-artifact
+just smoke-test-headless
+just release                 # signing/release workflow
+just publish                 # publishing workflow
 ```
+
+`just dev <script-args>` passes script arguments through. The `just` recipes are thin
+wrappers around the authoritative package scripts and Rust commands. Direct `bun`,
+`bunx`, `cargo`, and Playwright commands remain supported for targeted debugging,
+individual typechecks, Rust package selection, CI-specific setup, browser installation,
+and platform-specific workflows; for example, use `bunx tsc ...` for one typecheck or
+`cd server-rs && cargo run` to run the Rust server directly.
 
 `bun run check` runs protocol + scripts + e2e + client typechecks end to end.
 `tsconfig.scripts.json` and `tsconfig.e2e.json` close the typecheck gap for the
 dev-tooling and Playwright trees. Keep it green. **server-rs has its own CI
 gate** (`rust-server` job in `.github/workflows/ci.yml`: `cargo fmt --check` +
 `cargo clippy --locked --all-targets -- -D warnings` + `cargo nextest run`);
-run `bun run check:rs` locally for the same three checks.
+run `just check-rs` locally for the same three checks.
 
 **Implementing an issue — two paths:**
 - **CLI path** (out-of-session orchestration): `just implement-issue <issue-url>`

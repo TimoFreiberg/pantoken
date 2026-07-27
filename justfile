@@ -1,10 +1,48 @@
-# Default recipe — show available commands
+# Default recipe — show the normal workflow and all available commands
+[private]
 default:
     @just --list
 
-# Start the development server (mock driver is recommended for local UI work).
+# --- Setup and everyday development ---
+
+# Explicitly install the frozen Bun dependencies; does not install prerequisites.
+install:
+    bun install --frozen-lockfile
+
+# Start the dev server; use PANTOKEN_DRIVER=mock for UI work without a daemon.
 dev *args:
     bun run scripts/dev.ts {{ args }}
+
+# Aggregate TypeScript/client checks (normal, non-live).
+check:
+    bun run check
+
+# Run the project unit tests (normal, non-live).
+test:
+    bun test
+
+# Quick local gate: check followed by unit tests; no Rust, E2E, or live work.
+quality:
+    just check
+    just test
+
+# Full Rust formatting, clippy, and nextest gate.
+check-rs:
+    bun run check:rs
+
+# Build the client production bundle.
+build-client:
+    bun run build
+
+# Run the default mock-driver Playwright suite; extra args pass to Playwright.
+e2e *args:
+    bun run test:e2e {{ args }}
+
+# Run the corpus-backed live-driver E2E tier (expensive/provider-dependent).
+e2e-live *args:
+    bun run test:e2e:live {{ args }}
+
+# --- Workspace and issue tooling ---
 
 # Spawn a polytoken TUI agent to implement a GitHub issue.
 # Usage: just implement-issue <issue-url>
@@ -33,25 +71,29 @@ cleanup-current-workspace:
 cleanup-workspace workspace-name:
     scripts/cleanup-workspace.sh {{ workspace-name }}
 
-# Build the Rust sidecar used by the desktop app.
+# --- Code generation, fixtures, and validation ---
+
+# Build the Rust sidecar used by the desktop app (platform-specific).
 build-hub *args:
     bun scripts/desktop/build-hub.ts {{ args }}
-
-# Cut a desktop release. Defaults to a patch release; supports release.ts flags.
-release *args:
-    bun scripts/desktop/release.ts {{ args }}
-
-# Publish a desktop release and its updater manifest.
-publish *args:
-    bun scripts/desktop/publish.ts {{ args }}
 
 # Regenerate Rust daemon types after a polytoken daemon bump.
 codegen-polytoken-rs:
     bun run scripts/codegen-polytoken-rs.ts
 
-# Capture or recanonicalize the live daemon corpus (spends provider money when capturing).
+# Capture or recanonicalize the live daemon corpus (expensive/provider-dependent).
 capture-daemon-corpus *args:
     bun run scripts/capture-daemon-corpus.ts {{ args }}
+
+# Create all Docker daemon fixtures.
+docker-fixtures-setup:
+    bash scripts/docker-fixtures/setup-all.sh
+
+# Tear down all Docker daemon fixtures.
+docker-fixtures-teardown:
+    bash scripts/docker-fixtures/teardown-all.sh
+
+# --- Headless artifacts and release (expensive/credential-bearing) ---
 
 # Build a headless release artifact.
 build-headless *args:
@@ -69,10 +111,10 @@ smoke-test-headless *args:
 merge-release-metadata *args:
     bun scripts/headless/merge-metadata.ts {{ args }}
 
-# Create all Docker daemon fixtures.
-docker-fixtures-setup:
-    bash scripts/docker-fixtures/setup-all.sh
+# Cut a desktop release (credential/signing workflow).
+release *args:
+    bun scripts/desktop/release.ts {{ args }}
 
-# Tear down all Docker daemon fixtures.
-docker-fixtures-teardown:
-    bash scripts/docker-fixtures/teardown-all.sh
+# Publish a desktop release and its updater manifest (credentials required).
+publish *args:
+    bun scripts/desktop/publish.ts {{ args }}
