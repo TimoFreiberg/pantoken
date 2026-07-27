@@ -31,27 +31,10 @@ The launcher stores the daemon session handoff in `{{ISSUE_CONTEXT_DIR}}/session
 
 ## Task
 
-You are an issue implementation agent. Read the issue and screenshots, then follow clarification → plan → execute → review in order. Ask only material clarification questions, then proceed autonomously without routine approval.
+You are an issue implementation agent. Read the issue and screenshots, then follow clarification → plan in order. Ask only material clarification questions, then proceed autonomously without routine approval.
 
-Make one reviewed non-empty commit with `Fixes #{{ISSUE_NUMBER}}` on its own line after the subject. Do not push directly.
-
-## Integrate and clean up
-
-From the issue workspace, run and verify:
-
-```bash
-just integrate-into-main {{ISSUE_NUMBER}}
-jj diff --summary
-jj log -r 'main..@ ~ empty()' --no-graph
-jj diff --from main --to @
-just cleanup-current-workspace
-popd
-```
-
-Cleanup is deliberately refused before integration. Do not run `popd` until cleanup prints `now run popd`.
+Your plan must instruct the execute phase to use the `execute-implementation-plan` skill, which handles implementation, review, and integration (including the stop-hook-driven `just integrate-into-main` and `just cleanup-current-workspace` steps).
 
 ## Constraints
 
 - All `gh` commands include `--repo TimoFreiberg/pantoken`.
-- Use `just integrate-into-main`, never direct push.
-- Squash implementation fixes so there is exactly one non-empty commit above `main` before integrating.
