@@ -77,7 +77,10 @@ are delegation-only, and direct ecosystem commands remain available.
 > [Non-negotiable safeguards](#non-negotiable-safeguards) apply to every migration
 > ticket; consider linking this roadmap from each issue.
 
-### Ticket 2 — Pin and baseline the current toolchain
+### Ticket 2 — Pin and baseline the current toolchain ✅
+
+**Status: complete** ([#97](https://github.com/TimoFreiberg/pantoken/issues/97)).
+See [`docs/toolchain-baseline.md`](toolchain-baseline.md) for the baseline.
 
 **Goal:** Establish a reproducible pre-migration baseline so later failures can be attributed to the migration rather than floating tools or pre-existing drift.
 

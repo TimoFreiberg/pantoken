@@ -26,7 +26,10 @@ browser copy? Un-quarantine it: `xattr -cr /path/to/Pantoken.app`. See
 ## Quick start (dev)
 
 Before starting, have Bun, Rust, `just`, `sccache`, `cargo-nextest`, and the Playwright
-browsers available. These tools and browsers are prerequisites; recipes do not install or
+browsers available. Bun and Rust versions are pinned (`package.json` `packageManager`
+and `rust-toolchain.toml` respectively); see
+[`docs/toolchain-baseline.md`](docs/toolchain-baseline.md) for the full baseline.
+These tools and browsers are prerequisites; recipes do not install or
 upgrade them. Invoke the explicit frozen dependency install when needed:
 
 ```bash

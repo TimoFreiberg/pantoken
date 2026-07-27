@@ -28,6 +28,12 @@ See `docs/DESIGN.md` for architecture, `docs/DECISIONS.md` for settled calls, `d
   `direnv allow`). CI overrides this with
   `CARGO_TARGET_DIR: ${{ github.workspace }}/target` since direnv isn't
   active there.
+- **Tool versions are pinned.** Bun is pinned via `packageManager` in
+  `package.json` (`bun@1.3.11`); Rust via `rust-toolchain.toml` at the repo
+  root (channel `1.97.1` + `rustfmt`/`clippy` components). rustup auto-reads
+  the toolchain file for every `cargo` command. See
+  [`docs/toolchain-baseline.md`](docs/toolchain-baseline.md) for the full
+  baseline (versions, checks, timings, and how to reproduce).
 
 ## Stack & layout
 
@@ -47,6 +53,9 @@ Monorepo, Bun workspaces.
   porting cases to Rust.
 - `client/` — Svelte 5 + Vite PWA. Reconnecting WS singleton, the same fold reducer,
   Claude-app theming in `src/app.css` (warm paper, light + dark).
+
+Tool versions (Bun, Rust) are pinned; see
+[`docs/toolchain-baseline.md`](docs/toolchain-baseline.md) for the full baseline.
 
 ## Commands
 
