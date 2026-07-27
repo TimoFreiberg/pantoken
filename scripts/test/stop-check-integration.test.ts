@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { describe, expect, test, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";

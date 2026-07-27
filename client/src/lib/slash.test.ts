@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import type { CommandInfo, McpServerInfo } from "@pantoken/protocol";
 import {
   filterCommands,

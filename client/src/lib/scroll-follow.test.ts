@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { nextPinned } from "./scroll-follow.js";
 
 // The pin decision for the transcript scroller. Extracted from Transcript.svelte's

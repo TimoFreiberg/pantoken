@@ -7,7 +7,7 @@
 // history/Referer/access-logs. getToken stays as the thin wrapper doing the
 // history.replaceState side-effect.
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { captureTokenFromUrl } from "./auth.js";
 
 // A minimal in-memory Storage double — only getItem/setItem are used.

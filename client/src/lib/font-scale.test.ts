@@ -5,7 +5,7 @@
 // getFontScale/applyFontScale/setFontScale stay covered by the e2e + manual use; this
 // pins the pure transform the persisted value flows through.
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { MAX_SCALE, MIN_SCALE, STEP, clampScale } from "./font-scale.js";
 
 describe("clampScale", () => {

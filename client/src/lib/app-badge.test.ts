@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { type AppBadgeEnv, watchAppBadgeClear } from "./app-badge.js";
 
 function fakeEnv(opts: { visible: boolean; hasApi?: boolean }) {

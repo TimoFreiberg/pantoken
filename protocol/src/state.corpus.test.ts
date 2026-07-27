@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { foldAll } from "./state.js";
 import type { SessionDriverEvent } from "./session-driver.js";
 

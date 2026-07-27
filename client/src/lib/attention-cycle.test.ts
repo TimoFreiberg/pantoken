@@ -2,7 +2,7 @@
 // attention-cycle.svelte.ts so it runs under `bun test` without a Svelte
 // compiler. Mirrors the transitions.ts / revealDuration pattern.
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { planCycle } from "./attention-cycle-core.js";
 
 const ALL: ["transcript", "qna", "approval"] = [

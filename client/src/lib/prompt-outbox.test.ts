@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach } from "vitest";
 import fakeIndexedDB from "fake-indexeddb";
 import FDBKeyRange from "fake-indexeddb/lib/FDBKeyRange";
 import {

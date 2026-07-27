@@ -4,7 +4,7 @@
 // PushManager. A regression (wrong padding, wrong -/_ char mapping, off-by-one in the
 // byte copy) would silently produce a malformed key and break push subscription.
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { urlBase64ToUint8Array } from "./push.js";
 
 // A known VAPID-shaped key (base64url, 65 bytes once decoded — the uncompressed

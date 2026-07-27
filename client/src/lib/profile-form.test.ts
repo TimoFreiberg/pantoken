@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { validateProfileDraft, type ProfileFormDraft } from "./profile-form.js";
 
 function baseDraft(overrides: Partial<ProfileFormDraft> = {}): ProfileFormDraft {

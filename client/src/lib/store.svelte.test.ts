@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { settleStopOperation, type StopOperation } from "./store-helpers.js";
 
 const SESSION_ID = "session-under-test";

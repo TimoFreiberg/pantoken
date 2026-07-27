@@ -6,7 +6,7 @@
 // Known gap: the valuable logic (reconnect/backoff/heartbeat in the 480-line
 // impl) is untested today. See the TODO in ws-client.svelte.ts.
 
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "vitest";
 import { WsClient } from "./ws-client.svelte.js";
 
 // ── Mock WebSocket ─────────────────────────────────────────────────────

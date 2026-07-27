@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { createFakeHostProvider, createSingleHostProvider } from "./provider.js";
 import type { NativeHostDescriptor } from "./types.js";
 

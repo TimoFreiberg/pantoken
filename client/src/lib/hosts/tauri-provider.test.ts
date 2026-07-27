@@ -2,7 +2,7 @@
 // snapshot→descriptor mapping, poll-state error mapping, non-terminal resolution,
 // and pending-risk/docker-target mapping. Pure delegation tests were removed.
 
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "vitest";
 import { createTauriHostProvider, HostConnectionError } from "./tauri-provider.js";
 
 afterEach(() => {

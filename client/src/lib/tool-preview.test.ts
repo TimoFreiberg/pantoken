@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { toolPreview, webSearchResultTitle } from "./tool-preview.js";
 
 // The toolPreview dispatch group was cut (297 lines mirroring a 215-line switch

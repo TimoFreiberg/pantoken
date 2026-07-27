@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import type { ModelOption } from "@pantoken/protocol";
 import { rankModels, sortEfforts } from "./model-picker-helpers.js";
 

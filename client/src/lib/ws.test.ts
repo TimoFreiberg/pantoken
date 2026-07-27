@@ -5,7 +5,7 @@
 // entire protocol stream including auth tokens (getToken()) and prompt
 // content.
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { resolveWsUrl } from "./ws-url.js";
 import * as wsCompat from "./ws.svelte.js";
 import { WsClient } from "./ws-client.svelte.js";

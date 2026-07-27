@@ -4,7 +4,7 @@
 // Uses a FakeHostProvider and FakeWsClient instances — no real WebSocket,
 // no DOM, no timers.
 
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "vitest";
 import type { ClientMessage, ServerMessage } from "@pantoken/protocol";
 import { HostCoordinator } from "./hosts.svelte.js";
 import { createFakeHostProvider } from "./hosts/provider.js";

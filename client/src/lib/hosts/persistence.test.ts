@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "vitest";
 import { loadDraftConfigMap } from "../store.svelte.js";
 import {
   LEGACY_KEYS,

@@ -5,7 +5,7 @@ import type {
   ToolItem,
   TranscriptItem,
 } from "@pantoken/protocol";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   createTurnGrouper,
   filterHiddenThinking,

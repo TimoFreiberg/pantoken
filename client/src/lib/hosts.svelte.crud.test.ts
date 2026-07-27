@@ -3,7 +3,7 @@
 //
 // Uses createFakeHostProvider — no real WebSocket, no DOM.
 
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "vitest";
 import { HostCoordinator } from "./hosts.svelte.js";
 import { createFakeHostProvider } from "./hosts/provider.js";
 import type { NativeHostDescriptor, RemoteProfile } from "./hosts/types.js";

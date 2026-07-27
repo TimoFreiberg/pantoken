@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { compactTime, relativeTime } from "./relative-time.js";
 
 const NOW = 1_700_000_000_000;

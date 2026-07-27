@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import type { SessionDriverEvent, SessionRef } from "./session-driver.js";
 import { foldAll, foldEvent, initialSessionState } from "./state.js";
 

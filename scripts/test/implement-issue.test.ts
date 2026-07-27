@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { extractImageUrls, formatComments, imageExtension, parseDaemonOutput, parseIssueReference, plannedCommands, renderPrompt, zellijCleanupCommand } from "../implement-issue";
 
 describe("implement-issue helpers", () => {

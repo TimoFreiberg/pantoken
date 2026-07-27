@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { PullTracker } from "./pull-to-refresh.js";
 
 // Defaults: threshold 64, resistance 0.5, max 90.

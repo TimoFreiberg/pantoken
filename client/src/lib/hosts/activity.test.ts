@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { deriveIndicator, indicatorColor } from "./activity.js";
 import type { HostActivity } from "./types.js";
 

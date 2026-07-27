@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { EdgeSwipeTracker } from "./edge-swipe.js";
 
 // Defaults: edge 24, threshold 88, resistance 1, max 320.

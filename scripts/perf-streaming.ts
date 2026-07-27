@@ -45,7 +45,7 @@ if (url.pathname === "/health") {
 The test hits it with the real server on an ephemeral port:
 
 \`\`\`ts
-import { test, expect } from "bun:test";
+import { test, expect } from "vitest";
 
 test("GET /health returns ok", async () => {
   const res = await fetch(\`http://localhost:\${port}/health\`);
