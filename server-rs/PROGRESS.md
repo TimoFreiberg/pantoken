@@ -15,6 +15,10 @@ mock seam for setModel/subscribe; the spawn-seam + pure-helper +
 waitForDaemonStartup parts are tractable now); live smoke test against a real
 daemon.
 
+## Phase 2 session lifecycle
+
+Destroy-session protocol and driver seams are implemented. Empty/default mock sessions can be reaped with lifecycle guards; live sessions use a pantoken-owned durable lifecycle/tombstone store and filter tombstoned rows. Prompt acceptance and successful live configuration actions are recorded authoritatively, and warm-cap eviction prefers eligible empty/default attachments. The daemon surface exposes process termination but no registry-delete endpoint, so tombstones remain the deletion fallback.
+
 ## Goal
 
 Replace the Bun/TS server with a Rust server implementing the same WS protocol,

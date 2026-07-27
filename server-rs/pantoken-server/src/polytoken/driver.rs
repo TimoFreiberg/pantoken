@@ -1100,9 +1100,17 @@ impl PolytokenInner {
         // sessionClosed makes it look finished. Mirrors
         // `polytoken-driver.ts:567-600`.
         let order = self.order.lock().clone();
-        let victims = eviction_plan(&order, Some(&session_id), self.warm_cap, |id| {
+        let empty_first = eviction_plan(&order, Some(&session_id), self.warm_cap, |id| {
             !self.turn_in_flight(id)
+                && matches!(self.lifecycle.lock().state(id), LifecycleState::EmptyDefault)
         });
+        let victims = if empty_first.is_empty() {
+            eviction_plan(&order, Some(&session_id), self.warm_cap, |id| {
+                !self.turn_in_flight(id)
+            })
+        } else {
+            empty_first
+        };
         for victim_id in &victims {
             let Some(victim) = self.warm.write().remove(victim_id) else {
                 continue;
@@ -1791,7 +1799,9 @@ impl PantokenDriver for PolytokenDriver {
         let now = DriverMapCtx::now_ts();
         let mut warm_entries: Vec<SessionListEntry> = Vec::new();
         let mut warm_usage: HashMap<String, SessionUsage> = HashMap::new();
-        self.inner.lifecycle.lock().ensure_healthy().ok();
+        if self.inner.lifecycle.lock().ensure_healthy().is_err() {
+            return Vec::new();
+        }
         let warm = self.inner.warm.read().clone();
         let tombstones = self.inner.lifecycle.lock().tombstones();
         let archive_store = self.inner.archive_store.lock();

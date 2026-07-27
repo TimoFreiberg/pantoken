@@ -2153,7 +2153,14 @@ class PantokenStore {
     send({ type: "branch", entryId });
   }
   openSession(path: string): void {
+    const previous = this.sessions.find((s) => s.path === this.activeSessionPath);
     const switching = path !== this.activeSessionPath;
+    if (switching && previous) {
+      const sid = previous.sessionId;
+      if (!this.lifecycleAccepted.has(sid) && !this.lifecycleConfigured.has(sid)) {
+        this.destroySession(previous.path);
+      }
+    }
     // Save the draft we're leaving (the new-session draft, or the prior session's text)
     // before the composer re-points; navigating to a session exits any new-session draft.
     this.stashDraft();
@@ -2349,9 +2356,13 @@ class PantokenStore {
         ? this.sessions.find((s) => s.sessionId === savedId && !s.archived)
         : undefined;
       if (saved) {
-        this.bootRestoreInFlight = true;
-        this.openSession(saved.path);
-        return;
+        if (this.lifecycleAccepted.has(saved.sessionId) || this.lifecycleConfigured.has(saved.sessionId)) {
+          this.bootRestoreInFlight = true;
+          this.openSession(saved.path);
+          return;
+        }
+        this.destroySession(saved.path);
+        clearLastSession(this.serverId);
       }
       if (savedId) clearLastSession(this.serverId);
       this.startDraft(this.defaultNewSessionCwd);
