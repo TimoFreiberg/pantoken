@@ -293,6 +293,35 @@ if [ -f "Cargo.toml" ]; then
   fi
 fi
 
+# 6d. cargo clippy (deny warnings, matching CI's rust-server gate)
+# Use explicit -p flags to exclude the desktop (Tauri) crate, which requires
+# macOS tooling and is tested in a separate CI job. CI's rust-server job gates
+# exactly these four packages. pantoken-tar-validate is added here too: it is
+# not in CI's rust-server gate, but it is a pure-Rust crate (deps: flate2, tar)
+# with no platform deps, so including it catches provisioning-validator
+# regressions before push.
+if [ -f "Cargo.toml" ]; then
+  log "Running cargo clippy..."
+  if ! cargo clippy --locked -p pantoken-protocol -p pantoken-daemon-types -p pantoken-server -p pantoken-remote-layout -p pantoken-tar-validate --all-targets -- -D warnings 2>&1; then
+    log "ERROR: cargo clippy failed — fix warnings, then rerun 'just integrate-into-main $ISSUE_NUMBER'"
+    release_lock
+    RELEASE_ON_EXIT=false
+    exit 1
+  fi
+fi
+
+# 6e. cargo nextest (Rust tests, same packages as clippy)
+if [ -f "Cargo.toml" ]; then
+  log "Running cargo nextest..."
+  if ! cargo nextest run -p pantoken-protocol -p pantoken-daemon-types -p pantoken-server -p pantoken-remote-layout -p pantoken-tar-validate 2>&1; then
+    log "ERROR: cargo nextest failed — fix failing tests, then rerun 'just integrate-into-main $ISSUE_NUMBER'"
+    jj op restore "$PRE_REBASE_OP"
+    release_lock
+    RELEASE_ON_EXIT=false
+    exit 1
+  fi
+fi
+
 # 7. Advance main bookmark to the latest non-empty commit
 TARGET=$(jj log -r 'main..@ ~ empty()' --no-graph -T 'commit_id' 2>/dev/null | tail -1)
 if [ -z "$TARGET" ]; then

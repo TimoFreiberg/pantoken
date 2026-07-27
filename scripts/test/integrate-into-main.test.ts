@@ -698,3 +698,28 @@ describeOrSkip("integrate-into-main.sh tolerance (AC.5)", () => {
     expect(existsSync(join(tempDir, ".merge-lock"))).toBe(false);
   });
 });
+
+describeOrSkip("integrate-into-main.sh Rust gate (AC.3)", () => {
+  test("rust_gate_commands_present: cargo clippy and cargo nextest appear between cargo fmt and bookmark-move", () => {
+    const script = readFileSync(INTEGRATE_SH, "utf8");
+
+    // The clippy and nextest commands must appear after cargo fmt and before
+    // the bookmark-move step.
+    const fmtPos = script.indexOf("cargo fmt --all");
+    expect(fmtPos).toBeGreaterThanOrEqual(0);
+
+    const clippyCmd = "cargo clippy --locked -p pantoken-protocol -p pantoken-daemon-types -p pantoken-server -p pantoken-remote-layout -p pantoken-tar-validate --all-targets -- -D warnings";
+    const clippyPos = script.indexOf(clippyCmd);
+    expect(clippyPos, "cargo clippy command string must be present").toBeGreaterThanOrEqual(0);
+    expect(clippyPos, "cargo clippy must come after cargo fmt").toBeGreaterThan(fmtPos);
+
+    const nextestCmd = "cargo nextest run -p pantoken-protocol -p pantoken-daemon-types -p pantoken-server -p pantoken-remote-layout -p pantoken-tar-validate";
+    const nextestPos = script.indexOf(nextestCmd);
+    expect(nextestPos, "cargo nextest command string must be present").toBeGreaterThanOrEqual(0);
+    expect(nextestPos, "cargo nextest must come after cargo clippy").toBeGreaterThan(clippyPos);
+
+    const bookmarkPos = script.indexOf("Advance main bookmark");
+    expect(bookmarkPos).toBeGreaterThanOrEqual(0);
+    expect(nextestPos, "Rust gate must come before bookmark-move step").toBeLessThan(bookmarkPos);
+  });
+});

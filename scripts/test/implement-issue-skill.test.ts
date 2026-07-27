@@ -15,13 +15,13 @@ function ordered(text: string, terms: string[]): void {
 }
 
 test("skill lifecycle commands are ordered", () => {
-  ordered(skill, ["just create-workspace", "pushd", "bun install", "gh-issue-fetch.sh", ".implement-issue-session-id"]);
-  expect(skill).toContain("POLYTOKEN_SESSION_ID");
-  expect(skill).toContain("execute-implementation-plan");
+  ordered(skill, ["just create-workspace", "pushd", "bun install", "gh-issue-fetch.sh"]);
+  expect(skill).toContain("quality-review");
+  expect(skill).toContain("integrate-into-main");
 });
 
 test("seed prompt mirrors lifecycle and explicit CLI handoff", () => {
-  ordered(seed, ["just create-workspace", "pushd", "bun install", "gh-issue-fetch.sh", "{{ISSUE_CONTEXT_DIR}}/session-id", ".implement-issue-session-id"]);
-  expect(seed).toContain("{{ISSUE_CONTEXT_DIR}}");
-  expect(seed).toContain("execute-implementation-plan");
+  ordered(seed, ["just create-workspace", "pushd", "bun install", "gh-issue-fetch.sh"]);
+  expect(seed).toContain("quality-review");
+  expect(seed).toContain("integrate-into-main");
 });

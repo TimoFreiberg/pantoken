@@ -31,13 +31,14 @@ just implement-issue 42
    - Executes → implements → commits (with `Fixes #N`)
    - Reviews via `quality-review` skill → fixes → squashes
    - Calls `just integrate-into-main <N>` to merge and push
+   - Cleans up the workspace via `just cleanup-current-workspace`
 
 3. **`just integrate-into-main <N>`** → `scripts/integrate-into-main.sh`
    - Acquires a repo-local lock (`.merge-lock`, file-based with PID liveness)
    - Fetches latest main, rebases `main..@` onto `main@origin`
    - Verifies exactly one non-empty commit above `main` (squash enforcement)
    - Verifies at least one non-empty commit contains `Fixes #N` in its message
-   - Runs `bun test` + `bun run check` + `cargo fmt`
+   - Runs `bun test` + `bun run check` + `cargo fmt` + `cargo clippy` + `cargo nextest`
    - Advances the main bookmark, pushes
    - On conflict: exits 2 (lock held), agent resolves and retries
    - Exit codes: 0=success, 2=conflicts, 1=error
@@ -97,11 +98,12 @@ message and leaves registration/files intact on failure. Forgetting a workspace
 does not delete reachable jj commits; preserve or integrate anything valuable
 before cleanup. The old `cleanup-workspace.sh` remains a legacy manual helper.
 
-The launcher stores `session-id` and `workspace-dir` in the owned context. After
-entering the workspace, fetch the issue with `gh-issue-fetch.sh` (which writes
-`.implement-issue-number`), and copy the session id to
-`.implement-issue-session-id` before integration. The hook is inherited from
-the tracked `.polytoken/hooks.json` — no per-workspace copy needed.
+The launcher stores daemon session handoff data in the owned context. The stop
+hook writes `.implement-issue-session-id` from its `POLYTOKEN_SESSION_ID`
+environment variable — no manual copy needed. After entering the workspace,
+fetch the issue with `gh-issue-fetch.sh` (which writes
+`.implement-issue-number`). The hook is inherited from the tracked
+`.polytoken/hooks.json` — no per-workspace copy needed.
 
 **Legacy directories:** prior versions used `.workspaces/pantoken-issue-<N>`
 as the directory name (mismatching the jj workspace name `issue-<N>`). Those
@@ -119,7 +121,7 @@ justfile                          — entry points (implement-issue, integrate-i
 scripts/
   implement-issue.ts              — typed launcher, context downloader, renderer, and daemon seeder
   implement-issue.sh               — compatibility wrapper for older callers (`exec bun run scripts/implement-issue.ts "$@"`)
-  seed-prompt.md                  — the agent's initial prompt template
+  seed-prompt.md                  — the agent's initial prompt template (CLI path)
   create-workspace.sh             — default-workspace-only jj workspace creator
   cleanup-current-workspace.sh     — integrated current-workspace forget + removal
   cleanup-workspace.sh             — legacy name-based manual cleanup helper

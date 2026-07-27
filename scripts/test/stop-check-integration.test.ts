@@ -177,4 +177,38 @@ describeOrSkip("stop-check-integration.sh", () => {
     expect(parsed.outcome).toBe("continue");
     expect(parsed.reason).toContain("just integrate-into-main 42");
   });
+
+  test("writes_session_id_when_marker_absent (AC.1): creates .implement-issue-session-id from POLYTOKEN_SESSION_ID", () => {
+    createJjRepo(tempDir);
+    writeFileSync(join(tempDir, ISSUE_MARKER), "42");
+    writeCommit(tempDir, "feature.ts", "export const x = 1;\n");
+
+    const sessionId = "test-session-abc-123";
+    const result = runHook(HOOK_PATH, tempDir, { POLYTOKEN_SESSION_ID: sessionId });
+
+    // The hook should have continued (unpushed commits) AND written the session ID
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.outcome).toBe("continue");
+
+    const sessionFile = join(tempDir, ".implement-issue-session-id");
+    expect(readFileSync(sessionFile, "utf-8").trim()).toBe(sessionId);
+  });
+
+  test("does_not_overwrite_existing_session_id (AC.2): keeps the original .implement-issue-session-id across multiple hook invocations", () => {
+    createJjRepo(tempDir);
+    writeFileSync(join(tempDir, ISSUE_MARKER), "42");
+    writeCommit(tempDir, "feature.ts", "export const x = 1;\n");
+
+    // Pre-write a session ID (simulating a prior stop in the same session)
+    const originalSessionId = "original-session-id";
+    writeFileSync(join(tempDir, ".implement-issue-session-id"), originalSessionId);
+
+    // Run the hook with a DIFFERENT session ID in the env
+    runHook(HOOK_PATH, tempDir, { POLYTOKEN_SESSION_ID: "different-session-id" });
+
+    // The file should still contain the original value, not the env var
+    const sessionFile = join(tempDir, ".implement-issue-session-id");
+    expect(readFileSync(sessionFile, "utf-8").trim()).toBe(originalSessionId);
+  });
 });

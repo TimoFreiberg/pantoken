@@ -1,8 +1,8 @@
 ---
 description: >-
-  Project-specific quality-gate review for the pantoken repo. Use this instead
-  of the global review-subagent skill, this enriches that skill with
-  project-specific details.
+  Use only when instructed to. Project-specific quality-gate review for the
+  pantoken repo. Use this instead of the global review-subagent skill, this
+  enriches that skill with project-specific details.
 ---
 
 # quality-review — pantoken quality-gate review
@@ -52,7 +52,7 @@ uv run $HOME/dotfiles/agents/skills/review-subagent/scope.py [<subcommand> [<arg
 
 Keep the `diff` file path for the quality reviewer prompt.
 
-## Step 4: Spawn the quality reviewer
+## Step 3: Spawn the quality reviewer
 
 Spawn one `general-purpose` subagent with this prompt (fill `$DIFF_PATH`):
 
@@ -95,7 +95,7 @@ Begin your report with:
 <findings, or "none" if all criteria satisfied>
 ```
 
-## Step 5: Surface all reports
+## Step 4: Surface all reports
 
 Print the global review reports (from Step 1) verbatim, then the quality
 review report verbatim, under its own header:

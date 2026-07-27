@@ -1,6 +1,6 @@
 ---
 name: implement-issue
-description: Implement a GitHub issue end-to-end. Starts with the planning step.
+description: "Use only when instructed to. Implement a GitHub issue end-to-end: workspace setup, planning, execution, review, and integration into main."
 ---
 
 # Implement GitHub Issue #{{ISSUE_NUMBER}}
@@ -16,10 +16,9 @@ just create-workspace issue-<N>
 # run the printed: pushd <absolute-workspace-dir>
 bun install
 bash scripts/gh-issue-fetch.sh <issue-number>
-printf '%s\n' "${POLYTOKEN_SESSION_ID:-}" > .implement-issue-session-id  # optional — integration lock works without it
 ```
 
-Read the printed issue and screenshots. The workspace inherits the committed `.polytoken/hooks.json` (no per-workspace hook copy needed), and the stop hook gates on `.workspaces` + `.implement-issue-number` (written by `gh-issue-fetch.sh` when run from the workspace). `POLYTOKEN_SESSION_ID` may be unset in some contexts; the integration lock works without it — `integrate-into-main.sh` treats a missing session file as empty.
+Read the printed issue and screenshots. The workspace inherits the committed `.polytoken/hooks.json` (no per-workspace hook copy needed), and the stop hook gates on `.workspaces` + `.implement-issue-number` (written by `gh-issue-fetch.sh` when run from the workspace). The stop hook also writes `.implement-issue-session-id` from its environment for the integration lock's same-session re-acquisition.
 
 ## Step 1: Clarify implementation intent
 
@@ -27,13 +26,18 @@ Read the issue and investigate relevant code. Ask focused questions only for mat
 
 ## Step 2: Plan
 
-Investigate the codebase, write and review the plan.
-In addition to resolving the github issue, the plan must instruct the execute phase to use the `execute-implementation-plan` skill.
+Investigate the codebase, write and review the plan. The plan must instruct the execute phase to:
+
+1. **Implement** the plan faithfully.
+2. **Review** using the `quality-review` skill — fix or rebut all findings, loop until clean.
+3. **Integrate** — squash all commits into one, ensure the commit message includes `Fixes #<issue-number>` on its own line, then call `just integrate-into-main <issue-number>`. If it exits 2 (conflicts), resolve them with the `jj-resolve-conflicts` skill and retry. The stop hook will redirect you here if you try to stop before integrating.
+4. **Clean up** — after integration succeeds (exit 0), verify with `jj log -r 'main::@'` that you're in an empty commit on top of `main`, then run `just cleanup-current-workspace`.
 
 ## Step 3: Handoff
 
-Use `handoff_plan` and you're done!
+Use `handoff_plan`. The execute phase then drives implementation all the way to integration and cleanup.
 
 ## Constraints
 
 - All `gh` commands include `--repo TimoFreiberg/pantoken`.
+- Do not push directly; use `just integrate-into-main`.

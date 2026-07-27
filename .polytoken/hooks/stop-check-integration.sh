@@ -48,6 +48,13 @@ if [ -z "$issue_number" ]; then
   exit 0
 fi
 
+# Write the session ID for integrate-into-main's same-session lock re-acquisition.
+# POLYTOKEN_SESSION_ID is available in the hook environment (not the agent shell).
+# Only write once — don't clobber a value written by a prior stop in this session.
+if [ -n "${POLYTOKEN_SESSION_ID:-}" ] && [ ! -f "$PROJECT_DIR/.implement-issue-session-id" ]; then
+  printf '%s\n' "$POLYTOKEN_SESSION_ID" > "$PROJECT_DIR/.implement-issue-session-id"
+fi
+
 # Check for non-empty commits above main that need integration.
 non_empty=$(jj log -r 'main..@ ~ empty()' --no-graph -T 'commit_id' 2>/dev/null | head -1 || true)
 
