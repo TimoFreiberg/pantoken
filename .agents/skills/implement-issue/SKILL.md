@@ -9,7 +9,8 @@ You are implementing a GitHub issue. Extract the issue number from the invoking 
 
 ## Step 0: Create workspace and fetch issue
 
-From the repository's **default jj workspace** (the repository root), create and enter an issue workspace, then fetch the issue from within it:
+From the repository's **default jj workspace** (the repository root), create and enter an issue workspace, then fetch the issue from within it.
+**Don't skip these calls, they set up automated tooling for the rest of the session. Yes, also in the plan facet** — invoking this skill is the operator's explicit request to run them. The fetch script writes the `.implement-issue-number` marker the stop hook gates on, so don't substitute read-only `gh issue view`.
 
 ```bash
 just create-workspace issue-<N>

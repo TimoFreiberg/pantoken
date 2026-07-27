@@ -20,6 +20,15 @@ test("skill lifecycle commands are ordered", () => {
   expect(skill).toContain("integrate-into-main");
 });
 
+test("skill step 0 has plan-mode authorization note", () => {
+  // AC.1: note appears between Step 0 heading and the bash block
+  ordered(skill, ["## Step 0", "also in the plan facet", "just create-workspace"]);
+  // AC.2: note explains why read-only substitutes are insufficient
+  expect(skill).toContain("implement-issue-number");
+  // AC.3: note frames authorization as operator-invoked, not blanket override
+  expect(skill).toContain("operator's explicit request");
+});
+
 test("seed prompt mirrors lifecycle and explicit CLI handoff", () => {
   ordered(seed, ["just create-workspace", "pushd", "bun install", "gh-issue-fetch.sh"]);
   expect(seed).toContain("quality-review");
