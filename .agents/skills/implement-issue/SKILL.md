@@ -1,6 +1,6 @@
 ---
 name: implement-issue
-description: Implement a GitHub issue end-to-end. Clarify, plan, execute, review, and integrate into main.
+description: Implement a GitHub issue end-to-end. Starts with the planning step.
 ---
 
 # Implement GitHub Issue #{{ISSUE_NUMBER}}
@@ -27,33 +27,13 @@ Read the issue and investigate relevant code. Ask focused questions only for mat
 
 ## Step 2: Plan
 
-Investigate the codebase, write and review the plan, and preserve clarification → plan → execute → review ordering.
+Investigate the codebase, write and review the plan.
+In addition to resolving the github issue, the plan must instruct the execute phase to use the `execute-implementation-plan` skill.
 
-## Step 3: Execute
+## Step 3: Handoff
 
-Implement the plan. Commit exactly one non-empty implementation commit whose message includes `Fixes #<N>` on its own line after the subject. Do not push directly.
-
-## Step 4: Review implementation
-
-Use the `quality-review` skill, fix or rebut findings, and ensure there is exactly one non-empty commit above `main`.
-
-## Step 5: Integrate and clean up
-
-From the issue workspace, run:
-
-```bash
-just integrate-into-main <N>
-jj diff --summary
-jj log -r 'main..@ ~ empty()' --no-graph
-jj diff --from main --to @
-just cleanup-current-workspace
-popd
-```
-
-Cleanup is deliberately refused before integration and will not delete an unintegrated or dirty workspace. Run `popd` only after the current-workspace cleanup script prints `now run popd`.
+Use `handoff_plan` and you're done!
 
 ## Constraints
 
 - All `gh` commands include `--repo TimoFreiberg/pantoken`.
-- Do not push directly; use `just integrate-into-main`.
-- Keep the commit message's `Fixes #<N>` line and squash all implementation fixes before integration.
