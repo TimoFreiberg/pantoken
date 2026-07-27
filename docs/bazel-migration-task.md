@@ -26,12 +26,12 @@ The `justfile` now exposes discoverable, delegation-only recipes for every routi
 workflow, thin-wrapping the authoritative package, Rust, Playwright, and release
 scripts:
 
-- setup (`install` → `bun install --frozen-lockfile`);
+- setup (`install` → `pnpm install --frozen-lockfile`);
 - development (`dev`);
-- aggregate TypeScript/client checks (`check` → `bun run check`);
-- unit tests (`test` → `bun test`);
-- Rust fmt/clippy/nextest (`check-rs` → `bun run check:rs`);
-- frontend production build (`build-client` → `bun run build`);
+- aggregate TypeScript/client checks (`check` → `pnpm run check`);
+- unit tests (`test` → `pnpm run test`);
+- Rust fmt/clippy/nextest (`check-rs` → `pnpm run check:rs`);
+- frontend production build (`build-client` → `pnpm run build`);
 - default and live E2E tiers (`e2e`, `e2e-live`);
 - a quick default quality gate (`quality` → `check` + `test`);
 - headless artifact build, validation, smoke testing, and metadata merging;
@@ -108,7 +108,21 @@ See [`docs/toolchain-baseline.md`](toolchain-baseline.md) for the baseline.
 - Tests pass under both `bunx vitest run` (Bun) and `npx vitest run` (Node).
 - `just quality` (check + test) passes.
 
-### Ticket 4 — Experimentally migrate package management to pnpm
+### Ticket 4 — Experimentally migrate package management to pnpm ✅
+
+**Status:** Complete ([issue #99](https://github.com/TimoFreiberg/pantoken/issues/99)).
+
+**Outcome:** pnpm 11.17.0 replaces Bun as the sole JavaScript package/workspace manager. All package management, script invocation, CI, and tooling migrated from Bun to pnpm + tsx. The decision gate passed: checks, E2E, builds, release validation, and developer workflows remain sound.
+
+**Key changes:**
+- `pnpm-workspace.yaml` replaces `bunfig.toml`; `minimumReleaseAge: 4320` (minutes) preserves the 3-day supply-chain cooldown.
+- `pnpm-lock.yaml` replaces `bun.lock` as the single authoritative JS lockfile.
+- Node 22 LTS pinned via `.nvmrc` (read by nvm/fnm/volta; CI uses `actions/setup-node@v4` with `node-version-file: .nvmrc`).
+- `node-linker: hoisted` for compatibility with native optional dependencies (rolldown, esbuild). `hoist: false` was tried but broke native bindings that use dynamic require() for platform-specific binaries.
+- All `.ts` scripts run via `tsx` (was `bun run`); shebangs updated to `#!/usr/bin/env tsx`.
+- CI uses `pnpm/action-setup@v4` + `actions/setup-node@v4` (was `oven-sh/setup-bun@v2`).
+- `@types/bun` removed; `bun:test` import migrated to `vitest`.
+- `strictPeerDependencies: false` (openapi-typescript@7 declares a stale `typescript ^5.x` peer range; TS 6 works fine).
 
 **Goal:** Determine whether pnpm can replace Bun as the sole JavaScript package/workspace manager.
 

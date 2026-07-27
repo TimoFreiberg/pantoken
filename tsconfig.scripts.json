@@ -7,7 +7,7 @@
   // moduleDetection: "force" — the live-*.ts scripts have no top-level import/export,
   // so without it tsc treats each as a script sharing one global scope and reports
   // spurious "Cannot redeclare block-scoped variable" across files. Force-module gives
-  // each its own scope (correct: these are run as individual entry points via `bun run`).
+  // each its own scope (correct: these are run as individual entry points via `tsx`).
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,

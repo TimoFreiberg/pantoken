@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 // release.ts — cut a release: bump the version, commit, tag, push. CI does the rest
 // (the tag push triggers ci.yml's release-prepare job, which builds signed while
 // the gates run; release publishes via publish.ts once the gates pass).

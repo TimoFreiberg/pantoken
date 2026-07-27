@@ -1,10 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
 
 // LIVE tier config — SEPARATE from playwright.config.ts on purpose, so the default
-// `bun run test:e2e` (mock, desktop+mobile) is byte-for-byte unchanged (AC.8). This
+// `pnpm run test:e2e` (mock, desktop+mobile) is byte-for-byte unchanged (AC.8). This
 // tier boots the REAL PolytokenDriver over an in-process, corpus-backed fake daemon:
 // PANTOKEN_DRIVER=fake (the fake driver lives in the Rust server only). Run it with
-// `bun run test:e2e:live`.
+// `pnpm run test:e2e:live`.
 //
 // Same auto-port self-isolation as the mock config (PANTOKEN_AUTO_PORT=1: dev.ts grabs
 // a free backend port + per-port data dir, ignoring any inherited PANTOKEN_PORT/
@@ -30,7 +30,7 @@ export default defineConfig({
       `PANTOKEN_DRIVER=fake PANTOKEN_AUTO_PORT=1 ` +
       // Snappy live-refresh cadence, matching the mock config (prod default is 1s).
       `PANTOKEN_LIVE_REFRESH_MS=150 ` +
-      `VITE_PORT=${VITE_PORT} bun run scripts/dev.ts`,
+      `VITE_PORT=${VITE_PORT} tsx scripts/dev.ts`,
     url: `http://localhost:${VITE_PORT}`,
     reuseExistingServer: false,
     // Generous: the Rust backend is `cargo run`, so a cold compile can precede the

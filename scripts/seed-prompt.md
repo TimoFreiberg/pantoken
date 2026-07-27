@@ -22,7 +22,7 @@ The launcher runs the daemon and TUI from the repository's default jj workspace.
 ```bash
 just create-workspace issue-{{ISSUE_NUMBER}}
 # run the printed: pushd <absolute-workspace-dir>
-bun install
+pnpm install --frozen-lockfile
 bash scripts/gh-issue-fetch.sh {{ISSUE_NUMBER}}
 ```
 

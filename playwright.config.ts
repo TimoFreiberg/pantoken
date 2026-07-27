@@ -7,7 +7,7 @@ import { defineConfig, devices } from "@playwright/test";
 // free port per run makes orphans harmless. dev.ts ALSO ignores any inherited PANTOKEN_PORT /
 // PANTOKEN_DATA_DIR in auto-port mode (PANTOKEN_AUTO_PORT=1 here), so a run launched from inside
 // the live desktop app — which exports both into the shell — never aims at, nor fights the
-// PID lock of, the running app's backend or data dir. That makes `bun run test:e2e` safe to
+// PID lock of, the running app's backend or data dir. That makes `pnpm run test:e2e` safe to
 // run as-is from an agent session; no env scrubbing needed.
 //
 // Vite needs a port Playwright knows up front (it health-checks `url`), and the config is
@@ -47,7 +47,7 @@ export default defineConfig({
       // Snappy live-refresh cadence so the meter/list climb within a test's timeout
       // (prod default is 1s); the mid-turn live-update specs depend on it.
       `PANTOKEN_LIVE_REFRESH_MS=150 ` +
-      `VITE_PORT=${VITE_PORT} bun run scripts/dev.ts`,
+      `VITE_PORT=${VITE_PORT} tsx scripts/dev.ts`,
     url: `http://localhost:${VITE_PORT}`,
     reuseExistingServer: false,
     timeout: 180_000,
@@ -76,7 +76,7 @@ export default defineConfig({
     // real iPhone without a device — WebKit rendering + touch + the history/
     // swipe-back semantics the phone UI depends on. Not in the default run or
     // CI (WebKit download + extra minutes); enable with PANTOKEN_E2E_WEBKIT=1
-    // after `bunx playwright install webkit`.
+    // after `pnpm exec playwright install webkit`.
     ...(process.env.PANTOKEN_E2E_WEBKIT
       ? [
           {

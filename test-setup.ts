@@ -1,5 +1,5 @@
 // Test preload: polyfill Svelte 5 runes and minimal DOM globals so .svelte.ts
-// files can be imported and tested under `bun test` without the Svelte compiler
+// files can be imported and tested under `vitest` without the Svelte compiler
 // or a full DOM environment.
 //
 // In Svelte 5, `$state(x)` creates a reactive signal backed by a getter/setter.

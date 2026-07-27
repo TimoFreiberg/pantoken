@@ -23,8 +23,8 @@ import {
 import { spawnAsync, spawnManaged, streamText, sleep, isMain } from "../scripts/lib/node-compat.js";
 
 /** Is `pid` alive and does its command line look like OUR pantoken launcher (guards pid reuse)?
- *  Matches only the specific launcher/server entry points — NOT a bare `bun`, which would
- *  match any bun process (the agent harness, other dev servers) reusing a recycled pid. */
+ *  Matches only the specific launcher/server entry points — NOT a bare `node`/`tsx`, which would
+ *  match any node process (the agent harness, other dev servers) reusing a recycled pid. */
 async function isOurPantoken(pid: number): Promise<boolean> {
   const result = await spawnAsync(["ps", "-p", String(pid), "-o", "command="], {
     stdout: "pipe",
@@ -32,8 +32,8 @@ async function isOurPantoken(pid: number): Promise<boolean> {
   });
   if ((result.code ?? 1) !== 0) return false; // not alive
   const cmd = result.stdout.trim();
-  // The recorded pid is our launcher entry point: `bun run parity/launch.ts` (preview) or
-  // `bun run parity/parity.ts up` (script path). Match those specifically — never bare bun.
+  // The recorded pid is our launcher entry point: `tsx parity/launch.ts` (preview) or
+  // `tsx parity/parity.ts up` (script path). Match those specifically — never bare node/tsx.
   return /parity\/(launch|parity)\.ts/.test(cmd);
 }
 

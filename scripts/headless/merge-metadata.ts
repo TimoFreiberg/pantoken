@@ -1,8 +1,8 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 // merge-metadata.ts — merge per-target release-metadata.json files into one
 // combined file with all headless targets.
 //
-//   bun scripts/headless/merge-metadata.ts <primary.json> <secondary.json> [<tertiary.json>...]
+//   tsx scripts/headless/merge-metadata.ts <primary.json> <secondary.json> [<tertiary.json>...]
 //
 // The primary file (first argument) provides the desktop asset fields and is
 // updated in-place. Each subsequent file contributes its `headlessTargets`

@@ -1,7 +1,7 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 // validate-artifact.ts — validate a headless release artifact's contents.
 //
-//   bun scripts/headless/validate-artifact.ts <archive.tar.gz> [--version <vX.Y.Z>]
+//   tsx scripts/headless/validate-artifact.ts <archive.tar.gz> [--version <vX.Y.Z>]
 //
 // This script performs CONTENT validation only. Archive safety (path traversal,
 // symlinks, devices, forbidden patterns, canonical schema, required members)

@@ -1,8 +1,8 @@
 {
   // Typechecks parity/ — the GUI⇄TUI parity harness (docs/PARITY-TESTING.md). Run as
-  // individual `bun parity/*.ts` entry points, so moduleDetection:"force" gives each its
+  // individual `tsx parity/*.ts` entry points, so moduleDetection:"force" gives each its
   // own scope. allowImportingTsExtensions: the harness imports sibling `./lib.ts` etc. by
-  // their real `.ts` specifier (Bun runs those natively); noEmit makes that legal for tsc.
+  // their real `.ts` specifier (tsx runs those natively); noEmit makes that legal for tsc.
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,

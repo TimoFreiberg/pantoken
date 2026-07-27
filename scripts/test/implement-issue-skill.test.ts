@@ -15,7 +15,7 @@ function ordered(text: string, terms: string[]): void {
 }
 
 test("skill lifecycle commands are ordered", () => {
-  ordered(skill, ["just create-workspace", "pushd", "bun install", "gh-issue-fetch.sh"]);
+  ordered(skill, ["just create-workspace", "pushd", "pnpm install", "gh-issue-fetch.sh"]);
   expect(skill).toContain("quality-review");
   expect(skill).toContain("integrate-into-main");
 });
@@ -30,7 +30,7 @@ test("skill step 0 has plan-mode authorization note", () => {
 });
 
 test("seed prompt mirrors lifecycle and explicit CLI handoff", () => {
-  ordered(seed, ["just create-workspace", "pushd", "bun install", "gh-issue-fetch.sh"]);
+  ordered(seed, ["just create-workspace", "pushd", "pnpm install", "gh-issue-fetch.sh"]);
   expect(seed).toContain("quality-review");
   expect(seed).toContain("integrate-into-main");
 });

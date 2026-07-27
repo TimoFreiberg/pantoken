@@ -1,5 +1,5 @@
 // Unit tests for the pure cycle-decision core (planCycle), split out of
-// attention-cycle.svelte.ts so it runs under `bun test` without a Svelte
+// attention-cycle.svelte.ts so it runs under `vitest` without a Svelte
 // compiler. Mirrors the transitions.ts / revealDuration pattern.
 
 import { describe, expect, test } from "vitest";

@@ -8,7 +8,7 @@ decision and the spike results).
 The hub is a **compiled Rust binary** (`pantoken-server`, built from `server-rs/`),
 shipped as `Contents/MacOS/pantoken-server` in the packaged .app. It serves the bundled
 client (`Contents/Resources/client-dist`). The updater swaps shell + server + client
-**atomically**. No `bun`, no clone, no external checkout needed on the machine.
+**atomically**. No external package manager, no clone, no external checkout needed on the machine.
 
 `PANTOKEN_HUB_MODE=bundled` forces the bundled path (useful for testing a debug binary as
 if it were packaged). A .app missing its server/client payload fails with a fatal
@@ -47,16 +47,16 @@ SIGTERM, logout — the child is SIGTERM'd (SIGKILL after 5s if ignored).
 
 ```bash
 cd desktop
-bun run dev     # tauri dev — debug build
-bun run build   # tauri build — release .app under target/release/bundle/macos/
+pnpm run dev     # tauri dev — debug build
+pnpm run build   # tauri build — release .app under target/release/bundle/macos/
 ```
 
-Rust toolchain required (`rustup`); everything else comes through the Bun workspace.
+Rust toolchain required (`rustup`); everything else comes through the pnpm workspace.
 `cargo check` / `cargo clippy` in this directory for fast iteration.
 
 Both commands first compile the server sidecar (`scripts/desktop/build-hub.ts` →
 `binaries/pantoken-server-<triple>`, gitignored) because tauri-build stages `externalBin`
-next to the binary and errors when it's missing; `bun run build` additionally builds
+next to the binary and errors when it's missing; `pnpm run build` additionally builds
 the client (bundled as the `client-dist` resource).
 
 Release builds want the updater signing key in the environment, or they can't produce
@@ -65,7 +65,7 @@ updater artifacts:
 ```bash
 TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/pantoken-shell.key)" \
 TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
-bun run build
+pnpm run build
 ```
 
 ### Installing a release

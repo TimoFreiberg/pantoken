@@ -1,6 +1,6 @@
 // urlBase64ToUint8Array decodes a VAPID public key (base64url) into the BufferSource
 // PushManager.subscribe wants for applicationServerKey. Pure (only atob, available
-// under bun test). Extracted as an export so the decode is testable without a DOM /
+// under vitest). Extracted as an export so the decode is testable without a DOM /
 // PushManager. A regression (wrong padding, wrong -/_ char mapping, off-by-one in the
 // byte copy) would silently produce a malformed key and break push subscription.
 

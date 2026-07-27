@@ -1,7 +1,7 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 // build.ts — build a headless release artifact for a supported target triple.
 //
-//   bun scripts/headless/build.ts [--target <triple>] [--dry-run] [--skip-build] [--tag <vMAJOR.MINOR.PATCH>]
+//   tsx scripts/headless/build.ts [--target <triple>] [--dry-run] [--skip-build] [--tag <vMAJOR.MINOR.PATCH>]
 //
 // Default --target: aarch64-apple-darwin (the macOS arm64 host).
 // Supported targets are defined in release-constants.ts HEADLESS_TARGETS and
@@ -190,7 +190,7 @@ async function resolveBuildSha(cliTag: string | undefined): Promise<string> {
  */
 async function buildClientDist(): Promise<string> {
   console.log("Building client-dist (Vite)...");
-  await run(["bun", "run", "--cwd", join(repoRoot, "client"), "build"]);
+  await run(["pnpm", "--filter", "@pantoken/client", "build"]);
   return join(repoRoot, "client", "dist");
 }
 

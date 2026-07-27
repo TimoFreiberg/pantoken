@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -72,7 +72,7 @@ export function parseDaemonOutput(output: string, structured?: { session_id?: st
 }
 
 export function plannedCommands(issue: IssueReference, repoRoot: string): string[][] {
-  return [["polytoken", "new", "--no-attach"], ["just", "create-workspace", `issue-${issue.number}`], ["pushd", resolve(repoRoot, ".workspaces", `issue-${issue.number}`)], ["bun", "install"], ["zellij", "action", "new-tab", "--cwd", repoRoot, "--", "polytoken", "attach", "<session_id>"]];
+  return [["polytoken", "new", "--no-attach"], ["just", "create-workspace", `issue-${issue.number}`], ["pushd", resolve(repoRoot, ".workspaces", `issue-${issue.number}`)], ["pnpm", "install", "--frozen-lockfile"], ["zellij", "action", "new-tab", "--cwd", repoRoot, "--", "polytoken", "attach", "<session_id>"]];
 }
 
 /**
@@ -102,7 +102,7 @@ export function zellijCleanupCommand(
   };
 }
 
-export const bunCommandRunner: CommandRunner = async (command, args, options = {}) => {
+export const commandRunner: CommandRunner = async (command, args, options = {}) => {
   const { spawnManaged, streamText } = await import("./lib/node-compat.js");
   const proc = spawnManaged([command, ...args], { cwd: options.cwd, env: options.env ? { ...process.env, ...options.env } : process.env, stdout: "pipe", stderr: "pipe" });
   const timer = options.timeoutMs ? setTimeout(() => proc.kill(), options.timeoutMs) : undefined;
@@ -125,7 +125,7 @@ async function daemonRequest(connection: DaemonConnection, path: string, init: R
   return response.status === 204 ? undefined : response.json();
 }
 
-export async function fetchIssue(issue: IssueReference, runner: CommandRunner = bunCommandRunner): Promise<Issue> {
+export async function fetchIssue(issue: IssueReference, runner: CommandRunner = commandRunner): Promise<Issue> {
   const result = await command(runner, "gh", ["issue", "view", String(issue.number), "--repo", REPOSITORY, "--json", "title,body,comments"]);
   let value: unknown; try { value = JSON.parse(result.stdout); } catch { throw new Error("gh returned malformed issue JSON"); }
   if (!value || typeof value !== "object" || typeof (value as any).title !== "string" || typeof (value as any).body !== "string") throw new Error("gh issue data lacks a string title or body");
@@ -142,7 +142,7 @@ export async function downloadScreenshots(urls: string[], directory: string, htt
 
 export type LauncherOptions = { runner?: CommandRunner; http?: HttpClient; env?: Record<string, string>; print?: (text: string) => void };
 export async function runLauncher(args: string[], options: LauncherOptions = {}): Promise<void> {
-  const runner = options.runner ?? bunCommandRunner; const http = options.http ?? fetch; const print = options.print ?? console.log; const dryRun = args.includes("--dry-run");
+  const runner = options.runner ?? commandRunner; const http = options.http ?? fetch; const print = options.print ?? console.log; const dryRun = args.includes("--dry-run");
   const issue = parseIssueReference(args); const repoRoot = resolve(options.env?.PANTOKEN_REPO_ROOT ?? process.env.PANTOKEN_REPO_ROOT ?? resolve(SCRIPT_DIR, "..")); const data = await fetchIssue(issue, runner); const urls = extractImageUrls([data.body, ...data.comments.map((c) => c.body)].join("\n")); const template = await readFile(TEMPLATE_PATH, "utf8");
   if (dryRun) { const prompt = renderPrompt(template, { ...issue, ...data }, urls.map((sourceUrl) => ({ sourceUrl, status: "failed" as const })), true, join(repoRoot, ".pantoken-issue-context", `issue-${issue.number}`)); print(`DRY RUN — no filesystem, downloads, or mutating commands\n\nIssue #${issue.number}: ${data.title}\n${issue.url}\n\nPlanned commands:\n${plannedCommands(issue, repoRoot).map((c) => `  ${c.join(" ")}`).join("\n")}\n\nPrompt:\n${prompt}`); return; }
   const contextRoot = join(repoRoot, ".pantoken-issue-context"); await mkdir(contextRoot, { recursive: true }); const context = await mkdtemp(join(contextRoot, "issue-")); let handedOff = false; let daemonPid: string | undefined;

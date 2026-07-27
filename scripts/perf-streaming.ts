@@ -8,7 +8,7 @@
 // This isolates the dominant per-token cost (C1 in the analysis) without a
 // browser, and lets us compare "re-parse whole bubble per token" (today)
 // against a hypothetical coalesced / batched variant. Run:
-//   bun run scripts/perf-streaming.ts
+//   tsx scripts/perf-streaming.ts
 
 import { realpathSync } from "node:fs";
 import { dirname } from "node:path";

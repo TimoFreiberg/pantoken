@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 // publish.ts — build and publish a desktop release (the bundled .app: shell + compiled
 // hub + client) plus the static updater manifest the running apps poll.
 //
@@ -194,7 +194,7 @@ function signingEnv(): Record<string, string> {
   if (!existsSync(keyfile)) {
     fail(
       `no updater signing key: set TAURI_SIGNING_PRIVATE_KEY or create ${keyfile} ` +
-        `(bunx tauri signer generate -w ${keyfile}) — without it the build can't ` +
+        `(pnpm exec tauri signer generate -w ${keyfile}) — without it the build can't ` +
         `produce updater artifacts. In CI, add the key file's CONTENTS as an Actions ` +
         `secret: gh secret set TAURI_SIGNING_PRIVATE_KEY < ${keyfile}`,
     );
@@ -248,7 +248,7 @@ if (isMain()) {
 
   // ── build (signed, updater artifacts included) ──
   if (!skipBuild) {
-    await run(["bun", "run", "build"], {
+    await run(["pnpm", "run", "build"], {
       cwd: join(repoRoot, "desktop"),
       env: sign,
     });

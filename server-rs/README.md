@@ -59,7 +59,7 @@ cargo run         # run the server (reads PANTOKEN_PORT, PANTOKEN_DATA_DIR, etc.
 
 CI enforces `cargo fmt --check` + `cargo clippy --locked --all-targets -- -D
 warnings` + `cargo test` (the `rust-server` job in `.github/workflows/ci.yml`);
-run `bun run check:rs` from the repo root for the same locally.
+run `pnpm run check:rs` from the repo root for the same locally.
 
 ## Codegen
 
@@ -75,7 +75,7 @@ This runs `polytoken openapi` and generates `pantoken-daemon-types/src/lib.rs` w
 
 ## E2E integration
 
-The Rust server is the only server — `bun run dev` and `bun run test:e2e` spawn
+The Rust server is the only server — `pnpm run dev` and `pnpm run test:e2e` spawn
 it directly via `cargo run` in `server-rs/`. No env var needed.
 
 Mock mode (`PANTOKEN_DRIVER=mock`) uses `mock_driver.rs` — a deterministic fixture
@@ -83,7 +83,7 @@ driver serving `SessionDriverEvent`s, used for dev and the e2e suite.
 
 A third mode, `PANTOKEN_DRIVER=fake`, runs the real `PolytokenDriver` over an
 in-process, corpus-backed fake daemon: deterministic like the mock, but it
-exercises the live driver stack end-to-end. Run it with `bun run test:e2e:live`.
+exercises the live driver stack end-to-end. Run it with `pnpm run test:e2e:live`.
 
 ## TS test reference
 

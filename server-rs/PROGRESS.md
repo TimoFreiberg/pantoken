@@ -37,7 +37,7 @@ Rust server is the only server. The TS test files are archived in
 - e2e (Rust server, mock driver): 298/0 (3.0 min, `--project=desktop`). 2 known
   load-induced flakes (dir-picker, sidebar-drafts) pass in isolation.
 - server-rs is in CI: `rust-server` job runs fmt + clippy (`-D warnings`) +
-  test. `bun run check:rs` runs the same locally.
+  test. `pnpm run check:rs` runs the same locally.
 
 **Phase 1 (mock-e2e cluster burn-down) — COMPLETE:** failures 33 → 0
 deterministic across 7 clusters (models, queue, new-session-failure,
@@ -287,7 +287,7 @@ faithfully.
       frames). Integration tests cover boot, reset, and script-push.
 - [x] Playwright live tier: separate `playwright.live.config.ts` runs
       `e2e/live/*.e2e.ts` (5 specs) against `PANTOKEN_DRIVER=fake` via
-      `bun run test:e2e:live`. Corpus SUBSET (D21), not the full mock suite.
+      `pnpm run test:e2e:live`. Corpus SUBSET (D21), not the full mock suite.
       First run found + fixed a bootstrap bug (idle scenario synthesized;
       `run_script` arms HTTP override). All 5 pass locally. CI job `web-live`
       is gated to `workflow_dispatch`; next step is a CI dispatch run, then
@@ -338,7 +338,7 @@ faithfully.
 ```bash
 cd server-rs && cargo test                      # 993 tests, green
 cd server-rs && cargo clippy --all-targets -- -D warnings   # 0 warnings
-bun run check:rs                                # fmt + clippy + test locally (CI gate)
-bun run test:e2e                                # mock-driver e2e (298/0; 2 load-induced flakes)
-bun run test:e2e:live                           # corpus-subset live tier vs fake daemon (5 specs)
+pnpm run check:rs                               # fmt + clippy + test locally (CI gate)
+pnpm run test:e2e                               # mock-driver e2e (298/0; 2 load-induced flakes)
+pnpm run test:e2e:live                          # corpus-subset live tier vs fake daemon (5 specs)
 ```

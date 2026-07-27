@@ -5,21 +5,21 @@ default:
 
 # --- Setup and everyday development ---
 
-# Explicitly install the frozen Bun dependencies; does not install prerequisites.
+# Explicitly install the frozen dependencies; does not install prerequisites.
 install:
-    bun install --frozen-lockfile
+    pnpm install --frozen-lockfile
 
 # Start the dev server; use PANTOKEN_DRIVER=mock for UI work without a daemon.
 dev *args:
-    bun run scripts/dev.ts {{ args }}
+    tsx scripts/dev.ts {{ args }}
 
 # Aggregate TypeScript/client checks (normal, non-live).
 check:
-    bun run check
+    pnpm run check
 
 # Run the project unit tests (normal, non-live).
 test:
-    bun run test
+    pnpm run test
 
 # Quick local gate: check followed by unit tests; no Rust, E2E, or live work.
 quality:
@@ -28,19 +28,19 @@ quality:
 
 # Full Rust formatting, clippy, and nextest gate.
 check-rs:
-    bun run check:rs
+    pnpm run check:rs
 
 # Build the client production bundle.
 build-client:
-    bun run build
+    pnpm run build
 
 # Run the default mock-driver Playwright suite; extra args pass to Playwright.
 e2e *args:
-    bun run test:e2e {{ args }}
+    pnpm run test:e2e {{ args }}
 
 # Run the corpus-backed live-driver E2E tier (expensive/provider-dependent).
 e2e-live *args:
-    bun run test:e2e:live {{ args }}
+    pnpm run test:e2e:live {{ args }}
 
 # --- Workspace and issue tooling ---
 
@@ -48,7 +48,7 @@ e2e-live *args:
 # Usage: just implement-issue <issue-url>
 # just implement-issue --dry-run <issue-url>  (print commands, don't execute)
 implement-issue *args:
-    bun run scripts/implement-issue.ts {{ args }}
+    tsx scripts/implement-issue.ts {{ args }}
 
 # Integrate the current workspace's commits onto main.
 # Acquires a repo-local lock, pulls, rebases, tests, pushes.
@@ -79,15 +79,15 @@ baseline-timings:
 
 # Build the Rust sidecar used by the desktop app (platform-specific).
 build-hub *args:
-    bun scripts/desktop/build-hub.ts {{ args }}
+    tsx scripts/desktop/build-hub.ts {{ args }}
 
 # Regenerate Rust daemon types after a polytoken daemon bump.
 codegen-polytoken-rs:
-    bun run scripts/codegen-polytoken-rs.ts
+    tsx scripts/codegen-polytoken-rs.ts
 
 # Capture or recanonicalize the live daemon corpus (expensive/provider-dependent).
 capture-daemon-corpus *args:
-    bun run scripts/capture-daemon-corpus.ts {{ args }}
+    tsx scripts/capture-daemon-corpus.ts {{ args }}
 
 # Create all Docker daemon fixtures.
 docker-fixtures-setup:
@@ -101,24 +101,24 @@ docker-fixtures-teardown:
 
 # Build a headless release artifact.
 build-headless *args:
-    bun scripts/headless/build.ts {{ args }}
+    tsx scripts/headless/build.ts {{ args }}
 
 # Validate a headless release archive.
 validate-headless-artifact *args:
-    bun scripts/headless/validate-artifact.ts {{ args }}
+    tsx scripts/headless/validate-artifact.ts {{ args }}
 
 # Smoke-test an extracted headless release payload.
 smoke-test-headless *args:
-    bun scripts/headless/smoke-test.ts {{ args }}
+    tsx scripts/headless/smoke-test.ts {{ args }}
 
 # Merge release metadata files.
 merge-release-metadata *args:
-    bun scripts/headless/merge-metadata.ts {{ args }}
+    tsx scripts/headless/merge-metadata.ts {{ args }}
 
 # Cut a desktop release (credential/signing workflow).
 release *args:
-    bun scripts/desktop/release.ts {{ args }}
+    tsx scripts/desktop/release.ts {{ args }}
 
 # Publish a desktop release and its updater manifest (credentials required).
 publish *args:
-    bun scripts/desktop/publish.ts {{ args }}
+    tsx scripts/desktop/publish.ts {{ args }}

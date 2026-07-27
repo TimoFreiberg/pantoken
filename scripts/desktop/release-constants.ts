@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 
 /** Canonical public release host. */
 export const RELEASE_REPO = "TimoFreiberg/pantoken";

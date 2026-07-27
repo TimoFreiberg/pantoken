@@ -25,8 +25,8 @@ browser copy? Un-quarantine it: `xattr -cr /path/to/Pantoken.app`. See
 
 ## Quick start (dev)
 
-Before starting, have Bun, Rust, `just`, `sccache`, `cargo-nextest`, and the Playwright
-browsers available. Bun and Rust versions are pinned (`package.json` `packageManager`
+Before starting, have pnpm, Node, Rust, `just`, `sccache`, `cargo-nextest`, and the Playwright
+browsers available. pnpm, Node, and Rust versions are pinned (`package.json` `packageManager`
 and `rust-toolchain.toml` respectively); see
 [`docs/toolchain-baseline.md`](docs/toolchain-baseline.md) for the full baseline.
 These tools and browsers are prerequisites; recipes do not install or
@@ -38,7 +38,7 @@ PANTOKEN_DRIVER=mock just dev
 open http://localhost:5173
 ```
 
-`just install` only runs `bun install --frozen-lockfile`. The server defaults to the
+`just install` only runs `pnpm install --frozen-lockfile`. The server defaults to the
 polytoken daemon driver; use `PANTOKEN_DRIVER=mock` for UI development without a daemon
 and for the dev bar (`http://localhost:5173/?dev`). `just dev <script-args>` passes
 additional arguments through to the existing development script.
@@ -65,9 +65,9 @@ just release       # signing/release workflow
 just publish       # publishing workflow
 ```
 
-Direct `bun`, `bunx`, `cargo`, and Playwright commands remain supported for targeted
+Direct `pnpm`, `pnpm exec`, `cargo`, and Playwright commands remain supported for targeted
 debugging, individual typechecks, Rust package selection, CI-specific setup, browser
-installation, and other platform-specific workflows. For example, use `bunx tsc ...`
-for one typecheck, `bunx playwright test --project=desktop` for a focused E2E run, or
+installation, and other platform-specific workflows. For example, use `pnpm exec tsc ...`
+for one typecheck, `pnpm exec playwright test --project=desktop` for a focused E2E run, or
 `cd server-rs && cargo run` to run the Rust server directly. The recipes do not
 implicitly install dependencies, browsers, or other prerequisites.

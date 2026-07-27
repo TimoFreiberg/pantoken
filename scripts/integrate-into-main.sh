@@ -252,12 +252,12 @@ fi
 # 6. Run tests
 log "Running tests..."
 
-# 6a. bun test (use the package.json test script, which filters to the
-#     curated test paths — bare `bun test` discovers all *.test.ts files
+# 6a. pnpm run test (use the package.json test script, which filters to the
+#     curated test paths — bare `pnpm test` discovers all *.test.ts files
 #     including scripts/headless/, whose subprocess-spawning integration
-#     tests time out at bun's default 5000ms limit).
-if ! bun run test; then
-  log "ERROR: bun test failed — rolling back to pre-rebase state"
+#     tests time out at the default limit).
+if ! pnpm run test; then
+  log "ERROR: pnpm test failed — rolling back to pre-rebase state"
   log "Fix the failing tests, then rerun 'just integrate-into-main $ISSUE_NUMBER'"
   jj op restore "$PRE_REBASE_OP"
   release_lock
@@ -265,9 +265,9 @@ if ! bun run test; then
   exit 1
 fi
 
-# 6b. bun run check (typecheck)
-if ! bun run check; then
-  log "ERROR: bun run check (typecheck) failed — rolling back to pre-rebase state"
+# 6b. pnpm run check (typecheck)
+if ! pnpm run check; then
+  log "ERROR: pnpm run check (typecheck) failed — rolling back to pre-rebase state"
   log "Fix the typecheck errors, then rerun 'just integrate-into-main $ISSUE_NUMBER'"
   jj op restore "$PRE_REBASE_OP"
   release_lock

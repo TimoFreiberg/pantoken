@@ -1,7 +1,7 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 // smoke-test.ts — smoke test a staged headless release artifact.
 //
-//   bun scripts/headless/smoke-test.ts <extracted-dir> [--port <port>]
+//   tsx scripts/headless/smoke-test.ts <extracted-dir> [--port <port>]
 //
 // Steps:
 //   1. Run bin/pantoken-server with PANTOKEN_DRIVER=mock, bound to a non-8787 port

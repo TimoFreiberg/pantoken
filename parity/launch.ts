@@ -127,11 +127,8 @@ export async function launch(p: Paths = paths()): Promise<void> {
     shutdown(1);
   }
 
-  // Launch Vite via the current runtime: `bun run dev` under Bun, `npx vite` under Node.
-  const isBun = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
-  const viteCmd = isBun
-    ? ["bun", "run", "dev", "--host", "127.0.0.1", "--port", String(vitePort), "--strictPort"]
-    : ["npx", "vite", "--host", "127.0.0.1", "--port", String(vitePort), "--strictPort"];
+  // Launch Vite via npx (resolves from node_modules/.bin).
+  const viteCmd = ["npx", "vite", "--host", "127.0.0.1", "--port", String(vitePort), "--strictPort"];
 
   const vite = spawnManaged(
     viteCmd,

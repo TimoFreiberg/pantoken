@@ -1,6 +1,6 @@
 // Brings up the whole dev stack with one command: the Rust WS server (PANTOKEN_PORT,
 // default 8787) and the Vite client (VITE_PORT, default 5173, proxying /ws and
-// /debug to PANTOKEN_SERVER). Used by `bun run dev` and by the Claude_Preview launch
+// /debug to PANTOKEN_SERVER). Used by `pnpm run dev` and by the Claude_Preview launch
 // config so an agent can boot the app in one shot.
 //
 // ISOLATION NOTE: the live pantoken desktop app (desktop/Config.swift) exports its own
@@ -8,7 +8,7 @@
 // includes agent sessions. So a preview/e2e launched from inside the running app inherits
 // those. Auto-port mode (below) deliberately IGNORES the inherited PANTOKEN_PORT/PANTOKEN_DATA_DIR
 // and self-isolates, so an agent instance never aims at — or fights the lock of — the live
-// app or a concurrent session. Only an explicit, non-auto `bun run dev` honors them.
+// app or a concurrent session. Only an explicit, non-auto `pnpm run dev` honors them.
 //
 // Env vars:
 //   PANTOKEN_PORT   — server listen port (default 8787; ignored in auto-port mode)
@@ -23,7 +23,7 @@ import { spawnManaged, sleep } from "./lib/node-compat.js";
 
 // Ask the OS for an unused TCP port (bind :0, read it back, release). Used on the auto-port
 // paths (Claude_Preview's $PORT, e2e's PANTOKEN_AUTO_PORT) so parallel — or leaked — instances
-// never fight over one hardcoded port; bare `bun run dev` still pins 8787 below.
+// never fight over one hardcoded port; bare `pnpm run dev` still pins 8787 below.
 function freePort(): Promise<number> {
   return new Promise((res, rej) => {
     const srv = createServer();
@@ -64,7 +64,7 @@ const autoPort =
 // PANTOKEN_PORT: the live desktop app exports its own into the shell (see ISOLATION NOTE), so
 // honoring it would aim this preview/e2e instance at the LIVE backend (or a concurrent
 // session's) instead of a fresh one — and a free port is also immune to leaked orphans
-// squatting a fixed port. Outside auto-port (bare `bun run dev`) an explicit PANTOKEN_PORT
+// squatting a fixed port. Outside auto-port (bare `pnpm run dev`) an explicit PANTOKEN_PORT
 // wins, else the 8787 default.
 const backendPort = autoPort
   ? String(await freePort())
@@ -104,9 +104,6 @@ const dataDir =
     ? process.env.PANTOKEN_DATA_DIR
     : join(stateHome, "pantoken-dev", backendPort);
 
-const viteArgs = ["run", "dev"];
-if (vitePort) viteArgs.push("--port", vitePort);
-
 const backendEnv = {
   ...process.env,
   PANTOKEN_PORT: backendPort,
@@ -116,7 +113,7 @@ const backendEnv = {
   // shell it spawns (same leak as PANTOKEN_PORT/PANTOKEN_DATA_DIR above); inheriting it would
   // enable the token gate here, so the tokenless /debug reset + /?dev load in e2e (and a
   // mock preview) hit the TokenGate instead of the app. Outside auto-port an explicit
-  // PANTOKEN_TOKEN still wins, so a real `bun run dev` behind a token keeps it.
+  // PANTOKEN_TOKEN still wins, so a real `pnpm run dev` behind a token keeps it.
   ...(autoPort ? { PANTOKEN_TOKEN: undefined } : {}),
 };
 
@@ -150,12 +147,9 @@ async function waitForHealth(base: string, timeoutMs = 120_000): Promise<void> {
 
 await waitForHealth(SERVER);
 
-// Launch Vite via the current runtime: `bun run dev` under Bun, `npx vite` under Node.
-// tsx is the script runner; Vite itself is launched as a child process.
-const isBun = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
-const viteCmd = isBun
-  ? ["bun", ...viteArgs]
-  : ["npx", "vite", ...(vitePort ? ["--port", vitePort] : [])];
+// Launch Vite. tsx is the script runner; Vite itself is launched as a child process
+// via npx (resolves from node_modules/.bin).
+const viteCmd = ["npx", "vite", ...(vitePort ? ["--port", vitePort] : [])];
 
 const vite = spawnManaged(viteCmd, {
   cwd: "client",
@@ -179,7 +173,7 @@ function shutdown(code: number): never {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 // Last-resort: kill children even on an uncaught throw / plain exit, so dev.ts never leaves a
-// detached `bun --hot` server behind (that orphan is exactly what poisons the next e2e run).
+// detached Vite server behind (that orphan is exactly what poisons the next e2e run).
 process.on("exit", () => {
   for (const p of procs) p.kill();
 });

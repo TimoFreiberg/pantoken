@@ -28,8 +28,9 @@ See `docs/DESIGN.md` for architecture, `docs/DECISIONS.md` for settled calls, `d
   `direnv allow`). CI overrides this with
   `CARGO_TARGET_DIR: ${{ github.workspace }}/target` since direnv isn't
   active there.
-- **Tool versions are pinned.** Bun is pinned via `packageManager` in
-  `package.json` (`bun@1.3.11`); Rust via `rust-toolchain.toml` at the repo
+- **Tool versions are pinned.** pnpm is pinned via `packageManager` in
+  `package.json` (`pnpm@11.17.0`); Node via `.nvmrc` (Node 22 LTS);
+  Rust via `rust-toolchain.toml` at the repo
   root (channel `1.97.1` + `rustfmt`/`clippy` components). rustup auto-reads
   the toolchain file for every `cargo` command. See
   [`docs/toolchain-baseline.md`](docs/toolchain-baseline.md) for the full
@@ -37,7 +38,7 @@ See `docs/DESIGN.md` for architecture, `docs/DECISIONS.md` for settled calls, `d
 
 ## Stack & layout
 
-Monorepo, Bun workspaces.
+Monorepo, pnpm workspaces.
 - `protocol/` — shared, JSON-serializable WS contract + the `foldEvent` reducer that
   runs identically on server & client.
 - `server-rs/` — the Rust server. Axum-based WS bridge + HTTP routes + static file
@@ -54,12 +55,12 @@ Monorepo, Bun workspaces.
 - `client/` — Svelte 5 + Vite PWA. Reconnecting WS singleton, the same fold reducer,
   Claude-app theming in `src/app.css` (warm paper, light + dark).
 
-Tool versions (Bun, Rust) are pinned; see
+Tool versions (pnpm, Node, Rust) are pinned; see
 [`docs/toolchain-baseline.md`](docs/toolchain-baseline.md) for the full baseline.
 
 ## Commands
 
-The normal contributor interface is `just`. Prerequisites are Bun, Rust, `just`,
+The normal contributor interface is `just`. Prerequisites are Node, pnpm, Rust, `just`,
 `sccache`, `cargo-nextest`, and Playwright browsers; recipes do not install or upgrade
 these tools. Run the explicit dependency install when needed, then use the mock driver
 for local UI work:
@@ -82,24 +83,24 @@ just publish                 # publishing workflow
 ```
 
 `just dev <script-args>` passes script arguments through. The `just` recipes are thin
-wrappers around the authoritative package scripts and Rust commands. Direct `bun`,
-`bunx`, `cargo`, and Playwright commands remain supported for targeted debugging,
+wrappers around the authoritative package scripts and Rust commands. Direct `pnpm`,
+`pnpm exec`, `cargo`, and Playwright commands remain supported for targeted debugging,
 individual typechecks, Rust package selection, CI-specific setup, browser installation,
-and platform-specific workflows; for example, use `bunx tsc ...` for one typecheck or
+and platform-specific workflows; for example, use `pnpm exec tsc ...` for one typecheck or
 `cd server-rs && cargo run` to run the Rust server directly.
 
-`bun run check` runs protocol + scripts + e2e + client typechecks end to end.
+`pnpm run check` runs protocol + scripts + e2e + client typechecks end to end.
 `tsconfig.scripts.json` and `tsconfig.e2e.json` close the typecheck gap for the
 dev-tooling and Playwright trees. Keep it green. **server-rs has its own CI
 gate** (`rust-server` job in `.github/workflows/ci.yml`: `cargo fmt --check` +
 `cargo clippy --locked --all-targets -- -D warnings` + `cargo nextest run`);
 run `just check-rs` locally for the same three checks.
 
-**Dual-runtime (Bun + Node):** tests run via Vitest under both `bun run test`
-(Bun) and `npx vitest run` (Node); scripts run under both `bun run` (Bun) and
-`npx tsx` (Node). `bun:test` is retired; `vitest.config.ts` configures the
-runner. `scripts/lib/node-compat.ts` provides Node-compatible helpers
-(`spawnAsync`, `spawnManaged`, `isMain`, `sleep`) that replace Bun-specific APIs.
+**Single-runtime (Node + tsx):** tests run via Vitest (`pnpm run test`);
+scripts run via `tsx` (`tsx scripts/foo.ts`). `bun:test` is retired;
+`vitest.config.ts` configures the runner. `scripts/lib/node-compat.ts` provides
+Node-compatible helpers (`spawnAsync`, `spawnManaged`, `isMain`, `sleep`) that
+replace Bun-specific APIs.
 
 **Implementing an issue — two paths:**
 - **CLI path** (out-of-session orchestration): `just implement-issue <issue-url>`
@@ -123,15 +124,15 @@ A third mode, **`PANTOKEN_DRIVER=fake`**, runs the real `PolytokenDriver` over a
 exercises the live driver stack (`daemon_client → event_map → driver`)
 end-to-end. It reads the frozen corpus (`server-rs/tests/corpus`) and fails loud
 if it's absent, so it's dev/e2e-only (never shipped). The corpus-backed **live e2e
-tier** drives it: `bun run test:e2e:live` (separate `playwright.live.config.ts`
-over `e2e/live/`; the default `bun run test:e2e` mock tier — `desktop`/`mobile` —
+tier** drives it: `pnpm run test:e2e:live` (separate `playwright.live.config.ts`
+over `e2e/live/`; the default `pnpm run test:e2e` mock tier — `desktop`/`mobile` —
 is unchanged). It's a deliberate subset over the frozen corpus flows, not the full
 mock suite (see `docs/DECISIONS.md` D21).
 
 **Worktree note:** if you're spawned in an isolated worktree, work there — don't
 fall back to `~/src/pantoken` (a concurrent session may be committing there; two
 agents on one working copy scramble each other's commits). A fresh worktree
-starts without `node_modules` (gitignored), so run `bun install` in it before
+starts without `node_modules` (gitignored), so run `pnpm install` in it before
 building/testing. The e2e suite runs fully inside one checkout — it boots its own
 dev server — so a worktree can run it standalone.
 
@@ -140,7 +141,7 @@ workspaces in this repo. It validates names, checks collisions, and ensures the
 workspace is created under `.workspaces/` from the default workspace. Never use
 `jj workspace add` directly.
 
-**Auto-port self-isolation (why `bun run test:e2e` and the preview "just work"):**
+**Auto-port self-isolation (why `pnpm run test:e2e` and the preview "just work"):**
 the e2e suite (`PANTOKEN_AUTO_PORT=1`) and the mock preview (`scripts/dev.ts` with
 `$PORT` set) run in **auto-port mode**, which deliberately **ignores any inherited
 `PANTOKEN_PORT` / `PANTOKEN_DATA_DIR`** and grabs its own OS-assigned free backend port +
@@ -149,11 +150,11 @@ vars into every shell it spawns** (so an agent session running inside it inherit
 `PANTOKEN_PORT=<app port>` and the app's data dir). Auto-port mode means a run launched
 from inside the app never aims at — nor fights the PID lock of — the running app's
 backend/data dir, and two concurrent agent sessions never collide either. So just run
-`bun run test:e2e` / launch the preview as-is; **no `env -u` or `PANTOKEN_DATA_DIR=$(mktemp -d)`
+`pnpm run test:e2e` / launch the preview as-is; **no `env -u` or `PANTOKEN_DATA_DIR=$(mktemp -d)`
 scrubbing needed.** (Only Vite stays on a fixed port — Playwright health-checks it as a
 known URL and re-evaluates the config per worker, so it can't be a random free port;
 override `PANTOKEN_E2E_VITE_PORT` to run two e2e suites at literally the same time.)
-Bare, non-auto `bun run dev` still honors an explicit `PANTOKEN_PORT` (default 8787) —
+Bare, non-auto `pnpm run dev` still honors an explicit `PANTOKEN_PORT` (default 8787) —
 but note it would *also* inherit the app's, so prefer the auto-port preview for UI work.
 
 ## Verifying the UI (agent-legible introspection)
@@ -177,8 +178,8 @@ This is set up so you can verify autonomously — use it.
   authoritative `SessionState` as JSON. `curl localhost:8787/debug/state | …`.
 - Fixtures + scripts live in the Rust server's `mock_driver.rs`. Add a script there to get a
   new reproducible UI state.
-- **Committed regression suite:** `bun run test:e2e` (Playwright, in `e2e/`). It
-  reuses a running `bun run dev` (or starts one), resets the mock via `/debug/reset`
+- **Committed regression suite:** `pnpm run test:e2e` (Playwright, in `e2e/`). It
+  reuses a running `pnpm run dev` (or starts one), resets the mock via `/debug/reset`
   in `beforeEach`, and asserts DOM across desktop + a mobile (Pixel 7) project. Add a
   spec when you add UI. This is the repeatable feedback loop; `Claude_Preview` is for
   live eyeballing.

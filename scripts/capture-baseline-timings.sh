@@ -101,29 +101,29 @@ time_cmd "Rust build (incremental)" cargo build -p pantoken-server
 
 # --- Client warm build ------------------------------------------------------
 echo "Timing client warm build..." >&2
-time_cmd "Client build (warm)" bun run build
+time_cmd "Client build (warm)" pnpm run build
 
 # --- Client clean build -----------------------------------------------------
 echo "Timing client clean build..." >&2
 rm -rf client/dist
-time_cmd "Client build (clean)" bun run build
+time_cmd "Client build (clean)" pnpm run build
 
 # --- Client incremental build -----------------------------------------------
 echo "Timing client incremental build..." >&2
 touch client/src/lib/app-badge.ts
-time_cmd "Client build (incremental)" bun run build
+time_cmd "Client build (incremental)" pnpm run build
 
 # --- Unit tests -------------------------------------------------------------
 echo "Timing unit tests..." >&2
-time_cmd "Unit tests (bun test)" bun test
+time_cmd "Unit tests (pnpm test)" pnpm run test
 
 # --- Typecheck --------------------------------------------------------------
 echo "Timing typecheck..." >&2
-time_cmd "Typecheck (bun run check)" bun run check
+time_cmd "Typecheck (pnpm run check)" pnpm run check
 
 # --- E2E --------------------------------------------------------------------
 echo "Timing E2E (expensive — boots dev server + browser suite)..." >&2
-time_cmd "E2E (bun run test:e2e)" bun run test:e2e
+time_cmd "E2E (pnpm run test:e2e)" pnpm run test:e2e
 
 # --- Workspace startup ------------------------------------------------------
 echo "Timing workspace startup..." >&2
@@ -132,7 +132,7 @@ ws_name="baseline-timing-test"
 just cleanup-workspace "$ws_name" >/dev/null 2>&1 || true
 ws_start=$(date +%s.%N)
 just create-workspace "$ws_name" >/dev/null 2>&1
-(cd "$REPO_ROOT/.workspaces/$ws_name" && bun install --frozen-lockfile) >/dev/null 2>&1
+(cd "$REPO_ROOT/.workspaces/$ws_name" && pnpm install --frozen-lockfile) >/dev/null 2>&1
 ws_end=$(date +%s.%N)
 ws_elapsed=$(awk "BEGIN {printf \"%.2f\", $ws_end - $ws_start}")
 echo "Workspace startup	$ws_elapsed" >> "$timings_file"

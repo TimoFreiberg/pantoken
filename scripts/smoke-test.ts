@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 // Legacy smoke entry point. Release artifacts use scripts/headless/smoke-test.ts;
 // this development helper remains for local source-tree checks only.
 //

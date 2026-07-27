@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 // capture-daemon-corpus.ts — record a golden SSE corpus from a REAL polytoken daemon.
 //
 // This is the deliberate, separate "live capture" step behind the golden corpus
@@ -17,7 +17,7 @@
 //
 // ─── COST ───────────────────────────────────────────────────────────────────
 // Driving a scenario runs a REAL model turn through your configured provider —
-// it spends money. That's why this is a manual, opt-in tool, not part of `bun test`.
+// it spends money. That's why this is a manual, opt-in tool, not part of `pnpm run test`.
 //
 // ─── USAGE ──────────────────────────────────────────────────────────────────
 //   just capture-daemon-corpus <scenario> [--write]

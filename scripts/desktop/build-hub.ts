@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 // build-hub.ts — compile the Rust pantoken server into a binary for the bundled
 // desktop app.
 //
@@ -9,7 +9,7 @@
 // git/jj) plus PANTOKEN_CLIENT_DIST pointing at a built client bundle (in the
 // .app: the client-dist resource).
 //
-// Run from anywhere: `bun scripts/desktop/build-hub.ts`. Used as the Tauri
+// Run from anywhere: `tsx scripts/desktop/build-hub.ts`. Used as the Tauri
 // beforeDevCommand/beforeBuildCommand (desktop/tauri.conf.json) — dev
 // needs the file to exist because tauri-build stages externalBin next to the
 // dev binary and errors when it's missing, even though dev never spawns it.

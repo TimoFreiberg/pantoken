@@ -1,7 +1,7 @@
 # Toolchain Baseline
 
 Reproducible pre-migration baseline for the pantoken build system. Pinned tool
-versions, the checks/tests/builds that must remain valid, Bun's dependency
+versions, the checks/tests/builds that must remain valid, pnpm's dependency
 release-age protection, and representative timings — so future Bazel-migration
 failures can be attributed to the migration rather than floating tools or
 pre-existing drift.
@@ -12,38 +12,38 @@ This baseline was established for [Bazel migration Ticket 2](https://github.com/
 
 | Tool | Version | Pin mechanism | Location |
 |------|---------|---------------|----------|
-| Bun  | 1.3.11  | `packageManager` field in `package.json` | `package.json` |
+| pnpm | 11.17.0 | `packageManager` field in `package.json` | `package.json` |
+| Node | 22 LTS  | `.nvmrc` (read by nvm/fnm/volta) | `.nvmrc` |
 | Rust | 1.97.1  | `rust-toolchain.toml` (channel + components) | `rust-toolchain.toml` |
-| Node | 26.5.0  | system-installed (no pin yet) | — |
 | Vitest | 4.1.x | devDependency | `package.json` |
 | tsx | 4.23.x | devDependency | `package.json` |
 
-### Bun
+### pnpm
 
-Bun is pinned via the `packageManager` field in `package.json`:
+pnpm is pinned via the `packageManager` field in `package.json`:
 
 ```json
-"packageManager": "bun@1.3.11"
+"packageManager": "pnpm@11.17.0"
 ```
 
-The `oven-sh/setup-bun@v2` CI action reads this field automatically — no
-explicit `bun-version` input is needed in CI workflows. Locally, Bun warns
-about version mismatch if a different version is installed (non-blocking;
-encourages version alignment).
+The `pnpm/action-setup@v4` CI action reads this field automatically. Locally,
+Corepack (bundled with Node) can also read it — `corepack enable pnpm` makes
+the pinned version available without a global install.
 
-**To update Bun:** change the version in `package.json`'s `packageManager`
-field and run `bun install` to regenerate `bun.lock`.
+Node is pinned via `.nvmrc` (read by `nvm`/`fnm`/`volta`). CI uses
+`actions/setup-node@v4` with `node-version-file: .nvmrc`.
 
-### Dual-runtime transition (Bun + Node)
+**To update pnpm:** change the version in `package.json`'s `packageManager`
+field, then run `pnpm install` to regenerate `pnpm-lock.yaml`.
 
-The project is in a dual-runtime transition: Bun remains the package manager
-and primary runtime, but all TypeScript scripts and tests are now Node-compatible.
-Tests run via **Vitest** under both `bunx vitest run` (Bun) and `npx vitest run`
-(Node). Scripts run under both `bun run` (Bun) and `npx tsx` (Node). The
-`bun:test` runner is retired; `bunfig.toml [test]` is superseded by
-`vitest.config.ts`. Bun-specific runtime APIs (`Bun.spawn`, `Bun.file`,
-`Bun.sleep`, `import.meta.main`, `import.meta.dir`) are replaced with
-Node-standard equivalents via `scripts/lib/node-compat.ts`.
+### Single-runtime (Node + tsx)
+
+The project uses a single JavaScript runtime: **Node**, with **tsx** as the
+TypeScript script runner. Tests run via **Vitest** (`vitest run`). Scripts run
+via `tsx scripts/foo.ts`. The `bun:test` runner is retired; `bunfig.toml` is
+removed. Bun-specific runtime APIs (`Bun.spawn`, `Bun.file`, `Bun.sleep`,
+`import.meta.main`, `import.meta.dir`) are replaced with Node-standard
+equivalents via `scripts/lib/node-compat.ts`.
 
 ### Rust
 
@@ -77,12 +77,10 @@ The pinned Rust version (1.97.1) is distinct from the MSRV declared in
 ## Observed (not pinned) versions
 
 These prerequisite tools are documented in `README.md` / `AGENTS.md` but are
-**not pinned** — the issue scopes pinning to Bun and Rust only. Node pinning
-is deferred to [Ticket 3](docs/bazel-migration-task.md) (Node portability).
+**not pinned** — the issue scopes pinning to pnpm and Rust only.
 
 | Tool | Version | Notes |
 |------|---------|-------|
-| Node | v26.5.0 | Not pinned; deferred to Ticket 3 |
 | just | 1.57.0 | |
 | sccache | 0.16.0 | Required for Rust builds (`.cargo/config.toml`) |
 | cargo-nextest | 0.9.140 | Test runner for Rust |
@@ -127,38 +125,32 @@ migration, not to pre-existing drift.
 
 ### Release dry-run / smoke paths (from CI)
 
-- `bun scripts/desktop/publish.ts --dry-run --repo TimoFreiberg/pantoken --tag-must-match <tag>`
-- `bun scripts/headless/build.ts --tag <tag>`
-- `bun scripts/headless/validate-artifact.ts <archive>`
-- `bun scripts/headless/smoke-test.ts <payload-dir>`
+- `tsx scripts/desktop/publish.ts --dry-run --repo TimoFreiberg/pantoken --tag-must-match <tag>`
+- `tsx scripts/headless/build.ts --tag <tag>`
+- `tsx scripts/headless/validate-artifact.ts <archive>`
+- `tsx scripts/headless/smoke-test.ts <payload-dir>`
 - `bash deploy/launchd-platform-gate.sh --evidence <path>`
 
 ## Dependency release-age protection
 
-Bun's dependency release-age protection is configured in `bunfig.toml`:
+pnpm's dependency release-age protection is configured in `pnpm-workspace.yaml`:
 
-```toml
-[install]
-minimumReleaseAge = 259200
+```yaml
+minimumReleaseAge: 4320
 ```
 
-This enforces a 3-day (259200 seconds) cooldown on npm package resolution —
+This enforces a 3-day (4320 minutes) cooldown on npm package resolution —
 refusing to resolve any package version published less than 3 days ago. It
 covers both direct and transitive dependencies at resolution time. The value
 tops the dominant npm-malware detection band (most malicious versions are
 yanked within minutes–hours) and matches Renovate's default.
 
-**Caveats** (from `bunfig.toml` comments):
+**Caveats:**
 - Enforced only when versions are (re)resolved — a version already pinned in
-  `bun.lock` is NOT re-checked (bun #30525). This is by design: the cooldown
-  gates NEW picks; `bun audit` covers already-installed packages.
-- A plain `bun install` / deploy honors the committed lockfile and is
+  `pnpm-lock.yaml` is NOT re-checked. This is by design: the cooldown gates
+  NEW picks; `pnpm audit` covers already-installed packages.
+- A plain `pnpm install` / deploy honors the committed lockfile and is
   unaffected by the cooldown.
-
-**Baseline status:** This protection is preserved as-is for the baseline. Its
-replacement (or explicit decision to lose it) is [Ticket 4](docs/bazel-migration-task.md)'s
-responsibility (the pnpm experiment), with the decision owner being the
-repository maintainer.
 
 ## Representative timings
 
@@ -175,9 +167,9 @@ re-capture on the same machine for like-for-like comparison._
 | Client build (warm) | 4.1s |
 | Client build (clean) | 1.8s |
 | Client build (incremental) | 1.8s |
-| Unit tests (bun test) | 72.8s |
-| Typecheck (bun run check) | 6.8s |
-| E2E (bun run test:e2e) | 596.0s |
+| Unit tests (pnpm test) | 72.8s |
+| Typecheck (pnpm run check) | 6.8s |
+| E2E (pnpm run test:e2e) | 596.0s |
 | Workspace startup (create + install) | 0.7s |
 
 **Notes:**
@@ -192,8 +184,8 @@ re-capture on the same machine for like-for-like comparison._
 - 3 `update-headless.sh` integration tests fail outside a proper macOS launchd
   service environment — pre-existing, unrelated to toolchain pinning.
 - Workspace startup includes `just create-workspace` (jj workspace creation)
-  + `bun install --frozen-lockfile` in the new workspace. The shared Bun
-  install cache makes this near-instant.
+  + `pnpm install --frozen-lockfile` in the new workspace. The pnpm store
+  cache makes this near-instant.
 
 To re-capture timings, run `just baseline-timings` from the default jj
 workspace (repo root). See `scripts/capture-baseline-timings.sh`.
@@ -203,19 +195,22 @@ workspace (repo root). See `scripts/capture-baseline-timings.sh`.
 From a clean checkout:
 
 ```bash
-# 1. Install prerequisites: bun, rust (via rustup), just, sccache,
-#    cargo-nextest, direnv, jj, and Playwright browsers.
+# 1. Install prerequisites: Node 22 (via nvm/fnm/volta or direct), pnpm,
+#    rust (via rustup), just, sccache, cargo-nextest, direnv, jj, and
+#    Playwright browsers.
 #    rustup reads rust-toolchain.toml automatically — the pinned 1.97.1
 #    (with rustfmt + clippy) is installed on first cargo command.
+#    nvm/fnm reads .nvmrc automatically — Node 22 LTS is installed.
 
 # 2. Allow direnv (sets CARGO_TARGET_DIR and other env):
 direnv allow
 
 # 3. Install frozen dependencies:
-bun install --frozen-lockfile
+pnpm install --frozen-lockfile
 
 # 4. Verify pinned tool versions:
-bun --version    # → 1.3.11
+pnpm --version    # → 11.17.0
+node --version    # → v22.x.x
 rustc --version   # → rustc 1.97.1
 
 # 5. Run the quality gate + Rust gate:

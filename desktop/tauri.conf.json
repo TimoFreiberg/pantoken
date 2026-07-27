@@ -5,8 +5,8 @@
   "identifier": "dev.pantoken.app",
   "build": {
     "frontendDist": "ui",
-    "beforeDevCommand": "bun ../scripts/desktop/build-hub.ts",
-    "beforeBuildCommand": "bun ../scripts/desktop/build-hub.ts && bun run --cwd .. build"
+    "beforeDevCommand": "pnpm exec tsx ../scripts/desktop/build-hub.ts",
+    "beforeBuildCommand": "pnpm exec tsx ../scripts/desktop/build-hub.ts && pnpm --filter @pantoken/client build"
   },
   "app": {
     "windows": [],

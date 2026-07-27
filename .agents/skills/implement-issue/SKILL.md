@@ -15,7 +15,7 @@ From the repository's **default jj workspace** (the repository root), create and
 ```bash
 just create-workspace issue-<N>
 # run the printed: pushd <absolute-workspace-dir>
-bun install
+pnpm install --frozen-lockfile
 bash scripts/gh-issue-fetch.sh <issue-number>
 ```
 

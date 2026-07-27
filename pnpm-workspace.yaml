@@ -1,0 +1,53 @@
+packages:
+  - protocol
+  - client
+  - desktop
+
+# Supply-chain cooldown: refuse to resolve any package version published
+# less than 3 days ago (4320 minutes). Replaces bunfig.toml's
+# minimumReleaseAge = 259200 (seconds). Covers direct + transitive deps.
+minimumReleaseAge: 4320
+
+# Allow fallback when no version satisfies the cooldown (pnpm v11 defaults
+# minimumReleaseAgeStrict to true when minimumReleaseAge is set). Some
+# platform-specific optional dependencies (e.g. @rolldown/binding-darwin-arm64)
+# are not fetched when strict mode blocks them, breaking native bindings.
+minimumReleaseAgeStrict: false
+
+# Strict dependency isolation: pnpm's default hoisting (hoist: true) is used.
+# pnpm's symlinked layout already prevents phantom deps by default — only
+# declared deps are symlinked into each package's node_modules. The .pnpm
+# store hoists transitive deps for internal resolution, but they're not
+# directly importable from package code unless declared.
+# (hoist: false was tried but broke native optional dependencies like
+# @rolldown/binding-darwin-arm64 that rely on the hoisted store layout.)
+
+# Use a hoisted node-linker for compatibility with native optional dependencies
+# (rolldown, esbuild, lightningcss) that use dynamic require() to load
+# platform-specific bindings. The symlinked layout doesn't link optional deps
+# into the dependent's node_modules, breaking the dynamic resolution.
+node-linker: hoisted
+
+# Deny warnings from peer dependency resolution.
+# NOTE: openapi-typescript@7 declares a peer range of typescript ^5.x, but the
+# repo runs TypeScript 6 (which works fine). strictPeerDependencies would
+# hard-fail on this stale range; keep it false to avoid blocking on ranges
+# that are wrong, not broken.
+strictPeerDependencies: false
+
+# Auto-install missing peer dependencies (default, explicit for clarity).
+autoInstallPeers: true
+
+# Enforce the lockfile — no silent drift. pnpm's default is
+# preferFrozenLockfile: true (headless install when lockfile satisfies
+# package.json). CI also passes --frozen-lockfile explicitly and pnpm
+# auto-enables frozen mode in CI environments.
+preferFrozenLockfile: true
+
+# Allow esbuild's postinstall script (pnpm v10+ blocks build scripts by default).
+# esbuild needs its postinstall to install its native binary.
+onlyBuiltDependencies:
+  - esbuild
+
+allowBuilds:
+  esbuild: true

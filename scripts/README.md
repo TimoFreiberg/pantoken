@@ -38,7 +38,7 @@ just implement-issue 42
    - Fetches latest main, rebases `main..@` onto `main@origin`
    - Verifies exactly one non-empty commit above `main` (squash enforcement)
    - Verifies at least one non-empty commit contains `Fixes #N` in its message
-   - Runs `bun test` + `bun run check` + `cargo fmt` + `cargo clippy` + `cargo nextest`
+   - Runs `pnpm run test` + `pnpm run check` + `cargo fmt` + `cargo clippy` + `cargo nextest`
    - Advances the main bookmark, pushes
    - On conflict: exits 2 (lock held), agent resolves and retries
    - Exit codes: 0=success, 2=conflicts, 1=error
@@ -121,7 +121,7 @@ rm -rf .workspaces/pantoken-issue-*
 justfile                          — entry points (implement-issue, integrate-into-main, create-workspace, cleanup-current-workspace, legacy cleanup-workspace)
 scripts/
   implement-issue.ts              — typed launcher, context downloader, renderer, and daemon seeder
-  implement-issue.sh               — compatibility wrapper for older callers (`exec bun run scripts/implement-issue.ts "$@"`)
+  implement-issue.sh               — compatibility wrapper for older callers (`exec tsx scripts/implement-issue.ts "$@"`)
   seed-prompt.md                  — the agent's initial prompt template (CLI path)
   create-workspace.sh             — default-workspace-only jj workspace creator
   cleanup-current-workspace.sh     — integrated current-workspace forget + removal
@@ -146,7 +146,7 @@ scripts/
 - `jq` — JSON processing
 - `zellij` — terminal multiplexer (for TUI tab management)
 - `just` — command runner
-- Bun — runs `scripts/implement-issue.ts` and the repository test suite
+- pnpm + tsx — runs `scripts/implement-issue.ts` and the repository test suite
 
 The launcher owns a unique `issue-*` directory under `.pantoken-issue-context/` during normal execution. It stores `issue-body.md`, downloaded images, `manifest.json`, and daemon session/workspace handoff files; the zellij tab removes that context after the TUI exits. The parent directory is gitignored. Workspace integration and cleanup are performed explicitly by the agent with `just integrate-into-main <N>` and `just cleanup-current-workspace. Screenshot downloads are bounded, content-type checked, and failed downloads are never listed as local screenshots.
 
