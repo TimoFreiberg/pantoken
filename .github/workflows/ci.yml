@@ -165,7 +165,7 @@ jobs:
         with:
           workspaces: .
       - uses: mozilla-actions/sccache-action@v0.0.10
-      - run: tsx scripts/desktop/build-hub.ts --debug
+      - run: pnpm exec tsx scripts/desktop/build-hub.ts --debug
       - uses: taiki-e/install-action@v2
         with:
           tool: nextest
@@ -233,7 +233,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
           PANTOKEN_BUILD_SHA: ${{ github.sha }}
         run: >
-          tsx scripts/desktop/publish.ts
+          pnpm exec tsx scripts/desktop/publish.ts
           --dry-run
           --repo TimoFreiberg/pantoken
           --tag-must-match "${{ github.ref_name }}"
@@ -244,20 +244,20 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_TEXT: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_TEXT }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-        run: tsx scripts/headless/build.ts --tag "${{ github.ref_name }}"
+        run: pnpm exec tsx scripts/headless/build.ts --tag "${{ github.ref_name }}"
       - name: Install trusted tar validator for preparation
         run: test -x target/release/pantoken-tar-validate
       - name: Validate headless artifact
         env:
           PANTOKEN_UPDATE_TEST_MODE: "1"
           PANTOKEN_TAR_VALIDATOR: ${{ github.workspace }}/target/release/pantoken-tar-validate
-        run: tsx scripts/headless/validate-artifact.ts target/release/headless/pantoken-headless-macos-aarch64.tar.gz
+        run: pnpm exec tsx scripts/headless/validate-artifact.ts target/release/headless/pantoken-headless-macos-aarch64.tar.gz
       - name: Smoke-test compiled headless artifact
         run: |
           mkdir -p target/release/headless/payload
           tar -xzf target/release/headless/pantoken-headless-macos-aarch64.tar.gz \
             -C target/release/headless/payload
-          tsx scripts/headless/smoke-test.ts target/release/headless/payload
+          pnpm exec tsx scripts/headless/smoke-test.ts target/release/headless/payload
       - name: Mandatory macOS launchd platform gate
         run: |
           set -e
@@ -319,7 +319,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_TEXT: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_TEXT }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: >
-          tsx scripts/headless/build.ts
+          pnpm exec tsx scripts/headless/build.ts
           --target x86_64-unknown-linux-gnu
           --tag "${{ github.ref_name }}"
       - name: Install trusted tar validator for preparation
@@ -328,13 +328,13 @@ jobs:
         env:
           PANTOKEN_UPDATE_TEST_MODE: "1"
           PANTOKEN_TAR_VALIDATOR: ${{ github.workspace }}/target/release/pantoken-tar-validate
-        run: tsx scripts/headless/validate-artifact.ts target/release/headless/pantoken-headless-linux-x86_64.tar.gz
+        run: pnpm exec tsx scripts/headless/validate-artifact.ts target/release/headless/pantoken-headless-linux-x86_64.tar.gz
       - name: Smoke-test compiled Linux headless artifact
         run: |
           mkdir -p target/release/headless/payload
           tar -xzf target/release/headless/pantoken-headless-linux-x86_64.tar.gz \
             -C target/release/headless/payload
-          tsx scripts/headless/smoke-test.ts target/release/headless/payload
+          pnpm exec tsx scripts/headless/smoke-test.ts target/release/headless/payload
       - name: Assemble Linux release bundle
         run: |
           set -e
@@ -386,7 +386,7 @@ jobs:
              target/release/release-bundle/
           # Merge per-target metadata into the macOS metadata (which already
           # has the desktop assets). The merged file is what publish.ts validates.
-          tsx scripts/headless/merge-metadata.ts \
+          pnpm exec tsx scripts/headless/merge-metadata.ts \
             target/release/release-bundle/release-metadata.json \
             target/release/release-bundle-linux/release-metadata-linux.json
       - name: Validate retained release bundle
@@ -405,7 +405,7 @@ jobs:
           PANTOKEN_RELEASE_REPO: TimoFreiberg/pantoken
           PANTOKEN_RELEASE_BUNDLE_DIR: target/release/release-bundle
         run: >
-          tsx scripts/desktop/publish.ts
+          pnpm exec tsx scripts/desktop/publish.ts
           --skip-build
           --repo TimoFreiberg/pantoken
           --tag-must-match "${{ github.ref_name }}"

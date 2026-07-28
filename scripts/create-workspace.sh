@@ -24,11 +24,11 @@ done < <(jj workspace list -T 'name ++ "\t" ++ root ++ "\n"')
 [ "$is_default" = yes ] || { echo "ERROR: create-workspace.sh must run from the default workspace at $repo_root" >&2; exit 1; }
 
 jj log -r "$revision" --no-graph -T 'commit_id' >/dev/null 2>&1 || { echo "ERROR: invalid revision: $revision" >&2; exit 1; }
-workspace_dir="$repo_root/.workspaces/$name"
-[ ! -e "$workspace_dir" ] || { echo "ERROR: workspace path already exists: $workspace_dir" >&2; exit 1; }
 workspace_names=$(jj workspace list -T 'name ++ "\n"') || { echo "ERROR: could not inspect registered workspaces" >&2; exit 1; }
 # Match only after jj has finished writing all records; grep -q can SIGPIPE jj under pipefail.
 if grep -Fxq "$name" <<<"$workspace_names"; then echo "ERROR: workspace name already registered: $name" >&2; exit 1; fi
+workspace_dir="$repo_root/.workspaces/$name"
+[ ! -e "$workspace_dir" ] || { echo "ERROR: workspace path already exists: $workspace_dir" >&2; exit 1; }
 mkdir -p "$repo_root/.workspaces"
 jj workspace add "$workspace_dir" --name "$name" --revision "$revision"
 printf 'now run `pushd %s`\n' "$workspace_dir"

@@ -11,7 +11,7 @@ install:
 
 # Start the dev server; use PANTOKEN_DRIVER=mock for UI work without a daemon.
 dev *args:
-    tsx scripts/dev.ts {{ args }}
+    pnpm exec tsx scripts/dev.ts {{ args }}
 
 # Aggregate TypeScript/client checks (normal, non-live).
 check:
@@ -48,7 +48,7 @@ e2e-live *args:
 # Usage: just implement-issue <issue-url>
 # just implement-issue --dry-run <issue-url>  (print commands, don't execute)
 implement-issue *args:
-    tsx scripts/implement-issue.ts {{ args }}
+    pnpm exec tsx scripts/implement-issue.ts {{ args }}
 
 # Integrate the current workspace's commits onto main.
 # Acquires a repo-local lock, pulls, rebases, tests, pushes.
@@ -79,15 +79,15 @@ baseline-timings:
 
 # Build the Rust sidecar used by the desktop app (platform-specific).
 build-hub *args:
-    tsx scripts/desktop/build-hub.ts {{ args }}
+    pnpm exec tsx scripts/desktop/build-hub.ts {{ args }}
 
 # Regenerate Rust daemon types after a polytoken daemon bump.
 codegen-polytoken-rs:
-    tsx scripts/codegen-polytoken-rs.ts
+    pnpm exec tsx scripts/codegen-polytoken-rs.ts
 
 # Capture or recanonicalize the live daemon corpus (expensive/provider-dependent).
 capture-daemon-corpus *args:
-    tsx scripts/capture-daemon-corpus.ts {{ args }}
+    pnpm exec tsx scripts/capture-daemon-corpus.ts {{ args }}
 
 # Create all Docker daemon fixtures.
 docker-fixtures-setup:
@@ -101,24 +101,24 @@ docker-fixtures-teardown:
 
 # Build a headless release artifact.
 build-headless *args:
-    tsx scripts/headless/build.ts {{ args }}
+    pnpm exec tsx scripts/headless/build.ts {{ args }}
 
 # Validate a headless release archive.
 validate-headless-artifact *args:
-    tsx scripts/headless/validate-artifact.ts {{ args }}
+    pnpm exec tsx scripts/headless/validate-artifact.ts {{ args }}
 
 # Smoke-test an extracted headless release payload.
 smoke-test-headless *args:
-    tsx scripts/headless/smoke-test.ts {{ args }}
+    pnpm exec tsx scripts/headless/smoke-test.ts {{ args }}
 
 # Merge release metadata files.
 merge-release-metadata *args:
-    tsx scripts/headless/merge-metadata.ts {{ args }}
+    pnpm exec tsx scripts/headless/merge-metadata.ts {{ args }}
 
 # Cut a desktop release (credential/signing workflow).
 release *args:
-    tsx scripts/desktop/release.ts {{ args }}
+    pnpm exec tsx scripts/desktop/release.ts {{ args }}
 
 # Publish a desktop release and its updater manifest (credentials required).
 publish *args:
-    tsx scripts/desktop/publish.ts {{ args }}
+    pnpm exec tsx scripts/desktop/publish.ts {{ args }}
