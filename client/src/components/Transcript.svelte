@@ -1214,6 +1214,10 @@
     {/snippet}
 
     {#each turns as turn (turn.id)}
+      <!-- Keep a whole turn as the browser's virtualization unit. `content-visibility`
+           leaves every text node in the DOM (so browser find and runSearch still work),
+           but skips style/layout/paint for off-screen Markdown and tool trees. -->
+      <div class="transcript-turn">
         {#if turn.user}
           {@render itemView(turn.user)}
         {/if}
@@ -1267,6 +1271,7 @@
       {#each turn.postResponse as it (it.id)}
         {@render itemView(it)}
       {/each}
+      </div>
     {/each}
     {#if turns.length === 0}
       <div class="empty">No messages yet. Say something below to start a turn.</div>
@@ -1485,15 +1490,29 @@
        only — header / composer / sidebar keep the body size. */
     font-size: calc(16.5px * var(--font-scale, 1));
   }
-  /* Each turn sits at the reading measure, centered (:global so child-component roots —
+  /* A turn is the transcript-level virtualization unit. The intrinsic block-size keeps
+     the scrollbar useful until the browser has measured an off-screen turn; the measured
+     size replaces this estimate automatically and remains cached if it leaves the viewport.
+     DOM nodes stay mounted, preserving browser find and the transcript search TreeWalker. */
+  .transcript-turn {
+    width: 100%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    content-visibility: auto;
+    contain-intrinsic-block-size: auto 500px;
+  }
+  /* Each item sits at the reading measure, centered (:global so child-component roots —
      tool cards, the markdown body — are capped too, not just Transcript's own elements). */
-  .col > :global(*) {
+  .transcript-turn > :global(*) {
     width: min(100%, var(--maxw));
     min-width: 0;
   }
-  /* …except an assistant turn, which may stretch to the wide track so its fenced code and
+  /* …except an assistant item, which may stretch to the wide track so its fenced code and
      tables can break out (handled below). Its text still stays at the measure. */
-  .col > .row.assistant {
+  .transcript-turn > .row.assistant {
     width: min(100%, var(--maxw-wide));
   }
   /* Assistant internals — thinking block + copy/timestamp footer — stay at the measure,
@@ -2073,13 +2092,13 @@
      tool-to-thinking spacing (these selectors only match when BOTH sides are `.tool`).
      Two containers, because a turn's tools live in different parents depending on state:
        • `.work-body` (gap 8px) — a SETTLED turn, tools folded behind "Worked for Ns".
-       • `.col` (gap 18px) — a LIVE turn: groupTurns forces its work lane non-collapsible
-         while in flight, so the tools render inline as direct transcript children. This
-         is the case the freshly-loaded / streaming screenshot shows. */
+       • `.transcript-turn` (gap 18px) — a LIVE turn: groupTurns forces its work lane
+         non-collapsible while in flight, so the tools render inline as direct turn
+         children. This is the case the freshly-loaded / streaming screenshot shows. */
   .work-body > :global(.tool) + :global(.tool) {
     margin-top: -8px;
   }
-  .col > :global(.tool) + :global(.tool) {
+  .transcript-turn > :global(.tool) + :global(.tool) {
     margin-top: -18px;
   }
 </style>

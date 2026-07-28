@@ -128,11 +128,9 @@ test("with thinking visible, thinking blocks sit between the tool cards", async 
 // instead so scrollHeight is constant regardless of scroll position.
 //
 // This was fixed then reverted-by-readdition; guard the invariant so it can't silently
-// come back. The first assertion pins the exact fix (rows must not use CV:auto); the
-// second pins the user-visible behavior (scrollHeight doesn't grow when scrolling up).
-test("scrolling up does not move the viewport (no content-visibility lazy realization)", async ({
-  page,
-}) => {
+// come back. Turns now deliberately use CV:auto, so guard both the intended containment
+// boundary and the user-visible invariant: realizing turns must not change scroll height.
+test("turn virtualization does not change scroll height while scrolling", async ({ page }) => {
   const scroller = page.locator(".scroller");
 
   // Build a transcript taller than the viewport with a few markdown turns.
@@ -161,15 +159,15 @@ test("scrolling up does not move the viewport (no content-visibility lazy realiz
     )
     .toBe(true);
 
-  // Guard the exact fix: transcript rows must NOT use content-visibility:auto.
+  // Guard the intended implementation boundary: whole turns, not individual rows.
   const cv = await scroller
-    .locator(".row")
+    .locator(".transcript-turn")
     .first()
     .evaluate((el) => getComputedStyle(el).contentVisibility);
-  expect(cv).not.toBe("auto");
+  expect(cv).toBe("auto");
 
-  // Behavioral invariant: with no lazy realization, scrollHeight is constant
-  // regardless of scroll position — nothing grows above the viewport as you scroll up.
+  // Behavioral invariant: retained intrinsic sizing keeps scrollHeight constant as the
+  // browser realizes turns, so content above the viewport cannot move the reader.
   const hBottom = await scroller.evaluate((el) => {
     el.scrollTop = el.scrollHeight;
     return el.scrollHeight;

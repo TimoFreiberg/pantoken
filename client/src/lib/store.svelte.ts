@@ -2314,13 +2314,11 @@ class PantokenStore {
    *  add `?dev` to the URL in any deploy. Watch the trend: when `itemCount` climbs into
    *  the thousands AND the paint time grows past a perceptible pause, JS windowing
    *  (render only the last N turns + "load older") starts to earn its complexity. The
-   *  transcript renders every item up front (no JS virtualization, no CSS
-   *  content-visibility): rows render at their true height immediately. (content-visibility
-   *  was tried as a zero-JS virtualization but reverted — its estimated contain-intrinsic-size
-   *  made off-screen rows snap to real height as you scrolled up, drifting the viewport
-   *  into tall messages. `e2e/transcript.e2e.ts` guards the no-CV invariant.) Real JS windowing
-   *  that preserves scroll on prepend is the proper fix when item counts climb into the
-   *  thousands. */
+   *  transcript keeps every item in the DOM, but CSS content-visibility skips off-screen
+   *  turn layout and paint. Turns use retained intrinsic sizing so their measured height
+   *  replaces the initial estimate; `e2e/transcript.e2e.ts` guards against viewport drift
+   *  while those heights are realized. Real JS windowing that preserves search and scroll
+   *  position remains the higher-complexity option if CSS containment stops being enough. */
   private logRenderTiming(itemCount: number): void {
     if (typeof window === "undefined") return;
     if (!new URLSearchParams(window.location.search).has("dev")) return;
