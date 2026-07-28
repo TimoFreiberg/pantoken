@@ -16,6 +16,20 @@ test("confirm dialog: Allow resolves and surfaces a notice", async ({
   await expect(page.getByText("Approved — continuing.")).toBeVisible();
 });
 
+test("confirm dialog action buttons share the row equally", async ({ page }) => {
+  await drive(page, "confirm");
+  const dialog = page.getByRole("dialog");
+  const allow = dialog.getByRole("button", { name: "Allow" });
+  const deny = dialog.getByRole("button", { name: "Deny" });
+  const allowBox = await allow.boundingBox();
+  const denyBox = await deny.boundingBox();
+  expect(allowBox).not.toBeNull();
+  expect(denyBox).not.toBeNull();
+  if (allowBox && denyBox) {
+    expect(Math.abs(allowBox.width - denyBox.width)).toBeLessThanOrEqual(2);
+  }
+});
+
 test("confirm dialog: Deny resolves with the deny notice", async ({ page }) => {
   await drive(page, "confirm");
   await page.getByRole("dialog").getByRole("button", { name: "Deny" }).click();

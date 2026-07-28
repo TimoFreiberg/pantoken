@@ -198,3 +198,49 @@ test("User-entered name is never overwritten by suggestion (AC.9)", async ({ pag
   await page.getByTestId("cs-container-work-api-dev").click();
   await expect(page.getByTestId("cs-name-input")).toHaveValue("My Custom Name");
 });
+
+test("SSH row inputs have correct relative widths at desktop", async ({ page }) => {
+  const switcher = page.getByTestId("host-switcher");
+  await switcher.getByTestId("host-switcher-trigger").click();
+  await switcher.getByTestId("host-switcher-setup-docker").click();
+
+  const sshInput = page.getByTestId("cs-ssh-input");
+  const portInput = page.getByTestId("cs-port-input");
+
+  const sshBox = await sshInput.boundingBox();
+  const portBox = await portInput.boundingBox();
+  expect(sshBox).not.toBeNull();
+  expect(portBox).not.toBeNull();
+  if (sshBox && portBox) {
+    // Port should be approximately 80px (allow for borders/padding variance).
+    expect(Math.round(portBox.width)).toBeGreaterThanOrEqual(70);
+    expect(Math.round(portBox.width)).toBeLessThanOrEqual(90);
+    // SSH input should be substantially wider than port.
+    expect(sshBox.width).toBeGreaterThan(portBox.width * 3);
+  }
+});
+
+test("Port input has accessible label", async ({ page }) => {
+  const switcher = page.getByTestId("host-switcher");
+  await switcher.getByTestId("host-switcher-trigger").click();
+  await switcher.getByTestId("host-switcher-setup-docker").click();
+
+  // The port input's accessible name should be "Port".
+  const portInput = page.getByTestId("cs-port-input");
+  await expect(portInput).toHaveAccessibleName("Port");
+});
+
+test("Full-width action buttons keep intrinsic height at desktop", async ({ page }) => {
+  const switcher = page.getByTestId("host-switcher");
+  await switcher.getByTestId("host-switcher-trigger").click();
+  await switcher.getByTestId("host-switcher-setup-docker").click();
+
+  // The test SSH button should have an intrinsic height, not fill vertical space.
+  const testBtn = page.getByTestId("cs-test-ssh");
+  const box = await testBtn.boundingBox();
+  expect(box).not.toBeNull();
+  if (box) {
+    // Intrinsic height: should be well under 100px (padding-based, ~44-50px).
+    expect(Math.round(box.height)).toBeLessThan(100);
+  }
+});

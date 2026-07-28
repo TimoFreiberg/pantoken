@@ -1165,6 +1165,7 @@
         <div class="field">
           <label for="cs-ssh">SSH destination</label>
           <div class="ssh-row">
+            <label for="cs-port" class="sr-only">Port</label>
             <input
               id="cs-ssh"
               type="text"
@@ -1174,6 +1175,7 @@
               data-testid="cs-ssh-input"
             />
             <input
+              id="cs-port"
               type="number"
               placeholder="Port"
               value={port}
@@ -1493,8 +1495,9 @@
         <div class="field">
           <label for="cs-edit-ssh">SSH destination</label>
           <div class="ssh-row">
+            <label for="cs-edit-port" class="sr-only">Port</label>
             <input id="cs-edit-ssh" type="text" value={sshDestination} oninput={(e) => updateDraft("sshDestination", (e.target as HTMLInputElement).value)} data-testid="cs-edit-ssh" />
-            <input type="number" value={port} oninput={(e) => updateDraft("port", (e.target as HTMLInputElement).value)} class="port-input" />
+            <input id="cs-edit-port" type="number" value={port} oninput={(e) => updateDraft("port", (e.target as HTMLInputElement).value)} class="port-input" />
           </div>
         </div>
         <div class="field">
@@ -1686,9 +1689,7 @@
     box-sizing: border-box;
   }
   .field input:focus, .container-search:focus { border-color: var(--accent); }
-  .ssh-row { display: flex; gap: 8px; }
-  .ssh-row input:first-child { flex: 1; min-width: 0; }
-  .port-input { width: 80px; flex-shrink: 0; }
+  .ssh-row { display: grid; grid-template-columns: minmax(0, 1fr) 80px; gap: 8px; }
   .hint { font-size: 12px; color: var(--text-muted); line-height: 1.45; margin: 2px 0 0; }
   .hint.warn { color: var(--accent); }
   .loading-state {
@@ -1923,5 +1924,16 @@
   @keyframes fade { from { opacity: 0; } }
   @media (prefers-reduced-motion: reduce) {
     .scrim, .panel { animation: none; }
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
   }
 </style>

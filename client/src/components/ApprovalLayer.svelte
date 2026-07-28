@@ -710,6 +710,7 @@
   .actions :global(.btn) {
     white-space: normal;
     min-width: 0;
+    flex: 1 1 0;
   }
   /* Armed (click-twice confirm): destructive red so the operator sees the
      consequence of a second click. Mirrors ContextMeter's .action.armed. */

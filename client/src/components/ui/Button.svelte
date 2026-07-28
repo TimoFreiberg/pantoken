@@ -5,7 +5,8 @@
   // The shared button primitive. Three emphasis levels (the taxonomy promoted from
   // Settings' proven btn/ghost/danger) crossed with a size axis, because the heaviest
   // consumers span a real range — compact chrome buttons (sm/md) up to full-width dialog
-  // actions (lg). `block` makes it fill its container / share a flex row equally.
+  // actions (lg). `block` makes it fill its container's width. For equal-width
+  // siblings in a flex row, the parent should apply `flex: 1 1 0` itself.
   //
   // `title` stays optional here: a text button's label already names the action, so a
   // title that just duplicates it is noise. Pass one when it adds what the label can't —
@@ -96,10 +97,9 @@
     font-weight: 550;
   }
 
-  /* Full width standalone; equal share inside a flex row (the dialog two-button row). */
+  /* Full width only. A flex-row consumer that needs equal-width siblings applies flex on the parent, not here. */
   .block {
     width: 100%;
-    flex: 1 1 0;
   }
 
   /* Touch: guarantee a ≥44px tap target on coarse pointers (the md/lg paddings land just

@@ -195,6 +195,19 @@ test("Edit opens the sheet pre-filled with the profile's values (AC.10)", async 
   await expect(page.getByTestId("cs-edit-exec-env")).toContainText("immutable");
   // Name should be pre-filled.
   await expect(page.getByTestId("cs-edit-name")).toHaveValue("Edit Me");
+
+  const editSsh = page.getByTestId("cs-edit-ssh");
+  const editPort = page.locator("#cs-edit-port");
+  await expect(editPort).toHaveAccessibleName("Port");
+  const editSshBox = await editSsh.boundingBox();
+  const editPortBox = await editPort.boundingBox();
+  expect(editSshBox).not.toBeNull();
+  expect(editPortBox).not.toBeNull();
+  if (editSshBox && editPortBox) {
+    expect(Math.round(editPortBox.width)).toBeGreaterThanOrEqual(70);
+    expect(Math.round(editPortBox.width)).toBeLessThanOrEqual(90);
+    expect(editSshBox.width).toBeGreaterThan(editPortBox.width * 3);
+  }
 });
 
 test("Remove shows a confirmation, then removes the profile", async ({ page }) => {
