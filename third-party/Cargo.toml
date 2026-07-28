@@ -1,0 +1,60 @@
+# Dummy Cargo manifest representing the dependency closure of the five server-rs
+# crates (pantoken-protocol, pantoken-daemon-types, pantoken-remote-layout,
+# pantoken-server, pantoken-tar-validate). Reindeer uses this to resolve the
+# transitive dependency closure and generate Buck2 third-party BUCK files.
+#
+# This manifest is NOT used for building — Cargo remains authoritative.
+# It exists solely for `reindeer vendor` + `reindeer buckify`.
+# The dependency versions mirror the workspace Cargo.toml [workspace.dependencies]
+# and dev-dependencies from the five server crates.
+#
+# DO NOT add desktop dependencies here — the Buck2 POC intentionally selects
+# only the five server crates.
+
+[package]
+name = "pantoken-third-party-dummy"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Keep this out of the workspace so Reindeer can run `cargo metadata` independently.
+[workspace]
+
+[lib]
+path = "dummy.rs"
+
+[dependencies]
+# Workspace-level dependencies used by the five server crates
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "io-std", "process", "sync", "time", "macros", "fs", "signal"] }
+axum = { version = "0.8", features = ["ws"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+libc = "0.2"
+tempfile = "3"
+async-trait = "0.1"
+parking_lot = "0.12"
+flate2 = "1"
+futures-util = { version = "0.3", default-features = false }
+tokio-stream = { version = "0.1", default-features = false, features = ["sync"] }
+urlencoding = "2"
+web-push = { version = "0.11", default-features = false, features = ["hyper-client"] }
+# pure-rust feature avoids boring-sys (BoringSSL/cmake) — uses superboring pure-Rust backend
+jwt-simple = { version = "0.12", default-features = false, features = ["pure-rust"] }
+ct-codecs = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+rand = "0.9"
+ignore = "0.4"
+notify = "8"
+tar = "0.4"
+
+[dev-dependencies]
+# Dev-dependencies from the five server crates (used by test targets)
+http = "0.2"
+filetime = "0.2"
+tokio-tungstenite = "0.29"

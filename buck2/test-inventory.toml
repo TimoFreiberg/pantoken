@@ -1,0 +1,145 @@
+# Test inventory for the Buck2 POC.
+# Lists every selected test target, its data inputs, executable dependencies,
+# environment allowlist/clears, socket/temp-root behavior, and network policy.
+# The `just buck2-test-inventory-check` validates one-to-one coverage against
+# the expected-target manifest and rejects undeclared entries.
+#
+# Schema:
+#   label        — Buck2 test target label
+#   data         — list of declared data inputs
+#   executables  — list of declared runtime executables
+#   env_set      — env vars explicitly set by the test
+#   env_clear    — env vars that must be unset for hermeticity
+#   socket       — "none" or description of socket usage
+#   temp_root    — how temp files are handled
+#   network      — "none" (no network) or description
+
+[[tests]]
+label = "//server-rs/pantoken-protocol:fold_corpus_tests"
+data = ["//server-rs/pantoken-protocol:fold_corpus_data"]
+executables = []
+env_set = ["PANTOKEN_FOLD_CORPUS_FILES"]
+env_clear = ["HOME", "PANTOKEN_TAR_VALIDATOR"]
+socket = "none"
+temp_root = "none"
+network = "none"
+
+[[tests]]
+label = "//server-rs/pantoken-daemon-types:target_version_test"
+data = []
+executables = []
+env_set = []
+env_clear = []
+socket = "none"
+temp_root = "none"
+network = "none"
+
+[[tests]]
+label = "//server-rs/pantoken-daemon-types:daemon_types_roundtrip"
+data = []
+executables = []
+env_set = []
+env_clear = []
+socket = "none"
+temp_root = "none"
+network = "none"
+
+[[tests]]
+label = "//server-rs/pantoken-remote-layout:unit_tests"
+data = []
+executables = []
+env_set = []
+env_clear = []
+socket = "none"
+temp_root = "none"
+network = "none"
+
+[[tests]]
+label = "//server-rs/pantoken-tar-validate:unit_tests"
+data = []
+executables = []
+env_set = []
+env_clear = []
+socket = "none"
+temp_root = "none"
+network = "none"
+
+[[tests]]
+label = "//server-rs/pantoken-server:server_lib_unit_tests"
+data = []
+executables = []
+env_set = ["PANTOKEN_BUILD_SHA", "PANTOKEN_RELEASE_BUILD"]
+env_clear = ["HOME"]
+socket = "none"
+temp_root = "tempfile (sandboxed)"
+network = "none"
+
+[[tests]]
+label = "//server-rs/pantoken-server:corpus_tests"
+data = ["//server-rs/tests:corpus_json", "//server-rs/tests:canon_parity_json"]
+executables = []
+env_set = ["PANTOKEN_CORPUS_FILES", "PANTOKEN_CANON_PARITY_FILES"]
+env_clear = ["HOME"]
+socket = "none"
+temp_root = "tempfile (sandboxed)"
+network = "none"
+
+[[tests]]
+label = "//server-rs/pantoken-server:live_path_tests"
+data = ["//server-rs/tests:corpus_json"]
+executables = []
+env_set = ["PANTOKEN_CORPUS_FILES"]
+env_clear = ["HOME"]
+socket = "none"
+temp_root = "tempfile (sandboxed)"
+network = "none"
+
+[[tests]]
+label = "//server-rs/pantoken-server:websocket_adapter_tests"
+data = []
+executables = []
+env_set = []
+env_clear = ["HOME"]
+socket = "localhost (loopback only, test-managed)"
+temp_root = "tempfile (sandboxed)"
+network = "loopback"
+
+[[tests]]
+label = "//server-rs/pantoken-server:stdio_adapter_tests"
+data = []
+executables = []
+env_set = []
+env_clear = ["HOME"]
+socket = "none"
+temp_root = "tempfile (sandboxed)"
+network = "none"
+
+[[tests]]
+label = "//server-rs/pantoken-server:resume_and_recovery_tests"
+data = [":pantoken_server"]
+executables = ["//server-rs/pantoken-server:pantoken_server"]
+env_set = ["PANTOKEN_SERVER_BIN"]
+env_clear = ["HOME"]
+socket = "localhost (loopback only, test-managed)"
+temp_root = "tempfile (sandboxed)"
+network = "loopback"
+
+[[tests]]
+label = "//server-rs/pantoken-server:remote_runtime_tests"
+data = [":pantoken_server"]
+executables = ["//server-rs/pantoken-server:pantoken_server"]
+env_set = ["PANTOKEN_SERVER_BIN"]
+env_clear = ["HOME"]
+socket = "localhost (loopback only, test-managed)"
+temp_root = "tempfile (sandboxed)"
+network = "loopback"
+
+[[tests]]
+label = "//:validate_headless_archive"
+data = [":pantoken_headless_unsigned", "//server-rs/pantoken-tar-validate:pantoken_tar_validate"]
+executables = ["//server-rs/pantoken-tar-validate:pantoken_tar_validate"]
+env_set = []
+env_clear = ["HOME", "PANTOKEN_TAR_VALIDATOR"]
+socket = "none"
+temp_root = "none"
+network = "none"

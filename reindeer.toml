@@ -1,0 +1,18 @@
+# Reindeer configuration for the Buck2 POC.
+# Pinned to commit efe17c7bb0b547ed07d48111ebcbeea5fa42a904
+# from https://github.com/facebookincubator/reindeer
+#
+# Generation may use network only in the explicit dependency-regeneration
+# command (`just buck2-deps-regenerate`). Normal Buck2 builds require neither
+# Cargo nor network — all vendored sources and generated BUCK files are checked in.
+#
+# NOTE: manifest_path must be absolute for Reindeer. Use the
+# scripts/buck2/run-reindeer.sh wrapper which sets this dynamically,
+# or run: reindeer --manifest-path "$(pwd)/third-party/Cargo.toml" vendor
+
+third_party_dir = "third-party"
+
+# Provide all Cargo env vars (CARGO_PKG_NAME, CARGO_PKG_VERSION, etc.) to
+# build scripts and crates. Many build scripts read these env vars at
+# compile time via env!() — Buck2 doesn't set them automatically.
+cargo_env = true

@@ -1,0 +1,15 @@
+# Buck2 BUCK file for shared server-rs test data.
+# Exposes corpus test data as filegroups for cross-package reference from
+# pantoken-server's test targets. Mirrors server-rs/tests/BUILD.bazel.
+
+filegroup(
+    name = "corpus_json",
+    srcs = glob(["corpus/**/*.json"]),
+    visibility = ["PUBLIC"],
+)
+
+filegroup(
+    name = "canon_parity_json",
+    srcs = glob(["canon-parity/**/*.json"]),
+    visibility = ["PUBLIC"],
+)

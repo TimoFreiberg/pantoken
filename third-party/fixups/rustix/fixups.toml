@@ -1,0 +1,2 @@
+buildscript.run = false
+cfgs = ["libc", "apple", "bsd", "static_assertions", "lower_upper_exp_for_non_zero", "rustc_diagnostics"]

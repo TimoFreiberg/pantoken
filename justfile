@@ -153,3 +153,55 @@ bazel-archive:
 # Run the Bazel POC measurement script.
 bazel-measure:
     bash scripts/bazel/measure-poc.sh
+
+# --- Buck2 foundation (additive, experimental) ---
+# See docs/buck2-poc-findings.md. Cargo/pnpm remain authoritative.
+# POC target scope: host-only aarch64-apple-darwin.
+
+# Verify Buck2, Reindeer, and Rust toolchain versions.
+buck2-check:
+    bash scripts/buck2/check-version.sh
+
+# Build all server-rs Rust crates via Buck2.
+buck2-build:
+    bash scripts/buck2/check-version.sh && OPENSSL_DIR=/opt/homebrew/opt/openssl@3 buck2 build '//server-rs/pantoken-protocol:pantoken_protocol' '//server-rs/pantoken-daemon-types:pantoken_daemon_types' '//server-rs/pantoken-remote-layout:pantoken_remote_layout' '//server-rs/pantoken-tar-validate:pantoken_tar_validate'
+
+# Build the pantoken-server binary via Buck2 (may fail due to OpenSSL/ring POC blocker).
+buck2-build-server:
+    bash scripts/buck2/check-version.sh && OPENSSL_DIR=/opt/homebrew/opt/openssl@3 buck2 build '//server-rs/pantoken-server:pantoken_server'
+
+# Run all server-rs Rust tests via Buck2.
+buck2-test:
+    bash scripts/buck2/check-version.sh && OPENSSL_DIR=/opt/homebrew/opt/openssl@3 buck2 test '//server-rs/pantoken-protocol:fold_corpus_tests' '//server-rs/pantoken-daemon-types:target_version_test' '//server-rs/pantoken-daemon-types:daemon_types_roundtrip' '//server-rs/pantoken-remote-layout:unit_tests' '//server-rs/pantoken-tar-validate:unit_tests'
+
+# Build the unsigned headless archive via Buck2.
+buck2-archive:
+    bash scripts/buck2/check-version.sh && OPENSSL_DIR=/opt/homebrew/opt/openssl@3 buck2 build '//:pantoken_headless_unsigned'
+
+# Validate the unsigned headless archive via Buck2.
+buck2-validate-archive:
+    bash scripts/buck2/check-version.sh && buck2 test '//:validate_headless_archive'
+
+# List all Buck2 targets in the server-rs tree.
+buck2-targets:
+    bash scripts/buck2/check-version.sh && buck2 uquery 'kind(rust_library, //server-rs/...) + kind(rust_binary, //server-rs/...) + kind(rust_test, //server-rs/...)'
+
+# Regenerate Reindeer third-party dependencies (requires network).
+buck2-deps-regenerate:
+    bash scripts/buck2/check-version.sh && scripts/buck2/run-reindeer.sh vendor && scripts/buck2/run-reindeer.sh buckify
+
+# Check that Reindeer regeneration produces no diff (vendor sources + BUCK).
+buck2-deps-check:
+    bash scripts/buck2/check-version.sh && scripts/buck2/run-reindeer.sh vendor && scripts/buck2/run-reindeer.sh buckify && jj diff --stat third-party/BUCK third-party/vendor/ third-party/fixups/
+
+# Validate that Buck2 targets match the expected-target manifest.
+buck2-targets-check:
+    bash scripts/buck2/check-version.sh && python3 scripts/buck2/check-targets.py
+
+# Validate test inventory against expected targets.
+buck2-test-inventory-check:
+    bash scripts/buck2/check-version.sh && python3 scripts/buck2/check-test-inventory.py
+
+# Run the Buck2 POC measurement script.
+buck2-measure:
+    bash scripts/buck2/measure-poc.sh

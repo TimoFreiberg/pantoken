@@ -1,0 +1,3 @@
+buildscript.run = false
+
+extra_srcs = ["README.md"]

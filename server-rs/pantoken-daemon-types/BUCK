@@ -1,0 +1,34 @@
+# Buck2 BUCK file for pantoken-daemon-types.
+# Cargo remains authoritative; this is additive for the Buck2 POC.
+# Mirrors server-rs/pantoken-daemon-types/BUILD.bazel.
+# Rust rules are built-in Buck2 globals — no load needed.
+
+rust_library(
+    name = "pantoken_daemon_types",
+    srcs = glob(["src/**/*.rs"]),
+    crate_root = "src/lib.rs",
+    edition = "2024",
+    deps = [
+        "//server-rs/pantoken-protocol:pantoken_protocol",
+        "//third-party:serde",
+        "//third-party:serde_json",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+rust_test(
+    name = "target_version_test",
+    srcs = ["tests/target_version_test.rs"],
+    deps = [":pantoken_daemon_types"],
+    visibility = ["PUBLIC"],
+)
+
+rust_test(
+    name = "daemon_types_roundtrip",
+    srcs = ["tests/daemon_types_roundtrip.rs"],
+    deps = [
+        ":pantoken_daemon_types",
+        "//third-party:serde_json",
+    ],
+    visibility = ["PUBLIC"],
+)

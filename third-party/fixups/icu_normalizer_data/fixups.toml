@@ -1,0 +1,2 @@
+extra_srcs = ["data/**/*.rs", "data/**/*.data"]
+buildscript.run = false

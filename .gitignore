@@ -37,3 +37,7 @@ MODULE.bazel.lock
 .implement-issue-session-id
 .playwright-mcp/
 scripts/bazel/results.txt
+# Buck2 build output
+buck-out/
+.buckd/
+third-party/.cargo/

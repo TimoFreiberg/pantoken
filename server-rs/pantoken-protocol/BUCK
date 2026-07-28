@@ -1,0 +1,54 @@
+# Buck2 BUCK file for pantoken-protocol.
+# Cargo remains authoritative; this is additive for the Buck2 POC.
+# Mirrors server-rs/pantoken-protocol/BUILD.bazel.
+# See docs/buck2-poc-findings.md for the full target map.
+#
+# Rust rules (rust_library, rust_test) are built-in Buck2 globals — no load needed.
+# Note: Buck2 rust_test has no `data` attribute; test data files are declared
+# via `resources` and referenced in `run_env` via $(location).
+
+rust_library(
+    name = "pantoken_protocol",
+    srcs = glob(["src/**/*.rs"]),
+    crate_root = "src/lib.rs",
+    edition = "2024",
+    deps = [
+        "//third-party:serde",
+        "//third-party:serde_json",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# Fold-corpus integration test — uses PANTOKEN_FOLD_CORPUS_FILES env var
+# (Buck2 run_env expansion) instead of CARGO_MANIFEST_DIR.
+rust_test(
+    name = "fold_corpus_tests",
+    srcs = ["tests/fold_corpus.rs"],
+    crate_root = "tests/fold_corpus.rs",
+    deps = [
+        ":pantoken_protocol",
+        "//third-party:serde_json",
+    ],
+    resources = [":fold_corpus_data"],
+    env = {
+        # CARGO_MANIFEST_DIR is needed at compile time by env!() in the test.
+        # The runtime override PANTOKEN_FOLD_CORPUS_FILES takes precedence.
+        "CARGO_MANIFEST_DIR": "server-rs/pantoken-protocol",
+    },
+    run_env = {
+        # Buck2's $(location) on a filegroup with multiple files doesn't produce
+        # a usable directory path for the test's read_dir() call. This is a
+        # known Buck2 limitation. As a workaround, point directly at the source
+        # directory. The files are checked in and don't change between builds.
+        # See docs/buck2-poc-findings.md for details.
+        "PANTOKEN_FOLD_CORPUS_DIR": "server-rs/pantoken-protocol/tests/fold-corpus",
+    },
+    visibility = ["PUBLIC"],
+)
+
+# Expose the fold-corpus directory as a filegroup so $(location) can reference it.
+filegroup(
+    name = "fold_corpus_data",
+    srcs = glob(["tests/fold-corpus/**/*.json"]),
+    visibility = ["PUBLIC"],
+)

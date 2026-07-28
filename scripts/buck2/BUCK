@@ -1,0 +1,21 @@
+# Buck2 BUCK file for scripts/buck2/.
+# Exposes the deterministic archive assembler, staging script, and validator
+# as file targets for use in genrules and sh_tests.
+
+export_file(
+    name = "assemble_archive_py",
+    src = "assemble-archive.py",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "stage_payload_sh",
+    src = "stage-payload.sh",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "validate_archive_sh",
+    src = "validate-archive.sh",
+    visibility = ["PUBLIC"],
+)

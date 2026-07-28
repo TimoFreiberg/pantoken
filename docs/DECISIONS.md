@@ -606,3 +606,47 @@ and left two Bazel tests failing, inline tests uncovered, a large generated
 are promotion blockers and follow-up work, not reasons to discard the existing
 Cargo/pnpm workflows.
 
+## No OpenSSL policy (Issue #117)
+
+**Date:** 2026-07-28
+
+**Decision:** The project avoids OpenSSL wherever a pure-Rust alternative
+exists. `reqwest` uses `rustls-tls` (not `default-tls`/`native-tls`/OpenSSL).
+`jwt-simple` uses the `pure-rust` feature (not `boring-sys`/BoringSSL).
+
+**Known exception — requires operator discussion:** `web-push` 0.11.0 depends
+on `ece` 2.3.1, which has only `backend-openssl` — no Rustls or pure-Rust
+backend exists in any published crate. This means the `pantoken-server` binary
+transitively depends on OpenSSL via `web-push` → `ece` → `openssl` → `ring`.
+Eliminating this dependency requires forking `ece` (to use RustCrypto) and
+`web-push` (to use `hyper-rustls`). This is a known non-hermetic boundary
+that must be explicitly discussed with the operator before any hermetic build
+system (Bazel or Buck2) can claim full server-crate coverage.
+
+**Principle:** Minimize system dependencies. Each native C dependency
+(OpenSSL, ring's C code, etc.) is a hermeticity blocker for build-system
+POCs and a maintenance burden for CI. When a pure-Rust alternative exists,
+use it. When one doesn't, document the exception and surface it for
+operator discussion rather than silently accepting the system dependency.
+
+## Buck2 POC evaluation (Issue #117)
+
+**Date:** 2026-07-28
+
+**Decision:** Buck2 is evaluated as an additive, non-authoritative build
+system alongside the existing Cargo/pnpm workflows and the Bazel POC.
+The evaluation is documented in `docs/buck2-poc-findings.md`.
+
+**Verdict: CONDITIONAL — not ready for broad adoption.** Buck2 successfully
+builds 4 of 5 server crates with affected-target execution and a checked-in
+Reindeer dependency graph. The `pantoken-server` binary is blocked by the
+OpenSSL/ring native compilation issue (see "No OpenSSL policy" above).
+Reindeer fixups are complex and the 335MB vendored dependency tree is a
+maintenance burden. Cargo remains authoritative; Buck2 is not promoted.
+
+**Cross-reference:** The Bazel POC (`docs/bazel-poc-findings.md`) achieves
+full 5-crate coverage because Bazel's `cargo_build_script` rule handles
+native compilation differently. Buck2's `buildscript_run` sandboxing is
+stricter, which is better for hermeticity but blocks the OpenSSL/ring
+build scripts.
+

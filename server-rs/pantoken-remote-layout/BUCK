@@ -1,0 +1,33 @@
+# Buck2 BUCK file for pantoken-remote-layout.
+# Cargo remains authoritative; this is additive for the Buck2 POC.
+# Mirrors server-rs/pantoken-remote-layout/BUILD.bazel.
+# Rust rules are built-in Buck2 globals — no load needed.
+
+rust_library(
+    name = "pantoken_remote_layout",
+    srcs = glob(["src/**/*.rs"]),
+    crate_root = "src/lib.rs",
+    edition = "2024",
+    deps = [
+        "//server-rs/pantoken-protocol:pantoken_protocol",
+        "//third-party:serde",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# Inline unit tests for the library crate.
+# Buck2's rust_test doesn't have Bazel's crate= dep reference.
+# Instead, we pass the library's srcs directly — cfg(test) is enabled
+# automatically by rust_test's --test flag.
+rust_test(
+    name = "unit_tests",
+    srcs = glob(["src/**/*.rs"]),
+    crate_root = "src/lib.rs",
+    crate = "pantoken_remote_layout",
+    edition = "2024",
+    deps = [
+        "//server-rs/pantoken-protocol:pantoken_protocol",
+        "//third-party:serde",
+    ],
+    visibility = ["PUBLIC"],
+)
