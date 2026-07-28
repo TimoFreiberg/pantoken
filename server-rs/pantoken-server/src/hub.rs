@@ -411,6 +411,19 @@ impl SessionHub {
         }
     }
 
+    /// Extract the session id from a session.json path (parent dir name).
+    /// Mirrors `PolytokenInner::session_id_from_path` but available to the hub
+    /// (which doesn't have access to the polytoken driver's inner).
+    fn session_id_from_path(path: &str) -> Option<String> {
+        let normalized = path.replace('\\', "/");
+        let parts: Vec<&str> = normalized.split('/').filter(|s| !s.is_empty()).collect();
+        if parts.len() >= 2 && parts[parts.len() - 1] == "session.json" {
+            Some(parts[parts.len() - 2].to_string())
+        } else {
+            None
+        }
+    }
+
     /// The seed source for one session: the journal's events, delta-coalesced,
     /// plus the {epoch, seq} watermark.
     pub fn seed_of(&self, sid: Option<&SessionId>) -> Option<(u64, u64, Vec<SessionDriverEvent>)> {
@@ -1818,7 +1831,7 @@ impl SessionHub {
                     "detach_session",
                     Box::new(move |hub| {
                         Box::pin(async move {
-                            let result = driver.detach_session(path).await;
+                            let result = driver.detach_session(path.clone()).await;
                             if let Err(msg) = result {
                                 let h = hub.lock();
                                 h.send_to_client(
@@ -1834,6 +1847,52 @@ impl SessionHub {
                                 let sessions = driver.list_sessions().await;
                                 let default_cwd = std::env::var("HOME").unwrap_or_default();
                                 let mut h = hub.lock();
+
+                                // Resolve the session id from the path. All
+                                // journal-drop, seed-send, and
+                                // default_focus_id clearing happens inside this
+                                // block — NOT inside the journal-exists guard
+                                // (default_focus_id must be cleared even when
+                                // the journal was already absent).
+                                if let Some(sid) = Self::session_id_from_path(&path) {
+                                    // Clear default_focus_id if it points at the
+                                    // detached session, so a freshly-connecting
+                                    // client doesn't adopt a detached session.
+                                    // This is OUTSIDE the is_some() guard — must
+                                    // fire even if no journal existed (e.g.
+                                    // session was landing but already evicted).
+                                    if h.default_focus_id.as_ref() == Some(&sid) {
+                                        h.default_focus_id = None;
+                                    }
+
+                                    // Drop the journal so the session is cold
+                                    // again — the next open_session rebuilds
+                                    // from /history. Also drop any pending
+                                    // coalesced delta (can't commit to a
+                                    // journal we're removing).
+                                    h.drop_pending(&sid);
+                                    if h.journals.remove(&sid).is_some() {
+                                        // Bump the epoch so any stale in-flight
+                                        // events from the old journal are
+                                        // rejected by the client's epoch/seq
+                                        // gate.
+                                        let epoch = h.next_epoch();
+                                        let msg = ServerMessage::Seed {
+                                            session_id: Some(sid.clone()),
+                                            epoch,
+                                            seq: 0,
+                                            events: Vec::new(),
+                                        };
+                                        // Send the empty seed to all clients
+                                        // viewing this session so they clear
+                                        // their cached folded state.
+                                        let focused: Vec<_> = h.clients_focused(&sid);
+                                        for send in focused {
+                                            let _ = send.try_send(msg.clone());
+                                        }
+                                    }
+                                }
+
                                 h.broadcast_session_list_with(sessions, default_cwd);
                             }
                         })
@@ -5016,6 +5075,219 @@ mod hub_models_tests {
             ServerMessage::SessionList { .. } => {}
             other => panic!("expected SessionList after detach, got {other:?}"),
         }
+    }
+
+    /// AC.1–AC.3: After a successful detach, the hub drops the journal, bumps
+    /// the epoch, and sends an empty Seed to all viewing clients.
+    #[tokio::test]
+    async fn detach_drops_journal_and_sends_empty_seed_to_viewer() {
+        let (_driver, hub, mut hub_ops) = test_hub();
+        let sid = "detach-session";
+        insert_test_journal(&hub, sid);
+
+        // Capture the pre-detach epoch for AC.3.
+        let pre_epoch = hub
+            .lock()
+            .seed_of(Some(&sid.to_string()))
+            .map(|(epoch, _, _)| epoch)
+            .expect("journal should exist before detach");
+
+        // Add a client focused on the session.
+        let (client_key, _tx, mut rx) = hub.lock().add_client(None);
+        hub.lock().set_client_focus(client_key, sid.to_string());
+
+        // Drain the initial connect-time messages (Hello, Seed for the
+        // default session, SessionStatus, UpdateStatus, PantokenSettings).
+        let _ = drain_until(&mut rx, |msg| matches!(msg, ServerMessage::Seed { .. })).await;
+
+        // Enqueue and apply the detach.
+        hub.lock().handle_client(
+            client_key,
+            ClientMessage::DetachSession {
+                path: format!("/sessions/{sid}/session.json"),
+            },
+        );
+        apply_one(hub.clone(), &mut hub_ops).await;
+
+        // AC.1: journal is removed.
+        assert!(
+            !hub.lock().has_journal(&sid.to_string()),
+            "journal should be dropped after detach"
+        );
+
+        // AC.2 + AC.3: client receives an empty Seed with a bumped epoch.
+        let seed = drain_until(&mut rx, |msg| matches!(msg, ServerMessage::Seed { .. })).await;
+        match seed {
+            ServerMessage::Seed {
+                events,
+                epoch,
+                session_id,
+                seq,
+            } => {
+                assert!(events.is_empty(), "seed events should be empty");
+                assert_eq!(session_id.as_deref(), Some(sid));
+                assert_eq!(seq, 0);
+                assert!(
+                    epoch > pre_epoch,
+                    "epoch should be bumped ({epoch} > {pre_epoch})"
+                );
+            }
+            other => panic!("expected Seed after detach, got {other:?}"),
+        }
+
+        // The client should also receive a SessionList broadcast.
+        let list = drain_until(&mut rx, |msg| {
+            matches!(msg, ServerMessage::SessionList { .. })
+        })
+        .await;
+        assert!(
+            matches!(list, ServerMessage::SessionList { .. }),
+            "expected SessionList after detach"
+        );
+    }
+
+    /// AC.4: When no journal exists for the session, detach still succeeds
+    /// (broadcasts session list) but does NOT send a spurious empty seed.
+    #[tokio::test]
+    async fn detach_with_no_journal_is_a_noop() {
+        let (_driver, hub, mut hub_ops) = test_hub();
+        let (client_key, _tx, mut rx) = hub.lock().add_client(None);
+
+        // No journal inserted — session "no-journal" has no journal.
+        hub.lock().handle_client(
+            client_key,
+            ClientMessage::DetachSession {
+                path: "/sessions/no-journal/session.json".into(),
+            },
+        );
+        apply_one(hub.clone(), &mut hub_ops).await;
+
+        // Should receive a SessionList but NOT a Seed.
+        let list = drain_until(&mut rx, |msg| {
+            matches!(msg, ServerMessage::SessionList { .. })
+        })
+        .await;
+        assert!(
+            matches!(list, ServerMessage::SessionList { .. }),
+            "expected SessionList after detach with no journal"
+        );
+
+        // All messages are enqueued synchronously under the hub lock during
+        // apply_one, so the channel should be drained after the SessionList.
+        // A Seed here would be a bug.
+        assert!(
+            rx.try_recv().is_err(),
+            "channel should be empty after SessionList — no Seed expected"
+        );
+    }
+
+    /// Race safety: after the journal is dropped by detach, a late-arriving
+    /// `SessionClosed` event does NOT re-create the journal or send a stale
+    /// `ServerMessage::Event` to viewers.
+    #[tokio::test]
+    async fn late_session_closed_after_journal_drop_is_safe() {
+        use pantoken_protocol::session_driver::SessionClosedReason;
+
+        let (_driver, hub, mut hub_ops) = test_hub();
+        let sid = "race-session";
+        insert_test_journal(&hub, sid);
+
+        let (client_key, _tx, mut rx) = hub.lock().add_client(None);
+        hub.lock().set_client_focus(client_key, sid.to_string());
+
+        // Drain the initial connect-time Seed for the default session.
+        let _ = drain_until(&mut rx, |msg| matches!(msg, ServerMessage::Seed { .. })).await;
+
+        // Detach → journal dropped, empty seed sent.
+        hub.lock().handle_client(
+            client_key,
+            ClientMessage::DetachSession {
+                path: format!("/sessions/{sid}/session.json"),
+            },
+        );
+        apply_one(hub.clone(), &mut hub_ops).await;
+
+        // Drain the empty seed + session list.
+        let _ = drain_until(&mut rx, |msg| matches!(msg, ServerMessage::Seed { .. })).await;
+        let _ = drain_until(&mut rx, |msg| {
+            matches!(msg, ServerMessage::SessionList { .. })
+        })
+        .await;
+
+        // Now simulate a late-arriving SessionClosed (the async event that
+        // races the success closure — here we fire it after the journal is
+        // already gone).
+        hub.lock().on_event(SessionDriverEvent::SessionClosed {
+            base: SessionEventBase {
+                session_ref: session_ref_for(sid),
+                timestamp: ts(),
+                run_id: None,
+                subagent_handle: None,
+            },
+            reason: SessionClosedReason::Manual,
+        });
+
+        // The journal must NOT have been re-created.
+        assert!(
+            !hub.lock().has_journal(&sid.to_string()),
+            "journal should not be re-created by a late SessionClosed"
+        );
+
+        // The client must NOT receive a ServerMessage::Event. on_event runs
+        // synchronously, so the channel should be empty after it returns.
+        assert!(
+            rx.try_recv().is_err(),
+            "channel should be empty — no Event expected from late SessionClosed"
+        );
+    }
+
+    /// AC.5: If the detached session was the `default_focus_id` (landing
+    /// session), it is cleared so a freshly-connecting client doesn't adopt
+    /// the detached session. Also verifies the reverse: a different session's
+    /// default_focus_id is NOT cleared.
+    #[tokio::test]
+    async fn detach_clears_default_focus_id() {
+        let (_driver, hub, mut hub_ops) = test_hub();
+        let sid = "landing-session";
+        insert_test_journal(&hub, sid);
+
+        // Simulate the session being the landing session.
+        hub.lock().default_focus_id = Some(sid.to_string());
+
+        let (client_key, _tx, _rx) = hub.lock().add_client(None);
+        hub.lock().handle_client(
+            client_key,
+            ClientMessage::DetachSession {
+                path: format!("/sessions/{sid}/session.json"),
+            },
+        );
+        apply_one(hub.clone(), &mut hub_ops).await;
+
+        assert_eq!(
+            hub.lock().default_focus_id,
+            None,
+            "default_focus_id should be cleared when the detached session was the landing session"
+        );
+
+        // Reverse: detaching a different session should NOT clear
+        // default_focus_id pointing at another session.
+        let other_sid = "other-session";
+        insert_test_journal(&hub, other_sid);
+        hub.lock().default_focus_id = Some("keep-this".to_string());
+
+        hub.lock().handle_client(
+            client_key,
+            ClientMessage::DetachSession {
+                path: format!("/sessions/{other_sid}/session.json"),
+            },
+        );
+        apply_one(hub.clone(), &mut hub_ops).await;
+
+        assert_eq!(
+            hub.lock().default_focus_id,
+            Some("keep-this".to_string()),
+            "default_focus_id should NOT be cleared when it points at a different session"
+        );
     }
 
     #[tokio::test]
