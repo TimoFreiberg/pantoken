@@ -123,8 +123,20 @@ release *args:
 publish *args:
     pnpm exec tsx scripts/desktop/publish.ts {{ args }}
 
-# --- Bazel POC (additive, experimental) ---
-# See docs/bazel-poc-findings.md for the evaluation. Cargo/pnpm remain authoritative.
+# --- Bazel foundation (additive, experimental) ---
+# See docs/bazel-policy.md. Cargo/pnpm remain authoritative.
+
+# Validate Bazel policy and resolve the mandatory target without a daemon/build.
+bazel-policy-check:
+    python3 scripts/bazel/check-policy.py
+
+# Compare deterministic archive/metadata fixtures across checkout roots.
+bazel-path-stability-test:
+    bazel test //:bazel_path_stability_test
+
+# Run Bazel tests with the two documented POC failures allowlisted.
+bazel-test-allowlisted:
+    python3 scripts/bazel/expected-test-results.py
 
 # Build all server-rs Rust crates via Bazel.
 bazel-build:

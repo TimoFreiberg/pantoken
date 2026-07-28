@@ -6,7 +6,7 @@ release-age protection, and representative timings — so future Bazel-migration
 failures can be attributed to the migration rather than floating tools or
 pre-existing drift.
 
-This baseline was established for [Bazel migration Ticket 2](https://github.com/TimoFreiberg/pantoken/issues/97).
+This baseline was established for [Bazel migration Ticket 2](https://github.com/TimoFreiberg/pantoken/issues/97). The additive Bazel rules and verification policy is [`docs/bazel-policy.md`](bazel-policy.md).
 
 ## Pinned tool versions
 

@@ -2,6 +2,8 @@
 
 ## Recommendation
 
+The canonical operational policy for the additive foundation is [`docs/bazel-policy.md`](bazel-policy.md). It does not make Bazel authoritative or expand the settled hybrid boundary.
+
 Adopt the staged direction in the session summary, but do not create a single “migrate Pantoken to Bazel” ticket. The work should be split into independently reversible tickets, with a measured Bazel proof of concept before any broad migration.
 
 The dependency shape is:

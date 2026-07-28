@@ -1,0 +1,11 @@
+//server-rs/pantoken-daemon-types:daemon_types_roundtrip
+//server-rs/pantoken-daemon-types:target_version_test
+//server-rs/pantoken-protocol:fold_corpus_tests
+//server-rs/pantoken-remote-layout:unit_tests
+//server-rs/pantoken-server:corpus_tests
+//server-rs/pantoken-server:live_path_tests
+//server-rs/pantoken-server:remote_runtime_tests
+//server-rs/pantoken-server:resume_and_recovery_tests
+//server-rs/pantoken-server:stdio_adapter_tests
+//server-rs/pantoken-server:websocket_adapter_tests
+//server-rs/pantoken-tar-validate:unit_tests

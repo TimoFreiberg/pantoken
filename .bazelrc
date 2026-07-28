@@ -1,17 +1,28 @@
-# Bazel POC configuration — additive to Cargo/pnpm, not authoritative.
-# See docs/bazel-poc-findings.md for the evaluation.
+# Bazel foundation: additive to Cargo/pnpm, not authoritative.
+# Canonical rules and update workflow: docs/bazel-policy.md
 
-# bzlmod is default in Bazel 8+, but explicit for clarity.
+# bzlmod is the dependency mechanism. Bazel 8.7 still needs WORKSPACE enabled
+# for the crate-universe repin command; remove this transitional flag with Bazel 9.
 build --enable_bzlmod
 build --enable_workspace
 test --enable_workspace
 
-# Local disk cache — enables cross-workspace cache reuse (a key POC metric).
-build --disk_cache=~/.cache/bazel
+# Hermetic defaults: sandbox all actions and do not import ambient credentials or
+# machine-specific environment. Rules must declare inputs and runtime data.
+build --spawn_strategy=sandboxed
+build --strategy=Genrule=sandboxed
+build --incompatible_strict_action_env
+build --action_env=TZ=UTC
+build --action_env=LC_ALL=C
+test --spawn_strategy=sandboxed
+test --incompatible_strict_action_env
+test --action_env=TZ=UTC
+test --action_env=LC_ALL=C
 
-# Readable colored output.
+# Cache reuse is explicitly opt-in. Cache absence never affects correctness.
+# Supply the directory at invocation time, for example:
+#   bazel --disk_cache=/path/chosen/by/caller build //server-rs/...
+
 build --color=yes
 test --color=yes
-
-# Show test output on failure.
 test --test_output=errors

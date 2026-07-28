@@ -39,7 +39,7 @@ See `docs/DESIGN.md` for architecture, `docs/DECISIONS.md` for settled calls, `d
   It may eventually own hermetic server-Rust checks and deterministic unsigned
   headless archives after the rollout gates pass; the current `just bazel-*`
   commands remain additive. Cargo and pnpm direct workflows remain supported.
-  See `docs/DECISIONS.md` and `docs/bazel-poc-findings.md`. Requires `bazelisk`
+  See [`docs/bazel-policy.md`](docs/bazel-policy.md), `docs/DECISIONS.md`, and `docs/bazel-poc-findings.md`. Requires `bazelisk`
   (`brew install bazelisk`).
 
 ## Stack & layout

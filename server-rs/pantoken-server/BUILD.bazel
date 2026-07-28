@@ -121,8 +121,8 @@ rust_test(
     env = {
         "PANTOKEN_CORPUS_FILES": "$(rootpaths //server-rs/tests:corpus_json)",
         "PANTOKEN_CANON_PARITY_FILES": "$(rootpaths //server-rs/tests:canon_parity_json)",
+        "HOME": ".",
     },
-    env_inherit = ["HOME"],
 )
 
 # Live-path tests — fake-daemon integration against the frozen corpus.
@@ -138,8 +138,8 @@ rust_test(
     ],
     env = {
         "PANTOKEN_CORPUS_FILES": "$(rootpaths //server-rs/tests:corpus_json)",
+        "HOME": ".",
     },
-    env_inherit = ["HOME"],
 )
 
 # WebSocket adapter contract tests.
@@ -154,7 +154,7 @@ rust_test(
         "@crates//futures-util",
         "@crates//tokio-tungstenite",
     ],
-    env_inherit = ["HOME"],
+    env = {"HOME": "."},
 )
 
 # Stdio adapter contract tests.
@@ -165,7 +165,7 @@ rust_test(
     ] + _TEST_SUPPORT,
     crate_root = "tests/stdio_adapter_contract_tests.rs",
     deps = _TEST_DEPS,
-    env_inherit = ["HOME"],
+    env = {"HOME": "."},
 )
 
 # Resume and recovery tests.
@@ -176,7 +176,7 @@ rust_test(
     ] + _TEST_SUPPORT,
     crate_root = "tests/resume_and_recovery_tests.rs",
     deps = _TEST_DEPS,
-    env_inherit = ["HOME"],
+    env = {"HOME": "."},
 )
 
 # Remote runtime integration tests.
@@ -187,5 +187,5 @@ rust_test(
     ] + _TEST_SUPPORT,
     crate_root = "tests/remote_runtime_integration_tests.rs",
     deps = _TEST_DEPS,
-    env_inherit = ["HOME"],
+    env = {"HOME": "."},
 )

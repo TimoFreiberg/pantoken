@@ -111,8 +111,15 @@ pkg_tar(
 # ── Validation sh_test ───────────────────────────────────────────────────────
 
 sh_test(
+    name = "bazel_path_stability_test",
+    srcs = ["//scripts/bazel:path-stability.sh"],
+    data = ["//scripts/bazel:path_stability_py", "//scripts/bazel:path_stability_fixture"],
+    tags = ["small", "hermetic"],
+)
+
+sh_test(
     name = "validate_headless_archive",
-    srcs = ["scripts/bazel/validate-archive.sh"],
+    srcs = ["//scripts/bazel:validate-archive.sh"],
     args = [
         "$(location //server-rs/pantoken-tar-validate:pantoken_tar_validate)",
         "$(location :pantoken_headless_unsigned)",
