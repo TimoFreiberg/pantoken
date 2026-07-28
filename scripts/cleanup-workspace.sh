@@ -15,8 +15,13 @@ WS_DIR="$REPO_ROOT/.workspaces/$WS_NAME"
 
 log() { echo "[$(date '+%H:%M:%S')] $*" >&2; }
 
-# 1. If the workspace isn't tracked by jj, just remove the dir if it lingers.
-if ! jj -R "$REPO_ROOT" workspace list -T 'name ++ "\n"' 2>/dev/null | grep -Fqx "$WS_NAME"; then
+# 1. Inspect the registry successfully before deciding whether the directory is stale.
+# Capture all jj output before matching so grep cannot SIGPIPE jj under pipefail.
+WORKSPACE_NAMES=$(jj -R "$REPO_ROOT" workspace list -T 'name ++ "\n"' 2>/dev/null) || {
+  log "Could not inspect jj workspaces — retaining '$WS_NAME'."
+  exit 1
+}
+if ! grep -Fqx "$WS_NAME" <<<"$WORKSPACE_NAMES"; then
   if [ -d "$WS_DIR" ]; then
     rm -rf "$WS_DIR"
     log "Removed untracked workspace directory: $WS_DIR"
