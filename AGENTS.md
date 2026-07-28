@@ -35,11 +35,12 @@ See `docs/DESIGN.md` for architecture, `docs/DECISIONS.md` for settled calls, `d
   the toolchain file for every `cargo` command. See
   [`docs/toolchain-baseline.md`](docs/toolchain-baseline.md) for the full
   baseline (versions, checks, timings, and how to reproduce).
-- **Bazel is an experimental additive build system.** It builds the same Rust
-  crates and unsigned headless archive as Cargo/pnpm, but is not authoritative.
-  See `docs/bazel-poc-findings.md` for the evaluation and proceed/stop
-  recommendation. Use `just bazel-build` / `just bazel-test` / `just bazel-archive`.
-  Requires `bazelisk` (`brew install bazelisk`).
+- **Bazel has a settled conditional hybrid boundary, but is not authoritative yet.**
+  It may eventually own hermetic server-Rust checks and deterministic unsigned
+  headless archives after the rollout gates pass; the current `just bazel-*`
+  commands remain additive. Cargo and pnpm direct workflows remain supported.
+  See `docs/DECISIONS.md` and `docs/bazel-poc-findings.md`. Requires `bazelisk`
+  (`brew install bazelisk`).
 
 ## Stack & layout
 

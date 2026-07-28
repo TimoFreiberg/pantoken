@@ -507,3 +507,102 @@ trail the last assistant response are collected into a `postResponse` array
 and rendered after the response, so the work block can collapse behind the
 summary while the trailing items stay visible.
 
+## Bazel boundary: conditional hybrid (Issue #101)
+
+**Date:** 2026-07-28
+
+**Decision:** Adopt a conditional hybrid Bazel boundary. Bazel is the eventual
+CI/release authority only for hermetic server-Rust targets and deterministic
+unsigned headless archive/validator outputs, after the promotion gates below
+are met. This records the architecture for migration; it does not make Bazel
+authoritative today.
+
+### Ownership by environment
+
+- **Local targeted development:** Cargo remains the supported direct Rust
+  interface, and pnpm remains the supported JavaScript/Vite interface. The
+  existing `just bazel-*` commands are additive POC/migration commands. Vite
+  development, dependency installation, HMR, and the initial frontend
+  production build remain pnpm-owned.
+- **CI validation:** Bazel may become authoritative for the selected hermetic
+  server-Rust checks and deterministic unsigned headless artifact checks only
+  after all gates pass. Cargo/pnpm checks continue alongside it during staged
+  rollout and remain the fallback selector.
+- **Release assembly:** Bazel can provide unsigned server and headless archive
+  inputs. The existing tag-triggered pnpm/TypeScript release workflow remains
+  responsible for the supported macOS/Linux release matrix, metadata assembly,
+  validation and smoke tests, signing, notarization, deployment, and
+  publishing. Secret-bearing steps stay outside ordinary cacheable Bazel
+  actions.
+
+### Rust and desktop scope
+
+Bazel initially owns only hermetic server crates and their selected
+integration/parity tests. It does not own the Tauri desktop/native packaging
+path, desktop artifacts, or platform-native desktop release work; that path
+remains Cargo/Tauri-owned unless a later decision expands the boundary. Bazel
+may produce the unsigned headless archive and its archive validator, but not
+signed `.sig` outputs.
+
+### Frontend, JavaScript, and Playwright scope
+
+pnpm/Vite owns frontend development, HMR, dependency installation, and the
+initial production bundle. Bazel may consume declared `client/dist` output as
+an input to the unsigned headless archive, but does not run Vite initially.
+JS unit tests and TypeScript checks remain pnpm-owned because the POC did not
+establish a hermetic Node/Bazel toolchain or a benefit that justifies adding
+that graph. Both Playwright tiers also remain pnpm-owned initially: the
+standard mock E2E tier and the corpus-backed live/fake-daemon tier.
+
+### Generated types, parity, and hermetic tests
+
+Checked-in generated daemon types are the build input. Code generation and
+freshness checks remain an explicit pnpm/polytoken workflow; Bazel must not
+invoke an ambient daemon to regenerate them. protocol parity and corpus tests
+may enter Bazel only as deterministic tests with declared generated files and
+corpus inputs. An in-process or loopback fake-daemon harness is permitted only
+with declared inputs and an explicit test environment. Hermetic cacheable
+Bazel actions must not use an ambient real daemon, provider, external network,
+or undeclared filesystem input; inherited `HOME` is not a promotion pattern
+unless justified by later foundation work.
+
+### Non-goals and release boundary
+
+This decision does not mandate universal Bazel usage, a Bazel development
+server or HMR, immediate CI replacement, target deletion, lockfile/toolchain
+changes, or migration of frontend, JS tests, Playwright, desktop packaging,
+signing, notarization, credentials, deployment, or publishing. Signing is not
+simply Cargo-owned: it remains in the external credential-bearing release
+orchestration, outside ordinary cacheable actions.
+
+### Promotion criteria and rollback
+
+Bazel becomes authoritative only when the selected checks have parity with the
+existing Cargo/pnpm checks, all selected Bazel tests pass (including the two
+currently failing POC targets and inline-test coverage), and deterministic
+source/configuration/generated-input invalidation is demonstrated. The team
+must rerun cold, warm, incremental, and cross-workspace measurements on the
+same scenario and machine, record absolute values and ratios against both
+`docs/toolchain-baseline.md` and the POC timing table, and explain any
+correctness difference. There must be no unexplained correctness regression;
+any accepted clean-build regression requires explicit owner sign-off. The
+process must include a concrete CI fallback exercise that disables or makes
+the Bazel cache unavailable (or selects the Cargo/pnpm path) and verifies the
+existing gate completes. Dependency and BUILD-file updates must have a
+maintainable, documented procedure, including the generated-lockfile burden.
+
+Roll out quickly but reversibly: run Bazel alongside the existing paths, retain
+Cargo/pnpm direct workflows through epic completion and as rollback selectors,
+and promote each migrated boundary only after its gates pass. If a gate fails,
+revert CI selectors or `just` entry points to Cargo/pnpm without deleting the
+direct paths. Final signed-release integration is a separate follow-up
+validation, not a gate for this migration.
+
+**POC rationale:** The POC measured near-instant warm builds, surgical
+affected-target execution, cross-workspace cache reuse, and deterministic
+archive assembly. It also measured a slower clean build and maintenance cost,
+and left two Bazel tests failing, inline tests uncovered, a large generated
+`MODULE.bazel.lock`, and no CI, frontend build, or signing validation. Those
+are promotion blockers and follow-up work, not reasons to discard the existing
+Cargo/pnpm workflows.
+

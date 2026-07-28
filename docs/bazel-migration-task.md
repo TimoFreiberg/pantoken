@@ -159,6 +159,9 @@ See [`docs/toolchain-baseline.md`](toolchain-baseline.md) for the baseline.
 
 ### Ticket 6 — Define Pantoken’s hybrid Bazel boundary
 
+**Status: decided/approved; migration remains gated on POC blockers and later tickets.**
+See [`docs/DECISIONS.md#bazel-boundary-conditional-hybrid-issue-101`](DECISIONS.md#bazel-boundary-conditional-hybrid-issue-101) for the recorded boundary. This exit gate records the approved architecture; it does not mean migration is complete or Bazel is authoritative.
+
 **Goal:** Make a short architecture decision before broad target migration.
 
 Decide explicitly:
@@ -228,7 +231,7 @@ Keep direct pnpm/Vite development and HMR. Preserve type checks, unit tests, pro
 
 **Goal:** Make Bazel authoritative for targets inside the agreed hybrid boundary.
 
-Preserve the current CI separation between web checks, sharded E2E, Rust, macOS desktop, Linux/headless, and release gates. Keep platform-native execution where required. Make unsigned artifacts derivable from declared source and toolchain inputs, and separate cacheable production from signing, notarization, uploading, and publishing. Retain a non-Bazel fallback through at least one real release cycle.
+Preserve the current CI separation between web checks, sharded E2E, Rust, macOS desktop, Linux/headless, and release gates. Keep platform-native execution where required. Make unsigned artifacts derivable from declared source and toolchain inputs, and separate cacheable production from signing, notarization, uploading, and publishing. Retain a non-Bazel Cargo/pnpm fallback through epic completion; final signed-release integration is a separate follow-up validation and not a migration gate.
 
 ### Ticket 13 — Retire superseded tooling and document the final workflow
 
