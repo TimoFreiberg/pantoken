@@ -28,19 +28,37 @@ struct RuntimeHandle {
     socket_path: PathBuf,
 }
 
+/// Resolve the server binary supplied by Bazel, retaining Cargo's target/debug
+/// layout as the fallback for direct package test execution.
+fn server_binary() -> PathBuf {
+    std::env::var_os("PANTOKEN_SERVER_BIN")
+        .map(PathBuf::from)
+        .map(|path| {
+            if path.is_absolute() || path.is_file() {
+                path
+            } else if let Some(runfiles) = std::env::var_os("RUNFILES_DIR") {
+                PathBuf::from(runfiles).join(path)
+            } else {
+                path
+            }
+        })
+        .or_else(|| {
+            let exe = std::env::current_exe().expect("current_exe");
+            exe.parent()
+                .and_then(|p| p.parent())
+                .map(|p| p.join("pantoken-server"))
+                .filter(|p| p.is_file())
+        })
+        .expect("pantoken-server binary not found")
+}
+
 async fn spawn_remote_runtime(driver: &str) -> RuntimeHandle {
     let root = tempfile::tempdir().expect("tempdir");
     let root_path = root.path().to_path_buf();
 
     std::fs::create_dir_all(layout::run_dir(&root_path)).unwrap();
 
-    let exe = std::env::current_exe().expect("current_exe");
-    let server_bin = exe
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("pantoken-server"))
-        .filter(|p| p.is_file())
-        .expect("pantoken-server binary not found");
+    let server_bin = server_binary();
 
     let mut cmd = tokio::process::Command::new(&server_bin);
     cmd.env("PANTOKEN_SERVE_MODE", "remote-runtime");
@@ -192,13 +210,7 @@ async fn stale_runtime_recovery_dead_pid_in_pidfile() {
 
     // Now spawn the runtime — it should reclaim the stale lock, remove the
     // stale socket, and bind a new one.
-    let exe = std::env::current_exe().expect("current_exe");
-    let server_bin = exe
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("pantoken-server"))
-        .filter(|p| p.is_file())
-        .expect("pantoken-server binary not found");
+    let server_bin = server_binary();
 
     let mut cmd = tokio::process::Command::new(&server_bin);
     cmd.env("PANTOKEN_SERVE_MODE", "remote-runtime");
@@ -243,13 +255,7 @@ async fn stale_runtime_recovery_stale_socket_no_process() {
     std::fs::write(&socket_path, b"not a real socket").unwrap();
 
     // No pidfile — the runtime should start fresh.
-    let exe = std::env::current_exe().expect("current_exe");
-    let server_bin = exe
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("pantoken-server"))
-        .filter(|p| p.is_file())
-        .expect("pantoken-server binary not found");
+    let server_bin = server_binary();
 
     let mut cmd = tokio::process::Command::new(&server_bin);
     cmd.env("PANTOKEN_SERVE_MODE", "remote-runtime");

@@ -36,7 +36,7 @@ Same machine as the Cargo baseline in `docs/toolchain-baseline.md`.
 | Clean build | 32s | 11.4s | Bazel is 2.8× slower on clean builds (sandbox overhead + no sccache) |
 | Warm build | <1s | 8.4s | Bazel is dramatically faster — action cache, zero work |
 | Incremental (1 file) | 1s (16 actions) | 2.5s | Only protocol + dependents rebuilt; tar-validate untouched |
-| Test run | ~30s (9/11 pass) | N/A | 2 test targets fail due to binary-path discovery (see Known Gaps) |
+| Test run | ~30s (all expected server tests pass) | N/A | Includes corpus/fake-daemon, integration, and inline library unit tests |
 | Archive build | 3s (disk cache) | N/A | Includes Rust binaries + client-dist + deploy scripts |
 | Cross-workspace (disk cache) | 3s (767 cache hits) | N/A | `bazel clean` + rebuild with `--disk_cache` — 767/1134 actions hit cache |
 
@@ -135,19 +135,17 @@ each `env!()` call, with `env!()` as the fallback. Cargo builds are unaffected.
 
 The `config.rs` `PANTOKEN_CLIENT_DIST` case already had a runtime override — no patch needed.
 
-## Known gaps and follow-ups
+## Completed parity and remaining follow-ups
 
-1. **2 test targets fail under Bazel** (`remote_runtime_tests`, `resume_and_recovery_tests`):
-   These tests spawn the `pantoken-server` binary using `std::env::current_exe()` to navigate
-   to `target/debug/pantoken-server` (a Cargo-specific layout). Under Bazel, the binary is in a
-   different sandbox path. Fixing this requires either (a) a `PANTOKEN_SERVER_BIN` env var the
-   tests check first, or (b) passing the binary as a `data` dependency. This is a source patch
-   beyond the POC's 3-location scope, so it's documented as a gap.
+1. **Explicit binary contract**: `remote_runtime_tests` and `resume_and_recovery_tests` declare
+   `:pantoken_server` as runtime data and receive its runfiles-relative path through
+   `PANTOKEN_SERVER_BIN`. Their shared resolver uses that value under Bazel and retains the
+   Cargo `current_exe`/`target/debug` fallback for direct package tests.
 
-2. **Inline unit tests in `src/` are not run under Bazel**: The `pantoken_server_lib` target
-   doesn't have a `rust_test` with `crate = ":pantoken_server_lib"` to run its inline unit tests
-   (e.g., `src/push.rs` tests using `http`, `src/sessions_registry.rs` tests using `filetime`).
-   The integration tests cover the same code paths, but the inline tests are Cargo-only.
+2. **Inline library coverage is in the Bazel graph**: `server_lib_unit_tests` wraps
+   `pantoken_server_lib` with rules_rust's `crate =` test mode and explicitly supplies the
+   `http`, `filetime`, and `tempfile` dev-dependencies used by cfg(test) modules. It executes
+   the full inline library suite; Cargo remains the authoritative Rust workflow.
 
 3. **`MODULE.bazel.lock` is 2.8MB** — jj refuses to snapshot it by default. Needs either
    `.gitignore` exclusion or a config change (`jj config set --repo snapshot.max-new-file-size`).
@@ -173,9 +171,10 @@ The `config.rs` `PANTOKEN_CLIENT_DIST` case already had a runtime override — n
 | Test/artifact caching | ✅ Action cache (warm build <1s), disk cache (cross-workspace 3s), deterministic archive validation | Pass |
 | Cross-workspace/CI reuse | ✅ `--disk_cache` enables 767/1134 cache hits after `bazel clean`. Ready for CI. | Pass |
 
-**Recommendation**: Adopt Bazel incrementally for CI, starting with:
-1. `bazel build //server-rs/...` + `bazel test //server-rs/...` as a CI gate (alongside existing Cargo checks)
-2. `bazel build //:pantoken_headless_unsigned` + `bazel test //:validate_headless_archive` for archive validation
-3. Cross-workspace cache reuse via shared `--disk_cache` (or remote cache in CI)
+**Recommendation**: Continue the additive rollout alongside authoritative Cargo/pnpm workflows:
+1. Use `bazel build //server-rs/...` and the all-pass expected-test manifest for deterministic local validation.
+2. Use `bazel build //:pantoken_headless_unsigned` + `bazel test //:validate_headless_archive` for archive validation when `client/dist` is available.
+3. Preserve cross-workspace cache reuse via shared `--disk_cache` (or remote cache in CI).
 
-Defer until the 2 failing test targets are resolved and the `MODULE.bazel.lock` size issue is addressed.
+The server test parity gaps are resolved. Bazel remains non-authoritative; CI promotion and the
+`MODULE.bazel.lock` size issue remain separate follow-ups.

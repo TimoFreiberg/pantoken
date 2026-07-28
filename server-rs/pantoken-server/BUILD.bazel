@@ -60,6 +60,21 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
+# Inline unit tests for the library crate. The wrapper enables cfg(test) on
+# pantoken_server_lib and adds only the crate's Cargo dev-dependencies used by
+# inline modules.
+rust_test(
+    name = "server_lib_unit_tests",
+    crate = ":pantoken_server_lib",
+    deps = [
+        "@crates//http",
+        "@crates//filetime",
+        "@crates//tempfile",
+    ],
+    env = {"HOME": "."},
+    tags = ["small"],
+)
+
 # ── Binary ──────────────────────────────────────────────────────────────────
 
 rust_binary(
@@ -123,6 +138,7 @@ rust_test(
         "PANTOKEN_CANON_PARITY_FILES": "$(rootpaths //server-rs/tests:canon_parity_json)",
         "HOME": ".",
     },
+    tags = ["moderate"],
 )
 
 # Live-path tests — fake-daemon integration against the frozen corpus.
@@ -140,6 +156,7 @@ rust_test(
         "PANTOKEN_CORPUS_FILES": "$(rootpaths //server-rs/tests:corpus_json)",
         "HOME": ".",
     },
+    tags = ["moderate"],
 )
 
 # WebSocket adapter contract tests.
@@ -155,6 +172,7 @@ rust_test(
         "@crates//tokio-tungstenite",
     ],
     env = {"HOME": "."},
+    tags = ["moderate"],
 )
 
 # Stdio adapter contract tests.
@@ -166,6 +184,7 @@ rust_test(
     crate_root = "tests/stdio_adapter_contract_tests.rs",
     deps = _TEST_DEPS,
     env = {"HOME": "."},
+    tags = ["moderate"],
 )
 
 # Resume and recovery tests.
@@ -176,7 +195,12 @@ rust_test(
     ] + _TEST_SUPPORT,
     crate_root = "tests/resume_and_recovery_tests.rs",
     deps = _TEST_DEPS,
-    env = {"HOME": "."},
+    data = [":pantoken_server"],
+    env = {
+        "HOME": ".",
+        "PANTOKEN_SERVER_BIN": "$(rootpath :pantoken_server)",
+    },
+    tags = ["moderate"],
 )
 
 # Remote runtime integration tests.
@@ -187,5 +211,10 @@ rust_test(
     ] + _TEST_SUPPORT,
     crate_root = "tests/remote_runtime_integration_tests.rs",
     deps = _TEST_DEPS,
-    env = {"HOME": "."},
+    data = [":pantoken_server"],
+    env = {
+        "HOME": ".",
+        "PANTOKEN_SERVER_BIN": "$(rootpath :pantoken_server)",
+    },
+    tags = ["moderate"],
 )

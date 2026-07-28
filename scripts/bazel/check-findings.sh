@@ -17,7 +17,7 @@ REQUIRED_SECTIONS=(
     "## Affected-target execution"
     "## Correctness invalidation"
     "## Ergonomics assessment"
-    "## Known gaps"
+    "## Completed parity and remaining follow-ups"
     "## Decision gate"
 )
 

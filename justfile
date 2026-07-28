@@ -134,7 +134,7 @@ bazel-policy-check:
 bazel-path-stability-test:
     bazel test //:bazel_path_stability_test
 
-# Run Bazel tests with the two documented POC failures allowlisted.
+# Run the independently declared server Bazel test manifest; every test must pass.
 bazel-test-allowlisted:
     python3 scripts/bazel/expected-test-results.py
 

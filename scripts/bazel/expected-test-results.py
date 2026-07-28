@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Run server Bazel tests and allowlist only the two known Cargo-layout failures."""
+"""Run every expected server Bazel test and require a passing result."""
 from __future__ import annotations
-import json, pathlib, re, subprocess, sys, tempfile
+import json, pathlib, subprocess, sys, tempfile
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "scripts/bazel/expected-test-targets.txt"
-ALLOW = {"//server-rs/pantoken-server:remote_runtime_tests", "//server-rs/pantoken-server:resume_and_recovery_tests"}
-DIAG = re.compile(r"^pantoken-server binary not found$", re.I | re.M)
 TERMINAL = {"PASSED", "FAILED", "FLAKY", "TIMEOUT", "INCOMPLETE", "NO_STATUS"}
 def labels_from_query() -> set[str]:
     p = subprocess.run(["bazel", "query", 'kind(".*_test rule", //server-rs/...)'], cwd=ROOT, text=True, capture_output=True)
@@ -37,10 +35,8 @@ def main() -> int:
     if infrastructure_error or finished_code not in ("SUCCESS", "TESTS_FAILED") or set(results) != expected:
         print("Bazel startup/loading/analysis/infrastructure failure or incomplete result set", file=sys.stderr); return 1
     for label, status in results.items():
-        if label in ALLOW:
-            if status != "FAILED" or not DIAG.search(logs.get(label, "")):
-                print(f"allowlisted failure changed for {label}", file=sys.stderr); return 1
-        elif status != "PASSED": print(f"unexpected result {label}: {status}", file=sys.stderr); return 1
-    if p.returncode != 0 and not all(results[x] == "FAILED" for x in ALLOW): return 1
-    print("Bazel test result allowlist passed"); return 0
+        if status != "PASSED":
+            print(f"unexpected result {label}: {status}", file=sys.stderr); return 1
+    if p.returncode != 0: return 1
+    print("All expected Bazel server tests passed"); return 0
 if __name__ == "__main__": sys.exit(main())

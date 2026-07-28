@@ -5,6 +5,7 @@
 //server-rs/pantoken-server:corpus_tests
 //server-rs/pantoken-server:live_path_tests
 //server-rs/pantoken-server:remote_runtime_tests
+//server-rs/pantoken-server:server_lib_unit_tests
 //server-rs/pantoken-server:resume_and_recovery_tests
 //server-rs/pantoken-server:stdio_adapter_tests
 //server-rs/pantoken-server:websocket_adapter_tests

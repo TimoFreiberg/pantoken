@@ -33,14 +33,26 @@ async fn spawn_remote_runtime(driver: &str) -> RuntimeHandle {
     // Ensure run dir exists.
     std::fs::create_dir_all(layout::run_dir(&root_path)).unwrap();
 
-    let exe = std::env::current_exe().expect("current_exe");
-    // The test binary is at target/debug/deps/<test_name>-<hash>. We need the
-    // pantoken-server binary, which is at target/debug/pantoken-server.
-    let server_bin = exe
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("pantoken-server"))
-        .filter(|p| p.is_file())
+    let server_bin = std::env::var_os("PANTOKEN_SERVER_BIN")
+        .map(PathBuf::from)
+        .map(|path| {
+            if path.is_absolute() || path.is_file() {
+                path
+            } else if let Some(runfiles) = std::env::var_os("RUNFILES_DIR") {
+                PathBuf::from(runfiles).join(path)
+            } else {
+                path
+            }
+        })
+        .or_else(|| {
+            let exe = std::env::current_exe().expect("current_exe");
+            // Cargo places the test binary at target/debug/deps/<test>-<hash>
+            // and the server binary at target/debug/pantoken-server.
+            exe.parent()
+                .and_then(|p| p.parent())
+                .map(|p| p.join("pantoken-server"))
+                .filter(|p| p.is_file())
+        })
         .expect("pantoken-server binary not found");
 
     let mut cmd = tokio::process::Command::new(&server_bin);
