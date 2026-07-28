@@ -270,22 +270,19 @@
   // Starts at -1 so the first measurement never reads as growth.
   let prevSize = -1;
 
-  // --- Prompt-stepping nav (↑/↓ buttons). `navIndex` is a cursor into the visible
-  //     `.row.user` list: null = not stepping (sitting at the live tail). ↑ walks toward
-  //     older prompts, ↓ toward newer ones, and stepping past the newest returns to the
-  //     live bottom. The CURSOR — not the scroll position — is the source of truth, so a
-  //     rapid burst of presses steps deterministically even while a scroll from the
-  //     previous press is still settling (reading scrollTop mid-jump would stutter).
-  // $state: the template reads it (`class:visible` keeps the floating nav
-  // control shown while actively stepping) — a plain let wouldn't re-render.
-  let navIndex = $state<number | null>(null);
+  // --- Prompt-stepping nav (↑/↓ buttons). Every press anchors to the current viewport
+  //     rather than a persistent cursor, so content reflow or an intervening scroll cannot
+  //     make the next jump stale. `navStepping` only keeps the floating nav visible while
+  //     actively stepping — it is not used to choose the next prompt.
+  // $state: the template reads it (`class:visible` keeps the floating nav control shown
+  // while actively stepping) — a plain let wouldn't re-render.
+  let navStepping = $state(false);
   // Whether the transcript area is hovered or focused, so the floating prev/next
   // prompt-nav control is visible. On touch (pointer: coarse) the control is always
   // visible via CSS — hover/focus doesn't apply there.
   let navHovered = $state(false);
   // A programmatic scroll fires `scroll` events of its own; treat scrolls within this
-  // window as ours and keep the cursor. Once it lapses, a genuine user scroll drops the
-  // cursor so the next ↑ re-anchors to the most recent prompt. Prompt-stepping uses an
+  // window as ours for pin-state and save-position handling. Prompt-stepping uses an
   // INSTANT scroll (scrollTo, no animation), so it lands within a frame or two; the
   // window is short (120ms) but still covers the async scroll-event dispatch + any rAF
   // the browser defers to. settleScroll (switch/restore/send) keeps its own longer
@@ -443,7 +440,7 @@
     // Reaching the bottom clears the active-session unread flag (you've seen it all).
     if (pinned) store.clearActiveUnread();
     // A user scroll (not one of ours) abandons prompt-stepping, so the next ↑ button press re-anchors.
-    if (Date.now() >= progScrollUntil) navIndex = null;
+    if (Date.now() >= progScrollUntil) navStepping = false;
     // Persist where the user is reading (debounced). Skipped during our own programmatic
     // scrolls (prompt-stepping / settleScroll) — those set progScrollUntil, and saving a
     // transient mid-scroll position would restore to a spot the user never chose.
@@ -532,7 +529,7 @@
     lastScrollTop = 0;
     userScrolling = false;
     clearTimeout(userScrollClearTimer);
-    navIndex = null;
+    navStepping = false;
     const plan = id ? planRestore(scrollPositions, id) : null;
     if (plan && plan !== "bottom") {
       // Scrolled-up reading spot: NOT pinned. settleScroll re-derives ratio * scrollHeight
@@ -581,7 +578,7 @@
     if (n === lastSendN) return;
     lastSendN = n;
     pinned = true;
-    navIndex = null;
+    navStepping = false;
     store.clearActiveUnread();
     // Re-assert across frames (not a single scrollTo): sending while scrolled up jumps
     // from the top, where content between may still be settling (images decoding,
@@ -683,32 +680,47 @@
     return 0; // nothing scrolled off the top yet → the oldest prompt
   }
 
-  /** Step the prompt cursor and scroll the target prompt to the top of the viewport
-   *  (your message + the response below it). ↑ (dir -1) walks toward older prompts; the
-   *  first press anchors relative to where you're reading (see firstUpAnchor). ↓ (dir +1)
-   *  walks back toward newer ones, and stepping past the newest returns to the live
-   *  bottom. */
+  /** The first prompt whose top is below the viewport bottom — the next prompt
+   *  to jump to when pressing ↓. Returns null if no prompt is below the fold
+   *  (at/near the live tail), signaling a jump to the bottom.
+   *  A prompt straddling the viewport bottom (top above, body below) is
+   *  considered visible and skipped; ↓ always targets a prompt fully below
+   *  the fold. */
+  function firstDownAnchor(prompts: NodeListOf<HTMLElement>): number | null {
+    if (!scroller) return null;
+    const sBottom = scroller.getBoundingClientRect().bottom;
+    for (let i = 0; i < prompts.length; i++) {
+      const top = prompts[i]?.getBoundingClientRect().top ?? Infinity;
+      if (top > sBottom) return i;
+    }
+    return null; // nothing below the fold → live bottom
+  }
+
+  /** Scroll the target prompt to the top of the viewport, anchoring every press to
+   *  the current viewport rather than a persistent cursor. ↑ (dir -1) finds the
+   *  most recent prompt above the viewport; ↓ (dir +1) finds the first prompt below
+   *  the viewport and returns to the live bottom when there is none. */
   function stepPrompt(dir: -1 | 1): void {
     if (!scroller) return;
     const prompts = scroller.querySelectorAll<HTMLElement>(".row.user");
     const last = prompts.length - 1;
-    if (dir === 1) {
-      // ↓: not stepping yet, or already at/past the newest prompt → return to the live
-      // bottom (preserves the old "↓ jumps to the tail from anywhere" gesture).
-      if (navIndex === null || navIndex >= last) {
-        navIndex = null;
-        markProgScroll();
+    if (last < 0) return;
+
+    let target: HTMLElement | null;
+    if (dir === -1) {
+      const idx = firstUpAnchor(prompts);
+      target = prompts[idx] ?? null;
+    } else {
+      const idx = firstDownAnchor(prompts);
+      if (idx === null) {
+        navStepping = false;
         scrollToBottom();
         return;
       }
-      navIndex += 1;
-    } else {
-      if (last < 0) return; // no prompts to step to
-      // ↑: first press anchors to your reading spot; otherwise one older, clamped oldest.
-      navIndex = navIndex === null ? firstUpAnchor(prompts) : Math.max(0, navIndex - 1);
+      target = prompts[idx] ?? null;
     }
-    const target = prompts[navIndex];
     if (!target) return;
+
     // INSTANT jump (no smooth animation) so the prompt is visible + settled within a
     // frame — well under the ≤300ms target. scrollIntoView({block:"start"}) clamps at
     // the max scroll offset (a prompt near the tail can't reach the top), so we
@@ -725,6 +737,7 @@
     // streaming-pin effect doesn't yank back to the bottom. markProgScroll sets
     // progScrollUntil which makes onScroll's early-return guard hold this state.
     pinned = false;
+    navStepping = true;
     scroller.scrollTo({ top });
     flashPromptRow(target);
   }
@@ -1282,7 +1295,7 @@
 {/if}
 <div
   class="prompt-nav"
-  class:visible={navHovered || navIndex !== null}
+  class:visible={navHovered || navStepping}
   role="group"
   aria-label="Prompt navigation"
 >

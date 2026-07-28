@@ -647,7 +647,7 @@ test("Ctrl/Cmd+Up anchors to the scroll position, not always the last prompt", a
   // ↑ jumps to the prompt at the top of where we're reading (#1, just above the parked
   // #2) — it does NOT yank down to the most recent prompt the way it used to.
   await page.locator(".transcript-wrap").hover();
-  await page.getByTestId("prompt-nav-up").click();
+  await page.getByTestId("prompt-nav-up").press("Enter");
   await expect.poll(topRowIndex).toBeLessThanOrEqual(2);
   const idx = await topRowIndex();
   expect(idx).toBeGreaterThanOrEqual(1); // moved up to an early prompt
@@ -672,6 +672,8 @@ test("Ctrl/Cmd+Up anchors to the scroll position, not always the last prompt", a
 });
 
 test("Ctrl/Cmd+Up/Down step through user prompts", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 600 });
+  await page.waitForTimeout(50);
   // Build several turns so the oldest prompts have enough content below them to scroll to
   // the top (a short final turn can't, which is fine — the stepper clamps there).
   await buildMultiTurn(page, 5);
@@ -690,25 +692,65 @@ test("Ctrl/Cmd+Up/Down step through user prompts", async ({ page }) => {
 
   // From the live tail, clicking ↑ walks one prompt older per click, all the way to the oldest.
   // Stepping one at a time (settling between clicks) keeps each smooth scroll short.
-  await page.locator(".transcript-wrap").hover();
+  await page.locator(".scroller").focus();
   const upBtn = page.getByTestId("prompt-nav-up");
   const downBtn = page.getByTestId("prompt-nav-down");
   for (let i = last; i >= 0; i--) {
-    await upBtn.click();
+    await upBtn.press("Enter");
     await expect.poll(() => atPrompt(page, i)).toBe(true);
   }
   // Past the oldest, ↑ clamps — it stays on the first prompt.
-  await upBtn.click();
+  await upBtn.press("Enter");
   await expect.poll(() => atPrompt(page, 0)).toBe(true);
 
   // ↓ walks back toward newer prompts…
   for (let i = 1; i <= last; i++) {
-    await downBtn.click();
+    await downBtn.press("Enter");
     await expect.poll(() => atPrompt(page, i)).toBe(true);
   }
   // …and stepping past the newest returns to the live bottom.
-  await downBtn.click();
+  await downBtn.press("Enter");
   await expect.poll(atBottom).toBe(true);
+});
+
+test("prompt-nav re-anchors to viewport after manual scroll", async ({
+  page,
+}) => {
+  // 380px leaves no hit-testable transcript after the fixed header/composer; 600px
+  // keeps the fixture constrained while leaving the scroll region usable.
+  await page.setViewportSize({ width: 1100, height: 600 });
+  await page.waitForTimeout(50);
+  await buildMultiTurn(page, 5);
+  await page.locator(".scroller").focus();
+
+  // ↑ from the tail lands on the last prompt.
+  await page.getByTestId("prompt-nav-up").press("Enter");
+  await expect.poll(() => atPrompt(page, 5)).toBe(true);
+
+  // Set scrollTop directly so userScrolling remains false. This reproduces the
+  // intervening viewport shift that previously made the next jump use stale cursor
+  // state; the next ↑ must anchor to the current viewport.
+  const targetTop = await page.evaluate(() => {
+    const sc = document.querySelector(".scroller") as HTMLElement;
+    const row = document.querySelectorAll(".row.user")[3] as HTMLElement;
+    return (
+      row.getBoundingClientRect().top -
+      sc.getBoundingClientRect().top +
+      sc.scrollTop
+    );
+  });
+  await page.evaluate((top) => {
+    (document.querySelector(".scroller") as HTMLElement).scrollTop = top;
+  }, targetTop);
+
+  // Prompt #3 is at the viewport top, so ↑ should select #2 rather than use a
+  // stale cursor position from the previous jump.
+  await page.getByTestId("prompt-nav-up").press("Enter");
+  await expect.poll(() => atPrompt(page, 2)).toBe(true);
+
+  // From #2 at the top, ↓ selects the first prompt below the viewport fold (#3).
+  await page.getByTestId("prompt-nav-down").press("Enter");
+  await expect.poll(() => atPrompt(page, 3)).toBe(true);
 });
 
 test("⌘↑/⌘↓ scroll to top/bottom of transcript (not while typing)", async ({
@@ -790,6 +832,8 @@ test("sending a prompt while scrolled up jumps the transcript to the bottom", as
 test("prev/next prompt-nav buttons are visible on hover and step through prompts", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 1100, height: 600 });
+  await page.waitForTimeout(50);
   // Build several turns so the oldest prompts have enough content below them to scroll to
   // the top (a short final turn can't, which is fine — the stepper clamps there).
   await buildMultiTurn(page, 5);
@@ -802,7 +846,7 @@ test("prev/next prompt-nav buttons are visible on hover and step through prompts
   // hovered. Hover the transcript-wrap to reveal it.
   const upBtn = page.getByTestId("prompt-nav-up");
   const downBtn = page.getByTestId("prompt-nav-down");
-  await page.locator(".transcript-wrap").hover();
+  await page.locator(".scroller").focus();
   await expect(upBtn).toBeVisible();
   await expect(downBtn).toBeVisible();
 
@@ -812,16 +856,16 @@ test("prev/next prompt-nav buttons are visible on hover and step through prompts
 
   // From the live tail, clicking ↑ steps one prompt older per click.
   for (let i = last; i >= 0; i--) {
-    await upBtn.click();
+    await upBtn.press("Enter");
     await expect.poll(() => atPrompt(page, i)).toBe(true);
   }
   // Past the oldest, ↑ clamps.
-  await upBtn.click();
+  await upBtn.press("Enter");
   await expect.poll(() => atPrompt(page, 0)).toBe(true);
 
   // ↓ walks back toward newer prompts…
   for (let i = 1; i <= last; i++) {
-    await downBtn.click();
+    await downBtn.press("Enter");
     await expect.poll(() => atPrompt(page, i)).toBe(true);
   }
 });
