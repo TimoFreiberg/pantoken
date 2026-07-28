@@ -31,3 +31,7 @@
 [buck2]
   # Materialize outputs to buck-out for easy inspection.
   materialized = true
+
+[project]
+  # Exclude jj workspaces and build artifacts from Buck2's recursive BUCK scan.
+  ignore = .workspaces, buck-out, target, node_modules

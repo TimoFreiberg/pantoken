@@ -16,3 +16,7 @@ third_party_dir = "third-party"
 # build scripts and crates. Many build scripts read these env vars at
 # compile time via env!() — Buck2 doesn't set them automatically.
 cargo_env = true
+
+# Fixups live in third-party/fixups/<crate>/fixups.toml (Reindeer default).
+# See docs/buck2-poc-findings.md "Reindeer fixups" table for the full list
+# of build-script, extra_srcs, and env fixups applied.

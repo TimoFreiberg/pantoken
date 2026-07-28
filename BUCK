@@ -78,7 +78,7 @@ genrule(
         "//scripts/buck2:stage_payload_sh",
         "//scripts/buck2:assemble_archive_py",
     ],
-    cmd = "export TMPDIR=$(dirname $OUT) && STAGING=$TMP/staging && bash $(location //scripts/buck2:stage_payload_sh) $STAGING && python3 $(location //scripts/buck2:assemble_archive_py) $OUT $STAGING",
+    cmd = "bash $(location //scripts/buck2:stage_payload_sh) $TMP/staging && python3 $(location //scripts/buck2:assemble_archive_py) $OUT $TMP/staging",
     env = {
         "PANTOKEN_SERVER_BIN": "$(location //server-rs/pantoken-server:pantoken_server)",
         "PANTOKEN_TAR_VALIDATE_BIN": "$(location //server-rs/pantoken-tar-validate:pantoken_tar_validate)",
@@ -98,12 +98,12 @@ genrule(
 
 sh_test(
     name = "validate_headless_archive",
-    srcs = ["//scripts/buck2:validate_archive_sh"],
+    test = "//scripts/buck2:validate_archive_sh",
     args = [
         "$(location //server-rs/pantoken-tar-validate:pantoken_tar_validate)",
         "$(location :pantoken_headless_unsigned)",
     ],
-    data = [
+    resources = [
         ":pantoken_headless_unsigned",
         "//server-rs/pantoken-tar-validate:pantoken_tar_validate",
     ],

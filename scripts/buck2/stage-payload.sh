@@ -30,8 +30,17 @@ cp "$UPDATE_HEADLESS_SH" "$STAGING/update.sh"
 chmod 0755 "$STAGING/update.sh"
 
 # ── VERSION + BUILD_SHA ─────────────────────────────────────────────────────
-echo '0.0.0-dev' > "$STAGING/VERSION"
-echo '0000000000000000000000000000000000000000' > "$STAGING/BUILD_SHA"
+# Use the genrule-produced files if available, otherwise fall back to defaults.
+if [[ -n "${VERSION_FILE:-}" && -f "$VERSION_FILE" ]]; then
+    cp "$VERSION_FILE" "$STAGING/VERSION"
+else
+    echo '0.0.0-dev' > "$STAGING/VERSION"
+fi
+if [[ -n "${BUILD_SHA_FILE:-}" && -f "$BUILD_SHA_FILE" ]]; then
+    cp "$BUILD_SHA_FILE" "$STAGING/BUILD_SHA"
+else
+    echo '0000000000000000000000000000000000000000' > "$STAGING/BUILD_SHA"
+fi
 
 # ── Client-dist files ───────────────────────────────────────────────────────
 # Copy only the allowlisted PWA root files (mirrors the Bazel filegroup glob).
@@ -41,7 +50,7 @@ if [ -d "$CLIENT_DIST_DIR" ]; then
     # assets/
     if [ -d "$CLIENT_DIST_DIR/assets" ]; then
         mkdir -p "$STAGING/client-dist/assets"
-        cp -R "$CLIENT_DIST_DIR/assets/"* "$STAGING/client-dist/assets/" 2>/dev/null || true
+        cp -R "$CLIENT_DIST_DIR/assets/"* "$STAGING/client-dist/assets/" 2>/dev/null || echo "WARN: no assets to copy" >&2
     fi
     # PWA root files
     for pattern in apple-touch-icon* icon* favicon* manifest* sw* registerSW*; do

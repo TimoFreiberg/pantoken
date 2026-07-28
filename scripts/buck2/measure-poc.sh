@@ -12,11 +12,15 @@ export PATH="$HOME/.cargo/bin:$PATH"
 export OPENSSL_DIR="/opt/homebrew/opt/openssl@3"
 
 REPO_ROOT=$(pwd)
-BUCK2="/Users/timo/.local/bin/buck2"
+BUCK2="${BUCK2:-$(command -v buck2 2>/dev/null || echo "")}"
+if [[ -z "$BUCK2" ]]; then
+  echo "ERROR: buck2 not found. Install it or set BUCK2=/path/to/buck2." >&2
+  exit 1
+fi
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 MACHINE=$(uname -srm)
-RUSTC_VER=$($HOME/.cargo/bin/rustc --version 2>/dev/null || echo "unknown")
-BUCK2_VER=$("$BUCK2" --version 2>/dev/null || echo "unknown")
+RUSTC_VER=$(rustc --version 2>/dev/null || echo "unknown")
+BUCK2_VER=$("${BUCK2:-buck2}" --version 2>/dev/null || echo "unknown")
 
 # Targets that build successfully (excluding pantoken-server due to OpenSSL blocker)
 BUILD_TARGETS=(
@@ -34,11 +38,21 @@ TEST_TARGETS=(
   '//server-rs/pantoken-tar-validate:unit_tests'
 )
 
+# Timer function — uses $EPOCHREALTIME (bash 5+) with date fallback.
 timer() {
-  local start=$EPOCHREALTIME
-  "$@"
-  local end=$EPOCHREALTIME
-  echo "$end - $start" | bc
+  if [[ -n "${EPOCHREALTIME:-}" ]]; then
+    local start=$EPOCHREALTIME
+    "$@"
+    local end=$EPOCHREALTIME
+    echo "$end - $start" | bc
+  else
+    local start
+    start=$(date +%s.%N)
+    "$@"
+    local end
+    end=$(date +%s.%N)
+    echo "$end - $start" | bc
+  fi
 }
 
 echo "# Buck2 POC Measurement Report"
@@ -63,17 +77,19 @@ echo -n "| Warm build | "
 WARM_TIME=$(timer "$BUCK2" build "${BUILD_TARGETS[@]}" 2>/dev/null)
 echo "${WARM_TIME}s | No changes, action cache |"
 
-# Incremental (touch one file)
+# Incremental (content-preserving edit to trigger a real rebuild)
 echo -n "| Incremental (1 file) | "
 TARGET_FILE="server-rs/pantoken-protocol/src/lib.rs"
-# Save original content for restore
-ORIG_CONTENT=$(cat "$TARGET_FILE")
-trap 'echo "$ORIG_CONTENT" > "$TARGET_FILE"' EXIT
-touch "$TARGET_FILE"
+# Backup with cp to preserve exact bytes, append a comment to force rebuild,
+# then restore. Buck2 uses content hashing, so touch alone is a no-op.
+cp -p "$TARGET_FILE" "$TARGET_FILE.bak"
+printf '// buck2-measure incremental trigger\n' >> "$TARGET_FILE"
+trap 'cp -p "$TARGET_FILE.bak" "$TARGET_FILE" && rm -f "$TARGET_FILE.bak"' EXIT
 INCR_TIME=$(timer "$BUCK2" build "${BUILD_TARGETS[@]}" 2>/dev/null)
-echo "${INCR_TIME}s | Touched protocol/src/lib.rs |"
+echo "${INCR_TIME}s | Edited protocol/src/lib.rs (content change) |"
 # Restore original content
-echo "$ORIG_CONTENT" > "$TARGET_FILE"
+cp -p "$TARGET_FILE.bak" "$TARGET_FILE"
+rm -f "$TARGET_FILE.bak"
 trap - EXIT
 
 # Test run

@@ -83,7 +83,7 @@ assert_exit_and_stderr 1 "revision mismatch" "wrong buck2 revision" \
 
 # 4. Accepted version (the real binary, if available — environment-specific smoke check)
 echo "-- Test: accepted version (real binary smoke check)"
-REAL_BUCK2="${BUCK2:-/Users/timo/.local/bin/buck2}"
+REAL_BUCK2="${BUCK2:-$(command -v buck2 2>/dev/null || echo "")}"
 if [[ -x "$REAL_BUCK2" ]]; then
     assert_exit 0 "real buck2 binary passes" \
         bash "$BOOTSTRAP" --binary "$REAL_BUCK2"

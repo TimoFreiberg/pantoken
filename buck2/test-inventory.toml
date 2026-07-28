@@ -18,7 +18,7 @@
 label = "//server-rs/pantoken-protocol:fold_corpus_tests"
 data = ["//server-rs/pantoken-protocol:fold_corpus_data"]
 executables = []
-env_set = ["PANTOKEN_FOLD_CORPUS_FILES"]
+env_set = ["PANTOKEN_FOLD_CORPUS_DIR", "CARGO_MANIFEST_DIR"]
 env_clear = ["HOME", "PANTOKEN_TAR_VALIDATOR"]
 socket = "none"
 temp_root = "none"

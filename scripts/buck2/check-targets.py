@@ -6,6 +6,7 @@ checked-in expected-target manifest in buck2/expected-targets.toml.
 Fails on omissions or unexpected targets, including desktop/frontend targets.
 """
 
+import os
 import subprocess
 import sys
 import tomllib
@@ -22,21 +23,27 @@ def get_expected_targets():
 
 
 def get_actual_targets():
-    # Query all rust_library, rust_binary, rust_test, filegroup, genrule, sh_test targets
+    # Query all rust_library, rust_binary, rust_test, filegroup, genrule, sh_test targets.
+    # .workspaces/ and other dirs are excluded via [project] ignore in .buckconfig.
     result = subprocess.run(
-        ["/Users/timo/.local/bin/buck2", "uquery",
-         "kind(rust_library, //...) + kind(rust_binary, //...) + kind(rust_test, //...) + kind(filegroup, //server-rs/...) + kind(genrule, //:...) + kind(sh_test, //:...)"],
+        [os.environ.get("BUCK2", "buck2"), "uquery",
+         "kind(rust_library, //...) + kind(rust_binary, //...) + kind(rust_test, //...) + kind(filegroup, //server-rs/...) + kind(genrule, //...) + kind(sh_test, //...)"],
         capture_output=True, text=True, cwd=REPO_ROOT,
-        env={"HOME": str(Path.home()), "PATH": str(Path.home() / ".cargo/bin") + ":" + __import__("os").environ.get("PATH", "")},
+        env={**os.environ, "HOME": str(Path.home())},
     )
     if result.returncode != 0:
         print(f"ERROR: buck2 uquery failed: {result.stderr}", file=sys.stderr)
         sys.exit(1)
-    # Parse output lines, stripping log lines
+    # Parse output lines, stripping log lines and normalizing labels.
+    # Buck2 uquery returns labels with a cell prefix (e.g. "root//server-rs/...")
+    # but the manifest uses plain "//server-rs/..." labels. Strip the prefix.
     targets = set()
     for line in result.stdout.strip().split("\n"):
         line = line.strip()
         if line and not line.startswith("[") and not line.startswith("Command"):
+            # Normalize: "root//foo:bar" -> "//foo:bar"
+            if line.startswith("root//"):
+                line = line[4:]  # remove "root"
             targets.add(line)
     return targets
 
@@ -48,8 +55,14 @@ def main():
     missing = expected - actual
     unexpected = actual - expected
 
-    # Filter out third-party targets from unexpected (they're generated)
-    unexpected = {t for t in unexpected if not t.startswith("root//third-party:")}
+    # Filter out third-party targets and internal helper targets (they're
+    # intermediate genrules/filegroups used by the archive assembly, not POC deliverables)
+    _INTERNAL_PREFIXES = ("//third-party:",)
+    _INTERNAL_TARGETS = {"//:version_file", "//:build_sha_file", "//:client_dist",
+                         "//:run_sh", "//:update_headless_sh"}
+    unexpected = {t for t in unexpected
+                  if not any(t.startswith(p) for p in _INTERNAL_PREFIXES)
+                  and t not in _INTERNAL_TARGETS}
 
     if missing:
         print("ERROR: Expected targets not found in Buck2 graph:", file=sys.stderr)

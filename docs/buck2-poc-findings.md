@@ -119,6 +119,12 @@ instead of `rules_pkg` (which doesn't exist for Buck2). The assembler produces a
 - Fixed file modes (0755 for executables, 0644 for regular files)
 - Deterministic gzip header (no timestamp, no filename, compression level 9)
 
+**Status: BLOCKED.** The archive target (`//:pantoken_headless_unsigned`) depends on the
+`pantoken-server` binary, which cannot build due to the OpenSSL/ring POC blocker. The archive
+assembly logic, staging script, and validator are implemented and parseable by Buck2, but cannot
+be exercised end-to-end until the server binary builds. The `just buck2-archive` and
+`just buck2-validate-archive` recipes will fail until the blocker is resolved.
+
 ## Comparison with Bazel POC
 
 | Aspect | Bazel | Buck2 | Notes |
@@ -139,7 +145,7 @@ instead of `rules_pkg` (which doesn't exist for Buck2). The assembler produces a
 |-----------|------------|---------|
 | Reproducibility | ⚠️ Pinned toolchain, locked deps, deterministic archive — but OpenSSL/ring builds are non-hermetic | Conditional |
 | Affected-target execution | ✅ Only dependents of changed files rebuild | Pass |
-| Test/artifact caching | ⚠️ Action cache works for 4 crates; archive assembly not yet tested end-to-end | Conditional |
+| Test/artifact caching | ⚠️ Action cache works for 4 crates; archive assembly blocked by server binary | Conditional |
 | Cross-workspace/CI reuse | ⚠️ Buck2 cache works; but 335MB vendored deps is a maintenance burden | Conditional |
 | Maintainability | ⚠️ Reindeer fixups are complex; OpenSSL blocker requires resolution | Conditional |
 
