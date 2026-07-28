@@ -346,14 +346,17 @@
   }
 
   function editProfile(profile: RemoteProfile): void {
+    profileEditor.setLaunchOrigin("settings");
     profileEditor.openEdit(profile);
   }
 
   function addComputer(): void {
+    profileEditor.setLaunchOrigin("settings");
     profileEditor.openNew();
   }
 
   function setupDocker(): void {
+    profileEditor.setLaunchOrigin("settings");
     profileEditor.openNewDocker();
   }
 </script>
@@ -753,6 +756,7 @@
       <!-- Computers -->
       {#if activeSection === "computers" && showComputers}
       <section class="group" data-testid="computers-section">
+        <h3 class="section-heading" data-testid="settings-computers-heading" tabindex="-1">Computers</h3>
         <div class="row computer-row">
           <div class="rinfo">
             <div class="rlabel">{store.serverLabel || "This computer"}</div>
@@ -793,7 +797,7 @@
                   {:else}
                     <Button variant="primary" title="Connect to this computer" onclick={() => void connectProfile(profile.id)}>Connect</Button>
                   {/if}
-                  <Button title="Edit this computer" onclick={() => editProfile(profile)}>Edit</Button>
+                  <Button title="Edit this computer" onclick={() => editProfile(profile)} data-testid={`computer-edit-${profile.id}`}>Edit</Button>
                   <Button title="Remove this computer" onclick={() => confirmDelete(profile)}>Remove</Button>
                 </div>
               {/if}

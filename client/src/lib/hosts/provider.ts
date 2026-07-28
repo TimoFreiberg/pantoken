@@ -164,6 +164,14 @@ export interface FakeHostController {
   setPendingRisks: (id: string, risks: NativeHostDescriptor["pendingRisks"]) => void;
   /** Set the preflight phase surfaced for a host during preflight. */
   setPreflightPhase: (id: string, phase: NativeHostDescriptor["preflightPhase"]) => void;
+  // ── Deterministic async hooks for testing ─────────────────────────────────
+  setNextAddProfileBehavior: (behavior: { delay?: number; reject?: unknown } | null) => void;
+  setNextUpdateProfileBehavior: (behavior: { delay?: number; reject?: unknown } | null) => void;
+  setNextConnectHostBehavior: (behavior: { delay?: number; reject?: unknown } | null) => void;
+  setNextTestSshBehavior: (behavior: { delay?: number; reject?: unknown } | null) => void;
+  setNextInspectContainerBehavior: (behavior: { delay?: number; reject?: unknown } | null) => void;
+  setNextAcknowledgeRiskBehavior: (behavior: { delay?: number; reject?: unknown } | null) => void;
+  setNextResumeConnectionBehavior: (behavior: { delay?: number; reject?: unknown } | null) => void;
 }
 
 export function createFakeHostProvider(
@@ -178,6 +186,13 @@ export function createFakeHostProvider(
   setPreflightPhase: (id: string, phase: NativeHostDescriptor["preflightPhase"]) => void;
   setContainerPicker: (id: string, containers: ContainerSummary[]) => void;
   setInspection: (containerName: string, inspection: ContainerInspection) => void;
+  setNextAddProfileBehavior: (b: { delay?: number; reject?: unknown } | null) => void;
+  setNextUpdateProfileBehavior: (b: { delay?: number; reject?: unknown } | null) => void;
+  setNextConnectHostBehavior: (b: { delay?: number; reject?: unknown } | null) => void;
+  setNextTestSshBehavior: (b: { delay?: number; reject?: unknown } | null) => void;
+  setNextInspectContainerBehavior: (b: { delay?: number; reject?: unknown } | null) => void;
+  setNextAcknowledgeRiskBehavior: (b: { delay?: number; reject?: unknown } | null) => void;
+  setNextResumeConnectionBehavior: (b: { delay?: number; reject?: unknown } | null) => void;
 } {
   // Clone the initial descriptors so the test can't mutate them.
   let hostMap = new Map<string, NativeHostDescriptor>(
@@ -195,6 +210,23 @@ export function createFakeHostProvider(
   // Container inspection data injected by tests (setInspection).
   let inspectionMap = new Map<string, ContainerInspection>();
 
+  // ── Deterministic async hooks for testing ─────────────────────────────────
+  type NextBehavior = { delay?: number; reject?: unknown } | null;
+  let nextAddProfile: NextBehavior = null;
+  let nextUpdateProfile: NextBehavior = null;
+  let nextConnectHost: NextBehavior = null;
+  let nextTestSsh: NextBehavior = null;
+  let nextInspectContainer: NextBehavior = null;
+  let nextAcknowledgeRisk: NextBehavior = null;
+  let nextResumeConnection: NextBehavior = null;
+
+  async function applyBehavior<T>(behavior: NextBehavior, resolve: () => T): Promise<T> {
+    if (!behavior) return resolve();
+    if (behavior.delay) await new Promise((r) => setTimeout(r, behavior.delay));
+    if (behavior.reject !== undefined) throw behavior.reject;
+    return resolve();
+  }
+
   const provider: HostProvider = {
     supportsMultiHost() {
       return hosts.length > 1;
@@ -203,6 +235,9 @@ export function createFakeHostProvider(
       return [...hostMap.values()];
     },
     async connectHost(id) {
+      const behavior = nextConnectHost;
+      nextConnectHost = null;
+      await applyBehavior(behavior, () => undefined);
       // In the fake, connectHost resolves (does not throw) for non-terminal
       // preflight/awaitingAcknowledgement states, mirroring the real contract.
       // It only advances to ready if the current state is a terminal-ish or
@@ -235,11 +270,18 @@ export function createFakeHostProvider(
       return p ? structuredClone(p) : null;
     },
     async addProfile(profile) {
+      const behavior = nextAddProfile;
+      nextAddProfile = null;
+      return applyBehavior(behavior, () => {
       const stored = structuredClone(profile);
       profileMap.set(profile.id, stored);
       return structuredClone(stored);
+      });
     },
     async updateProfile(profile) {
+      const behavior = nextUpdateProfile;
+      nextUpdateProfile = null;
+      await applyBehavior(behavior, () => undefined);
       const stored = structuredClone(profile);
       profileMap.set(profile.id, stored);
     },
@@ -248,6 +290,9 @@ export function createFakeHostProvider(
       hostMap.delete(id);
     },
     async acknowledgeRisk(id, riskId, fingerprint) {
+      const behavior = nextAcknowledgeRisk;
+      nextAcknowledgeRisk = null;
+      await applyBehavior(behavior, () => undefined);
       const h = hostMap.get(id);
       const risks = h?.pendingRisks;
       if (!risks || risks.length === 0) {
@@ -276,6 +321,9 @@ export function createFakeHostProvider(
       }
     },
     async resumeConnection(id) {
+      const behavior = nextResumeConnection;
+      nextResumeConnection = null;
+      await applyBehavior(behavior, () => undefined);
       const h = hostMap.get(id);
       if (h) {
         // Resume from awaitingAcknowledgement → ready (risks acknowledged).
@@ -296,6 +344,9 @@ export function createFakeHostProvider(
       _sshDestination: string,
       _port?: number,
     ): Promise<TestSshResult> {
+      const behavior = nextTestSsh;
+      nextTestSsh = null;
+      return applyBehavior(behavior, () => {
       const containers =
         containerPickers.get("__default__") ?? defaultContainerFixtures;
       return {
@@ -303,15 +354,20 @@ export function createFakeHostProvider(
         dockerPermission: "granted",
         containers: structuredClone(containers),
       };
+      });
     },
     async inspectContainer(
       _sshDestination: string,
       _port: number | undefined,
       containerName: string,
     ): Promise<ContainerInspection> {
+      const behavior = nextInspectContainer;
+      nextInspectContainer = null;
+      return applyBehavior(behavior, () => {
       const cached = inspectionMap.get(containerName);
       if (cached) return structuredClone(cached);
       return structuredClone(defaultInspection(containerName));
+      });
     },
   };
 
@@ -352,6 +408,14 @@ export function createFakeHostProvider(
     setInspection(containerName: string, inspection: ContainerInspection) {
       inspectionMap.set(containerName, structuredClone(inspection));
     },
+    // ── Deterministic async hooks for testing ───────────────────────────────
+    setNextAddProfileBehavior: (b: NextBehavior) => { nextAddProfile = b; },
+    setNextUpdateProfileBehavior: (b: NextBehavior) => { nextUpdateProfile = b; },
+    setNextConnectHostBehavior: (b: NextBehavior) => { nextConnectHost = b; },
+    setNextTestSshBehavior: (b: NextBehavior) => { nextTestSsh = b; },
+    setNextInspectContainerBehavior: (b: NextBehavior) => { nextInspectContainer = b; },
+    setNextAcknowledgeRiskBehavior: (b: NextBehavior) => { nextAcknowledgeRisk = b; },
+    setNextResumeConnectionBehavior: (b: NextBehavior) => { nextResumeConnection = b; },
   };
 }
 

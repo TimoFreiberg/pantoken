@@ -37,6 +37,21 @@ export interface DevHostControls {
   /** Toggle whether Docker container targets are supported (PWA-degradation test hook). */
   setSupportsContainerTargets(enabled: boolean): void;
   setFailure(id: string, label: string, action?: string, detail?: string): void;
+  // ── Deterministic async hooks for testing ─────────────────────────────────
+  /** Control the next addProfile call: delay, reject, or resolve normally. */
+  setNextAddProfileBehavior(behavior: { delay?: number; reject?: unknown } | null): void;
+  /** Control the next updateProfile call. */
+  setNextUpdateProfileBehavior(behavior: { delay?: number; reject?: unknown } | null): void;
+  /** Control the next connectHost call. */
+  setNextConnectHostBehavior(behavior: { delay?: number; reject?: unknown } | null): void;
+  /** Control the next testSshAndListContainers call. */
+  setNextTestSshBehavior(behavior: { delay?: number; reject?: unknown } | null): void;
+  /** Control the next inspectContainer call. */
+  setNextInspectContainerBehavior(behavior: { delay?: number; reject?: unknown } | null): void;
+  /** Control the next acknowledgeRisk call. */
+  setNextAcknowledgeRiskBehavior(behavior: { delay?: number; reject?: unknown } | null): void;
+  /** Control the next resumeConnection call. */
+  setNextResumeConnectionBehavior(behavior: { delay?: number; reject?: unknown } | null): void;
 }
 
 export type DevHostProvider = HostProvider & DevHostControls;
@@ -118,6 +133,29 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
   // Mutable toggle for supportsContainerTargets (default true; tests opt into
   // the false/PWA-degradation path via setSupportsContainerTargets).
   let supportsDockerFlag = true;
+
+  // ── Deterministic async hooks for testing ─────────────────────────────────
+  // Each hook is a one-shot: the next call to the corresponding method applies
+  // the behavior (delay, reject, or resolve normally), then clears it.
+  type NextBehavior = { delay?: number; reject?: unknown } | null;
+  let nextAddProfile: NextBehavior = null;
+  let nextUpdateProfile: NextBehavior = null;
+  let nextConnectHost: NextBehavior = null;
+  let nextTestSsh: NextBehavior = null;
+  let nextInspectContainer: NextBehavior = null;
+  let nextAcknowledgeRisk: NextBehavior = null;
+  let nextResumeConnection: NextBehavior = null;
+
+  /** Apply a one-shot behavior: wait delay ms, then reject or resolve. */
+  async function applyBehavior<T>(
+    behavior: NextBehavior,
+    resolve: () => T,
+  ): Promise<T> {
+    if (!behavior) return resolve();
+    if (behavior.delay) await new Promise((r) => setTimeout(r, behavior.delay));
+    if (behavior.reject !== undefined) throw behavior.reject;
+    return resolve();
+  }
 
   /** Check whether all pending risks for a host have been acknowledged. */
   function allRisksAcknowledged(hostId: string, risks: PendingRisk[]): boolean {
@@ -220,6 +258,15 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
     supportsMultiHost: () => true,
     listHosts: async () => [...hostMap.values()].map((host) => ({ ...host })),
     connectHost: async (id) => {
+      const behavior = nextConnectHost;
+      nextConnectHost = null;
+      await applyBehavior(behavior, () => {
+        const host = hostMap.get(id);
+        if (!host) throw new Error("Computer not found");
+        if (host.state === "failed") throw new Error(host.failureLabel ?? "Connection failed");
+        return undefined;
+      });
+      // The actual connection logic (runs after behavior delay/reject).
       const host = hostMap.get(id);
       if (!host) throw new Error("Computer not found");
       if (host.state === "failed") throw new Error(host.failureLabel ?? "Connection failed");
@@ -253,48 +300,55 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
       return p ? structuredClone(p) : null;
     },
     addProfile: async (profile) => {
-      const stored = structuredClone(profile);
-      profileMap.set(profile.id, stored);
-      // If it's a Docker profile, add a corresponding host descriptor.
-      if (profile.executionTarget.kind === "dockerContainer") {
-        const hostId = profile.id;
-        const containerName = profile.executionTarget.containerName;
-        const { host: sshHost } = profile.sshDestination.includes("@")
-          ? { host: profile.sshDestination.split("@")[1] ?? profile.sshDestination }
-          : { host: profile.sshDestination };
-        hostMap.set(hostId, {
-          id: hostId,
-          kind: "remote",
-          label: profile.label,
-          subtitle: `${containerName} via ${sshHost}`,
-          state: "disconnected",
-          isDockerTarget: true,
-        });
-        // Set a default container ID.
-        containerIdMap.set(hostId, `dev-id-${containerName}`);
-        // Apply pre-registered risks for e2e testing (set via setPendingRisksForNextDocker).
-        if (nextDockerRisks) {
-          pendingRisksMap.set(hostId, nextDockerRisks);
+      const behavior = nextAddProfile;
+      nextAddProfile = null;
+      return applyBehavior(behavior, () => {
+        const stored = structuredClone(profile);
+        profileMap.set(profile.id, stored);
+        // If it's a Docker profile, add a corresponding host descriptor.
+        if (profile.executionTarget.kind === "dockerContainer") {
+          const hostId = profile.id;
+          const containerName = profile.executionTarget.containerName;
+          const { host: sshHost } = profile.sshDestination.includes("@")
+            ? { host: profile.sshDestination.split("@")[1] ?? profile.sshDestination }
+            : { host: profile.sshDestination };
           hostMap.set(hostId, {
-            ...hostMap.get(hostId)!,
-            pendingRisks: nextDockerRisks,
+            id: hostId,
+            kind: "remote",
+            label: profile.label,
+            subtitle: `${containerName} via ${sshHost}`,
+            state: "disconnected",
+            isDockerTarget: true,
           });
-          nextDockerRisks = null;
+          // Set a default container ID.
+          containerIdMap.set(hostId, `dev-id-${containerName}`);
+          // Apply pre-registered risks for e2e testing (set via setPendingRisksForNextDocker).
+          if (nextDockerRisks) {
+            pendingRisksMap.set(hostId, nextDockerRisks);
+            hostMap.set(hostId, {
+              ...hostMap.get(hostId)!,
+              pendingRisks: nextDockerRisks,
+            });
+            nextDockerRisks = null;
+          }
+        } else {
+          // Host profile — add a non-docker descriptor.
+          hostMap.set(profile.id, {
+            id: profile.id,
+            kind: "remote",
+            label: profile.label,
+            subtitle: profile.sshDestination,
+            state: "disconnected",
+            isDockerTarget: false,
+          });
         }
-      } else {
-        // Host profile — add a non-docker descriptor.
-        hostMap.set(profile.id, {
-          id: profile.id,
-          kind: "remote",
-          label: profile.label,
-          subtitle: profile.sshDestination,
-          state: "disconnected",
-          isDockerTarget: false,
-        });
-      }
-      return structuredClone(stored);
+        return structuredClone(stored);
+      });
     },
     updateProfile: async (profile) => {
+      const behavior = nextUpdateProfile;
+      nextUpdateProfile = null;
+      await applyBehavior(behavior, () => undefined);
       profileMap.set(profile.id, structuredClone(profile));
     },
     deleteProfile: async (id) => {
@@ -307,23 +361,28 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
       containerIdMap.delete(id);
     },
     acknowledgeRisk: async (id, riskId, fingerprint) => {
-      const risks = pendingRisksMap.get(id);
-      if (!risks || risks.length === 0) {
-        throw new Error(`no pending risks for host ${id}`);
-      }
-      const risk = risks.find((r) => r.id === riskId);
-      if (!risk) {
-        throw new Error(`no pending risk ${riskId} for host ${id}`);
-      }
-      if (risk.fingerprint !== fingerprint) {
-        throw new Error(`fingerprint mismatch for risk ${riskId}: target changed`);
-      }
-      let acked = acknowledgedRisks.get(id);
-      if (!acked) {
-        acked = new Set();
-        acknowledgedRisks.set(id, acked);
-      }
-      acked.add(riskId);
+      const behavior = nextAcknowledgeRisk;
+      nextAcknowledgeRisk = null;
+      await applyBehavior(behavior, () => {
+        const risks = pendingRisksMap.get(id);
+        if (!risks || risks.length === 0) {
+          throw new Error(`no pending risks for host ${id}`);
+        }
+        const risk = risks.find((r) => r.id === riskId);
+        if (!risk) {
+          throw new Error(`no pending risk ${riskId} for host ${id}`);
+        }
+        if (risk.fingerprint !== fingerprint) {
+          throw new Error(`fingerprint mismatch for risk ${riskId}: target changed`);
+        }
+        let acked = acknowledgedRisks.get(id);
+        if (!acked) {
+          acked = new Set();
+          acknowledgedRisks.set(id, acked);
+        }
+        acked.add(riskId);
+        return undefined;
+      });
     },
     cancelConnection: async (id) => {
       setState(id, "disconnected");
@@ -335,36 +394,49 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
       }
     },
     resumeConnection: async (id) => {
-      const host = hostMap.get(id);
-      if (!host) return;
-      // Resume from awaitingAcknowledgement / preflight → provisioning → ready.
-      if (host.state === "awaitingAcknowledgement" || host.state === "preflight") {
-        // Check if all risks are acknowledged.
-        const risks = pendingRisksMap.get(id);
-        if (risks && !allRisksAcknowledged(id, risks)) {
-          // Still has unacknowledged risks — stay in awaitingAcknowledgement.
-          return;
+      const behavior = nextResumeConnection;
+      nextResumeConnection = null;
+      await applyBehavior(behavior, () => {
+        const host = hostMap.get(id);
+        if (!host) return undefined;
+        // Resume from awaitingAcknowledgement / preflight → provisioning → ready.
+        if (host.state === "awaitingAcknowledgement" || host.state === "preflight") {
+          // Check if all risks are acknowledged.
+          const risks = pendingRisksMap.get(id);
+          if (risks && !allRisksAcknowledged(id, risks)) {
+            // Still has unacknowledged risks — stay in awaitingAcknowledgement.
+            return undefined;
+          }
+          setState(id, "provisioning");
+          // Clear pending risks.
+          pendingRisksMap.delete(id);
+          hostMap.set(id, { ...host, pendingRisks: undefined, preflightPhase: undefined, state: "provisioning" });
         }
-        setState(id, "provisioning");
-        // Clear pending risks.
-        pendingRisksMap.delete(id);
-        hostMap.set(id, { ...host, pendingRisks: undefined, preflightPhase: undefined, state: "provisioning" });
-      }
+        return undefined;
+      });
     },
     // ── Docker container target methods ────────────────────────────────────
     supportsContainerTargets: () => supportsDockerFlag,
     testSshAndListContainers: async (_sshDestination, _port?) => {
-      const containers = containerPickerMap.get("__default__") ?? DEV_CONTAINERS;
-      return {
-        sshOk: true,
-        dockerPermission: "granted" as const,
-        containers: structuredClone(containers),
-      };
+      const behavior = nextTestSsh;
+      nextTestSsh = null;
+      return applyBehavior(behavior, () => {
+        const containers = containerPickerMap.get("__default__") ?? DEV_CONTAINERS;
+        return {
+          sshOk: true,
+          dockerPermission: "granted" as const,
+          containers: structuredClone(containers),
+        };
+      });
     },
     inspectContainer: async (_sshDestination, _port, containerName) => {
-      const cached = inspectionMap.get(containerName);
-      if (cached) return structuredClone(cached);
-      return structuredClone(defaultInspection(containerName));
+      const behavior = nextInspectContainer;
+      nextInspectContainer = null;
+      return applyBehavior(behavior, () => {
+        const cached = inspectionMap.get(containerName);
+        if (cached) return structuredClone(cached);
+        return structuredClone(defaultInspection(containerName));
+      });
     },
     // ── DevHostControls ───────────────────────────────────────────────────
     setState,
@@ -381,5 +453,13 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
     getInspection,
     setInspection,
     setSupportsContainerTargets: (enabled: boolean) => { supportsDockerFlag = enabled; },
+    // ── Deterministic async hooks for testing ───────────────────────────────
+    setNextAddProfileBehavior: (b: NextBehavior) => { nextAddProfile = b; },
+    setNextUpdateProfileBehavior: (b: NextBehavior) => { nextUpdateProfile = b; },
+    setNextConnectHostBehavior: (b: NextBehavior) => { nextConnectHost = b; },
+    setNextTestSshBehavior: (b: NextBehavior) => { nextTestSsh = b; },
+    setNextInspectContainerBehavior: (b: NextBehavior) => { nextInspectContainer = b; },
+    setNextAcknowledgeRiskBehavior: (b: NextBehavior) => { nextAcknowledgeRisk = b; },
+    setNextResumeConnectionBehavior: (b: NextBehavior) => { nextResumeConnection = b; },
   };
 }

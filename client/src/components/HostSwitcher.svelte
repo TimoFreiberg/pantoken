@@ -185,8 +185,8 @@
       </div>
       {#if coordinator.multiHostCapable}
         <div class="management">
-          <button onclick={() => { hide(); profileEditor.openNew(); }} data-testid="add-computer-btn">Add computer</button>
-          <button onclick={() => { hide(); profileEditor.openNewDocker(); }} data-testid="host-switcher-setup-docker">Setup Docker container</button>
+          <button onclick={() => { hide(); profileEditor.setLaunchOrigin("hostSwitcher"); profileEditor.openNew(); }} data-testid="add-computer-btn">Add computer</button>
+          <button onclick={() => { hide(); profileEditor.setLaunchOrigin("hostSwitcher"); profileEditor.openNewDocker(); }} data-testid="host-switcher-setup-docker">Setup Docker container</button>
           <button onclick={() => { hide(); store.openSettingsTo("computers"); }} data-testid="manage-computers-btn">Manage computers</button>
         </div>
       {/if}

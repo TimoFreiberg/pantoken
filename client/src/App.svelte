@@ -29,6 +29,7 @@
   import ImageLightbox from "./components/ImageLightbox.svelte";
   import { untrack } from "svelte";
   import { imageViewer } from "./lib/image-viewer.svelte.js";
+  import { profileEditor } from "./lib/profile-editor.svelte.js";
   import { attention, type AttentionSurface } from "./lib/attention-cycle.svelte.js";
   import IconButton from "./components/ui/IconButton.svelte";
   import { notifyIfUnfocused } from "./lib/notify.js";
@@ -176,6 +177,13 @@
           testSshAndListContainers: provider.testSshAndListContainers,
           inspectContainer: provider.inspectContainer,
           listProfiles: provider.listProfiles,
+          setNextAddProfileBehavior: provider.setNextAddProfileBehavior,
+          setNextUpdateProfileBehavior: provider.setNextUpdateProfileBehavior,
+          setNextConnectHostBehavior: provider.setNextConnectHostBehavior,
+          setNextTestSshBehavior: provider.setNextTestSshBehavior,
+          setNextInspectContainerBehavior: provider.setNextInspectContainerBehavior,
+          setNextAcknowledgeRiskBehavior: provider.setNextAcknowledgeRiskBehavior,
+          setNextResumeConnectionBehavior: provider.setNextResumeConnectionBehavior,
           setFailure: (hostId: string, label: string, action?: string, detail?: string) => {
             provider.setFailure(hostId, label, action, detail);
             void coordinator.refreshHosts();
@@ -353,7 +361,8 @@
     if (
       store.settingsOpen ||
       store.planViewOpen ||
-      imageViewer.index !== null
+      imageViewer.index !== null ||
+      profileEditor.open
     )
       return;
     // Ctrl+Tab / Ctrl+Shift+Tab — cycle forward/back through sessions in sidebar order.
@@ -428,7 +437,8 @@
         if (
           store.settingsOpen ||
           store.planViewOpen ||
-          imageViewer.index !== null
+          imageViewer.index !== null ||
+          profileEditor.open
         )
           break;
         e.preventDefault();
@@ -456,7 +466,8 @@
           store.creatingSession ||
           store.settingsOpen ||
           store.planViewOpen ||
-          imageViewer.index !== null
+          imageViewer.index !== null ||
+          profileEditor.open
         )
           break;
         e.preventDefault();
@@ -489,7 +500,7 @@
     <button onclick={() => location.reload()}>Reload</button>
   </div>
 {:else}
-<div class="shell">
+<div class="shell" inert={profileEditor.open}>
   <Sidebar edge={edge} coordinator={hostCoordinator} />
   <!-- No edge pop-in arrows on either side: both collapsed panels reopen from a chevron
        in the header (StatusHeader), at the leading/trailing edge respectively — the top

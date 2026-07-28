@@ -59,9 +59,10 @@
   $effect(() => {
     // Don't auto-show the connection sheet while the computer setup sheet
     // is open — it handles risk acknowledgement inline and closes itself
-    // when done. After it closes, if the host is still in
-    // awaitingAcknowledgement, this effect fires on the next summary update.
-    if (profileEditor.open) return;
+    // when done. But still iterate hosts to record pending actionable state
+    // so it can be surfaced after setup closes.
+    const setupOpen = profileEditor.open;
+
     // Show for first-time connecting states on any host.
     for (const summary of coordinator.summaries) {
       const id = summary.descriptor.id;
@@ -74,7 +75,14 @@
         !everConnected &&
         ["testingSsh", "connecting", "provisioning", "starting", "preflight", "awaitingAcknowledgement"].includes(state)
       ) {
-        connectionSheet.show(id);
+        if (setupOpen) {
+          // Defer — record as pending instead of showing.
+          if (connectionSheet.pendingHostId !== id) {
+            connectionSheet.setPending(id);
+          }
+        } else {
+          connectionSheet.show(id);
+        }
         return;
       }
 
@@ -85,7 +93,13 @@
       if (state === "failed") {
         const hasAction = Boolean(summary.descriptor.failureAction);
         if (!everConnected || hasAction) {
-          connectionSheet.show(id);
+          if (setupOpen) {
+            if (connectionSheet.pendingHostId !== id) {
+              connectionSheet.setPending(id);
+            }
+          } else {
+            connectionSheet.show(id);
+          }
           return;
         }
       }
@@ -93,16 +107,36 @@
 
     // Auto-hide when the watched host reaches a terminal-ish state.
     const watched = connectionSheet.visibleHostId;
-    if (!watched) return;
-    const watchedState = coordinator.summaries.find((s) => s.descriptor.id === watched)?.descriptor.state;
+    if (watched) {
+      const watchedState = coordinator.summaries.find((s) => s.descriptor.id === watched)?.descriptor.state;
 
-    if (watchedState === "ready") {
-      connectionSheet.hide();
-    } else if (watchedState === "disconnected") {
-      connectionSheet.hide();
-    } else if (watchedState === "reconnecting" && coordinator.hasEverConnected(watched)) {
-      // Non-modal reconnect — hide the sheet, use the existing ConnectionBanner.
-      connectionSheet.hide();
+      if (watchedState === "ready") {
+        connectionSheet.hide();
+      } else if (watchedState === "disconnected") {
+        connectionSheet.hide();
+      } else if (watchedState === "reconnecting" && coordinator.hasEverConnected(watched)) {
+        // Non-modal reconnect — hide the sheet, use the existing ConnectionBanner.
+        connectionSheet.hide();
+      }
+    }
+
+    // If setup just closed and there's a pending host, surface it if still actionable.
+    if (!setupOpen && connectionSheet.pendingHostId) {
+      const pendingId = connectionSheet.pendingHostId;
+      const pendingSummary = coordinator.summaries.find((s) => s.descriptor.id === pendingId);
+      if (pendingSummary) {
+        const pendingState = pendingSummary.descriptor.state;
+        const pendingEverConnected = coordinator.hasEverConnected(pendingId);
+        const isActionable =
+          (!pendingEverConnected &&
+            ["testingSsh", "connecting", "provisioning", "starting", "preflight", "awaitingAcknowledgement", "failed"].includes(pendingState)) ||
+          (pendingState === "failed" && Boolean(pendingSummary.descriptor.failureAction));
+        if (isActionable && !connectionSheet.visibleHostId) {
+          connectionSheet.show(pendingId);
+        }
+      }
+      // Clear pending regardless — it was a one-shot.
+      connectionSheet.clearPending();
     }
   });
 
@@ -233,6 +267,7 @@
 
   function editConnection(): void {
     if (watchedId && profileForWatched) {
+      profileEditor.setLaunchOrigin("settings");
       profileEditor.openEdit(profileForWatched);
     }
     close();

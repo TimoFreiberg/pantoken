@@ -3,7 +3,13 @@
 //
 // No Svelte, no DOM — pure functions.
 
-import type { ExecutionTargetProfile } from "./hosts/types.js";
+import type {
+  ExecutionTargetProfile,
+  PolytokenPolicy,
+  RemoteProfile,
+  XdgMode,
+} from "./hosts/types.js";
+import type { ComputerSetupIntent } from "./profile-editor.svelte.js";
 
 export interface ProfileFormDraft {
   label: string;
@@ -16,6 +22,205 @@ export interface ProfileFormDraft {
   dockerUser: string;
   dockerWorkdir: string;
   dockerPantokenRoot: string;
+}
+
+// ── ComputerSetupDraft: the single source of truth for form fields ─────────
+//
+// Captures every user-editable saved field in a plain object so it can be
+// serialized (localStorage), compared (isDirty), and survive component
+// remounts (lives in profileEditor, not the component's local $state).
+//
+// executionTarget uses the component-internal shorthand "host" | "docker"
+// (matching ExecutionTargetKind). This is distinct from ExecutionTargetProfile,
+// the discriminated union stored on RemoteProfile.
+
+export interface ComputerSetupDraft {
+  name: string;
+  sshDestination: string;
+  port: string;
+  executionTarget: "host" | "docker";
+  polytokenPolicy: PolytokenPolicy;
+  serverPath: string;
+  remoteRootOverride: string;
+  xdgMode: XdgMode;
+  containerName: string;
+  containerUser: string;
+  containerWorkdir: string;
+  pantokenRoot: string;
+}
+
+/** Map the draft's shorthand executionTarget to the persisted union. */
+export function draftToExecutionTargetProfile(
+  draft: ComputerSetupDraft,
+): ExecutionTargetProfile {
+  if (draft.executionTarget === "host") return { kind: "host" };
+  return {
+    kind: "dockerContainer",
+    containerName: draft.containerName,
+    user: draft.containerUser,
+    workdir: draft.containerWorkdir || undefined,
+    pantokenRoot: draft.pantokenRoot,
+  };
+}
+
+/** Map a RemoteProfile's executionTarget back to the draft shorthand. */
+export function executionTargetProfileToDraft(
+  profile: RemoteProfile,
+): "host" | "docker" {
+  return profile.executionTarget.kind === "dockerContainer" ? "docker" : "host";
+}
+
+/** Default draft for a new profile (host or docker). */
+export function defaultDraft(intent: ComputerSetupIntent): ComputerSetupDraft {
+  const isDocker =
+    intent.kind === "edit"
+      ? intent.profile.executionTarget.kind === "dockerContainer"
+      : intent.initialTarget === "dockerContainer";
+  return {
+    name: "",
+    sshDestination: "",
+    port: "22",
+    executionTarget: isDocker ? "docker" : "host",
+    polytokenPolicy: "requireExisting",
+    serverPath: "",
+    remoteRootOverride: "",
+    xdgMode: "isolated",
+    containerName: "",
+    containerUser: "",
+    containerWorkdir: "",
+    pantokenRoot: "",
+  };
+}
+
+/** Create a draft from a loaded RemoteProfile (for edit baseline). */
+export function draftFromProfile(profile: RemoteProfile): ComputerSetupDraft {
+  const target = profile.executionTarget;
+  if (target.kind === "dockerContainer") {
+    return {
+      name: profile.label,
+      sshDestination: profile.sshDestination,
+      port: String(profile.port ?? 22),
+      executionTarget: "docker",
+      polytokenPolicy: profile.polytokenPolicy,
+      serverPath: profile.serverPath ?? "",
+      remoteRootOverride: profile.remoteRootOverride ?? "",
+      xdgMode: profile.xdgMode,
+      containerName: target.containerName,
+      containerUser: target.user,
+      containerWorkdir: target.workdir ?? "",
+      pantokenRoot: target.pantokenRoot,
+    };
+  }
+  return {
+    name: profile.label,
+    sshDestination: profile.sshDestination,
+    port: String(profile.port ?? 22),
+    executionTarget: "host",
+    polytokenPolicy: profile.polytokenPolicy,
+    serverPath: profile.serverPath ?? "",
+    remoteRootOverride: profile.remoteRootOverride ?? "",
+    xdgMode: profile.xdgMode,
+    containerName: "",
+    containerUser: "",
+    containerWorkdir: "",
+    pantokenRoot: "",
+  };
+}
+
+/** Adapter: map the draft to the validation input shape. */
+export function toValidationDraft(
+  draft: ComputerSetupDraft,
+): ProfileFormDraft {
+  return {
+    label: draft.name,
+    sshDestination: draft.sshDestination,
+    port: draft.port,
+    remoteRootOverride: draft.remoteRootOverride,
+    serverPath: draft.serverPath,
+    executionTarget: draftToExecutionTargetProfile(draft),
+    dockerContainerName: draft.containerName,
+    dockerUser: draft.containerUser,
+    dockerWorkdir: draft.containerWorkdir,
+    dockerPantokenRoot: draft.pantokenRoot,
+  };
+}
+
+/**
+ * Deep-compare every saved field. Returns true if the draft differs from the
+ * baseline. Replaces the old "any field non-empty" check which missed port,
+ * executionTarget, serverPath, and xdgMode changes.
+ */
+export function isDirty(
+  baseline: ComputerSetupDraft | null,
+  current: ComputerSetupDraft | null,
+): boolean {
+  if (!baseline || !current) return false;
+  return (
+    baseline.name !== current.name ||
+    baseline.sshDestination !== current.sshDestination ||
+    baseline.port !== current.port ||
+    baseline.executionTarget !== current.executionTarget ||
+    baseline.polytokenPolicy !== current.polytokenPolicy ||
+    baseline.serverPath !== current.serverPath ||
+    baseline.remoteRootOverride !== current.remoteRootOverride ||
+    baseline.xdgMode !== current.xdgMode ||
+    baseline.containerName !== current.containerName ||
+    baseline.containerUser !== current.containerUser ||
+    baseline.containerWorkdir !== current.containerWorkdir ||
+    baseline.pantokenRoot !== current.pantokenRoot
+  );
+}
+
+// ── SetupError: normalized error for structured UI ──────────────────────────
+
+export interface SetupError {
+  summary: string;
+  detail?: string;
+  operation: string;
+  retryable: boolean;
+}
+
+/**
+ * Normalize an unknown rejection into a structured SetupError. Never assumes
+ * .message exists. Handles Error instances, strings, plain objects, and
+ * null/undefined.
+ */
+export function normalizeError(err: unknown, operation: string): SetupError {
+  if (err instanceof Error) {
+    const detail = err.cause
+      ? String(err.cause)
+      : err.stack ?? err.toString();
+    return {
+      summary: err.message,
+      detail: detail !== err.message ? detail : undefined,
+      operation,
+      retryable: true,
+    };
+  }
+  if (typeof err === "string") {
+    return {
+      summary: err,
+      operation,
+      retryable: true,
+    };
+  }
+  if (err && typeof err === "object") {
+    const msg =
+      (err as { message?: unknown }).message ??
+      (err as { error?: unknown }).error ??
+      JSON.stringify(err, null, 2);
+    return {
+      summary: typeof msg === "string" ? msg : String(msg),
+      detail: JSON.stringify(err, null, 2),
+      operation,
+      retryable: true,
+    };
+  }
+  return {
+    summary: err == null ? "Unknown error" : String(err),
+    operation,
+    retryable: true,
+  };
 }
 
 function isAbsolutePath(p: string): boolean {
