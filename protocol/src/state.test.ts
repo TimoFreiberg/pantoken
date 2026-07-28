@@ -31,6 +31,41 @@ const base = (over: Partial<SessionDriverEvent> = {}) =>
 // clear-on-empty) — NOT in the corpus and load-bearing.
 
 describe("foldEvent", () => {
+  test("routes nested handles independently and preserves top-level transcript", () => {
+    const s = foldAll([
+      base({ type: "assistantDelta", text: "top" }),
+      base({ type: "assistantDelta", text: "A", subagentHandle: "general-purpose:code-reviewer" }),
+      base({ type: "toolStarted", callId: "c", toolName: "bash", subagentHandle: "general-purpose:code-reviewer" }),
+      base({ type: "toolFinished", callId: "c", success: true, output: "ok", subagentHandle: "general-purpose:code-reviewer" }),
+      base({ type: "assistantDelta", text: "B", subagentHandle: "other" }),
+    ]);
+    expect(s.items).toHaveLength(1);
+    expect(s.items[0]).toMatchObject({ kind: "assistant", text: "top" });
+    expect(s.subagentItems["general-purpose:code-reviewer"]?.items).toMatchObject([
+      { kind: "assistant", text: "A", streaming: false },
+      { kind: "tool", id: "c", status: "ok", output: "ok" },
+    ]);
+    expect(s.subagentItems.other?.items).toMatchObject([{ kind: "assistant", text: "B" }]);
+  });
+
+  test("nested replay status is handle-keyed and live output becomes available", () => {
+    const s = foldAll([
+      base({ type: "nestedReplayStatus", subagentHandle: "h", status: "unavailable", reason: "not persisted" }),
+      base({ type: "assistantDelta", subagentHandle: "h", text: "x" }),
+    ]);
+    expect(s.subagentItems.h).toMatchObject({ replayStatus: "available", replayReason: "not persisted" });
+    expect(s.subagentItems.h?.items[0]).toMatchObject({ kind: "assistant", text: "x" });
+  });
+
+  test("nested retention evicts old completed output and retains running tools", () => {
+    const s = initialSessionState();
+    for (let i = 0; i < 10; i++) {
+      foldEvent(s, base({ type: "customMessage", subagentHandle: "h", id: `n${i}`, customType: "test", text: "x".repeat(8192), display: true }));
+    }
+    expect(s.subagentItems.h?.retainedBytes).toBeLessThanOrEqual(64 * 1024);
+    expect(s.subagentItems.h?.truncated).toBe(true);
+  });
+
   test("customMessage folds to an inject item and closes the open assistant", () => {
     const s = foldAll([
       base({ type: "assistantDelta", text: "final", channel: "text" }),

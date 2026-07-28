@@ -223,6 +223,7 @@ fn meta(ctx: &dyn MapCtx) -> SessionEventBase {
         session_ref: ctx.r#ref().clone(),
         timestamp: ctx.now(),
         run_id: None,
+        subagent_handle: None,
     }
 }
 
@@ -1155,7 +1156,7 @@ pub fn monitor_to_mode(monitor: &PermissionMonitor) -> PermissionMonitorMode {
 /// to their handlers because the check is at the top: `const subHandle = (ev as
 /// {subagent_handle?: string | null}).subagent_handle; if (subHandle != null) return EMPTY;`
 /// — for variants without the field, `subHandle` is `undefined` so they pass).
-fn subagent_handle(ev: &DaemonEvent) -> Option<&str> {
+pub fn subagent_handle(ev: &DaemonEvent) -> Option<&str> {
     match ev {
         DaemonEvent::Heartbeat {
             subagent_handle, ..
@@ -1333,29 +1334,59 @@ fn block_kind_from_content(kind: &ContentBlockKind) -> BlockKind {
 // ---------------------------------------------------------------------------
 // The mapper — map one DaemonEvent to zero or more pantoken events + effects.
 //
-// Subagent routing: every event variant (except subsession_*, mcp_server_*,
-// subagent_*, notification_autodrain_switch) carries an optional subagent_handle.
-// When non-null, the frame belongs to a NESTED subagent turn — not the
-// top-level transcript. These route to empty (the subagent view is later);
-// they must NOT pollute the top-level transcript.
+// Subagent routing: every streaming event carrying an optional
+// `subagent_handle` is retained as a nested event. The exact daemon handle is
+// copied to the additive protocol metadata; `None` remains the top-level stream.
 // ---------------------------------------------------------------------------
 
+/// Apply the daemon's exact nested handle to every emitted protocol event.
+fn annotate_subagent_handle(result: &mut FoldResult, handle: Option<&str>) {
+    if let Some(handle) = handle {
+        for event in &mut result.events {
+            let base = match event {
+                SessionDriverEvent::SessionOpened { base, .. }
+                | SessionDriverEvent::SessionUpdated { base, .. }
+                | SessionDriverEvent::AssistantDelta { base, .. }
+                | SessionDriverEvent::QueuedMessageStarted { base, .. }
+                | SessionDriverEvent::QueueUpdated { base, .. }
+                | SessionDriverEvent::UserMessage { base, .. }
+                | SessionDriverEvent::CustomMessage { base, .. }
+                | SessionDriverEvent::ToolStarted { base, .. }
+                | SessionDriverEvent::ToolUpdated { base, .. }
+                | SessionDriverEvent::ToolFinished { base, .. }
+                | SessionDriverEvent::RunCompleted { base, .. }
+                | SessionDriverEvent::UsageUpdated { base, .. }
+                | SessionDriverEvent::RunFailed { base, .. }
+                | SessionDriverEvent::HostUiRequest { base, .. }
+                | SessionDriverEvent::HostUiResolved { base, .. }
+                | SessionDriverEvent::ExtensionCompatibilityIssue { base, .. }
+                | SessionDriverEvent::SessionClosed { base, .. }
+                | SessionDriverEvent::SessionReset { base }
+                | SessionDriverEvent::NestedReplayStatus { base, .. } => base,
+            };
+            base.subagent_handle = Some(handle.to_owned());
+        }
+    }
+}
+
 /// Map one daemon event to zero or more pantoken events + side-effect descriptors.
-///
-/// This is the core of the polytoken driver. It's a pure function (no I/O) with
-/// an accumulator that tracks streaming block state. The driver calls this for
-/// each SSE event, emits the returned `events`, then executes the returned
-/// `effects` (HTTP calls).
+/// Nested output is emitted with its exact daemon handle instead of being dropped.
 pub fn map_daemon_event(
     ev: &DaemonEvent,
     acc: &mut FoldAccumulator,
     ctx: &dyn MapCtx,
 ) -> FoldResult {
-    // Subagent routing: skip frames from nested subagent turns.
-    if subagent_handle(ev).is_some() {
-        return FoldResult::default();
-    }
+    let handle = subagent_handle(ev);
+    let mut result = map_daemon_event_inner(ev, acc, ctx);
+    annotate_subagent_handle(&mut result, handle);
+    result
+}
 
+fn map_daemon_event_inner(
+    ev: &DaemonEvent,
+    acc: &mut FoldAccumulator,
+    ctx: &dyn MapCtx,
+) -> FoldResult {
     let base = meta(ctx);
 
     match ev {
@@ -2587,6 +2618,7 @@ mod tests {
                 session_ref: ctx.r#ref().clone(),
                 timestamp: "t".to_string(),
                 run_id: None,
+                subagent_handle: None,
             },
             snapshot: ctx.snapshot(s),
         })
@@ -3517,11 +3549,14 @@ mod tests {
     }
 
     #[test]
-    fn message_start_with_subagent_handle_is_skipped() {
+    fn message_start_with_subagent_handle_is_nested_not_top_level() {
         let out = fold_fresh(
             json!({ "type": "message_start", "prompt_id": "p1", "subagent_handle": "sub1" }),
         );
-        assert!(out.events.is_empty());
+        assert_eq!(out.events.len(), 1);
+        let event = event_json(&out.events[0]);
+        assert_eq!(event["type"], "sessionUpdated");
+        assert_eq!(event["subagentHandle"], "sub1");
     }
 
     #[test]
@@ -3856,12 +3891,15 @@ mod tests {
     }
 
     #[test]
-    fn interrogative_with_subagent_handle_is_skipped_not_top_level() {
+    fn interrogative_with_subagent_handle_is_nested_not_top_level() {
         let out = fold_fresh(
             json!({ "type": "interrogative", "interrogative_id": "i1", "interrogative_type": "confirmation", "prompt_id": "p1", "question": "ok?", "subagent_handle": "sub1" }),
         );
-        assert!(out.events.is_empty());
-        assert!(out.effects.is_empty());
+        assert_eq!(out.events.len(), 1);
+        let event = event_json(&out.events[0]);
+        assert_eq!(event["type"], "hostUiRequest");
+        assert_eq!(event["subagentHandle"], "sub1");
+        assert_eq!(out.effects.len(), 1);
     }
 
     // -----------------------------------------------------------------------

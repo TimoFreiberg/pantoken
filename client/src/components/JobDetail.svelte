@@ -1,11 +1,34 @@
 <script lang="ts">
   import { store } from "../lib/store.svelte.js";
   import IconButton from "./ui/IconButton.svelte";
-  import type { BackgroundJob } from "@pantoken/protocol";
+  import type { BackgroundJob, TranscriptItem } from "@pantoken/protocol";
 
   const job = $derived<BackgroundJob | null>(
     store.jobs.find((j) => j.handle === store.selectedJobHandle) ?? null,
   );
+  const subagentHandle = $derived(job?.subagentHandle ?? job?.handle);
+  const subagentTranscript = $derived(
+    job?.kind === "subagent" && subagentHandle
+      ? store.session.subagentItems[subagentHandle]
+      : undefined,
+  );
+
+  function itemText(item: TranscriptItem): string {
+    switch (item.kind) {
+      case "assistant":
+        return [item.thinking ? `Thinking: ${item.thinking}` : "", item.text].filter(Boolean).join("\n\n");
+      case "user":
+      case "notice":
+      case "inject":
+        return item.text;
+      case "tool":
+        return [
+          `${item.name} (${item.status})`,
+          item.text,
+          item.output === undefined ? "" : JSON.stringify(item.output),
+        ].filter(Boolean).join("\n");
+    }
+  }
 
   const JOB_KIND_ICON: Record<string, string> = {
     subagent: "◇",
@@ -69,7 +92,27 @@
       >
     </header>
     <div class="body" data-testid="job-detail-body">
-      {#if job.outputTail}
+      {#if job.kind === "subagent"}
+        <section class="transcript" aria-label="Subagent transcript" data-testid="subagent-transcript">
+          <div class="section-label">Captured transcript</div>
+          {#if subagentTranscript?.truncated}
+            <p class="truncation" data-testid="subagent-transcript-truncated">Earlier output was truncated to keep this view bounded.</p>
+          {/if}
+          {#if subagentTranscript?.items.length}
+            <div class="transcript-items">
+              {#each subagentTranscript.items as item (item.id)}
+                <pre class="transcript-item {item.kind}" data-testid={`subagent-item-${item.kind}`}>{itemText(item)}</pre>
+              {/each}
+            </div>
+          {:else if subagentTranscript?.replayStatus === "unavailable"}
+            <p class="no-output">Transcript replay is unavailable; new output will appear here while this session is live.</p>
+          {:else if subagentTranscript?.replayStatus === "loading" || !subagentTranscript}
+            <p class="no-output">Loading subagent transcript…</p>
+          {:else}
+            <p class="no-output">No transcript output captured</p>
+          {/if}
+        </section>
+      {:else if job.outputTail}
         <pre class="output-tail" data-testid="job-output-tail">{job.outputTail}</pre>
       {:else}
         <p class="no-output">No output captured</p>
@@ -215,6 +258,41 @@
     padding: 16px;
     -webkit-overflow-scrolling: touch;
     flex: 1;
+  }
+  .transcript {
+    margin: 0 0 16px;
+  }
+  .section-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+  .transcript-items {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 360px;
+    overflow-y: auto;
+  }
+  .transcript-item {
+    font-family: var(--font-mono, monospace);
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text);
+    background: var(--surface-sunken);
+    border-radius: 8px;
+    padding: 10px;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .transcript-item.tool { border-left: 3px solid var(--accent); }
+  .transcript-item.notice { border-left: 3px solid var(--progress); }
+  .truncation {
+    font-size: 12px;
+    color: var(--warning, var(--text-muted));
+    margin: 0 0 8px;
   }
   .output-tail {
     font-family: var(--font-mono, monospace);

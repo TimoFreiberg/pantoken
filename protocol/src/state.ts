@@ -110,6 +110,18 @@ export interface InjectItem {
 export type TranscriptItem =
   UserItem | AssistantItem | ToolItem | NoticeItem | InjectItem;
 
+/** Retained nested output is bounded to keep reconnect/session memory predictable. */
+export const SUBAGENT_TRANSCRIPT_LIMIT = 64 * 1024;
+export interface SubagentTranscript {
+  items: TranscriptItem[];
+  truncated: boolean;
+  retainedBytes: number;
+  replayStatus: "loading" | "available" | "unavailable";
+  replayReason?: string;
+  status: "running" | "completed" | "failed" | "closed";
+  resultSummary?: string;
+}
+
 export interface AmbientWidget {
   key: string;
   lines: string[];
@@ -162,6 +174,8 @@ export interface SessionState {
    *  overwrite-guarded semantics as cwd. */
   cwdStackDepth?: number;
   items: TranscriptItem[];
+  /** Exact daemon-handle keyed nested transcripts; top-level items never appear here. */
+  subagentItems: Record<string, SubagentTranscript>;
   /** Blocking dialogs awaiting a response, in arrival order. */
   pendingApprovals: HostUiRequest[];
   ambient: {
@@ -179,6 +193,7 @@ export function initialSessionState(): SessionState {
     status: "idle",
     config: {},
     items: [],
+    subagentItems: {},
     pendingApprovals: [],
     ambient: { statuses: {}, widgets: {} },
     queued: [],
@@ -253,6 +268,52 @@ function interruptRunningTools(
   }
 }
 
+function retainedBytes(items: TranscriptItem[]): number {
+  return new TextEncoder().encode(JSON.stringify(items)).byteLength;
+}
+
+function retainNested(t: SubagentTranscript): void {
+  // Bound individual text-bearing fields before total eviction. Tool input/output
+  // remain correlated by retaining their ToolItem (possibly with bounded strings).
+  for (const item of t.items) {
+    if (item.kind === "assistant" || item.kind === "notice" || item.kind === "inject") {
+      if (item.kind === "assistant") {
+        item.text = item.text.slice(-8192);
+        item.thinking = item.thinking.slice(-8192);
+      } else item.text = item.text.slice(-8192);
+    } else if (item.kind === "tool") {
+      if (item.text) item.text = item.text.slice(-4096);
+      if (typeof item.input === "string") item.input = item.input.slice(-8192);
+      if (typeof item.output === "string") item.output = item.output.slice(-8192);
+      if (item.images) item.images = item.images.map((image) => ({ ...image, data: image.data.slice(-16384) }));
+    }
+  }
+  while (retainedBytes(t.items) > SUBAGENT_TRANSCRIPT_LIMIT) {
+    const index = t.items.findIndex((item) => item.kind !== "tool" || item.status !== "running");
+    if (index >= 0) {
+      t.items.splice(index, 1);
+      t.truncated = true;
+      continue;
+    }
+    // Preserve in-flight tool correlation, but reduce its payload to a bounded
+    // placeholder rather than allowing a single JSON/image result to exceed the budget.
+    for (const item of t.items) {
+      if (item.kind !== "tool" || item.status !== "running") continue;
+      item.input = typeof item.input === "string" ? item.input.slice(-1024) : item.input === undefined ? undefined : "[input truncated]";
+      item.output = typeof item.output === "string" ? item.output.slice(-1024) : item.output === undefined ? undefined : "[output truncated]";
+      item.images = item.images?.slice(0, 1).map((image) => ({ ...image, data: image.data.slice(-1024) }));
+      item.text = item.text?.slice(-1024);
+    }
+    t.truncated = true;
+    break;
+  }
+  t.retainedBytes = retainedBytes(t.items);
+}
+
+function nestedTranscript(): SubagentTranscript {
+  return { items: [], truncated: false, retainedBytes: 0, replayStatus: "loading", status: "running" };
+}
+
 /**
  * Fold one driver event into state. MUTATES `state` and returns it — callers that
  * need immutability (Svelte reactivity) should clone first or reassign the result.
@@ -263,6 +324,26 @@ export function foldEvent(
   state: SessionState,
   ev: SessionDriverEvent,
 ): SessionState {
+  if (ev.type === "nestedReplayStatus") {
+    const t = (state.subagentItems[ev.subagentHandle] ??= nestedTranscript());
+    t.replayStatus = ev.status;
+    t.replayReason = ev.reason;
+    return state;
+  }
+  const nestedType = ev.subagentHandle !== undefined;
+  if (nestedType) {
+    const t = (state.subagentItems[ev.subagentHandle!] ??= nestedTranscript());
+    const nestedState = { ...state, items: t.items, subagentItems: {} } as SessionState;
+    const nestedEvent = { ...ev, subagentHandle: undefined } as SessionDriverEvent;
+    foldEvent(nestedState, nestedEvent);
+    t.items = nestedState.items;
+    if (ev.type === "runFailed") t.status = "failed";
+    else if (ev.type === "sessionClosed") t.status = ev.reason === "failed" ? "failed" : "closed";
+    else if (ev.type === "assistantDelta" || ev.type === "toolStarted") t.status = "running";
+    t.replayStatus = "available";
+    retainNested(t);
+    return state;
+  }
   switch (ev.type) {
     case "sessionOpened":
     case "sessionUpdated":
@@ -556,11 +637,18 @@ export function foldEvent(
     }
 
     case "sessionReset": {
-      // The transcript was truncated/gapped. Clear the items so the fresh events
-      // that follow (emitted by the driver's reseed) fold into an empty state
-      // instead of duplicating on top of the stale transcript. Preserve metadata
-      // (ref, title, config) — only the transcript items are reset.
+      // A top-level reset replaces the complete session transcript. A nested reset
+      // only replaces that exact handle's stream.
       state.items = [];
+      if (ev.subagentHandle !== undefined) {
+        const nested = state.subagentItems[ev.subagentHandle];
+        if (nested) {
+          nested.items = [];
+          nested.retainedBytes = 0;
+        }
+      } else {
+        state.subagentItems = {};
+      }
       return state;
     }
   }

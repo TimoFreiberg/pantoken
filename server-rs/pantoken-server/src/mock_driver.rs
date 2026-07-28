@@ -919,6 +919,7 @@ fn base() -> SessionEventBase {
         session_ref: mock_session_ref(),
         timestamp: ts(),
         run_id: None,
+        subagent_handle: None,
     }
 }
 
@@ -930,6 +931,7 @@ fn base_with_ref(session_ref: SessionRef) -> SessionEventBase {
         session_ref,
         timestamp: ts(),
         run_id: None,
+        subagent_handle: None,
     }
 }
 
@@ -949,6 +951,7 @@ fn mock_session_seed(path: &str) -> Vec<SessionDriverEvent> {
             session_ref: ref_id.clone(),
             timestamp: ts(),
             run_id: None,
+            subagent_handle: None,
         };
         let snap = |status: SessionStatus| SessionSnapshot {
             r#ref: ref_id.clone(),
@@ -1146,6 +1149,7 @@ fn restored_session_seed() -> Vec<SessionDriverEvent> {
         session_ref: ref_id.clone(),
         timestamp: ts(),
         run_id: None,
+        subagent_handle: None,
     };
     let snap = || SessionSnapshot {
         r#ref: ref_id.clone(),
@@ -1719,6 +1723,7 @@ fn new_session_seed(
             session_ref: ref_id,
             timestamp: ts(),
             run_id: None,
+            subagent_handle: None,
         },
         snapshot: snapshot.clone(),
     }];
@@ -1740,6 +1745,7 @@ fn new_session_reply(
         session_ref: ref_id.clone(),
         timestamp: ts(),
         run_id: None,
+        subagent_handle: None,
     };
     let snap = |status: SessionStatus| SessionSnapshot {
         status,
@@ -1975,6 +1981,7 @@ impl MockDriver {
                 session_ref: session_ref_for(session_id),
                 timestamp: ts(),
                 run_id: None,
+                subagent_handle: None,
             },
             messages,
         });
@@ -2487,6 +2494,7 @@ impl PantokenDriver for MockDriver {
                             session_ref: p.session_ref.clone(),
                             timestamp: ts(),
                             run_id: None,
+                            subagent_handle: None,
                         },
                         request: p.request.clone(),
                     });
@@ -2844,6 +2852,7 @@ impl PantokenDriver for MockDriver {
             session_ref: session_ref_for(&sid),
             timestamp: ts(),
             run_id: None,
+            subagent_handle: None,
         };
         match action {
             SessionAction::SetModel {
@@ -3777,9 +3786,9 @@ impl PantokenDriver for MockDriver {
                     cwd: None, cwd_stack_depth: None,
                 };
                 vec![
-                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated { base: SessionEventBase { session_ref: ref_id.clone(), timestamp: ts(), run_id: None }, snapshot: snap_bg(SessionStatus::Running) } },
-                    ScriptStep { wait_ms: 300, event: SessionDriverEvent::AssistantDelta { base: SessionEventBase { session_ref: ref_id.clone(), timestamp: ts(), run_id: None }, text: "(background turn)".into(), channel: Some(AssistantDeltaChannel::Text), entry_id: None } },
-                    ScriptStep { wait_ms: 1500, event: SessionDriverEvent::RunCompleted { base: SessionEventBase { session_ref: ref_id.clone(), timestamp: ts(), run_id: None }, snapshot: snap_bg(SessionStatus::Idle), user_entry_id: None, assistant_entry_id: None } },
+                    ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated { base: SessionEventBase { session_ref: ref_id.clone(), timestamp: ts(), run_id: None, subagent_handle: None }, snapshot: snap_bg(SessionStatus::Running) } },
+                    ScriptStep { wait_ms: 300, event: SessionDriverEvent::AssistantDelta { base: SessionEventBase { session_ref: ref_id.clone(), timestamp: ts(), run_id: None, subagent_handle: None }, text: "(background turn)".into(), channel: Some(AssistantDeltaChannel::Text), entry_id: None } },
+                    ScriptStep { wait_ms: 1500, event: SessionDriverEvent::RunCompleted { base: SessionEventBase { session_ref: ref_id.clone(), timestamp: ts(), run_id: None, subagent_handle: None }, snapshot: snap_bg(SessionStatus::Idle), user_entry_id: None, assistant_entry_id: None } },
                 ]
             }
             "bgwait" => {
@@ -3797,7 +3806,7 @@ impl PantokenDriver for MockDriver {
                     flags: None, todos: None, mcp_servers: None,
                     cwd: None, cwd_stack_depth: None,
                 };
-                let b = || SessionEventBase { session_ref: ref_id.clone(), timestamp: ts(), run_id: None };
+                let b = || SessionEventBase { session_ref: ref_id.clone(), timestamp: ts(), run_id: None, subagent_handle: None };
                 vec![
                     ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated { base: b(), snapshot: snap_bg } },
                     ScriptStep { wait_ms: 80, event: SessionDriverEvent::ToolStarted {

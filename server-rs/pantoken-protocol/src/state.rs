@@ -719,6 +719,11 @@ pub fn fold_event(state: &mut SessionState, ev: &SessionDriverEvent) {
             // empty state instead of duplicating. Preserve metadata.
             state.items.clear();
         }
+
+        E::NestedReplayStatus { .. } => {
+            // Nested transcript state is folded by the shared TypeScript reducer;
+            // accepting this additive event preserves Rust wire compatibility.
+        }
     }
 }
 
@@ -775,6 +780,7 @@ mod tests {
             },
             timestamp: "2026-01-01T00:00:00Z".into(),
             run_id: None,
+            subagent_handle: None,
         }
     }
 

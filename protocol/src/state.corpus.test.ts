@@ -16,6 +16,9 @@ for (const file of readdirSync(corpusDir).filter((f) => f.endsWith(".json"))) {
     const state = foldAll(json.events as SessionDriverEvent[]);
     // Serialize → parse to normalize (strips undefined, matches JSON wire shape)
     const actual = JSON.parse(JSON.stringify(state));
+    // The additive nested transcript map is omitted from legacy corpus fixtures
+    // when no nested handle was observed, preserving old wire expectations.
+    if (Object.keys(actual.subagentItems ?? {}).length === 0) delete actual.subagentItems;
     expect(actual).toEqual(json.expected);
   });
 }

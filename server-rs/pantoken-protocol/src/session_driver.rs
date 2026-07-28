@@ -831,6 +831,13 @@ pub struct SessionEventBase {
     pub timestamp: Timestamp,
     #[serde(skip_serializing_if = "Option::is_none", default, rename = "runId")]
     pub run_id: Option<RunId>,
+    /// Exact daemon subagent handle; absent identifies the top-level stream.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        rename = "subagentHandle"
+    )]
+    pub subagent_handle: Option<String>,
 }
 
 /// The full session driver event stream.
@@ -987,6 +994,23 @@ pub enum SessionDriverEvent {
         #[serde(flatten)]
         base: SessionEventBase,
     },
+    NestedReplayStatus {
+        #[serde(flatten)]
+        base: SessionEventBase,
+        #[serde(rename = "subagentHandle")]
+        subagent_handle: String,
+        status: NestedReplayStatusKind,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        reason: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum NestedReplayStatusKind {
+    Loading,
+    Available,
+    Unavailable,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -1019,7 +1043,8 @@ impl SessionDriverEvent {
             | SessionDriverEvent::HostUiResolved { base, .. }
             | SessionDriverEvent::ExtensionCompatibilityIssue { base, .. }
             | SessionDriverEvent::SessionClosed { base, .. }
-            | SessionDriverEvent::SessionReset { base } => &base.session_ref,
+            | SessionDriverEvent::SessionReset { base }
+            | SessionDriverEvent::NestedReplayStatus { base, .. } => &base.session_ref,
         }
     }
 
@@ -1043,7 +1068,35 @@ impl SessionDriverEvent {
             | SessionDriverEvent::HostUiResolved { base, .. }
             | SessionDriverEvent::ExtensionCompatibilityIssue { base, .. }
             | SessionDriverEvent::SessionClosed { base, .. }
-            | SessionDriverEvent::SessionReset { base } => &base.timestamp,
+            | SessionDriverEvent::SessionReset { base }
+            | SessionDriverEvent::NestedReplayStatus { base, .. } => &base.timestamp,
+        }
+    }
+
+    /// Returns the exact nested daemon handle, or None for the top-level stream.
+    pub fn subagent_handle(&self) -> Option<&str> {
+        match self {
+            SessionDriverEvent::SessionOpened { base, .. }
+            | SessionDriverEvent::SessionUpdated { base, .. }
+            | SessionDriverEvent::AssistantDelta { base, .. }
+            | SessionDriverEvent::QueuedMessageStarted { base, .. }
+            | SessionDriverEvent::QueueUpdated { base, .. }
+            | SessionDriverEvent::UserMessage { base, .. }
+            | SessionDriverEvent::CustomMessage { base, .. }
+            | SessionDriverEvent::ToolStarted { base, .. }
+            | SessionDriverEvent::ToolUpdated { base, .. }
+            | SessionDriverEvent::ToolFinished { base, .. }
+            | SessionDriverEvent::RunCompleted { base, .. }
+            | SessionDriverEvent::UsageUpdated { base, .. }
+            | SessionDriverEvent::RunFailed { base, .. }
+            | SessionDriverEvent::HostUiRequest { base, .. }
+            | SessionDriverEvent::HostUiResolved { base, .. }
+            | SessionDriverEvent::ExtensionCompatibilityIssue { base, .. }
+            | SessionDriverEvent::SessionClosed { base, .. }
+            | SessionDriverEvent::SessionReset { base }
+            | SessionDriverEvent::NestedReplayStatus { base, .. } => {
+                base.subagent_handle.as_deref()
+            }
         }
     }
 
@@ -1067,7 +1120,8 @@ impl SessionDriverEvent {
             | SessionDriverEvent::HostUiResolved { base, .. }
             | SessionDriverEvent::ExtensionCompatibilityIssue { base, .. }
             | SessionDriverEvent::SessionClosed { base, .. }
-            | SessionDriverEvent::SessionReset { base } => base.run_id.as_ref(),
+            | SessionDriverEvent::SessionReset { base }
+            | SessionDriverEvent::NestedReplayStatus { base, .. } => base.run_id.as_ref(),
         }
     }
 }
@@ -1305,6 +1359,7 @@ mod tests {
                 },
                 timestamp: "2026-07-03T12:00:00Z".into(),
                 run_id: None,
+                subagent_handle: None,
             },
         };
         let json = serde_json::to_value(&ev).unwrap();

@@ -137,7 +137,8 @@ fn estimated_bytes(ev: &SessionDriverEvent) -> usize {
         | QueueUpdated { .. }
         | QueuedMessageStarted { .. }
         | ExtensionCompatibilityIssue { .. }
-        | SessionReset { .. } => OVERHEAD,
+        | SessionReset { .. }
+        | NestedReplayStatus { .. } => OVERHEAD,
     }
 }
 
@@ -210,6 +211,30 @@ fn compacted_append(compacted: &mut Vec<SessionDriverEvent>, ev: SessionDriverEv
 ///   merged event (first's timestamp/entryId, joined text) folds byte-identically.
 /// - usageUpdated + usageUpdated keeps the later one (the fold overwrites
 ///   `usage` wholesale, so only the last of an adjacent run matters).
+fn event_subagent_handle(event: &SessionDriverEvent) -> Option<&str> {
+    match event {
+        SessionDriverEvent::SessionOpened { base, .. }
+        | SessionDriverEvent::SessionUpdated { base, .. }
+        | SessionDriverEvent::AssistantDelta { base, .. }
+        | SessionDriverEvent::QueuedMessageStarted { base, .. }
+        | SessionDriverEvent::QueueUpdated { base, .. }
+        | SessionDriverEvent::UserMessage { base, .. }
+        | SessionDriverEvent::CustomMessage { base, .. }
+        | SessionDriverEvent::ToolStarted { base, .. }
+        | SessionDriverEvent::ToolUpdated { base, .. }
+        | SessionDriverEvent::ToolFinished { base, .. }
+        | SessionDriverEvent::RunCompleted { base, .. }
+        | SessionDriverEvent::UsageUpdated { base, .. }
+        | SessionDriverEvent::RunFailed { base, .. }
+        | SessionDriverEvent::HostUiRequest { base, .. }
+        | SessionDriverEvent::HostUiResolved { base, .. }
+        | SessionDriverEvent::ExtensionCompatibilityIssue { base, .. }
+        | SessionDriverEvent::SessionClosed { base, .. }
+        | SessionDriverEvent::SessionReset { base, .. }
+        | SessionDriverEvent::NestedReplayStatus { base, .. } => base.subagent_handle.as_deref(),
+    }
+}
+
 pub fn try_merge(a: &SessionDriverEvent, b: &SessionDriverEvent) -> Option<SessionDriverEvent> {
     use SessionDriverEvent::*;
 
@@ -227,6 +252,11 @@ pub fn try_merge(a: &SessionDriverEvent, b: &SessionDriverEvent) -> Option<Sessi
                 ..
             },
         ) => {
+            // Nested transcripts are independent streams. Never coalesce a
+            // top-level delta with nested output or two different handles.
+            if event_subagent_handle(a) != event_subagent_handle(b) {
+                return None;
+            }
             let chan_a = channel.unwrap_or(AssistantDeltaChannel::Text);
             let chan_b = channel_b.unwrap_or(AssistantDeltaChannel::Text);
             if chan_a != chan_b {
@@ -311,6 +341,7 @@ pub fn meta_seed_events(
             session_ref: r#ref.clone(),
             timestamp: timestamp.to_string(),
             run_id: None,
+            subagent_handle: None,
         },
         snapshot,
     });
@@ -322,6 +353,7 @@ pub fn meta_seed_events(
                 session_ref: r#ref.clone(),
                 timestamp: timestamp.to_string(),
                 run_id: None,
+                subagent_handle: None,
             },
             request: HostUiRequest::Status {
                 request_id: format!("meta-status-{key}"),
@@ -338,6 +370,7 @@ pub fn meta_seed_events(
                 session_ref: r#ref.clone(),
                 timestamp: timestamp.to_string(),
                 run_id: None,
+                subagent_handle: None,
             },
             request: HostUiRequest::Widget {
                 request_id: format!("meta-widget-{}", w.key),
@@ -362,6 +395,7 @@ pub fn meta_seed_events(
                 session_ref: r#ref.clone(),
                 timestamp: timestamp.to_string(),
                 run_id: None,
+                subagent_handle: None,
             },
             request: HostUiRequest::Title {
                 request_id: "meta-title".to_string(),
@@ -377,6 +411,7 @@ pub fn meta_seed_events(
                 session_ref: r#ref.clone(),
                 timestamp: timestamp.to_string(),
                 run_id: None,
+                subagent_handle: None,
             },
             request: req.clone(),
         });
@@ -406,6 +441,7 @@ mod tests {
             session_ref: sref(),
             timestamp: "t".into(),
             run_id: None,
+            subagent_handle: None,
         }
     }
 

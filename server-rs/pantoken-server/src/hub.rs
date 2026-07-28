@@ -2492,6 +2492,7 @@ impl SessionHub {
                     session_ref,
                     timestamp: now_iso(),
                     run_id: None,
+                    subagent_handle: None,
                 },
                 usage,
             };
@@ -3144,6 +3145,7 @@ impl SessionDriverEventExt for SessionDriverEvent {
             E::CustomMessage { base, .. } => &base.session_ref,
             E::ExtensionCompatibilityIssue { base, .. } => &base.session_ref,
             E::SessionReset { base, .. } => &base.session_ref,
+            E::NestedReplayStatus { base, .. } => &base.session_ref,
         }
     }
 
@@ -3167,6 +3169,7 @@ impl SessionDriverEventExt for SessionDriverEvent {
             E::CustomMessage { base, .. } => &base.timestamp,
             E::ExtensionCompatibilityIssue { base, .. } => &base.timestamp,
             E::SessionReset { base, .. } => &base.timestamp,
+            E::NestedReplayStatus { base, .. } => &base.timestamp,
         }
     }
 
@@ -3193,6 +3196,7 @@ impl SessionDriverEventExt for SessionDriverEvent {
             E::CustomMessage { .. } => "customMessage",
             E::ExtensionCompatibilityIssue { .. } => "extensionCompatibilityIssue",
             E::SessionReset { .. } => "sessionReset",
+            E::NestedReplayStatus { .. } => "nestedReplayStatus",
         }
     }
 
@@ -3703,6 +3707,7 @@ mod hub_models_tests {
                 session_ref: session_ref_for("demo-session"),
                 timestamp: ts(),
                 run_id: None,
+                subagent_handle: None,
             },
             text: text.into(),
             channel: Some(pantoken_protocol::session_driver::AssistantDeltaChannel::Text),
@@ -4278,6 +4283,7 @@ mod hub_models_tests {
                 session_ref: session_ref_for("demo-session"),
                 timestamp: ts(),
                 run_id: None,
+                subagent_handle: None,
             },
             id: "u-wedge".into(),
             text: "wedged msg".into(),
@@ -4746,6 +4752,7 @@ mod hub_models_tests {
                 session_ref: sref.clone(),
                 timestamp: ts(),
                 run_id: None,
+                subagent_handle: None,
             },
             request: HostUiRequest::Confirm {
                 request_id: "req-1".into(),
@@ -4764,6 +4771,7 @@ mod hub_models_tests {
                 session_ref: sref2.clone(),
                 timestamp: ts(),
                 run_id: None,
+                subagent_handle: None,
             },
             error: pantoken_protocol::session_driver::SessionErrorInfo {
                 message: "boom".into(),
@@ -4805,6 +4813,7 @@ mod hub_models_tests {
                 session_ref: session_ref_for("demo-session"),
                 timestamp: ts(),
                 run_id: None,
+                subagent_handle: None,
             },
             id: "u1".into(),
             text: "hello".into(),
@@ -4852,6 +4861,7 @@ mod hub_models_tests {
                 session_ref: sref.clone(),
                 timestamp: ts(),
                 run_id: None,
+                subagent_handle: None,
             },
             text: "All done!".into(),
             channel: Some(AssistantDeltaChannel::Text),
@@ -4870,6 +4880,7 @@ mod hub_models_tests {
                 session_ref: sref.clone(),
                 timestamp: ts(),
                 run_id: None,
+                subagent_handle: None,
             },
             id: "reminder-session-resumed-0".into(),
             custom_type: "session-resumed".into(),
@@ -4901,6 +4912,7 @@ mod hub_models_tests {
                 session_ref: sref.clone(),
                 timestamp: ts(),
                 run_id: None,
+                subagent_handle: None,
             },
             snapshot: idle_snap,
         });
@@ -4950,6 +4962,7 @@ mod hub_models_tests {
                 session_ref: sref.clone(),
                 timestamp: ts(),
                 run_id: None,
+                subagent_handle: None,
             },
             snapshot: idle_snap,
         });
@@ -5097,6 +5110,7 @@ mod hub_models_tests {
                 session_ref: sref.clone(),
                 timestamp: ts(),
                 run_id: None,
+                subagent_handle: None,
             },
             snapshot: snap,
         });
@@ -5152,6 +5166,7 @@ mod hub_models_tests {
                 session_ref: sref.clone(),
                 timestamp: ts(),
                 run_id: None,
+                subagent_handle: None,
             },
             snapshot: snap,
         });
@@ -5226,6 +5241,7 @@ mod hub_models_tests {
                 session_ref: sref,
                 timestamp: ts(),
                 run_id: None,
+                subagent_handle: None,
             },
             snapshot: crate::polytoken::event_map::snapshot_from_state(
                 None,

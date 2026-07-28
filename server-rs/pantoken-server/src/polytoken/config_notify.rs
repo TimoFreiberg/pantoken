@@ -31,6 +31,7 @@ pub fn error_notify(
             session_ref: r#ref,
             timestamp,
             run_id: None,
+            subagent_handle: None,
         },
         request: HostUiRequest::Notify {
             request_id,

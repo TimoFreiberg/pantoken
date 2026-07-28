@@ -143,6 +143,7 @@ mod tests {
                 session_ref: make_session_ref(),
                 timestamp: Timestamp::from("2026-07-03T12:00:00Z"),
                 run_id: None,
+                subagent_handle: None,
             },
         };
         let msg = ServerMessage::Event {

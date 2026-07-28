@@ -94,7 +94,9 @@ use pantoken_protocol::session_driver::ModelCatalogDiagnostic;
 /// A warm session: a daemon client + accumulator + cached state.
 struct WarmSession {
     client: Arc<DaemonClient>,
-    accumulator: Mutex<FoldAccumulator>,
+    /// Independent streaming fold state per exact daemon subagent handle.
+    /// `None` is the top-level stream; nested handles never share buffers.
+    accumulators: Mutex<HashMap<Option<String>, FoldAccumulator>>,
     last_state: RwLock<Option<SessionStateSnapshot>>,
     session_ref: SessionRef,
     workspace: WorkspaceRef,
@@ -434,6 +436,7 @@ impl PolytokenInner {
                 session_ref: session_ref.clone(),
                 timestamp: DriverMapCtx::now_ts(),
                 run_id: None,
+                subagent_handle: None,
             },
             request: HostUiRequest::Notify {
                 request_id: format!("action-error-{}", chrono::Utc::now().timestamp_millis()),
@@ -452,6 +455,7 @@ impl PolytokenInner {
                 session_ref: session_ref.clone(),
                 timestamp: DriverMapCtx::now_ts(),
                 run_id: None,
+                subagent_handle: None,
             },
             request: HostUiRequest::Notify {
                 request_id: format!("action-success-{}", chrono::Utc::now().timestamp_millis()),
@@ -868,6 +872,7 @@ impl PolytokenInner {
                 session_ref: ctx.r#ref.clone(),
                 timestamp: DriverMapCtx::now_ts(),
                 run_id: None,
+                subagent_handle: None,
             },
             snapshot: snapshot.clone(),
         }];
@@ -893,6 +898,7 @@ impl PolytokenInner {
                     session_ref: ctx.r#ref.clone(),
                     timestamp: DriverMapCtx::now_ts(),
                     run_id: None,
+                    subagent_handle: None,
                 },
                 snapshot,
             });
@@ -926,6 +932,7 @@ impl PolytokenInner {
                 session_ref: ctx.r#ref.clone(),
                 timestamp: DriverMapCtx::now_ts(),
                 run_id: None,
+                subagent_handle: None,
             },
         }];
         events.extend(history_seed::history_to_seed_events(history_items, ctx));
@@ -934,6 +941,7 @@ impl PolytokenInner {
                 session_ref: ctx.r#ref.clone(),
                 timestamp: DriverMapCtx::now_ts(),
                 run_id: None,
+                subagent_handle: None,
             },
             snapshot,
         });
@@ -1008,7 +1016,7 @@ impl PolytokenInner {
         // Create the warm session
         let warm = Arc::new(WarmSession {
             client: client.clone(),
-            accumulator: Mutex::new(event_map::create_accumulator()),
+            accumulators: Mutex::new(HashMap::from([(None, event_map::create_accumulator())])),
             last_state: RwLock::new(last_state),
             session_ref: session_ref.clone(),
             workspace: workspace.clone(),
@@ -1127,6 +1135,7 @@ impl PolytokenInner {
                     session_ref: victim.session_ref.clone(),
                     timestamp: now,
                     run_id: None,
+                    subagent_handle: None,
                 },
                 reason: SessionClosedReason::Ended,
             });
@@ -1381,8 +1390,12 @@ impl PolytokenInner {
 
         // Map through the event_map accumulator
         let result: FoldResult = {
-            let mut acc = ws.accumulator.lock();
-            event_map::map_daemon_event(&ev, &mut acc, &ctx)
+            let key = event_map::subagent_handle(&ev).map(str::to_owned);
+            let mut accumulators = ws.accumulators.lock();
+            let acc = accumulators
+                .entry(key)
+                .or_insert_with(event_map::create_accumulator);
+            event_map::map_daemon_event(&ev, acc, &ctx)
         };
 
         // Emit all resulting pantoken events to subscribers
@@ -1446,8 +1459,10 @@ impl PolytokenInner {
                 //    open path). A genuinely running session carries status:running here,
                 //    correctly keeping the turn live.
                 {
-                    let mut acc = ws.accumulator.lock();
-                    event_map::reset_accumulator(&mut acc);
+                    let mut accumulators = ws.accumulators.lock();
+                    for acc in accumulators.values_mut() {
+                        event_map::reset_accumulator(acc);
+                    }
                 }
                 let state_res = ws.client.state().await;
                 if let Some(state) = state_res.data {
@@ -1585,6 +1600,7 @@ impl PantokenDriver for PolytokenDriver {
             session_ref: ws.session_ref.clone(),
             timestamp: now.clone(),
             run_id: None,
+            subagent_handle: None,
         };
         if accepted.queued_item.is_some() {
             let res = ws.client.turn_input_snapshot().await;
@@ -1739,6 +1755,7 @@ impl PantokenDriver for PolytokenDriver {
                 session_ref: ws.session_ref.clone(),
                 timestamp: now,
                 run_id: None,
+                subagent_handle: None,
             },
             request_id: request_id.clone(),
         });
@@ -1768,6 +1785,7 @@ impl PantokenDriver for PolytokenDriver {
                             session_ref,
                             timestamp: DriverMapCtx::now_ts(),
                             run_id: None,
+                            subagent_handle: None,
                         },
                         request: HostUiRequest::Notify {
                             request_id: format!("respond-error-{interrogative_id}"),
@@ -1912,6 +1930,7 @@ impl PantokenDriver for PolytokenDriver {
                             session_ref: ws.session_ref.clone(),
                             timestamp: DriverMapCtx::now_ts(),
                             run_id: None,
+                            subagent_handle: None,
                         },
                         request: HostUiRequest::Notify {
                             request_id: format!(
@@ -2237,6 +2256,7 @@ impl PantokenDriver for PolytokenDriver {
                     session_ref: ws.session_ref.clone(),
                     timestamp: DriverMapCtx::now_ts(),
                     run_id: None,
+                    subagent_handle: None,
                 },
                 reason: SessionClosedReason::Manual,
             });
@@ -2384,6 +2404,7 @@ impl PantokenDriver for PolytokenDriver {
                             session_ref: ws.session_ref.clone(),
                             timestamp: DriverMapCtx::now_ts(),
                             run_id: None,
+                            subagent_handle: None,
                         },
                         snapshot,
                     }]
@@ -3172,8 +3193,10 @@ impl PantokenDriver for PolytokenDriver {
             return;
         };
         for ws in self.inner.warm.read().values() {
-            let mut acc = ws.accumulator.lock();
-            event_map::reset_accumulator(&mut acc);
+            let mut accumulators = ws.accumulators.lock();
+            for acc in accumulators.values_mut() {
+                event_map::reset_accumulator(acc);
+            }
         }
         control.reset();
     }
@@ -3203,6 +3226,7 @@ impl PantokenDriver for PolytokenDriver {
                 session_ref: ws.session_ref.clone(),
                 timestamp: DriverMapCtx::now_ts(),
                 run_id: None,
+                subagent_handle: None,
             },
             snapshot,
         }])
@@ -3597,7 +3621,7 @@ mod tests {
         };
         Arc::new(WarmSession {
             client,
-            accumulator: Mutex::new(event_map::create_accumulator()),
+            accumulators: Mutex::new(HashMap::from([(None, event_map::create_accumulator())])),
             last_state: RwLock::new(None),
             session_ref: SessionRef {
                 workspace_id: workspace.workspace_id.clone(),
@@ -5171,6 +5195,7 @@ mod tests {
                     },
                     timestamp: "t".into(),
                     run_id: None,
+                    subagent_handle: None,
                 },
             });
         }

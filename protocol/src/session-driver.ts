@@ -530,6 +530,8 @@ export interface SessionEventBase {
   readonly sessionRef: SessionRef;
   readonly timestamp: Timestamp;
   readonly runId?: RunId;
+  /** Exact daemon subagent handle. Absent identifies the top-level session stream. */
+  readonly subagentHandle?: string;
 }
 
 export interface SessionOpenedEvent extends SessionEventBase {
@@ -691,6 +693,15 @@ export interface SessionResetEvent extends SessionEventBase {
   readonly type: "sessionReset";
 }
 
+/** Replay availability for a daemon subagent transcript. This additive event is
+ * intentionally handle-keyed: it never aliases a job handle or array position. */
+export interface NestedReplayStatusEvent extends SessionEventBase {
+  readonly type: "nestedReplayStatus";
+  readonly subagentHandle: string;
+  readonly status: "loading" | "available" | "unavailable";
+  readonly reason?: string;
+}
+
 export type SessionDriverEvent =
   | SessionOpenedEvent
   | SessionUpdatedEvent
@@ -709,4 +720,5 @@ export type SessionDriverEvent =
   | HostUiResolvedEvent
   | ExtensionCompatibilityIssueEvent
   | SessionClosedEvent
-  | SessionResetEvent;
+  | SessionResetEvent
+  | NestedReplayStatusEvent;
