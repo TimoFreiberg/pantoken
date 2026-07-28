@@ -663,6 +663,35 @@ describeOrSkip("integrate-into-main.sh squash enforcement", () => {
     );
     expect(result.stdout.trim()).toBe("0");
   });
+
+  test("preflight lists the full commit IDs when squash is required", () => {
+    createJjRepo(tempDir);
+    writeFileSync(join(tempDir, "base.txt"), "base\n");
+    run(["jj", "describe", "-m", "base"], tempDir);
+    run(["jj", "new"], tempDir);
+    writeFileSync(join(tempDir, "first.txt"), "first\n");
+    run(["jj", "describe", "-m", "first feature"], tempDir);
+    run(["jj", "new"], tempDir);
+    writeFileSync(join(tempDir, "second.txt"), "second\n");
+    run(["jj", "describe", "-m", "second feature"], tempDir);
+
+    const ids = runBash(
+      String.raw`jj log -r 'main..@ ~ empty()' --no-graph -T 'commit_id ++ "\\n"'`,
+      tempDir,
+    ).stdout.split("\\n").filter(Boolean);
+    expect(ids.length).toBe(2);
+
+    const result = run(
+      ["bash", INTEGRATE_SH, "42"],
+      tempDir,
+      { PANTOKEN_REPO_ROOT: tempDir },
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("Commits that must be squashed:");
+    for (const id of ids) {
+      expect(result.stderr).toContain(id);
+    }
+  });
 });
 
 describeOrSkip("integrate-into-main.sh tolerance (AC.5)", () => {

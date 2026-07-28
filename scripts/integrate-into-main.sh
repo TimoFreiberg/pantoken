@@ -140,9 +140,14 @@ release_lock() {
 COMMIT_MESSAGES=$(jj log -r 'main..@ ~ empty()' --no-graph -T 'description' 2>/dev/null || true)
 if [ -n "$COMMIT_MESSAGES" ]; then
   # Verify exactly one non-empty commit above main (squash enforcement)
-  NON_EMPTY_COUNT=$(jj log -r 'main..@ ~ empty()' --no-graph -T 'commit_id ++ "\n"' 2>/dev/null | grep -c . || true)
+  NON_EMPTY_COMMIT_IDS=$(jj log -r 'main..@ ~ empty()' --no-graph -T 'commit_id ++ "\n"' 2>/dev/null || true)
+  NON_EMPTY_COUNT=$(printf '%s' "$NON_EMPTY_COMMIT_IDS" | grep -c . || true)
   if [ "$NON_EMPTY_COUNT" -gt 1 ]; then
     log "ERROR: found $NON_EMPTY_COUNT non-empty commits above main — expected exactly one."
+    log "Commits that must be squashed:"
+    while IFS= read -r commit_id; do
+      [ -n "$commit_id" ] && log "  $commit_id"
+    done <<< "$NON_EMPTY_COMMIT_IDS"
     log "Squash them into a single commit, then rerun 'just integrate-into-main $ISSUE_NUMBER'."
     exit 1
   fi
