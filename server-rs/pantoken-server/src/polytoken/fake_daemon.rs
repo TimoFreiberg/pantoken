@@ -8,13 +8,12 @@
 //! driver stack (`warm_session` → `DaemonClient` → `event_map`) runs end-to-end
 //! against deterministic fixtures.
 //!
-//! Endpoints the corpus records (`/state`, `/history`, `/prompt`, `/turn/input`)
-//! are replayed from the `http[]` entries in first-match order. Endpoints the
-//! driver calls but the corpus did NOT record (`/health`, `/tui-attachment/claim`,
-//! `/terminate`, etc.) get a minimal canned OK response sufficient for
-//! `warm_session` to reach "healthy + lease claimed". An UNMATCHED recorded-style
-//! request fails loud (500 + logged) — a missing recording is a harness bug to
-//! surface, not swallow.
+//! Historical corpus replay uses per-endpoint cursors plus a small explicit
+//! lifecycle bootstrap allowlist. Independently authored contracts opt into
+//! global order/body/count matching with [`spawn_strict`]; live-driver action
+//! contracts use [`spawn_strict_with_bootstrap`] to combine that strict action
+//! sequence with only the tested lifecycle allowlist. Strict fakes reject every
+//! other undeclared request and enforce expectation consumption on drop.
 //!
 //! `recorded_calls()` exposes every `(method, path)` the driver made, so tests
 //! can assert e.g. `GET /state` / `GET /turn/input` fired after an effect.
@@ -209,6 +208,9 @@ struct FakeState {
     declared_http_expectations: usize,
     /// Strict mode is opt-in for independently authored contract scenarios.
     strict: bool,
+    /// A distinct integration mode permits only the tiny lifecycle bootstrap
+    /// allowlist around an otherwise strict authored scenario.
+    allow_bootstrap: bool,
     /// Controlled-mode SSE sender. Present after GET /events connects; reset
     /// replaces it so a reset mid-stream cannot corrupt a later producer.
     sse_tx: Option<mpsc::Sender<Result<Event, std::convert::Infallible>>>,
@@ -308,6 +310,19 @@ impl FakeDaemon {
 impl Drop for FakeDaemon {
     fn drop(&mut self) {
         self._serve.abort();
+        if std::thread::panicking() {
+            return;
+        }
+        let state = self.state.lock();
+        if state.strict && state.next_http_expectation != state.declared_http_expectations {
+            panic!(
+                "strict fake daemon dropped with {} unconsumed HTTP expectation(s), starting at index {}",
+                state
+                    .declared_http_expectations
+                    .saturating_sub(state.next_http_expectation),
+                state.next_http_expectation
+            );
+        }
     }
 }
 
@@ -384,12 +399,14 @@ pub async fn spawn(
             inter_frame_delay_ms,
         },
         false,
+        false,
     )
     .await
 }
 
 /// Spawn a strict contract fake. Unlike historical [`spawn`], this consumes
-/// `http[]` in one global order and validates request bodies/counts.
+/// `http[]` in one global order, validates request bodies/counts, and rejects
+/// every request absent from the authored contract.
 pub async fn spawn_strict(
     scenario: ScenarioFile,
     session_id: String,
@@ -401,6 +418,26 @@ pub async fn spawn_strict(
         SseMode::OneShot {
             inter_frame_delay_ms,
         },
+        true,
+        false,
+    )
+    .await
+}
+
+/// Spawn a strict action contract wrapped by the explicit daemon lifecycle
+/// bootstrap allowlist needed to warm and dispose a live driver session.
+pub async fn spawn_strict_with_bootstrap(
+    scenario: ScenarioFile,
+    session_id: String,
+    inter_frame_delay_ms: u64,
+) -> FakeDaemon {
+    spawn_with_mode(
+        scenario,
+        session_id,
+        SseMode::OneShot {
+            inter_frame_delay_ms,
+        },
+        true,
         true,
     )
     .await
@@ -427,13 +464,14 @@ pub async fn spawn_hydration_race(
             control: control.clone(),
         },
         false,
+        false,
     )
     .await;
     (fake, control)
 }
 
 async fn spawn_controlled(scenario: ScenarioFile, session_id: String) -> Arc<FakeDaemon> {
-    Arc::new(spawn_with_mode(scenario, session_id, SseMode::Controlled, false).await)
+    Arc::new(spawn_with_mode(scenario, session_id, SseMode::Controlled, false, false).await)
 }
 
 /// The idle landing scenario for a fake-mode bootstrap session: an empty
@@ -486,6 +524,7 @@ async fn spawn_with_mode(
     session_id: String,
     sse_mode: SseMode,
     strict: bool,
+    allow_bootstrap: bool,
 ) -> FakeDaemon {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
@@ -495,6 +534,7 @@ async fn spawn_with_mode(
     let state = Arc::new(Mutex::new(FakeState {
         declared_http_expectations: scenario.http.len(),
         strict,
+        allow_bootstrap,
         ..FakeState::default()
     }));
 
@@ -1078,16 +1118,24 @@ async fn http_handler(
                         entry.response_body.clone(),
                     )
                 }
-                Ok(None) => match canned(&method, &path) {
-                    Some((code, value)) => (code, Some(value)),
-                    None => {
-                        tracing::error!("fake daemon: unmatched request {} {}", method, path);
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Some(Value::String(format!("unmatched request: {method} {path}"))),
-                        )
+                Ok(None) => {
+                    if st.allow_bootstrap {
+                        if let Some((code, value)) = canned(&method, &path) {
+                            (code, Some(value))
+                        } else {
+                            let error = format!(
+                                "strict fake contract has no expectation for {method} {path}"
+                            );
+                            tracing::error!("fake daemon contract violation: {error}");
+                            return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response();
+                        }
+                    } else {
+                        let error =
+                            format!("strict fake contract has no expectation for {method} {path}");
+                        tracing::error!("fake daemon contract violation: {error}");
+                        return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response();
                     }
-                },
+                }
                 Err(error) => {
                     tracing::error!("fake daemon contract violation: {error}");
                     return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response();
@@ -1174,26 +1222,46 @@ mod tests {
         assert!(err.contains("unexpected extra request"));
     }
 
-    #[test]
-    fn fake_daemon_fails_on_unconsumed_expectation() {
-        let s = scenario(serde_json::json!([
-            {"method":"GET","path":"/state","status":200},
-            {"method":"GET","path":"/history","status":200}
-        ]));
-        let entry = match_http_expectation(&s, 0, "GET", "/state", "")
-            .unwrap()
-            .unwrap();
-        assert_eq!(entry.status, 200);
-        let err = format!("unconsumed expectation at index {}", 1);
-        assert!(err.contains("unconsumed"));
+    #[tokio::test]
+    async fn fake_daemon_fails_on_unconsumed_expectation() {
+        let fake = spawn_strict(
+            scenario(serde_json::json!([
+                {"method":"GET","path":"/state","status":200},
+                {"method":"GET","path":"/history","status":200}
+            ])),
+            "strict-consumption".into(),
+            0,
+        )
+        .await;
+        let base = format!("http://127.0.0.1:{}", fake.port);
+        reqwest::get(format!("{base}/state")).await.unwrap();
+        let error = fake.assert_expectations_consumed().unwrap_err();
+        assert!(error.contains("1 unconsumed"), "{error}");
+        reqwest::get(format!("{base}/history")).await.unwrap();
+        fake.assert_expectations_consumed().unwrap();
     }
 
-    #[test]
-    fn bootstrap_allowlist_has_contract_tests() {
+    #[tokio::test]
+    async fn bootstrap_allowlist_has_contract_tests() {
         assert!(canned("GET", "/health").is_some());
         assert!(canned("POST", "/tui-attachment/claim").is_some());
         assert!(canned("POST", "/tui-attachment/heartbeat").is_some());
         assert!(canned("DELETE", "/tui-attachment/lease-1").is_some());
         assert!(canned("GET", "/not-in-allowlist").is_none());
+
+        let empty = scenario(serde_json::json!([]));
+        let strict = spawn_strict(empty.clone(), "strict-no-bootstrap".into(), 0).await;
+        let response = reqwest::get(format!("http://127.0.0.1:{}/health", strict.port))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        strict.assert_expectations_consumed().unwrap();
+
+        let wrapped = spawn_strict_with_bootstrap(empty, "strict-with-bootstrap".into(), 0).await;
+        let response = reqwest::get(format!("http://127.0.0.1:{}/health", wrapped.port))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        wrapped.assert_expectations_consumed().unwrap();
     }
 }

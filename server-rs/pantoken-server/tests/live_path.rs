@@ -1422,15 +1422,29 @@ fn synthetic_rewind_scenario(accepted: bool) -> ScenarioFile {
         ],
         "sse": [], "expected_driver_events": null
     });
-    serde_json::from_value(body).expect("parse synthetic rewind scenario")
+    let mut scenario: ScenarioFile =
+        serde_json::from_value(body).expect("parse synthetic rewind scenario");
+    if !accepted {
+        let rewind_index = scenario
+            .http
+            .iter()
+            .position(|entry| entry.method == "POST" && entry.path == "/rewind")
+            .expect("rewind expectation");
+        scenario.http.truncate(rewind_index + 1);
+    }
+    scenario
 }
 
 #[tokio::test]
 async fn branch_rewind_acceptance_preserves_prompt_domains_and_reseeds() {
     let _guard = OVERRIDE_MUTEX.lock().await;
     let fake = Arc::new(
-        fake_daemon::spawn_strict(synthetic_rewind_scenario(true), "rewind-accepted".into(), 0)
-            .await,
+        fake_daemon::spawn_strict_with_bootstrap(
+            synthetic_rewind_scenario(true),
+            "rewind-accepted".into(),
+            0,
+        )
+        .await,
     );
     let _ovr = OverrideGuard::install(fake.clone());
     let (driver, _dir) = make_driver().await;
@@ -1491,22 +1505,28 @@ async fn branch_rewind_acceptance_preserves_prompt_domains_and_reseeds() {
             .count(),
         3
     );
+    fake.assert_expectations_consumed()
+        .expect("accepted rewind consumed its strict contract");
 }
 
 async fn assert_rewind_refresh_failure_detaches(endpoint: &str, occurrence: usize) {
     let mut scenario = synthetic_rewind_scenario(true);
-    let entry = scenario
+    let failure_index = scenario
         .http
-        .iter_mut()
-        .filter(|entry| entry.method == "GET" && entry.path == endpoint)
+        .iter()
+        .enumerate()
+        .filter(|(_, entry)| entry.method == "GET" && entry.path == endpoint)
         .nth(occurrence)
+        .map(|(index, _)| index)
         .expect("post-rewind refresh recording");
-    entry.status = 500;
-    entry.response_body = Some(serde_json::json!({
+    scenario.http[failure_index].status = 500;
+    scenario.http[failure_index].response_body = Some(serde_json::json!({
         "code":"refresh_failed", "message":"authoritative snapshot unavailable"
     }));
+    scenario.http.truncate(failure_index + 1);
     let session_id = format!("rewind-refresh-failed-{}", endpoint.trim_start_matches('/'));
-    let fake = Arc::new(fake_daemon::spawn_strict(scenario, session_id.clone(), 0).await);
+    let fake =
+        Arc::new(fake_daemon::spawn_strict_with_bootstrap(scenario, session_id.clone(), 0).await);
     let _ovr = OverrideGuard::install(fake.clone());
     let (driver, _dir) = make_driver().await;
     driver
@@ -1528,6 +1548,8 @@ async fn assert_rewind_refresh_failure_detaches(endpoint: &str, occurrence: usiz
         fake.called("DELETE", "/tui-attachment/lease-1"),
         "invalidated warm attachment must release its lease"
     );
+    fake.assert_expectations_consumed()
+        .expect("failed refresh consumed its strict contract through the failure");
 }
 
 #[tokio::test]
@@ -1541,7 +1563,7 @@ async fn branch_rewind_refresh_failure_invalidates_stale_warm_session() {
 async fn branch_rewind_rejection_preserves_warm_session_and_public_error() {
     let _guard = OVERRIDE_MUTEX.lock().await;
     let fake = Arc::new(
-        fake_daemon::spawn_strict(
+        fake_daemon::spawn_strict_with_bootstrap(
             synthetic_rewind_scenario(false),
             "rewind-rejected".into(),
             0,
@@ -1607,6 +1629,8 @@ async fn branch_rewind_rejection_preserves_warm_session_and_public_error() {
         2,
         "warm seed plus pre-rewind lookup only: {calls:?}"
     );
+    fake.assert_expectations_consumed()
+        .expect("rejected rewind consumed its strict contract through rejection");
 }
 
 /// Build a synthetic scenario whose SSE stream is: `message_start` →

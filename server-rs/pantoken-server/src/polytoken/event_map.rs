@@ -1525,9 +1525,29 @@ pub fn map_daemon_event(
     acc: &mut FoldAccumulator,
     ctx: &dyn MapCtx,
 ) -> FoldResult {
+    let disposition = event_disposition(ev);
     let handle = subagent_handle(ev);
     let mut result = map_daemon_event_inner(ev, acc, ctx);
     annotate_subagent_handle(&mut result, handle);
+
+    match disposition {
+        EventDisposition::StateRefetch => assert!(
+            !result.effects.is_empty(),
+            "state-refetch event produced no authoritative follow-up"
+        ),
+        EventDisposition::Reseed => assert!(
+            result
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, DaemonEffect::Reseed)),
+            "reseed event produced no reseed effect"
+        ),
+        EventDisposition::IntentionalNoop => assert!(
+            result.events.is_empty() && result.effects.is_empty(),
+            "intentional no-op event produced observable behavior"
+        ),
+        EventDisposition::Mapped | EventDisposition::UserNotice => {}
+    }
     result
 }
 
