@@ -27,9 +27,9 @@ mod support;
 // `support::corpus` and are shared with the fake-daemon harness. The
 // canonicalization machinery below is corpus-test-only.
 use support::corpus::{
-    CanonicalizationManifest, DriverEffectExpectation, FinalSessionInvariants, FixtureProvenance,
-    FixtureProvenanceKind, HttpEntry, ScenarioFile, SseFrame, corpus_dir, load_scenario,
-    scenario_files, version_dirs,
+    CanonicalizationManifest, DriverContractExpectations, DriverEffectExpectation,
+    FinalSessionInvariants, FixtureProvenance, FixtureProvenanceKind, HttpEntry, ScenarioFile,
+    SseFrame, corpus_dir, load_scenario, scenario_files, version_dirs,
 };
 
 // ---------------------------------------------------------------------------
@@ -454,6 +454,87 @@ fn subset(actual: &Value, expected: &Value) -> bool {
     }
 }
 
+fn validate_positional_events(
+    scenario_name: &str,
+    actual_events: &[Value],
+    expected: &DriverContractExpectations,
+) -> Result<(), String> {
+    if expected.events.is_empty() {
+        return Err(format!(
+            "{scenario_name}: committed contract event sequence is empty"
+        ));
+    }
+    let mut cursor = 0;
+    for contract in &expected.events {
+        for run_index in 0..contract.count {
+            if cursor >= actual_events.len() {
+                return Err(format!(
+                    "{scenario_name}: event run {} of {} is missing",
+                    run_index + 1,
+                    contract.kind
+                ));
+            }
+            let actual = &actual_events[cursor];
+            if actual["type"] != contract.kind {
+                return Err(format!(
+                    "{scenario_name}: unexpected event at position {cursor}"
+                ));
+            }
+            if let Some(fields) = &contract.essential {
+                let expected_fields =
+                    Value::Object(fields.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+                if !subset(actual, &expected_fields) {
+                    return Err(format!(
+                        "{scenario_name}: essential fields failed at position {cursor}"
+                    ));
+                }
+            }
+            cursor += 1;
+        }
+    }
+    if cursor != actual_events.len() {
+        return Err(format!(
+            "{scenario_name}: unexpected mapped events: {:?}",
+            actual_events
+        ));
+    }
+    Ok(())
+}
+
+fn validate_provenance(scenario: &ScenarioFile) -> Result<(), String> {
+    match scenario.provenance.kind {
+        FixtureProvenanceKind::Captured => {
+            if scenario.provenance.daemon_version.as_deref() != Some(scenario.version.as_str()) {
+                return Err(format!(
+                    "{}: captured daemon version mismatch",
+                    scenario.scenario
+                ));
+            }
+            if !scenario
+                .provenance
+                .capture_method
+                .as_deref()
+                .is_some_and(|m| !m.trim().is_empty())
+            {
+                return Err(format!(
+                    "{}: captured fixture needs capture_method",
+                    scenario.scenario
+                ));
+            }
+        }
+        FixtureProvenanceKind::SyntheticPublicSchema
+        | FixtureProvenanceKind::SyntheticPantokenRegression => {
+            if scenario.provenance.capture_method.is_some() {
+                return Err(format!(
+                    "{}: synthetic fixture must not carry capture_method",
+                    scenario.scenario
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn assert_contract(scenario: &ScenarioFile) {
     let (_raw, events, effects, acc) = replay_contract(scenario);
     let actual_events: Vec<Value> = events
@@ -461,52 +542,7 @@ fn assert_contract(scenario: &ScenarioFile) {
         .map(|e| serde_json::to_value(e).unwrap())
         .collect();
     let expected = &scenario.expected_driver_events;
-    assert!(
-        !expected.events.is_empty(),
-        "{}: committed contract event sequence is empty",
-        scenario.scenario
-    );
-    let mut cursor = 0;
-    for contract in &expected.events {
-        for run_index in 0..contract.count {
-            assert!(
-                cursor < actual_events.len(),
-                "{}: event run {} of {} is missing",
-                scenario.scenario,
-                run_index + 1,
-                contract.kind
-            );
-            let actual = &actual_events[cursor];
-            cursor += 1;
-            assert_eq!(
-                actual["type"],
-                contract.kind,
-                "{}: unexpected event at position {}",
-                scenario.scenario,
-                cursor - 1
-            );
-            if let Some(fields) = &contract.essential {
-                assert!(
-                    subset(
-                        actual,
-                        &Value::Object(
-                            fields.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-                        )
-                    ),
-                    "{}: essential fields failed at position {}",
-                    scenario.scenario,
-                    cursor - 1
-                );
-            }
-        }
-    }
-    assert_eq!(
-        cursor,
-        actual_events.len(),
-        "{}: unexpected mapped events: {:?}",
-        scenario.scenario,
-        actual_events
-    );
+    validate_positional_events(&scenario.scenario, &actual_events, expected).unwrap();
     assert_eq!(
         effects, expected.effects,
         "{}: exact effect sequence mismatch",
@@ -554,33 +590,7 @@ fn corpus_provenance_is_complete() {
         for path in scenario_files(&version) {
             let scenario = load_scenario(&path);
             assert!(!scenario.description.trim().is_empty());
-            match scenario.provenance.kind {
-                FixtureProvenanceKind::Captured => {
-                    assert_eq!(
-                        scenario.provenance.daemon_version.as_deref(),
-                        Some(scenario.version.as_str()),
-                        "{}: captured daemon version mismatch",
-                        scenario.scenario
-                    );
-                    assert!(
-                        scenario
-                            .provenance
-                            .capture_method
-                            .as_deref()
-                            .is_some_and(|m| !m.trim().is_empty()),
-                        "{}: captured fixture needs capture_method",
-                        scenario.scenario
-                    );
-                }
-                FixtureProvenanceKind::SyntheticPublicSchema
-                | FixtureProvenanceKind::SyntheticPantokenRegression => {
-                    assert!(
-                        scenario.provenance.capture_method.is_none(),
-                        "{}: synthetic fixture must not carry capture_method",
-                        scenario.scenario
-                    );
-                }
-            }
+            validate_provenance(&scenario).unwrap_or_else(|error| panic!("{error}"));
             assert!(
                 !scenario.expected_driver_events.events.is_empty(),
                 "{} has no typed event expectations",
@@ -648,30 +658,17 @@ fn provenance_metadata_validation_accepts_capture_and_rejects_invalid() {
     captured.provenance.kind = FixtureProvenanceKind::Captured;
     captured.provenance.daemon_version = Some(captured.version.clone());
     captured.provenance.capture_method = Some("public_http_sse_capture_script".into());
-    assert_eq!(
-        captured.provenance.daemon_version.as_deref(),
-        Some(captured.version.as_str())
-    );
-    assert!(
-        captured
-            .provenance
-            .capture_method
-            .as_deref()
-            .is_some_and(|m| !m.trim().is_empty())
-    );
+    assert!(validate_provenance(&captured).is_ok());
+
     captured.provenance.capture_method = Some(" ".into());
-    assert!(
-        !captured
-            .provenance
-            .capture_method
-            .as_deref()
-            .is_some_and(|m| !m.trim().is_empty())
-    );
+    assert!(validate_provenance(&captured).is_err());
+
+    captured.provenance.capture_method = Some("public_http_sse_capture_script".into());
+    captured.provenance.daemon_version = Some("wrong-version".into());
+    assert!(validate_provenance(&captured).is_err());
+
     captured.provenance.kind = FixtureProvenanceKind::SyntheticPublicSchema;
-    assert!(
-        captured.provenance.capture_method.is_some(),
-        "mutation setup"
-    );
+    assert!(validate_provenance(&captured).is_err());
 }
 
 #[test]
@@ -692,25 +689,19 @@ fn positional_event_contract_rejects_inserted_event() {
             .unwrap(),
     );
     let (raw, events, _, _) = replay_contract(&scenario);
-    let mut kinds: Vec<String> = events
+    let mut actual_events: Vec<Value> = events
         .iter()
-        .map(|e| {
-            serde_json::to_value(e).unwrap()["type"]
-                .as_str()
-                .unwrap()
-                .into()
-        })
+        .map(|event| serde_json::to_value(event).unwrap())
         .collect();
-    kinds.insert(1, "unexpectedInserted".into());
-    let expected: Vec<String> = scenario
-        .expected_driver_events
-        .events
-        .iter()
-        .flat_map(|e| std::iter::repeat_n(e.kind.clone(), e.count))
-        .collect();
-    assert_ne!(
-        kinds, expected,
-        "mutation must change the positional output"
+    actual_events.insert(1, serde_json::json!({"type": "unexpectedInserted"}));
+    assert!(
+        validate_positional_events(
+            &scenario.scenario,
+            &actual_events,
+            &scenario.expected_driver_events,
+        )
+        .is_err(),
+        "inserting a serialized event must fail positional validation"
     );
     assert_eq!(raw.len(), scenario.sse.len());
 }
