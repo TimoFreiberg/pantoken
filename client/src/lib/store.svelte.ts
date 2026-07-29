@@ -303,6 +303,9 @@ class PantokenStore {
     backgroundModel: null,
   });
   loginEnv = $state<LoginEnvStatus>({ activeShell: null, ok: false });
+  // Degraded login-env diagnostics are sent on every reconnect. Remember the
+  // detail already surfaced so one server boot produces one sticky GUI notice.
+  private loginEnvWarningNotified: string | null = null;
   // Server-computed: the configured login shell differs from the one captured at boot,
   // so a restart is needed to apply it. Drives the Settings "restart to apply" hint.
   loginShellPendingRestart = $state(false);
@@ -1493,6 +1496,10 @@ class PantokenStore {
         this.loginEnv = msg.env;
         this.loginShellPendingRestart = msg.pendingRestart;
         this.backgroundModelWarning = msg.backgroundModelWarning;
+        if (!msg.env.ok && msg.env.detail && this.loginEnvWarningNotified !== msg.env.detail) {
+          this.loginEnvWarningNotified = msg.env.detail;
+          this.chatNotice(`Shell environment warning: ${msg.env.detail}`, { durationMs: 0 });
+        }
         break;
       case "updateStatus":
         this.appUpdate = msg.available
@@ -1688,6 +1695,7 @@ class PantokenStore {
     this.modelDefaults = { favorites: [] };
     this.pantokenSettings = { loginShell: null, backgroundModel: null };
     this.loginEnv = { activeShell: null, ok: false };
+    this.loginEnvWarningNotified = null;
     this.loginShellPendingRestart = false;
     this.backgroundModelWarning = undefined;
     this.serverId = null;

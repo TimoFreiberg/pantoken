@@ -69,6 +69,28 @@ fn is_valid_env_key(key: &str) -> bool {
         && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
+fn missing_expected_path_entries(env: &HashMap<String, String>) -> Vec<String> {
+    let home = env.get("HOME").filter(|value| !value.is_empty());
+    let path_entries: Vec<&str> = env
+        .get("PATH")
+        .map(|path| path.split(':').collect())
+        .unwrap_or_default();
+    let mut expected = vec!["/opt/homebrew/bin".to_string()];
+    match home {
+        Some(home) => {
+            expected.insert(0, format!("{home}/.cargo/bin"));
+            expected.insert(0, format!("{home}/.local/bin"));
+        }
+        None => expected.insert(0, "$HOME (missing or empty)".to_string()),
+    }
+    expected
+        .into_iter()
+        .filter(|entry| {
+            entry == "$HOME (missing or empty)" || !path_entries.contains(&entry.as_str())
+        })
+        .collect()
+}
+
 /// The outcome of a login-env capture: the parsed env plus a status struct for
 /// the Settings panel (configured vs active shell + a human detail).
 pub struct CapturedLoginEnv {
@@ -105,6 +127,9 @@ pub async fn capture_login_env(configured: Option<&str>) -> CapturedLoginEnv {
     cmd.args(["-l", "-c", "env"]);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
+    // `timeout` cancels `wait_with_output`; without kill-on-drop that cancellation
+    // can leave the capture shell running after Pantoken has given up on it.
+    cmd.kill_on_drop(true);
     cmd.env_clear();
     // Inherit the current process env so the login shell sees the same base
     // environment (mirrors TS `env: process.env`). The login profile then
@@ -133,9 +158,8 @@ pub async fn capture_login_env(configured: Option<&str>) -> CapturedLoginEnv {
     )
     .await;
     match result {
-        // Timed out — the child was killed by `wait_with_output`'s drop? No:
-        // `timeout` cancels the future, but `wait_with_output` owns the Child and
-        // drops it on cancel → the child is killed. Treat as a timeout failure.
+        // `kill_on_drop(true)` above guarantees cancelling `wait_with_output`
+        // terminates the capture shell rather than orphaning it.
         Err(_) => CapturedLoginEnv {
             env: HashMap::new(),
             status: LoginEnvStatus {
@@ -168,13 +192,33 @@ pub async fn capture_login_env(configured: Option<&str>) -> CapturedLoginEnv {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let parsed = parse_env_output(&stdout);
             let count = parsed.len();
-            CapturedLoginEnv {
-                env: parsed,
-                status: LoginEnvStatus {
-                    active_shell: Some(shell),
-                    ok: true,
-                    detail: Some(format!("{count} vars captured")),
-                },
+            let missing = missing_expected_path_entries(&parsed);
+            if missing.is_empty() {
+                CapturedLoginEnv {
+                    env: parsed,
+                    status: LoginEnvStatus {
+                        active_shell: Some(shell),
+                        ok: true,
+                        detail: Some(format!("{count} vars captured")),
+                    },
+                }
+            } else {
+                let detail = format!(
+                    "captured PATH is missing expected entries: {}",
+                    missing.join(", ")
+                );
+                tracing::warn!(shell = %shell, missing = ?missing, "{detail}");
+                CapturedLoginEnv {
+                    // Preserve the captured env for diagnosis and daemon startup;
+                    // this check warns about the single-user machine's expected
+                    // setup rather than silently substituting a different PATH.
+                    env: parsed,
+                    status: LoginEnvStatus {
+                        active_shell: Some(shell),
+                        ok: false,
+                        detail: Some(detail),
+                    },
+                }
             }
         }
     }
@@ -257,6 +301,46 @@ mod tests {
             let shell = resolve_login_shell(None);
             assert!(shell.is_some());
             assert!(Path::new(shell.as_deref().unwrap()).exists());
+        }
+    }
+
+    mod expected_path_entries {
+        use super::*;
+
+        #[test]
+        fn accepts_the_single_user_expected_path() {
+            let env = map(&[
+                ("HOME", "/Users/timo"),
+                (
+                    "PATH",
+                    "/usr/bin:/Users/timo/.local/bin:/Users/timo/.cargo/bin:/opt/homebrew/bin",
+                ),
+            ]);
+            assert!(missing_expected_path_entries(&env).is_empty());
+        }
+
+        #[test]
+        fn reports_missing_home_and_path_entries() {
+            let env = map(&[("PATH", "/usr/bin:/bin")]);
+            assert_eq!(
+                missing_expected_path_entries(&env),
+                vec![
+                    "$HOME (missing or empty)".to_string(),
+                    "/opt/homebrew/bin".to_string(),
+                ]
+            );
+        }
+
+        #[test]
+        fn path_components_match_exactly() {
+            let env = map(&[
+                ("HOME", "/Users/timo"),
+                (
+                    "PATH",
+                    "/tmp/Users/timo/.local/bin:/Users/timo/.cargo/bin-old:/opt/homebrew/bin-extra",
+                ),
+            ]);
+            assert_eq!(missing_expected_path_entries(&env).len(), 3);
         }
     }
 
