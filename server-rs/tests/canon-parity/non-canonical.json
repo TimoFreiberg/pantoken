@@ -62,5 +62,5 @@
       }
     }
   ],
-  "expected_driver_events": null
+  "expected_driver_events": {"capabilities": [], "events": [], "effects": [], "final_session": {"mapped_event_count": 0, "assistant_delta_count": 0, "open_block_count": 0, "tool_input_buffer_empty": true, "turn_error_present": false}, "required_requests": [], "forbidden_requests": []}
 }

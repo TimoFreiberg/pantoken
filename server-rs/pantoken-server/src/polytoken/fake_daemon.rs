@@ -516,7 +516,7 @@ fn bootstrap_scenario(version: &str) -> ScenarioFile {
               } }
         ],
         "sse": [],
-        "expected_driver_events": null
+        "expected_driver_events": {"capabilities": [], "events": [], "effects": [], "final_session": {"mapped_event_count": 0, "assistant_delta_count": 0, "open_block_count": 0, "tool_input_buffer_empty": true, "turn_error_present": false}, "required_requests": [], "forbidden_requests": []}
     })
     .to_string();
     serde_json::from_str::<ScenarioFile>(&json_str).expect("parse bootstrap scenario")
@@ -1228,7 +1228,7 @@ mod tests {
             "provenance": {"kind": "synthetic_pantoken_regression"},
             "description": "strict fake daemon matcher test",
             "canonicalization": {"session_id": "S", "prompt_ids": {}, "timestamps": "fixed"},
-            "http": http, "sse": [], "expected_driver_events": null
+            "http": http, "sse": [], "expected_driver_events": {"capabilities": [], "events": [], "effects": [], "final_session": {"mapped_event_count": 0, "assistant_delta_count": 0, "open_block_count": 0, "tool_input_buffer_empty": true, "turn_error_present": false}, "required_requests": [], "forbidden_requests": []}
         }))
         .unwrap()
     }

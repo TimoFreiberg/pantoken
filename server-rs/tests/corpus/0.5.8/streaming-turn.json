@@ -1,8 +1,10 @@
 {
   "scenario": "streaming-turn",
   "version": "0.5.8",
-  "provenance": { "kind": "synthetic_pantoken_regression" },
-  "description": "A complete assistant turn: prompt → streamed text deltas → message_complete. The baseline happy-path streaming sequence.",
+  "provenance": {
+    "kind": "synthetic_pantoken_regression"
+  },
+  "description": "A complete assistant turn: prompt \u2192 streamed text deltas \u2192 message_complete. The baseline happy-path streaming sequence.",
   "canonicalization": {
     "session_id": "SESSION",
     "prompt_ids": {
@@ -444,5 +446,58 @@
       }
     }
   ],
-  "expected_driver_events": {"events": [{"kind": "sessionUpdated", "min_count": 1}], "effects": ["fetchState"], "final_session": {"mapped_event_count_min": 1, "assistant_delta_count_min": 1, "open_block_count": 0}, "required_requests": ["GET /state", "POST /prompt"], "forbidden_requests": ["GET /history"]}
+  "expected_driver_events": {
+    "events": [
+      {
+        "kind": "sessionUpdated",
+        "count": 1,
+        "essential": {
+          "type": "sessionUpdated"
+        }
+      },
+      {
+        "kind": "customMessage",
+        "count": 1,
+        "essential": {
+          "type": "customMessage"
+        }
+      },
+      {
+        "kind": "sessionUpdated",
+        "count": 1,
+        "essential": {
+          "type": "sessionUpdated"
+        }
+      },
+      {
+        "kind": "assistantDelta",
+        "count": 13,
+        "essential": {
+          "type": "assistantDelta"
+        }
+      }
+    ],
+    "effects": [
+      {
+        "kind": "setAutodrainEnabled"
+      },
+      {
+        "emit": "RunCompleted",
+        "kind": "fetchState",
+        "prompt_id": "PROMPT_0"
+      }
+    ],
+    "final_session": {
+      "mapped_event_count": 16,
+      "assistant_delta_count": 13,
+      "open_block_count": 0,
+      "tool_input_buffer_empty": true,
+      "turn_error_present": false
+    },
+    "required_requests": [],
+    "forbidden_requests": [],
+    "capabilities": [
+      "streaming"
+    ]
+  }
 }

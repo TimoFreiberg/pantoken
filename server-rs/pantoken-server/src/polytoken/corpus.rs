@@ -118,47 +118,37 @@ pub struct FixtureProvenance {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DriverEventExpectation {
     pub kind: String,
-    #[serde(default)]
-    pub min_count: usize,
+    pub count: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub essential: Option<std::collections::BTreeMap<String, Value>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DriverEffectExpectation {
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FinalSessionInvariants {
-    #[serde(default)]
-    pub mapped_event_count_min: usize,
-    #[serde(default)]
-    pub assistant_delta_count_min: usize,
-    #[serde(default)]
+    pub mapped_event_count: usize,
+    pub assistant_delta_count: usize,
     pub open_block_count: usize,
+    pub tool_input_buffer_empty: bool,
+    pub turn_error_present: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DriverContractExpectations {
+    pub capabilities: Vec<String>,
     pub events: Vec<DriverEventExpectation>,
-    #[serde(default)]
-    pub effects: Vec<String>,
-    #[serde(default)]
+    pub effects: Vec<DriverEffectExpectation>,
     pub final_session: FinalSessionInvariants,
-    #[serde(default)]
     pub required_requests: Vec<String>,
-    #[serde(default)]
     pub forbidden_requests: Vec<String>,
-}
-
-fn deserialize_contract<'de, D>(deserializer: D) -> Result<DriverContractExpectations, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = Option::<DriverContractExpectations>::deserialize(deserializer)?;
-    Ok(value.unwrap_or_else(|| DriverContractExpectations {
-        events: vec![],
-        effects: vec![],
-        final_session: FinalSessionInvariants::default(),
-        required_requests: vec![],
-        forbidden_requests: vec![],
-    }))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -171,7 +161,6 @@ pub struct ScenarioFile {
     pub canonicalization: CanonicalizationManifest,
     pub http: Vec<HttpEntry>,
     pub sse: Vec<SseFrame>,
-    #[serde(deserialize_with = "deserialize_contract")]
     pub expected_driver_events: DriverContractExpectations,
 }
 

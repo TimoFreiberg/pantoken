@@ -1,8 +1,10 @@
 {
   "scenario": "ask-user-question",
   "version": "0.5.8",
-  "provenance": { "kind": "synthetic_pantoken_regression" },
-  "description": "A turn where the model asks the user a structured question (ask_user_question interrogative) → the user answers → message_complete.",
+  "provenance": {
+    "kind": "synthetic_pantoken_regression"
+  },
+  "description": "A turn where the model asks the user a structured question (ask_user_question interrogative) \u2192 the user answers \u2192 message_complete.",
   "canonicalization": {
     "session_id": "SESSION",
     "prompt_ids": {
@@ -79,7 +81,7 @@
       "method": "POST",
       "path": "/prompt",
       "request_body": {
-        "content": "I'm torn between two approaches for a small refactor. Use your ask_user_question tool to ask which I prefer, with exactly two short options (A: extract a helper; B: inline it). Keep the options terse. After I answer, do NOT implement anything — reply with just one short sentence acknowledging my choice, then stop.",
+        "content": "I'm torn between two approaches for a small refactor. Use your ask_user_question tool to ask which I prefer, with exactly two short options (A: extract a helper; B: inline it). Keep the options terse. After I answer, do NOT implement anything \u2014 reply with just one short sentence acknowledging my choice, then stop.",
         "max_tool_turns": null
       },
       "status": 202,
@@ -1279,7 +1281,7 @@
         "block_index": 0,
         "delta": {
           "type": "thinking",
-          "text": " —"
+          "text": " \u2014"
         }
       }
     },
@@ -2592,7 +2594,7 @@
         "block_index": 1,
         "delta": {
           "type": "tool_use_input",
-          "partial_json": " —"
+          "partial_json": " \u2014"
         }
       }
     },
@@ -2998,7 +3000,7 @@
         "block_index": 1,
         "delta": {
           "type": "tool_use_input",
-          "partial_json": " —"
+          "partial_json": " \u2014"
         }
       }
     },
@@ -3418,7 +3420,7 @@
         "block_index": 1,
         "delta": {
           "type": "tool_use_input",
-          "partial_json": " —"
+          "partial_json": " \u2014"
         }
       }
     },
@@ -3728,16 +3730,16 @@
               "question": "Extract a helper or inline the logic?",
               "mode": "single_select",
               "allow_free_text": true,
-              "context": "You mentioned a small refactor with two approaches on the table. This is a narrow, low-stakes design choice — pick whichever fits better with how you see the surrounding code evolving.",
+              "context": "You mentioned a small refactor with two approaches on the table. This is a narrow, low-stakes design choice \u2014 pick whichever fits better with how you see the surrounding code evolving.",
               "options": [
                 {
                   "id": "a",
-                  "label": "A — Extract a helper",
+                  "label": "A \u2014 Extract a helper",
                   "description": "Pull the logic into a named helper function."
                 },
                 {
                   "id": "b",
-                  "label": "B — Inline it",
+                  "label": "B \u2014 Inline it",
                   "description": "Keep the logic inline at the call site."
                 }
               ]
@@ -3758,19 +3760,19 @@
           "questions": [
             {
               "id": "refactor",
-              "context": "You mentioned a small refactor with two approaches on the table. This is a narrow, low-stakes design choice — pick whichever fits better with how you see the surrounding code evolving.",
+              "context": "You mentioned a small refactor with two approaches on the table. This is a narrow, low-stakes design choice \u2014 pick whichever fits better with how you see the surrounding code evolving.",
               "question": "Extract a helper or inline the logic?",
               "mode": "single_select",
               "allow_free_text": true,
               "options": [
                 {
                   "id": "a",
-                  "label": "A — Extract a helper",
+                  "label": "A \u2014 Extract a helper",
                   "description": "Pull the logic into a named helper function."
                 },
                 {
                   "id": "b",
-                  "label": "B — Inline it",
+                  "label": "B \u2014 Inline it",
                   "description": "Keep the logic inline at the call site."
                 }
               ]
@@ -3787,9 +3789,9 @@
         "type": "tool_result",
         "prompt_id": "PROMPT_0",
         "call_id": "call_00_easGEznPnEdX7OTcNNqz4637",
-        "content": "{\n  \"answers\": [\n    {\n      \"question_id\": \"refactor\",\n      \"context\": \"You mentioned a small refactor with two approaches on the table. This is a narrow, low-stakes design choice — pick whichever…",
+        "content": "{\n  \"answers\": [\n    {\n      \"question_id\": \"refactor\",\n      \"context\": \"You mentioned a small refactor with two approaches on the table. This is a narrow, low-stakes design choice \u2014 pick whichever\u2026",
         "content_full": {
-          "text": "{\n  \"answers\": [\n    {\n      \"question_id\": \"refactor\",\n      \"context\": \"You mentioned a small refactor with two approaches on the table. This is a narrow, low-stakes design choice — pick whichever fits better with how you see the surrounding code evolving.\",\n      \"question\": \"Extract a helper or inline the logic?\",\n      \"selected_option_ids\": [\n        \"a\"\n      ],\n      \"selected_options\": [\n        {\n          \"id\": \"a\",\n          \"label\": \"A — Extract a helper\"\n        }\n      ]\n    }\n  ]\n}"
+          "text": "{\n  \"answers\": [\n    {\n      \"question_id\": \"refactor\",\n      \"context\": \"You mentioned a small refactor with two approaches on the table. This is a narrow, low-stakes design choice \u2014 pick whichever fits better with how you see the surrounding code evolving.\",\n      \"question\": \"Extract a helper or inline the logic?\",\n      \"selected_option_ids\": [\n        \"a\"\n      ],\n      \"selected_options\": [\n        {\n          \"id\": \"a\",\n          \"label\": \"A \u2014 Extract a helper\"\n        }\n      ]\n    }\n  ]\n}"
         }
       }
     },
@@ -3886,7 +3888,7 @@
         "block_index": 0,
         "delta": {
           "type": "thinking",
-          "text": " —"
+          "text": " \u2014"
         }
       }
     },
@@ -4147,7 +4149,7 @@
         "block_index": 1,
         "delta": {
           "type": "text",
-          "text": " —"
+          "text": " \u2014"
         }
       }
     },
@@ -4255,5 +4257,94 @@
       }
     }
   ],
-  "expected_driver_events": {"events": [{"kind": "sessionUpdated", "min_count": 1}, {"kind": "hostUiRequest", "min_count": 1}], "effects": ["registerInterrogative", "fetchState"], "final_session": {"mapped_event_count_min": 1, "assistant_delta_count_min": 1, "open_block_count": 0}, "required_requests": ["POST /interrogative/019f3494-3034-7b83-9572-30006722bb21/respond"], "forbidden_requests": ["POST /turn/cancel"]}
+  "expected_driver_events": {
+    "events": [
+      {
+        "kind": "sessionUpdated",
+        "count": 1,
+        "essential": {
+          "type": "sessionUpdated"
+        }
+      },
+      {
+        "kind": "customMessage",
+        "count": 1,
+        "essential": {
+          "type": "customMessage"
+        }
+      },
+      {
+        "kind": "sessionUpdated",
+        "count": 1,
+        "essential": {
+          "type": "sessionUpdated"
+        }
+      },
+      {
+        "kind": "assistantDelta",
+        "count": 98,
+        "essential": {
+          "type": "assistantDelta"
+        }
+      },
+      {
+        "kind": "toolStarted",
+        "count": 1,
+        "essential": {
+          "type": "toolStarted"
+        }
+      },
+      {
+        "kind": "hostUiRequest",
+        "count": 1,
+        "essential": {
+          "type": "hostUiRequest"
+        }
+      },
+      {
+        "kind": "toolFinished",
+        "count": 1,
+        "essential": {
+          "type": "toolFinished"
+        }
+      },
+      {
+        "kind": "assistantDelta",
+        "count": 28,
+        "essential": {
+          "type": "assistantDelta"
+        }
+      }
+    ],
+    "effects": [
+      {
+        "emit": "SessionUpdated",
+        "kind": "fetchState"
+      },
+      {
+        "kind": "setAutodrainEnabled"
+      },
+      {
+        "kind": "registerInterrogative"
+      },
+      {
+        "emit": "RunCompleted",
+        "kind": "fetchState",
+        "prompt_id": "PROMPT_0"
+      }
+    ],
+    "final_session": {
+      "mapped_event_count": 132,
+      "assistant_delta_count": 126,
+      "open_block_count": 0,
+      "tool_input_buffer_empty": true,
+      "turn_error_present": false
+    },
+    "required_requests": [],
+    "forbidden_requests": [],
+    "capabilities": [
+      "streaming",
+      "interrogative"
+    ]
+  }
 }

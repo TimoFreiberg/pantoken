@@ -27,8 +27,9 @@ mod support;
 // `support::corpus` and are shared with the fake-daemon harness. The
 // canonicalization machinery below is corpus-test-only.
 use support::corpus::{
-    CanonicalizationManifest, FixtureProvenance, FixtureProvenanceKind, HttpEntry, ScenarioFile,
-    SseFrame, corpus_dir, load_scenario, scenario_files, version_dirs,
+    CanonicalizationManifest, DriverEffectExpectation, FinalSessionInvariants, FixtureProvenance,
+    FixtureProvenanceKind, HttpEntry, ScenarioFile, SseFrame, corpus_dir, load_scenario,
+    scenario_files, version_dirs,
 };
 
 // ---------------------------------------------------------------------------
@@ -380,20 +381,38 @@ impl MapCtx for ContractCtx {
     }
 }
 
-fn event_kind(event: &SessionDriverEvent) -> String {
-    serde_json::to_value(event).unwrap()["type"]
-        .as_str()
-        .unwrap()
-        .to_string()
-}
-fn effect_kind(effect: &DaemonEffect) -> &'static str {
+fn effect_expectation(effect: &DaemonEffect) -> DriverEffectExpectation {
     match effect {
-        DaemonEffect::FetchState { .. } => "fetchState",
-        DaemonEffect::Reseed => "reseed",
-        DaemonEffect::RefetchQueue => "refetchQueue",
-        DaemonEffect::SetMonitorMode { .. } => "setMonitorMode",
-        DaemonEffect::SetAutodrainEnabled { .. } => "setAutodrainEnabled",
-        DaemonEffect::RegisterInterrogative { .. } => "registerInterrogative",
+        DaemonEffect::FetchState { emit, prompt_id } => DriverEffectExpectation {
+            kind: "fetchState".into(),
+            emit: Some(format!("{emit:?}")),
+            prompt_id: prompt_id.clone(),
+        },
+        DaemonEffect::Reseed => DriverEffectExpectation {
+            kind: "reseed".into(),
+            emit: None,
+            prompt_id: None,
+        },
+        DaemonEffect::RefetchQueue => DriverEffectExpectation {
+            kind: "refetchQueue".into(),
+            emit: None,
+            prompt_id: None,
+        },
+        DaemonEffect::SetMonitorMode { .. } => DriverEffectExpectation {
+            kind: "setMonitorMode".into(),
+            emit: None,
+            prompt_id: None,
+        },
+        DaemonEffect::SetAutodrainEnabled { .. } => DriverEffectExpectation {
+            kind: "setAutodrainEnabled".into(),
+            emit: None,
+            prompt_id: None,
+        },
+        DaemonEffect::RegisterInterrogative { .. } => DriverEffectExpectation {
+            kind: "registerInterrogative".into(),
+            emit: None,
+            prompt_id: None,
+        },
     }
 }
 
@@ -401,7 +420,7 @@ fn replay_contract(
     scenario: &ScenarioFile,
 ) -> (
     Vec<SessionDriverEvent>,
-    Vec<&'static str>,
+    Vec<DriverEffectExpectation>,
     event_map::FoldAccumulator,
 ) {
     let ctx = ContractCtx::default();
@@ -414,44 +433,86 @@ fn replay_contract(
             .unwrap_or_else(|e| panic!("{}: {e}", scenario.scenario));
         let result = event_map::map_daemon_event(&envelope.event, &mut acc, &ctx);
         events.extend(result.events);
-        effects.extend(result.effects.iter().map(effect_kind));
+        effects.extend(result.effects.iter().map(effect_expectation));
     }
     (events, effects, acc)
 }
 
+fn subset(actual: &Value, expected: &Value) -> bool {
+    match (actual, expected) {
+        (Value::Object(actual), Value::Object(expected)) => expected
+            .iter()
+            .all(|(key, value)| actual.get(key).is_some_and(|a| subset(a, value))),
+        (Value::Array(actual), Value::Array(expected)) => {
+            expected.len() <= actual.len() && expected.iter().zip(actual).all(|(e, a)| subset(a, e))
+        }
+        _ => actual == expected,
+    }
+}
+
 fn assert_contract(scenario: &ScenarioFile) {
     let (events, effects, acc) = replay_contract(scenario);
-    let kinds: Vec<String> = events.iter().map(event_kind).collect();
-    for expected in &scenario.expected_driver_events.events {
-        let count = kinds.iter().filter(|kind| *kind == &expected.kind).count();
-        assert!(
-            count >= expected.min_count,
-            "{}: expected at least {} {} events, got {count}: {kinds:?}",
-            scenario.scenario,
-            expected.min_count,
-            expected.kind
-        );
-    }
-    for effect in &scenario.expected_driver_events.effects {
-        assert!(
-            effects.iter().any(|actual| actual == effect),
-            "{}: missing declared effect {effect}; got {effects:?}",
-            scenario.scenario
-        );
-    }
-    let inv = &scenario.expected_driver_events.final_session;
+    let actual_events: Vec<Value> = events
+        .iter()
+        .map(|e| serde_json::to_value(e).unwrap())
+        .collect();
+    let expected = &scenario.expected_driver_events;
     assert!(
-        events.len() >= inv.mapped_event_count_min,
-        "{}: mapped event count below invariant",
+        !expected.events.is_empty(),
+        "{}: committed contract event sequence is empty",
         scenario.scenario
     );
-    assert!(
+    let mut cursor = 0;
+    for contract in &expected.events {
+        let mut matched = 0;
+        while cursor < actual_events.len() && matched < contract.count {
+            let actual = &actual_events[cursor];
+            cursor += 1;
+            if actual["type"] == contract.kind
+                && contract.essential.as_ref().is_none_or(|fields| {
+                    subset(
+                        actual,
+                        &Value::Object(
+                            fields.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+                        ),
+                    )
+                })
+            {
+                matched += 1;
+            }
+        }
+        assert_eq!(
+            matched, contract.count,
+            "{}: exact ordered event contract failed at {}",
+            scenario.scenario, contract.kind
+        );
+    }
+    assert_eq!(
+        cursor,
+        actual_events.len(),
+        "{}: unexpected mapped events: {:?}",
+        scenario.scenario,
+        actual_events
+    );
+    assert_eq!(
+        effects, expected.effects,
+        "{}: exact effect sequence mismatch",
+        scenario.scenario
+    );
+    let inv = &expected.final_session;
+    assert_eq!(
+        events.len(),
+        inv.mapped_event_count,
+        "{}: mapped event count",
+        scenario.scenario
+    );
+    assert_eq!(
         events
             .iter()
             .filter(|e| matches!(e, SessionDriverEvent::AssistantDelta { .. }))
-            .count()
-            >= inv.assistant_delta_count_min,
-        "{}: assistant delta count below invariant",
+            .count(),
+        inv.assistant_delta_count,
+        "{}: assistant delta count",
         scenario.scenario
     );
     assert_eq!(
@@ -460,25 +521,18 @@ fn assert_contract(scenario: &ScenarioFile) {
         "{}: open block invariant",
         scenario.scenario
     );
-    let paths: Vec<String> = scenario
-        .http
-        .iter()
-        .map(|h| format!("{} {}", h.method, h.path))
-        .collect();
-    for required in &scenario.expected_driver_events.required_requests {
-        assert!(
-            paths.iter().any(|path| path == required),
-            "{}: missing required request {required}",
-            scenario.scenario
-        );
-    }
-    for forbidden in &scenario.expected_driver_events.forbidden_requests {
-        assert!(
-            !paths.iter().any(|path| path == forbidden),
-            "{}: forbidden request present {forbidden}",
-            scenario.scenario
-        );
-    }
+    assert_eq!(
+        acc.tool_input_buffer.is_empty(),
+        inv.tool_input_buffer_empty,
+        "{}: tool input buffer invariant",
+        scenario.scenario
+    );
+    assert_eq!(
+        acc.turn_error.is_some(),
+        inv.turn_error_present,
+        "{}: turn error invariant",
+        scenario.scenario
+    );
 }
 
 #[test]
@@ -493,11 +547,37 @@ fn corpus_provenance_is_complete() {
                 scenario.scenario
             );
             assert!(
-                !scenario.expected_driver_events.events.is_empty()
-                    || !scenario.expected_driver_events.effects.is_empty(),
-                "{} has no typed expectations",
+                !scenario.expected_driver_events.events.is_empty(),
+                "{} has no typed event expectations",
                 scenario.scenario
             );
+            let (events, effects, _) = replay_contract(&scenario);
+            let kinds: std::collections::BTreeSet<String> = events
+                .iter()
+                .map(|e| {
+                    serde_json::to_value(e).unwrap()["type"]
+                        .as_str()
+                        .unwrap()
+                        .to_string()
+                })
+                .collect();
+            for capability in &scenario.expected_driver_events.capabilities {
+                let observed = match capability.as_str() {
+                    "streaming" => kinds.contains("assistantDelta"),
+                    "queue" => {
+                        kinds.contains("queueUpdated") || kinds.contains("queuedMessageStarted")
+                    }
+                    "interrogative" => kinds.contains("hostUiRequest"),
+                    "reconnect_reseed" => effects.iter().any(|e| e.kind == "reseed"),
+                    "abort" => kinds.contains("assistantDelta"),
+                    other => panic!("{}: unknown capability claim {other}", scenario.scenario),
+                };
+                assert!(
+                    observed,
+                    "{}: capability {capability} was not observed in executable replay",
+                    scenario.scenario
+                );
+            }
         }
     }
 }
@@ -676,9 +756,16 @@ const RAW_CALL_ID: &str = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 
 fn empty_contract() -> support::corpus::DriverContractExpectations {
     support::corpus::DriverContractExpectations {
+        capabilities: vec![],
         events: vec![],
         effects: vec![],
-        final_session: Default::default(),
+        final_session: FinalSessionInvariants {
+            mapped_event_count: 0,
+            assistant_delta_count: 0,
+            open_block_count: 0,
+            tool_input_buffer_empty: true,
+            turn_error_present: false,
+        },
         required_requests: vec![],
         forbidden_requests: vec![],
     }

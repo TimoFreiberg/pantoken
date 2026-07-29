@@ -9,12 +9,14 @@ recordings and do not claim capture provenance.
 Each fixture must deserialize into the real Rust `SseEnvelope` / `DaemonEvent`
 types. The corpus tests additionally replay every SSE frame through
 `map_daemon_event`, check typed Pantoken-boundary event/effect expectations,
-request presence/absence, and final accumulator invariants. Canonicalization
-remains deterministic and idempotent.
+final accumulator invariants. Runtime request presence/absence is covered only by
+`live_path` strict fake-daemon tests, which observe actual `DaemonClient`/driver
+calls; the pure corpus replay does not treat `http[]` as observed behavior.
+Canonicalization remains deterministic and idempotent.
 
 ## Format
 
-Each scenario is one JSON file. The canonical shape:
+Each scenario is one JSON file. The canonical shape below is illustrative (the committed scenarios contain the full exact ordered event sequence):
 
 ```json
 {
@@ -45,15 +47,18 @@ Each scenario is one JSON file. The canonical shape:
     }
   ],
   "expected_driver_events": {
-    "events": [{"kind": "sessionUpdated", "min_count": 1}],
-    "effects": ["fetchState"],
+    "capabilities": ["streaming"],
+    "events": [{"kind": "sessionUpdated", "count": 1, "essential": {"type": "sessionUpdated"}}],
+    "effects": [{"kind": "fetchState", "emit": "RunCompleted", "prompt_id": "PROMPT_0"}],
     "final_session": {
-      "mapped_event_count_min": 1,
-      "assistant_delta_count_min": 1,
-      "open_block_count": 0
+      "mapped_event_count": 16,
+      "assistant_delta_count": 13,
+      "open_block_count": 0,
+      "tool_input_buffer_empty": true,
+      "turn_error_present": false
     },
-    "required_requests": ["GET /state", "POST /prompt"],
-    "forbidden_requests": ["GET /history"]
+    "required_requests": [],
+    "forbidden_requests": []
   }
 }
 ```
@@ -100,16 +105,15 @@ yields identical output. The loader test asserts this (replay determinism).
 
 When the daemon version bumps and a fresh capture is needed:
 
-1. Bump the version in `scripts/capture-daemon-corpus.ts` (the `VERSION`
-   constant) and create the matching corpus dir.
-2. Run `just capture-daemon-corpus` against a throwaway isolated daemon (the
-   script uses `parity/lib.ts`'s `isolationEnv` so it never touches a prod daemon's
-   sessions/config). **This spends provider money** — it drives real model turns.
-   It is the deliberate, separate, operator-run step.
-3. The script writes one `<scenario>.json` per scenario into the version dir,
-   already canonicalized. To re-apply canonicalization to committed files without
-   re-capturing or spending model tokens, run `just capture-daemon-corpus --recanon`
-   (or pass explicit file paths after `--recanon`).
+1. Choose one explicit scenario and daemon version; do not change a shared default:
+   `just capture-daemon-corpus streaming-turn --version 0.5.8 --write`.
+2. The command uses `parity/lib.ts`'s isolated environment and requires `--write`
+   deliberately. **This spends provider money** because it drives a real model turn;
+   it is never a normal test step.
+3. Existing `<scenario>.json` files are never overwritten unless the separate,
+   explicit `--force` approval is supplied. Captures are written to the selected
+   version directory and canonicalized before review. Canonicalization-only work
+   may use `just capture-daemon-corpus --recanon <file...>` without provider spend.
 4. Run `cd server-rs && cargo test corpus` — the loader and contract tests confirm
    every seed event deserializes, maps to the declared Pantoken boundary, and
    remains canonical. If a public event shape changes, this fails loudly (no

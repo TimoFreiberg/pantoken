@@ -1,8 +1,10 @@
 {
   "scenario": "reconnect-stream-discontinuity",
   "version": "0.5.8",
-  "provenance": { "kind": "synthetic_pantoken_regression" },
-  "description": "Reconnect after a stream gap: the SSE subscriber synthesized a stream_discontinuity event (events were dropped between the last delivered frame and this one; carries seq=null). The accumulator must RESEED — issue GET /history + GET /state for a full re-broadcast — NOT attempt SSE resume replay via Last-Event-ID (a known upstream no-op). The reseed fetches fresh state, then the stream continues from the new baseline.",
+  "provenance": {
+    "kind": "synthetic_pantoken_regression"
+  },
+  "description": "Reconnect after a stream gap: the SSE subscriber synthesized a stream_discontinuity event (events were dropped between the last delivered frame and this one; carries seq=null). The accumulator must RESEED \u2014 issue GET /history + GET /state for a full re-broadcast \u2014 NOT attempt SSE resume replay via Last-Event-ID (a known upstream no-op). The reseed fetches fresh state, then the stream continues from the new baseline.",
   "canonicalization": {
     "session_id": "SESSION",
     "prompt_ids": {
@@ -123,5 +125,45 @@
       }
     }
   ],
-  "expected_driver_events": {"events": [], "effects": ["reseed"], "final_session": {"mapped_event_count_min": 1, "assistant_delta_count_min": 1, "open_block_count": 1}, "required_requests": ["GET /history", "GET /state"], "forbidden_requests": ["POST /events"]}
+  "expected_driver_events": {
+    "events": [
+      {
+        "kind": "sessionUpdated",
+        "count": 1,
+        "essential": {
+          "type": "sessionUpdated"
+        }
+      },
+      {
+        "kind": "assistantDelta",
+        "count": 1,
+        "essential": {
+          "type": "assistantDelta"
+        }
+      }
+    ],
+    "effects": [
+      {
+        "kind": "reseed"
+      },
+      {
+        "emit": "RunCompleted",
+        "kind": "fetchState",
+        "prompt_id": "PROMPT_0"
+      }
+    ],
+    "final_session": {
+      "mapped_event_count": 2,
+      "assistant_delta_count": 1,
+      "open_block_count": 1,
+      "tool_input_buffer_empty": true,
+      "turn_error_present": false
+    },
+    "required_requests": [],
+    "forbidden_requests": [],
+    "capabilities": [
+      "streaming",
+      "reconnect_reseed"
+    ]
+  }
 }

@@ -1321,7 +1321,7 @@ fn minimal_state_scenario(name: &str, turn_in_flight: bool) -> ScenarioFile {
                                  "history_revision": 0, "session_id": "SESSION" } }
         ],
         "sse": [],
-        "expected_driver_events": null
+        "expected_driver_events": {"capabilities": [], "events": [], "effects": [], "final_session": {"mapped_event_count": 0, "assistant_delta_count": 0, "open_block_count": 0, "tool_input_buffer_empty": true, "turn_error_present": false}, "required_requests": [], "forbidden_requests": []}
     })
     .to_string();
     serde_json::from_str::<ScenarioFile>(&json_str).expect("parse minimal synthetic scenario")
@@ -1420,7 +1420,7 @@ fn synthetic_rewind_scenario(accepted: bool) -> ScenarioFile {
             {"method": "GET", "path": "/state", "status": 200, "response_body": state("after-rewind")},
             {"method": "GET", "path": "/history", "status": 200, "response_body": post_history}
         ],
-        "sse": [], "expected_driver_events": null
+        "sse": [], "expected_driver_events": {"capabilities": [], "events": [], "effects": [], "final_session": {"mapped_event_count": 0, "assistant_delta_count": 0, "open_block_count": 0, "tool_input_buffer_empty": true, "turn_error_present": false}, "required_requests": [], "forbidden_requests": []}
     });
     let mut scenario: ScenarioFile =
         serde_json::from_value(body).expect("parse synthetic rewind scenario");
@@ -1690,7 +1690,7 @@ fn synthetic_ordering_scenario(n: usize) -> ScenarioFile {
                                  "history_revision": 0, "session_id": "SESSION" } }
         ],
         "sse": sse,
-        "expected_driver_events": null
+        "expected_driver_events": {"capabilities": [], "events": [], "effects": [], "final_session": {"mapped_event_count": 0, "assistant_delta_count": 0, "open_block_count": 0, "tool_input_buffer_empty": true, "turn_error_present": false}, "required_requests": [], "forbidden_requests": []}
     })
     .to_string();
     serde_json::from_str::<ScenarioFile>(&json_str).expect("parse synthetic scenario")
@@ -2684,7 +2684,7 @@ fn streaming_turn_with_in_flight_scenario() -> ScenarioFile {
               "response_body": history_body }
         ],
         "sse": corpus.sse,
-        "expected_driver_events": null
+        "expected_driver_events": {"capabilities": [], "events": [], "effects": [], "final_session": {"mapped_event_count": 0, "assistant_delta_count": 0, "open_block_count": 0, "tool_input_buffer_empty": true, "turn_error_present": false}, "required_requests": [], "forbidden_requests": []}
     })
     .to_string();
     serde_json::from_str::<ScenarioFile>(&json_str).expect("parse synthetic streaming scenario")

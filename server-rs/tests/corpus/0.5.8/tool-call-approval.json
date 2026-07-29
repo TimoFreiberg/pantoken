@@ -1,8 +1,10 @@
 {
   "scenario": "tool-call-approval",
   "version": "0.5.8",
-  "provenance": { "kind": "synthetic_pantoken_regression" },
-  "description": "A turn that calls a tool requiring approval → interrogative (permission) → approve → tool_result → message_complete.",
+  "provenance": {
+    "kind": "synthetic_pantoken_regression"
+  },
+  "description": "A turn that calls a tool requiring approval \u2192 interrogative (permission) \u2192 approve \u2192 tool_result \u2192 message_complete.",
   "canonicalization": {
     "session_id": "SESSION",
     "prompt_ids": {
@@ -1201,5 +1203,98 @@
       }
     }
   ],
-  "expected_driver_events": {"events": [{"kind": "sessionUpdated", "min_count": 1}, {"kind": "hostUiRequest", "min_count": 1}, {"kind": "toolStarted", "min_count": 1}, {"kind": "toolFinished", "min_count": 1}], "effects": ["registerInterrogative", "fetchState"], "final_session": {"mapped_event_count_min": 1, "assistant_delta_count_min": 1, "open_block_count": 0}, "required_requests": ["POST /permission-monitor", "POST /interrogative/019f3690-951c-7bd2-ba1f-58dc534b8f58/respond"], "forbidden_requests": ["POST /turn/cancel"]}
+  "expected_driver_events": {
+    "events": [
+      {
+        "kind": "sessionUpdated",
+        "count": 1,
+        "essential": {
+          "type": "sessionUpdated"
+        }
+      },
+      {
+        "kind": "customMessage",
+        "count": 1,
+        "essential": {
+          "type": "customMessage"
+        }
+      },
+      {
+        "kind": "sessionUpdated",
+        "count": 1,
+        "essential": {
+          "type": "sessionUpdated"
+        }
+      },
+      {
+        "kind": "assistantDelta",
+        "count": 18,
+        "essential": {
+          "type": "assistantDelta"
+        }
+      },
+      {
+        "kind": "toolStarted",
+        "count": 1,
+        "essential": {
+          "type": "toolStarted"
+        }
+      },
+      {
+        "kind": "hostUiRequest",
+        "count": 1,
+        "essential": {
+          "type": "hostUiRequest"
+        }
+      },
+      {
+        "kind": "toolFinished",
+        "count": 1,
+        "essential": {
+          "type": "toolFinished"
+        }
+      },
+      {
+        "kind": "assistantDelta",
+        "count": 25,
+        "essential": {
+          "type": "assistantDelta"
+        }
+      }
+    ],
+    "effects": [
+      {
+        "emit": "SessionUpdated",
+        "kind": "fetchState"
+      },
+      {
+        "kind": "setAutodrainEnabled"
+      },
+      {
+        "kind": "registerInterrogative"
+      },
+      {
+        "emit": "SessionUpdated",
+        "kind": "fetchState"
+      },
+      {
+        "emit": "RunCompleted",
+        "kind": "fetchState",
+        "prompt_id": "PROMPT_0"
+      }
+    ],
+    "final_session": {
+      "mapped_event_count": 49,
+      "assistant_delta_count": 43,
+      "open_block_count": 0,
+      "tool_input_buffer_empty": true,
+      "turn_error_present": false
+    },
+    "required_requests": [],
+    "forbidden_requests": [],
+    "capabilities": [
+      "streaming",
+      "interrogative"
+    ]
+  }
 }
