@@ -676,7 +676,11 @@ async fn daemon_client_endpoint_contract_matrix() {
     executed.insert("heartbeat");
     executed.insert("release_lease");
 
-    let prompt_body = json!({"prompt_id":"prompt-1","session_id":SESSION});
+    let prompt_body = json!({
+        "prompt_id":"prompt-1",
+        "session_id":SESSION,
+        "resolved_references":[{"file_kind":"file","kind":"file","name":"README.md"}]
+    });
     let (seen, result) = call(StatusCode::ACCEPTED, prompt_body, |c| async move {
         c.prompt("prompt", Some(3)).await
     })
@@ -691,6 +695,13 @@ async fn daemon_client_endpoint_contract_matrix() {
     assert_eq!(accepted.prompt_id, "prompt-1");
     assert_eq!(accepted.session_id, SESSION);
     assert!(accepted.queued_item.is_none());
+    let references = accepted
+        .resolved_references
+        .expect("resolved prompt references");
+    assert_eq!(references.len(), 1);
+    assert_eq!(references[0].file_kind.as_deref(), Some("file"));
+    assert_eq!(references[0].kind, "file");
+    assert_eq!(references[0].name, "README.md");
     executed.insert("prompt");
 
     let (seen, result) = call(StatusCode::ACCEPTED, json!({}), |c| async move {
@@ -1288,6 +1299,17 @@ async fn daemon_client_endpoint_contract_matrix() {
     .await;
     assert_request(&seen, "GET", "/notification-autodrain", None);
     assert!(malformed_autodrain.is_err());
+    let (seen, autodrain_500) = call(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        rejected.clone(),
+        |c| async move { c.get_notification_autodrain().await },
+    )
+    .await;
+    assert_request(&seen, "GET", "/notification-autodrain", None);
+    let autodrain_error = autodrain_500.expect_err("autodrain 500 must fail");
+    assert!(autodrain_error.contains("(500)"));
+    assert!(autodrain_error.contains("public_code"));
+    assert!(autodrain_error.contains("public message"));
     let (seen, autodrain_rejected) =
         call(StatusCode::BAD_REQUEST, rejected.clone(), |c| async move {
             c.set_notification_autodrain(true).await
