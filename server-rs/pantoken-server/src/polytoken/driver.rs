@@ -963,6 +963,17 @@ impl PolytokenInner {
         events
     }
 
+    async fn cleanup_owned_process(
+        client: &Arc<DaemonClient>,
+        owned_process: Option<tokio::process::Child>,
+    ) {
+        if let Some(mut child) = owned_process {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            client.close_without_kill().await;
+        }
+    }
+
     async fn cleanup_failed_hydration(
         client: &Arc<DaemonClient>,
         subscription: SseSubscription,
@@ -970,11 +981,7 @@ impl PolytokenInner {
     ) {
         subscription.stop().await;
         client.release_lease().await;
-        if let Some(mut child) = owned_process {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
-            client.close_without_kill().await;
-        }
+        Self::cleanup_owned_process(client, owned_process).await;
     }
 
     /// Build a `WarmSession` from an already-connected client: validate health,
@@ -1016,13 +1023,15 @@ impl PolytokenInner {
         };
 
         if !healthy {
+            Self::cleanup_owned_process(&client, owned_process).await;
             return Err("daemon health probe failed".into());
         }
 
-        // Claim lease
-        match client.claim_lease("pantoken").await {
-            Ok(_) => {}
-            Err(e) => return Err(format!("lease claim failed: {e}")),
+        // Claim lease. No heartbeat exists when claim fails, but a daemon that
+        // Pantoken spawned still belongs to this failed warm attempt.
+        if let Err(error) = client.claim_lease("pantoken").await {
+            Self::cleanup_owned_process(&client, owned_process).await;
+            return Err(format!("lease claim failed: {error}"));
         }
 
         // Connect `/events` before any snapshot request. The callback only queues
@@ -1063,16 +1072,22 @@ impl PolytokenInner {
                     .unwrap_or("malformed success body")
             ));
         };
-        let monitor_mode = client
-            .get_permission_monitor()
-            .await
-            .ok()
-            .map(|response| event_map::monitor_to_mode(&response.monitor));
-        let autodrain_enabled = client
-            .get_notification_autodrain()
-            .await
-            .ok()
-            .map(|response| response.enabled);
+        let monitor_mode = match client.get_permission_monitor().await {
+            Ok(response) => Some(event_map::monitor_to_mode(&response.monitor)),
+            Err(error) => {
+                Self::cleanup_failed_hydration(&client, sub, owned_process).await;
+                return Err(format!("GET /permission-monitor hydration failed: {error}"));
+            }
+        };
+        let autodrain_enabled = match client.get_notification_autodrain().await {
+            Ok(response) => Some(response.enabled),
+            Err(error) => {
+                Self::cleanup_failed_hydration(&client, sub, owned_process).await;
+                return Err(format!(
+                    "GET /notification-autodrain hydration failed: {error}"
+                ));
+            }
+        };
 
         let warm = Arc::new(WarmSession {
             client: client.clone(),

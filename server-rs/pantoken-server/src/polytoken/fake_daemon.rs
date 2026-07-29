@@ -108,6 +108,23 @@ fn canned(method: &str, path: &str) -> Option<(StatusCode, Value)> {
             serde_json::json!({"title": "", "overridden": true}),
         ));
     }
+    // Required attach snapshots not represented by the older scenario corpus.
+    if m == "GET" && p == "/permission-monitor" {
+        return Some((
+            StatusCode::OK,
+            serde_json::json!({
+                "monitor": {"type": "bypass_plus"},
+                "config_default": {"type": "bypass_plus"},
+                "configured_autonomous": null
+            }),
+        ));
+    }
+    if m == "GET" && p == "/notification-autodrain" {
+        return Some((
+            StatusCode::OK,
+            serde_json::json!({"enabled": true, "config_default": true}),
+        ));
+    }
     // GET /turn/input — the RefetchQueue effect's snapshot fetch. The corpus
     // doesn't record /turn/input (the queue-while-in-flight scenario triggers
     // a RefetchQueue but the capture didn't snapshot it), so serve a canned
@@ -218,9 +235,49 @@ struct QueryParams {
 }
 
 #[derive(Clone)]
+pub struct HydrationRaceControl {
+    state_requested: Arc<tokio::sync::Semaphore>,
+    event_sent: Arc<tokio::sync::Semaphore>,
+    release_state: Arc<tokio::sync::Semaphore>,
+    stream_closed: Arc<tokio::sync::Semaphore>,
+}
+
+impl HydrationRaceControl {
+    async fn wait(semaphore: &tokio::sync::Semaphore) {
+        semaphore
+            .acquire()
+            .await
+            .expect("hydration race semaphore remains open")
+            .forget();
+    }
+
+    pub async fn wait_state_requested(&self) {
+        Self::wait(&self.state_requested).await;
+    }
+
+    pub async fn wait_event_sent(&self) {
+        Self::wait(&self.event_sent).await;
+    }
+
+    pub fn release_state(&self) {
+        self.release_state.add_permits(1);
+    }
+
+    pub async fn wait_stream_closed(&self) {
+        Self::wait(&self.stream_closed).await;
+    }
+}
+
+#[derive(Clone)]
 enum SseMode {
-    OneShot { inter_frame_delay_ms: u64 },
+    OneShot {
+        inter_frame_delay_ms: u64,
+    },
     Controlled,
+    HydrationRace {
+        frame: corpus::SseFrame,
+        control: HydrationRaceControl,
+    },
 }
 
 /// Spawn a fake daemon serving `scenario` on an ephemeral port.
@@ -242,6 +299,31 @@ pub async fn spawn(
         },
     )
     .await
+}
+
+/// Spawn a deterministic attach-race daemon. `/state` blocks until the test
+/// releases it, while the selected SSE frame is sent after `/state` has entered.
+pub async fn spawn_hydration_race(
+    scenario: ScenarioFile,
+    session_id: String,
+    frame: corpus::SseFrame,
+) -> (FakeDaemon, HydrationRaceControl) {
+    let control = HydrationRaceControl {
+        state_requested: Arc::new(tokio::sync::Semaphore::new(0)),
+        event_sent: Arc::new(tokio::sync::Semaphore::new(0)),
+        release_state: Arc::new(tokio::sync::Semaphore::new(0)),
+        stream_closed: Arc::new(tokio::sync::Semaphore::new(0)),
+    };
+    let fake = spawn_with_mode(
+        scenario,
+        session_id,
+        SseMode::HydrationRace {
+            frame,
+            control: control.clone(),
+        },
+    )
+    .await;
+    (fake, control)
 }
 
 async fn spawn_controlled(scenario: ScenarioFile, session_id: String) -> Arc<FakeDaemon> {
@@ -817,6 +899,16 @@ async fn sse_handler(
         SseMode::Controlled => {
             app.state.lock().sse_tx = Some(tx);
         }
+        SseMode::HydrationRace { frame, control } => {
+            tokio::spawn(async move {
+                control.wait_state_requested().await;
+                if tx.send(Ok(frame_to_event(&frame))).await.is_ok() {
+                    control.event_sent.add_permits(1);
+                }
+                tx.closed().await;
+                control.stream_closed.add_permits(1);
+            });
+        }
     }
     Sse::new(ReceiverStream::new(rx))
 }
@@ -835,58 +927,57 @@ async fn http_handler(
         .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
         .unwrap_or_default();
 
+    // The race test holds the authoritative snapshot after the request arrives.
+    // Its SSE producer waits for this signal, guaranteeing the event is emitted
+    // while hydration is still incomplete rather than merely before installation.
+    if method == "GET" && path == "/state" {
+        if let SseMode::HydrationRace { control, .. } = &app.sse_mode {
+            // One permit for the SSE producer and one for the test observer.
+            control.state_requested.add_permits(2);
+            HydrationRaceControl::wait(&control.release_state).await;
+        }
+    }
+
     // Record the call (lock held only for the push + cursor advance).
     let (status, body) = {
         let mut st = app.state.lock();
         st.calls.push((method.clone(), path.clone()));
         st.request_bodies
             .push((method.clone(), path.clone(), request_body));
-        // Canned lifecycle endpoints win over recordings (the corpus never
-        // records them, and a recording would be stale/malformed for them).
-        if let Some((code, val)) = canned(&method, &path) {
-            st.cursors.insert((method.clone(), path.clone()), 0);
-            (code, Some(val))
+        // Declared scenario contracts always win. The tiny canned bootstrap
+        // allowlist applies only when the active scenario has no recording.
+        let key = (method.clone(), path.clone());
+        let idx = st.cursors.get(&key).copied().unwrap_or(0);
+        let scenario = st
+            .scenario_override
+            .clone()
+            .unwrap_or_else(|| app.scenario.clone());
+        let recording = scenario
+            .http
+            .iter()
+            .filter(|e| e.method == method && e.path == path)
+            .nth(idx)
+            .cloned();
+        if let Some(entry) = recording {
+            *st.cursors.entry(key).or_insert(0) = idx + 1;
+            (
+                StatusCode::from_u16(entry.status as u16)
+                    .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                entry.response_body.clone(),
+            )
+        } else if let Some((code, value)) = canned(&method, &path) {
+            (code, Some(value))
         } else {
-            // Advance the cursor for this endpoint + return the recording.
-            let key = (method.clone(), path.clone());
-            let idx = st.cursors.get(&key).copied().unwrap_or(0);
-            // Prefer a `run_script`-armed override (the active flow's
-            // recordings); fall back to the spawn-time scenario (one-shot
-            // `spawn`, or the idle bootstrap before any script is pushed).
-            let scenario = st
-                .scenario_override
-                .clone()
-                .unwrap_or_else(|| app.scenario.clone());
-            let recording = scenario
-                .http
-                .iter()
-                .filter(|e| e.method == method && e.path == path)
-                .nth(idx)
-                .cloned();
-            if recording.is_some() {
-                *st.cursors.entry(key).or_insert(0) = idx + 1;
-            }
-            let (code, body) = match recording {
-                Some(e) => (
-                    StatusCode::from_u16(e.status as u16)
-                        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
-                    e.response_body.clone(),
-                ),
-                None => {
-                    // Unmatched — a missing recording is a harness bug.
-                    tracing::error!(
-                        "fake daemon: unmatched request {} {} (no canned + no recording)",
-                        method,
-                        path
-                    );
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("unmatched request: {method} {path}"),
-                    )
-                        .into_response();
-                }
-            };
-            (code, body)
+            tracing::error!(
+                "fake daemon: unmatched request {} {} (no recording or bootstrap contract)",
+                method,
+                path
+            );
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("unmatched request: {method} {path}"),
+            )
+                .into_response();
         }
     };
 

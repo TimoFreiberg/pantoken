@@ -797,8 +797,23 @@ const SCENARIOS: Record<string, Scenario> = {
 
 // ─── main ────────────────────────────────────────────────────────────────────
 
+export function validateCaptureVersion(version: string): string {
+  if (
+    version.length === 0 ||
+    version === "." ||
+    version === ".." ||
+    !/^[A-Za-z0-9][A-Za-z0-9.+-]*$/.test(version)
+  ) {
+    throw new Error(
+      `invalid daemon version ${JSON.stringify(version)}; expected one safe path component`,
+    );
+  }
+  return version;
+}
+
 export function captureTarget(version: string, scenario: string, force: boolean): string {
-  const dir = join(SCRIPT_DIR, "..", "server-rs", "tests", "corpus", version);
+  const safeVersion = validateCaptureVersion(version);
+  const dir = join(SCRIPT_DIR, "..", "server-rs", "tests", "corpus", safeVersion);
   const target = join(dir, `${scenario}.json`);
   if (existsSync(target) && !force) {
     throw new Error(

@@ -1380,6 +1380,78 @@ pub enum EventDisposition {
     IntentionalNoop,
 }
 
+/// Independently authored compatibility inventory keyed by public wire name.
+/// Its exact union is tested against the generated OpenAPI-derived name list;
+/// the exhaustive typed match below independently prevents enum drift.
+pub const DAEMON_EVENT_DISPOSITIONS: &[(&str, EventDisposition)] = &[
+    ("message_start", EventDisposition::Mapped),
+    ("content_block_start", EventDisposition::Mapped),
+    ("content_block_delta", EventDisposition::Mapped),
+    ("content_block_stop", EventDisposition::Mapped),
+    ("tool_call", EventDisposition::Mapped),
+    ("tool_result", EventDisposition::Mapped),
+    ("pending_turn_input_drained", EventDisposition::Mapped),
+    ("session_title_changed", EventDisposition::Mapped),
+    ("model_switch", EventDisposition::Mapped),
+    ("permission_monitor_switch", EventDisposition::Mapped),
+    ("interrogative", EventDisposition::Mapped),
+    ("ask_user_question", EventDisposition::Mapped),
+    ("notification_autodrain_switch", EventDisposition::Mapped),
+    ("goal_driver_update", EventDisposition::Mapped),
+    ("hook_fired", EventDisposition::Mapped),
+    ("message_complete", EventDisposition::StateRefetch),
+    ("turn_cancelled", EventDisposition::StateRefetch),
+    ("pending_turn_input_queued", EventDisposition::StateRefetch),
+    (
+        "pending_turn_input_dequeued",
+        EventDisposition::StateRefetch,
+    ),
+    (
+        "pending_turn_input_discarded",
+        EventDisposition::StateRefetch,
+    ),
+    ("session_state_changed", EventDisposition::StateRefetch),
+    ("facet_switch", EventDisposition::StateRefetch),
+    ("compaction_complete", EventDisposition::StateRefetch),
+    ("subagent_started", EventDisposition::StateRefetch),
+    ("subagent_completed", EventDisposition::StateRefetch),
+    ("stream_discontinuity", EventDisposition::Reseed),
+    ("session_rewound", EventDisposition::Reseed),
+    ("context_cleared", EventDisposition::Reseed),
+    ("model_error", EventDisposition::UserNotice),
+    ("retry_wait", EventDisposition::UserNotice),
+    ("agent_block_violation", EventDisposition::UserNotice),
+    ("tool_exposure_changed", EventDisposition::UserNotice),
+    ("compaction_started", EventDisposition::UserNotice),
+    ("compaction_cancelled", EventDisposition::UserNotice),
+    ("compaction_failed", EventDisposition::UserNotice),
+    ("subagent_compaction_notice", EventDisposition::UserNotice),
+    ("notification_queued", EventDisposition::UserNotice),
+    ("system_reminder", EventDisposition::UserNotice),
+    ("mcp_server_connected", EventDisposition::UserNotice),
+    ("mcp_server_disconnected", EventDisposition::UserNotice),
+    ("mcp_server_reconnecting", EventDisposition::UserNotice),
+    ("mcp_server_disabled", EventDisposition::UserNotice),
+    ("heartbeat", EventDisposition::IntentionalNoop),
+    ("job_promoted", EventDisposition::IntentionalNoop),
+    ("job_completed", EventDisposition::IntentionalNoop),
+    ("job_expiring", EventDisposition::IntentionalNoop),
+    ("job_cancelled", EventDisposition::IntentionalNoop),
+    ("job_updated", EventDisposition::IntentionalNoop),
+    ("context_loaded", EventDisposition::IntentionalNoop),
+    ("compaction_retry", EventDisposition::IntentionalNoop),
+    ("notifications_drained", EventDisposition::IntentionalNoop),
+    ("tool_reveal", EventDisposition::IntentionalNoop),
+    ("classifier_decision", EventDisposition::IntentionalNoop),
+    ("extension_registered", EventDisposition::IntentionalNoop),
+    ("subagent_messaged", EventDisposition::IntentionalNoop),
+    (
+        "image_reference_resolved",
+        EventDisposition::IntentionalNoop,
+    ),
+    ("usage_throttle", EventDisposition::IntentionalNoop),
+];
+
 /// Explicit Pantoken product disposition for every generated daemon event.
 /// This is deliberately separate from wire deserialization: accepting an event
 /// is not proof that Pantoken either surfaces or intentionally ignores it.
@@ -2328,6 +2400,51 @@ mod tests {
         PermissionMonitorMode, SessionRef, TodoStatus, WorkspaceRef,
     };
     use serde_json::{Value, json};
+
+    #[test]
+    fn daemon_event_disposition_is_exhaustive() {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let generated: BTreeSet<_> = pantoken_daemon_types::DAEMON_EVENT_VARIANT_NAMES
+            .iter()
+            .copied()
+            .collect();
+        let classified: BTreeSet<_> = DAEMON_EVENT_DISPOSITIONS
+            .iter()
+            .map(|(name, _)| *name)
+            .collect();
+        assert_eq!(
+            DAEMON_EVENT_DISPOSITIONS.len(),
+            classified.len(),
+            "each daemon wire name must have exactly one disposition"
+        );
+        assert_eq!(classified, generated);
+
+        let counts = DAEMON_EVENT_DISPOSITIONS.iter().fold(
+            BTreeMap::<&'static str, usize>::new(),
+            |mut counts, (_, disposition)| {
+                let name = match disposition {
+                    EventDisposition::Mapped => "mapped",
+                    EventDisposition::StateRefetch => "state_refetch",
+                    EventDisposition::Reseed => "reseed",
+                    EventDisposition::UserNotice => "user_notice",
+                    EventDisposition::IntentionalNoop => "intentional_noop",
+                };
+                *counts.entry(name).or_default() += 1;
+                counts
+            },
+        );
+        assert_eq!(
+            counts.keys().copied().collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                "intentional_noop",
+                "mapped",
+                "reseed",
+                "state_refetch",
+                "user_notice",
+            ])
+        );
+    }
 
     fn snap(items: Vec<(&str, &str)>) -> PendingTurnInputSnapshot {
         PendingTurnInputSnapshot {

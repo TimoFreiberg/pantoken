@@ -19,7 +19,11 @@ import { expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { canonicalizeScenario, captureTarget } from "./capture-daemon-corpus";
+import {
+  canonicalizeScenario,
+  captureTarget,
+  validateCaptureVersion,
+} from "./capture-daemon-corpus";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -39,6 +43,15 @@ test("capture refuses an existing version without explicit override", () => {
   expect(captureTarget("future-test-version", "streaming-turn", false)).toMatch(
     /future-test-version\/streaming-turn\.json$/,
   );
+});
+
+test("capture version is one safe path component", () => {
+  expect(validateCaptureVersion("0.5.8-rc.1+local")).toBe("0.5.8-rc.1+local");
+  for (const version of ["", ".", "..", "../../outside", "a/b", "a\\b", "/tmp/x"]) {
+    expect(() => validateCaptureVersion(version), version).toThrow(
+      /invalid daemon version/,
+    );
+  }
 });
 
 test("TS canonicalizeScenario matches the committed TS golden", () => {
