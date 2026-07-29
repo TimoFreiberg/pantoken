@@ -22,6 +22,10 @@ rust_library(
     env = {
         "PANTOKEN_BUILD_SHA": "dev-buck2",
         "PANTOKEN_RELEASE_BUILD": "0",
+        # CARGO_MANIFEST_DIR is used by env!() in config.rs and corpus.rs to
+        # locate client/dist and tests/corpus. Cargo sets this automatically;
+        # Buck2 doesn't, so we set it to the crate's source directory.
+        "CARGO_MANIFEST_DIR": "server-rs/pantoken-server",
     },
     deps = [
         "//server-rs/pantoken-daemon-types:pantoken_daemon_types",
@@ -32,6 +36,7 @@ rust_library(
         "//third-party:ct-codecs",
         "//third-party:flate2",
         "//third-party:futures-util",
+        "//third-party:http",
         "//third-party:ignore",
         "//third-party:jwt-simple",
         "//third-party:libc",
@@ -49,6 +54,7 @@ rust_library(
         "//third-party:tracing-subscriber",
         "//third-party:urlencoding",
         "//third-party:web-push",
+        "//third-party:ece",
         # async-trait is a proc-macro crate — in Buck2, proc macros are regular deps
         "//third-party:async-trait",
     ],
@@ -67,6 +73,7 @@ rust_test(
     env = {
         "PANTOKEN_BUILD_SHA": "dev-buck2",
         "PANTOKEN_RELEASE_BUILD": "0",
+        "CARGO_MANIFEST_DIR": "server-rs/pantoken-server",
     },
     run_env = {
         "HOME": ".",
@@ -97,6 +104,7 @@ rust_test(
         "//third-party:tracing-subscriber",
         "//third-party:urlencoding",
         "//third-party:web-push",
+        "//third-party:ece",
         "//third-party:async-trait",
         # Dev-dependencies used by cfg(test) modules
         "//third-party:http",
@@ -115,6 +123,7 @@ rust_binary(
     env = {
         "PANTOKEN_BUILD_SHA": "dev-buck2",
         "PANTOKEN_RELEASE_BUILD": "0",
+        "CARGO_MANIFEST_DIR": "server-rs/pantoken-server",
     },
     deps = [
         ":pantoken_server_lib",
@@ -129,6 +138,7 @@ rust_binary(
         "//third-party:tower-http",
         "//third-party:tracing",
         "//third-party:tracing-subscriber",
+        "//third-party:ece",
         # async-trait is a proc-macro crate — in Buck2, proc macros are regular deps
         "//third-party:async-trait",
     ],
@@ -161,13 +171,17 @@ rust_test(
     srcs = ["tests/corpus.rs"] + _TEST_SUPPORT,
     crate_root = "tests/corpus.rs",
     deps = _TEST_DEPS,
+    env = {"CARGO_MANIFEST_DIR": "server-rs/pantoken-server"},
     resources = [
         "//server-rs/tests:corpus_json",
         "//server-rs/tests:canon_parity_json",
     ],
     run_env = {
-        "PANTOKEN_CORPUS_FILES": "$(location //server-rs/tests:corpus_json)",
-        "PANTOKEN_CANON_PARITY_FILES": "$(location //server-rs/tests:canon_parity_json)",
+        # $(location <filegroup>) expands to the filegroup's output DIRECTORY
+        # (containing srcs at their package-relative paths), so point the
+        # *_DIR vars at the subtree root the tests expect.
+        "PANTOKEN_CORPUS_DIR": "$(location //server-rs/tests:corpus_json)/corpus",
+        "PANTOKEN_CANON_PARITY_DIR": "$(location //server-rs/tests:canon_parity_json)/canon-parity",
         "HOME": ".",
     },
     visibility = ["PUBLIC"],
@@ -179,9 +193,10 @@ rust_test(
     srcs = ["tests/live_path.rs"] + _TEST_SUPPORT,
     crate_root = "tests/live_path.rs",
     deps = _TEST_DEPS,
+    env = {"CARGO_MANIFEST_DIR": "server-rs/pantoken-server"},
     resources = ["//server-rs/tests:corpus_json"],
     run_env = {
-        "PANTOKEN_CORPUS_FILES": "$(location //server-rs/tests:corpus_json)",
+        "PANTOKEN_CORPUS_DIR": "$(location //server-rs/tests:corpus_json)/corpus",
         "HOME": ".",
     },
     visibility = ["PUBLIC"],
@@ -197,6 +212,7 @@ rust_test(
         "//third-party:futures-util",
         "//third-party:tokio-tungstenite",
     ],
+    env = {"CARGO_MANIFEST_DIR": "server-rs/pantoken-server"},
     run_env = {"HOME": "."},
     visibility = ["PUBLIC"],
 )
@@ -207,6 +223,7 @@ rust_test(
     srcs = ["tests/stdio_adapter_contract_tests.rs"] + _TEST_SUPPORT,
     crate_root = "tests/stdio_adapter_contract_tests.rs",
     deps = _TEST_DEPS,
+    env = {"CARGO_MANIFEST_DIR": "server-rs/pantoken-server"},
     resources = [":pantoken_server"],
     run_env = {
         "HOME": ".",
@@ -221,6 +238,7 @@ rust_test(
     srcs = ["tests/resume_and_recovery_tests.rs"] + _TEST_SUPPORT,
     crate_root = "tests/resume_and_recovery_tests.rs",
     deps = _TEST_DEPS,
+    env = {"CARGO_MANIFEST_DIR": "server-rs/pantoken-server"},
     resources = [":pantoken_server"],
     run_env = {
         "HOME": ".",
@@ -235,6 +253,7 @@ rust_test(
     srcs = ["tests/remote_runtime_integration_tests.rs"] + _TEST_SUPPORT,
     crate_root = "tests/remote_runtime_integration_tests.rs",
     deps = _TEST_DEPS,
+    env = {"CARGO_MANIFEST_DIR": "server-rs/pantoken-server"},
     resources = [":pantoken_server"],
     run_env = {
         "HOME": ".",

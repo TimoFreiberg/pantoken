@@ -11,7 +11,7 @@
 ## Overview
 
 This POC evaluated Buck2 as the **sole additive** build system alongside the authoritative Cargo/pnpm
-workflows. It covers all 5 `server-rs` Rust crates (4 build successfully),
+workflows. It covers all 5 `server-rs` Rust crates (all 5 build successfully),
 Reindeer-generated third-party dependencies, and unsigned headless archive assembly.
 Cargo and pnpm remain the source of truth; Buck2 builds the same artifacts from the same sources.
 
@@ -53,33 +53,26 @@ just buck2-measure        # run measurement script
 | pantoken-daemon-types | ✅ | — | ✅ | |
 | pantoken-remote-layout | ✅ | — | ✅ | |
 | pantoken-tar-validate | ✅ | ✅ | ✅ | |
-| pantoken-server | ❌ | ❌ | ❌ | Blocked by OpenSSL/ring |
+| pantoken-server | ✅ | ✅ | ✅ | Resolved (Issue #119) |
 
-### POC blocker: OpenSSL/ring native compilation
+### POC blocker: OpenSSL/ring native compilation — RESOLVED
 
-The `pantoken-server` crate depends on `web-push` → `ece` → `openssl` → `ring`.
-Neither `ece` 2.3.1 nor `web-push` 0.11.0 has a Rustls or pure-Rust backend — `backend-openssl`
-is the only published backend. This means:
+The `pantoken-server` crate previously depended on `web-push` → `ece` → `openssl` → `ring`.
+This is now resolved (Issue #119):
 
-1. **`openssl-sys`** requires a build script that finds and validates system OpenSSL headers.
-   The build script panics during `validate_headers` under Buck2's sandboxed buildscript execution.
-2. **`ring`** requires a build script that compiles C code (curve25519, etc.) via `cc-rs`.
-   The C compilation fails in Buck2's sandbox due to header expansion issues.
+1. The `ece` RustCrypto fork (`third-party/vendor/ece-2.3.1-rustcrypto`) replaced
+   the OpenSSL backend with pure RustCrypto (`p256`, `aes-gcm`, `hkdf`, `sha2`).
+2. The `web-push` `hyper-client` feature was dropped; an in-tree
+   `ReqwestWebPushClient` implements the `WebPushClient` trait over the existing
+   reqwest (rustls) client — no `web-push` fork needed.
+3. `ring` remains as the sole native C dependency (via `reqwest[rustls-tls]` →
+   `rustls`). Its `cc`-based buildscript compiles under Buck2's sandbox with env
+   fixups (`PATH`, `SDKROOT`, `DEVELOPER_DIR`) in `third-party/fixups/ring/fixups.toml`.
+4. `OPENSSL_DIR` was removed from all `buck2-*` justfile recipes — openssl is no
+   longer in the graph.
 
-**Workaround attempted:** Setting `OPENSSL_DIR`, `OPT_LEVEL`, `DEBUG` env vars in fixups.
-The `openssl-sys` build script runs but panics on header validation. The `ring` build script
-runs but fails on C compilation.
-
-**Root cause:** These are native C dependencies that require ambient system libraries and
-compilers — inherently non-hermetic. Cargo handles this because it runs build scripts with
-full host access. Buck2's sandboxed `buildscript_run` isolates the build script from the host
-environment.
-
-**Resolution paths (future work):**
-- Fork `ece` to use a pure-Rust crypto backend (ring/RustCrypto)
-- Fork `web-push` to use `hyper-rustls` instead of `hyper-tls`
-- Provide a hermetic native toolchain for Buck2 that includes OpenSSL headers
-- Document the OpenSSL dependency as a known non-hermetic boundary
+All other `-sys` crates (`core-foundation-sys`, `fsevent-sys`) are linkage-only
+framework bindings with no C compilation.
 
 ## Reindeer fixups
 
@@ -87,10 +80,10 @@ The following fixups were required for the 353 third-party crates:
 
 | Fixup | Crates | Reason |
 |-------|--------|--------|
-| `buildscript.run = true` | anyhow, libc, getrandom, ring, openssl, openssl-sys, serde, etc. | Build scripts set cfg flags or generate code |
+| `buildscript.run = true` | anyhow, libc, getrandom, ring, serde, etc. | Build scripts set cfg flags or generate code |
 | `buildscript.run = false` + `cfgs` | serde_json, rustix | Build script sets cfg flags that can be hardcoded for aarch64-apple-darwin |
 | `extra_srcs` | axum (docs/**), bstr (fsm/**), cc (.c file), ring (data/**), rustls-pki-types (data/**), rustls-webpki (data/**), tower-http (README.md), aho-corasick (src/**/*.md) | `include_bytes!`/`include_str!` for non-.rs files not discovered by Reindeer |
-| `[buildscript.run] env` | ring (OPT_LEVEL, DEBUG, NUM_JOBS), openssl-sys (OPENSSL_DIR, OPENSSL_INCLUDE_DIR, OPENSSL_LIB_DIR) | Build scripts need env vars that Cargo normally sets |
+| `[buildscript.run] env` | ring (OPT_LEVEL, DEBUG, NUM_JOBS, PATH, SDKROOT, DEVELOPER_DIR) | Build script needs env vars that Cargo normally sets; PATH/SDKROOT/DEVELOPER_DIR for sandboxed `cc`-based C compilation |
 | `omit_features` + `features` | reqwest (removed default-tls, added rustls-tls) | Eliminate OpenSSL dependency from reqwest (applied in Cargo.toml) |
 | `cargo_env = true` | (global in reindeer.toml) | Provide CARGO_PKG_* env vars that build scripts read via env!() |
 
@@ -120,26 +113,51 @@ instead of `rules_pkg` (which doesn't exist for Buck2). The assembler produces a
 - Fixed file modes (0755 for executables, 0644 for regular files)
 - Deterministic gzip header (no timestamp, no filename, compression level 9)
 
-**Status: BLOCKED.** The archive target (`//:pantoken_headless_unsigned`) depends on the
-`pantoken-server` binary, which cannot build due to the OpenSSL/ring POC blocker. The archive
-assembly logic, staging script, and validator are implemented and parseable by Buck2, but cannot
-be exercised end-to-end until the server binary builds. The `just buck2-archive` and
-`just buck2-validate-archive` recipes will fail until the blocker is resolved.
+**Status: PASSING.** The archive target (`//:pantoken_headless_unsigned`) builds
+successfully and `just buck2-validate-archive` passes end-to-end (Issue #119).
+The staging script handles Buck2's filegroup materialization (source files are
+nested at their project-relative paths within the filegroup output directory).
+Requires `just build-client` to have been run first (Buck2 consumes pre-built
+client/dist, it does not invoke pnpm/Vite).
 
 
-## Decision gate: CONDITIONAL
+## Decision gate: CONDITIONAL — improving
 
 | Criterion | Assessment | Verdict |
 |-----------|------------|---------|
-| Reproducibility | ⚠️ Pinned toolchain, locked deps, deterministic archive — but OpenSSL/ring builds are non-hermetic | Conditional |
+| Reproducibility | ✅ Pinned toolchain, locked deps, deterministic archive; ring is the sole native C dep with sandboxed `cc` build | Pass |
 | Affected-target execution | ✅ Only dependents of changed files rebuild | Pass |
-| Test/artifact caching | ⚠️ Action cache works for 4 crates; archive assembly blocked by server binary | Conditional |
+| Test/artifact caching | ✅ Action cache works for all 5 crates; archive assembly passing | Pass |
 | Cross-workspace/CI reuse | ⚠️ Buck2 cache works; but 335MB vendored deps is a maintenance burden | Conditional |
-| Maintainability | ⚠️ Reindeer fixups are complex; OpenSSL blocker requires resolution | Conditional |
+| Maintainability | ⚠️ Reindeer fixups are complex but stable; ring fixup requires platform-specific env | Conditional |
 
-**Recommendation:** Do not promote Buck2. The OpenSSL/ring native compilation blocker
-prevents building the server binary. Reindeer fixups are complex and fragile. The 335MB
-vendored dependency tree is a maintenance burden. Cargo remains authoritative.
+**Recommendation:** Do not promote Buck2 to authoritative CI yet. All 5 crates
+build and all test targets pass (3 pre-existing Cargo test failures are unrelated
+to Buck2). The 335MB vendored dependency tree remains a maintenance burden.
+Cargo remains authoritative.
+
+## Cargo⇄Buck2 test parity mapping
+
+Every Cargo test binary for the 5 server-rs crates has a Buck2 `rust_test` counterpart:
+
+| Crate | Cargo test binary(s) | Buck2 target | Notes |
+|-------|---------------------|--------------|-------|
+| pantoken-protocol | `fold_corpus` | `fold_corpus_tests` | Uses `PANTOKEN_FOLD_CORPUS_DIR` run_env |
+| pantoken-daemon-types | `target_version_test`, `daemon_types_roundtrip`, `schema_inventory_test` | same names | `schema_inventory_test` needs `src/lib.rs` + fixture in `srcs` (include_str!) |
+| pantoken-remote-layout | inline `#[cfg(test)]` | `unit_tests` | `crate = ":lib"` analogue via duplicated `srcs` |
+| pantoken-tar-validate | inline `#[cfg(test)]` | `unit_tests` | Same pattern |
+| pantoken-server | inline `#[cfg(test)]` | `server_lib_unit_tests` | `crate = "pantoken_server"` enables `cfg(test)`; `real_shell` test skips under sandbox (HOME not absolute) |
+| pantoken-server | `corpus` | `corpus_tests` | `PANTOKEN_CORPUS_DIR`/`PANTOKEN_CANON_PARITY_DIR` run_env |
+| pantoken-server | `live_path` | `live_path_tests` | `PANTOKEN_CORPUS_DIR` run_env; Unix socket tests |
+| pantoken-server | `websocket_adapter_contract_tests` | `websocket_adapter_tests` | Loopback networking |
+| pantoken-server | `stdio_adapter_contract_tests` | `stdio_adapter_tests` | `PANTOKEN_SERVER_BIN` env injection |
+| pantoken-server | `resume_and_recovery_tests` | `resume_and_recovery_tests` | `PANTOKEN_SERVER_BIN` env injection |
+| pantoken-server | `remote_runtime_integration_tests` | `remote_runtime_tests` | `PANTOKEN_SERVER_BIN` env injection |
+
+Pre-existing Cargo test failures unrelated to Buck2 (also fail under `cargo nextest run`):
+- `polytoken::event_map::tests::message_complete_with_turn_error_run_failed_and_clears_error`
+- `polytoken::event_map::tests::streaming_unretried_error_fails_the_run`
+- `stdio_proxy_bootstraps_declared_server_binary` (server binary not found at expected path)
 
 ## Rollback
 

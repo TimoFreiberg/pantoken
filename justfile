@@ -133,21 +133,20 @@ buck2-check:
 
 # Build all server-rs Rust crates via Buck2.
 buck2-build:
-    bash scripts/buck2/check-version.sh && OPENSSL_DIR=/opt/homebrew/opt/openssl@3 buck2 build '//server-rs/pantoken-protocol:pantoken_protocol' '//server-rs/pantoken-daemon-types:pantoken_daemon_types' '//server-rs/pantoken-remote-layout:pantoken_remote_layout' '//server-rs/pantoken-tar-validate:pantoken_tar_validate'
+    bash scripts/buck2/check-version.sh && buck2 build '//server-rs/pantoken-protocol:pantoken_protocol' '//server-rs/pantoken-daemon-types:pantoken_daemon_types' '//server-rs/pantoken-remote-layout:pantoken_remote_layout' '//server-rs/pantoken-tar-validate:pantoken_tar_validate'
 
-# Build the pantoken-server binary via Buck2 (may fail due to OpenSSL/ring POC blocker).
+# Build the pantoken-server binary via Buck2.
 buck2-build-server:
-    bash scripts/buck2/check-version.sh && OPENSSL_DIR=/opt/homebrew/opt/openssl@3 buck2 build '//server-rs/pantoken-server:pantoken_server'
+    bash scripts/buck2/check-version.sh && buck2 build '//server-rs/pantoken-server:pantoken_server'
 
 # Run buildable server-rs Rust tests via Buck2 (5 of 13 targets;
 # pantoken-server tests are blocked by the OpenSSL/ring POC blocker).
 buck2-test:
-    bash scripts/buck2/check-version.sh && OPENSSL_DIR=/opt/homebrew/opt/openssl@3 buck2 test '//server-rs/pantoken-protocol:fold_corpus_tests' '//server-rs/pantoken-daemon-types:target_version_test' '//server-rs/pantoken-daemon-types:daemon_types_roundtrip' '//server-rs/pantoken-remote-layout:unit_tests' '//server-rs/pantoken-tar-validate:unit_tests'
+    bash scripts/buck2/check-version.sh && buck2 test '//server-rs/pantoken-protocol:fold_corpus_tests' '//server-rs/pantoken-daemon-types:target_version_test' '//server-rs/pantoken-daemon-types:daemon_types_roundtrip' '//server-rs/pantoken-daemon-types:schema_inventory_test' '//server-rs/pantoken-remote-layout:unit_tests' '//server-rs/pantoken-tar-validate:unit_tests' '//server-rs/pantoken-server:server_lib_unit_tests' '//server-rs/pantoken-server:corpus_tests' '//server-rs/pantoken-server:live_path_tests' '//server-rs/pantoken-server:websocket_adapter_tests' '//server-rs/pantoken-server:stdio_adapter_tests' '//server-rs/pantoken-server:resume_and_recovery_tests' '//server-rs/pantoken-server:remote_runtime_tests'
 
-# Build the unsigned headless archive via Buck2 (blocked: requires
-# pantoken-server binary which fails on OpenSSL/ring).
+# Build the unsigned headless archive via Buck2.
 buck2-archive:
-    bash scripts/buck2/check-version.sh && OPENSSL_DIR=/opt/homebrew/opt/openssl@3 buck2 build '//:pantoken_headless_unsigned'
+    bash scripts/buck2/check-version.sh && buck2 build '//:pantoken_headless_unsigned'
 
 # Validate the unsigned headless archive via Buck2.
 buck2-validate-archive:

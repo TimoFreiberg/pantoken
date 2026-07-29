@@ -9,7 +9,6 @@
 set -euo pipefail
 
 export PATH="$HOME/.cargo/bin:$PATH"
-export OPENSSL_DIR="/opt/homebrew/opt/openssl@3"
 
 REPO_ROOT=$(pwd)
 BUCK2="${BUCK2:-$(command -v buck2 2>/dev/null || echo "")}"
@@ -22,7 +21,8 @@ MACHINE=$(uname -srm)
 RUSTC_VER=$(rustc --version 2>/dev/null || echo "unknown")
 BUCK2_VER=$("${BUCK2:-buck2}" --version 2>/dev/null || echo "unknown")
 
-# Targets that build successfully (excluding pantoken-server due to OpenSSL blocker)
+# Targets measured here (the four non-binary server crates; pantoken-server
+# itself builds via `just buck2-build-server`).
 BUILD_TARGETS=(
   '//server-rs/pantoken-protocol:pantoken_protocol'
   '//server-rs/pantoken-daemon-types:pantoken_daemon_types'
@@ -123,7 +123,7 @@ echo "| Incremental | ${INCR_TIME}s | 2.5s |"
 echo "| Test run | ${TEST_TIME}s | N/A |"
 echo ""
 echo "## Notes"
-echo "- Buck2 builds 4 of 5 server crates (pantoken-server blocked by OpenSSL/ring)"
+echo "- Buck2 builds all 5 server crates (this script times the 4 non-binary crates)"
 echo "- Reindeer-generated dependency graph: 353 vendored crates, 335MB"
 echo "- All builds use the system Rust toolchain (1.97.1 via rustup)"
 echo "- Buck2 does not use sccache (independent cache mechanism)"

@@ -5,13 +5,14 @@
 
 ## Decision
 
-**Promising but incomplete.** A local `ece 2.3.1` fork can preserve the published
+**Adopted (Issue #119).** A local `ece 2.3.1` fork preserves the published
 `web-push 0.11.0` and `pantoken-server` APIs while replacing the default OpenSSL
 backend with RustCrypto. The Cargo path compiles, the fixed upstream RFC 8291
-vector passes, and the focused push/VAPID tests pass. Adoption is not yet a
-production cryptography recommendation: the forked backend remains unreviewed,
-there is no independent implementation/verifier beyond the fixed RFC oracle, and
-HTTP wire capture plus Buck2 validation remain follow-up work.
+vector passes, and the focused push/VAPID tests pass. The `web-push`
+`hyper-client` feature was dropped in favor of an in-tree `ReqwestWebPushClient`
+over the existing reqwest (rustls) client — no `web-push` fork needed. The ece
+fork itself remains unreviewed cryptographic adapter code (see Gaps #1); the
+HTTP-wire seam is now covered by adapter tests (Gap #3 closed).
 
 ## Implementation
 
@@ -45,7 +46,7 @@ Patched commands and results:
 - `cargo test --manifest-path third-party/vendor/ece-2.3.1-rustcrypto/Cargo.toml --locked --offline --no-default-features --features backend-rustcrypto,backend-test-helper`: 25 passed, including exact RFC 8291 ciphertext, decryption, record-size, padding, key-validation, and invalid-input cases.
 - `cargo metadata --locked --manifest-path third-party/Cargo.toml`: passed; standalone Reindeer closure resolves the fork.
 - `cargo tree --locked -p pantoken-server -i ece`: resolves to the local fork.
-- No OpenSSL appears in the ece/web-push subtree. The selected server closure still has unrelated `ring` through the existing `superboring`/JWT path; it is not introduced by this fork.
+- No OpenSSL appears in the ece/web-push subtree. `ring` enters via `reqwest[rustls-tls]` → `rustls` (not `superboring` — superboring is pure RustCrypto used by `jwt-simple`); it is not introduced by this fork.
 - `cargo test --locked -p web-push` is not runnable directly because the vendored web-push package is not a workspace member. Consumer compilation and server tests exercise its unchanged API instead.
 
 ## Gaps and risks
@@ -55,8 +56,11 @@ Patched commands and results:
 2. The RFC fixture is an independent protocol oracle, but the spike did not add a
    separately maintained decryptor or offline RFC 8292 VAPID signature verifier.
    Same-codec round trips are supplemental only.
-3. No deterministic HTTP request-capture seam was added; exact provider wire
-   assertions are follow-up work.
+3. ~~No deterministic HTTP request-capture seam was added; exact provider wire
+   assertions are follow-up work.~~ **Resolved (Issue #119):** Adapter tests
+   (`adapter_sends_well_formed_request`, `adapter_classifies_dead_endpoints`,
+   `adapter_propagates_retry_after`, `adapter_caps_response_size`) now cover the
+   HTTP wire seam against a local axum server.
 4. The full Cargo closure was not claimed native-free: unrelated baseline `ring`
    remains elsewhere in the server graph. Buck2/Reindeer generated graph and
    sandbox validation were intentionally not changed in this spike.
@@ -65,8 +69,7 @@ Patched commands and results:
 
 ## Recommendation
 
-Treat this as a **promising feasibility result**, not production adoption. Before
-merging into the main issue, perform independent cryptographic review, add an
-independent decrypt/verify path and deterministic HTTP-wire tests, audit the full
-native closure, then run a separately reviewed Reindeer/Buck2 closure experiment.
-Keep the local patch and fork reversible until those gates pass.
+**Adopted.** The fork is integrated on main (Issue #119). The ece RustCrypto
+backend remains flagged for a dedicated cryptographic review (Gap #1). The
+Reindeer/Buck2 closure has been regenerated and validated — `pantoken-server`
+builds and all test targets pass under Buck2.

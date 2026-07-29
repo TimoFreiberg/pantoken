@@ -43,21 +43,43 @@ else
 fi
 
 # ── Client-dist files ───────────────────────────────────────────────────────
-# Copy only the allowlisted PWA root files (mirrors the root BUCK filegroup glob).
+# $(location :client_dist) resolves to a directory containing the filegroup's
+# files at their project-relative paths (e.g. .../client_dist/client/dist/).
+# Find the client/dist subdirectory and copy from there.
 if [ -d "$CLIENT_DIST_DIR" ]; then
-    # index.html
-    [ -f "$CLIENT_DIST_DIR/index.html" ] && cp "$CLIENT_DIST_DIR/index.html" "$STAGING/client-dist/"
-    # assets/
-    if [ -d "$CLIENT_DIST_DIR/assets" ]; then
-        mkdir -p "$STAGING/client-dist/assets"
-        cp -R "$CLIENT_DIST_DIR/assets/"* "$STAGING/client-dist/assets/" 2>/dev/null || echo "WARN: no assets to copy" >&2
-    fi
-    # PWA root files
-    for pattern in apple-touch-icon* icon* favicon* manifest* sw* registerSW*; do
-        for f in "$CLIENT_DIST_DIR"/$pattern; do
-            [ -f "$f" ] && cp "$f" "$STAGING/client-dist/"
-        done
-    done
+    DIST_DIR="$CLIENT_DIST_DIR"
+elif [ -f "$CLIENT_DIST_DIR" ]; then
+    DIST_DIR="$(dirname "$CLIENT_DIST_DIR")"
+else
+    echo "ERROR: CLIENT_DIST_DIR does not exist: $CLIENT_DIST_DIR" >&2
+    exit 1
 fi
+# Source filegroups preserve project-relative paths, so the dist files are
+# nested under client/dist/ within the materialized directory. Walk down.
+CLIENT_ROOT=""
+for candidate in "$DIST_DIR" "$DIST_DIR/client/dist" "$DIST_DIR/client_dist/client/dist"; do
+    if [ -f "$candidate/index.html" ]; then
+        CLIENT_ROOT="$candidate"
+        break
+    fi
+done
+if [ -z "$CLIENT_ROOT" ]; then
+    echo "ERROR: could not find index.html under $DIST_DIR" >&2
+    find "$DIST_DIR" -name 'index.html' >&2 || true
+    exit 1
+fi
+# index.html
+cp "$CLIENT_ROOT/index.html" "$STAGING/client-dist/"
+# assets/
+if [ -d "$CLIENT_ROOT/assets" ]; then
+    mkdir -p "$STAGING/client-dist/assets"
+    cp -R "$CLIENT_ROOT/assets/"* "$STAGING/client-dist/assets/" 2>/dev/null || echo "WARN: no assets to copy" >&2
+fi
+# PWA root files
+for pattern in apple-touch-icon* icon* favicon* manifest* sw* registerSW*; do
+    for f in "$CLIENT_ROOT"/$pattern; do
+        [ -f "$f" ] && cp "$f" "$STAGING/client-dist/"
+    done
+done
 
 echo "Staged $(find "$STAGING" -type f | wc -l | tr -d ' ') files" >&2

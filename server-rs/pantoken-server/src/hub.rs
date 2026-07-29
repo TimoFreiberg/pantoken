@@ -3580,7 +3580,11 @@ mod hub_models_tests {
     #[tokio::test]
     async fn pantoken_settings_defaults_login_env_when_unsupported() {
         let (_driver, hub, _ops) = test_hub();
-        match hub.lock().pantoken_settings_msg() {
+        // NOTE: bound before the match — holding the MutexGuard temporary in
+        // the match scrutinee trips a dropck error (E0716) in the async state
+        // machine under Buck2-built dependency artifacts (Cargo accepts it).
+        let msg = hub.lock().pantoken_settings_msg();
+        match msg {
             ServerMessage::PantokenSettings { env, .. } => {
                 assert!(!env.ok, "default login-env status should report ok:false");
                 assert_eq!(env.active_shell, None);
@@ -3612,7 +3616,9 @@ mod hub_models_tests {
             10,
             0,
         );
-        match hub.lock().pantoken_settings_msg() {
+        // See the E0716 note on the tokio::test above — bind before match.
+        let msg = hub.lock().pantoken_settings_msg();
+        match msg {
             ServerMessage::PantokenSettings { env, .. } => {
                 assert_eq!(env.active_shell.as_deref(), Some("zsh"));
                 assert!(env.ok);

@@ -40,7 +40,14 @@ rust_test(
 
 rust_test(
     name = "schema_inventory_test",
-    srcs = ["tests/schema_inventory_test.rs"],
+    # The fixture and src/lib.rs are compile-time inputs via include_str!,
+    # so they must be in srcs (Buck2 materializes them at the same relative
+    # paths), not only in runtime resources.
+    srcs = [
+        "src/lib.rs",
+        "tests/fixtures/polytoken-0.5.8-openapi.json",
+        "tests/schema_inventory_test.rs",
+    ],
     crate_root = "tests/schema_inventory_test.rs",
     deps = [
         ":pantoken_daemon_types",

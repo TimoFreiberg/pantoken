@@ -279,12 +279,23 @@ async fn connect_with_bootstrap(root: &Path, socket_path: &Path) -> std::io::Res
         }
     };
 
+    // Release the bootstrap lock before spawning the runtime so the child can
+    // acquire its own pidlock (run_remote_runtime_mode re-acquires it). The
+    // proxy's lock only serializes the bootstrap *decision*; the long-lived
+    // runtime process owns the lock for its lifetime.
+    drop(_pid_lock);
+
     // Spawn the runtime in remote-runtime mode.
     let server_binary = resolve_server_binary()?;
 
     let mut cmd = tokio::process::Command::new(&server_binary);
     cmd.env("PANTOKEN_SERVE_MODE", "remote-runtime");
     cmd.env("PANTOKEN_REMOTE_ROOT", root);
+    // Forward PANTOKEN_DRIVER so the spawned runtime uses the same driver
+    // (e.g. mock for tests) as the proxy process.
+    if let Ok(driver) = std::env::var("PANTOKEN_DRIVER") {
+        cmd.env("PANTOKEN_DRIVER", driver);
+    }
     // Thread PANTOKEN_POLYTOKEN_BIN through to the runtime (Phase 3 resolves
     // which binary; Phase 1 just passes it through).
     if let Ok(bin) = std::env::var("PANTOKEN_POLYTOKEN_BIN") {

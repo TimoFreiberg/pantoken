@@ -6,14 +6,18 @@
 //!
 //! The subscription store (add/remove/count/persist/prune) is fully ported and
 //! unit-tested. The VAPID keypair generation uses `jwt-simple`'s `ES256KeyPair`
-//! (the same P-256 primitive the TS `web-push` library uses). Delivery uses the
-//! `web-push` crate's `HyperWebPushClient`. On-device delivery is validated
-//! manually on the owner's iPhone (same as the TS implementation).
+//! (the same P-256 primitive the TS `web-push` library uses). Delivery uses a
+//! reqwest-based `WebPushClient` implementation (`ReqwestWebPushClient`) that
+//! reuses the server's existing rustls HTTP stack — no OpenSSL/native-tls
+//! dependency. On-device delivery is validated manually on the owner's iPhone
+//! (same as the TS implementation).
 
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
+use async_trait::async_trait;
 use ct_codecs::{Base64UrlSafeNoPadding, Encoder};
 use futures_util::future::join_all;
 use jwt_simple::prelude::*;
@@ -120,6 +124,141 @@ impl PushSubscriptionStore {
     }
 }
 
+/// Maximum response body size we'll read from a push service (64 KiB).
+/// Mirrors `web_push::clients::MAX_RESPONSE_SIZE` (private const).
+const MAX_RESPONSE_SIZE: usize = 64 * 1024;
+
+/// Parse a `Retry-After` header value into a `Duration`.
+///
+/// Duplicates `web_push::error::RetryAfter::from_str` (not publicly exported).
+/// Accepts either an integer number of seconds or an RFC 2822 date.
+fn parse_retry_after(header_value: &str) -> Option<Duration> {
+    if let Ok(seconds) = header_value.parse::<u64>() {
+        Some(Duration::from_secs(seconds))
+    } else {
+        chrono::DateTime::parse_from_rfc2822(header_value)
+            .map(|date_time| {
+                let systime: std::time::SystemTime = date_time.into();
+                systime
+                    .duration_since(std::time::SystemTime::now())
+                    .unwrap_or_else(|_| Duration::new(0, 0))
+            })
+            .ok()
+    }
+}
+
+/// A reqwest-based `WebPushClient` that reuses the server's rustls HTTP stack.
+///
+/// Replaces `web_push::HyperWebPushClient` (which pulled in `hyper-tls` →
+/// `native-tls` → OpenSSL). This client builds the HTTP request via
+/// `web_push::request_builder::build_request`, translates it to reqwest,
+/// sends it, and parses the response via `web_push::request_builder::parse_response`.
+///
+/// Thread-safe and `Clone` (reqwest::Client is cheaply cloneable — shares a
+/// connection pool), matching the contract the fan-out code relies on.
+#[derive(Clone)]
+pub struct ReqwestWebPushClient {
+    client: reqwest::Client,
+}
+
+impl Default for ReqwestWebPushClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ReqwestWebPushClient {
+    /// Creates a new client with the same rustls-based configuration the server
+    /// uses elsewhere.
+    pub fn new() -> Self {
+        Self {
+            client: reqwest::Client::new(),
+        }
+    }
+}
+
+#[async_trait]
+impl WebPushClient for ReqwestWebPushClient {
+    /// Sends a notification. Never times out (mirrors the hyper client contract).
+    async fn send(&self, message: WebPushMessage) -> Result<(), WebPushError> {
+        // Build the HTTP request via web-push's own builder (http 0.2 types).
+        let request = web_push::request_builder::build_request::<Vec<u8>>(message);
+
+        // Translate the http 0.2 request into a reqwest request builder.
+        let method = reqwest::Method::from_bytes(request.method().as_str().as_bytes())
+            .map_err(|_| WebPushError::Unspecified)?;
+        let url = request
+            .uri()
+            .to_string()
+            .parse::<reqwest::Url>()
+            .map_err(|_| WebPushError::InvalidUri)?;
+
+        // Collect headers before consuming the body (into_body takes ownership).
+        // web-push uses http 0.2; reqwest uses http 1.x. We convert via strings
+        // to bridge the two versions.
+        let headers: Vec<(String, String)> = request
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| {
+                Some((name.as_str().to_string(), value.to_str().ok()?.to_string()))
+            })
+            .collect();
+        let body = request.into_body();
+        let mut req_builder = self.client.request(method, url).body(body);
+
+        // Re-apply all headers from the original request.
+        // (build_request already set TTL, Content-Encoding, Content-Length,
+        // Content-Type, and crypto headers.)
+        for (name, value) in headers {
+            req_builder = req_builder.header(name, value);
+        }
+
+        // Send the request.
+        let response = req_builder
+            .send()
+            .await
+            // The hyper client maps hyper::Error → WebPushError::Unspecified;
+            // we do the same for reqwest transport failures.
+            .map_err(|_| WebPushError::Unspecified)?;
+
+        // Extract Retry-After before consuming the response.
+        let retry_after = response
+            .headers()
+            .get("retry-after")
+            .and_then(|ra| ra.to_str().ok())
+            .and_then(parse_retry_after);
+
+        let status_02 = http::StatusCode::from_u16(response.status().as_u16())
+            .map_err(|_| WebPushError::Unspecified)?;
+
+        // Read the response body with the 64 KiB cap.
+        let mut body = Vec::new();
+        let mut stream = response.bytes_stream();
+        use futures_util::StreamExt;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|_| WebPushError::Unspecified)?;
+            body.extend_from_slice(&chunk);
+            if body.len() > MAX_RESPONSE_SIZE {
+                return Err(WebPushError::ResponseTooLarge);
+            }
+        }
+
+        // Parse the response via web-push's own parser.
+        let result = web_push::request_builder::parse_response(status_02, body);
+
+        // Patch ServerError with retry_after, exactly as the hyper client does.
+        if let Err(WebPushError::ServerError {
+            retry_after: None,
+            info,
+        }) = result
+        {
+            Err(WebPushError::ServerError { retry_after, info })
+        } else {
+            Ok(result?)
+        }
+    }
+}
+
 /// The VAPID-bound push service: owns a subscription store + a VAPID keypair.
 pub struct PushService {
     store: PushSubscriptionStore,
@@ -181,7 +320,7 @@ impl PushService {
     ///
     /// Fans out concurrently (mirroring the TS `Promise.all`): builds all signed
     /// messages up front, then sends them all at once via `join_all`, so N
-    /// subscriptions take ~1× wall time instead of N×. The `HyperWebPushClient`
+    /// subscriptions take ~1× wall time instead of N×. The `ReqwestWebPushClient`
     /// is `Clone` + thread-safe, so each send runs independently.
     pub async fn send_to_all(&mut self, n: &PushNotification) -> usize {
         let subs = self.store.values();
@@ -200,7 +339,7 @@ impl PushService {
         let payload = serde_json::to_vec(n).expect(
             "PushNotification serialization is infallible (String, Option<String>, and Option<u32> fields)",
         );
-        let client = HyperWebPushClient::new();
+        let client = ReqwestWebPushClient::new();
         let partial = sig_builder.clone();
         let subject = self.vapid_subject.clone();
 
@@ -668,5 +807,217 @@ mod tests {
         std::fs::write(&path, "{ not valid json").unwrap();
         let reloaded = PushSubscriptionStore::new(path);
         assert_eq!(reloaded.count(), 0);
+    }
+
+    // ── ReqwestWebPushClient adapter tests ─────────────────────
+    //
+    // These tests spin up a local axum server to verify the HTTP-wire behavior
+    // of the reqwest-based push client: request shape, dead-endpoint
+    // classification (404/410), Retry-After propagation, and the 64 KiB
+    // response-body cap.
+
+    use std::sync::{Arc, Mutex, Once};
+    use std::time::Duration;
+
+    use axum::Router;
+    use axum::extract::Request;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use axum::routing::any;
+    use tokio::net::TcpListener;
+
+    /// Initialize ece's RustCrypto backend once for all adapter tests.
+    /// `build_test_message` encrypts a payload, which requires the cryptographer.
+    static ECE_INIT: Once = Once::new();
+    fn ensure_ece_init() {
+        ECE_INIT.call_once(|| {
+            let _ = ece::crypto::init_rustcrypto();
+        });
+    }
+
+    /// Captured request details from the mock push server.
+    #[derive(Default, Clone)]
+    struct CapturedRequest {
+        method: Option<String>,
+        ttl: Option<String>,
+        content_encoding: Option<String>,
+        authorization: Option<String>,
+        body: Option<Vec<u8>>,
+    }
+
+    /// Build a signed `WebPushMessage` for a subscription pointing at `endpoint`.
+    fn build_test_message(endpoint: &str) -> WebPushMessage {
+        ensure_ece_init();
+        let sub_info = SubscriptionInfo {
+            endpoint: endpoint.to_string(),
+            keys: SubscriptionKeys {
+                p256dh: "BLMbF9ffKBiWQLCKvTHb6LO8Nb6dcUh6TItC455vu2kElga6PQvUmaFyCdykxY2nOSSL3yKgfbmFLRTUaGv4yV8".into(),
+                auth: "xS03Fi5ErfTNH_l9WHE9Ig".into(),
+            },
+        };
+        // Generate a VAPID keypair for signing.
+        let keypair = ES256KeyPair::generate();
+        let private_bytes = keypair.to_bytes();
+        let private_key = Base64UrlSafeNoPadding::encode_to_string(&private_bytes).unwrap();
+        let partial = VapidSignatureBuilder::from_base64_no_sub(&private_key).unwrap();
+        let mut sig_builder = partial.add_sub_info(&sub_info);
+        sig_builder.add_claim("sub", "mailto:test@test.com".to_string());
+        let sig = sig_builder.build().unwrap();
+
+        let mut msg_builder = WebPushMessageBuilder::new(&sub_info);
+        msg_builder.set_payload(
+            ContentEncoding::Aes128Gcm,
+            br#"{"title":"test","body":"hello"}"#,
+        );
+        msg_builder.set_vapid_signature(sig);
+        msg_builder.build().unwrap()
+    }
+
+    /// Start a mock push server that captures the request and responds with
+    /// the given status, headers, and body.
+    async fn start_mock_server(
+        status: StatusCode,
+        extra_headers: Vec<(&'static str, &'static str)>,
+        body: Vec<u8>,
+    ) -> (String, Arc<Mutex<CapturedRequest>>) {
+        let captured = Arc::new(Mutex::new(CapturedRequest::default()));
+        let captured_clone = captured.clone();
+
+        let app = Router::new().route(
+            "/{anything}",
+            any(move |req: Request| {
+                let captured = captured_clone.clone();
+                let status = status;
+                let extra_headers = extra_headers.clone();
+                let resp_body = body.clone();
+                async move {
+                    let (parts, req_body) = req.into_parts();
+                    let req_bytes = axum::body::to_bytes(req_body, usize::MAX)
+                        .await
+                        .unwrap_or_default();
+                    let mut cap = captured.lock().unwrap();
+                    cap.method = Some(parts.method.to_string());
+                    cap.ttl = parts
+                        .headers
+                        .get("ttl")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
+                    cap.content_encoding = parts
+                        .headers
+                        .get("content-encoding")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
+                    cap.authorization = parts
+                        .headers
+                        .get("authorization")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
+                    cap.body = Some(req_bytes.to_vec());
+                    drop(cap);
+
+                    let mut response = (status, resp_body).into_response();
+                    for (name, value) in extra_headers {
+                        if let Ok(val) = value.parse() {
+                            response.headers_mut().insert(name, val);
+                        }
+                    }
+                    response
+                }
+            }),
+        );
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let port = addr.port();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        // Give the server a moment to start.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        (format!("http://127.0.0.1:{port}/send"), captured)
+    }
+
+    #[tokio::test]
+    async fn adapter_sends_well_formed_request() {
+        let (endpoint, captured) = start_mock_server(StatusCode::OK, vec![], vec![]).await;
+
+        let client = ReqwestWebPushClient::new();
+        let message = build_test_message(&endpoint);
+        let result = client.send(message).await;
+
+        assert!(result.is_ok(), "send should succeed on 200: {:?}", result);
+
+        let cap = captured.lock().unwrap();
+        assert_eq!(cap.method.as_deref(), Some("POST"), "must be POST");
+        assert!(cap.ttl.is_some(), "TTL header must be present");
+        assert_eq!(
+            cap.content_encoding.as_deref(),
+            Some("aes128gcm"),
+            "Content-Encoding must be aes128gcm"
+        );
+        assert!(
+            cap.authorization
+                .as_deref()
+                .is_some_and(|a| a.starts_with("vapid t=")),
+            "Authorization header must be VAPID: {:?}",
+            cap.authorization
+        );
+        assert!(
+            cap.body.as_ref().is_some_and(|b| !b.is_empty()),
+            "encrypted body must be non-empty"
+        );
+    }
+
+    #[tokio::test]
+    async fn adapter_classifies_dead_endpoints() {
+        // 404 → EndpointNotFound (dead)
+        let (endpoint_404, _) = start_mock_server(StatusCode::NOT_FOUND, vec![], vec![]).await;
+        let client = ReqwestWebPushClient::new();
+        let result = client.send(build_test_message(&endpoint_404)).await;
+        assert!(matches!(result, Err(WebPushError::EndpointNotFound(_))));
+
+        // 410 → EndpointNotValid (dead)
+        let (endpoint_410, _) = start_mock_server(StatusCode::GONE, vec![], vec![]).await;
+        let result = client.send(build_test_message(&endpoint_410)).await;
+        assert!(matches!(result, Err(WebPushError::EndpointNotValid(_))));
+    }
+
+    #[tokio::test]
+    async fn adapter_propagates_retry_after() {
+        let (endpoint, _) = start_mock_server(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            vec![("retry-after", "120")],
+            vec![],
+        )
+        .await;
+
+        let client = ReqwestWebPushClient::new();
+        let result = client.send(build_test_message(&endpoint)).await;
+
+        match result {
+            Err(WebPushError::ServerError { retry_after, .. }) => {
+                assert_eq!(
+                    retry_after,
+                    Some(Duration::from_secs(120)),
+                    "Retry-After should be 120s"
+                );
+            }
+            other => panic!("expected ServerError with retry_after, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn adapter_caps_response_size() {
+        // Send a response body larger than 64 KiB.
+        let oversized = vec![b'x'; MAX_RESPONSE_SIZE + 1];
+        let (endpoint, _) = start_mock_server(StatusCode::OK, vec![], oversized).await;
+
+        let client = ReqwestWebPushClient::new();
+        let result = client.send(build_test_message(&endpoint)).await;
+
+        assert!(
+            matches!(result, Err(WebPushError::ResponseTooLarge)),
+            "oversized response should be ResponseTooLarge, got {result:?}"
+        );
     }
 }

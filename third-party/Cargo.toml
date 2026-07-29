@@ -43,7 +43,10 @@ flate2 = "1"
 futures-util = { version = "0.3", default-features = false }
 tokio-stream = { version = "0.1", default-features = false, features = ["sync"] }
 urlencoding = "2"
-web-push = { version = "0.11", default-features = false, features = ["hyper-client"] }
+web-push = { version = "0.11", default-features = false }
+# Direct edge so Reindeer emits a PUBLIC alias (//third-party:ece) for the
+# patched fork below — patch-only crates get no alias and stay invisible.
+ece = "2"
 # pure-rust feature avoids boring-sys (BoringSSL/cmake) — uses superboring pure-Rust backend
 jwt-simple = { version = "0.12", default-features = false, features = ["pure-rust"] }
 ct-codecs = "1"

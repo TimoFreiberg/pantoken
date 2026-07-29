@@ -1900,7 +1900,7 @@ impl DaemonClient {
             .await
         {
             Err(_) => Err(format!("{operation} failed (connection error)")),
-            Ok((status, _, _)) if status == 200 => Ok(()),
+            Ok((200, _, _)) => Ok(()),
             Ok((status, text, err)) => {
                 if status == 409 {
                     let no_input = text
@@ -4645,8 +4645,8 @@ sleep 30
         let session_id = "s1";
         let connect_count = Arc::new(AtomicUsize::new(0));
         // Records Last-Event-ID and Authorization headers seen on each connect.
-        let seen_headers: Arc<Mutex<Vec<(Option<String>, Option<String>)>>> =
-            Arc::new(Mutex::new(Vec::new()));
+        type SeenHeaders = Arc<Mutex<Vec<(Option<String>, Option<String>)>>>;
+        let seen_headers: SeenHeaders = Arc::new(Mutex::new(Vec::new()));
 
         let seen_headers_handler = seen_headers.clone();
         let connect_count_handler = connect_count.clone();

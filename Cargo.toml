@@ -35,7 +35,7 @@ flate2 = "1"
 futures-util = { version = "0.3", default-features = false }
 tokio-stream = { version = "0.1", default-features = false, features = ["sync"] }
 urlencoding = "2"
-web-push = { version = "0.11", default-features = false, features = ["hyper-client"] }
+web-push = { version = "0.11", default-features = false }
 # SPIKE: direct access is only for explicit RustCrypto initialization.
 ece = { version = "2.3.1", default-features = false, features = ["backend-rustcrypto", "serializable-keys"] }
 # pure-rust feature avoids boring-sys (BoringSSL/cmake) — uses superboring pure-Rust backend. web-push uses the same.

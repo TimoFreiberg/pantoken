@@ -1662,7 +1662,10 @@ fn map_daemon_event_inner(
                             details: None,
                         },
                     }],
-                    vec![],
+                    vec![DaemonEffect::FetchState {
+                        emit: FetchEmit::RunCompleted,
+                        prompt_id: Some(prompt_id.clone()),
+                    }],
                 );
             }
             // Usage is on GET /state, not on the event. Defer to
@@ -4501,7 +4504,14 @@ mod tests {
             json!({ "type": "message_complete", "prompt_id": "p1" }),
             &mut acc,
         );
-        assert!(out.effects.is_empty());
+        // message_complete with a turn_error emits RunFailed + a FetchState
+        // effect to authoritatively clear the error state (same StateRefetch
+        // disposition as the no-error path).
+        assert_eq!(out.effects.len(), 1);
+        assert_eq!(
+            effects_json(&out),
+            vec![json!({ "type": "fetchState", "emit": "runCompleted", "promptId": "p1" })]
+        );
         assert_eq!(out.events.len(), 1);
         let ev = event_json(&out.events[0]);
         assert_eq!(ev["type"], "runFailed");

@@ -616,14 +616,22 @@ Cargo/pnpm workflows.
 exists. `reqwest` uses `rustls-tls` (not `default-tls`/`native-tls`/OpenSSL).
 `jwt-simple` uses the `pure-rust` feature (not `boring-sys`/BoringSSL).
 
-**Known exception — requires operator discussion:** `web-push` 0.11.0 depends
-on `ece` 2.3.1, which has only `backend-openssl` — no Rustls or pure-Rust
-backend exists in any published crate. This means the `pantoken-server` binary
-transitively depends on OpenSSL via `web-push` → `ece` → `openssl` → `ring`.
-Eliminating this dependency requires forking `ece` (to use RustCrypto) and
-`web-push` (to use `hyper-rustls`). This is a known non-hermetic boundary
-that must be explicitly discussed with the operator before any hermetic build
-system (Buck2) can claim full server-crate coverage.
+**Known exception — RESOLVED (Issue #119):** The `web-push` → `ece` → `openssl`
+edge has been eliminated. The `ece` RustCrypto fork
+(`third-party/vendor/ece-2.3.1-rustcrypto`, `[patch.crates-io]` in root `Cargo.toml`)
+replaced the OpenSSL backend with pure RustCrypto. The `web-push` `hyper-client`
+feature was dropped in favor of an in-tree `ReqwestWebPushClient` that implements
+the `WebPushClient` trait over the existing reqwest (rustls) client — no `web-push`
+fork needed. `openssl`, `openssl-sys`, `native-tls`, `hyper-tls`, and
+`security-framework` are absent from the `pantoken-server` dependency tree.
+
+**Remaining native dependency:** `ring` (via `reqwest[rustls-tls]` → `rustls`).
+Push endpoints are HTTPS, so rustls stays and ring is its only mature provider.
+Ring's `cc`-based buildscript compiles under Buck2's sandboxed `buildscript_run`
+with env fixups (`PATH`, `SDKROOT`, `DEVELOPER_DIR`) in
+`third-party/fixups/ring/fixups.toml`. Ring is the sole native C compilation in
+the server closure; all other `-sys` crates (`core-foundation-sys`,
+`fsevent-sys`) are linkage-only framework bindings with no C compilation.
 
 **Principle:** Minimize system dependencies. Each native C dependency
 (OpenSSL, ring's C code, etc.) is a hermeticity blocker for build-system
@@ -639,12 +647,14 @@ operator discussion rather than silently accepting the system dependency.
 system alongside the existing Cargo/pnpm workflows.
 The evaluation is documented in `docs/buck2-poc-findings.md`.
 
-**Verdict: CONDITIONAL — not ready for broad adoption.** Buck2 successfully
-builds 4 of 5 server crates with affected-target execution and a checked-in
-Reindeer dependency graph. The `pantoken-server` binary is blocked by the
-OpenSSL/ring native compilation issue (see "No OpenSSL policy" above).
-Reindeer fixups are complex and the 335MB vendored dependency tree is a
-maintenance burden. Cargo remains authoritative; Buck2 is not promoted.
+**Verdict: CONDITIONAL — improving.** Buck2 now builds all 5 server crates
+including the `pantoken-server` binary, with affected-target execution and a
+checked-in Reindeer dependency graph. The OpenSSL/ring native compilation
+blocker is resolved (Issue #119): the ece RustCrypto fork eliminated OpenSSL,
+and ring's `cc`-based buildscript compiles under Buck2's sandbox with env
+fixups. All test targets pass (with 3 pre-existing Cargo failures unrelated to
+Buck2). Archive assembly and validation pass end-to-end. Cargo remains
+authoritative; Buck2 is not promoted to authoritative CI.
 
-**Cross-reference:** Bazel has been removed (Issue #118). Buck2 is now the sole additive build system. The OpenSSL/ring native compilation blocker remains a known gap; see `docs/buck2-policy.md` for the foundation policy.
+**Cross-reference:** Bazel has been removed (Issue #118). Buck2 is now the sole additive build system. See `docs/buck2-policy.md` for the foundation policy.
 

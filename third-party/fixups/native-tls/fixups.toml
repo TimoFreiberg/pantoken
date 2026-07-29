@@ -1,2 +1,0 @@
-omit_deps = ["openssl", "openssl-probe", "openssl-sys"]
-buildscript.run = false

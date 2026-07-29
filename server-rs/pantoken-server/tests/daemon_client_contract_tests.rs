@@ -46,7 +46,7 @@ struct ExecutableContract {
 }
 
 impl ExecutableContract {
-    fn behavior(self: &Self) -> ContractBehavior {
+    fn behavior(&self) -> ContractBehavior {
         if self.name == "release_lease" {
             ContractBehavior::BestEffortRelease
         } else {
@@ -610,10 +610,7 @@ async fn daemon_client_endpoint_contract_matrix() {
         assert_eq!(normalized_path, contract.path);
         assert_eq!(inventory.request_body, contract.inventory_request_body);
         if let Some(body) = contract.request_body {
-            assert_eq!(
-                serde_json::from_str::<Value>(body).unwrap().is_object(),
-                true
-            );
+            assert!(serde_json::from_str::<Value>(body).unwrap().is_object());
         }
         assert_eq!(inventory.response_schema, contract.response_schema);
         if contract.behavior() == ContractBehavior::BestEffortRelease {
@@ -1047,7 +1044,7 @@ async fn daemon_client_endpoint_contract_matrix() {
     })
     .await;
     assert_request(&seen, "POST", "/adventurous-handoff", None);
-    assert_eq!(result.expect("typed toggle response"), true);
+    assert!(result.expect("typed toggle response"));
     executed.insert("toggle_adventurous_handoff");
     let (seen, result) = call(StatusCode::ACCEPTED, json!({}), |c| async move {
         c.cancel_turn().await

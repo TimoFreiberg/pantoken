@@ -39,11 +39,11 @@ chrono = { workspace = true }
 rand = { workspace = true }
 ignore = { workspace = true }
 notify = { workspace = true }
+# Pinned to 0.2 to match `web-push`'s `http` — used by the reqwest-based push
+# client to translate web-push's http 0.2 request/response types.
+http = "0.2"
 
 [dev-dependencies]
-# Pinned to 0.2 to match `web-push`'s `http` — tests construct push-service
-# responses via `web_push::request_builder::parse_response(http::StatusCode, _)`.
-http = "0.2"
 # Pinning distinct mtimes in `list_session_ids` sort tests (mirrors Node's `utimesSync`).
 filetime = "0.2"
 # WS client for the adapter contract tests (AC.1).
