@@ -21,6 +21,110 @@ use tokio::{net::TcpListener, sync::Mutex};
 const TOKEN: &str = "contract-token-never-print-this";
 const SESSION: &str = "contract-session";
 
+#[derive(Debug, Clone)]
+struct ExecutableContract {
+    name: &'static str,
+    method: &'static str,
+    path: &'static str,
+    request_body: Option<&'static str>,
+    inventory_request_body: &'static str,
+    response_schema: &'static str,
+    success_status: StatusCode,
+    rejected_status: StatusCode,
+}
+
+const EXPECTED_EXECUTABLE_CONTRACTS: &[ExecutableContract] = &[
+    ExecutableContract {
+        name: "clear",
+        method: "POST",
+        path: "/clear",
+        request_body: None,
+        inventory_request_body: "none",
+        response_schema: "empty",
+        success_status: StatusCode::OK,
+        rejected_status: StatusCode::UNAUTHORIZED,
+    },
+    ExecutableContract {
+        name: "goal_pause",
+        method: "POST",
+        path: "/goal/pause",
+        request_body: None,
+        inventory_request_body: "none",
+        response_schema: "empty",
+        success_status: StatusCode::NO_CONTENT,
+        rejected_status: StatusCode::NOT_FOUND,
+    },
+    ExecutableContract {
+        name: "compact",
+        method: "POST",
+        path: "/compact",
+        request_body: Some(r#"{"guidance":"g"}"#),
+        inventory_request_body: "CompactRequest or JSON null",
+        response_schema: "empty",
+        success_status: StatusCode::ACCEPTED,
+        rejected_status: StatusCode::CONFLICT,
+    },
+    ExecutableContract {
+        name: "rewind",
+        method: "POST",
+        path: "/rewind",
+        request_body: Some(r#"{"domains":["conversation"],"to_message_index":2}"#),
+        inventory_request_body: "RewindRequest",
+        response_schema: "empty",
+        success_status: StatusCode::ACCEPTED,
+        rejected_status: StatusCode::UNPROCESSABLE_ENTITY,
+    },
+    ExecutableContract {
+        name: "respond_interrogative",
+        method: "POST",
+        path: "/interrogative/q%201/respond",
+        request_body: Some(r#"{"kind":"cancel"}"#),
+        inventory_request_body: "InterrogativeResponse",
+        response_schema: "empty",
+        success_status: StatusCode::NO_CONTENT,
+        rejected_status: StatusCode::NOT_FOUND,
+    },
+    ExecutableContract {
+        name: "toggle_adventurous_handoff",
+        method: "POST",
+        path: "/adventurous-handoff",
+        request_body: None,
+        inventory_request_body: "none",
+        response_schema: "{ enabled: bool }",
+        success_status: StatusCode::OK,
+        rejected_status: StatusCode::UNAUTHORIZED,
+    },
+    ExecutableContract {
+        name: "cancel_turn",
+        method: "POST",
+        path: "/turn/cancel",
+        request_body: None,
+        inventory_request_body: "none",
+        response_schema: "empty or { prompt_id? }",
+        success_status: StatusCode::ACCEPTED,
+        rejected_status: StatusCode::INTERNAL_SERVER_ERROR,
+    },
+    ExecutableContract {
+        name: "set_title",
+        method: "POST",
+        path: "/title",
+        request_body: Some(r#"{"title":"title"}"#),
+        inventory_request_body: "SessionTitleRequest { title }",
+        response_schema: "empty",
+        success_status: StatusCode::OK,
+        rejected_status: StatusCode::BAD_REQUEST,
+    },
+];
+
+fn inventory_contract(
+    name: &str,
+) -> &'static pantoken_server::polytoken::endpoint_inventory::EndpointContract {
+    ENDPOINTS
+        .iter()
+        .find(|endpoint| endpoint.client_method == name)
+        .expect("contract must be inventoried")
+}
+
 #[derive(Clone, Debug)]
 struct Seen {
     method: String,
@@ -65,10 +169,18 @@ async fn record_request(State(h): State<Harness>, request: Request<Body>) -> Res
     (h.status, h.body).into_response()
 }
 
-async fn call<F, Fut>(status: StatusCode, body: Value, f: F) -> (Vec<Seen>, Result<(), String>)
+async fn call<F, Fut, R>(status: StatusCode, body: Value, f: F) -> (Vec<Seen>, R)
 where
     F: FnOnce(DaemonClient) -> Fut,
-    Fut: std::future::Future<Output = Result<(), String>>,
+    Fut: std::future::Future<Output = R>,
+{
+    call_raw(status, body.to_string(), f).await
+}
+
+async fn call_raw<F, Fut, R>(status: StatusCode, body: String, f: F) -> (Vec<Seen>, R)
+where
+    F: FnOnce(DaemonClient) -> Fut,
+    Fut: std::future::Future<Output = R>,
 {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -112,11 +224,49 @@ fn assert_request(seen: &[Seen], method: &str, path: &str, body: Option<Value>) 
 
 #[tokio::test]
 async fn daemon_client_endpoint_contract_matrix() {
-    // Every entry is an executable call to a real DaemonClient method. The set is
-    // deliberately derived from the inventory only for the final coverage check;
-    // request and response assertions above remain independent wire assertions.
-    let mut executed = Vec::new();
+    let expected: std::collections::BTreeSet<_> = EXPECTED_EXECUTABLE_CONTRACTS
+        .iter()
+        .map(|c| c.name)
+        .collect();
+    assert_eq!(
+        expected.len(),
+        8,
+        "the bounded slice must contain eight distinct cases"
+    );
+    for contract in EXPECTED_EXECUTABLE_CONTRACTS {
+        let inventory = inventory_contract(contract.name);
+        assert_eq!(inventory.method, contract.method);
+        let normalized_path = inventory.path_template.replace("{id}", "q%201");
+        assert_eq!(normalized_path, contract.path);
+        assert_eq!(inventory.request_body, contract.inventory_request_body);
+        if let Some(body) = contract.request_body {
+            assert_eq!(
+                serde_json::from_str::<Value>(body).unwrap().is_object(),
+                true
+            );
+        }
+        assert_eq!(inventory.response_schema, contract.response_schema);
+        let success_code = contract.success_status.as_u16().to_string();
+        assert!(
+            inventory.success_policy.contains(&success_code)
+                || (contract.success_status.is_success()
+                    && inventory.success_policy.contains("2xx")),
+            "{} missing accepted status {}",
+            contract.name,
+            success_code
+        );
+        assert!(
+            inventory
+                .representative_errors
+                .split(',')
+                .any(|status| status.trim() == contract.rejected_status.as_u16().to_string()),
+            "{} missing rejected status {}",
+            contract.name,
+            contract.rejected_status
+        );
+    }
 
+    let mut executed = std::collections::BTreeSet::new();
     let (seen, result) = call(
         StatusCode::OK,
         json!({}),
@@ -125,16 +275,14 @@ async fn daemon_client_endpoint_contract_matrix() {
     .await;
     assert_request(&seen, "POST", "/clear", None);
     assert!(result.is_ok());
-    executed.push("clear");
-
+    executed.insert("clear");
     let (seen, result) = call(StatusCode::NO_CONTENT, json!(null), |c| async move {
         c.goal_pause().await
     })
     .await;
     assert_request(&seen, "POST", "/goal/pause", None);
     assert!(result.is_ok());
-    executed.push("goal_pause");
-
+    executed.insert("goal_pause");
     let (seen, result) = call(StatusCode::ACCEPTED, json!({}), |c| async move {
         c.compact(Some(&CompactRequest {
             guidance: Some("g".into()),
@@ -144,8 +292,7 @@ async fn daemon_client_endpoint_contract_matrix() {
     .await;
     assert_request(&seen, "POST", "/compact", Some(json!({"guidance":"g"})));
     assert!(result.is_ok());
-    executed.push("compact");
-
+    executed.insert("compact");
     let (seen, result) = call(StatusCode::ACCEPTED, json!({}), |c| async move {
         c.rewind(&RewindRequest {
             domains: vec!["conversation".into()],
@@ -162,8 +309,7 @@ async fn daemon_client_endpoint_contract_matrix() {
         Some(json!({"domains":["conversation"],"to_message_index":2})),
     );
     assert!(result.is_ok());
-    executed.push("rewind");
-
+    executed.insert("rewind");
     let (seen, result) = call(StatusCode::NO_CONTENT, json!(null), |c| async move {
         c.respond_interrogative("q 1", &InterrogativeResponse::Cancel)
             .await
@@ -176,16 +322,14 @@ async fn daemon_client_endpoint_contract_matrix() {
         Some(json!({"kind":"cancel"})),
     );
     assert!(result.is_ok());
-    executed.push("respond_interrogative");
-
+    executed.insert("respond_interrogative");
     let (seen, result) = call(StatusCode::OK, json!({"enabled":true}), |c| async move {
-        c.toggle_adventurous_handoff().await.map(|_| ())
+        c.toggle_adventurous_handoff().await
     })
     .await;
     assert_request(&seen, "POST", "/adventurous-handoff", None);
-    assert!(result.is_ok());
-    executed.push("toggle_adventurous_handoff");
-
+    assert_eq!(result.expect("typed toggle response"), true);
+    executed.insert("toggle_adventurous_handoff");
     let (seen, result) = call(
         StatusCode::CONFLICT,
         json!({"code":"busy","message":"busy"}),
@@ -194,28 +338,98 @@ async fn daemon_client_endpoint_contract_matrix() {
     .await;
     assert_request(&seen, "POST", "/turn/cancel", None);
     assert!(result.is_ok());
-    executed.push("cancel_turn");
-
-    let (seen, result) = call(
-        StatusCode::BAD_REQUEST,
-        json!({"code":"bad","message":"public error"}),
-        |c| async move { c.set_title("title").await },
-    )
+    executed.insert("cancel_turn");
+    let (seen, result) = call(StatusCode::OK, json!({}), |c| async move {
+        c.set_title("title").await
+    })
     .await;
     assert_request(&seen, "POST", "/title", Some(json!({"title":"title"})));
-    let error = result.expect_err("4xx must fail");
-    assert!(error.contains("public error"));
-    executed.push("set_title");
-
-    let inventory: std::collections::BTreeSet<_> =
-        ENDPOINTS.iter().map(|e| e.client_method).collect();
-    let executed: std::collections::BTreeSet<_> = executed.into_iter().collect();
-    assert!(inventory.is_superset(&executed));
+    assert!(result.is_ok());
+    executed.insert("set_title");
     assert_eq!(
-        executed.len(),
-        8,
-        "this bounded slice has eight executable cases"
+        executed, expected,
+        "every expected case must execute exactly once"
     );
+
+    let rejected = json!({"code":"public_code","message":"public message"});
+    let (seen, result) = call(StatusCode::UNAUTHORIZED, rejected.clone(), |c| async move {
+        c.clear().await
+    })
+    .await;
+    assert_request(&seen, "POST", "/clear", None);
+    assert!(result.unwrap_err().contains("public message"));
+    let (seen, result) = call(StatusCode::NOT_FOUND, rejected.clone(), |c| async move {
+        c.goal_pause().await
+    })
+    .await;
+    assert_request(&seen, "POST", "/goal/pause", None);
+    assert!(result.unwrap_err().contains("public message"));
+    let (seen, result) = call(StatusCode::CONFLICT, rejected.clone(), |c| async move {
+        c.compact(None).await
+    })
+    .await;
+    assert_request(&seen, "POST", "/compact", Some(json!(null)));
+    assert!(result.unwrap_err().contains("public message"));
+    let (seen, result) = call(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        rejected.clone(),
+        |c| async move {
+            c.rewind(&RewindRequest {
+                domains: vec!["conversation".into()],
+                to_message_index: None,
+                to_prompt_id: None,
+            })
+            .await
+        },
+    )
+    .await;
+    assert_request(
+        &seen,
+        "POST",
+        "/rewind",
+        Some(json!({"domains":["conversation"]})),
+    );
+    assert!(result.unwrap_err().contains("public message"));
+    let (seen, result) = call(StatusCode::NOT_FOUND, rejected.clone(), |c| async move {
+        c.respond_interrogative("q", &InterrogativeResponse::Cancel)
+            .await
+    })
+    .await;
+    assert_request(
+        &seen,
+        "POST",
+        "/interrogative/q/respond",
+        Some(json!({"kind":"cancel"})),
+    );
+    assert!(result.unwrap_err().contains("public message"));
+    let (seen, result) = call(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        rejected.clone(),
+        |c| async move { c.cancel_turn().await },
+    )
+    .await;
+    assert_request(&seen, "POST", "/turn/cancel", None);
+    assert!(result.unwrap_err().contains("public message"));
+    let (seen, result) = call(StatusCode::BAD_REQUEST, rejected.clone(), |c| async move {
+        c.set_title("title").await
+    })
+    .await;
+    assert_request(&seen, "POST", "/title", Some(json!({"title":"title"})));
+    assert!(result.unwrap_err().contains("public message"));
+
+    let (seen, malformed) = call_raw(StatusCode::OK, "not-json".into(), |c| async move {
+        c.toggle_adventurous_handoff().await
+    })
+    .await;
+    assert_request(&seen, "POST", "/adventurous-handoff", None);
+    assert!(malformed.is_err(), "malformed typed toggle body must fail");
+    let (seen, rejected_toggle) = call(StatusCode::UNAUTHORIZED, rejected, |c| async move {
+        c.toggle_adventurous_handoff().await
+    })
+    .await;
+    assert_request(&seen, "POST", "/adventurous-handoff", None);
+    let toggle_error = rejected_toggle.expect_err("rejected toggle status must fail");
+    assert!(toggle_error.contains("401"));
 }
 
 #[tokio::test]
@@ -231,7 +445,9 @@ async fn daemon_client_auth_matrix() {
 }
 
 #[test]
-fn endpoint_inventory_includes_startup_contracts() {
+fn endpoint_inventory_presence_only_includes_startup_contracts() {
+    // Behavioral startup parsing is covered by daemon_client's existing startup tests;
+    // this slice only verifies that new/resume remain represented in the inventory.
     assert_eq!(
         pantoken_server::polytoken::endpoint_inventory::STARTUP.len(),
         2

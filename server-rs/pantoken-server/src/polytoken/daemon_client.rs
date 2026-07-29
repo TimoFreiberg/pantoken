@@ -1928,14 +1928,15 @@ impl DaemonClient {
                 }
                 #[derive(Deserialize)]
                 struct Resp {
-                    #[serde(default)]
-                    enabled: Option<bool>,
+                    enabled: bool,
                 }
-                let body: Resp = text
-                    .as_deref()
-                    .and_then(|t| serde_json::from_str(t).ok())
-                    .unwrap_or(Resp { enabled: None });
-                Ok(body.enabled.unwrap_or(false))
+                let text = text.ok_or_else(|| {
+                    "POST /adventurous-handoff failed (malformed success body)".to_string()
+                })?;
+                let body: Resp = serde_json::from_str(&text).map_err(|_| {
+                    "POST /adventurous-handoff failed (malformed success body)".to_string()
+                })?;
+                Ok(body.enabled)
             }
         }
     }
