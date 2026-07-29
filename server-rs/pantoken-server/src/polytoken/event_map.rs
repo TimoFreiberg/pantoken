@@ -1452,6 +1452,71 @@ pub const DAEMON_EVENT_DISPOSITIONS: &[(&str, EventDisposition)] = &[
     ("usage_throttle", EventDisposition::IntentionalNoop),
 ];
 
+/// Classify a public daemon event wire name without constructing or serializing
+/// an event. This is the production compatibility classifier used by the
+/// exhaustive typed classifier below and by the schema inventory test.
+pub fn event_disposition_for_wire_name(name: &str) -> Option<EventDisposition> {
+    use EventDisposition::*;
+    Some(match name {
+        "message_start"
+        | "content_block_start"
+        | "content_block_delta"
+        | "content_block_stop"
+        | "tool_call"
+        | "tool_result"
+        | "pending_turn_input_drained"
+        | "session_title_changed"
+        | "model_switch"
+        | "permission_monitor_switch"
+        | "interrogative"
+        | "ask_user_question"
+        | "notification_autodrain_switch"
+        | "goal_driver_update"
+        | "hook_fired" => Mapped,
+        "message_complete"
+        | "turn_cancelled"
+        | "pending_turn_input_queued"
+        | "pending_turn_input_dequeued"
+        | "pending_turn_input_discarded"
+        | "session_state_changed"
+        | "facet_switch"
+        | "compaction_complete"
+        | "subagent_started"
+        | "subagent_completed" => StateRefetch,
+        "stream_discontinuity" | "session_rewound" | "context_cleared" => Reseed,
+        "model_error"
+        | "retry_wait"
+        | "agent_block_violation"
+        | "tool_exposure_changed"
+        | "compaction_started"
+        | "compaction_cancelled"
+        | "compaction_failed"
+        | "subagent_compaction_notice"
+        | "notification_queued"
+        | "system_reminder"
+        | "mcp_server_connected"
+        | "mcp_server_disconnected"
+        | "mcp_server_reconnecting"
+        | "mcp_server_disabled" => UserNotice,
+        "heartbeat"
+        | "job_promoted"
+        | "job_completed"
+        | "job_expiring"
+        | "job_cancelled"
+        | "job_updated"
+        | "context_loaded"
+        | "compaction_retry"
+        | "notifications_drained"
+        | "tool_reveal"
+        | "classifier_decision"
+        | "extension_registered"
+        | "subagent_messaged"
+        | "image_reference_resolved"
+        | "usage_throttle" => IntentionalNoop,
+        _ => return None,
+    })
+}
+
 /// Explicit Pantoken product disposition for every generated daemon event.
 /// This is deliberately separate from wire deserialization: accepting an event
 /// is not proof that Pantoken either surfaces or intentionally ignores it.
@@ -2439,6 +2504,19 @@ mod tests {
             "each daemon wire name must have exactly one disposition"
         );
         assert_eq!(classified, generated);
+        for name in pantoken_daemon_types::DAEMON_EVENT_VARIANT_NAMES {
+            let declared = DAEMON_EVENT_DISPOSITIONS
+                .iter()
+                .find_map(|(declared_name, disposition)| {
+                    (*declared_name == *name).then_some(*disposition)
+                })
+                .expect("generated event has a declared disposition");
+            assert_eq!(
+                event_disposition_for_wire_name(name),
+                Some(declared),
+                "production wire-name classifier disagrees for {name}"
+            );
+        }
 
         let counts = DAEMON_EVENT_DISPOSITIONS.iter().fold(
             BTreeMap::<&'static str, usize>::new(),

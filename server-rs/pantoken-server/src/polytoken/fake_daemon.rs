@@ -91,9 +91,12 @@ fn canned(method: &str, path: &str) -> Option<(StatusCode, Value)> {
         return Some((StatusCode::OK, serde_json::json!({"ok": true})));
     }
     // DELETE /tui-attachment/{lease_id} — `release_lease()` uses this (not POST
-    // /tui-attachment/release). The lease_id is dynamic (e.g. "lease-1"), so
-    // match the path prefix. Idempotent → 204 No Content (empty body).
-    if m == "DELETE" && p.starts_with("/tui-attachment/") {
+    // /tui-attachment/release). The lease_id is one nonempty path segment.
+    // Idempotent → 204 No Content (empty body).
+    if m == "DELETE"
+        && p.strip_prefix("/tui-attachment/")
+            .is_some_and(|lease_id| !lease_id.is_empty() && !lease_id.contains('/'))
+    {
         return Some((StatusCode::NO_CONTENT, Value::Null));
     }
     // POST /model — acknowledge model/thinking switches. Tests inspect the
@@ -1022,16 +1025,44 @@ fn frame_to_event(frame: &corpus::SseFrame) -> Event {
 
 /// The SSE handler: one-shot test mode streams the spawn scenario immediately;
 /// controlled fake mode holds the stream open and waits for `FakeControl` pushes.
-async fn sse_handler(
-    State(app): State<AppState>,
-) -> Sse<ReceiverStream<Result<Event, std::convert::Infallible>>> {
-    {
+/// Strict fakes treat the stream connection as an ordered request expectation,
+/// while loose historical corpus replay only records it.
+async fn sse_handler(State(app): State<AppState>) -> Response {
+    let contract_error = {
         let mut state = app.state.lock();
         state.calls.push(("GET".to_string(), "/events".to_string()));
         state
             .request_bodies
             .push(("GET".to_string(), "/events".to_string(), String::new()));
+        let scenario = state
+            .scenario_override
+            .clone()
+            .unwrap_or_else(|| app.scenario.clone());
+        if state.strict {
+            match match_http_expectation(
+                &scenario,
+                state.next_http_expectation,
+                "GET",
+                "/events",
+                "",
+            ) {
+                Ok(Some(_)) => {
+                    state.next_http_expectation += 1;
+                    None
+                }
+                Ok(None) if state.allow_bootstrap => None,
+                Ok(None) => Some("strict fake contract has no expectation for GET /events".into()),
+                Err(error) => Some(error),
+            }
+        } else {
+            None
+        }
+    };
+    if let Some(error) = contract_error {
+        tracing::error!("fake daemon contract violation: {error}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response();
     }
+
     let (tx, rx) = mpsc::channel::<Result<Event, std::convert::Infallible>>(64);
     match app.sse_mode.clone() {
         SseMode::OneShot {
@@ -1064,7 +1095,7 @@ async fn sse_handler(
             });
         }
     }
-    Sse::new(ReceiverStream::new(rx))
+    Sse::new(ReceiverStream::new(rx)).into_response()
 }
 
 /// The catch-all HTTP handler: record the call, then resolve a response from
@@ -1223,6 +1254,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn strict_fake_accounts_for_sse_expectation() {
+        let fake = spawn_strict(
+            scenario(serde_json::json!([
+                {"method":"GET","path":"/events","status":200}
+            ])),
+            "strict-sse".into(),
+            0,
+        )
+        .await;
+        let response = reqwest::get(format!("http://127.0.0.1:{}/events", fake.port))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(fake.called("GET", "/events"));
+        fake.assert_expectations_consumed().unwrap();
+
+        let missing = spawn_strict(scenario(serde_json::json!([])), "missing-sse".into(), 0).await;
+        let response = reqwest::get(format!("http://127.0.0.1:{}/events", missing.port))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        missing.assert_expectations_consumed().unwrap();
+
+        let ordered = scenario(serde_json::json!([
+            {"method":"GET","path":"/state","status":200},
+            {"method":"GET","path":"/events","status":200}
+        ]));
+        let error = match_http_expectation(&ordered, 0, "GET", "/events", "").unwrap_err();
+        assert!(error.contains("request order mismatch"), "{error}");
+    }
+
+    #[tokio::test]
     async fn fake_daemon_fails_on_unconsumed_expectation() {
         let fake = spawn_strict(
             scenario(serde_json::json!([
@@ -1247,7 +1310,19 @@ mod tests {
         assert!(canned("POST", "/tui-attachment/claim").is_some());
         assert!(canned("POST", "/tui-attachment/heartbeat").is_some());
         assert!(canned("DELETE", "/tui-attachment/lease-1").is_some());
-        assert!(canned("GET", "/not-in-allowlist").is_none());
+        assert!(canned("DELETE", "/tui-attachment/a-b_c.1").is_some());
+        for path in [
+            "/tui-attachment/",
+            "/tui-attachment/lease-1/extra",
+            "/tui-attachment//lease-1",
+            "/tui-attachmentary/lease-1",
+            "/not-in-allowlist",
+        ] {
+            assert!(
+                canned("DELETE", path).is_none(),
+                "unexpected bootstrap path: {path}"
+            );
+        }
 
         let empty = scenario(serde_json::json!([]));
         let strict = spawn_strict(empty.clone(), "strict-no-bootstrap".into(), 0).await;
