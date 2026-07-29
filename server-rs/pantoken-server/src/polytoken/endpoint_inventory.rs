@@ -76,10 +76,10 @@ pub const ENDPOINTS: &[EndpointContract] = &[
         "release_lease",
         "DELETE",
         "/tui-attachment/{lease_id}",
-        "204 (idempotent)",
+        "best-effort DELETE; caller observes no status/error",
         "none",
         "empty",
-        "401, 404, 409, 500"
+        "server failures are intentionally swallowed by release_lease"
     ),
     endpoint!(
         "prompt",
@@ -419,13 +419,21 @@ mod tests {
             assert!(!endpoint.request_body.is_empty());
             assert!(!endpoint.response_schema.is_empty());
             assert!(!endpoint.representative_errors.is_empty());
-            assert!(
-                endpoint
-                    .representative_errors
-                    .split(',')
-                    .all(|s| s.trim().parse::<u16>().is_ok())
-            );
-            assert!(endpoint.success_policy.chars().any(|c| c.is_ascii_digit()));
+            if endpoint.client_method == "release_lease" {
+                assert!(endpoint.representative_errors.contains("swallowed"));
+            } else {
+                assert!(
+                    endpoint
+                        .representative_errors
+                        .split(',')
+                        .all(|s| s.trim().parse::<u16>().is_ok())
+                );
+            }
+            if endpoint.client_method == "release_lease" {
+                assert!(endpoint.success_policy.contains("best-effort"));
+            } else {
+                assert!(endpoint.success_policy.chars().any(|c| c.is_ascii_digit()));
+            }
         }
     }
 

@@ -21,6 +21,12 @@ use tokio::{net::TcpListener, sync::Mutex};
 const TOKEN: &str = "contract-token-never-print-this";
 const SESSION: &str = "contract-session";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContractBehavior {
+    Ordinary,
+    BestEffortRelease,
+}
+
 #[derive(Debug, Clone)]
 struct ExecutableContract {
     name: &'static str,
@@ -31,6 +37,16 @@ struct ExecutableContract {
     response_schema: &'static str,
     accepted_statuses: &'static [StatusCode],
     rejected_status: StatusCode,
+}
+
+impl ExecutableContract {
+    fn behavior(self: &Self) -> ContractBehavior {
+        if self.name == "release_lease" {
+            ContractBehavior::BestEffortRelease
+        } else {
+            ContractBehavior::Ordinary
+        }
+    }
 }
 
 const EXPECTED_EXECUTABLE_CONTRACTS: &[ExecutableContract] = &[
@@ -237,6 +253,9 @@ struct Seen {
 struct Harness {
     seen: Arc<Mutex<Vec<Seen>>>,
     status: StatusCode,
+    heartbeat_status: Option<StatusCode>,
+    release_status: Option<StatusCode>,
+    heartbeat_notify: Option<Arc<tokio::sync::Notify>>,
     body: String,
     delay: Option<Duration>,
 }
@@ -256,6 +275,12 @@ async fn record_request(State(h): State<Harness>, request: Request<Body>) -> Res
     let bytes = axum::body::to_bytes(body, 1024 * 1024)
         .await
         .expect("request body");
+    let is_heartbeat = parts.uri.path() == "/tui-attachment/heartbeat";
+    if is_heartbeat {
+        if let Some(notify) = &h.heartbeat_notify {
+            notify.notify_one();
+        }
+    }
     h.seen.lock().await.push(Seen {
         method: parts.method.to_string(),
         path: parts.uri.to_string(),
@@ -266,7 +291,14 @@ async fn record_request(State(h): State<Harness>, request: Request<Body>) -> Res
             .map(str::to_owned),
         body: String::from_utf8(bytes.to_vec()).expect("utf8 body"),
     });
-    (h.status, h.body).into_response()
+    let response_status = if is_heartbeat {
+        h.heartbeat_status.unwrap_or(h.status)
+    } else if parts.method == axum::http::Method::DELETE {
+        h.release_status.unwrap_or(h.status)
+    } else {
+        h.status
+    };
+    (response_status, h.body).into_response()
 }
 
 async fn call<F, Fut, R>(status: StatusCode, body: Value, f: F) -> (Vec<Seen>, R)
@@ -277,8 +309,13 @@ where
     call_raw(status, body.to_string(), f).await
 }
 
-async fn lease_lifecycle(body: Value) -> Vec<Seen> {
+async fn lease_lifecycle(
+    body: Value,
+    heartbeat_status: StatusCode,
+    release_status: StatusCode,
+) -> Vec<Seen> {
     let seen = Arc::new(Mutex::new(Vec::new()));
+    let heartbeat_notify = Arc::new(tokio::sync::Notify::new());
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let port = listener.local_addr().expect("addr").port();
     let server = tokio::spawn(serve(
@@ -286,13 +323,21 @@ async fn lease_lifecycle(body: Value) -> Vec<Seen> {
         Harness {
             seen: seen.clone(),
             status: StatusCode::OK,
+            heartbeat_status: Some(heartbeat_status),
+            release_status: Some(release_status),
+            heartbeat_notify: Some(heartbeat_notify.clone()),
             body: body.to_string(),
             delay: None,
         },
     ));
     let client = DaemonClient::new(SESSION.into(), port, 7, Some(TOKEN.into()));
     client.claim_lease("contract").await.expect("claim");
-    tokio::time::sleep(Duration::from_millis(1100)).await;
+    tokio::time::timeout(Duration::from_secs(2), heartbeat_notify.notified())
+        .await
+        .expect("first heartbeat within bounded timeout");
+    tokio::time::timeout(Duration::from_millis(250), heartbeat_notify.notified())
+        .await
+        .expect_err("lease loss must stop the heartbeat task");
     client.release_lease().await;
     server.abort();
     seen.lock().await.clone()
@@ -311,6 +356,9 @@ where
         Harness {
             seen: seen.clone(),
             status,
+            heartbeat_status: None,
+            release_status: None,
+            heartbeat_notify: None,
             body: body.to_string(),
             delay: None,
         },
@@ -373,6 +421,11 @@ async fn daemon_client_endpoint_contract_matrix() {
             );
         }
         assert_eq!(inventory.response_schema, contract.response_schema);
+        if contract.behavior() == ContractBehavior::BestEffortRelease {
+            assert_eq!(contract.response_schema, "empty");
+            assert!(inventory.success_policy.contains("best-effort"));
+            continue;
+        }
         for accepted_status in contract.accepted_statuses {
             let accepted_code = accepted_status.as_u16().to_string();
             assert!(
@@ -431,24 +484,80 @@ async fn daemon_client_endpoint_contract_matrix() {
     executed.insert("terminate");
 
     let claim_body = json!({"expires_after_seconds":30,"expires_at":"2099-01-01T00:00:00Z","heartbeat_interval_seconds":1,"lease_id":"lease with space"});
-    let seen = lease_lifecycle(claim_body).await;
-    assert!(
-        seen.iter()
-            .any(|r| r.method == "POST" && r.path == "/tui-attachment/claim")
+    let seen = lease_lifecycle(claim_body.clone(), StatusCode::OK, StatusCode::NO_CONTENT).await;
+    assert_eq!(seen.len(), 3, "claim, one heartbeat, and release only");
+    assert_eq!(seen[0].method, "POST");
+    assert_eq!(seen[0].path, "/tui-attachment/claim");
+    assert_eq!(
+        serde_json::from_str::<Value>(&seen[0].body).unwrap(),
+        json!({"pid":7,"terminal_label":"contract"})
     );
-    assert!(
-        seen.iter()
-            .any(|r| r.method == "POST" && r.path == "/tui-attachment/heartbeat")
+    assert_eq!(seen[1].method, "POST");
+    assert_eq!(seen[1].path, "/tui-attachment/heartbeat");
+    assert_eq!(
+        serde_json::from_str::<Value>(&seen[1].body).unwrap(),
+        json!({"lease_id":"lease with space","pid":7})
     );
-    assert!(
-        seen.iter()
-            .any(|r| r.method == "DELETE" && r.path == "/tui-attachment/lease%20with%20space")
-    );
+    assert_eq!(seen[2].method, "DELETE");
+    assert_eq!(seen[2].path, "/tui-attachment/lease%20with%20space");
     assert!(
         seen.iter()
             .all(|r| r.auth.as_deref() == Some(format!("Bearer {TOKEN}").as_str()))
     );
+    let lost = lease_lifecycle(
+        claim_body.clone(),
+        StatusCode::NOT_FOUND,
+        StatusCode::NO_CONTENT,
+    )
+    .await;
+    assert_eq!(
+        lost.len(),
+        3,
+        "lease loss stops heartbeat before explicit cleanup release"
+    );
+    assert_eq!(lost[1].method, "POST");
+    assert_eq!(lost[1].path, "/tui-attachment/heartbeat");
+    assert_eq!(
+        serde_json::from_str::<Value>(&lost[1].body).unwrap(),
+        json!({"lease_id":"lease with space","pid":7})
+    );
+    assert_eq!(lost[2].method, "DELETE");
+    assert_eq!(lost[2].path, "/tui-attachment/lease%20with%20space");
+    let release_failure = lease_lifecycle(
+        claim_body,
+        StatusCode::OK,
+        StatusCode::INTERNAL_SERVER_ERROR,
+    )
+    .await;
+    assert_eq!(
+        release_failure.len(),
+        3,
+        "release failure still completes without caller error"
+    );
+    assert_eq!(release_failure[2].method, "DELETE");
+    assert_eq!(
+        release_failure[2].path,
+        "/tui-attachment/lease%20with%20space"
+    );
+    assert_eq!(
+        release_failure[2].auth.as_deref(),
+        Some(format!("Bearer {TOKEN}").as_str())
+    );
     executed.insert("claim_lease");
+    let (seen, malformed_claim) = call_raw(StatusCode::OK, "not-json".into(), |c| async move {
+        c.claim_lease("contract").await
+    })
+    .await;
+    assert_request(
+        &seen,
+        "POST",
+        "/tui-attachment/claim",
+        Some(json!({"pid":7,"terminal_label":"contract"})),
+    );
+    assert!(
+        malformed_claim.is_err(),
+        "malformed lease claim success must fail"
+    );
     executed.insert("heartbeat");
     executed.insert("release_lease");
 
@@ -594,7 +703,87 @@ async fn daemon_client_endpoint_contract_matrix() {
         "every expected case must execute exactly once"
     );
 
+    // The executable group manifest is intentionally partial: these ten rows are
+    // covered here, while the remaining ENDPOINTS rows remain separate work.
+    const EXECUTABLE_GROUP: &[&str] = &[
+        "health",
+        "terminate",
+        "claim_lease",
+        "heartbeat",
+        "release_lease",
+        "state",
+        "history",
+        "files",
+        "file_catalog",
+        "jobs",
+    ];
+    assert_eq!(EXECUTABLE_GROUP.len(), 10);
+    assert!(EXECUTABLE_GROUP.iter().all(|name| expected.contains(name)));
+    assert!(
+        EXECUTABLE_GROUP.len() < ENDPOINTS.len(),
+        "do not claim full inventory coverage"
+    );
+
     let rejected = json!({"code":"public_code","message":"public message"});
+    let (seen, health_rejected) =
+        call(StatusCode::UNAUTHORIZED, rejected.clone(), |c| async move {
+            c.health().await
+        })
+        .await;
+    assert_request(&seen, "GET", "/health", None);
+    assert_eq!(health_rejected.status, 401);
+    assert!(health_rejected.data.is_none());
+    assert!(
+        health_rejected
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("public message")
+    );
+    let (seen, terminate_rejected) = call(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        rejected.clone(),
+        |c| async move { c.terminate().await },
+    )
+    .await;
+    assert_request(&seen, "POST", "/terminate", None);
+    let terminate_error = terminate_rejected.expect_err("rejected terminate must fail");
+    assert!(terminate_error.contains("public message") && terminate_error.contains("public_code"));
+    let (seen, claim_rejected) = call(StatusCode::CONFLICT, rejected.clone(), |c| async move {
+        c.claim_lease("contract").await
+    })
+    .await;
+    assert_request(
+        &seen,
+        "POST",
+        "/tui-attachment/claim",
+        Some(json!({"pid":7,"terminal_label":"contract"})),
+    );
+    assert!(
+        claim_rejected.is_err(),
+        "rejected lease claim must return a public LeaseError"
+    );
+    macro_rules! rejected_snapshot {
+        ($call:expr, $path:literal) => {{
+            let (seen, response) =
+                call(StatusCode::INTERNAL_SERVER_ERROR, rejected.clone(), $call).await;
+            assert_request(&seen, "GET", $path, None);
+            assert_eq!(response.status, 500);
+            assert!(response.data.is_none());
+            assert!(
+                response
+                    .error
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("public message")
+            );
+        }};
+    }
+    rejected_snapshot!(|c| async move { c.state().await }, "/state");
+    rejected_snapshot!(|c| async move { c.history(None, None).await }, "/history");
+    rejected_snapshot!(|c| async move { c.files(None).await }, "/files");
+    rejected_snapshot!(|c| async move { c.file_catalog().await }, "/files");
+    rejected_snapshot!(|c| async move { c.jobs().await }, "/jobs");
     let (seen, result) = call(StatusCode::UNAUTHORIZED, rejected.clone(), |c| async move {
         c.clear().await
     })
