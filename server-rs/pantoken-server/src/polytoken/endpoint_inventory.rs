@@ -112,7 +112,7 @@ pub const ENDPOINTS: &[EndpointContract] = &[
         "dequeue_newest_input",
         "DELETE",
         "/turn/input/newest",
-        "200 or 409 (both accepted no-op outcomes)",
+        "200; 409 only with public code=no_input",
         "none",
         "empty",
         "401, 404, 500"

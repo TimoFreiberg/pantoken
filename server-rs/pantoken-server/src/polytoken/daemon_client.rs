@@ -1890,19 +1890,37 @@ impl DaemonClient {
     }
 
     /// `DELETE /turn/input/newest` — dequeue the newest pending input.
-    /// 200 = dequeued; 409 = no pending input (both are acceptable no-ops).
+    /// 200 = dequeued; 409 is an acceptable no-op only when its public error
+    /// code is `no_input`.
     pub async fn dequeue_newest_input(&self) -> Result<(), String> {
+        let operation = "DELETE /turn/input/newest";
         let url = format!("{}/turn/input/newest", self.base_url);
         match self
             .safe_fetch(&url, reqwest::Method::DELETE, None, 10_000)
             .await
         {
-            Err(_) => Err("DELETE /turn/input/newest failed (connection error)".into()),
-            Ok((status, _, _)) => {
-                if status != 200 && status != 409 {
-                    return Err(format!("DELETE /turn/input/newest failed ({status})"));
+            Err(_) => Err(format!("{operation} failed (connection error)")),
+            Ok((status, _, _)) if status == 200 => Ok(()),
+            Ok((status, text, err)) => {
+                if status == 409 {
+                    let no_input = text
+                        .as_deref()
+                        .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+                        .and_then(|body| {
+                            body.get("code")
+                                .and_then(serde_json::Value::as_str)
+                                .map(|code| code == "no_input")
+                        })
+                        .unwrap_or(false);
+                    if no_input {
+                        return Ok(());
+                    }
                 }
-                Ok(())
+                Err(format_daemon_response_error(
+                    operation,
+                    status,
+                    text.as_deref().or(err.as_deref()),
+                ))
             }
         }
     }

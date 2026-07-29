@@ -788,6 +788,11 @@ async fn daemon_client_endpoint_contract_matrix() {
     assert_request(&seen, "GET", "/permission-monitor", None);
     let permission = result.expect("typed permission monitor");
     assert!(matches!(permission.monitor, PermissionMonitor::Bypass));
+    assert!(matches!(
+        permission.config_default,
+        PermissionMonitor::Standard
+    ));
+    assert!(permission.configured_autonomous.is_none());
     executed.insert("get_permission_monitor");
 
     let (seen, result) = call(
@@ -1147,12 +1152,13 @@ async fn daemon_client_endpoint_contract_matrix() {
     )
     .await;
     assert_request(&seen, "POST", "/prompt", Some(json!({"content":"queued"})));
-    assert!(
-        queued_prompt
-            .expect("auto-queued prompt accepted")
-            .queued_item
-            .is_some()
-    );
+    let queued = queued_prompt.expect("auto-queued prompt accepted");
+    assert_eq!(queued.prompt_id, "prompt-queued");
+    assert_eq!(queued.session_id, SESSION);
+    let queued_item = queued.queued_item.expect("queued item");
+    assert_eq!(queued_item.id, "q3");
+    assert_eq!(queued_item.content, "queued");
+    assert_eq!(queued_item.admission_prompt_id, "prompt-queued");
     let (seen, prompt_rejected) = call(
         StatusCode::UNPROCESSABLE_ENTITY,
         rejected.clone(),
@@ -1183,14 +1189,39 @@ async fn daemon_client_endpoint_contract_matrix() {
         malformed.data.is_none(),
         "malformed queue snapshot must fail decoding"
     );
+    let (seen, snapshot_500) = call(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        rejected.clone(),
+        |c| async move { c.turn_input_snapshot().await },
+    )
+    .await;
+    assert_request(&seen, "GET", "/turn/input", None);
+    assert_eq!(snapshot_500.status, 500);
+    assert!(snapshot_500.data.is_none());
+    assert!(
+        snapshot_500
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("public message")
+    );
     let (seen, dequeue_rejected) = call(
+        StatusCode::CONFLICT,
+        json!({"code":"real_conflict","message":"queue changed"}),
+        |c| async move { c.dequeue_newest_input().await },
+    )
+    .await;
+    assert_request(&seen, "DELETE", "/turn/input/newest", None);
+    let dequeue_error = dequeue_rejected.expect_err("arbitrary 409 must be rejected");
+    assert!(dequeue_error.contains("real_conflict") && dequeue_error.contains("queue changed"));
+    let (seen, dequeue_500) = call(
         StatusCode::INTERNAL_SERVER_ERROR,
         rejected.clone(),
         |c| async move { c.dequeue_newest_input().await },
     )
     .await;
     assert_request(&seen, "DELETE", "/turn/input/newest", None);
-    assert!(dequeue_rejected.unwrap_err().contains("failed"));
+    assert!(dequeue_500.unwrap_err().contains("public message"));
     let (seen, model_conflict) = call(
         StatusCode::CONFLICT,
         json!({"code":"different_model","message":"model conflict"}),
