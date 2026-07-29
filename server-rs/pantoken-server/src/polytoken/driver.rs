@@ -83,6 +83,8 @@ use crate::polytoken::fake_daemon::FakeControlHub;
 use crate::polytoken::history_seed::{self, HistoryMapCtx};
 use crate::polytoken::lifecycle_store::{LifecycleState, LifecycleStore};
 use crate::polytoken::models::{ParsedModels, model_post_key, parse_models};
+
+const REWIND_DOMAINS: [&str; 3] = ["conversation", "todos", "flags"];
 use crate::polytoken::restore_error::RestoreErrorClass;
 use crate::polytoken::sessions_registry;
 use crate::polytoken::ui_bridge::{PendingInterrogative, build_interrogative_response};
@@ -862,6 +864,19 @@ impl PolytokenInner {
         }
     }
 
+    fn user_prompt_text(
+        history_items: &[pantoken_daemon_types::SessionHistoryItem],
+        prompt_id: &str,
+    ) -> Option<String> {
+        history_items.iter().find_map(|item| {
+            (item.get("type").and_then(serde_json::Value::as_str) == Some("user")
+                && item.get("prompt_id").and_then(serde_json::Value::as_str) == Some(prompt_id))
+            .then(|| item.get("content").and_then(serde_json::Value::as_str))
+            .flatten()
+            .map(str::to_string)
+        })
+    }
+
     fn build_branch_seed(
         snapshot: SessionSnapshot,
         history_items: &[pantoken_daemon_types::SessionHistoryItem],
@@ -948,8 +963,23 @@ impl PolytokenInner {
         events
     }
 
-    /// Build a `WarmSession` from an already-connected client: claim the lease,
-    /// fetch initial state, subscribe to SSE, and insert into `self.warm`.
+    async fn cleanup_failed_hydration(
+        client: &Arc<DaemonClient>,
+        subscription: SseSubscription,
+        owned_process: Option<tokio::process::Child>,
+    ) {
+        subscription.stop().await;
+        client.release_lease().await;
+        if let Some(mut child) = owned_process {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            client.close_without_kill().await;
+        }
+    }
+
+    /// Build a `WarmSession` from an already-connected client: validate health,
+    /// claim the lease, connect/buffer SSE, hydrate snapshots, then install the
+    /// single ordered consumer and insert into `self.warm`.
     /// Shared by `warm_session` (spawn path) and `warm_session_attach`
     /// (resume-with-known-port path). Returns the warm `Arc<WarmSession>`.
     async fn install_warm(
@@ -995,66 +1025,74 @@ impl PolytokenInner {
             Err(e) => return Err(format!("lease claim failed: {e}")),
         }
 
-        // Fetch initial state. A daemon/protocol version mismatch (the
-        // response body doesn't deserialize into our generated type) would
-        // otherwise degrade completely silently: status can be 200 with
-        // `data: None` and no `error` set (the daemon technically answered,
-        // it just didn't answer in the shape we expected). Log it loudly so
-        // a codegen drift shows up somewhere instead of just rendering as an
-        // idle-looking session with no usage/title/status.
-        let state_res = client.state().await;
-        if state_res.data.is_none() {
-            warn!(
-                "install_warm: GET /state returned no usable data for {session_id} \
-                 (status {}): {} — proceeding with no cached state",
-                state_res.status,
-                state_res.error.as_deref().unwrap_or("<no body>")
-            );
+        // Connect `/events` before any snapshot request. The callback only queues
+        // envelopes; no event is folded against a partially initialized session.
+        // Awaiting response headers makes the ordering deterministic rather than
+        // relying on the spawned SSE task winning a scheduler race with `/state`.
+        let (sse_tx, mut sse_rx) = mpsc::unbounded_channel::<SseEnvelope>();
+        let callback_tx = sse_tx.clone();
+        let (sub, connected) = client
+            .subscribe_connected(move |envelope: SseEnvelope| {
+                let _ = callback_tx.send(envelope);
+            })
+            .await;
+        match connected.await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                Self::cleanup_failed_hydration(&client, sub, owned_process).await;
+                return Err(format!("event subscription failed: {error}"));
+            }
+            Err(_) => {
+                Self::cleanup_failed_hydration(&client, sub, owned_process).await;
+                return Err("event subscription stopped before connecting".to_string());
+            }
         }
-        let last_state = state_res.data;
 
-        // Create the warm session
+        // Hydrate authoritative state while SSE envelopes accumulate in order.
+        // A malformed success body is a compatibility failure, not an empty idle
+        // session: tear down before installing any warm state.
+        let state_res = client.state().await;
+        let Some(last_state) = state_res.data else {
+            Self::cleanup_failed_hydration(&client, sub, owned_process).await;
+            return Err(format!(
+                "GET /state hydration failed ({}): {}",
+                state_res.status,
+                state_res
+                    .error
+                    .as_deref()
+                    .unwrap_or("malformed success body")
+            ));
+        };
+        let monitor_mode = client
+            .get_permission_monitor()
+            .await
+            .ok()
+            .map(|response| event_map::monitor_to_mode(&response.monitor));
+        let autodrain_enabled = client
+            .get_notification_autodrain()
+            .await
+            .ok()
+            .map(|response| response.enabled);
+
         let warm = Arc::new(WarmSession {
             client: client.clone(),
             accumulators: Mutex::new(HashMap::from([(None, event_map::create_accumulator())])),
-            last_state: RwLock::new(last_state),
+            last_state: RwLock::new(Some(last_state)),
             session_ref: session_ref.clone(),
             workspace: workspace.clone(),
             pending_interrogatives: Mutex::new(HashMap::new()),
-            sse_subscription: Mutex::new(None),
-            monitor_mode: Mutex::new(None),
-            autodrain_enabled: Mutex::new(None),
+            sse_subscription: Mutex::new(Some(sub)),
+            monitor_mode: Mutex::new(monitor_mode),
+            autodrain_enabled: Mutex::new(autodrain_enabled),
             owned_process: Mutex::new(owned_process),
-            sse_tx: Mutex::new(None),
+            sse_tx: Mutex::new(Some(sse_tx)),
             sse_consumer_handle: Mutex::new(None),
         });
 
-        // Subscribe to SSE via ONE per-warm-session consumer task (not a task
-        // per event). The daemon's `subscribe` callback is synchronous (`Fn`),
-        // so it can only push; it sends each envelope into an unbounded mpsc,
-        // and a single long-lived task drains the receiver sequentially,
-        // folding events in arrival order. This mirrors the TS SSE path
-        // (`polytoken-driver.ts:368-371`) which processes events sequentially.
-        //
-        // WHY UNBOUNDED (deliberate divergence from the hub's bounded(256) +
-        // `try_send` + panic completion queue): SSE is push-only with no
-        // backpressure seam, and connect-time replays can burst (the
-        // ask-user-question corpus is 291 frames). A bounded channel would
-        // either drop (corrupting the transcript — the wrong direction for
-        // fail-loud) or panic on a burst. Unbounded + sequential drain is the
-        // faithful choice; the cost is unbounded memory only if the consumer
-        // task stalls indefinitely, which would itself be a louder failure.
-        //
-        // Single-consumer invariant: `debug_assert` that no consumer is
-        // already running for this session, so a second `install_warm` on the
-        // same `WarmSession` is caught at the code level (not just
-        // probabilistically by the ordering test).
-        debug_assert!(
-            warm.sse_consumer_handle.lock().is_none(),
-            "install_warm: SSE consumer already running for this warm session"
-        );
-        let (sse_tx, mut sse_rx) = mpsc::unbounded_channel::<SseEnvelope>();
-        *warm.sse_tx.lock() = Some(sse_tx.clone());
+        // Install exactly one ordered consumer only after hydration is complete.
+        // Buffered envelopes drain first; the same receiver then transitions
+        // atomically to live delivery without a second consumer or handoff queue.
+        debug_assert!(warm.sse_consumer_handle.lock().is_none());
         let consumer_warm = warm.clone();
         let consumer_self = self.clone();
         let consumer_handle = tokio::spawn(async move {
@@ -1063,39 +1101,8 @@ impl PolytokenInner {
                     .handle_sse_event(consumer_warm.clone(), envelope)
                     .await;
             }
-            // sse_rx returns None when all senders drop — the subscription's
-            // stop() drops the sender held in the subscribe closure below, so
-            // the consumer task exits cleanly on disposal.
         });
         *warm.sse_consumer_handle.lock() = Some(consumer_handle);
-
-        // The subscribe callback just pushes into the channel (non-blocking,
-        // order-preserving). It never awaits, so it's safe as a sync `Fn`. A
-        // cloned sender is moved into the closure; when the subscription is
-        // stopped (`SseSubscription::stop` aborts the SSE loop task that owns
-        // this closure), the sender drops, and the consumer's `recv` returns
-        // None → the consumer task exits.
-        let sub = client
-            .subscribe(move |envelope: SseEnvelope| {
-                // `send` fails only if the receiver was dropped (the consumer
-                // task exited) — drop the envelope silently during teardown.
-                let _ = sse_tx.send(envelope);
-            })
-            .await;
-
-        *warm.sse_subscription.lock() = Some(sub);
-
-        // Seed the cached monitor mode from the daemon's actual state. The
-        // daemon's config may set a non-standard default (e.g. bypass), and
-        // without this the badge shows "Standard" until the user explicitly
-        // picks a mode. `new_session` overrides this with the user's explicit
-        // pick AFTER `warm_session` returns, so the seed only sticks when the
-        // user didn't choose (the common case for resume/attach). On error,
-        // `monitor_mode` stays `None` (the prior behavior) — fail gracefully.
-        if let Ok(pm) = warm.client.get_permission_monitor().await {
-            let mode = event_map::monitor_to_mode(&pm.monitor);
-            *warm.monitor_mode.lock() = Some(mode);
-        }
 
         self.warm.write().insert(session_id.clone(), warm.clone());
         // Focus the new session (most-recently focused) before running eviction
@@ -2424,60 +2431,80 @@ impl PantokenDriver for PolytokenDriver {
         entry_id: String,
         summarize: bool,
         session_id: Option<SessionId>,
-    ) -> BranchResult {
-        // summarize: pantoken-side only, no daemon /rewind param (matches TS
-        // `polytoken-driver.ts:1277-1315`).
+    ) -> Result<BranchResult, String> {
+        // Summarization remains Pantoken-side; the daemon rewind request has no
+        // corresponding parameter.
         let _summarize = summarize;
-        if let Some(sid) = &session_id {
-            if let Some(ws) = self.inner.get_warm(sid) {
-                let req = RewindRequest {
-                    // All three valid rewind domains: conversation (transcript),
-                    // todos, and flags. Sending [] is a semantic no-op (the daemon
-                    // returns 202 with domains_applied: [] and changes nothing).
-                    // Discovered empirically against polytoken 0.5.3 — the daemon's
-                    // OpenAPI spec does not enumerate valid domain values.
-                    domains: vec![
-                        "conversation".to_string(),
-                        "todos".to_string(),
-                        "flags".to_string(),
-                    ],
-                    to_message_index: None,
-                    to_prompt_id: Some(entry_id.clone()),
-                };
-                if let Err(e) = ws.client.rewind(&req).await {
-                    error!("branch rewind failed: {e}");
-                    return BranchResult::default();
-                }
-                let state_res = ws.client.state().await;
-                if let Some(state) = state_res.data {
-                    *ws.last_state.write() = Some(state);
-                }
-                let ctx = DriverMapCtx {
-                    session_ref: ws.session_ref.clone(),
-                    workspace: ws.workspace.clone(),
-                    last_state: ws.last_state.read().clone(),
-                    monitor_mode: *ws.monitor_mode.lock(),
-                    autodrain_enabled: *ws.autodrain_enabled.lock(),
-                };
-                let snapshot = ctx.snapshot(ctx.live_status());
-                let history_res = ws.client.history(None, None).await;
-                if let Some(history) = history_res.data {
-                    return BranchResult {
-                        seed: PolytokenInner::build_branch_seed(
-                            snapshot,
-                            &history.items,
-                            &HistoryMapCtx {
-                                r#ref: ws.session_ref.clone(),
-                            },
-                        ),
-                        editor_text: None,
-                        cancelled: false,
-                        aborted: None,
-                    };
-                }
-            }
+        let sid = session_id.ok_or_else(|| "cannot rewind without a target session".to_string())?;
+        let ws = self
+            .inner
+            .get_warm(&sid)
+            .ok_or_else(|| format!("session {sid} is not attached"))?;
+
+        // This branch action is the UI's edit-and-resend gesture. Capture the
+        // target user's text from Pantoken-owned pre-rewind history before issuing
+        // the destructive command. Never rewind when the prefill cannot be secured.
+        let before = ws.client.history(None, None).await;
+        if before.status != 200 {
+            return Err(format!(
+                "cannot load transcript before rewind ({}): {}",
+                before.status,
+                before.error.as_deref().unwrap_or("")
+            ));
         }
-        BranchResult::default()
+        let before = before
+            .data
+            .ok_or_else(|| "cannot decode transcript before rewind".to_string())?;
+        let editor_text = PolytokenInner::user_prompt_text(&before.items, &entry_id)
+            .ok_or_else(|| "cannot rewind: the target prompt text is unavailable".to_string())?;
+
+        let req = RewindRequest {
+            domains: REWIND_DOMAINS
+                .iter()
+                .map(|domain| (*domain).to_string())
+                .collect(),
+            to_message_index: None,
+            to_prompt_id: Some(entry_id),
+        };
+        ws.client.rewind(&req).await?;
+
+        let state_res = ws.client.state().await;
+        let state = state_res.data.ok_or_else(|| {
+            format!(
+                "rewind succeeded but state refresh failed ({}): {}",
+                state_res.status,
+                state_res.error.as_deref().unwrap_or("")
+            )
+        })?;
+        *ws.last_state.write() = Some(state);
+        let ctx = DriverMapCtx {
+            session_ref: ws.session_ref.clone(),
+            workspace: ws.workspace.clone(),
+            last_state: ws.last_state.read().clone(),
+            monitor_mode: *ws.monitor_mode.lock(),
+            autodrain_enabled: *ws.autodrain_enabled.lock(),
+        };
+        let snapshot = ctx.snapshot(ctx.live_status());
+        let history_res = ws.client.history(None, None).await;
+        let history = history_res.data.ok_or_else(|| {
+            format!(
+                "rewind succeeded but transcript refresh failed ({}): {}",
+                history_res.status,
+                history_res.error.as_deref().unwrap_or("")
+            )
+        })?;
+        Ok(BranchResult {
+            seed: PolytokenInner::build_branch_seed(
+                snapshot,
+                &history.items,
+                &HistoryMapCtx {
+                    r#ref: ws.session_ref.clone(),
+                },
+            ),
+            editor_text: Some(editor_text),
+            cancelled: false,
+            aborted: None,
+        })
     }
 
     fn model_catalog_diagnostic(&self) -> Option<ModelCatalogDiagnostic> {
@@ -3887,6 +3914,29 @@ mod tests {
             names
         );
         assert!(names.contains(&"visible.rs"));
+    }
+
+    #[test]
+    fn branch_rewind_preserves_editor_text_lookup() {
+        let history = vec![
+            serde_json::json!({"type":"assistant","prompt_id":"p1","blocks":[]}),
+            serde_json::json!({"type":"user","prompt_id":"p1","content":"edit this prompt"}),
+            serde_json::json!({"type":"user","prompt_id":"p2","content":"later prompt"}),
+        ];
+        assert_eq!(
+            PolytokenInner::user_prompt_text(&history, "p1").as_deref(),
+            Some("edit this prompt")
+        );
+        assert_eq!(PolytokenInner::user_prompt_text(&history, "missing"), None);
+        assert_eq!(REWIND_DOMAINS, ["conversation", "todos", "flags"]);
+    }
+
+    #[test]
+    fn branch_rewind_missing_text_is_non_destructive_precondition() {
+        let history = vec![serde_json::json!({
+            "type":"user", "prompt_id":"p1", "content": {"not":"text"}
+        })];
+        assert!(PolytokenInner::user_prompt_text(&history, "p1").is_none());
     }
 
     #[test]

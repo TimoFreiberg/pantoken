@@ -95,11 +95,29 @@ impl SseFrame {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FixtureProvenanceKind {
+    Captured,
+    SyntheticPublicSchema,
+    SyntheticPantokenRegression,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FixtureProvenance {
+    pub kind: FixtureProvenanceKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daemon_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_method: Option<String>,
+}
+
 /// A full scenario file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScenarioFile {
     pub scenario: String,
     pub version: String,
+    pub provenance: FixtureProvenance,
     #[allow(dead_code)]
     pub description: String,
     pub canonicalization: CanonicalizationManifest,
@@ -167,18 +185,21 @@ pub fn version_dirs() -> Vec<String> {
     dirs
 }
 
-/// The single canonical version dir the corpus ships under. Returns it if
-/// exactly one version dir exists; panics otherwise (the harness assumes a
-/// single frozen version, matching "pin the corpus"). The active fixture is
-/// versioned under `server-rs/tests/corpus/0.5.8`; historical captures are not
-/// retained because this loader intentionally supports one version directory.
-pub fn sole_version() -> String {
+/// Select the active corpus explicitly. Tests and fake mode may override with
+/// `PANTOKEN_CORPUS_VERSION`; otherwise use the public codegen target version.
+/// Historical version directories remain loadable through `version_dirs()`.
+pub fn active_version() -> String {
+    let selected = std::env::var("PANTOKEN_CORPUS_VERSION")
+        .unwrap_or_else(|_| pantoken_daemon_types::POLYTOKEN_DAEMON_TARGET_VERSION.to_string());
     let dirs = version_dirs();
-    assert_eq!(
-        dirs.len(),
-        1,
-        "expected exactly one corpus version dir, found {:?}",
-        dirs
+    assert!(
+        dirs.contains(&selected),
+        "active corpus version {selected:?} missing; available versions: {dirs:?}"
     );
-    dirs.into_iter().next().unwrap()
+    selected
+}
+
+#[deprecated(note = "use active_version; historical corpus versions may coexist")]
+pub fn sole_version() -> String {
+    active_version()
 }

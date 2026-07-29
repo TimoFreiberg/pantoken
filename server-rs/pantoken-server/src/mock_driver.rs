@@ -2517,11 +2517,11 @@ impl PantokenDriver for MockDriver {
         entry_id: String,
         _summarize: bool,
         _session_id: Option<SessionId>,
-    ) -> BranchResult {
+    ) -> Result<BranchResult, String> {
         self.cancel_timers();
         let is_user = entry_id == "e-u1" || entry_id == "e-u2";
         if is_user {
-            return BranchResult {
+            return Ok(BranchResult {
                 seed: branched_seed(),
                 editor_text: Some(if entry_id == "e-u1" {
                     GREETING_PROMPT.into()
@@ -2530,14 +2530,14 @@ impl PantokenDriver for MockDriver {
                 }),
                 cancelled: false,
                 aborted: None,
-            };
+            });
         }
-        BranchResult {
+        Ok(BranchResult {
             seed: greeting_seed(),
             editor_text: None,
             cancelled: false,
             aborted: None,
-        }
+        })
     }
 
     async fn new_session(

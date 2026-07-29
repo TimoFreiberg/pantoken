@@ -23,8 +23,8 @@ mod support;
 // `support::corpus` and are shared with the fake-daemon harness. The
 // canonicalization machinery below is corpus-test-only.
 use support::corpus::{
-    CanonicalizationManifest, HttpEntry, ScenarioFile, SseFrame, corpus_dir, load_scenario,
-    scenario_files, version_dirs,
+    CanonicalizationManifest, FixtureProvenance, FixtureProvenanceKind, HttpEntry, ScenarioFile,
+    SseFrame, corpus_dir, load_scenario, scenario_files, version_dirs,
 };
 
 // ---------------------------------------------------------------------------
@@ -427,12 +427,30 @@ fn capture_corpus_writes_required_sections() {
             assert!(!scenario.http.is_empty(), "{name}: http[] empty");
             assert!(!scenario.sse.is_empty(), "{name}: sse[] empty");
 
-            // expected_driver_events must be null in Phase 2.0.5 (not fabricated).
-            // `null` deserializes to `None` for `Option<Value>`.
-            assert!(
-                scenario.expected_driver_events.is_none(),
-                "{name}: expected_driver_events must be null in Phase 2.0.5"
-            );
+            match scenario.provenance.kind {
+                FixtureProvenanceKind::Captured => {
+                    assert_eq!(
+                        scenario.provenance.daemon_version.as_deref(),
+                        Some(scenario.version.as_str()),
+                        "{name}: captured fixture must name its daemon version"
+                    );
+                    assert!(
+                        scenario
+                            .provenance
+                            .capture_method
+                            .as_deref()
+                            .is_some_and(|method| !method.trim().is_empty()),
+                        "{name}: captured fixture must name its capture method"
+                    );
+                }
+                FixtureProvenanceKind::SyntheticPublicSchema
+                | FixtureProvenanceKind::SyntheticPantokenRegression => {
+                    assert!(
+                        scenario.provenance.capture_method.is_none(),
+                        "{name}: synthetic fixture must not claim a capture method"
+                    );
+                }
+            }
         }
     }
 }
@@ -450,6 +468,14 @@ const RAW_PROMPT: &str = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 /// A different UUID-shaped value that is NOT a prompt id (a call_id / item_id).
 const RAW_CALL_ID: &str = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 
+fn synthetic_provenance() -> FixtureProvenance {
+    FixtureProvenance {
+        kind: FixtureProvenanceKind::SyntheticPantokenRegression,
+        daemon_version: None,
+        capture_method: None,
+    }
+}
+
 #[test]
 fn canon_prompt_dedupes_repeated_uuid_to_one_placeholder() {
     // The same raw prompt id appears 3×: in an HTTP body (PromptAccepted) and in
@@ -458,6 +484,7 @@ fn canon_prompt_dedupes_repeated_uuid_to_one_placeholder() {
     let mut scenario = ScenarioFile {
         scenario: "dedupe-probe".to_string(),
         version: "0.5.8".to_string(),
+        provenance: synthetic_provenance(),
         description: "synthetic".to_string(),
         canonicalization: CanonicalizationManifest {
             session_id: "SESSION".to_string(),
@@ -529,6 +556,7 @@ fn canon_leaves_uuid_shaped_non_prompt_ids_untouched() {
     let mut scenario = ScenarioFile {
         scenario: "non-prompt-probe".to_string(),
         version: "0.5.8".to_string(),
+        provenance: synthetic_provenance(),
         description: "synthetic".to_string(),
         canonicalization: CanonicalizationManifest {
             session_id: "SESSION".to_string(),
@@ -582,6 +610,7 @@ fn canon_maps_plural_prompt_id_arrays() {
     let mut scenario = ScenarioFile {
         scenario: "plural-probe".to_string(),
         version: "0.5.8".to_string(),
+        provenance: synthetic_provenance(),
         description: "synthetic".to_string(),
         canonicalization: CanonicalizationManifest {
             session_id: "SESSION".to_string(),

@@ -84,14 +84,14 @@ function readStartupJson(
   }
 }
 
-const CORPUS_VERSION = "0.5.8";
-const CORPUS_DIR = join(
+const DEFAULT_CORPUS_VERSION = "0.5.8";
+const DEFAULT_CORPUS_DIR = join(
   SCRIPT_DIR,
   "..",
   "server-rs",
   "tests",
   "corpus",
-  CORPUS_VERSION,
+  DEFAULT_CORPUS_VERSION,
 );
 
 // ─── Canonicalization (mirrors server-rs/pantoken-server/tests/corpus.rs) ────────
@@ -248,6 +248,11 @@ interface SseFrame {
 interface ScenarioFile {
   scenario: string;
   version: string;
+  provenance: {
+    kind: "captured" | "synthetic_public_schema" | "synthetic_pantoken_regression";
+    daemon_version?: string;
+    capture_method?: string;
+  };
   description: string;
   canonicalization: {
     session_id: string;
@@ -316,6 +321,8 @@ function assertScenarioFile(value: unknown, file: string): asserts value is Scen
   if (
     typeof scenario.scenario !== "string" ||
     typeof scenario.version !== "string" ||
+    scenario.provenance === null ||
+    typeof scenario.provenance !== "object" ||
     typeof scenario.description !== "string" ||
     scenario.canonicalization === null ||
     typeof scenario.canonicalization !== "object" ||
@@ -339,6 +346,7 @@ function recanonFile(file: string): void {
   const out: ScenarioFile = {
     scenario: parsed.scenario,
     version: parsed.version,
+    provenance: parsed.provenance,
     description: parsed.description,
     canonicalization: {
       session_id: "SESSION",
@@ -359,13 +367,13 @@ function recanonFile(file: string): void {
 function recanonCorpus(args: string[]): void {
   const files =
     args.length === 0
-      ? readdirSync(CORPUS_DIR)
+      ? readdirSync(DEFAULT_CORPUS_DIR)
           .filter((name) => name.endsWith(".json"))
           .sort()
-          .map((name) => join(CORPUS_DIR, name))
+          .map((name) => join(DEFAULT_CORPUS_DIR, name))
       : args.map(recanonPath);
   if (files.length === 0) {
-    throw new Error(`no .json files to recanonicalize in ${CORPUS_DIR}`);
+    throw new Error(`no .json files to recanonicalize in ${DEFAULT_CORPUS_DIR}`);
   }
   for (const file of files) recanonFile(file);
 }
@@ -789,6 +797,17 @@ const SCENARIOS: Record<string, Scenario> = {
 
 // ─── main ────────────────────────────────────────────────────────────────────
 
+export function captureTarget(version: string, scenario: string, force: boolean): string {
+  const dir = join(SCRIPT_DIR, "..", "server-rs", "tests", "corpus", version);
+  const target = join(dir, `${scenario}.json`);
+  if (existsSync(target) && !force) {
+    throw new Error(
+      `refusing to overwrite existing capture ${target}; pass --force only after explicit review`,
+    );
+  }
+  return target;
+}
+
 async function main() {
   const [scenarioName, ...rest] = process.argv.slice(2);
   if (scenarioName === "--recanon") {
@@ -796,14 +815,22 @@ async function main() {
     return;
   }
   const write = rest.includes("--write");
-  if (!scenarioName || !(scenarioName in SCENARIOS)) {
+  const force = rest.includes("--force");
+  const versionIndex = rest.indexOf("--version");
+  const version = versionIndex >= 0 ? rest[versionIndex + 1] : undefined;
+  if (!scenarioName || !(scenarioName in SCENARIOS) || !write || !version) {
     console.error(
-      `usage: just capture-daemon-corpus <scenario> [--write]\n` +
+      `usage: just capture-daemon-corpus <scenario> --version <daemon-version> --write [--force]\n` +
         `       just capture-daemon-corpus --recanon [file...]\n` +
+        `live capture can spend provider tokens and is never a normal test step\n` +
         `scenarios: ${Object.keys(SCENARIOS).join(", ")}`,
     );
     process.exit(1);
   }
+  const target = captureTarget(version, scenarioName, force);
+  console.error(
+    `WARNING: capturing ${scenarioName} against daemon ${version} can spend provider tokens.`,
+  );
   const scenario = SCENARIOS[scenarioName]!;
   const p = paths();
 
@@ -880,7 +907,12 @@ async function main() {
   const { http: cHttp, sse: cSse, manifest } = canonicalizeScenario(http, sse);
   const out: ScenarioFile = {
     scenario: scenarioName,
-    version: CORPUS_VERSION,
+    version,
+    provenance: {
+      kind: "captured",
+      daemon_version: version,
+      capture_method: "public_http_sse_capture_script",
+    },
     description: scenario.description,
     canonicalization: {
       session_id: "SESSION",
@@ -893,21 +925,15 @@ async function main() {
   };
   const json = `${JSON.stringify(out, null, 2)}\n`;
 
-  if (write) {
-    mkdirSync(CORPUS_DIR, { recursive: true });
-    const target = join(CORPUS_DIR, `${scenarioName}.json`);
-    writeFileSync(target, json);
-    console.error(
-      `wrote ${target} (${cSse.length} SSE frames, ${cHttp.length} HTTP calls)`,
-    );
-    console.error(
-      "REVIEW before committing: eyeball the diff, then run `cargo test --test corpus` to " +
-        "confirm it still deserializes into the real DaemonEvent enum.",
-    );
-  } else {
-    process.stdout.write(json);
-    console.error(`\n(dry run — re-run with --write to save to ${CORPUS_DIR})`);
-  }
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, json);
+  console.error(
+    `wrote ${target} (${cSse.length} SSE frames, ${cHttp.length} HTTP calls)`,
+  );
+  console.error(
+    "REVIEW before committing: eyeball the diff, then run the corpus tests to " +
+      "confirm it still deserializes into the real DaemonEvent enum.",
+  );
 }
 
 // Only auto-run the capture CLI when invoked directly. Guarding on

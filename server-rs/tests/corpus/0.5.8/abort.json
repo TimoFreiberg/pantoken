@@ -1,6 +1,7 @@
 {
   "scenario": "abort",
   "version": "0.5.8",
+  "provenance": { "kind": "synthetic_pantoken_regression" },
   "description": "A streaming turn aborted mid-flight via POST /turn/cancel → turn_cancelled (user_cancelled).",
   "canonicalization": {
     "session_id": "SESSION",

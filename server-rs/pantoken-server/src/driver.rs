@@ -151,8 +151,8 @@ pub trait PantokenDriver: Send + Sync {
         _entry_id: String,
         _summarize: bool,
         _session_id: Option<SessionId>,
-    ) -> BranchResult {
-        BranchResult::default()
+    ) -> Result<BranchResult, String> {
+        Err("branching is not supported by this driver".to_string())
     }
 
     /// The current context-window fill for a (warm) session.

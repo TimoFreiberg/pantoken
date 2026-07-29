@@ -1,6 +1,7 @@
 {
   "scenario": "canon-parity",
   "version": "0.4.0-unstable.7",
+  "provenance": { "kind": "synthetic_pantoken_regression" },
   "description": "Synthetic non-canonical fixture for Rust/TS canonicalization parity.",
   "canonicalization": {
     "session_id": "raw-session-123",

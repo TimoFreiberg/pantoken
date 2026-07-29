@@ -1,6 +1,7 @@
 {
   "scenario": "streaming-turn",
   "version": "0.5.8",
+  "provenance": { "kind": "synthetic_pantoken_regression" },
   "description": "A complete assistant turn: prompt → streamed text deltas → message_complete. The baseline happy-path streaming sequence.",
   "canonicalization": {
     "session_id": "SESSION",

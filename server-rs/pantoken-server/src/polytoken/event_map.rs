@@ -1371,6 +1371,81 @@ fn annotate_subagent_handle(result: &mut FoldResult, handle: Option<&str>) {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventDisposition {
+    Mapped,
+    StateRefetch,
+    Reseed,
+    UserNotice,
+    IntentionalNoop,
+}
+
+/// Explicit Pantoken product disposition for every generated daemon event.
+/// This is deliberately separate from wire deserialization: accepting an event
+/// is not proof that Pantoken either surfaces or intentionally ignores it.
+pub fn event_disposition(event: &DaemonEvent) -> EventDisposition {
+    use EventDisposition::*;
+    match event {
+        DaemonEvent::MessageStart { .. }
+        | DaemonEvent::ContentBlockStart { .. }
+        | DaemonEvent::ContentBlockDelta { .. }
+        | DaemonEvent::ContentBlockStop { .. }
+        | DaemonEvent::ToolCall { .. }
+        | DaemonEvent::ToolResult { .. }
+        | DaemonEvent::PendingTurnInputDrained { .. }
+        | DaemonEvent::SessionTitleChanged { .. }
+        | DaemonEvent::ModelSwitch { .. }
+        | DaemonEvent::PermissionMonitorSwitch { .. }
+        | DaemonEvent::Interrogative { .. }
+        | DaemonEvent::AskUserQuestion { .. }
+        | DaemonEvent::NotificationAutodrainSwitch { .. }
+        | DaemonEvent::GoalDriverUpdate { .. }
+        | DaemonEvent::HookFired { .. } => Mapped,
+        DaemonEvent::MessageComplete { .. }
+        | DaemonEvent::TurnCancelled { .. }
+        | DaemonEvent::PendingTurnInputQueued { .. }
+        | DaemonEvent::PendingTurnInputDequeued { .. }
+        | DaemonEvent::PendingTurnInputDiscarded { .. }
+        | DaemonEvent::SessionStateChanged { .. }
+        | DaemonEvent::FacetSwitch { .. }
+        | DaemonEvent::CompactionComplete { .. }
+        | DaemonEvent::SubagentStarted { .. }
+        | DaemonEvent::SubagentCompleted { .. } => StateRefetch,
+        DaemonEvent::StreamDiscontinuity { .. }
+        | DaemonEvent::SessionRewound { .. }
+        | DaemonEvent::ContextCleared { .. } => Reseed,
+        DaemonEvent::ModelError { .. }
+        | DaemonEvent::RetryWait { .. }
+        | DaemonEvent::AgentBlockViolation { .. }
+        | DaemonEvent::ToolExposureChanged { .. }
+        | DaemonEvent::CompactionStarted { .. }
+        | DaemonEvent::CompactionCancelled { .. }
+        | DaemonEvent::CompactionFailed { .. }
+        | DaemonEvent::SubagentCompactionNotice { .. }
+        | DaemonEvent::NotificationQueued { .. }
+        | DaemonEvent::SystemReminder { .. }
+        | DaemonEvent::McpServerConnected { .. }
+        | DaemonEvent::McpServerDisconnected { .. }
+        | DaemonEvent::McpServerReconnecting { .. }
+        | DaemonEvent::McpServerDisabled { .. } => UserNotice,
+        DaemonEvent::Heartbeat { .. }
+        | DaemonEvent::JobPromoted { .. }
+        | DaemonEvent::JobCompleted { .. }
+        | DaemonEvent::JobExpiring { .. }
+        | DaemonEvent::JobCancelled { .. }
+        | DaemonEvent::JobUpdated { .. }
+        | DaemonEvent::ContextLoaded { .. }
+        | DaemonEvent::CompactionRetry { .. }
+        | DaemonEvent::NotificationsDrained { .. }
+        | DaemonEvent::ToolReveal { .. }
+        | DaemonEvent::ClassifierDecision { .. }
+        | DaemonEvent::ExtensionRegistered { .. }
+        | DaemonEvent::SubagentMessaged { .. }
+        | DaemonEvent::ImageReferenceResolved { .. }
+        | DaemonEvent::UsageThrottle { .. } => IntentionalNoop,
+    }
+}
+
 /// Map one daemon event to zero or more pantoken events + side-effect descriptors.
 /// Nested output is emitted with its exact daemon handle instead of being dropped.
 pub fn map_daemon_event(

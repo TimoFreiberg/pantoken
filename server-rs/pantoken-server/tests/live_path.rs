@@ -17,7 +17,9 @@ mod support;
 use std::sync::Arc;
 
 use pantoken_daemon_types::SseEnvelope;
-use pantoken_protocol::session_driver::{SessionDriverEvent, SessionRef, WorkspaceRef};
+use pantoken_protocol::session_driver::{
+    SessionDriverEvent, SessionRef, SessionStatus, WorkspaceRef,
+};
 use tokio::sync::Mutex;
 
 use pantoken_server::driver::{NewSessionModel, NewSessionOptsData, PantokenDriver};
@@ -775,7 +777,7 @@ async fn dev_surface_run_script_pushes_scenario() {
 /// This is the load-bearing proof that `warm_session` → `subscribe` →
 /// `handle_sse_event` → `emit` is live end-to-end.
 #[tokio::test]
-async fn warm_session_subscribes_and_folds_sse() {
+async fn attach_subscribes_before_snapshot_and_delivers_buffered_event_once() {
     let _guard = OVERRIDE_MUTEX.lock().await;
 
     let scenario = corpus_loader::load_named(VERSION, "streaming-turn");
@@ -792,22 +794,81 @@ async fn warm_session_subscribes_and_folds_sse() {
         .await
         .expect("new_session");
 
-    // Wait for a SessionUpdated from the SSE path. `message_start` (frame 2)
-    // emits one with status Running. Timeout so a dead SSE path fails the test
-    // rather than hanging.
-    let mut got_session_updated = false;
+    let calls = fake.recorded_calls();
+    let events_pos = calls
+        .iter()
+        .position(|(method, path)| method == "GET" && path == "/events")
+        .expect("/events requested");
+    let state_pos = calls
+        .iter()
+        .position(|(method, path)| method == "GET" && path == "/state")
+        .expect("/state requested");
+    assert!(
+        events_pos < state_pos,
+        "/events must connect before hydration: {calls:?}"
+    );
+
+    // `message_start` emits the only Running SessionUpdated in this scenario.
+    // Drain through turn completion and assert it was delivered exactly once,
+    // proving the pre-hydration buffer neither loses nor duplicates envelopes.
+    let mut running_updates = 0;
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     while let Ok(Some(ev)) = tokio::time::timeout_at(deadline, rx.recv()).await {
-        if matches!(ev, SessionDriverEvent::SessionUpdated { .. }) {
-            got_session_updated = true;
-            break;
+        match ev {
+            SessionDriverEvent::SessionUpdated { snapshot, .. }
+                if snapshot.status == SessionStatus::Running =>
+            {
+                running_updates += 1;
+            }
+            SessionDriverEvent::RunCompleted { .. } => break,
+            _ => {}
         }
     }
+    assert_eq!(
+        running_updates, 1,
+        "buffered message_start must be delivered exactly once; calls: {calls:?}"
+    );
+}
+
+#[tokio::test]
+async fn attach_failure_tears_down_subscription_lease_and_does_not_install_warm_session() {
+    let _guard = OVERRIDE_MUTEX.lock().await;
+
+    let mut scenario = corpus_loader::load_named(VERSION, "streaming-turn");
+    let state = scenario
+        .http
+        .iter_mut()
+        .find(|entry| entry.method == "GET" && entry.path == "/state")
+        .expect("state recording");
+    state.status = 200;
+    state.response_body = Some(serde_json::json!({"malformed": true}));
+    let fake = Arc::new(fake_daemon::spawn(scenario, "failed-attach".into(), 0).await);
+    let _ovr = OverrideGuard::install(fake.clone());
+    let (driver, _dir) = make_driver().await;
+
+    let error = driver
+        .new_session(NewSessionOptsData::default())
+        .await
+        .expect_err("malformed state must fail hydration");
+    assert!(error.contains("GET /state hydration failed"), "{error}");
     assert!(
-        got_session_updated,
-        "warm session did not emit a SessionUpdated from SSE; the SSE fold is not live. \
-         calls: {:?}",
+        fake.called("DELETE", "/tui-attachment/lease-1"),
+        "failed hydration must release the lease: {:?}",
         fake.recorded_calls()
+    );
+    assert_eq!(
+        fake.recorded_calls()
+            .iter()
+            .filter(|(method, path)| method == "GET" && path == "/events")
+            .count(),
+        1,
+        "failed hydration must not reconnect or leave a second subscription"
+    );
+    assert!(
+        driver
+            .get_usage(Some("failed-attach".to_string()))
+            .is_none(),
+        "failed hydration must not install a warm session"
     );
 }
 
@@ -1184,6 +1245,7 @@ fn minimal_state_scenario(name: &str, turn_in_flight: bool) -> ScenarioFile {
     let json_str = json!({
         "scenario": name,
         "version": "test",
+        "provenance": {"kind": "synthetic_pantoken_regression"},
         "description": "minimal state/history scenario for multi-spawn harness tests",
         "canonicalization": {
             "session_id": "SESSION",
@@ -1283,6 +1345,7 @@ fn synthetic_ordering_scenario(n: usize) -> ScenarioFile {
     let json_str = json!({
         "scenario": "synthetic-ordering",
         "version": "test",
+        "provenance": {"kind": "synthetic_pantoken_regression"},
         "description": "N ordered text deltas",
         "canonicalization": {
             "session_id": "SESSION",
@@ -2282,6 +2345,7 @@ fn streaming_turn_with_in_flight_scenario() -> ScenarioFile {
     let json_str = json!({
         "scenario": "streaming-turn-in-flight",
         "version": "test",
+        "provenance": {"kind": "synthetic_pantoken_regression"},
         "description": "streaming-turn SSE frames + turn_in_flight:true /state",
         "canonicalization": {
             "session_id": "SESSION",

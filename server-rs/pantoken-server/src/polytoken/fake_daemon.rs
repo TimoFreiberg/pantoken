@@ -261,6 +261,7 @@ fn bootstrap_scenario(version: &str) -> ScenarioFile {
     let json_str = serde_json::json!({
         "scenario": "bootstrap-idle",
         "version": version,
+        "provenance": {"kind": "synthetic_pantoken_regression"},
         "description": "idle empty landing session for fake-mode bootstrap",
         "canonicalization": {
             "session_id": "SESSION",
@@ -334,7 +335,7 @@ struct FakeControlInner {
 
 impl FakeControlHub {
     pub fn load_default() -> Self {
-        let version = corpus::sole_version();
+        let version = corpus::active_version();
         let mut scenarios = HashMap::new();
         for file in corpus::scenario_files(&version) {
             let scenario = corpus::load_scenario(&file);
@@ -788,6 +789,13 @@ fn frame_to_event(frame: &corpus::SseFrame) -> Event {
 async fn sse_handler(
     State(app): State<AppState>,
 ) -> Sse<ReceiverStream<Result<Event, std::convert::Infallible>>> {
+    {
+        let mut state = app.state.lock();
+        state.calls.push(("GET".to_string(), "/events".to_string()));
+        state
+            .request_bodies
+            .push(("GET".to_string(), "/events".to_string(), String::new()));
+    }
     let (tx, rx) = mpsc::channel::<Result<Event, std::convert::Infallible>>(64);
     match app.sse_mode.clone() {
         SseMode::OneShot {

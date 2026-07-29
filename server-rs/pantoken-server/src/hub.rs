@@ -1652,6 +1652,7 @@ impl SessionHub {
                                             target_id,
                                         )
                                         .await;
+                                    let result = result?;
                                     if let Some(text) = result.editor_text {
                                         *prefill_clone.lock() = Some(text);
                                     }

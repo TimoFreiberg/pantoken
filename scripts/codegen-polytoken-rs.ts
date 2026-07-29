@@ -364,6 +364,13 @@ async function main() {
   }
 
   // Generate Rust types
+  const daemonEventNames = (schemas["DaemonEvent"]?.oneOf || []).flatMap((variant) => {
+    const discriminant = variant.properties?.["type"] || variant.properties?.["kind"];
+    const name = discriminant?.enum?.[0];
+    return typeof name === "string" ? [name] : [];
+  });
+  const daemonEventNamesRust = daemonEventNames.map((name) => `    "${name}",`).join("\n");
+
   const parts: string[] = [
     `//! Auto-generated daemon wire types from \`polytoken openapi\`.
 //!
@@ -394,6 +401,13 @@ async function main() {
 //! in the OpenAPI spec (which is a static "0.1.0"). The live corpus tests are the
 //! true spec-drift gate.
 pub const POLYTOKEN_DAEMON_TARGET_VERSION: &str = "${daemonVersion}";
+
+/// Public-schema-derived wire names for every current \`DaemonEvent\` variant.
+/// Handwritten compatibility code compares its explicit dispositions to this
+/// constant so a newly generated event cannot remain silently unclassified.
+pub const DAEMON_EVENT_VARIANT_NAMES: &[&str] = &[
+${daemonEventNamesRust}
+];
 `,
   ];
 

@@ -1,6 +1,7 @@
 {
   "scenario": "tool-call-approval",
   "version": "0.5.8",
+  "provenance": { "kind": "synthetic_pantoken_regression" },
   "description": "A turn that calls a tool requiring approval → interrogative (permission) → approve → tool_result → message_complete.",
   "canonicalization": {
     "session_id": "SESSION",

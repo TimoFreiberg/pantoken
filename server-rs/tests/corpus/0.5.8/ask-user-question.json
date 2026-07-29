@@ -1,6 +1,7 @@
 {
   "scenario": "ask-user-question",
   "version": "0.5.8",
+  "provenance": { "kind": "synthetic_pantoken_regression" },
   "description": "A turn where the model asks the user a structured question (ask_user_question interrogative) → the user answers → message_complete.",
   "canonicalization": {
     "session_id": "SESSION",

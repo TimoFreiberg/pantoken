@@ -1112,6 +1112,29 @@ pub struct DaemonResponse<T> {
     pub error: Option<String>,
 }
 
+/// Format a daemon command failure without discarding its public error code/message.
+/// Error responses arrive as bounded raw text from the shared HTTP layer, so decode
+/// the public `ErrorBody` shape when possible and otherwise retain the raw detail.
+fn format_daemon_response_error(operation: &str, status: u16, detail: Option<&str>) -> String {
+    let detail = detail.unwrap_or("").trim();
+    let public_detail = serde_json::from_str::<serde_json::Value>(detail)
+        .ok()
+        .and_then(|body| {
+            let message = body.get("message").and_then(serde_json::Value::as_str)?;
+            let code = body.get("code").and_then(serde_json::Value::as_str);
+            Some(match code {
+                Some(code) if !code.is_empty() => format!("{message} ({code})"),
+                _ => message.to_string(),
+            })
+        })
+        .unwrap_or_else(|| detail.to_string());
+    if public_detail.is_empty() {
+        format!("{operation} failed ({status})")
+    } else {
+        format!("{operation} failed ({status}): {public_detail}")
+    }
+}
+
 /// Internal handle for cancelling an SSE subscription. Uses a `Notify` so both
 /// `close()` and `SseSubscription::stop()` can signal the stream loop.
 struct CancelHandle {
@@ -1423,11 +1446,18 @@ impl DaemonClient {
                 let error = if status < 400 {
                     None
                 } else {
-                    // Try to extract a `message` field from the parsed body.
-                    let parsed_msg = serde_json::from_str::<serde_json::Value>(&text)
+                    // Preserve the daemon's public message and machine-actionable code.
+                    let parsed_error = serde_json::from_str::<serde_json::Value>(&text)
                         .ok()
-                        .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(String::from));
-                    Some(parsed_msg.unwrap_or_else(|| text[..text.len().min(200)].to_string()))
+                        .and_then(|value| {
+                            let message = value.get("message")?.as_str()?;
+                            let code = value.get("code").and_then(serde_json::Value::as_str);
+                            Some(match code {
+                                Some(code) if !code.is_empty() => format!("{message} ({code})"),
+                                _ => message.to_string(),
+                            })
+                        });
+                    Some(parsed_error.unwrap_or_else(|| text[..text.len().min(200)].to_string()))
                 };
                 DaemonResponse {
                     status,
@@ -1505,10 +1535,14 @@ impl DaemonClient {
     /// `POST /terminate` — graceful drain + exit.
     pub async fn terminate(&self) -> Result<(), String> {
         let body = self.post::<serde_json::Value>("/terminate", None).await;
-        if body.status == 0 {
-            return Err(body.error.unwrap_or_default());
+        if body.status == 200 {
+            return Ok(());
         }
-        Ok(())
+        Err(format_daemon_response_error(
+            "POST /terminate",
+            body.status,
+            body.error.as_deref(),
+        ))
     }
 
     /// Hard-kill the daemon process (SIGTERM → SIGKILL fallback). Used when HTTP
@@ -2394,7 +2428,20 @@ impl DaemonClient {
         self: &Arc<Self>,
         on_event: impl Fn(SseEnvelope) + Send + Sync + 'static,
     ) -> SseSubscription {
+        let (subscription, _connected) = self.subscribe_connected(on_event).await;
+        subscription
+    }
+
+    /// Start an SSE subscription and return a one-shot readiness signal for the
+    /// initial successful HTTP connection. Attach hydration awaits this signal so
+    /// snapshots can never race ahead of `/events`; later reconnects retain the
+    /// normal backoff/discontinuity behavior.
+    pub async fn subscribe_connected(
+        self: &Arc<Self>,
+        on_event: impl Fn(SseEnvelope) + Send + Sync + 'static,
+    ) -> (SseSubscription, oneshot::Receiver<Result<(), String>>) {
         let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
+        let (connected_tx, connected_rx) = oneshot::channel::<Result<(), String>>();
         // Store the cancel sender in sse_cancel so close() can abort the stream.
         // We also keep one for the returned SseSubscription — but oneshot::Sender
         // isn't Clone, so we use a shared CancellationToken pattern: store ours in
@@ -2421,15 +2468,24 @@ impl DaemonClient {
         let notify_for_loop = notify.clone();
         let join_handle = tokio::spawn(async move {
             client
-                .sse_loop(on_event, notify_for_loop, cancel_rx, heartbeat_timeout)
+                .sse_loop(
+                    on_event,
+                    notify_for_loop,
+                    cancel_rx,
+                    heartbeat_timeout,
+                    Some(connected_tx),
+                )
                 .await;
         });
 
-        SseSubscription {
-            join_handle,
-            cancel: Some(cancel_tx),
-            notify: Some(notify),
-        }
+        (
+            SseSubscription {
+                join_handle,
+                cancel: Some(cancel_tx),
+                notify: Some(notify),
+            },
+            connected_rx,
+        )
     }
 
     #[expect(
@@ -2442,6 +2498,7 @@ impl DaemonClient {
         stop_notify: Arc<tokio::sync::Notify>,
         mut cancel_rx: oneshot::Receiver<()>,
         heartbeat_timeout: u64,
+        mut initial_connected: Option<oneshot::Sender<Result<(), String>>>,
     ) where
         F: Fn(SseEnvelope) + Send + Sync + 'static,
     {
@@ -2481,6 +2538,10 @@ impl DaemonClient {
 
             let response = match response_result {
                 Err(e) => {
+                    if let Some(connected) = initial_connected.take() {
+                        let _ = connected.send(Err(format!("GET /events failed: {e}")));
+                        break;
+                    }
                     if !stopped {
                         error!("[polytoken] SSE error: {}; retry in {}ms", e, state.backoff);
                     }
@@ -2498,6 +2559,10 @@ impl DaemonClient {
 
             if !response.status().is_success() {
                 let status = response.status();
+                if let Some(connected) = initial_connected.take() {
+                    let _ = connected.send(Err(format!("GET /events failed ({status})")));
+                    break;
+                }
                 if !stopped {
                     error!(
                         "[polytoken] SSE connect failed: {status}; retry in {}ms",
@@ -2512,6 +2577,10 @@ impl DaemonClient {
                     }
                 }
                 continue;
+            }
+
+            if let Some(connected) = initial_connected.take() {
+                let _ = connected.send(Ok(()));
             }
 
             // Reconnected successfully.
@@ -2760,6 +2829,73 @@ pub fn _set_spawn_for_testing(_enabled: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn terminate_rejects_http_errors() {
+        use std::sync::{Arc, Mutex};
+
+        use axum::{
+            Router, extract::State, http::HeaderMap, response::IntoResponse, routing::post,
+        };
+        use tokio::net::TcpListener;
+
+        #[derive(Clone)]
+        struct TestState {
+            status: u16,
+            saw_auth: Arc<Mutex<bool>>,
+        }
+
+        for (status, should_succeed) in [(200, true), (401, false), (409, false), (500, false)] {
+            let saw_auth = Arc::new(Mutex::new(false));
+            let state = TestState {
+                status,
+                saw_auth: saw_auth.clone(),
+            };
+            let app = Router::new()
+                .route(
+                    "/terminate",
+                    post(
+                        |State(state): State<TestState>, headers: HeaderMap| async move {
+                            *state.saw_auth.lock().unwrap() = headers
+                                .get("authorization")
+                                .and_then(|value| value.to_str().ok())
+                                == Some("Bearer test-token");
+                            let body = serde_json::json!({
+                                "code": "terminate_rejected",
+                                "message": "termination rejected"
+                            });
+                            (
+                                axum::http::StatusCode::from_u16(state.status).unwrap(),
+                                body.to_string(),
+                            )
+                                .into_response()
+                        },
+                    ),
+                )
+                .with_state(state);
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let client = DaemonClient::new("session".into(), port, 1, Some("test-token".into()));
+
+            let result = client.terminate().await;
+            assert_eq!(
+                result.is_ok(),
+                should_succeed,
+                "status {status}: {result:?}"
+            );
+            assert!(
+                *saw_auth.lock().unwrap(),
+                "status {status}: bearer auth missing"
+            );
+            if !should_succeed {
+                let error = result.unwrap_err();
+                assert!(error.contains("termination rejected"), "{error}");
+                assert!(error.contains("terminate_rejected"), "{error}");
+            }
+            server.abort();
+        }
+    }
 
     // A missing binary must be named as such — the bare OS "No such file or
     // directory" reads like a missing project dir (see restore_error.rs).

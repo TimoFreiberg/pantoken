@@ -1,6 +1,7 @@
 {
   "scenario": "queue-while-in-flight",
   "version": "0.5.8",
+  "provenance": { "kind": "synthetic_pantoken_regression" },
   "description": "A prompt sent while a turn is in flight → daemon auto-queues it (202 + queued_item, NOT 409); the queue drains and the queued turn runs. Verifies AC.3 against real daemon behavior.",
   "canonicalization": {
     "session_id": "SESSION",

@@ -27,6 +27,26 @@ fn target_version_is_0_5_8() {
 }
 
 #[test]
+fn generated_daemon_event_names_match_public_schema() {
+    let spec: Value = serde_json::from_str(OPENAPI).expect("valid OpenAPI fixture");
+    let expected: Vec<&str> = spec["components"]["schemas"]["DaemonEvent"]["oneOf"]
+        .as_array()
+        .expect("DaemonEvent.oneOf")
+        .iter()
+        .map(|variant| {
+            variant["properties"]
+                .get("type")
+                .or_else(|| variant["properties"].get("kind"))
+                .and_then(|discriminator| discriminator["enum"].as_array())
+                .and_then(|values| values.first())
+                .and_then(Value::as_str)
+                .expect("single string event discriminator")
+        })
+        .collect();
+    assert_eq!(pantoken_daemon_types::DAEMON_EVENT_VARIANT_NAMES, expected);
+}
+
+#[test]
 fn generated_schema_names_match_0_5_8_spec() {
     let spec: Value = serde_json::from_str(OPENAPI).expect("valid OpenAPI fixture");
     let schemas = spec["components"]["schemas"]
