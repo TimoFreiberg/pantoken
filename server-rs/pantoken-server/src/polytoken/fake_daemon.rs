@@ -95,7 +95,7 @@ fn canned(method: &str, path: &str) -> Option<(StatusCode, Value)> {
     // Idempotent → 204 No Content (empty body).
     if m == "DELETE"
         && p.strip_prefix("/tui-attachment/")
-            .is_some_and(|lease_id| !lease_id.is_empty() && !lease_id.contains('/'))
+            .is_some_and(|lease_id| !lease_id.is_empty() && !lease_id.contains(['/', '?', '#']))
     {
         return Some((StatusCode::NO_CONTENT, Value::Null));
     }
@@ -1106,7 +1106,13 @@ async fn http_handler(
     req: Request,
 ) -> Response {
     let method = req.method().to_string();
-    let path = req.uri().path().to_string();
+    // Keep the normalized path+query as the contract key. This preserves query
+    // matching for declared expectations and prevents bootstrap fallbacks from
+    // silently accepting an undeclared query-bearing request.
+    let path = req.uri().path_and_query().map_or_else(
+        || req.uri().path().to_string(),
+        |value| value.as_str().to_string(),
+    );
     let request_body = axum::body::to_bytes(req.into_body(), usize::MAX)
         .await
         .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
@@ -1332,11 +1338,41 @@ mod tests {
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
         strict.assert_expectations_consumed().unwrap();
 
-        let wrapped = spawn_strict_with_bootstrap(empty, "strict-with-bootstrap".into(), 0).await;
+        let wrapped =
+            spawn_strict_with_bootstrap(empty.clone(), "strict-with-bootstrap".into(), 0).await;
         let response = reqwest::get(format!("http://127.0.0.1:{}/health", wrapped.port))
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+        let response = reqwest::Client::new()
+            .delete(format!(
+                "http://127.0.0.1:{}/tui-attachment/lease-1?unexpected=1",
+                wrapped.port
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
         wrapped.assert_expectations_consumed().unwrap();
+
+        let declared_query = scenario(serde_json::json!([
+            {
+                "method": "DELETE",
+                "path": "/tui-attachment/lease-1?expected=1",
+                "status": 204
+            }
+        ]));
+        let declared =
+            spawn_strict_with_bootstrap(declared_query, "declared-query".into(), 0).await;
+        let response = reqwest::Client::new()
+            .delete(format!(
+                "http://127.0.0.1:{}/tui-attachment/lease-1?expected=1",
+                declared.port
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        declared.assert_expectations_consumed().unwrap();
     }
 }

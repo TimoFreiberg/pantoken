@@ -1517,70 +1517,78 @@ pub fn event_disposition_for_wire_name(name: &str) -> Option<EventDisposition> {
     })
 }
 
-/// Explicit Pantoken product disposition for every generated daemon event.
-/// This is deliberately separate from wire deserialization: accepting an event
-/// is not proof that Pantoken either surfaces or intentionally ignores it.
-pub fn event_disposition(event: &DaemonEvent) -> EventDisposition {
-    use EventDisposition::*;
+/// Return the public wire name for every generated daemon event.
+///
+/// This exhaustive typed match is the compile-time gate for generated enum
+/// drift. It performs no allocation or serialization on the live event path.
+pub fn event_wire_name(event: &DaemonEvent) -> &'static str {
     match event {
-        DaemonEvent::MessageStart { .. }
-        | DaemonEvent::ContentBlockStart { .. }
-        | DaemonEvent::ContentBlockDelta { .. }
-        | DaemonEvent::ContentBlockStop { .. }
-        | DaemonEvent::ToolCall { .. }
-        | DaemonEvent::ToolResult { .. }
-        | DaemonEvent::PendingTurnInputDrained { .. }
-        | DaemonEvent::SessionTitleChanged { .. }
-        | DaemonEvent::ModelSwitch { .. }
-        | DaemonEvent::PermissionMonitorSwitch { .. }
-        | DaemonEvent::Interrogative { .. }
-        | DaemonEvent::AskUserQuestion { .. }
-        | DaemonEvent::NotificationAutodrainSwitch { .. }
-        | DaemonEvent::GoalDriverUpdate { .. }
-        | DaemonEvent::HookFired { .. } => Mapped,
-        DaemonEvent::MessageComplete { .. }
-        | DaemonEvent::TurnCancelled { .. }
-        | DaemonEvent::PendingTurnInputQueued { .. }
-        | DaemonEvent::PendingTurnInputDequeued { .. }
-        | DaemonEvent::PendingTurnInputDiscarded { .. }
-        | DaemonEvent::SessionStateChanged { .. }
-        | DaemonEvent::FacetSwitch { .. }
-        | DaemonEvent::CompactionComplete { .. }
-        | DaemonEvent::SubagentStarted { .. }
-        | DaemonEvent::SubagentCompleted { .. } => StateRefetch,
-        DaemonEvent::StreamDiscontinuity { .. }
-        | DaemonEvent::SessionRewound { .. }
-        | DaemonEvent::ContextCleared { .. } => Reseed,
-        DaemonEvent::ModelError { .. }
-        | DaemonEvent::RetryWait { .. }
-        | DaemonEvent::AgentBlockViolation { .. }
-        | DaemonEvent::ToolExposureChanged { .. }
-        | DaemonEvent::CompactionStarted { .. }
-        | DaemonEvent::CompactionCancelled { .. }
-        | DaemonEvent::CompactionFailed { .. }
-        | DaemonEvent::SubagentCompactionNotice { .. }
-        | DaemonEvent::NotificationQueued { .. }
-        | DaemonEvent::SystemReminder { .. }
-        | DaemonEvent::McpServerConnected { .. }
-        | DaemonEvent::McpServerDisconnected { .. }
-        | DaemonEvent::McpServerReconnecting { .. }
-        | DaemonEvent::McpServerDisabled { .. } => UserNotice,
-        DaemonEvent::Heartbeat { .. }
-        | DaemonEvent::JobPromoted { .. }
-        | DaemonEvent::JobCompleted { .. }
-        | DaemonEvent::JobExpiring { .. }
-        | DaemonEvent::JobCancelled { .. }
-        | DaemonEvent::JobUpdated { .. }
-        | DaemonEvent::ContextLoaded { .. }
-        | DaemonEvent::CompactionRetry { .. }
-        | DaemonEvent::NotificationsDrained { .. }
-        | DaemonEvent::ToolReveal { .. }
-        | DaemonEvent::ClassifierDecision { .. }
-        | DaemonEvent::ExtensionRegistered { .. }
-        | DaemonEvent::SubagentMessaged { .. }
-        | DaemonEvent::ImageReferenceResolved { .. }
-        | DaemonEvent::UsageThrottle { .. } => IntentionalNoop,
+        DaemonEvent::Heartbeat { .. } => "heartbeat",
+        DaemonEvent::ContentBlockStart { .. } => "content_block_start",
+        DaemonEvent::ContentBlockDelta { .. } => "content_block_delta",
+        DaemonEvent::ContentBlockStop { .. } => "content_block_stop",
+        DaemonEvent::MessageStart { .. } => "message_start",
+        DaemonEvent::MessageComplete { .. } => "message_complete",
+        DaemonEvent::PendingTurnInputQueued { .. } => "pending_turn_input_queued",
+        DaemonEvent::PendingTurnInputDequeued { .. } => "pending_turn_input_dequeued",
+        DaemonEvent::PendingTurnInputDrained { .. } => "pending_turn_input_drained",
+        DaemonEvent::PendingTurnInputDiscarded { .. } => "pending_turn_input_discarded",
+        DaemonEvent::TurnCancelled { .. } => "turn_cancelled",
+        DaemonEvent::ModelError { .. } => "model_error",
+        DaemonEvent::StreamDiscontinuity { .. } => "stream_discontinuity",
+        DaemonEvent::ToolCall { .. } => "tool_call",
+        DaemonEvent::ToolResult { .. } => "tool_result",
+        DaemonEvent::JobPromoted { .. } => "job_promoted",
+        DaemonEvent::JobCompleted { .. } => "job_completed",
+        DaemonEvent::JobExpiring { .. } => "job_expiring",
+        DaemonEvent::JobCancelled { .. } => "job_cancelled",
+        DaemonEvent::JobUpdated { .. } => "job_updated",
+        DaemonEvent::SessionRewound { .. } => "session_rewound",
+        DaemonEvent::SessionStateChanged { .. } => "session_state_changed",
+        DaemonEvent::SessionTitleChanged { .. } => "session_title_changed",
+        DaemonEvent::FacetSwitch { .. } => "facet_switch",
+        DaemonEvent::ContextCleared { .. } => "context_cleared",
+        DaemonEvent::ModelSwitch { .. } => "model_switch",
+        DaemonEvent::PermissionMonitorSwitch { .. } => "permission_monitor_switch",
+        DaemonEvent::Interrogative { .. } => "interrogative",
+        DaemonEvent::AskUserQuestion { .. } => "ask_user_question",
+        DaemonEvent::HookFired { .. } => "hook_fired",
+        DaemonEvent::ContextLoaded { .. } => "context_loaded",
+        DaemonEvent::CompactionStarted { .. } => "compaction_started",
+        DaemonEvent::CompactionComplete { .. } => "compaction_complete",
+        DaemonEvent::CompactionCancelled { .. } => "compaction_cancelled",
+        DaemonEvent::CompactionFailed { .. } => "compaction_failed",
+        DaemonEvent::CompactionRetry { .. } => "compaction_retry",
+        DaemonEvent::SubagentCompactionNotice { .. } => "subagent_compaction_notice",
+        DaemonEvent::NotificationQueued { .. } => "notification_queued",
+        DaemonEvent::NotificationsDrained { .. } => "notifications_drained",
+        DaemonEvent::NotificationAutodrainSwitch { .. } => "notification_autodrain_switch",
+        DaemonEvent::SystemReminder { .. } => "system_reminder",
+        DaemonEvent::ToolReveal { .. } => "tool_reveal",
+        DaemonEvent::ToolExposureChanged { .. } => "tool_exposure_changed",
+        DaemonEvent::GoalDriverUpdate { .. } => "goal_driver_update",
+        DaemonEvent::ClassifierDecision { .. } => "classifier_decision",
+        DaemonEvent::ExtensionRegistered { .. } => "extension_registered",
+        DaemonEvent::SubagentStarted { .. } => "subagent_started",
+        DaemonEvent::SubagentCompleted { .. } => "subagent_completed",
+        DaemonEvent::SubagentMessaged { .. } => "subagent_messaged",
+        DaemonEvent::McpServerConnected { .. } => "mcp_server_connected",
+        DaemonEvent::McpServerDisconnected { .. } => "mcp_server_disconnected",
+        DaemonEvent::McpServerReconnecting { .. } => "mcp_server_reconnecting",
+        DaemonEvent::McpServerDisabled { .. } => "mcp_server_disabled",
+        DaemonEvent::ImageReferenceResolved { .. } => "image_reference_resolved",
+        DaemonEvent::UsageThrottle { .. } => "usage_throttle",
+        DaemonEvent::RetryWait { .. } => "retry_wait",
+        DaemonEvent::AgentBlockViolation { .. } => "agent_block_violation",
     }
+}
+
+/// Explicit Pantoken product disposition for every generated daemon event.
+/// The typed wire-name match above is exhaustive, while this single public
+/// classifier remains the authoritative disposition table.
+pub fn event_disposition(event: &DaemonEvent) -> EventDisposition {
+    event_disposition_for_wire_name(event_wire_name(event))
+        .expect("exhaustive event wire name must have a disposition")
 }
 
 /// Map one daemon event to zero or more pantoken events + side-effect descriptors.
