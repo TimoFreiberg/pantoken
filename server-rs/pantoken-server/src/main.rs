@@ -41,6 +41,12 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() {
+    // SPIKE: initialize ece's process-wide RustCrypto backend before any push builder runs.
+    if let Err(error) = ece::crypto::init_rustcrypto() {
+        error!("failed to initialize ece RustCrypto backend: {error}");
+        std::process::exit(1);
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

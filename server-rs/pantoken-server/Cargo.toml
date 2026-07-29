@@ -32,6 +32,7 @@ futures-util = { workspace = true }
 tokio-stream = { workspace = true }
 urlencoding = { workspace = true }
 web-push = { workspace = true }
+ece = { workspace = true }
 jwt-simple = { workspace = true }
 ct-codecs = { workspace = true }
 chrono = { workspace = true }

@@ -53,6 +53,10 @@ ignore = "0.4"
 notify = "8"
 tar = "0.4"
 
+# SPIKE: mirror the root manifest's reversible local ece override for Reindeer metadata.
+[patch.crates-io]
+ece = { path = "vendor/ece-2.3.1-rustcrypto" }
+
 [dev-dependencies]
 # Dev-dependencies from the five server crates (used by test targets)
 http = "0.2"
