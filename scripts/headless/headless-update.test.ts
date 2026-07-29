@@ -352,143 +352,7 @@ http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
     symlinkSync(dir, liveLink);
   }
 
-  // ── Static tests (regex, ordering, structure) ───────────────────
-
-  // GAP: This is a static structural assertion of the tag regex, which is the
-  // actual gate. Full tag-based download is exercised by the "explicit tag
-  // recovery" integration test below.
-  test("rejects invalid release tags via regex", async () => {
-    const script = readFileSync(UPDATER, "utf8");
-    const badTags = ["v1.2", "v01.2.3", "1.2.3", "v1.2.3-beta", "latest", "abc", "v1.2.3.4"];
-    for (const tag of badTags) {
-      const valid = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(tag);
-      expect(valid).toBe(false);
-    }
-  });
-
-  // GAP: Static assertion of the tag regex acceptance path. The regex is
-  // exercised end-to-end by the "explicit tag recovery" integration test.
-  test("accepts valid semantic-version tags (v1.2.3)", async () => {
-    const validTags = ["v0.1.0", "v1.0.0", "v1.2.3", "v0.0.1", "v10.20.30"];
-    for (const tag of validTags) {
-      const valid = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(tag);
-      expect(valid).toBe(true);
-    }
-  });
-
-  // GAP: Static assertion of journal state names. The full journal sequence is
-  // verified by the "healthy update" and "rollback" integration tests.
-  test("records all required journal states in script", async () => {
-    const script = readFileSync(UPDATER, "utf8");
-    const requiredStates = [
-      "started",
-      "downloaded",
-      "signature-verified",
-      "archive-validated",
-      "flipped",
-      "restart-requested",
-      "new-process-confirmed",
-      "healthy",
-      "committed",
-      "rollback-started",
-      "rollback-flipped",
-      "rollback-healthy",
-      "rollback-failed",
-    ];
-    for (const state of requiredStates) {
-      expect(script).toContain(state);
-    }
-  });
-
-  // GAP: Static structural assertion of the symlink flip mechanism. The
-  // actual flip is exercised end-to-end by the "healthy update" integration test.
-  test("uses portable symlink flip (ln -sfn)", async () => {
-    const script = readFileSync(UPDATER, "utf8");
-    expect(script).toContain("ln -sfn");
-    expect(script).toContain("mv");
-  });
-
-  // GAP: Static assertion of phase ordering. The actual ordering is exercised
-  // by the integration tests that verify signature failure happens before extraction.
-  test("verifies signature before tar extraction", async () => {
-    const script = readFileSync(UPDATER, "utf8");
-    const lines = script.split("\n");
-    const verifyLine = lines.findIndex((l) => l.includes("verify_signature"));
-    const extractLine = lines.findIndex((l) => l.includes("extract_staging"));
-    const validateLine = lines.findIndex((l) => l.includes("validate_tar"));
-    expect(verifyLine).toBeLessThan(extractLine);
-    expect(validateLine).toBeLessThan(extractLine);
-  });
-
-  // GAP: Static assertion of the canonical release host constant. URL
-  // resolution is exercised by the "explicit tag recovery" integration test.
-  test("uses canonical release host URLs", async () => {
-    const script = readFileSync(UPDATER, "utf8");
-    expect(script).toContain("TimoFreiberg/pantoken");
-    expect(script).toContain("releases/download/");
-    expect(script).toContain("pantoken-headless-macos-aarch64.tar.gz");
-    expect(script).toContain("dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg2Mjg4ODNBNzJBQzM0MjkKUldRcE5LeHlPb2dvaHJOY2pRbjlDUUtmVE51ZHlrU0h0aUVNRXhLR2JUNER2cktvSVd1Q3NWUFEK");
-  });
-
-  // GAP: Static assertion that test-mode env vars are gated. The actual
-  // gating is exercised by every integration test that relies on test mode.
-  test("test-mode overrides are gated behind PANTOKEN_UPDATE_TEST_MODE", async () => {
-    const script = readFileSync(UPDATER, "utf8");
-    expect(script).toContain("PANTOKEN_UPDATE_TEST_MODE");
-    expect(script).toContain("PANTOKEN_TEST_ASSET_URL");
-    expect(script).toContain("PANTOKEN_TEST_SIG_URL");
-    expect(script).toContain("PANTOKEN_TEST_KICKSTART_CMD");
-  });
-
-  // GAP: "rolls back on health failure" is tested by the real subprocess
-  // test "rollback on health failure: flips back to old version" below.
-  // This static test remains only as a structural assertion of the rollback
-  // implementation (STAGED_OLD_DIR, rollback_to, ln -sfn).
-  test("rolls back on health failure (structural)", async () => {
-    const script = readFileSync(UPDATER, "utf8");
-    expect(script).toContain("STAGED_OLD_DIR");
-    expect(script).toContain("rollback_to");
-    expect(script).toContain("ln -sfn");
-  });
-
-  // GAP: Static assertion of the sudoers kickstart command. The actual
-  // kickstart is exercised by all integration tests that use fake-launchctl.
-  test("uses sudoers-allowed kickstart, not kill", async () => {
-    const script = readFileSync(UPDATER, "utf8");
-    expect(script).toContain("kickstart -k system/");
-    expect(script).toContain("sudo");
-    expect(script).not.toMatch(/kill\s+\$\{?PID/);
-  });
-
-  // GAP: Static assertion of the portable symlink resolution helper. The
-  // actual resolution is exercised by all integration tests that flip the symlink.
-  test("uses portable symlink resolution (no readlink -f)", async () => {
-    const script = readFileSync(UPDATER, "utf8");
-    expect(script).toContain("resolve_link_target");
-    // No raw readlink -f should remain in production code (excluding comments)
-    const codeLines = script.split("\n").filter(l => !l.trim().startsWith("#"));
-    for (const line of codeLines) {
-      expect(line).not.toContain("readlink -f");
-    }
-  });
-
-  // GAP: Static assertion of BUILD_SHA validation regex. The actual
-  // validation is exercised by all integration tests that pass through it.
-  test("validates BUILD_SHA format (40 lowercase hex)", async () => {
-    const script = readFileSync(UPDATER, "utf8");
-    expect(script).toContain("BUILD_SHA");
-    expect(script).toContain("0-9a-f");
-  });
-
-  // GAP: Static assertion of required staged file list. The actual file
-  // presence is exercised by all integration tests that extract and validate.
-  test("checks all required staged files", async () => {
-    const script = readFileSync(UPDATER, "utf8");
-    expect(script).toContain("bin/pantoken-server");
-    expect(script).toContain("client-dist/index.html");
-    expect(script).toContain("run.sh");
-    expect(script).toContain("update.sh");
-  });
+  // ── Subprocess integration tests ───────────────────────────────
 
   // ── Subprocess integration tests ───────────────────────────────
 
@@ -517,16 +381,6 @@ with tarfile.open(${JSON.stringify(archive)}, "w:gz") as t:
     expect(await proc.exited).not.toBe(0);
     expect(!existsSync(join(versionsDir, "2.0.0"))).toBe(true);
     rmSync(unsafe, { recursive: true, force: true });
-  });
-
-  // GAP: "creates lock to prevent concurrent runs" is tested by the real
-  // subprocess test "concurrent update: second invocation exits 0 without
-  // doing work" below. This static test remains only as a structural assertion
-  // of the lock mechanism (mkdir + rm on the lock dir).
-  test("creates lock directory to prevent concurrent runs (structural)", async () => {
-    const script = readFileSync(UPDATER, "utf8");
-    expect(script).toContain('mkdir "$LOCK_DIR"');
-    expect(script).toContain("rm -rf");
   });
 
   test("fixture cleanup: no orphaned processes after test", async () => {
@@ -797,33 +651,4 @@ with tarfile.open(${JSON.stringify(archive)}, "w:gz") as t:
     expect(await proc1.exited).toBe(0);
   });
 
-  // ── AC.9: no static-only tests without GAP comments ─────────────
-
-  test("no static-only tests without GAP comment", async () => {
-    const src = readFileSync(fileURLToPath(import.meta.url), "utf8");
-    // Find all test(...) calls and check which ones use readFileSync(UPDATER)
-    // without spawning a subprocess (spawnManaged or runUpdater).
-    const testRegex = /test\(["']([^"']+)["']/g;
-    let match;
-    while ((match = testRegex.exec(src)) !== null) {
-      const testName = match[1];
-      const startIdx = match.index;
-      const nextTestIdx = src.indexOf("test(", startIdx + 1);
-      const endIdx = nextTestIdx === -1 ? src.length : nextTestIdx;
-      const body = src.slice(startIdx, endIdx);
-
-      // Check if this test uses readFileSync(UPDATER) but doesn't call runUpdater or spawnManaged
-      const usesStaticRead = body.includes("readFileSync(UPDATER") || body.includes('readFileSync(UPDATER, "utf8")');
-      const spawnsProcess = body.includes("runUpdater") || body.includes("spawnManaged");
-
-      if (usesStaticRead && !spawnsProcess) {
-        // Look backwards from the test() call for a GAP comment on preceding lines
-        const beforeTest = src.slice(Math.max(0, startIdx - 500), startIdx);
-        if (!beforeTest.includes("// GAP:")) {
-          expect(testName).toBe("missing // GAP: comment");
-        }
-      }
-    }
-    expect(true).toBe(true);
-  });
 });

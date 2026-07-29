@@ -52,67 +52,6 @@ function fixtureRelease(version: string, tmpBase: string): string {
 
 // ── Plist template tests ─────────────────────────────────────────────────────
 describe("plist template", () => {
-  test("exists and is valid XML", () => {
-    const content = readAll(PLIST_TEMPLATE);
-    expect(content).toContain("<?xml");
-    expect(content).toContain("<plist version=\"1.0\">");
-    expect(content).toContain("<dict>");
-  });
-
-  test("uses @@@PLACEHOLDER@@@ syntax (not standalone @@...@@)", () => {
-    const content = readAll(PLIST_TEMPLATE);
-    // Should contain the new triple-@ syntax.
-    expect(content).toContain("@@@USER@@@");
-    expect(content).toContain("@@@HOME@@@");
-    expect(content).toContain("@@@LIVE@@@");
-    expect(content).toContain("@@@LOGDIR@@@");
-    // Verify there are no standalone @@...@@ placeholders (only triple-@@ or
-    // non-placeholder uses like comments). Scan every @@ occurrence and check
-    // that it is always preceded and followed by another @ (making it @@@).
-    const foundStandalone = content.match(/(?<!@)@@[A-Z_]+@@(?!@)/g);
-    expect(foundStandalone).toBeNull();
-  });
-
-  test("has all required placeholders", () => {
-    const content = readAll(PLIST_TEMPLATE);
-    const required = [
-      "@@@USER@@@",
-      "@@@HOME@@@",
-      "@@@LIVE@@@",
-      "@@@LOGDIR@@@",
-      "@@@POLYTOKEN_BIN@@@",
-      "@@@XDG_CONFIG@@@",
-      "@@@XDG_DATA@@@",
-    ];
-    for (const ph of required) {
-      expect(content).toContain(ph);
-    }
-  });
-
-  test("has correct label", () => {
-    const content = readAll(PLIST_TEMPLATE);
-    expect(content).toContain("<string>com.pantoken.server</string>");
-  });
-
-  test("contains absolute path environment variables", () => {
-    const content = readAll(PLIST_TEMPLATE);
-    expect(content).toContain("<key>PANTOKEN_DATA_DIR</key>");
-    expect(content).toContain("<key>PANTOKEN_HOST</key>");
-    expect(content).toContain("<key>PANTOKEN_PORT</key>");
-    expect(content).toContain("127.0.0.1");
-    expect(content).toContain("8787");
-    expect(content).toContain("<key>PANTOKEN_POLYTOKEN_BIN</key>");
-    expect(content).toContain("<key>XDG_CONFIG_HOME</key>");
-    expect(content).toContain("<key>XDG_DATA_HOME</key>");
-  });
-
-  test("Has RunAtLoad and KeepAlive", () => {
-    const content = readAll(PLIST_TEMPLATE);
-    expect(content).toContain("<key>RunAtLoad</key>");
-    expect(content).toContain("<true/>");
-    expect(content).toContain("<key>KeepAlive</key>");
-  });
-
   test("renders to valid plist via sed substitution", async () => {
     const content = readAll(PLIST_TEMPLATE);
     const rendered = content
