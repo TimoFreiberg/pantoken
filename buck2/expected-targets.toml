@@ -37,6 +37,12 @@ test = false
 package = "pantoken-protocol"
 
 [[targets]]
+label = "//server-rs/pantoken-daemon-types:openapi_fixture"
+kind = "filegroup"
+test = false
+package = "pantoken-daemon-types"
+
+[[targets]]
 label = "//server-rs/pantoken-daemon-types:pantoken_daemon_types"
 cargo = "pantoken-daemon-types"
 kind = "library"
@@ -53,6 +59,13 @@ package = "pantoken-daemon-types"
 
 [[targets]]
 label = "//server-rs/pantoken-daemon-types:daemon_types_roundtrip"
+cargo = "pantoken-daemon-types"
+kind = "integration_test"
+test = true
+package = "pantoken-daemon-types"
+
+[[targets]]
+label = "//server-rs/pantoken-daemon-types:schema_inventory_test"
 cargo = "pantoken-daemon-types"
 kind = "integration_test"
 test = true

@@ -14,16 +14,24 @@ use std::time::Duration;
 
 use pantoken_protocol::frame::FrameDecoder;
 use pantoken_server::remote::layout;
-use pantoken_server::remote::runtime::{Identity, RuntimeState, probe_identity};
+use pantoken_server::remote::runtime::{
+    Identity, RuntimeState, probe_identity, resolve_server_binary,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
 /// Spawn the pantoken-server binary in `remote-runtime` mode against a temp
 /// remote root. Returns the temp dir (to keep it alive) and the socket path.
 struct RuntimeHandle {
-    _child: tokio::process::Child,
+    child: tokio::process::Child,
     _root: tempfile::TempDir,
     socket_path: PathBuf,
+}
+
+impl Drop for RuntimeHandle {
+    fn drop(&mut self) {
+        let _ = self.child.start_kill();
+    }
 }
 
 async fn spawn_remote_runtime(driver: &str) -> RuntimeHandle {
@@ -33,27 +41,7 @@ async fn spawn_remote_runtime(driver: &str) -> RuntimeHandle {
     // Ensure run dir exists.
     std::fs::create_dir_all(layout::run_dir(&root_path)).unwrap();
 
-    let server_bin = std::env::var_os("PANTOKEN_SERVER_BIN")
-        .map(PathBuf::from)
-        .map(|path| {
-            if path.is_absolute() || path.is_file() {
-                path
-            } else if let Some(runfiles) = std::env::var_os("RUNFILES_DIR") {
-                PathBuf::from(runfiles).join(path)
-            } else {
-                path
-            }
-        })
-        .or_else(|| {
-            let exe = std::env::current_exe().expect("current_exe");
-            // Cargo places the test binary at target/debug/deps/<test>-<hash>
-            // and the server binary at target/debug/pantoken-server.
-            exe.parent()
-                .and_then(|p| p.parent())
-                .map(|p| p.join("pantoken-server"))
-                .filter(|p| p.is_file())
-        })
-        .expect("pantoken-server binary not found");
+    let server_bin = resolve_server_binary().expect("pantoken-server binary not found");
 
     let mut cmd = tokio::process::Command::new(&server_bin);
     cmd.env("PANTOKEN_SERVE_MODE", "remote-runtime");
@@ -73,7 +61,7 @@ async fn spawn_remote_runtime(driver: &str) -> RuntimeHandle {
     loop {
         if socket_path.exists() {
             return RuntimeHandle {
-                _child: child,
+                child,
                 _root: root,
                 socket_path,
             };

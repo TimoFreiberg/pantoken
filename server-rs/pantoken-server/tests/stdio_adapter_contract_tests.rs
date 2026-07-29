@@ -26,6 +26,8 @@ use pantoken_server::connection::{ConnectionSession, SessionEnv, Transport};
 use pantoken_server::driver::PantokenDriver;
 use pantoken_server::hub::{SessionHub, hub_op_channel, run_hub_op_applier};
 use pantoken_server::mock_driver::MockDriver;
+use pantoken_server::remote::layout;
+use pantoken_server::remote::runtime::resolve_server_binary;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
 
 /// Build a test SessionEnv (no auth, MockDriver-backed hub).
@@ -133,6 +135,38 @@ impl<R: AsyncReadExt + Unpin> FramedReader<R> {
         }
         msgs
     }
+}
+
+#[tokio::test]
+async fn stdio_proxy_bootstraps_declared_server_binary() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let root_path = root.path().to_path_buf();
+    let server_bin = resolve_server_binary().expect("pantoken-server binary");
+    let mut child = tokio::process::Command::new(&server_bin)
+        .env("PANTOKEN_SERVE_MODE", "stdio-proxy")
+        .env("PANTOKEN_REMOTE_ROOT", &root_path)
+        .env("PANTOKEN_DRIVER", "mock")
+        .env("PANTOKEN_SERVER_BIN", &server_bin)
+        .env("HOME", ".")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn stdio-proxy");
+    let socket_path = layout::private_socket(&root_path);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if tokio::net::UnixStream::connect(&socket_path).await.is_ok() {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            let _ = child.kill().await;
+            panic!("stdio-proxy did not bootstrap the runtime");
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let _ = child.kill().await;
+    let _ = child.wait().await;
 }
 
 #[tokio::test]

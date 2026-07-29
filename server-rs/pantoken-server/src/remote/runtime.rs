@@ -15,7 +15,7 @@
 //! Both modes keep stdout protocol-only (AC.2) and bind no public TCP
 //! listener (AC.3).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::connection::stdio::{FramedRelay, StdioAdapter};
@@ -166,6 +166,63 @@ pub async fn run_stdio_proxy(root: &Path) -> std::io::Result<()> {
     relay.run().await
 }
 
+/// Resolve the server executable used to bootstrap a remote runtime.
+///
+/// Buck2 supplies `PANTOKEN_SERVER_BIN` as a resource-relative path and
+/// `RUNFILES_DIR` identifies the runfiles root. Cargo callers omit the
+/// override and use the conventional `target/debug/pantoken-server` path.
+pub fn resolve_server_binary() -> std::io::Result<PathBuf> {
+    if let Some(value) = std::env::var_os("PANTOKEN_SERVER_BIN") {
+        let value = value.to_string_lossy();
+        if value.trim().is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "PANTOKEN_SERVER_BIN must not be empty",
+            ));
+        }
+        let path = PathBuf::from(value.as_ref());
+        if path.is_file() {
+            return Ok(path);
+        }
+        if let Some(runfiles) = std::env::var_os("RUNFILES_DIR") {
+            let resolved = PathBuf::from(runfiles).join(&path);
+            if resolved.is_file() {
+                return Ok(resolved);
+            }
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!(
+                    "PANTOKEN_SERVER_BIN does not name a file in RUNFILES_DIR: {}",
+                    resolved.display()
+                ),
+            ));
+        }
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!(
+                "PANTOKEN_SERVER_BIN does not name an existing file: {}",
+                path.display()
+            ),
+        ));
+    }
+
+    let exe =
+        std::env::current_exe().map_err(|e| std::io::Error::other(format!("current_exe: {e}")))?;
+    let fallback = exe
+        .parent()
+        .and_then(Path::parent)
+        .map(|p| p.join("pantoken-server"))
+        .ok_or_else(|| std::io::Error::other("current_exe has no Cargo target directory"))?;
+    if fallback.is_file() {
+        Ok(fallback)
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("pantoken-server binary not found at {}", fallback.display()),
+        ))
+    }
+}
+
 /// Connect to the runtime socket, bootstrapping the runtime if absent.
 ///
 /// Race-safe bootstrap (plan step 7):
@@ -223,8 +280,7 @@ async fn connect_with_bootstrap(root: &Path, socket_path: &Path) -> std::io::Res
     };
 
     // Spawn the runtime in remote-runtime mode.
-    let server_binary =
-        std::env::current_exe().map_err(|e| std::io::Error::other(format!("current_exe: {e}")))?;
+    let server_binary = resolve_server_binary()?;
 
     let mut cmd = tokio::process::Command::new(&server_binary);
     cmd.env("PANTOKEN_SERVE_MODE", "remote-runtime");
@@ -476,4 +532,98 @@ pub fn assert_no_public_tcp_listener() {
     // This is a compile-time + code-review guarantee. The runtime module
     // uses only `UnixListener::bind`. No TCP listener is created in the
     // remote-runtime or stdio-proxy modes.
+}
+
+#[cfg(test)]
+mod resolver_tests {
+    use super::resolve_server_binary;
+    use std::path::PathBuf;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvGuard {
+        server_bin: Option<std::ffi::OsString>,
+        runfiles: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn new() -> Self {
+            Self {
+                server_bin: std::env::var_os("PANTOKEN_SERVER_BIN"),
+                runfiles: std::env::var_os("RUNFILES_DIR"),
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.server_bin {
+                    Some(value) => std::env::set_var("PANTOKEN_SERVER_BIN", value),
+                    None => std::env::remove_var("PANTOKEN_SERVER_BIN"),
+                }
+                match &self.runfiles {
+                    Some(value) => std::env::set_var("RUNFILES_DIR", value),
+                    None => std::env::remove_var("RUNFILES_DIR"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn resolves_override_and_runfiles_and_rejects_invalid_values() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::new();
+        let root = tempfile::tempdir().unwrap();
+        let direct = root.path().join("direct-server");
+        std::fs::write(&direct, b"binary").unwrap();
+        unsafe {
+            std::env::set_var("PANTOKEN_SERVER_BIN", &direct);
+            std::env::remove_var("RUNFILES_DIR");
+        }
+        assert_eq!(resolve_server_binary().unwrap(), direct);
+
+        let runfiles = root.path().join("runfiles");
+        let relative = PathBuf::from("bin/pantoken-server");
+        let runfile = runfiles.join(&relative);
+        std::fs::create_dir_all(runfile.parent().unwrap()).unwrap();
+        std::fs::write(&runfile, b"binary").unwrap();
+        unsafe {
+            std::env::set_var("PANTOKEN_SERVER_BIN", &relative);
+            std::env::set_var("RUNFILES_DIR", &runfiles);
+        }
+        assert_eq!(resolve_server_binary().unwrap(), runfile);
+
+        unsafe { std::env::set_var("PANTOKEN_SERVER_BIN", "missing-server") };
+        let error = resolve_server_binary().unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+        assert!(error.to_string().contains("PANTOKEN_SERVER_BIN"));
+    }
+
+    #[test]
+    fn uses_cargo_fallback_only_without_override() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::new();
+        unsafe {
+            std::env::remove_var("PANTOKEN_SERVER_BIN");
+            std::env::remove_var("RUNFILES_DIR");
+        }
+        let expected = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("pantoken-server");
+        let resolved = resolve_server_binary();
+        if expected.is_file() {
+            assert_eq!(resolved.unwrap(), expected);
+        } else {
+            assert_eq!(resolved.unwrap_err().kind(), std::io::ErrorKind::NotFound);
+        }
+    }
 }

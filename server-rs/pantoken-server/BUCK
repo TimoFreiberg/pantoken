@@ -207,7 +207,11 @@ rust_test(
     srcs = ["tests/stdio_adapter_contract_tests.rs"] + _TEST_SUPPORT,
     crate_root = "tests/stdio_adapter_contract_tests.rs",
     deps = _TEST_DEPS,
-    run_env = {"HOME": "."},
+    resources = [":pantoken_server"],
+    run_env = {
+        "HOME": ".",
+        "PANTOKEN_SERVER_BIN": "$(location :pantoken_server)",
+    },
     visibility = ["PUBLIC"],
 )
 

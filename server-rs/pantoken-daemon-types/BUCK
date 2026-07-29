@@ -2,6 +2,12 @@
 # Cargo remains authoritative; this is additive for the Buck2 POC.
 # Rust rules are built-in Buck2 globals — no load needed.
 
+filegroup(
+    name = "openapi_fixture",
+    srcs = ["tests/fixtures/polytoken-0.5.8-openapi.json"],
+    visibility = ["PUBLIC"],
+)
+
 rust_library(
     name = "pantoken_daemon_types",
     srcs = glob(["src/**/*.rs"]),
@@ -29,5 +35,17 @@ rust_test(
         ":pantoken_daemon_types",
         "//third-party:serde_json",
     ],
+    visibility = ["PUBLIC"],
+)
+
+rust_test(
+    name = "schema_inventory_test",
+    srcs = ["tests/schema_inventory_test.rs"],
+    crate_root = "tests/schema_inventory_test.rs",
+    deps = [
+        ":pantoken_daemon_types",
+        "//third-party:serde_json",
+    ],
+    resources = [":openapi_fixture"],
     visibility = ["PUBLIC"],
 )

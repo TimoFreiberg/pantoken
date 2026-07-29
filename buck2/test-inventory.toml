@@ -45,6 +45,16 @@ temp_root = "none"
 network = "none"
 
 [[tests]]
+label = "//server-rs/pantoken-daemon-types:schema_inventory_test"
+data = ["//server-rs/pantoken-daemon-types:openapi_fixture"]
+executables = []
+env_set = []
+env_clear = []
+socket = "none"
+temp_root = "none"
+network = "none"
+
+[[tests]]
 label = "//server-rs/pantoken-remote-layout:unit_tests"
 data = []
 executables = []
@@ -106,17 +116,17 @@ network = "loopback"
 
 [[tests]]
 label = "//server-rs/pantoken-server:stdio_adapter_tests"
-data = []
-executables = []
-env_set = []
+data = ["//server-rs/pantoken-server:pantoken_server"]
+executables = ["//server-rs/pantoken-server:pantoken_server"]
+env_set = ["PANTOKEN_SERVER_BIN"]
 env_clear = ["HOME"]
-socket = "none"
+socket = "Unix socket (temp-root, test-managed)"
 temp_root = "tempfile (sandboxed)"
 network = "none"
 
 [[tests]]
 label = "//server-rs/pantoken-server:resume_and_recovery_tests"
-data = [":pantoken_server"]
+data = ["//server-rs/pantoken-server:pantoken_server"]
 executables = ["//server-rs/pantoken-server:pantoken_server"]
 env_set = ["PANTOKEN_SERVER_BIN"]
 env_clear = ["HOME"]
@@ -126,7 +136,7 @@ network = "loopback"
 
 [[tests]]
 label = "//server-rs/pantoken-server:remote_runtime_tests"
-data = [":pantoken_server"]
+data = ["//server-rs/pantoken-server:pantoken_server"]
 executables = ["//server-rs/pantoken-server:pantoken_server"]
 env_set = ["PANTOKEN_SERVER_BIN"]
 env_clear = ["HOME"]
