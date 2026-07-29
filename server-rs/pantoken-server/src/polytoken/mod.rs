@@ -6,6 +6,7 @@ pub mod config_watcher;
 pub mod corpus;
 pub mod daemon_client;
 pub mod driver;
+pub mod endpoint_inventory;
 pub mod event_map;
 pub mod facets;
 pub mod fake_daemon;
