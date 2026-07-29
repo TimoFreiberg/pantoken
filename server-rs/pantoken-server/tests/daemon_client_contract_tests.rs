@@ -15,9 +15,13 @@ use axum::{
     routing::any,
 };
 use pantoken_daemon_types::{
-    CompactRequest, InterrogativeResponse, PermissionMonitor, PermissionMonitorMode, RewindRequest,
+    CompactRequest, DaemonEvent, InterrogativeResponse, PermissionMonitor, PermissionMonitorMode,
+    RewindRequest, SseEnvelope,
 };
-use pantoken_server::polytoken::{daemon_client::DaemonClient, endpoint_inventory::ENDPOINTS};
+use pantoken_server::polytoken::{
+    daemon_client::{DaemonClient, McpServerAction},
+    endpoint_inventory::ENDPOINTS,
+};
 use serde_json::{Value, json};
 use tokio::{net::TcpListener, sync::Mutex};
 const TOKEN: &str = "contract-token-never-print-this";
@@ -322,6 +326,96 @@ const EXPECTED_EXECUTABLE_CONTRACTS: &[ExecutableContract] = &[
         accepted_statuses: &[StatusCode::OK],
         rejected_status: StatusCode::BAD_REQUEST,
     },
+    ExecutableContract {
+        name: "delete_todo",
+        method: "DELETE",
+        path: "/todos/7",
+        request_body: None,
+        inventory_request_body: "none",
+        response_schema: "empty or TodoDeleteConflictResponse",
+        accepted_statuses: &[StatusCode::OK, StatusCode::NO_CONTENT],
+        rejected_status: StatusCode::CONFLICT,
+    },
+    ExecutableContract {
+        name: "set_facet",
+        method: "POST",
+        path: "/facet",
+        request_body: Some(r#"{"facet":"contract"}"#),
+        inventory_request_body: "FacetRequest { facet }",
+        response_schema: "empty",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::UNPROCESSABLE_ENTITY,
+    },
+    ExecutableContract {
+        name: "reload",
+        method: "POST",
+        path: "/reload",
+        request_body: None,
+        inventory_request_body: "none",
+        response_schema: "empty",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::INTERNAL_SERVER_ERROR,
+    },
+    ExecutableContract {
+        name: "reset_shell",
+        method: "POST",
+        path: "/reset-shell",
+        request_body: None,
+        inventory_request_body: "none",
+        response_schema: "empty",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::INTERNAL_SERVER_ERROR,
+    },
+    ExecutableContract {
+        name: "goal_set",
+        method: "POST",
+        path: "/goal",
+        request_body: Some(r#"{"summary":"contract goal"}"#),
+        inventory_request_body: "GoalSetRequest { summary }",
+        response_schema: "empty",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::CONFLICT,
+    },
+    ExecutableContract {
+        name: "goal_resume",
+        method: "POST",
+        path: "/goal/resume",
+        request_body: None,
+        inventory_request_body: "none",
+        response_schema: "empty",
+        accepted_statuses: &[StatusCode::OK, StatusCode::NO_CONTENT],
+        rejected_status: StatusCode::CONFLICT,
+    },
+    ExecutableContract {
+        name: "goal_clear",
+        method: "POST",
+        path: "/goal/clear",
+        request_body: None,
+        inventory_request_body: "none",
+        response_schema: "empty",
+        accepted_statuses: &[StatusCode::OK, StatusCode::NO_CONTENT],
+        rejected_status: StatusCode::NOT_FOUND,
+    },
+    ExecutableContract {
+        name: "mcp_server_action",
+        method: "POST",
+        path: "/mcp/server%20name/enable",
+        request_body: None,
+        inventory_request_body: "none; server/action path params",
+        response_schema: "empty",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::CONFLICT,
+    },
+    ExecutableContract {
+        name: "subscribe",
+        method: "GET",
+        path: "/events",
+        request_body: None,
+        inventory_request_body: "none; optional Last-Event-ID on reconnect",
+        response_schema: "SseEnvelope<DaemonEvent>",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::UNAUTHORIZED,
+    },
 ];
 
 fn inventory_contract(
@@ -491,19 +585,28 @@ async fn daemon_client_endpoint_contract_matrix() {
         .collect();
     assert_eq!(
         expected.len(),
-        27,
-        "the bounded slice must contain twenty-seven distinct cases"
+        36,
+        "the executable matrix must contain all thirty-six inventory cases"
     );
     for contract in EXPECTED_EXECUTABLE_CONTRACTS {
         let inventory = inventory_contract(contract.name);
         assert_eq!(inventory.method, contract.method);
         let normalized_path = inventory
             .path_template
-            .replace("{id}", "q%201")
+            .replace(
+                "{id}",
+                if contract.name == "delete_todo" {
+                    "7"
+                } else {
+                    "q%201"
+                },
+            )
             .replace("{lease_id}", "lease")
             .replace("{offset}", "2")
             .replace("{limit}", "3")
-            .replace("{bool}", "true");
+            .replace("{bool}", "true")
+            .replace("{server}", "server%20name")
+            .replace("{action}", "enable");
         assert_eq!(normalized_path, contract.path);
         assert_eq!(inventory.request_body, contract.inventory_request_body);
         if let Some(body) = contract.request_body {
@@ -968,47 +1071,182 @@ async fn daemon_client_endpoint_contract_matrix() {
     assert_request(&seen, "POST", "/title", Some(json!({"title":"title"})));
     assert!(result.is_ok());
     executed.insert("set_title");
+
+    let (seen, result) = call(StatusCode::NO_CONTENT, json!(null), |c| async move {
+        c.delete_todo(7).await
+    })
+    .await;
+    assert_request(&seen, "DELETE", "/todos/7", None);
+    assert_eq!(result.status, 204);
+    let (seen, result) = call(StatusCode::CONFLICT, json!({"type":"dependents_exist","code":"has_dependents","dependents":[],"message":"blocked"}), |c| async move { c.delete_todo(7).await }).await;
+    assert_request(&seen, "DELETE", "/todos/7", None);
+    assert!(result.data.is_some());
+    assert!(
+        result
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("blocked")
+    );
+    let (seen, result) = call(
+        StatusCode::NOT_FOUND,
+        json!({"code":"not_found","message":"missing todo"}),
+        |c| async move { c.delete_todo(7).await },
+    )
+    .await;
+    assert_request(&seen, "DELETE", "/todos/7", None);
+    assert_eq!(result.status, 404);
+    executed.insert("delete_todo");
+
+    let (seen, result) = call(StatusCode::OK, json!({}), |c| async move {
+        c.set_facet("contract").await
+    })
+    .await;
+    assert_request(&seen, "POST", "/facet", Some(json!({"facet":"contract"})));
+    assert!(result.is_ok());
+    executed.insert("set_facet");
+    for (name, path, operation) in [("reload", "/reload", 0), ("reset_shell", "/reset-shell", 1)] {
+        let (seen, result) = if operation == 0 {
+            call(
+                StatusCode::OK,
+                json!({}),
+                |c| async move { c.reload().await },
+            )
+            .await
+        } else {
+            call(StatusCode::OK, json!({}), |c| async move {
+                c.reset_shell().await
+            })
+            .await
+        };
+        assert_request(&seen, "POST", path, None);
+        assert!(result.is_ok());
+        executed.insert(name);
+    }
+    let (seen, result) = call(StatusCode::OK, json!({}), |c| async move {
+        c.goal_set("contract goal").await
+    })
+    .await;
+    assert_request(
+        &seen,
+        "POST",
+        "/goal",
+        Some(json!({"summary":"contract goal"})),
+    );
+    assert!(result.is_ok());
+    executed.insert("goal_set");
+    for (name, status, path) in [
+        ("goal_resume", StatusCode::OK, "/goal/resume"),
+        ("goal_clear", StatusCode::NO_CONTENT, "/goal/clear"),
+    ] {
+        let (seen, result) = if name == "goal_resume" {
+            call(status, json!({}), |c| async move { c.goal_resume().await }).await
+        } else {
+            call(status, json!({}), |c| async move { c.goal_clear().await }).await
+        };
+        assert_request(&seen, "POST", path, None);
+        assert!(result.is_ok());
+        executed.insert(name);
+    }
+    let (seen, result) = call(StatusCode::OK, json!({}), |c| async move {
+        c.mcp_server_action("server name", McpServerAction::Enable)
+            .await
+    })
+    .await;
+    assert_request(&seen, "POST", "/mcp/server%20name/enable", None);
+    assert!(result.is_ok());
+    executed.insert("mcp_server_action");
+    let new_operation_rejection = json!({"code":"public_code","message":"public message"});
+    let rejected = new_operation_rejection.clone();
+    for (name, path, operation) in [
+        ("set_facet", "/facet", 0),
+        ("reload", "/reload", 1),
+        ("reset_shell", "/reset-shell", 2),
+        ("goal_set", "/goal", 3),
+        ("goal_resume", "/goal/resume", 4),
+        ("goal_clear", "/goal/clear", 5),
+        ("mcp_server_action", "/mcp/server%20name/enable", 6),
+    ] {
+        let (seen, result) = match operation {
+            0 => {
+                call(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    new_operation_rejection.clone(),
+                    |c| async move { c.set_facet("contract").await },
+                )
+                .await
+            }
+            1 => {
+                call(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    rejected.clone(),
+                    |c| async move { c.reload().await },
+                )
+                .await
+            }
+            2 => {
+                call(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    rejected.clone(),
+                    |c| async move { c.reset_shell().await },
+                )
+                .await
+            }
+            3 => {
+                call(StatusCode::CONFLICT, rejected.clone(), |c| async move {
+                    c.goal_set("contract goal").await
+                })
+                .await
+            }
+            4 => {
+                call(StatusCode::CONFLICT, rejected.clone(), |c| async move {
+                    c.goal_resume().await
+                })
+                .await
+            }
+            5 => {
+                call(StatusCode::NOT_FOUND, rejected.clone(), |c| async move {
+                    c.goal_clear().await
+                })
+                .await
+            }
+            _ => {
+                call(StatusCode::CONFLICT, rejected.clone(), |c| async move {
+                    c.mcp_server_action("server name", McpServerAction::Enable)
+                        .await
+                })
+                .await
+            }
+        };
+        assert_request(
+            &seen,
+            "POST",
+            path,
+            if operation == 0 {
+                Some(json!({"facet":"contract"}))
+            } else if operation == 3 {
+                Some(json!({"summary":"contract goal"}))
+            } else {
+                None
+            },
+        );
+        assert!(result.is_err(), "{name} representative rejection must fail");
+    }
+    // The dedicated SSE contract below exercises the real Arc<DaemonClient>::subscribe_connected path.
+    executed.insert("subscribe");
     assert_eq!(
         executed, expected,
-        "every expected case must execute exactly once"
+        "every inventory operation must execute exactly once"
     );
 
-    // The executable group manifest intentionally covers exactly the first 27
-    // operations; the remaining ENDPOINTS rows remain separate work.
-    const EXECUTABLE_GROUP: &[&str] = &[
-        "health",
-        "terminate",
-        "claim_lease",
-        "heartbeat",
-        "release_lease",
-        "prompt",
-        "queue_turn_input",
-        "turn_input_snapshot",
-        "dequeue_newest_input",
-        "set_model",
-        "set_permission_mode",
-        "get_permission_monitor",
-        "get_notification_autodrain",
-        "set_notification_autodrain",
-        "state",
-        "history",
-        "files",
-        "file_catalog",
-        "jobs",
-        "clear",
-        "goal_pause",
-        "compact",
-        "rewind",
-        "respond_interrogative",
-        "toggle_adventurous_handoff",
-        "cancel_turn",
-        "set_title",
-    ];
-    assert_eq!(EXECUTABLE_GROUP.len(), 27);
-    assert!(EXECUTABLE_GROUP.iter().all(|name| expected.contains(name)));
-    assert!(
-        EXECUTABLE_GROUP.len() < ENDPOINTS.len(),
-        "do not claim full inventory coverage"
+    assert_eq!(expected.len(), ENDPOINTS.len());
+    let inventory_names: std::collections::BTreeSet<_> = ENDPOINTS
+        .iter()
+        .map(|endpoint| endpoint.client_method)
+        .collect();
+    assert_eq!(
+        expected, inventory_names,
+        "every inventory row needs executable evidence"
     );
 
     let rejected = json!({"code":"public_code","message":"public message"});
@@ -1346,6 +1584,80 @@ async fn daemon_client_endpoint_contract_matrix() {
         c.file_catalog().await
     });
     typed_contract!("jobs", "/jobs", |c| async move { c.jobs().await });
+}
+
+#[tokio::test]
+async fn daemon_client_subscribe_contract() {
+    let seen = Arc::new(Mutex::new(Vec::<Seen>::new()));
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let seen_for_handler = seen.clone();
+    let app = Router::new().fallback(move |request: Request<Body>| {
+        let seen = seen_for_handler.clone();
+        async move {
+            let (parts, _body) = request.into_parts();
+            seen.lock().await.push(Seen {
+                method: parts.method.to_string(),
+                path: parts.uri.to_string(),
+                auth: parts
+                    .headers
+                    .get("authorization")
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_owned),
+                body: String::new(),
+            });
+            let envelope = SseEnvelope {
+                emitted_at: "2024-01-01T00:00:00Z".into(),
+                event: DaemonEvent::Heartbeat {
+                    subagent_handle: None,
+                    timestamp: "2024-01-01T00:00:00Z".into(),
+                },
+                seq: Some(9),
+                session_id: SESSION.into(),
+            };
+            let frame = format!(
+                "id: 9\ndata: {}\n\n",
+                serde_json::to_string(&envelope).unwrap()
+            );
+            (
+                StatusCode::OK,
+                [("content-type", "text/event-stream")],
+                frame,
+            )
+                .into_response()
+        }
+    });
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.expect("SSE server") });
+    let client = Arc::new(DaemonClient::new(
+        SESSION.into(),
+        port,
+        7,
+        Some(TOKEN.into()),
+    ));
+    let received = Arc::new(tokio::sync::Notify::new());
+    let received_for_callback = received.clone();
+    let (subscription, connected) = client
+        .subscribe_connected(move |envelope| {
+            assert_eq!(envelope.seq, Some(9));
+            received_for_callback.notify_one();
+        })
+        .await;
+    connected
+        .await
+        .expect("connected signal")
+        .expect("SSE connected");
+    tokio::time::timeout(Duration::from_secs(1), received.notified())
+        .await
+        .expect("valid envelope delivered");
+    let requests = seen.lock().await.clone();
+    assert_eq!(requests[0].method, "GET");
+    assert_eq!(requests[0].path, "/events");
+    assert_eq!(
+        requests[0].auth.as_deref(),
+        Some(format!("Bearer {TOKEN}").as_str())
+    );
+    subscription.stop().await;
+    server.abort();
 }
 
 #[tokio::test]
