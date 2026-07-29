@@ -53,7 +53,7 @@ review-approved.
   `history_seed`: the ported timestamp fabrication is deletable on the next
   daemon bump (unstable.6 ships `emitted_at`); don't extend it. Also note the
   known TS bug that only 3 of 12 history kinds are replayed.
-- `pantoken-daemon-types` — codegen from `polytoken openapi` (162 types).
+- `pantoken-daemon-types` — codegen from `polytoken 0.5.8 openapi` (178 component schemas, 178 generated declarations, 57 DaemonEvent variants).
 - `daemon_client.rs` — 1:1 method-surface port including lease retry.
   **Untested** — dedicated test ports still open (Phase 2 item 4). SSE liveness
   is heartbeat-based (Phase 2.0).
@@ -209,14 +209,16 @@ Before porting, fixing, or testing any daemon-facing workaround, check
 dump — prefer deleting a workaround the daemon now owns over porting it
 faithfully.
 
-> **Version status (2026-07-11):** installed **0.5.0-unstable.6**. Codegen
-> re-run against unstable.6 (162 schemas, 55 DaemonEvent variants — same event
-> set as unstable.1). Two additive type changes: `TransportKind::StreamInterrupted`
-> new variant, `ProviderError::Transport` gained optional `source_detail: Option<String>`.
-> Bearer-token auth (PT-235) remains adopted. Corpus replayed as drift canary: all
-> 993 server tests pass. Re-check only on the *next* bump: re-run codegen, replay
-> the corpus as the drift canary, adopt newly daemon-owned fields, re-capture only
-> on conscious adoption.
+> **Version status (2026-07-29):** installed and validated **0.5.8**. The fresh
+> OpenAPI inventory contains 178 component schemas and 57 `DaemonEvent` variants;
+> generated Rust contains 178 matching declarations. The bump adds cache-miss,
+> compaction/history projection, feedback-artifact, active-plan, and response-id
+> vocabulary, and removes the obsolete `CodexAuthProfile` alias. These are
+> additive/unused wire shapes except for the two new events, which are explicitly
+> handled as no-op notifications by the live mapper. The corpus was renamed to the
+> active `0.5.8` selector and replay passes. A future bump must re-run codegen,
+> refresh the checked-in OpenAPI inventory, replay/capture the corpus, update
+> provisioning fixtures, and review all daemon-facing mappings.
 
 **Confirmed still daemon-gaps (probed live, 2026-07-04):**
 - SSE resume is a silent no-op — `Last-Event-ID: 100` replays nothing. Reconnect

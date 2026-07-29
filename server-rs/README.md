@@ -69,9 +69,12 @@ Daemon wire types are auto-generated from the polytoken binary's OpenAPI spec:
 just codegen-polytoken-rs
 ```
 
-This runs `polytoken openapi` and generates `pantoken-daemon-types/src/lib.rs` with
-162 serde types (90 structs + 48 enums + 24 type aliases) including the 55-variant
-`DaemonEvent` discriminated union.
+This runs `polytoken openapi` and generates `pantoken-daemon-types/src/lib.rs` from the
+installed daemon version. The current pinned baseline is `polytoken 0.5.8`: the
+OpenAPI document contains 178 component schemas and the generated Rust contains 178
+matching declarations, including the 57-variant `DaemonEvent` discriminated union.
+The checked-in fixture at `pantoken-daemon-types/tests/fixtures/polytoken-0.5.8-openapi.json`
+and its inventory test make this source-of-truth comparison deterministic.
 
 ## E2E integration
 

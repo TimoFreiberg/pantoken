@@ -521,7 +521,7 @@ mod tests {
                 curl: true,
                 sha256sum: true,
             },
-            polytoken_version: Some("0.5.0-unstable.9".into()),
+            polytoken_version: Some("0.5.8".into()),
         }
     }
 

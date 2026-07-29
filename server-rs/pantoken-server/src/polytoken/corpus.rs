@@ -6,7 +6,7 @@
 //! machinery (the value/frame/http rewriters + the idempotency tests) stays in
 //! `corpus.rs`; only the structs + load/enum helpers live here.
 //!
-//! See `server-rs/tests/corpus/0.4.0-unstable.7/README.md` for the file format.
+//! See `server-rs/tests/corpus/0.5.8/README.md` for the file format.
 //
 // `load_named`/`sole_version`/`envelope` are consumed by the fake-daemon harness
 // (`live_path.rs`), which lands in a later step of this same plan. Until then
@@ -169,7 +169,9 @@ pub fn version_dirs() -> Vec<String> {
 
 /// The single canonical version dir the corpus ships under. Returns it if
 /// exactly one version dir exists; panics otherwise (the harness assumes a
-/// single frozen version, matching "pin the corpus").
+/// single frozen version, matching "pin the corpus"). The active fixture is
+/// versioned under `server-rs/tests/corpus/0.5.8`; historical captures are not
+/// retained because this loader intentionally supports one version directory.
 pub fn sole_version() -> String {
     let dirs = version_dirs();
     assert_eq!(

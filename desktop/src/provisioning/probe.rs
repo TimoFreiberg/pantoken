@@ -226,10 +226,7 @@ mod tests {
         assert!(!result.tools.unzip);
         assert!(result.tools.curl);
         assert!(result.tools.sha256sum);
-        assert_eq!(
-            result.polytoken_version.as_deref(),
-            Some("0.5.0-unstable.9")
-        );
+        assert_eq!(result.polytoken_version.as_deref(), Some("0.5.8"));
     }
 
     #[test]

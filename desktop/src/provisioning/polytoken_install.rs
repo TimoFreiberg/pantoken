@@ -480,7 +480,7 @@ mod tests {
 
     #[test]
     fn polytoken_install_artifact_matrix() {
-        let version = "0.5.0-unstable.9";
+        let version = POLYTOKEN_DAEMON_TARGET_VERSION;
 
         // Only targets with published, smoke-tested artifacts are supported.
         // aarch64-unknown-linux-gnu and x86_64-apple-darwin are intentionally
@@ -544,7 +544,7 @@ mod tests {
             layout::polytoken_binary(Path::new(root), "0.4.2", "x86_64-unknown-linux-gnu").unwrap();
         let new_binary = layout::polytoken_binary(
             Path::new(root),
-            "0.5.0-unstable.9",
+            POLYTOKEN_DAEMON_TARGET_VERSION,
             "x86_64-unknown-linux-gnu",
         )
         .unwrap();
@@ -555,7 +555,7 @@ mod tests {
         // The install command for the new version doesn't reference the old.
         let cmd = build_install_command(
             root,
-            "0.5.0-unstable.9",
+            POLYTOKEN_DAEMON_TARGET_VERSION,
             "x86_64-unknown-linux-gnu",
             "/tmp/archive.tar.gz",
             ArchiveFormat::TarGz,
@@ -567,11 +567,9 @@ mod tests {
     #[test]
     fn polytoken_install_records_provenance() {
         let provenance = InstallProvenance {
-            version: "0.5.0-unstable.9".into(),
+            version: POLYTOKEN_DAEMON_TARGET_VERSION.into(),
             target: "x86_64-unknown-linux-gnu".into(),
-            source_url:
-                "https://dl.polytoken.dev/unstable/0.5.0-unstable.9/linux-amd64/polytoken.tar.gz"
-                    .into(),
+            source_url: "https://dl.polytoken.dev/0.5.8/linux-amd64/polytoken.tar.gz".into(),
             sha256: "abc123".into(),
             channel: "unstable".into(),
             installed_at: "1234567890".into(),
@@ -580,7 +578,7 @@ mod tests {
 
         let json = serde_json::to_string(&provenance).expect("serialize");
         let back: InstallProvenance = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(back.version, "0.5.0-unstable.9");
+        assert_eq!(back.version, POLYTOKEN_DAEMON_TARGET_VERSION);
         assert_eq!(back.target, "x86_64-unknown-linux-gnu");
         assert_eq!(back.sha256, "abc123");
         assert_eq!(back.channel, "unstable");
@@ -610,7 +608,7 @@ mod tests {
     #[test]
     fn channel_derivation() {
         assert_eq!(channel_for_version("1.0.0"), Channel::Stable);
-        assert_eq!(channel_for_version("0.5.0-unstable.9"), Channel::Unstable);
+        assert_eq!(channel_for_version("0.5.8"), Channel::Stable);
         assert_eq!(channel_for_version("1.0.0-rc.1"), Channel::Unstable);
     }
 }

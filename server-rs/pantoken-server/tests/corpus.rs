@@ -1,6 +1,6 @@
 //! Golden daemon corpus loader + canonicalization tests.
 //!
-//! See `server-rs/tests/corpus/0.4.0-unstable.7/README.md` for the format. The
+//! See `server-rs/tests/corpus/0.5.8/README.md` for the format. The
 //! correctness bar: every seed event in every scenario's `sse[]` MUST deserialize
 //! into the real `pantoken_daemon_types::SseEnvelope` / `DaemonEvent` — the loader test
 //! enforces this, so a daemon event-shape drift fails loud (no silent fallbacks).
@@ -457,7 +457,7 @@ fn canon_prompt_dedupes_repeated_uuid_to_one_placeholder() {
     // record exactly one entry (review C1: the old code allocated PROMPT_0/1/2).
     let mut scenario = ScenarioFile {
         scenario: "dedupe-probe".to_string(),
-        version: "0.4.0-unstable.7".to_string(),
+        version: "0.5.8".to_string(),
         description: "synthetic".to_string(),
         canonicalization: CanonicalizationManifest {
             session_id: "SESSION".to_string(),
@@ -528,7 +528,7 @@ fn canon_leaves_uuid_shaped_non_prompt_ids_untouched() {
     // corrupted it and inflated the prompt counter).
     let mut scenario = ScenarioFile {
         scenario: "non-prompt-probe".to_string(),
-        version: "0.4.0-unstable.7".to_string(),
+        version: "0.5.8".to_string(),
         description: "synthetic".to_string(),
         canonicalization: CanonicalizationManifest {
             session_id: "SESSION".to_string(),
@@ -581,7 +581,7 @@ fn canon_maps_plural_prompt_id_arrays() {
     const RAW_PROMPT_2: &str = "cccccccc-cccc-cccc-cccc-cccccccccccc";
     let mut scenario = ScenarioFile {
         scenario: "plural-probe".to_string(),
-        version: "0.4.0-unstable.7".to_string(),
+        version: "0.5.8".to_string(),
         description: "synthetic".to_string(),
         canonicalization: CanonicalizationManifest {
             session_id: "SESSION".to_string(),

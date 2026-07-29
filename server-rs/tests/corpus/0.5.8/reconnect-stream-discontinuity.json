@@ -1,6 +1,6 @@
 {
   "scenario": "reconnect-stream-discontinuity",
-  "version": "0.4.0-unstable.7",
+  "version": "0.5.8",
   "description": "Reconnect after a stream gap: the SSE subscriber synthesized a stream_discontinuity event (events were dropped between the last delivered frame and this one; carries seq=null). The accumulator must RESEED — issue GET /history + GET /state for a full re-broadcast — NOT attempt SSE resume replay via Last-Event-ID (a known upstream no-op). The reseed fetches fresh state, then the stream continues from the new baseline.",
   "canonicalization": {
     "session_id": "SESSION",

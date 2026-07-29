@@ -146,7 +146,7 @@ at codegen, parse the semver (with prerelease), and embed as
 
 **Rationale:** `polytoken openapi` exposes `info.version = "0.1.0"` — a static
 string that has never tracked daemon releases (installed daemon is
-`0.5.0-unstable.9`). The `GET /version` endpoint returns the *runtime* daemon
+`0.5.8`). The `GET /version` endpoint returns the *runtime* daemon
 version, which cannot be captured at codegen time. `polytoken --version` is the
 only source that tracks real releases with honest naming and parses cleanly as
 semver with prerelease.

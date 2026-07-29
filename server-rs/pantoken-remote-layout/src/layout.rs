@@ -324,9 +324,9 @@ mod tests {
         );
         assert_eq!(tools_dir(root), PathBuf::from("/opt/pantoken/tools"));
         assert_eq!(
-            polytoken_binary(root, "0.5.0-unstable.9", "x86_64-unknown-linux-gnu").unwrap(),
+            polytoken_binary(root, "0.5.8", "x86_64-unknown-linux-gnu").unwrap(),
             PathBuf::from(
-                "/opt/pantoken/tools/polytoken/0.5.0-unstable.9/x86_64-unknown-linux-gnu/polytoken"
+                "/opt/pantoken/tools/polytoken/0.5.8/x86_64-unknown-linux-gnu/polytoken"
             )
         );
         assert_eq!(run_dir(root), PathBuf::from("/opt/pantoken/run"));
@@ -406,7 +406,7 @@ mod tests {
     fn sanitize_or_err_accepts_safe_inputs() {
         assert!(sanitize_or_err("0.1.0").is_ok());
         assert!(sanitize_or_err("aarch64-apple-darwin").is_ok());
-        assert!(sanitize_or_err("0.5.0-unstable.9").is_ok());
+        assert!(sanitize_or_err("0.5.8").is_ok());
     }
 
     #[test]

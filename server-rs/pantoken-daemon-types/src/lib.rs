@@ -6,7 +6,7 @@
 //! file keeps a crate-level dead_code allowance. Do not copy this pattern into
 //! hand-written server modules; annotate those gaps at item level instead.
 //!
-//! Regenerate after a polytoken bump: `bun run scripts/codegen-polytoken-rs.ts`
+//! Regenerate after a polytoken bump: `just codegen-polytoken-rs`
 //! DO NOT EDIT MANUALLY.
 
 #![allow(dead_code)]
@@ -19,13 +19,13 @@
 //
 // The live corpus tests are the true spec-drift gate; this constant is a floor.
 //
-// Regenerate: `bun run scripts/codegen-polytoken-rs.ts`
+// Regenerate: `just codegen-polytoken-rs`
 
 //! Compatibility target: the polytoken daemon version this build was codegen'd
 //! against. Sourced from `polytoken --version` at codegen, NOT from `info.version`
 //! in the OpenAPI spec (which is a static "0.1.0"). The live corpus tests are the
 //! true spec-drift gate.
-pub const POLYTOKEN_DAEMON_TARGET_VERSION: &str = "0.5.0-unstable.9";
+pub const POLYTOKEN_DAEMON_TARGET_VERSION: &str = "0.5.8";
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -162,6 +162,14 @@ pub enum PersistenceTarget {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum ProjectedToolStatus {
+    Ok,
+    Failed,
+    Incomplete,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum ProviderErrorPhase {
     HttpResponse,
     SseEvent,
@@ -224,6 +232,7 @@ pub enum TerminateStatus {
 pub enum TitleChangeSource {
     Operator,
     Inferred,
+    Fallback,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -322,12 +331,15 @@ pub enum BlockDeltaPayload {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CacheMissAlert {
+    pub occupancy_tokens: i32,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClarificationOption {
     pub key: String,
     pub label: String,
 }
-
-pub type CodexAuthProfile = String;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CompactAccepted {
@@ -341,6 +353,18 @@ pub struct CompactRequest {
 }
 
 pub type CompactionId = String;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CompactionProjection {
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub compaction_epoch: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub earlier_user_entries: Option<Vec<EarlierUserEntry>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub recent_turns: Option<Vec<ProjectedTurn>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub version: Option<i32>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -450,6 +474,8 @@ pub enum DaemonEvent {
         subagent_handle: Option<String>,
     },
     MessageComplete {
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        cache_miss_alert: Option<CacheMissAlert>,
         prompt_id: PromptId,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         subagent_handle: Option<String>,
@@ -634,6 +660,8 @@ pub enum DaemonEvent {
         subagent_handle: Option<String>,
     },
     HookFired {
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        additional_context: Option<String>,
         event_type: String,
         hook_name: String,
         outcome: HookOutcome,
@@ -668,6 +696,14 @@ pub enum DaemonEvent {
     },
     CompactionFailed {
         compaction_id: CompactionId,
+        reason: FailureReason,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        subagent_handle: Option<String>,
+    },
+    CompactionRetry {
+        attempt: i32,
+        compaction_id: CompactionId,
+        max_attempts: i32,
         reason: FailureReason,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         subagent_handle: Option<String>,
@@ -752,6 +788,11 @@ pub enum DaemonEvent {
         outcome: SubagentOutcome,
         result_summary: String,
     },
+    SubagentMessaged {
+        emitted_at: String,
+        handle: String,
+        message_preview: String,
+    },
     McpServerConnected {
         resource_count: i32,
         server_name: String,
@@ -824,6 +865,15 @@ pub struct DiffPreviewContent {
 pub type DiffPreviewLine = serde_json::Value;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EarlierUserEntry {
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub source_epoch: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub source_ordinal: Option<i32>,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EditFormatLockedResponse {
     pub code: String,
     pub resolution: String,
@@ -867,6 +917,39 @@ pub enum FailureReason {
         detail: String,
     },
 }
+
+pub type FeedbackArtifactError = serde_json::Value;
+
+pub type FeedbackArtifactId = String;
+
+pub type FeedbackArtifactIdentityKind = String;
+
+pub type FeedbackArtifactKind = String;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FeedbackArtifactKindContentType {
+    pub daemon_log: String,
+    pub main_session: String,
+    pub subagent_session: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FeedbackArtifactManifest {
+    pub entries: Vec<FeedbackArtifactManifestEntry>,
+}
+
+pub type FeedbackArtifactManifestEntry = serde_json::Value;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FeedbackArtifactSnapshotMetadata {
+    pub captured_length: i64,
+    pub device: i64,
+    pub identity_kind: FeedbackArtifactIdentityKind,
+    pub inode: i64,
+    pub prefix_digest: String,
+}
+
+pub type FeedbackArtifactVersionToken = String;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FileCatalogResponse {
@@ -1041,6 +1124,8 @@ pub struct JobSnapshot {
     pub handle: String,
     pub kind: JobKind,
     #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub last_activity_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub output_channels: Option<Vec<JobOutputChannelSnapshot>>,
@@ -1048,6 +1133,8 @@ pub struct JobSnapshot {
     pub parent: Option<ParentRef>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub reasoning_effort: Option<ReasoningEffort>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub stalled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub started_at: Option<String>,
     pub status: JobStatus,
@@ -1060,6 +1147,46 @@ pub struct JobSnapshot {
 }
 
 pub type JobStatus = serde_json::Value;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum KnownFeedbackArtifactError {
+    MissingVersionToken {
+        code: String,
+        message: String,
+    },
+    MalformedVersionToken {
+        code: String,
+        message: String,
+    },
+    UnknownArtifact {
+        code: String,
+        message: String,
+    },
+    StaleSnapshot {
+        code: String,
+        message: String,
+    },
+    OversizedArtifact {
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        byte_length: Option<i64>,
+        code: String,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        limit: Option<i64>,
+        message: String,
+    },
+    RetrievalFailed {
+        code: String,
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum KnownFeedbackArtifactManifestEntry {
+    /// Unknown variant (forward-compatible)
+    Unknown(serde_json::Value),
+}
 
 pub type KnownSessionHistoryItem = serde_json::Value;
 
@@ -1151,6 +1278,12 @@ pub enum Message {
     },
     CompactionFencepost {
         compaction_id: CompactionId,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        compaction_projection: Option<CompactionProjection>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        compaction_prompt: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        continuation_prompt: Option<String>,
         emitted_at: String,
         reattachment: ReattachmentState,
         summary: String,
@@ -1367,6 +1500,34 @@ pub struct PreUserPromptDenied {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProjectedItem {
+    Text {
+        text: String,
+    },
+    ToolCall {
+        name: String,
+        status: ProjectedToolStatus,
+        target: String,
+    },
+    HarnessNote {
+        label: String,
+        text: String,
+    },
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProjectedTurn {
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub items: Option<Vec<ProjectedItem>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub source_epoch: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub source_ordinal: Option<i32>,
+    pub user_text: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PromptAccepted {
     pub prompt_id: PromptId,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -1394,7 +1555,7 @@ pub enum ProviderError {
     },
     AuthFailed,
     LoginRequired {
-        profile: CodexAuthProfile,
+        profile: String,
     },
     ModelNotFound,
     ContextTooLarge {
@@ -1712,6 +1873,9 @@ pub enum StateDelta {
         path: String,
     },
     Popd,
+    ActivePlanSet {
+        path: String,
+    },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -1961,6 +2125,8 @@ pub enum TurnChunk {
         cache_read_input_tokens: Option<i32>,
         input_tokens: i32,
         output_tokens: i32,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        response_id: Option<String>,
     },
 }
 

@@ -20,7 +20,7 @@ pub enum Scenario {
     MissingPolytoken,
     /// No polytoken; policy is RequireExisting.
     MissingPolytokenDeclined,
-    /// polytoken 0.4.2 on PATH; target is 0.5.0-unstable.9.
+    /// polytoken 0.4.2 on PATH; target is 0.5.8.
     TooOldPolytoken,
     /// Unsupported target (freebsd/amd64).
     UnsupportedTarget,
@@ -225,7 +225,7 @@ mod tests {
         let probe = parse_probe_output(&output).expect("parse");
         assert_eq!(probe.os, "linux");
         assert_eq!(probe.arch, "x86_64");
-        assert_eq!(probe.polytoken_version.as_deref(), Some("0.5.0-unstable.9"));
+        assert_eq!(probe.polytoken_version.as_deref(), Some("0.5.8"));
     }
 
     #[tokio::test]
@@ -238,17 +238,14 @@ mod tests {
         let fetch = mock_http_fetch(archive, sums);
 
         // Verify the mock fetch works.
-        let data = fetch(
-            "https://dl.polytoken.dev/unstable/0.5.0-unstable.9/linux-amd64/polytoken.tar.gz",
-        )
-        .await
-        .expect("fetch");
+        let data = fetch("https://dl.polytoken.dev/0.5.8/linux-amd64/polytoken.tar.gz")
+            .await
+            .expect("fetch");
         assert!(!data.is_empty());
 
-        let sums_data =
-            fetch("https://dl.polytoken.dev/unstable/0.5.0-unstable.9/SHA256SUMS.linux")
-                .await
-                .expect("fetch sums");
+        let sums_data = fetch("https://dl.polytoken.dev/0.5.8/SHA256SUMS.linux")
+            .await
+            .expect("fetch sums");
         let sums_str = String::from_utf8_lossy(&sums_data);
         let found = find_checksum_in_sums(&sums_str, "polytoken-linux-amd64.tar.gz");
         assert_eq!(found.as_deref(), Some(hash.as_str()));
@@ -345,7 +342,7 @@ mod fake_ssh_harness_smoke_tests {
         );
 
         let archive = b"archive bytes".to_vec();
-        let install_json = br#"{"version":"0.5.0-unstable.9"}"#.to_vec();
+        let install_json = br#"{"version":"0.5.8"}"#.to_vec();
 
         {
             let fs = transport.remote_fs();

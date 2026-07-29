@@ -1310,7 +1310,9 @@ pub fn subagent_handle(ev: &DaemonEvent) -> Option<&str> {
         | DaemonEvent::McpServerConnected { .. }
         | DaemonEvent::McpServerDisconnected { .. }
         | DaemonEvent::McpServerReconnecting { .. }
-        | DaemonEvent::McpServerDisabled { .. } => None,
+        | DaemonEvent::McpServerDisabled { .. }
+        | DaemonEvent::CompactionRetry { .. }
+        | DaemonEvent::SubagentMessaged { .. } => None,
     }
 }
 
@@ -2149,7 +2151,9 @@ fn map_daemon_event_inner(
         | DaemonEvent::JobExpiring { .. }
         | DaemonEvent::JobCancelled { .. }
         | DaemonEvent::JobUpdated { .. }
-        | DaemonEvent::UsageThrottle { .. } => FoldResult::default(),
+        | DaemonEvent::UsageThrottle { .. }
+        | DaemonEvent::CompactionRetry { .. }
+        | DaemonEvent::SubagentMessaged { .. } => FoldResult::default(),
 
         // Subagent lifecycle: refresh state so the hub re-fetches the jobs list
         // (the hub broadcasts JobsList on every SessionUpdated). Low-frequency,

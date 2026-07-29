@@ -14,7 +14,7 @@ set -euo pipefail
 
 # The polytoken daemon version pantoken is codegen'd against. The compatible
 # fixtures install this exact version; the too-old fixture installs an older one.
-PANTOKEN_POLYTOKEN_VERSION="0.5.0-unstable.9"
+PANTOKEN_POLYTOKEN_VERSION="0.5.8"
 
 # An older plausible version the compat checker classifies as TooOld.
 PANTOKEN_OLD_POLYTOKEN_VERSION="0.4.2"

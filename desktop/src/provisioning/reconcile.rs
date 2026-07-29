@@ -239,7 +239,7 @@ async fn ensure_server_installed(
     // NOTE: server_version is the PANTOKEN SERVER release version (from the
     // manifest's release_version / CARGO_PKG_VERSION, e.g. "0.2.75"), NOT the
     // polytoken daemon version (POLYTOKEN_DAEMON_TARGET_VERSION, e.g.
-    // "0.5.0-unstable.9"). These are different binaries with different versions.
+    // "0.5.8"). These are different binaries with different versions.
     let server_version = &manifest.release_version;
     let target = match probe::target_triple(probe) {
         Ok(t) => t,

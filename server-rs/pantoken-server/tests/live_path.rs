@@ -40,7 +40,7 @@ static OVERRIDE_MUTEX: Mutex<()> = Mutex::const_new(());
 
 /// The corpus version the harness pins (single frozen version per "pin the
 /// corpus" — see PROGRESS.md D20).
-const VERSION: &str = "0.4.0-unstable.7";
+const VERSION: &str = "0.5.8";
 
 /// Install a spawn-override pointing at `fake`, returning a guard that clears
 /// it on drop. Panics if the override is already set (caller bug).

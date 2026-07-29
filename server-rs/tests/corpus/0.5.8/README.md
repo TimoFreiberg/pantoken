@@ -1,4 +1,4 @@
-# Golden daemon corpus — `0.4.0-unstable.7`
+# Golden daemon corpus — `0.5.8`
 
 This directory holds the **golden daemon corpus**: deterministic, canonicalized
 recordings of real daemon (SSE `DaemonEvent` sequences + matching HTTP
@@ -20,7 +20,7 @@ Each scenario is one JSON file. The canonical shape:
 ```json
 {
   "scenario": "streaming-turn",
-  "version": "0.4.0-unstable.7",
+  "version": "0.5.8",
   "description": "A complete assistant turn: message_start → content block "
                "stream → message_complete.",
   "canonicalization": {

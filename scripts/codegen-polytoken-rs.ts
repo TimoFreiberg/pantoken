@@ -1,7 +1,7 @@
 // Regenerates server-rs/pantoken-daemon-types/src/lib.rs from the polytoken
 // binary's own self-describing OpenAPI spec (`polytoken openapi`).
 //
-// The generated file contains serde types for all 161 OpenAPI schemas,
+// The generated file contains serde types for every OpenAPI component schema,
 // including the DaemonEvent discriminated union. Types use the same
 // JSON wire format as the daemon: internally-tagged enums use `type`
 // (or `kind` where the spec says so), camelCase field names via
@@ -247,8 +247,8 @@ ${fields.join("\n")}
       // A variant that's a $ref to another schema
       const refName = refToRust(variant.$ref);
       variantDefs.push(`    ${refName}(${refName}),`);
-    } else {
-      // Unknown variant shape — use a catch-all
+    } else if (!variantDefs.some((definition) => definition.includes("    Unknown(serde_json::Value),"))) {
+      // Unknown variant shape — use one catch-all for any number of opaque variants.
       variantDefs.push(`    /// Unknown variant (forward-compatible)\n    Unknown(serde_json::Value),`);
     }
   }

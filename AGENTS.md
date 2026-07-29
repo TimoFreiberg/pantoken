@@ -54,7 +54,7 @@ Monorepo, pnpm workspaces.
   `pantoken-tar-validate` (archive path-safety for provisioning), plus `desktop`
   (Tauri desktop app) at the workspace root. The `PantokenDriver` seam has two
   implementors: `mock` (deterministic, for dev/e2e) and `polytoken` (the live
-  daemon). **The installed daemon is `0.5.0-unstable.9`** (bearer-token auth). See
+  daemon). **The installed daemon is `0.5.8`** (bearer-token auth). See
   `server-rs/PROGRESS.md` for the live-path validation status before building on
   it. Archived TS tests are in `server-rs/ts-test-reference/` for reference when
   porting cases to Rust.

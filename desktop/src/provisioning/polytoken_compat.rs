@@ -188,7 +188,7 @@ mod tests {
 
     #[test]
     fn polytoken_compatibility_matrix() {
-        let target = "0.5.0-unstable.9";
+        let target = POLYTOKEN_DAEMON_TARGET_VERSION;
 
         // Missing → Missing.
         assert_eq!(classify_compat(None, target), PolytokenCompat::Missing);
@@ -204,9 +204,9 @@ mod tests {
 
         // Equal.
         assert_eq!(
-            classify_compat(Some("0.5.0-unstable.9".into()), target),
+            classify_compat(Some(POLYTOKEN_DAEMON_TARGET_VERSION.into()), target),
             PolytokenCompat::Compatible {
-                found: "0.5.0-unstable.9".into(),
+                found: POLYTOKEN_DAEMON_TARGET_VERSION.into(),
                 target: target.into(),
                 newer_than_target: false
             }
@@ -233,10 +233,13 @@ mod tests {
 
     #[test]
     fn polytoken_compat_records_observed_version() {
-        let compat = classify_compat(Some("0.5.0-unstable.9".into()), "0.5.0-unstable.9");
+        let compat = classify_compat(
+            Some(POLYTOKEN_DAEMON_TARGET_VERSION.into()),
+            POLYTOKEN_DAEMON_TARGET_VERSION,
+        );
         match compat {
             PolytokenCompat::Compatible { found, .. } => {
-                assert_eq!(found, "0.5.0-unstable.9");
+                assert_eq!(found, POLYTOKEN_DAEMON_TARGET_VERSION);
             }
             other => panic!("expected Compatible, got {other:?}"),
         }
@@ -245,25 +248,19 @@ mod tests {
     #[test]
     fn extract_version_from_command_output() {
         let output = CommandOutput {
-            stdout: "polytoken 0.5.0-unstable.9\n".into(),
+            stdout: "polytoken 0.5.8\n".into(),
             stderr: String::new(),
             exit_code: Some(0),
         };
-        assert_eq!(
-            extract_version_string(&output).as_deref(),
-            Some("0.5.0-unstable.9")
-        );
+        assert_eq!(extract_version_string(&output).as_deref(), Some("0.5.8"));
 
         // Version with build metadata / extra text.
         let output = CommandOutput {
-            stdout: "polytoken version 0.5.0-unstable.9 (build abc123)\n".into(),
+            stdout: "polytoken version 0.5.8 (build abc123)\n".into(),
             stderr: String::new(),
             exit_code: Some(0),
         };
-        assert_eq!(
-            extract_version_string(&output).as_deref(),
-            Some("0.5.0-unstable.9")
-        );
+        assert_eq!(extract_version_string(&output).as_deref(), Some("0.5.8"));
     }
 
     #[test]

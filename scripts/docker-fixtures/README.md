@@ -63,7 +63,7 @@ Each fixture is independently runnable and idempotent (tears down + recreates):
 
 | # | Script | Container name | User | polytoken | Expected pantoken behavior |
 |---|--------|---------------|------|-----------|---------------------------|
-| 01 | `01-healthy.sh` | `pantoken-healthy` | `pantoken` | compatible `0.5.0-unstable.9` | Preflight passes, no risks → **Ready** |
+| 01 | `01-healthy.sh` | `pantoken-healthy` | `pantoken` | compatible `0.5.8` | Preflight passes, no risks → **Ready** |
 | 02 | `02-missing-polytoken.sh` | `pantoken-no-polytoken` | `pantoken` | missing | `PolytokenCompat::Missing` — install-offer flow |
 | 03 | `03-old-polytoken.sh` | `pantoken-old-polytoken` | `pantoken` | too-old `0.4.2` | `PolytokenCompat::TooOld` |
 | 04 | `04-root-user.sh` | `pantoken-root` | `root` | compatible | `RootExecution` risk → **AwaitingAcknowledgement** |
@@ -88,7 +88,7 @@ After running `setup-all.sh`, you can verify each container's state directly:
 
 ```bash
 # AC.3 — healthy container passes the probe
-docker exec pantoken-healthy polytoken --version     # → polytoken 0.5.0-unstable.9
+docker exec pantoken-healthy polytoken --version     # → polytoken 0.5.8
 docker exec pantoken-healthy uname -m                # → x86_64
 docker exec pantoken-healthy sh -c 'ldd --version 2>&1 | head -1'  # mentions glibc
 
@@ -116,12 +116,12 @@ docker inspect pantoken-ephemeral | grep -c '"Destination": "/var/lib/pantoken"'
 ## How polytoken Is Installed
 
 The compatible fixtures (01, 04, 05, 06, 08, 09, 12, 13) install the **real**
-polytoken `0.5.0-unstable.9` binary from the official release artifact CDN. The
+polytoken `0.5.8` binary from the official release artifact CDN. The
 URL pattern matches the production code in
 `desktop/src/provisioning/polytoken_install.rs:resolve_artifact_urls()`:
 
-- **Archive:** `https://dl.polytoken.dev/unstable/0.5.0-unstable.9/linux-amd64/polytoken.tar.gz`
-- **Checksums:** `https://dl.polytoken.dev/unstable/0.5.0-unstable.9/SHA256SUMS.linux`
+- **Archive:** `https://dl.polytoken.dev/0.5.8/linux-amd64/polytoken.tar.gz`
+- **Checksums:** `https://dl.polytoken.dev/0.5.8/SHA256SUMS.linux`
 
 The `install-polytoken.sh` helper downloads the archive + checksums, verifies
 SHA256, copies the archive into the container, and extracts it to

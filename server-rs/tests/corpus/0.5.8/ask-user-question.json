@@ -1,6 +1,6 @@
 {
   "scenario": "ask-user-question",
-  "version": "0.4.0-unstable.7",
+  "version": "0.5.8",
   "description": "A turn where the model asks the user a structured question (ask_user_question interrogative) → the user answers → message_complete.",
   "canonicalization": {
     "session_id": "SESSION",

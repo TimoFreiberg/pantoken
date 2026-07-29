@@ -84,7 +84,7 @@ function readStartupJson(
   }
 }
 
-const CORPUS_VERSION = "0.4.0-unstable.7";
+const CORPUS_VERSION = "0.5.8";
 const CORPUS_DIR = join(
   SCRIPT_DIR,
   "..",
@@ -390,7 +390,7 @@ interface CaptureCtx {
 const CROCKFORD = "0123456789abcdefghjkmnpqrstvwxyz";
 
 /** A daemon-valid session id: `<6 Crockford base32>-corpus`. The daemon
- *  (`0.4.0-unstable.7`) REJECTS an arbitrary id like a UUID — it requires the
+ *  (`0.5.8`) REJECTS an arbitrary id like a UUID — it requires the
  *  segment before the first dash to be exactly 6 Crockford base32 chars (its own
  *  timestamp-segment scheme). We encode the low 30 bits of the epoch (ms) as those
  *  6 chars so sequential captures never collide, then a fixed `corpus` word so the
