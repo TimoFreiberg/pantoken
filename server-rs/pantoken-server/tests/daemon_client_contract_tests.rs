@@ -1096,6 +1096,12 @@ async fn daemon_client_endpoint_contract_matrix() {
     .await;
     assert_request(&seen, "DELETE", "/todos/7", None);
     assert_eq!(result.status, 404);
+    let (seen, result) = call(StatusCode::OK, json!({}), |c| async move {
+        c.delete_todo(7).await
+    })
+    .await;
+    assert_request(&seen, "DELETE", "/todos/7", None);
+    assert_eq!(result.status, 200);
     executed.insert("delete_todo");
 
     let (seen, result) = call(StatusCode::OK, json!({}), |c| async move {
@@ -1137,6 +1143,8 @@ async fn daemon_client_endpoint_contract_matrix() {
     executed.insert("goal_set");
     for (name, status, path) in [
         ("goal_resume", StatusCode::OK, "/goal/resume"),
+        ("goal_resume", StatusCode::NO_CONTENT, "/goal/resume"),
+        ("goal_clear", StatusCode::OK, "/goal/clear"),
         ("goal_clear", StatusCode::NO_CONTENT, "/goal/clear"),
     ] {
         let (seen, result) = if name == "goal_resume" {
@@ -1155,6 +1163,18 @@ async fn daemon_client_endpoint_contract_matrix() {
     .await;
     assert_request(&seen, "POST", "/mcp/server%20name/enable", None);
     assert!(result.is_ok());
+    for (action, path) in [
+        (McpServerAction::Disable, "/mcp/server%20name/disable"),
+        (McpServerAction::Disconnect, "/mcp/server%20name/disconnect"),
+        (McpServerAction::Reconnect, "/mcp/server%20name/reconnect"),
+    ] {
+        let (seen, result) = call(StatusCode::OK, json!({}), |c| async move {
+            c.mcp_server_action("server name", action).await
+        })
+        .await;
+        assert_request(&seen, "POST", path, None);
+        assert!(result.is_ok());
+    }
     executed.insert("mcp_server_action");
     let new_operation_rejection = json!({"code":"public_code","message":"public message"});
     let rejected = new_operation_rejection.clone();
@@ -1639,6 +1659,9 @@ async fn daemon_client_subscribe_contract() {
     let (subscription, connected) = client
         .subscribe_connected(move |envelope| {
             assert_eq!(envelope.seq, Some(9));
+            assert_eq!(envelope.session_id, SESSION);
+            assert_eq!(envelope.emitted_at, "2024-01-01T00:00:00Z");
+            assert!(matches!(envelope.event, DaemonEvent::Heartbeat { ref timestamp, subagent_handle: None } if timestamp == "2024-01-01T00:00:00Z"));
             received_for_callback.notify_one();
         })
         .await;
@@ -1658,6 +1681,71 @@ async fn daemon_client_subscribe_contract() {
     );
     subscription.stop().await;
     server.abort();
+}
+
+#[tokio::test]
+async fn daemon_client_subscribe_rejects_bad_status_and_content_type() {
+    for (status, content_type) in [
+        (StatusCode::UNAUTHORIZED, Some("text/event-stream")),
+        (StatusCode::INTERNAL_SERVER_ERROR, Some("text/event-stream")),
+        (StatusCode::OK, Some("application/json")),
+        (StatusCode::OK, None),
+    ] {
+        let seen = Arc::new(Mutex::new(Vec::<Seen>::new()));
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let seen_for_handler = seen.clone();
+        let app = Router::new().fallback(move |request: Request<Body>| {
+            let seen = seen_for_handler.clone();
+            async move {
+                let (parts, _body) = request.into_parts();
+                seen.lock().await.push(Seen {
+                    method: parts.method.to_string(),
+                    path: parts.uri.to_string(),
+                    auth: parts
+                        .headers
+                        .get("authorization")
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_owned),
+                    body: String::new(),
+                });
+                let mut response = Response::new(Body::from("rejected"));
+                *response.status_mut() = status;
+                if let Some(value) = content_type {
+                    response
+                        .headers_mut()
+                        .insert("content-type", value.parse().unwrap());
+                }
+                response
+            }
+        });
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.expect("server") });
+        let client = Arc::new(DaemonClient::new(
+            SESSION.into(),
+            port,
+            7,
+            Some(TOKEN.into()),
+        ));
+        let (subscription, connected) = client.subscribe_connected(|_| {}).await;
+        let readiness = tokio::time::timeout(Duration::from_secs(1), connected)
+            .await
+            .expect("bounded readiness")
+            .expect("readiness channel");
+        assert!(
+            readiness.is_err(),
+            "status/content type must reject: {status:?} {content_type:?}"
+        );
+        let requests = seen.lock().await.clone();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].method, "GET");
+        assert_eq!(requests[0].path, "/events");
+        assert_eq!(
+            requests[0].auth.as_deref(),
+            Some(format!("Bearer {TOKEN}").as_str())
+        );
+        subscription.stop().await;
+        server.abort();
+    }
 }
 
 #[tokio::test]

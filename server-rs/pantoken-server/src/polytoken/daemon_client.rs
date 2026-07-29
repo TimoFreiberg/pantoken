@@ -2612,6 +2612,40 @@ impl DaemonClient {
                 continue;
             }
 
+            let content_type_is_sse = response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.split(';').next())
+                .map(str::trim)
+                .is_some_and(|media_type| media_type.eq_ignore_ascii_case("text/event-stream"));
+            if !content_type_is_sse {
+                let content_type = response
+                    .headers()
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or("<missing>");
+                let error = format!(
+                    "GET /events failed: expected Content-Type text/event-stream, got {content_type}"
+                );
+                if let Some(connected) = initial_connected.take() {
+                    let _ = connected.send(Err(error));
+                    break;
+                }
+                if !stopped {
+                    error!(
+                        "[polytoken] SSE connect failed: {error}; retry in {}ms",
+                        state.backoff
+                    );
+                    tokio::select! {
+                        _ = &mut cancel_rx => { stopped = true; break; }
+                        _ = stop_notify.notified() => { stopped = true; break; }
+                        _ = tokio::time::sleep(Duration::from_millis(state.on_failure())) => {}
+                    }
+                }
+                continue;
+            }
+
             if let Some(connected) = initial_connected.take() {
                 let _ = connected.send(Ok(()));
             }
@@ -2806,7 +2840,12 @@ impl SseSubscription {
         if let Some(cancel) = self.cancel.take() {
             let _ = cancel.send(());
         }
-        self.join_handle.abort();
+        if tokio::time::timeout(Duration::from_secs(1), &mut self.join_handle)
+            .await
+            .is_err()
+        {
+            self.join_handle.abort();
+        }
     }
 }
 
@@ -4604,8 +4643,9 @@ sleep 30
 
         let session_id = "s1";
         let connect_count = Arc::new(AtomicUsize::new(0));
-        // Records the Last-Event-ID header seen on each connect.
-        let seen_headers: Arc<Mutex<Vec<Option<String>>>> = Arc::new(Mutex::new(Vec::new()));
+        // Records Last-Event-ID and Authorization headers seen on each connect.
+        let seen_headers: Arc<Mutex<Vec<(Option<String>, Option<String>)>>> =
+            Arc::new(Mutex::new(Vec::new()));
 
         let seen_headers_handler = seen_headers.clone();
         let connect_count_handler = connect_count.clone();
@@ -4620,7 +4660,11 @@ sleep 30
                         .get("last-event-id")
                         .and_then(|v| v.to_str().ok())
                         .map(|s| s.to_string());
-                    sh.lock().unwrap().push(last_event_id);
+                    let authorization = headers
+                        .get("authorization")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
+                    sh.lock().unwrap().push((last_event_id, authorization));
 
                     let (tx, rx) =
                         tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(16);
@@ -4660,7 +4704,8 @@ sleep 30
             axum::serve(listener, app).await.expect("serve");
         });
 
-        let mut client = DaemonClient::new(session_id.into(), port, 1, None);
+        let mut client =
+            DaemonClient::new(session_id.into(), port, 1, Some("reconnect-token".into()));
         client.heartbeat_timeout_ms = 50;
         let client = Arc::new(client);
 
@@ -4690,16 +4735,18 @@ sleep 30
         );
         // First connect: no Last-Event-ID (never seen an id before).
         assert!(
-            headers[0].is_none(),
+            headers[0].0.is_none(),
             "first connect should have no Last-Event-ID header; got {:?}",
             headers[0]
         );
+        assert_eq!(headers[0].1.as_deref(), Some("Bearer reconnect-token"));
         // Second connect: should replay the id "7" from the first stream.
         assert_eq!(
-            headers[1].as_deref(),
+            headers[1].0.as_deref(),
             Some("7"),
             "second connect should replay Last-Event-ID=7; got {:?}",
             headers[1]
         );
+        assert_eq!(headers[1].1.as_deref(), Some("Bearer reconnect-token"));
     }
 }
