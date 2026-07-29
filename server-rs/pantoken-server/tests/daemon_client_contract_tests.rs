@@ -1176,6 +1176,19 @@ async fn daemon_client_endpoint_contract_matrix() {
         assert!(result.is_ok());
     }
     executed.insert("mcp_server_action");
+    for (action, path) in [
+        (McpServerAction::Enable, "/mcp/server%20name/enable"),
+        (McpServerAction::Disable, "/mcp/server%20name/disable"),
+        (McpServerAction::Disconnect, "/mcp/server%20name/disconnect"),
+        (McpServerAction::Reconnect, "/mcp/server%20name/reconnect"),
+    ] {
+        let (seen, result) = call(StatusCode::NO_CONTENT, json!({}), |c| async move {
+            c.mcp_server_action("server name", action).await
+        })
+        .await;
+        assert_request(&seen, "POST", path, None);
+        assert!(result.is_err(), "MCP must reject alternate 2xx");
+    }
     let new_operation_rejection = json!({"code":"public_code","message":"public message"});
     let rejected = new_operation_rejection.clone();
     for (name, path, operation) in [
@@ -1679,7 +1692,13 @@ async fn daemon_client_subscribe_contract() {
         requests[0].auth.as_deref(),
         Some(format!("Bearer {TOKEN}").as_str())
     );
+    let before_stop = seen.lock().await.len();
     subscription.stop().await;
+    let after_stop = seen.lock().await.len();
+    assert_eq!(
+        after_stop, before_stop,
+        "stop must prevent reconnect requests"
+    );
     server.abort();
 }
 
@@ -1688,6 +1707,11 @@ async fn daemon_client_subscribe_rejects_bad_status_and_content_type() {
     for (status, content_type) in [
         (StatusCode::UNAUTHORIZED, Some("text/event-stream")),
         (StatusCode::INTERNAL_SERVER_ERROR, Some("text/event-stream")),
+        (StatusCode::CREATED, Some("text/event-stream")),
+        (StatusCode::PARTIAL_CONTENT, Some("text/event-stream")),
+        (StatusCode::NO_CONTENT, Some("text/event-stream")),
+        (StatusCode::CREATED, Some("application/json")),
+        (StatusCode::NO_CONTENT, None),
         (StatusCode::OK, Some("application/json")),
         (StatusCode::OK, None),
     ] {

@@ -2590,7 +2590,7 @@ impl DaemonClient {
                 Ok(res) => res,
             };
 
-            if !response.status().is_success() {
+            if response.status() != reqwest::StatusCode::OK {
                 let status = response.status();
                 if let Some(connected) = initial_connected.take() {
                     let _ = connected.send(Err(format!("GET /events failed ({status})")));
@@ -2845,6 +2845,7 @@ impl SseSubscription {
             .is_err()
         {
             self.join_handle.abort();
+            let _ = self.join_handle.await;
         }
     }
 }
