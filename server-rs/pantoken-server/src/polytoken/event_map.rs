@@ -1454,7 +1454,7 @@ pub const DAEMON_EVENT_DISPOSITIONS: &[(&str, EventDisposition)] = &[
 
 /// Classify a public daemon event wire name without constructing or serializing
 /// an event. This is the production compatibility classifier used by the
-/// exhaustive typed classifier below and by the schema inventory test.
+/// exhaustive typed wire-name mapping below and by the schema inventory test.
 pub fn event_disposition_for_wire_name(name: &str) -> Option<EventDisposition> {
     use EventDisposition::*;
     Some(match name {
