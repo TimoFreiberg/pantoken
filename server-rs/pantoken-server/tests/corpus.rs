@@ -419,23 +419,27 @@ fn effect_expectation(effect: &DaemonEffect) -> DriverEffectExpectation {
 fn replay_contract(
     scenario: &ScenarioFile,
 ) -> (
+    Vec<Value>,
     Vec<SessionDriverEvent>,
     Vec<DriverEffectExpectation>,
     event_map::FoldAccumulator,
 ) {
     let ctx = ContractCtx::default();
     let mut acc = event_map::create_accumulator();
+    let mut raw_events = Vec::new();
     let mut events = Vec::new();
     let mut effects = Vec::new();
     for frame in &scenario.sse {
         let envelope = frame
             .envelope()
             .unwrap_or_else(|e| panic!("{}: {e}", scenario.scenario));
+        let raw = serde_json::to_value(&envelope.event).unwrap();
+        raw_events.push(raw);
         let result = event_map::map_daemon_event(&envelope.event, &mut acc, &ctx);
         events.extend(result.events);
         effects.extend(result.effects.iter().map(effect_expectation));
     }
-    (events, effects, acc)
+    (raw_events, events, effects, acc)
 }
 
 fn subset(actual: &Value, expected: &Value) -> bool {
@@ -451,7 +455,7 @@ fn subset(actual: &Value, expected: &Value) -> bool {
 }
 
 fn assert_contract(scenario: &ScenarioFile) {
-    let (events, effects, acc) = replay_contract(scenario);
+    let (_raw, events, effects, acc) = replay_contract(scenario);
     let actual_events: Vec<Value> = events
         .iter()
         .map(|e| serde_json::to_value(e).unwrap())
@@ -464,28 +468,37 @@ fn assert_contract(scenario: &ScenarioFile) {
     );
     let mut cursor = 0;
     for contract in &expected.events {
-        let mut matched = 0;
-        while cursor < actual_events.len() && matched < contract.count {
+        for run_index in 0..contract.count {
+            assert!(
+                cursor < actual_events.len(),
+                "{}: event run {} of {} is missing",
+                scenario.scenario,
+                run_index + 1,
+                contract.kind
+            );
             let actual = &actual_events[cursor];
             cursor += 1;
-            if actual["type"] == contract.kind
-                && contract.essential.as_ref().is_none_or(|fields| {
+            assert_eq!(
+                actual["type"],
+                contract.kind,
+                "{}: unexpected event at position {}",
+                scenario.scenario,
+                cursor - 1
+            );
+            if let Some(fields) = &contract.essential {
+                assert!(
                     subset(
                         actual,
                         &Value::Object(
-                            fields.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
-                        ),
-                    )
-                })
-            {
-                matched += 1;
+                            fields.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+                        )
+                    ),
+                    "{}: essential fields failed at position {}",
+                    scenario.scenario,
+                    cursor - 1
+                );
             }
         }
-        assert_eq!(
-            matched, contract.count,
-            "{}: exact ordered event contract failed at {}",
-            scenario.scenario, contract.kind
-        );
     }
     assert_eq!(
         cursor,
@@ -541,17 +554,39 @@ fn corpus_provenance_is_complete() {
         for path in scenario_files(&version) {
             let scenario = load_scenario(&path);
             assert!(!scenario.description.trim().is_empty());
-            assert!(
-                !matches!(scenario.provenance.kind, FixtureProvenanceKind::Captured),
-                "{} must not claim unverified capture provenance",
-                scenario.scenario
-            );
+            match scenario.provenance.kind {
+                FixtureProvenanceKind::Captured => {
+                    assert_eq!(
+                        scenario.provenance.daemon_version.as_deref(),
+                        Some(scenario.version.as_str()),
+                        "{}: captured daemon version mismatch",
+                        scenario.scenario
+                    );
+                    assert!(
+                        scenario
+                            .provenance
+                            .capture_method
+                            .as_deref()
+                            .is_some_and(|m| !m.trim().is_empty()),
+                        "{}: captured fixture needs capture_method",
+                        scenario.scenario
+                    );
+                }
+                FixtureProvenanceKind::SyntheticPublicSchema
+                | FixtureProvenanceKind::SyntheticPantokenRegression => {
+                    assert!(
+                        scenario.provenance.capture_method.is_none(),
+                        "{}: synthetic fixture must not carry capture_method",
+                        scenario.scenario
+                    );
+                }
+            }
             assert!(
                 !scenario.expected_driver_events.events.is_empty(),
                 "{} has no typed event expectations",
                 scenario.scenario
             );
-            let (events, effects, _) = replay_contract(&scenario);
+            let (raw, events, effects, _) = replay_contract(&scenario);
             let kinds: std::collections::BTreeSet<String> = events
                 .iter()
                 .map(|e| {
@@ -563,13 +598,38 @@ fn corpus_provenance_is_complete() {
                 .collect();
             for capability in &scenario.expected_driver_events.capabilities {
                 let observed = match capability.as_str() {
-                    "streaming" => kinds.contains("assistantDelta"),
-                    "queue" => {
-                        kinds.contains("queueUpdated") || kinds.contains("queuedMessageStarted")
+                    "streaming" => {
+                        raw.iter().any(|e| e["type"] == "message_start")
+                            && kinds.contains("assistantDelta")
+                            && effects.iter().any(|e| {
+                                e.kind == "fetchState" && e.emit.as_deref() == Some("RunCompleted")
+                            })
                     }
-                    "interrogative" => kinds.contains("hostUiRequest"),
-                    "reconnect_reseed" => effects.iter().any(|e| e.kind == "reseed"),
-                    "abort" => kinds.contains("assistantDelta"),
+                    "queue" => {
+                        raw.iter().any(|e| e["type"] == "pending_turn_input_queued")
+                            && raw
+                                .iter()
+                                .any(|e| e["type"] == "pending_turn_input_drained")
+                            && kinds.contains("queueUpdated")
+                            && effects.iter().any(|e| e.kind == "refetchQueue")
+                    }
+                    "interrogative" => {
+                        raw.iter().any(|e| {
+                            e["type"] == "ask_user_question" || e["type"] == "interrogative"
+                        }) && kinds.contains("hostUiRequest")
+                            && effects.iter().any(|e| e.kind == "registerInterrogative")
+                    }
+                    "reconnect_reseed" => {
+                        raw.iter().any(|e| e["type"] == "stream_discontinuity")
+                            && effects.iter().any(|e| e.kind == "reseed")
+                    }
+                    "abort" => {
+                        raw.iter().any(|e| {
+                            e["type"] == "turn_cancelled" && e["reason"] == "user_cancelled"
+                        }) && effects.iter().any(|e| {
+                            e.kind == "fetchState" && e.emit.as_deref() == Some("SessionUpdated")
+                        })
+                    }
                     other => panic!("{}: unknown capability claim {other}", scenario.scenario),
                 };
                 assert!(
@@ -583,6 +643,38 @@ fn corpus_provenance_is_complete() {
 }
 
 #[test]
+fn provenance_metadata_validation_accepts_capture_and_rejects_invalid() {
+    let mut captured = load_scenario(&scenario_files("0.5.8")[0]);
+    captured.provenance.kind = FixtureProvenanceKind::Captured;
+    captured.provenance.daemon_version = Some(captured.version.clone());
+    captured.provenance.capture_method = Some("public_http_sse_capture_script".into());
+    assert_eq!(
+        captured.provenance.daemon_version.as_deref(),
+        Some(captured.version.as_str())
+    );
+    assert!(
+        captured
+            .provenance
+            .capture_method
+            .as_deref()
+            .is_some_and(|m| !m.trim().is_empty())
+    );
+    captured.provenance.capture_method = Some(" ".into());
+    assert!(
+        !captured
+            .provenance
+            .capture_method
+            .as_deref()
+            .is_some_and(|m| !m.trim().is_empty())
+    );
+    captured.provenance.kind = FixtureProvenanceKind::SyntheticPublicSchema;
+    assert!(
+        captured.provenance.capture_method.is_some(),
+        "mutation setup"
+    );
+}
+
+#[test]
 fn corpus_expected_driver_contracts_match() {
     for version in version_dirs() {
         for path in scenario_files(&version) {
@@ -592,11 +684,43 @@ fn corpus_expected_driver_contracts_match() {
 }
 
 #[test]
+fn positional_event_contract_rejects_inserted_event() {
+    let scenario = load_scenario(
+        &scenario_files("0.5.8")
+            .into_iter()
+            .find(|p| p.file_stem().is_some_and(|n| n == "streaming-turn"))
+            .unwrap(),
+    );
+    let (raw, events, _, _) = replay_contract(&scenario);
+    let mut kinds: Vec<String> = events
+        .iter()
+        .map(|e| {
+            serde_json::to_value(e).unwrap()["type"]
+                .as_str()
+                .unwrap()
+                .into()
+        })
+        .collect();
+    kinds.insert(1, "unexpectedInserted".into());
+    let expected: Vec<String> = scenario
+        .expected_driver_events
+        .events
+        .iter()
+        .flat_map(|e| std::iter::repeat_n(e.kind.clone(), e.count))
+        .collect();
+    assert_ne!(
+        kinds, expected,
+        "mutation must change the positional output"
+    );
+    assert_eq!(raw.len(), scenario.sse.len());
+}
+
+#[test]
 fn corpus_final_state_invariants_match() {
     for version in version_dirs() {
         for path in scenario_files(&version) {
             let scenario = load_scenario(&path);
-            let (_, _, acc) = replay_contract(&scenario);
+            let (_, _, _, acc) = replay_contract(&scenario);
             assert_eq!(
                 usize::from(acc.block_kind.is_some()),
                 scenario
@@ -766,8 +890,6 @@ fn empty_contract() -> support::corpus::DriverContractExpectations {
             tool_input_buffer_empty: true,
             turn_error_present: false,
         },
-        required_requests: vec![],
-        forbidden_requests: vec![],
     }
 }
 

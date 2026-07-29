@@ -4340,8 +4340,6 @@
       "tool_input_buffer_empty": true,
       "turn_error_present": false
     },
-    "required_requests": [],
-    "forbidden_requests": [],
     "capabilities": [
       "streaming",
       "interrogative"

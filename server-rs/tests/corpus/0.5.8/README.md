@@ -56,9 +56,7 @@ Each scenario is one JSON file. The canonical shape below is illustrative (the c
       "open_block_count": 0,
       "tool_input_buffer_empty": true,
       "turn_error_present": false
-    },
-    "required_requests": [],
-    "forbidden_requests": []
+    }
   }
 }
 ```
@@ -73,7 +71,7 @@ Each scenario is one JSON file. The canonical shape below is illustrative (the c
 | `canonicalization`       | `object`  | Manifest of the placeholder scheme applied (see below). |
 | `http`                   | `array`   | HTTP request/response pairs in arrival order. `request_body` is `null` for bodyless requests. |
 | `sse`                    | `array`   | Raw SSE frames in arrival order. Each is an `SseEnvelope` (`emitted_at`, `event`, `seq`, `session_id`). |
-| `expected_driver_events` | `object` | Typed Pantoken-boundary contract: stable event kinds, effects, final accumulator invariants, required requests, and forbidden requests. |
+| `expected_driver_events` | `object` | Typed Pantoken-boundary contract: exact stable event runs, effects, capability predicates, and final accumulator invariants. Runtime HTTP request coverage is documented and tested separately by `live_path`. |
 
 ### `canonicalization` manifest
 

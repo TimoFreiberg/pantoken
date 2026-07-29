@@ -147,8 +147,6 @@ pub struct DriverContractExpectations {
     pub events: Vec<DriverEventExpectation>,
     pub effects: Vec<DriverEffectExpectation>,
     pub final_session: FinalSessionInvariants,
-    pub required_requests: Vec<String>,
-    pub forbidden_requests: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
