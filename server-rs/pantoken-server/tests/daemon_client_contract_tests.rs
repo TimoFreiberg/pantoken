@@ -29,7 +29,7 @@ struct ExecutableContract {
     request_body: Option<&'static str>,
     inventory_request_body: &'static str,
     response_schema: &'static str,
-    success_status: StatusCode,
+    accepted_statuses: &'static [StatusCode],
     rejected_status: StatusCode,
 }
 
@@ -41,7 +41,7 @@ const EXPECTED_EXECUTABLE_CONTRACTS: &[ExecutableContract] = &[
         request_body: None,
         inventory_request_body: "none",
         response_schema: "empty",
-        success_status: StatusCode::OK,
+        accepted_statuses: &[StatusCode::OK],
         rejected_status: StatusCode::UNAUTHORIZED,
     },
     ExecutableContract {
@@ -51,7 +51,7 @@ const EXPECTED_EXECUTABLE_CONTRACTS: &[ExecutableContract] = &[
         request_body: None,
         inventory_request_body: "none",
         response_schema: "empty",
-        success_status: StatusCode::NO_CONTENT,
+        accepted_statuses: &[StatusCode::OK, StatusCode::NO_CONTENT],
         rejected_status: StatusCode::NOT_FOUND,
     },
     ExecutableContract {
@@ -61,7 +61,7 @@ const EXPECTED_EXECUTABLE_CONTRACTS: &[ExecutableContract] = &[
         request_body: Some(r#"{"guidance":"g"}"#),
         inventory_request_body: "CompactRequest or JSON null",
         response_schema: "empty",
-        success_status: StatusCode::ACCEPTED,
+        accepted_statuses: &[StatusCode::ACCEPTED],
         rejected_status: StatusCode::CONFLICT,
     },
     ExecutableContract {
@@ -71,7 +71,7 @@ const EXPECTED_EXECUTABLE_CONTRACTS: &[ExecutableContract] = &[
         request_body: Some(r#"{"domains":["conversation"],"to_message_index":2}"#),
         inventory_request_body: "RewindRequest",
         response_schema: "empty",
-        success_status: StatusCode::ACCEPTED,
+        accepted_statuses: &[StatusCode::ACCEPTED],
         rejected_status: StatusCode::UNPROCESSABLE_ENTITY,
     },
     ExecutableContract {
@@ -81,7 +81,7 @@ const EXPECTED_EXECUTABLE_CONTRACTS: &[ExecutableContract] = &[
         request_body: Some(r#"{"kind":"cancel"}"#),
         inventory_request_body: "InterrogativeResponse",
         response_schema: "empty",
-        success_status: StatusCode::NO_CONTENT,
+        accepted_statuses: &[StatusCode::NO_CONTENT],
         rejected_status: StatusCode::NOT_FOUND,
     },
     ExecutableContract {
@@ -91,7 +91,7 @@ const EXPECTED_EXECUTABLE_CONTRACTS: &[ExecutableContract] = &[
         request_body: None,
         inventory_request_body: "none",
         response_schema: "{ enabled: bool }",
-        success_status: StatusCode::OK,
+        accepted_statuses: &[StatusCode::OK],
         rejected_status: StatusCode::UNAUTHORIZED,
     },
     ExecutableContract {
@@ -101,7 +101,7 @@ const EXPECTED_EXECUTABLE_CONTRACTS: &[ExecutableContract] = &[
         request_body: None,
         inventory_request_body: "none",
         response_schema: "empty or { prompt_id? }",
-        success_status: StatusCode::ACCEPTED,
+        accepted_statuses: &[StatusCode::ACCEPTED],
         rejected_status: StatusCode::INTERNAL_SERVER_ERROR,
     },
     ExecutableContract {
@@ -111,7 +111,7 @@ const EXPECTED_EXECUTABLE_CONTRACTS: &[ExecutableContract] = &[
         request_body: Some(r#"{"title":"title"}"#),
         inventory_request_body: "SessionTitleRequest { title }",
         response_schema: "empty",
-        success_status: StatusCode::OK,
+        accepted_statuses: &[StatusCode::OK],
         rejected_status: StatusCode::BAD_REQUEST,
     },
 ];
@@ -246,15 +246,22 @@ async fn daemon_client_endpoint_contract_matrix() {
             );
         }
         assert_eq!(inventory.response_schema, contract.response_schema);
-        let success_code = contract.success_status.as_u16().to_string();
-        assert!(
-            inventory.success_policy.contains(&success_code)
-                || (contract.success_status.is_success()
-                    && inventory.success_policy.contains("2xx")),
-            "{} missing accepted status {}",
-            contract.name,
-            success_code
-        );
+        for accepted_status in contract.accepted_statuses {
+            let accepted_code = accepted_status.as_u16().to_string();
+            assert!(
+                inventory.success_policy.contains(&accepted_code)
+                    || (accepted_status.is_success() && inventory.success_policy.contains("2xx")),
+                "{} missing accepted status {}",
+                contract.name,
+                accepted_code
+            );
+        }
+        if contract.name == "cancel_turn" {
+            assert!(
+                inventory.success_policy.contains("409"),
+                "cancel_turn must separately represent accepted 409 no-op"
+            );
+        }
         assert!(
             inventory
                 .representative_errors
