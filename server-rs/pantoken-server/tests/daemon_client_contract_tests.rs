@@ -35,6 +35,106 @@ struct ExecutableContract {
 
 const EXPECTED_EXECUTABLE_CONTRACTS: &[ExecutableContract] = &[
     ExecutableContract {
+        name: "health",
+        method: "GET",
+        path: "/health",
+        request_body: None,
+        inventory_request_body: "none",
+        response_schema: "HealthResponse",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::UNAUTHORIZED,
+    },
+    ExecutableContract {
+        name: "terminate",
+        method: "POST",
+        path: "/terminate",
+        request_body: None,
+        inventory_request_body: "none",
+        response_schema: "empty",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::INTERNAL_SERVER_ERROR,
+    },
+    ExecutableContract {
+        name: "claim_lease",
+        method: "POST",
+        path: "/tui-attachment/claim",
+        request_body: Some(r#"{"pid":7,"terminal_label":"contract"}"#),
+        inventory_request_body: "TuiAttachClaimRequest { pid, terminal_label, process_start_token? }",
+        response_schema: "TuiAttachClaimResponse",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::CONFLICT,
+    },
+    ExecutableContract {
+        name: "heartbeat",
+        method: "POST",
+        path: "/tui-attachment/heartbeat",
+        request_body: Some(r#"{"lease_id":"lease","pid":7}"#),
+        inventory_request_body: "TuiAttachHeartbeatRequest { lease_id, pid, process_start_token? }",
+        response_schema: "empty",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::CONFLICT,
+    },
+    ExecutableContract {
+        name: "release_lease",
+        method: "DELETE",
+        path: "/tui-attachment/lease",
+        request_body: None,
+        inventory_request_body: "none",
+        response_schema: "empty",
+        accepted_statuses: &[StatusCode::NO_CONTENT],
+        rejected_status: StatusCode::NOT_FOUND,
+    },
+    ExecutableContract {
+        name: "state",
+        method: "GET",
+        path: "/state",
+        request_body: None,
+        inventory_request_body: "none",
+        response_schema: "SessionStateSnapshot",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::INTERNAL_SERVER_ERROR,
+    },
+    ExecutableContract {
+        name: "history",
+        method: "GET",
+        path: "/history?offset=2&limit=3",
+        request_body: None,
+        inventory_request_body: "none; optional offset/limit query",
+        response_schema: "SessionHistorySnapshot",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::BAD_REQUEST,
+    },
+    ExecutableContract {
+        name: "files",
+        method: "GET",
+        path: "/files?include_ignored=true",
+        request_body: None,
+        inventory_request_body: "none; optional include_ignored query",
+        response_schema: "FileCatalogResponse",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::NOT_FOUND,
+    },
+    ExecutableContract {
+        name: "file_catalog",
+        method: "GET",
+        path: "/files",
+        request_body: None,
+        inventory_request_body: "none (alias method)",
+        response_schema: "FileCatalogResponse",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::NOT_FOUND,
+    },
+    ExecutableContract {
+        name: "jobs",
+        method: "GET",
+        path: "/jobs",
+        request_body: None,
+        inventory_request_body: "none",
+        response_schema: "Vec<JobSnapshot>",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::INTERNAL_SERVER_ERROR,
+    },
+    ExecutableContract {
         name: "clear",
         method: "POST",
         path: "/clear",
@@ -177,6 +277,27 @@ where
     call_raw(status, body.to_string(), f).await
 }
 
+async fn lease_lifecycle(body: Value) -> Vec<Seen> {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let server = tokio::spawn(serve(
+        listener,
+        Harness {
+            seen: seen.clone(),
+            status: StatusCode::OK,
+            body: body.to_string(),
+            delay: None,
+        },
+    ));
+    let client = DaemonClient::new(SESSION.into(), port, 7, Some(TOKEN.into()));
+    client.claim_lease("contract").await.expect("claim");
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    client.release_lease().await;
+    server.abort();
+    seen.lock().await.clone()
+}
+
 async fn call_raw<F, Fut, R>(status: StatusCode, body: String, f: F) -> (Vec<Seen>, R)
 where
     F: FnOnce(DaemonClient) -> Fut,
@@ -230,13 +351,19 @@ async fn daemon_client_endpoint_contract_matrix() {
         .collect();
     assert_eq!(
         expected.len(),
-        8,
-        "the bounded slice must contain eight distinct cases"
+        18,
+        "the bounded slice must contain eighteen distinct cases"
     );
     for contract in EXPECTED_EXECUTABLE_CONTRACTS {
         let inventory = inventory_contract(contract.name);
         assert_eq!(inventory.method, contract.method);
-        let normalized_path = inventory.path_template.replace("{id}", "q%201");
+        let normalized_path = inventory
+            .path_template
+            .replace("{id}", "q%201")
+            .replace("{lease_id}", "lease")
+            .replace("{offset}", "2")
+            .replace("{limit}", "3")
+            .replace("{bool}", "true");
         assert_eq!(normalized_path, contract.path);
         assert_eq!(inventory.request_body, contract.inventory_request_body);
         if let Some(body) = contract.request_body {
@@ -274,6 +401,109 @@ async fn daemon_client_endpoint_contract_matrix() {
     }
 
     let mut executed = std::collections::BTreeSet::new();
+
+    let health_body = json!({
+        "last_heartbeat_at":"2024-01-01T00:00:00Z","parent_session_id":{"kind":"standalone"},
+        "pid":7,"port":1234,"project_path":"/tmp/project","session_id":SESSION,
+        "started_at":"2024-01-01T00:00:00Z"
+    });
+    let (seen, result) = call(
+        StatusCode::OK,
+        health_body,
+        |c| async move { c.health().await },
+    )
+    .await;
+    assert_request(&seen, "GET", "/health", None);
+    assert_eq!(
+        result.data.expect("typed health response").session_id,
+        SESSION
+    );
+    executed.insert("health");
+
+    let (seen, result) = call(
+        StatusCode::OK,
+        json!({}),
+        |c| async move { c.terminate().await },
+    )
+    .await;
+    assert_request(&seen, "POST", "/terminate", None);
+    assert!(result.is_ok());
+    executed.insert("terminate");
+
+    let claim_body = json!({"expires_after_seconds":30,"expires_at":"2099-01-01T00:00:00Z","heartbeat_interval_seconds":1,"lease_id":"lease with space"});
+    let seen = lease_lifecycle(claim_body).await;
+    assert!(
+        seen.iter()
+            .any(|r| r.method == "POST" && r.path == "/tui-attachment/claim")
+    );
+    assert!(
+        seen.iter()
+            .any(|r| r.method == "POST" && r.path == "/tui-attachment/heartbeat")
+    );
+    assert!(
+        seen.iter()
+            .any(|r| r.method == "DELETE" && r.path == "/tui-attachment/lease%20with%20space")
+    );
+    assert!(
+        seen.iter()
+            .all(|r| r.auth.as_deref() == Some(format!("Bearer {TOKEN}").as_str()))
+    );
+    executed.insert("claim_lease");
+    executed.insert("heartbeat");
+    executed.insert("release_lease");
+
+    let state_body = json!({"active_facet":"default","env":{},"flags":[],"plugin_config":{},"todos":[],"session_id":SESSION});
+    let (seen, result) = call(
+        StatusCode::OK,
+        state_body,
+        |c| async move { c.state().await },
+    )
+    .await;
+    assert_request(&seen, "GET", "/state", None);
+    assert_eq!(
+        result.data.expect("typed state response").active_facet,
+        "default"
+    );
+    executed.insert("state");
+
+    let history_body = json!({"history_revision":2,"items":[{"type":"user","content":"hello"}],"limit":3,"offset":2,"session_id":SESSION,"total_projected_items":4});
+    let (seen, result) = call(StatusCode::OK, history_body, |c| async move {
+        c.history(Some(2), Some(3)).await
+    })
+    .await;
+    assert_request(&seen, "GET", "/history?offset=2&limit=3", None);
+    assert_eq!(result.data.expect("typed history response").offset, 2);
+    executed.insert("history");
+
+    let files_body = json!({"files":["src/main.rs"]});
+    let (seen, result) = call(StatusCode::OK, files_body.clone(), |c| async move {
+        c.files(Some(true)).await
+    })
+    .await;
+    assert_request(&seen, "GET", "/files?include_ignored=true", None);
+    assert_eq!(
+        result.data.expect("typed files response").files,
+        vec!["src/main.rs"]
+    );
+    executed.insert("files");
+
+    let (seen, result) = call(StatusCode::OK, files_body, |c| async move {
+        c.file_catalog().await
+    })
+    .await;
+    assert_request(&seen, "GET", "/files", None);
+    assert_eq!(
+        result.data.expect("typed file catalog response").files,
+        vec!["src/main.rs"]
+    );
+    executed.insert("file_catalog");
+
+    let jobs_body = json!([]);
+    let (seen, result) = call(StatusCode::OK, jobs_body, |c| async move { c.jobs().await }).await;
+    assert_request(&seen, "GET", "/jobs", None);
+    assert!(result.data.expect("typed jobs response").is_empty());
+    executed.insert("jobs");
+
     let (seen, result) = call(
         StatusCode::OK,
         json!({}),
@@ -444,6 +674,27 @@ async fn daemon_client_endpoint_contract_matrix() {
     let toggle_error = rejected_toggle.expect_err("rejected toggle status must fail");
     assert!(toggle_error.contains("public message"));
     assert!(toggle_error.contains("public_code"));
+
+    // Typed response methods must reject malformed success bodies rather than silently
+    // presenting an empty/default snapshot, and preserve representative public errors.
+    macro_rules! typed_contract {
+        ($name:literal, $path:literal, $call:expr) => {{
+            let (seen, malformed) = call_raw(StatusCode::OK, "not-json".into(), $call).await;
+            assert_request(&seen, "GET", $path, None);
+            assert!(malformed.data.is_none(), "malformed $name success must fail decoding");
+            let (seen, rejected) = call(StatusCode::INTERNAL_SERVER_ERROR, json!({"code":"public_code","message":"public message"}), $call).await;
+            assert_request(&seen, "GET", $path, None);
+            assert_eq!(rejected.status, 500);
+            assert!(rejected.error.as_deref().unwrap_or_default().contains("public message"));
+        }};
+    }
+    typed_contract!("health", "/health", |c| async move { c.health().await });
+    typed_contract!("state", "/state", |c| async move { c.state().await });
+    typed_contract!("history", "/history", |c| async move {
+        c.history(None, None).await
+    });
+    typed_contract!("files", "/files", |c| async move { c.files(None).await });
+    typed_contract!("jobs", "/jobs", |c| async move { c.jobs().await });
 }
 
 #[tokio::test]
