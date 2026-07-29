@@ -515,6 +515,12 @@ async fn daemon_client_endpoint_contract_matrix() {
         3,
         "lease loss stops heartbeat before explicit cleanup release"
     );
+    assert_eq!(lost[0].method, "POST");
+    assert_eq!(lost[0].path, "/tui-attachment/claim");
+    assert_eq!(
+        serde_json::from_str::<Value>(&lost[0].body).unwrap(),
+        json!({"pid":7,"terminal_label":"contract"})
+    );
     assert_eq!(lost[1].method, "POST");
     assert_eq!(lost[1].path, "/tui-attachment/heartbeat");
     assert_eq!(
@@ -523,8 +529,12 @@ async fn daemon_client_endpoint_contract_matrix() {
     );
     assert_eq!(lost[2].method, "DELETE");
     assert_eq!(lost[2].path, "/tui-attachment/lease%20with%20space");
+    assert!(
+        lost.iter()
+            .all(|request| { request.auth.as_deref() == Some(format!("Bearer {TOKEN}").as_str()) })
+    );
     let release_failure = lease_lifecycle(
-        claim_body,
+        claim_body.clone(),
         StatusCode::OK,
         StatusCode::INTERNAL_SERVER_ERROR,
     )
@@ -534,14 +544,27 @@ async fn daemon_client_endpoint_contract_matrix() {
         3,
         "release failure still completes without caller error"
     );
+    assert_eq!(release_failure[0].method, "POST");
+    assert_eq!(release_failure[0].path, "/tui-attachment/claim");
+    assert_eq!(
+        serde_json::from_str::<Value>(&release_failure[0].body).unwrap(),
+        json!({"pid":7,"terminal_label":"contract"})
+    );
+    assert_eq!(release_failure[1].method, "POST");
+    assert_eq!(release_failure[1].path, "/tui-attachment/heartbeat");
+    assert_eq!(
+        serde_json::from_str::<Value>(&release_failure[1].body).unwrap(),
+        json!({"lease_id":"lease with space","pid":7})
+    );
     assert_eq!(release_failure[2].method, "DELETE");
     assert_eq!(
         release_failure[2].path,
         "/tui-attachment/lease%20with%20space"
     );
-    assert_eq!(
-        release_failure[2].auth.as_deref(),
-        Some(format!("Bearer {TOKEN}").as_str())
+    assert!(
+        release_failure
+            .iter()
+            .all(|request| { request.auth.as_deref() == Some(format!("Bearer {TOKEN}").as_str()) })
     );
     executed.insert("claim_lease");
     let (seen, malformed_claim) = call_raw(StatusCode::OK, "not-json".into(), |c| async move {
@@ -883,6 +906,9 @@ async fn daemon_client_endpoint_contract_matrix() {
         c.history(None, None).await
     });
     typed_contract!("files", "/files", |c| async move { c.files(None).await });
+    typed_contract!("file_catalog", "/files", |c| async move {
+        c.file_catalog().await
+    });
     typed_contract!("jobs", "/jobs", |c| async move { c.jobs().await });
 }
 
