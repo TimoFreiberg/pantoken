@@ -330,6 +330,12 @@ async fn daemon_client_endpoint_contract_matrix() {
     assert_request(&seen, "POST", "/adventurous-handoff", None);
     assert_eq!(result.expect("typed toggle response"), true);
     executed.insert("toggle_adventurous_handoff");
+    let (seen, result) = call(StatusCode::ACCEPTED, json!({}), |c| async move {
+        c.cancel_turn().await
+    })
+    .await;
+    assert_request(&seen, "POST", "/turn/cancel", None);
+    assert!(result.is_ok());
     let (seen, result) = call(
         StatusCode::CONFLICT,
         json!({"code":"busy","message":"busy"}),
@@ -337,7 +343,7 @@ async fn daemon_client_endpoint_contract_matrix() {
     )
     .await;
     assert_request(&seen, "POST", "/turn/cancel", None);
-    assert!(result.is_ok());
+    assert!(result.is_ok(), "409 is an accepted no-op");
     executed.insert("cancel_turn");
     let (seen, result) = call(StatusCode::OK, json!({}), |c| async move {
         c.set_title("title").await
@@ -423,13 +429,14 @@ async fn daemon_client_endpoint_contract_matrix() {
     .await;
     assert_request(&seen, "POST", "/adventurous-handoff", None);
     assert!(malformed.is_err(), "malformed typed toggle body must fail");
-    let (seen, rejected_toggle) = call(StatusCode::UNAUTHORIZED, rejected, |c| async move {
+    let (seen, rejected_toggle) = call(StatusCode::FOUND, rejected, |c| async move {
         c.toggle_adventurous_handoff().await
     })
     .await;
     assert_request(&seen, "POST", "/adventurous-handoff", None);
     let toggle_error = rejected_toggle.expect_err("rejected toggle status must fail");
-    assert!(toggle_error.contains("401"));
+    assert!(toggle_error.contains("public message"));
+    assert!(toggle_error.contains("public_code"));
 }
 
 #[tokio::test]

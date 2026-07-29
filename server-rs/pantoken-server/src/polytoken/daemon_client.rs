@@ -1923,8 +1923,22 @@ impl DaemonClient {
                         err.unwrap_or_else(|| "fetch returned null".into())
                     ));
                 }
-                if status >= 400 {
-                    return Err(format!("POST /adventurous-handoff failed ({status})"));
+                if !(200..300).contains(&status) {
+                    let public_error = text.as_deref().and_then(|body| {
+                        let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+                        let message = value.get("message")?.as_str()?;
+                        let code = value.get("code").and_then(serde_json::Value::as_str);
+                        Some(match code {
+                            Some(code) if !code.is_empty() => format!("{message} ({code})"),
+                            _ => message.to_string(),
+                        })
+                    });
+                    return Err(format!(
+                        "POST /adventurous-handoff failed ({status}): {}",
+                        public_error
+                            .or(text)
+                            .unwrap_or_else(|| "empty response body".to_string())
+                    ));
                 }
                 #[derive(Deserialize)]
                 struct Resp {
