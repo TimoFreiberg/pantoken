@@ -14,7 +14,9 @@ use axum::{
     response::{IntoResponse, Response},
     routing::any,
 };
-use pantoken_daemon_types::{CompactRequest, InterrogativeResponse, RewindRequest};
+use pantoken_daemon_types::{
+    CompactRequest, InterrogativeResponse, PermissionMonitor, PermissionMonitorMode, RewindRequest,
+};
 use pantoken_server::polytoken::{daemon_client::DaemonClient, endpoint_inventory::ENDPOINTS};
 use serde_json::{Value, json};
 use tokio::{net::TcpListener, sync::Mutex};
@@ -99,6 +101,96 @@ const EXPECTED_EXECUTABLE_CONTRACTS: &[ExecutableContract] = &[
         response_schema: "empty",
         accepted_statuses: &[StatusCode::NO_CONTENT],
         rejected_status: StatusCode::NOT_FOUND,
+    },
+    ExecutableContract {
+        name: "prompt",
+        method: "POST",
+        path: "/prompt",
+        request_body: Some(r#"{"content":"prompt","max_tool_turns":3}"#),
+        inventory_request_body: "PromptRequest { content, max_tool_turns? }",
+        response_schema: "PromptAccepted",
+        accepted_statuses: &[StatusCode::ACCEPTED],
+        rejected_status: StatusCode::UNPROCESSABLE_ENTITY,
+    },
+    ExecutableContract {
+        name: "queue_turn_input",
+        method: "POST",
+        path: "/turn/input",
+        request_body: Some(r#"{"content":"queued"}"#),
+        inventory_request_body: "PendingTurnInputRequest { content }",
+        response_schema: "empty",
+        accepted_statuses: &[StatusCode::ACCEPTED],
+        rejected_status: StatusCode::TOO_MANY_REQUESTS,
+    },
+    ExecutableContract {
+        name: "turn_input_snapshot",
+        method: "GET",
+        path: "/turn/input",
+        request_body: None,
+        inventory_request_body: "none",
+        response_schema: "PendingTurnInputSnapshot",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::INTERNAL_SERVER_ERROR,
+    },
+    ExecutableContract {
+        name: "dequeue_newest_input",
+        method: "DELETE",
+        path: "/turn/input/newest",
+        request_body: None,
+        inventory_request_body: "none",
+        response_schema: "empty",
+        accepted_statuses: &[StatusCode::OK, StatusCode::CONFLICT],
+        rejected_status: StatusCode::INTERNAL_SERVER_ERROR,
+    },
+    ExecutableContract {
+        name: "set_model",
+        method: "POST",
+        path: "/model",
+        request_body: Some(r#"{"model":"provider/model","reasoning_effort":"high"}"#),
+        inventory_request_body: "ModelRequest { model, reasoning_effort? }",
+        response_schema: "empty or ErrorBody",
+        accepted_statuses: &[StatusCode::OK, StatusCode::CONFLICT],
+        rejected_status: StatusCode::UNPROCESSABLE_ENTITY,
+    },
+    ExecutableContract {
+        name: "set_permission_mode",
+        method: "POST",
+        path: "/permission-monitor",
+        request_body: Some(r#"{"mode":"bypass"}"#),
+        inventory_request_body: "PermissionMonitorRequest { mode }",
+        response_schema: "empty",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::BAD_REQUEST,
+    },
+    ExecutableContract {
+        name: "get_permission_monitor",
+        method: "GET",
+        path: "/permission-monitor",
+        request_body: None,
+        inventory_request_body: "none",
+        response_schema: "PermissionMonitorResponse",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::INTERNAL_SERVER_ERROR,
+    },
+    ExecutableContract {
+        name: "get_notification_autodrain",
+        method: "GET",
+        path: "/notification-autodrain",
+        request_body: None,
+        inventory_request_body: "none",
+        response_schema: "NotificationAutodrainResponse",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::INTERNAL_SERVER_ERROR,
+    },
+    ExecutableContract {
+        name: "set_notification_autodrain",
+        method: "POST",
+        path: "/notification-autodrain",
+        request_body: Some(r#"{"enabled":true}"#),
+        inventory_request_body: "{ enabled: bool }",
+        response_schema: "empty",
+        accepted_statuses: &[StatusCode::OK],
+        rejected_status: StatusCode::BAD_REQUEST,
     },
     ExecutableContract {
         name: "state",
@@ -399,8 +491,8 @@ async fn daemon_client_endpoint_contract_matrix() {
         .collect();
     assert_eq!(
         expected.len(),
-        18,
-        "the bounded slice must contain eighteen distinct cases"
+        27,
+        "the bounded slice must contain twenty-seven distinct cases"
     );
     for contract in EXPECTED_EXECUTABLE_CONTRACTS {
         let inventory = inventory_contract(contract.name);
@@ -584,6 +676,145 @@ async fn daemon_client_endpoint_contract_matrix() {
     executed.insert("heartbeat");
     executed.insert("release_lease");
 
+    let prompt_body = json!({"prompt_id":"prompt-1","session_id":SESSION});
+    let (seen, result) = call(StatusCode::ACCEPTED, prompt_body, |c| async move {
+        c.prompt("prompt", Some(3)).await
+    })
+    .await;
+    assert_request(
+        &seen,
+        "POST",
+        "/prompt",
+        Some(json!({"content":"prompt","max_tool_turns":3})),
+    );
+    let accepted = result.expect("immediate prompt accepted");
+    assert_eq!(accepted.prompt_id, "prompt-1");
+    assert_eq!(accepted.session_id, SESSION);
+    assert!(accepted.queued_item.is_none());
+    executed.insert("prompt");
+
+    let (seen, result) = call(StatusCode::ACCEPTED, json!({}), |c| async move {
+        c.queue_turn_input("queued").await
+    })
+    .await;
+    assert_request(
+        &seen,
+        "POST",
+        "/turn/input",
+        Some(json!({"content":"queued"})),
+    );
+    assert!(result.is_ok());
+    executed.insert("queue_turn_input");
+
+    let snapshot_body = json!({"queue_revision":7,"items":[
+        {"id":"q1","content":"first","admission_prompt_id":"p1"},
+        {"id":"q2","content":"second","admission_prompt_id":"p2"}
+    ]});
+    let (seen, result) = call(StatusCode::OK, snapshot_body, |c| async move {
+        c.turn_input_snapshot().await
+    })
+    .await;
+    assert_request(&seen, "GET", "/turn/input", None);
+    let snapshot = result.data.expect("typed queue snapshot");
+    assert_eq!(snapshot.queue_revision, 7);
+    assert_eq!(snapshot.items.len(), 2);
+    assert_eq!(snapshot.items[1].id, "q2");
+    assert_eq!(snapshot.items[1].content, "second");
+    executed.insert("turn_input_snapshot");
+
+    let (seen, result) = call(StatusCode::OK, json!({}), |c| async move {
+        c.dequeue_newest_input().await
+    })
+    .await;
+    assert_request(&seen, "DELETE", "/turn/input/newest", None);
+    assert!(result.is_ok());
+    let (seen, result) = call(
+        StatusCode::CONFLICT,
+        json!({"code":"no_input","message":"no pending input"}),
+        |c| async move { c.dequeue_newest_input().await },
+    )
+    .await;
+    assert_request(&seen, "DELETE", "/turn/input/newest", None);
+    assert!(
+        result.is_ok(),
+        "documented 409 dequeue no-op must be accepted"
+    );
+    executed.insert("dequeue_newest_input");
+
+    let (seen, result) = call(StatusCode::OK, json!({}), |c| async move {
+        c.set_model("provider/model", Some("high")).await
+    })
+    .await;
+    assert_request(
+        &seen,
+        "POST",
+        "/model",
+        Some(json!({"model":"provider/model","reasoning_effort":"high"})),
+    );
+    assert!(result.is_ok());
+    let (seen, result) = call(
+        StatusCode::CONFLICT,
+        json!({"code":"no_change","message":"already selected"}),
+        |c| async move { c.set_model("provider/model", Some("high")).await },
+    )
+    .await;
+    assert_request(
+        &seen,
+        "POST",
+        "/model",
+        Some(json!({"model":"provider/model","reasoning_effort":"high"})),
+    );
+    assert!(result.is_ok(), "409 no_change is an accepted model no-op");
+    executed.insert("set_model");
+
+    let (seen, result) = call(StatusCode::OK, json!({}), |c| async move {
+        c.set_permission_mode(PermissionMonitorMode::Bypass).await
+    })
+    .await;
+    assert_request(
+        &seen,
+        "POST",
+        "/permission-monitor",
+        Some(json!({"mode":"bypass"})),
+    );
+    assert!(result.is_ok());
+    executed.insert("set_permission_mode");
+
+    let permission_body = json!({"config_default":{"type":"standard"},"configured_autonomous":null,"monitor":{"type":"bypass"}});
+    let (seen, result) = call(StatusCode::OK, permission_body, |c| async move {
+        c.get_permission_monitor().await
+    })
+    .await;
+    assert_request(&seen, "GET", "/permission-monitor", None);
+    let permission = result.expect("typed permission monitor");
+    assert!(matches!(permission.monitor, PermissionMonitor::Bypass));
+    executed.insert("get_permission_monitor");
+
+    let (seen, result) = call(
+        StatusCode::OK,
+        json!({"enabled":true,"config_default":false}),
+        |c| async move { c.get_notification_autodrain().await },
+    )
+    .await;
+    assert_request(&seen, "GET", "/notification-autodrain", None);
+    let autodrain = result.expect("typed notification autodrain");
+    assert!(autodrain.enabled);
+    assert!(!autodrain.config_default);
+    executed.insert("get_notification_autodrain");
+
+    let (seen, result) = call(StatusCode::OK, json!({}), |c| async move {
+        c.set_notification_autodrain(true).await
+    })
+    .await;
+    assert_request(
+        &seen,
+        "POST",
+        "/notification-autodrain",
+        Some(json!({"enabled":true})),
+    );
+    assert!(result.is_ok());
+    executed.insert("set_notification_autodrain");
+
     let state_body = json!({"active_facet":"default","env":{},"flags":[],"plugin_config":{},"todos":[],"session_id":SESSION});
     let (seen, result) = call(
         StatusCode::OK,
@@ -726,21 +957,38 @@ async fn daemon_client_endpoint_contract_matrix() {
         "every expected case must execute exactly once"
     );
 
-    // The executable group manifest is intentionally partial: these ten rows are
-    // covered here, while the remaining ENDPOINTS rows remain separate work.
+    // The executable group manifest intentionally covers exactly the first 27
+    // operations; the remaining ENDPOINTS rows remain separate work.
     const EXECUTABLE_GROUP: &[&str] = &[
         "health",
         "terminate",
         "claim_lease",
         "heartbeat",
         "release_lease",
+        "prompt",
+        "queue_turn_input",
+        "turn_input_snapshot",
+        "dequeue_newest_input",
+        "set_model",
+        "set_permission_mode",
+        "get_permission_monitor",
+        "get_notification_autodrain",
+        "set_notification_autodrain",
         "state",
         "history",
         "files",
         "file_catalog",
         "jobs",
+        "clear",
+        "goal_pause",
+        "compact",
+        "rewind",
+        "respond_interrogative",
+        "toggle_adventurous_handoff",
+        "cancel_turn",
+        "set_title",
     ];
-    assert_eq!(EXECUTABLE_GROUP.len(), 10);
+    assert_eq!(EXECUTABLE_GROUP.len(), 27);
     assert!(EXECUTABLE_GROUP.iter().all(|name| expected.contains(name)));
     assert!(
         EXECUTABLE_GROUP.len() < ENDPOINTS.len(),
@@ -878,7 +1126,7 @@ async fn daemon_client_endpoint_contract_matrix() {
     .await;
     assert_request(&seen, "POST", "/adventurous-handoff", None);
     assert!(malformed.is_err(), "malformed typed toggle body must fail");
-    let (seen, rejected_toggle) = call(StatusCode::FOUND, rejected, |c| async move {
+    let (seen, rejected_toggle) = call(StatusCode::FOUND, rejected.clone(), |c| async move {
         c.toggle_adventurous_handoff().await
     })
     .await;
@@ -886,6 +1134,141 @@ async fn daemon_client_endpoint_contract_matrix() {
     let toggle_error = rejected_toggle.expect_err("rejected toggle status must fail");
     assert!(toggle_error.contains("public message"));
     assert!(toggle_error.contains("public_code"));
+
+    // Each newly executable operation also exercises its public rejection boundary and
+    // malformed typed-success behavior; these calls use the same authenticated loopback.
+    let (seen, queued_prompt) = call(
+        StatusCode::ACCEPTED,
+        json!({
+            "prompt_id":"prompt-queued", "session_id":SESSION,
+            "queued_item":{"id":"q3","content":"queued","admission_prompt_id":"prompt-queued"}
+        }),
+        |c| async move { c.prompt("queued", None).await },
+    )
+    .await;
+    assert_request(&seen, "POST", "/prompt", Some(json!({"content":"queued"})));
+    assert!(
+        queued_prompt
+            .expect("auto-queued prompt accepted")
+            .queued_item
+            .is_some()
+    );
+    let (seen, prompt_rejected) = call(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        rejected.clone(),
+        |c| async move { c.prompt("denied", None).await },
+    )
+    .await;
+    assert_request(&seen, "POST", "/prompt", Some(json!({"content":"denied"})));
+    assert!(prompt_rejected.unwrap_err().contains("public message"));
+    let (seen, queue_rejected) = call(
+        StatusCode::TOO_MANY_REQUESTS,
+        rejected.clone(),
+        |c| async move { c.queue_turn_input("full").await },
+    )
+    .await;
+    assert_request(
+        &seen,
+        "POST",
+        "/turn/input",
+        Some(json!({"content":"full"})),
+    );
+    assert!(queue_rejected.unwrap_err().contains("public message"));
+    let (seen, malformed) = call_raw(StatusCode::OK, "not-json".into(), |c| async move {
+        c.turn_input_snapshot().await
+    })
+    .await;
+    assert_request(&seen, "GET", "/turn/input", None);
+    assert!(
+        malformed.data.is_none(),
+        "malformed queue snapshot must fail decoding"
+    );
+    let (seen, dequeue_rejected) = call(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        rejected.clone(),
+        |c| async move { c.dequeue_newest_input().await },
+    )
+    .await;
+    assert_request(&seen, "DELETE", "/turn/input/newest", None);
+    assert!(dequeue_rejected.unwrap_err().contains("failed"));
+    let (seen, model_conflict) = call(
+        StatusCode::CONFLICT,
+        json!({"code":"different_model","message":"model conflict"}),
+        |c| async move { c.set_model("provider/model", Some("high")).await },
+    )
+    .await;
+    assert_request(
+        &seen,
+        "POST",
+        "/model",
+        Some(json!({"model":"provider/model","reasoning_effort":"high"})),
+    );
+    let model_error = model_conflict.unwrap_err();
+    assert!(model_error.contains("different_model") && model_error.contains("model conflict"));
+    let (seen, malformed_model) =
+        call_raw(StatusCode::CONFLICT, "not-json".into(), |c| async move {
+            c.set_model("provider/model", Some("high")).await
+        })
+        .await;
+    assert_request(
+        &seen,
+        "POST",
+        "/model",
+        Some(json!({"model":"provider/model","reasoning_effort":"high"})),
+    );
+    assert!(
+        malformed_model.is_err(),
+        "malformed model conflict body must reject"
+    );
+    let (seen, permission_rejected) =
+        call(StatusCode::BAD_REQUEST, rejected.clone(), |c| async move {
+            c.set_permission_mode(PermissionMonitorMode::Bypass).await
+        })
+        .await;
+    assert_request(
+        &seen,
+        "POST",
+        "/permission-monitor",
+        Some(json!({"mode":"bypass"})),
+    );
+    assert!(permission_rejected.unwrap_err().contains("public message"));
+    let (seen, malformed_permission) =
+        call_raw(StatusCode::OK, "not-json".into(), |c| async move {
+            c.get_permission_monitor().await
+        })
+        .await;
+    assert_request(&seen, "GET", "/permission-monitor", None);
+    assert!(malformed_permission.is_err());
+    let (seen, permission_get_rejected) = call(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        rejected.clone(),
+        |c| async move { c.get_permission_monitor().await },
+    )
+    .await;
+    assert_request(&seen, "GET", "/permission-monitor", None);
+    assert!(
+        permission_get_rejected
+            .unwrap_err()
+            .contains("public message")
+    );
+    let (seen, malformed_autodrain) = call_raw(StatusCode::OK, "not-json".into(), |c| async move {
+        c.get_notification_autodrain().await
+    })
+    .await;
+    assert_request(&seen, "GET", "/notification-autodrain", None);
+    assert!(malformed_autodrain.is_err());
+    let (seen, autodrain_rejected) =
+        call(StatusCode::BAD_REQUEST, rejected.clone(), |c| async move {
+            c.set_notification_autodrain(true).await
+        })
+        .await;
+    assert_request(
+        &seen,
+        "POST",
+        "/notification-autodrain",
+        Some(json!({"enabled":true})),
+    );
+    assert!(autodrain_rejected.unwrap_err().contains("public message"));
 
     // Typed response methods must reject malformed success bodies rather than silently
     // presenting an empty/default snapshot, and preserve representative public errors.
