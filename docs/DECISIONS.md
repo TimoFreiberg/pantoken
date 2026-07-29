@@ -509,6 +509,8 @@ summary while the trailing items stay visible.
 
 ## Bazel boundary: conditional hybrid (Issue #101)
 
+**Superseded by Issue #118:** Bazel has been removed. Buck2 is now the sole additive build system. See `docs/buck2-policy.md`.
+
 **Date:** 2026-07-28
 
 **Decision:** Adopt a conditional hybrid Bazel boundary. Bazel is the eventual
@@ -621,7 +623,7 @@ transitively depends on OpenSSL via `web-push` → `ece` → `openssl` → `ring
 Eliminating this dependency requires forking `ece` (to use RustCrypto) and
 `web-push` (to use `hyper-rustls`). This is a known non-hermetic boundary
 that must be explicitly discussed with the operator before any hermetic build
-system (Bazel or Buck2) can claim full server-crate coverage.
+system (Buck2) can claim full server-crate coverage.
 
 **Principle:** Minimize system dependencies. Each native C dependency
 (OpenSSL, ring's C code, etc.) is a hermeticity blocker for build-system
@@ -634,7 +636,7 @@ operator discussion rather than silently accepting the system dependency.
 **Date:** 2026-07-28
 
 **Decision:** Buck2 is evaluated as an additive, non-authoritative build
-system alongside the existing Cargo/pnpm workflows and the Bazel POC.
+system alongside the existing Cargo/pnpm workflows.
 The evaluation is documented in `docs/buck2-poc-findings.md`.
 
 **Verdict: CONDITIONAL — not ready for broad adoption.** Buck2 successfully
@@ -644,9 +646,5 @@ OpenSSL/ring native compilation issue (see "No OpenSSL policy" above).
 Reindeer fixups are complex and the 335MB vendored dependency tree is a
 maintenance burden. Cargo remains authoritative; Buck2 is not promoted.
 
-**Cross-reference:** The Bazel POC (`docs/bazel-poc-findings.md`) achieves
-full 5-crate coverage because Bazel's `cargo_build_script` rule handles
-native compilation differently. Buck2's `buildscript_run` sandboxing is
-stricter, which is better for hermeticity but blocks the OpenSSL/ring
-build scripts.
+**Cross-reference:** Bazel has been removed (Issue #118). Buck2 is now the sole additive build system. The OpenSSL/ring native compilation blocker remains a known gap; see `docs/buck2-policy.md` for the foundation policy.
 

@@ -779,7 +779,7 @@ fn canon_matches_ts_golden() {
     let dir: PathBuf = std::env::var("PANTOKEN_CANON_PARITY_DIR")
         .map(PathBuf::from)
         .or_else(|_| {
-            // Bazel runfiles: PANTOKEN_CANON_PARITY_FILES contains space-separated file paths.
+            // Test runner env: PANTOKEN_CANON_PARITY_FILES contains space-separated file paths.
             // Derive the canon-parity directory from the first file's parent.
             std::env::var("PANTOKEN_CANON_PARITY_FILES")
                 .ok()

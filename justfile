@@ -123,37 +123,6 @@ release *args:
 publish *args:
     pnpm exec tsx scripts/desktop/publish.ts {{ args }}
 
-# --- Bazel foundation (additive, experimental) ---
-# See docs/bazel-policy.md. Cargo/pnpm remain authoritative.
-
-# Validate Bazel policy and resolve the mandatory target without a daemon/build.
-bazel-policy-check:
-    python3 scripts/bazel/check-policy.py
-
-# Compare deterministic archive/metadata fixtures across checkout roots.
-bazel-path-stability-test:
-    bazel test //:bazel_path_stability_test
-
-# Run the independently declared server Bazel test manifest; every test must pass.
-bazel-test-allowlisted:
-    python3 scripts/bazel/expected-test-results.py
-
-# Build all server-rs Rust crates via Bazel.
-bazel-build:
-    bazel build //server-rs/...
-
-# Run all server-rs Rust tests via Bazel.
-bazel-test:
-    bazel test //server-rs/...
-
-# Build the unsigned headless archive via Bazel.
-bazel-archive:
-    bazel build //:pantoken_headless_unsigned
-
-# Run the Bazel POC measurement script.
-bazel-measure:
-    bash scripts/bazel/measure-poc.sh
-
 # --- Buck2 foundation (additive, experimental) ---
 # See docs/buck2-poc-findings.md. Cargo/pnpm remain authoritative.
 # POC target scope: host-only aarch64-apple-darwin.
@@ -194,7 +163,7 @@ buck2-deps-regenerate:
 
 # Check that Reindeer regeneration produces no diff (vendor sources + BUCK).
 buck2-deps-check:
-    bash scripts/buck2/check-version.sh && scripts/buck2/run-reindeer.sh vendor && scripts/buck2/run-reindeer.sh buckify && jj diff --stat third-party/BUCK third-party/vendor/ third-party/fixups/
+    bash scripts/buck2/check-version.sh && scripts/buck2/run-reindeer.sh vendor && scripts/buck2/run-reindeer.sh buckify && test -z "$(jj diff --name-only -- third-party/BUCK third-party/vendor/ third-party/fixups/)"
 
 # Validate that Buck2 targets match the expected-target manifest.
 buck2-targets-check:

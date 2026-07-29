@@ -2,11 +2,11 @@
 
 Reproducible pre-migration baseline for the pantoken build system. Pinned tool
 versions, the checks/tests/builds that must remain valid, pnpm's dependency
-release-age protection, and representative timings — so future Bazel-migration
+release-age protection, and representative timings — so future Buck2-migration
 failures can be attributed to the migration rather than floating tools or
 pre-existing drift.
 
-This baseline was established for [Bazel migration Ticket 2](https://github.com/TimoFreiberg/pantoken/issues/97). The additive Bazel rules and verification policy is [`docs/bazel-policy.md`](bazel-policy.md).
+This baseline was established for [Buck2 migration Ticket 2](https://github.com/TimoFreiberg/pantoken/issues/97). The additive Buck2 rules and verification policy is [`docs/buck2-policy.md`](buck2-policy.md).
 
 ## Pinned tool versions
 
@@ -91,7 +91,7 @@ These prerequisite tools are documented in `README.md` / `AGENTS.md` but are
 ## Checks, tests, and builds that must remain valid
 
 These are the check/test/build/release paths that must remain green after the
-Bazel migration. Any regression in these paths must be attributable to the
+Buck2 migration. Any regression in these paths must be attributable to the
 migration, not to pre-existing drift.
 
 ### Local (`just` recipes)

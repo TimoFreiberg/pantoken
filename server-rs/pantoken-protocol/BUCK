@@ -1,6 +1,5 @@
 # Buck2 BUCK file for pantoken-protocol.
 # Cargo remains authoritative; this is additive for the Buck2 POC.
-# Mirrors server-rs/pantoken-protocol/BUILD.bazel.
 # See docs/buck2-poc-findings.md for the full target map.
 #
 # Rust rules (rust_library, rust_test) are built-in Buck2 globals — no load needed.

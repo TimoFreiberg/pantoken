@@ -35,12 +35,14 @@ See `docs/DESIGN.md` for architecture, `docs/DECISIONS.md` for settled calls, `d
   the toolchain file for every `cargo` command. See
   [`docs/toolchain-baseline.md`](docs/toolchain-baseline.md) for the full
   baseline (versions, checks, timings, and how to reproduce).
-- **Bazel has a settled conditional hybrid boundary, but is not authoritative yet.**
-  It may eventually own hermetic server-Rust checks and deterministic unsigned
-  headless archives after the rollout gates pass; the current `just bazel-*`
-  commands remain additive. Cargo and pnpm direct workflows remain supported.
-  See [`docs/bazel-policy.md`](docs/bazel-policy.md), `docs/DECISIONS.md`, and `docs/bazel-poc-findings.md`. Requires `bazelisk`
-  (`brew install bazelisk`).
+- **Buck2 is the additive build system — Cargo/pnpm remain authoritative.**
+  Buck2 builds 4 of 5 server-rs Rust crates with affected-target execution and
+  a checked-in Reindeer dependency graph. The `pantoken-server` binary is
+  blocked by `ece → openssl → ring` native compilation under Buck2's sandbox
+  (see `docs/DECISIONS.md` "No OpenSSL policy"). The `just buck2-*` commands
+  are additive. See [`docs/buck2-policy.md`](docs/buck2-policy.md),
+  `docs/DECISIONS.md`, and `docs/buck2-poc-findings.md`. Requires `buck2`
+  and `reindeer` (install instructions in `buck2/bootstrap.sh`).
 
 ## Stack & layout
 

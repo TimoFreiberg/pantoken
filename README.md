@@ -28,7 +28,7 @@ browser copy? Un-quarantine it: `xattr -cr /path/to/Pantoken.app`. See
 Before starting, have pnpm, Node, Rust, `just`, `sccache`, `cargo-nextest`, and the Playwright
 browsers available. pnpm, Node, and Rust versions are pinned (`package.json` `packageManager`
 and `rust-toolchain.toml` respectively); see
-[`docs/toolchain-baseline.md`](docs/toolchain-baseline.md) for the full baseline and [`docs/bazel-policy.md`](docs/bazel-policy.md) for the additive Bazel foundation.
+[`docs/toolchain-baseline.md`](docs/toolchain-baseline.md) for the full baseline and [`docs/buck2-policy.md`](docs/buck2-policy.md) for the additive Buck2 foundation.
 These tools and browsers are prerequisites; recipes do not install or
 upgrade them. Invoke the explicit frozen dependency install when needed:
 

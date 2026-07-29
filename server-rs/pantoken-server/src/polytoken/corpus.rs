@@ -21,13 +21,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Resolve the corpus root: `<crate>/../tests/corpus` (i.e. `server-rs/tests/corpus`).
-/// Checks PANTOKEN_CORPUS_DIR at runtime (Bazel runfiles), falls back to
+/// Checks PANTOKEN_CORPUS_DIR at runtime (test runner env), falls back to
 /// env!("CARGO_MANIFEST_DIR") (Cargo).
 pub fn corpus_dir() -> std::path::PathBuf {
     if let Ok(dir) = std::env::var("PANTOKEN_CORPUS_DIR") {
         return std::path::PathBuf::from(dir);
     }
-    // Bazel runfiles: PANTOKEN_CORPUS_FILES contains space-separated file paths.
+    // Test runner env: PANTOKEN_CORPUS_FILES contains space-separated file paths.
     // Derive the corpus root from the first file's path (up two parents).
     if let Ok(files) = std::env::var("PANTOKEN_CORPUS_FILES") {
         if let Some(first) = files.split_whitespace().next() {

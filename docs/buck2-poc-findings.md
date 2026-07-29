@@ -1,16 +1,17 @@
 # Buck2 POC Findings
 
 > **Decision gate: CONDITIONAL — not ready for broad adoption.**
+> The previous foundation has been removed; Buck2 is now the sole additive build system.
 > Buck2 successfully builds 4 of 5 server crates with affected-target execution
-> and a checked-in dependency graph. The `pantoken-server` binary is blocked by
-> an OpenSSL/ring native compilation issue that has no pure-Rust workaround.
-> Recommendation: keep Buck2 as an additive experiment; do not promote until
-> the OpenSSL dependency is eliminated or a hermetic native toolchain is provided.
+> and a checked-in dependency graph. The `pantoken-server` binary remains blocked
+> by an OpenSSL/ring native compilation issue that has no pure-Rust workaround.
+> This known gap is tracked in `docs/DECISIONS.md` under “No OpenSSL policy”.
+> See `docs/buck2-policy.md` for the foundation policy.
 
 ## Overview
 
-This POC evaluated Buck2 as an **additive** build system alongside the authoritative Cargo/pnpm
-workflows and the existing Bazel POC. It covers all 5 `server-rs` Rust crates (4 build successfully),
+This POC evaluated Buck2 as the **sole additive** build system alongside the authoritative Cargo/pnpm
+workflows. It covers all 5 `server-rs` Rust crates (4 build successfully),
 Reindeer-generated third-party dependencies, and unsigned headless archive assembly.
 Cargo and pnpm remain the source of truth; Buck2 builds the same artifacts from the same sources.
 
@@ -78,7 +79,7 @@ environment.
 - Fork `ece` to use a pure-Rust crypto backend (ring/RustCrypto)
 - Fork `web-push` to use `hyper-rustls` instead of `hyper-tls`
 - Provide a hermetic native toolchain for Buck2 that includes OpenSSL headers
-- Document the OpenSSL dependency as a known non-hermetic boundary (like Bazel's approach)
+- Document the OpenSSL dependency as a known non-hermetic boundary
 
 ## Reindeer fixups
 
@@ -125,19 +126,6 @@ assembly logic, staging script, and validator are implemented and parseable by B
 be exercised end-to-end until the server binary builds. The `just buck2-archive` and
 `just buck2-validate-archive` recipes will fail until the blocker is resolved.
 
-## Comparison with Bazel POC
-
-| Aspect | Bazel | Buck2 | Notes |
-|--------|-------|-------|-------|
-| Server crates build | ✅ All 5 | ⚠️ 4 of 5 | Buck2 blocked by OpenSSL/ring |
-| Dependency ingestion | crate_universe | Reindeer | Both require manual fixups |
-| Deterministic archive | rules_pkg | Python genrule | Buck2 hand-rolls the archive |
-| Build script support | cargo_build_script | buildscript_run | Both require env fixes |
-| CARGO_MANIFEST_DIR | Source patch + env override | env/resources + $(location) | Similar approach |
-| Vendored deps size | N/A (crate_universe) | 335MB (Reindeer vendor) | Buck2 checks in vendored sources |
-| Clean build | 32s | ~45s | Buck2 slower (more crates to compile) |
-| Warm build | <1s | <1s | Both use action cache |
-| Incremental | 16 actions (surgical) | Similar (affected-target) | Both track dependencies precisely |
 
 ## Decision gate: CONDITIONAL
 
@@ -162,4 +150,4 @@ Buck2 is fully additive — removing it requires only:
 4. Revert the `reqwest` feature change in `Cargo.toml` (optional — it's an improvement)
 5. Run `cargo update` to regenerate `Cargo.lock`
 
-Cargo, pnpm, and Bazel workflows are completely unaffected.
+Cargo and pnpm workflows are completely unaffected.

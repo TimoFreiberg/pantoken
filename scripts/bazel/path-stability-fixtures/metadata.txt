@@ -1,3 +1,0 @@
-artifact-version=0.0.0-dev
-build-sha=deterministic
-archive-member=client-dist/index.html

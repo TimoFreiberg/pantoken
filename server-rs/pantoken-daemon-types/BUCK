@@ -1,6 +1,5 @@
 # Buck2 BUCK file for pantoken-daemon-types.
 # Cargo remains authoritative; this is additive for the Buck2 POC.
-# Mirrors server-rs/pantoken-daemon-types/BUILD.bazel.
 # Rust rules are built-in Buck2 globals — no load needed.
 
 rust_library(

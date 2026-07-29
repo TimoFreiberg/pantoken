@@ -19,12 +19,6 @@ server-rs/target/
 grindbot-config.toml
 .grindbot
 
-# Bazel — symlinks are workspace-local; the lockfile is too large for jj to snapshot
-bazel-bin
-bazel-out
-bazel-testlogs
-bazel-issue-100
-MODULE.bazel.lock
 # Runtime-only polytoken artifacts the daemon writes; committed config
 # (hooks, skills, config.yaml, README.md) must stay trackable.
 .polytoken/sessions/
@@ -36,7 +30,6 @@ MODULE.bazel.lock
 .implement-issue-stop-redirects
 .implement-issue-session-id
 .playwright-mcp/
-scripts/bazel/results.txt
 # Buck2 build output
 buck-out/
 .buckd/

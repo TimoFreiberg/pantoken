@@ -1,6 +1,6 @@
 # Root BUCK file for the pantoken Buck2 POC.
 # Cargo/pnpm remain authoritative. Buck2 is additive and experimental.
-# Mirrors the root BUILD.bazel archive assembly targets.
+# Archive assembly targets for the Buck2 foundation.
 # See docs/buck2-poc-findings.md for the full POC boundary and policy.
 
 # ── Pre-built client-dist (pnpm stays authoritative) ─────────────────────────

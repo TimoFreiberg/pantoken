@@ -43,7 +43,7 @@ else
 fi
 
 # ── Client-dist files ───────────────────────────────────────────────────────
-# Copy only the allowlisted PWA root files (mirrors the Bazel filegroup glob).
+# Copy only the allowlisted PWA root files (mirrors the root BUCK filegroup glob).
 if [ -d "$CLIENT_DIST_DIR" ]; then
     # index.html
     [ -f "$CLIENT_DIST_DIR/index.html" ] && cp "$CLIENT_DIST_DIR/index.html" "$STAGING/client-dist/"

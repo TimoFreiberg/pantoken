@@ -1,6 +1,5 @@
 # Buck2 BUCK file for pantoken-server.
 # Cargo remains authoritative; this is additive for the Buck2 POC.
-# Mirrors server-rs/pantoken-server/BUILD.bazel.
 # Rust rules are built-in Buck2 globals — no load needed.
 #
 # The build.rs sets cargo:rustc-env=PANTOKEN_BUILD_SHA based on the
@@ -19,7 +18,7 @@ rust_library(
     crate = "pantoken_server",
     edition = "2024",
     # PANTOKEN_BUILD_SHA is set via build.rs in Cargo. Under Buck2, we set it
-    # directly as a rustc env var. This mirrors the Bazel cargo_build_script env.
+    # directly as a rustc env var.
     env = {
         "PANTOKEN_BUILD_SHA": "dev-buck2",
         "PANTOKEN_RELEASE_BUILD": "0",

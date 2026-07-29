@@ -325,9 +325,7 @@ mod tests {
         assert_eq!(tools_dir(root), PathBuf::from("/opt/pantoken/tools"));
         assert_eq!(
             polytoken_binary(root, "0.5.8", "x86_64-unknown-linux-gnu").unwrap(),
-            PathBuf::from(
-                "/opt/pantoken/tools/polytoken/0.5.8/x86_64-unknown-linux-gnu/polytoken"
-            )
+            PathBuf::from("/opt/pantoken/tools/polytoken/0.5.8/x86_64-unknown-linux-gnu/polytoken")
         );
         assert_eq!(run_dir(root), PathBuf::from("/opt/pantoken/run"));
         assert_eq!(

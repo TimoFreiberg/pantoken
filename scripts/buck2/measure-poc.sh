@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Buck2 POC measurement script.
 # Captures cold, warm, incremental, cross-workspace, test, and archive timings
-# comparable to docs/toolchain-baseline.md and docs/bazel-poc-findings.md.
+# comparable to docs/toolchain-baseline.md and docs/buck2-poc-findings.md.
 #
 # Usage: just buck2-measure
 # Prerequisites: Buck2, Reindeer, Rust 1.97.1, sccache
@@ -113,14 +113,14 @@ XWORKSPACE_TIME=$(timer "$BUCK2" build "${BUILD_TARGETS[@]}" 2>/dev/null)
 echo "${XWORKSPACE_TIME}s | After buck2 clean, action cache cold but deps cached |"
 
 echo ""
-echo "## Comparison with Cargo baseline and Bazel POC"
+echo "## Comparison with Cargo baseline"
 echo ""
-echo "| Metric | Buck2 | Bazel | Cargo baseline |"
-echo "|--------|-------|-------|----------------|"
-echo "| Cold build | ${COLD_TIME}s | 32s | 11.4s |"
-echo "| Warm build | ${WARM_TIME}s | <1s | 8.4s |"
-echo "| Incremental | ${INCR_TIME}s | 1s | 2.5s |"
-echo "| Test run | ${TEST_TIME}s | ~30s | N/A |"
+echo "| Metric | Buck2 | Cargo baseline |"
+echo "|--------|-------|----------------|"
+echo "| Cold build | ${COLD_TIME}s | 11.4s |"
+echo "| Warm build | ${WARM_TIME}s | 8.4s |"
+echo "| Incremental | ${INCR_TIME}s | 2.5s |"
+echo "| Test run | ${TEST_TIME}s | N/A |"
 echo ""
 echo "## Notes"
 echo "- Buck2 builds 4 of 5 server crates (pantoken-server blocked by OpenSSL/ring)"

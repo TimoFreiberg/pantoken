@@ -28,7 +28,7 @@ struct RuntimeHandle {
     socket_path: PathBuf,
 }
 
-/// Resolve the server binary supplied by Bazel, retaining Cargo's target/debug
+/// Resolve the server binary supplied by the test runner, retaining Cargo's target/debug
 /// layout as the fallback for direct package test execution.
 fn server_binary() -> PathBuf {
     std::env::var_os("PANTOKEN_SERVER_BIN")
