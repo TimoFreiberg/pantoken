@@ -855,25 +855,36 @@ async fn attach_subscribes_before_snapshot_and_delivers_buffered_event_once() {
     );
 }
 
-#[tokio::test]
-async fn attach_failure_tears_down_subscription_lease_and_does_not_install_warm_session() {
-    let _guard = OVERRIDE_MUTEX.lock().await;
-
+async fn assert_hydration_failure_cleanup(endpoint: &str, malformed_success: bool) {
     let mut scenario = corpus_loader::load_named(VERSION, "streaming-turn");
-    let state = scenario
-        .http
-        .iter_mut()
-        .find(|entry| entry.method == "GET" && entry.path == "/state")
-        .expect("state recording");
-    state.status = 200;
-    state.response_body = Some(serde_json::json!({"malformed": true}));
+    if endpoint == "/state" {
+        let state = scenario
+            .http
+            .iter_mut()
+            .find(|entry| entry.method == "GET" && entry.path == endpoint)
+            .expect("state recording");
+        state.status = 200;
+        state.response_body = Some(serde_json::json!({"malformed": true}));
+    } else {
+        scenario.http.push(support::corpus::HttpEntry {
+            method: "GET".into(),
+            path: endpoint.into(),
+            request_body: None,
+            status: if malformed_success { 200 } else { 500 },
+            response_body: Some(if malformed_success {
+                serde_json::json!({"malformed": true})
+            } else {
+                serde_json::json!({"code":"hydrate_failed","message":"snapshot unavailable"})
+            }),
+        });
+    }
     let frame = scenario
         .sse
         .first()
         .cloned()
         .expect("failure scenario SSE frame");
-    let (fake, race) =
-        fake_daemon::spawn_hydration_race(scenario, "failed-attach".into(), frame).await;
+    let session_id = format!("failed-attach-{}", endpoint.trim_start_matches('/'));
+    let (fake, race) = fake_daemon::spawn_hydration_race(scenario, session_id.clone(), frame).await;
     let fake = Arc::new(fake);
     let _ovr = OverrideGuard::install(fake.clone());
     let (driver, _dir) = make_driver().await;
@@ -883,19 +894,19 @@ async fn attach_failure_tears_down_subscription_lease_and_does_not_install_warm_
         tokio::spawn(async move { warm_driver.new_session(NewSessionOptsData::default()).await });
     tokio::time::timeout(std::time::Duration::from_secs(2), race.wait_event_sent())
         .await
-        .expect("SSE remains held open during malformed snapshot hydration");
+        .unwrap_or_else(|_| panic!("{endpoint}: SSE was not sent during snapshot hydration"));
     race.release_state();
     let error = warming
         .await
         .expect("warm task")
-        .expect_err("malformed state must fail hydration");
+        .expect_err("hydration failure must reject attach");
     tokio::time::timeout(std::time::Duration::from_secs(2), race.wait_stream_closed())
         .await
         .expect("failed hydration must stop the SSE subscription");
-    assert!(error.contains("GET /state hydration failed"), "{error}");
+    assert!(error.contains(endpoint), "{endpoint}: {error}");
     assert!(
         fake.called("DELETE", "/tui-attachment/lease-1"),
-        "failed hydration must release the lease: {:?}",
+        "{endpoint}: failed hydration must release the lease: {:?}",
         fake.recorded_calls()
     );
     assert_eq!(
@@ -904,14 +915,20 @@ async fn attach_failure_tears_down_subscription_lease_and_does_not_install_warm_
             .filter(|(method, path)| method == "GET" && path == "/events")
             .count(),
         1,
-        "failed hydration must not reconnect or leave a second subscription"
+        "{endpoint}: failed hydration must not reconnect"
     );
     assert!(
-        driver
-            .get_usage(Some("failed-attach".to_string()))
-            .is_none(),
-        "failed hydration must not install a warm session"
+        driver.get_usage(Some(session_id)).is_none(),
+        "{endpoint}: failed hydration must not install a warm session"
     );
+}
+
+#[tokio::test]
+async fn attach_failure_tears_down_subscription_lease_and_heartbeat() {
+    let _guard = OVERRIDE_MUTEX.lock().await;
+    assert_hydration_failure_cleanup("/state", true).await;
+    assert_hydration_failure_cleanup("/permission-monitor", false).await;
+    assert_hydration_failure_cleanup("/notification-autodrain", false).await;
 }
 
 /// `reload_session` disposes the old warm session AND re-warms. We open a
@@ -1394,7 +1411,12 @@ fn synthetic_rewind_scenario(accepted: bool) -> ScenarioFile {
             {"method": "GET", "path": "/state", "status": 200, "response_body": state("before")},
             {"method": "GET", "path": "/history", "status": 200, "response_body": pre_history},
             {"method": "GET", "path": "/history", "status": 200, "response_body": pre_history},
-            {"method": "POST", "path": "/rewind", "status": rewind_status, "response_body": rewind_body},
+            {"method": "POST", "path": "/rewind",
+             "request_body": {
+                 "domains": ["conversation", "todos", "flags"],
+                 "to_prompt_id": "target-prompt"
+             },
+             "status": rewind_status, "response_body": rewind_body},
             {"method": "GET", "path": "/state", "status": 200, "response_body": state("after-rewind")},
             {"method": "GET", "path": "/history", "status": 200, "response_body": post_history}
         ],
@@ -1407,7 +1429,8 @@ fn synthetic_rewind_scenario(accepted: bool) -> ScenarioFile {
 async fn branch_rewind_acceptance_preserves_prompt_domains_and_reseeds() {
     let _guard = OVERRIDE_MUTEX.lock().await;
     let fake = Arc::new(
-        fake_daemon::spawn(synthetic_rewind_scenario(true), "rewind-accepted".into(), 0).await,
+        fake_daemon::spawn_strict(synthetic_rewind_scenario(true), "rewind-accepted".into(), 0)
+            .await,
     );
     let _ovr = OverrideGuard::install(fake.clone());
     let (driver, _dir) = make_driver().await;
@@ -1470,11 +1493,55 @@ async fn branch_rewind_acceptance_preserves_prompt_domains_and_reseeds() {
     );
 }
 
+async fn assert_rewind_refresh_failure_detaches(endpoint: &str, occurrence: usize) {
+    let mut scenario = synthetic_rewind_scenario(true);
+    let entry = scenario
+        .http
+        .iter_mut()
+        .filter(|entry| entry.method == "GET" && entry.path == endpoint)
+        .nth(occurrence)
+        .expect("post-rewind refresh recording");
+    entry.status = 500;
+    entry.response_body = Some(serde_json::json!({
+        "code":"refresh_failed", "message":"authoritative snapshot unavailable"
+    }));
+    let session_id = format!("rewind-refresh-failed-{}", endpoint.trim_start_matches('/'));
+    let fake = Arc::new(fake_daemon::spawn_strict(scenario, session_id.clone(), 0).await);
+    let _ovr = OverrideGuard::install(fake.clone());
+    let (driver, _dir) = make_driver().await;
+    driver
+        .new_session(NewSessionOptsData::default())
+        .await
+        .expect("warm session");
+
+    let error = driver
+        .branch_from("target-prompt".into(), false, Some(session_id.clone()))
+        .await
+        .expect_err("accepted rewind with failed refresh must detach");
+    assert!(error.contains("rewind succeeded"), "{error}");
+    assert!(error.contains("must be reopened"), "{error}");
+    assert!(
+        !driver.has_warm_session(&session_id),
+        "destructively changed session must not retain stale warm state"
+    );
+    assert!(
+        fake.called("DELETE", "/tui-attachment/lease-1"),
+        "invalidated warm attachment must release its lease"
+    );
+}
+
+#[tokio::test]
+async fn branch_rewind_refresh_failure_invalidates_stale_warm_session() {
+    let _guard = OVERRIDE_MUTEX.lock().await;
+    assert_rewind_refresh_failure_detaches("/state", 1).await;
+    assert_rewind_refresh_failure_detaches("/history", 2).await;
+}
+
 #[tokio::test]
 async fn branch_rewind_rejection_preserves_warm_session_and_public_error() {
     let _guard = OVERRIDE_MUTEX.lock().await;
     let fake = Arc::new(
-        fake_daemon::spawn(
+        fake_daemon::spawn_strict(
             synthetic_rewind_scenario(false),
             "rewind-rejected".into(),
             0,
@@ -1487,6 +1554,7 @@ async fn branch_rewind_rejection_preserves_warm_session_and_public_error() {
         .new_session(NewSessionOptsData::default())
         .await
         .expect("warm session");
+    let (_sub_id, mut events) = collect_events(&driver, 16);
 
     let error = driver
         .branch_from(
@@ -1503,6 +1571,16 @@ async fn branch_rewind_rejection_preserves_warm_session_and_public_error() {
     assert!(
         error.contains("target prompt cannot be rewound"),
         "public error message lost: {error}"
+    );
+    assert!(
+        driver.has_warm_session(&"rewind-rejected".to_string()),
+        "a rejected rewind must retain the existing authoritative attachment"
+    );
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), events.recv())
+            .await
+            .is_err(),
+        "a rejected rewind must not emit reset/reseed transcript mutations"
     );
 
     let calls = fake.recorded_calls();

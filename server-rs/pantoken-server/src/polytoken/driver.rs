@@ -1207,6 +1207,28 @@ impl PolytokenInner {
     /// - When no `Child` handle is present (resume/attach path), use
     ///   `close()` which falls back to `kill()` — but `kill()` now verifies
     ///   process identity via start-time before signaling.
+    async fn invalidate_warm_after_destructive_refresh_failure(
+        &self,
+        session_id: &SessionId,
+        expected: &Arc<WarmSession>,
+    ) {
+        let removed = {
+            let mut warm = self.warm.write();
+            if warm
+                .get(session_id)
+                .is_some_and(|current| Arc::ptr_eq(current, expected))
+            {
+                warm.remove(session_id)
+            } else {
+                None
+            }
+        };
+        if let Some(removed) = removed {
+            self.order.lock().retain(|id| id != session_id);
+            self.dispose_warm(&removed).await;
+        }
+    }
+
     async fn dispose_warm(&self, ws: &Arc<WarmSession>) {
         let sub = ws.sse_subscription.lock().take();
         *ws.sse_tx.lock() = None;
@@ -2484,13 +2506,27 @@ impl PantokenDriver for PolytokenDriver {
         ws.client.rewind(&req).await?;
 
         let state_res = ws.client.state().await;
-        let state = state_res.data.ok_or_else(|| {
-            format!(
-                "rewind succeeded but state refresh failed ({}): {}",
+        let Some(state) = state_res.data else {
+            self.inner
+                .invalidate_warm_after_destructive_refresh_failure(&sid, &ws)
+                .await;
+            return Err(format!(
+                "rewind succeeded but state refresh failed ({}): {}; the session was detached and must be reopened",
                 state_res.status,
                 state_res.error.as_deref().unwrap_or("")
-            )
-        })?;
+            ));
+        };
+        let history_res = ws.client.history(None, None).await;
+        let Some(history) = history_res.data else {
+            self.inner
+                .invalidate_warm_after_destructive_refresh_failure(&sid, &ws)
+                .await;
+            return Err(format!(
+                "rewind succeeded but transcript refresh failed ({}): {}; the session was detached and must be reopened",
+                history_res.status,
+                history_res.error.as_deref().unwrap_or("")
+            ));
+        };
         *ws.last_state.write() = Some(state);
         let ctx = DriverMapCtx {
             session_ref: ws.session_ref.clone(),
@@ -2500,14 +2536,6 @@ impl PantokenDriver for PolytokenDriver {
             autodrain_enabled: *ws.autodrain_enabled.lock(),
         };
         let snapshot = ctx.snapshot(ctx.live_status());
-        let history_res = ws.client.history(None, None).await;
-        let history = history_res.data.ok_or_else(|| {
-            format!(
-                "rewind succeeded but transcript refresh failed ({}): {}",
-                history_res.status,
-                history_res.error.as_deref().unwrap_or("")
-            )
-        })?;
         Ok(BranchResult {
             seed: PolytokenInner::build_branch_seed(
                 snapshot,

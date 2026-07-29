@@ -392,14 +392,15 @@ async function main() {
 // is a static "0.1.0" that does NOT track daemon releases — do not use it as a
 // compatibility target.
 //
-// The live corpus tests are the true spec-drift gate; this constant is a floor.
+// This constant records the generation target only. Behavioral compatibility is
+// checked separately by deterministic HTTP/SSE contracts, corpus replay, and live-path tests.
 //
 // Regenerate: \`just codegen-polytoken-rs\`
 `,
     `//! Compatibility target: the polytoken daemon version this build was codegen'd
 //! against. Sourced from \`polytoken --version\` at codegen, NOT from \`info.version\`
-//! in the OpenAPI spec (which is a static "0.1.0"). The live corpus tests are the
-//! true spec-drift gate.
+//! in the OpenAPI spec (which is a static "0.1.0"). This records the generation
+//! target; deterministic contracts and live-path tests establish behavioral compatibility.
 pub const POLYTOKEN_DAEMON_TARGET_VERSION: &str = "${daemonVersion}";
 
 /// Public-schema-derived wire names for every current \`DaemonEvent\` variant.

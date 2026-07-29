@@ -49,7 +49,9 @@ use crate::polytoken::daemon_client::{
 /// the push loop for rationale.
 const CONTROLLED_INTER_FRAME_DELAY_MS: u64 = 8;
 
-/// One canned response for a lifecycle endpoint the corpus doesn't record.
+/// One canned response for the tiny bootstrap allowlist. This is deliberately
+/// consulted only when the active scenario declares no request with this
+/// method/path; a declared endpoint can never silently fall through to canned.
 fn canned(method: &str, path: &str) -> Option<(StatusCode, Value)> {
     let (m, p) = (method, path);
     // GET /health — minimal healthy body. `HealthResponse` requires several
@@ -150,18 +152,63 @@ fn canned(method: &str, path: &str) -> Option<(StatusCode, Value)> {
     None
 }
 
-/// The mutable harness state: the recorded-call log + the per-endpoint replay
-/// cursors (so a repeated `GET /state` returns the NEXT recording, not a stale
-/// first one — the corpus records multiple `/state` snapshots across a turn).
+/// Match one request against the next declared scenario expectation. The cursor
+/// is intentionally global: strict HTTP recordings describe one ordered
+/// conversation, not independent endpoint fixtures.
+fn match_http_expectation(
+    scenario: &ScenarioFile,
+    next: usize,
+    method: &str,
+    path: &str,
+    request_body: &str,
+) -> Result<Option<corpus::HttpEntry>, String> {
+    let declared_pair = scenario
+        .http
+        .iter()
+        .any(|entry| entry.method == method && entry.path == path);
+    if !declared_pair {
+        return Ok(None);
+    }
+    let Some(expected) = scenario.http.get(next) else {
+        return Err(format!("unexpected extra request: {method} {path}"));
+    };
+    if expected.method != method || expected.path != path {
+        return Err(format!(
+            "request order mismatch at expectation {next}: expected {} {}, got {method} {path}",
+            expected.method, expected.path
+        ));
+    }
+    let actual_body = if request_body.trim().is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_str::<Value>(request_body)
+            .map_err(|e| format!("invalid JSON request body for {method} {path}: {e}"))?
+    };
+    let expected_body = expected.request_body.clone().unwrap_or(Value::Null);
+    if actual_body != expected_body {
+        return Err(format!(
+            "request body mismatch for {method} {path}: expected {}, got {}",
+            expected_body, actual_body
+        ));
+    }
+    Ok(Some(expected.clone()))
+}
+
+/// The mutable harness state: the recorded-call log + the global HTTP cursor.
 #[derive(Default)]
 struct FakeState {
     /// Every `(METHOD, path)` the driver called, in arrival order.
     calls: Vec<(String, String)>,
     /// Every `(METHOD, path, body)` the driver called, in arrival order.
     request_bodies: Vec<(String, String, String)>,
-    /// Per `(METHOD, path)` → index into the scenario's matching `http[]`
-    /// entries (so repeated calls advance through the recordings).
+    /// Per `(METHOD, path)` replay cursors used by historical loose scenarios.
     cursors: HashMap<(String, String), usize>,
+    /// Index of the next declared HTTP expectation in strict mode.
+    next_http_expectation: usize,
+    /// Number of expectations in the currently armed scenario.
+    declared_http_expectations: usize,
+    /// Strict mode is opt-in for independently authored contract scenarios.
+    strict: bool,
     /// Controlled-mode SSE sender. Present after GET /events connects; reset
     /// replaces it so a reset mid-stream cannot corrupt a later producer.
     sse_tx: Option<mpsc::Sender<Result<Event, std::convert::Infallible>>>,
@@ -196,6 +243,43 @@ impl FakeDaemon {
         self.state.lock().request_bodies.clone()
     }
 
+    /// Fail the test/harness if any required scenario HTTP expectation remains.
+    pub fn assert_expectations_consumed(&self) -> Result<(), String> {
+        let st = self.state.lock();
+        if !st.strict {
+            return Err("expectation consumption is available only for spawn_strict fakes".into());
+        }
+        if st.next_http_expectation != st.declared_http_expectations {
+            return Err(format!(
+                "fake daemon has {} unconsumed HTTP expectation(s), starting at index {}",
+                st.declared_http_expectations
+                    .saturating_sub(st.next_http_expectation),
+                st.next_http_expectation
+            ));
+        }
+        Ok(())
+    }
+
+    /// Assert consumption against an explicitly selected scenario. This keeps
+    /// the check useful after controlled reset/arm without exposing mutable state.
+    pub fn assert_expectations_consumed_for_scenario(
+        &self,
+        scenario: &ScenarioFile,
+    ) -> Result<(), String> {
+        let st = self.state.lock();
+        if !st.strict {
+            return Err("expectation consumption is available only for spawn_strict fakes".into());
+        }
+        if st.next_http_expectation != scenario.http.len() {
+            return Err(format!(
+                "fake daemon has {} unconsumed HTTP expectation(s), starting at index {}",
+                scenario.http.len().saturating_sub(st.next_http_expectation),
+                st.next_http_expectation
+            ));
+        }
+        Ok(())
+    }
+
     /// True iff the driver made a call matching `method` + `path`.
     pub fn called(&self, method: &str, path: &str) -> bool {
         self.state
@@ -213,8 +297,10 @@ impl FakeDaemon {
     /// frames. Controlled-mode only (one-shot `spawn` does not swap).
     fn arm_scenario(&self, scenario: Arc<ScenarioFile>) {
         let mut st = self.state.lock();
+        st.declared_http_expectations = scenario.http.len();
+        st.strict = false;
         st.scenario_override = Some(scenario);
-        st.cursors.clear();
+        st.next_http_expectation = 0;
         st.calls.clear();
     }
 }
@@ -297,6 +383,25 @@ pub async fn spawn(
         SseMode::OneShot {
             inter_frame_delay_ms,
         },
+        false,
+    )
+    .await
+}
+
+/// Spawn a strict contract fake. Unlike historical [`spawn`], this consumes
+/// `http[]` in one global order and validates request bodies/counts.
+pub async fn spawn_strict(
+    scenario: ScenarioFile,
+    session_id: String,
+    inter_frame_delay_ms: u64,
+) -> FakeDaemon {
+    spawn_with_mode(
+        scenario,
+        session_id,
+        SseMode::OneShot {
+            inter_frame_delay_ms,
+        },
+        true,
     )
     .await
 }
@@ -321,13 +426,14 @@ pub async fn spawn_hydration_race(
             frame,
             control: control.clone(),
         },
+        false,
     )
     .await;
     (fake, control)
 }
 
 async fn spawn_controlled(scenario: ScenarioFile, session_id: String) -> Arc<FakeDaemon> {
-    Arc::new(spawn_with_mode(scenario, session_id, SseMode::Controlled).await)
+    Arc::new(spawn_with_mode(scenario, session_id, SseMode::Controlled, false).await)
 }
 
 /// The idle landing scenario for a fake-mode bootstrap session: an empty
@@ -379,13 +485,18 @@ async fn spawn_with_mode(
     scenario: ScenarioFile,
     session_id: String,
     sse_mode: SseMode,
+    strict: bool,
 ) -> FakeDaemon {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind ephemeral port");
     let port = listener.local_addr().expect("local_addr").port();
-    let state = Arc::new(Mutex::new(FakeState::default()));
     let scenario = Arc::new(scenario);
+    let state = Arc::new(Mutex::new(FakeState {
+        declared_http_expectations: scenario.http.len(),
+        strict,
+        ..FakeState::default()
+    }));
 
     let app = build_router(state.clone(), scenario.clone(), sse_mode);
 
@@ -468,6 +579,9 @@ impl FakeControlHub {
             let mut state = fake.state.lock();
             state.calls.clear();
             state.cursors.clear();
+            state.next_http_expectation = 0;
+            // Keep the bootstrap count: reset drops the override and re-adopts
+            // the spawn-time bootstrap scenario.
             state.scenario_override = None;
         }
     }
@@ -943,41 +1057,67 @@ async fn http_handler(
         let mut st = app.state.lock();
         st.calls.push((method.clone(), path.clone()));
         st.request_bodies
-            .push((method.clone(), path.clone(), request_body));
-        // Declared scenario contracts always win. The tiny canned bootstrap
-        // allowlist applies only when the active scenario has no recording.
-        let key = (method.clone(), path.clone());
-        let idx = st.cursors.get(&key).copied().unwrap_or(0);
+            .push((method.clone(), path.clone(), request_body.clone()));
         let scenario = st
             .scenario_override
             .clone()
             .unwrap_or_else(|| app.scenario.clone());
-        let recording = scenario
-            .http
-            .iter()
-            .filter(|e| e.method == method && e.path == path)
-            .nth(idx)
-            .cloned();
-        if let Some(entry) = recording {
-            *st.cursors.entry(key).or_insert(0) = idx + 1;
-            (
-                StatusCode::from_u16(entry.status as u16)
-                    .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
-                entry.response_body.clone(),
-            )
-        } else if let Some((code, value)) = canned(&method, &path) {
-            (code, Some(value))
+        if st.strict {
+            match match_http_expectation(
+                &scenario,
+                st.next_http_expectation,
+                &method,
+                &path,
+                &request_body,
+            ) {
+                Ok(Some(entry)) => {
+                    st.next_http_expectation += 1;
+                    (
+                        StatusCode::from_u16(entry.status as u16)
+                            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                        entry.response_body.clone(),
+                    )
+                }
+                Ok(None) => match canned(&method, &path) {
+                    Some((code, value)) => (code, Some(value)),
+                    None => {
+                        tracing::error!("fake daemon: unmatched request {} {}", method, path);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Some(Value::String(format!("unmatched request: {method} {path}"))),
+                        )
+                    }
+                },
+                Err(error) => {
+                    tracing::error!("fake daemon contract violation: {error}");
+                    return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response();
+                }
+            }
         } else {
-            tracing::error!(
-                "fake daemon: unmatched request {} {} (no recording or bootstrap contract)",
-                method,
-                path
-            );
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("unmatched request: {method} {path}"),
-            )
-                .into_response();
+            let key = (method.clone(), path.clone());
+            let idx = st.cursors.get(&key).copied().unwrap_or(0);
+            let recording = scenario
+                .http
+                .iter()
+                .filter(|entry| entry.method == method && entry.path == path)
+                .nth(idx)
+                .cloned();
+            if let Some(entry) = recording {
+                st.cursors.insert(key, idx + 1);
+                (
+                    StatusCode::from_u16(entry.status as u16)
+                        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                    entry.response_body.clone(),
+                )
+            } else if let Some((code, value)) = canned(&method, &path) {
+                (code, Some(value))
+            } else {
+                tracing::error!("fake daemon: unmatched request {} {}", method, path);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Some(Value::String(format!("unmatched request: {method} {path}"))),
+                )
+            }
         }
     };
 
@@ -991,4 +1131,69 @@ async fn http_handler(
     );
     *resp.status_mut() = status;
     resp
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scenario(http: Value) -> ScenarioFile {
+        serde_json::from_value(serde_json::json!({
+            "scenario": "strict-test", "version": "test",
+            "provenance": {"kind": "synthetic_pantoken_regression"},
+            "description": "strict fake daemon matcher test",
+            "canonicalization": {"session_id": "S", "prompt_ids": {}, "timestamps": "fixed"},
+            "http": http, "sse": [], "expected_driver_events": null
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn fake_daemon_rejects_unexpected_request() {
+        let s = scenario(serde_json::json!([
+            {"method":"GET","path":"/state","status":200},
+            {"method":"GET","path":"/history","status":200}
+        ]));
+        let err = match_http_expectation(&s, 0, "GET", "/history", "").unwrap_err();
+        assert!(err.contains("request order mismatch"));
+    }
+
+    #[test]
+    fn fake_daemon_checks_body_order_and_count() {
+        let s = scenario(serde_json::json!([
+            {"method":"POST","path":"/prompt","request_body":{"text":"a"},"status":202},
+            {"method":"GET","path":"/state","status":200}
+        ]));
+        let err = match_http_expectation(&s, 0, "POST", "/prompt", r#"{"text":"b"}"#).unwrap_err();
+        assert!(err.contains("request body mismatch"));
+        let err = match_http_expectation(&s, 0, "GET", "/state", "").unwrap_err();
+        assert!(err.contains("request order mismatch"));
+        assert!(match_http_expectation(&s, 0, "POST", "/prompt", r#"{"text":"a"}"#).is_ok());
+        assert!(match_http_expectation(&s, 1, "GET", "/state", "").is_ok());
+        let err = match_http_expectation(&s, 2, "GET", "/state", "").unwrap_err();
+        assert!(err.contains("unexpected extra request"));
+    }
+
+    #[test]
+    fn fake_daemon_fails_on_unconsumed_expectation() {
+        let s = scenario(serde_json::json!([
+            {"method":"GET","path":"/state","status":200},
+            {"method":"GET","path":"/history","status":200}
+        ]));
+        let entry = match_http_expectation(&s, 0, "GET", "/state", "")
+            .unwrap()
+            .unwrap();
+        assert_eq!(entry.status, 200);
+        let err = format!("unconsumed expectation at index {}", 1);
+        assert!(err.contains("unconsumed"));
+    }
+
+    #[test]
+    fn bootstrap_allowlist_has_contract_tests() {
+        assert!(canned("GET", "/health").is_some());
+        assert!(canned("POST", "/tui-attachment/claim").is_some());
+        assert!(canned("POST", "/tui-attachment/heartbeat").is_some());
+        assert!(canned("DELETE", "/tui-attachment/lease-1").is_some());
+        assert!(canned("GET", "/not-in-allowlist").is_none());
+    }
 }

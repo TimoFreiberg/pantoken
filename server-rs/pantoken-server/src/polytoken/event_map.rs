@@ -2444,6 +2444,39 @@ mod tests {
                 "user_notice",
             ])
         );
+
+        let representatives = [
+            (
+                json!({"type":"message_start","prompt_id":"p"}),
+                EventDisposition::Mapped,
+            ),
+            (
+                json!({"type":"message_complete","prompt_id":"p"}),
+                EventDisposition::StateRefetch,
+            ),
+            (
+                json!({"type":"stream_discontinuity","missed":1}),
+                EventDisposition::Reseed,
+            ),
+            (
+                json!({
+                    "type":"system_reminder", "body":"notice", "display_name":"Notice",
+                    "emitted_at":"1970-01-01T00:00:00.000Z",
+                    "reason":{"type":"session_start"}, "slug":"notice"
+                }),
+                EventDisposition::UserNotice,
+            ),
+            (
+                json!({
+                    "type":"heartbeat", "timestamp":"1970-01-01T00:00:00.000Z"
+                }),
+                EventDisposition::IntentionalNoop,
+            ),
+        ];
+        for (value, expected) in representatives {
+            let event: DaemonEvent = serde_json::from_value(value).expect("representative event");
+            assert_eq!(event_disposition(&event), expected);
+        }
     }
 
     fn snap(items: Vec<(&str, &str)>) -> PendingTurnInputSnapshot {
