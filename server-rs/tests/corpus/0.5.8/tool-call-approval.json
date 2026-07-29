@@ -1201,5 +1201,5 @@
       }
     }
   ],
-  "expected_driver_events": null
+  "expected_driver_events": {"events": [{"kind": "sessionUpdated", "min_count": 1}, {"kind": "hostUiRequest", "min_count": 1}, {"kind": "toolStarted", "min_count": 1}, {"kind": "toolFinished", "min_count": 1}], "effects": ["registerInterrogative", "fetchState"], "final_session": {"mapped_event_count_min": 1, "assistant_delta_count_min": 1, "open_block_count": 0}, "required_requests": ["POST /permission-monitor", "POST /interrogative/019f3690-951c-7bd2-ba1f-58dc534b8f58/respond"], "forbidden_requests": ["POST /turn/cancel"]}
 }

@@ -15,6 +15,10 @@ use std::fs;
 use std::path::PathBuf;
 
 use pantoken_daemon_types::SseEnvelope;
+use pantoken_protocol::session_driver::{
+    SessionDriverEvent, SessionRef, SessionStatus, WorkspaceRef,
+};
+use pantoken_server::polytoken::event_map::{self, DaemonEffect, MapCtx};
 use serde_json::Value;
 
 mod support;
@@ -325,6 +329,208 @@ fn canonicalize_scenario(scenario: &mut ScenarioFile) {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
+// Typed Pantoken-boundary contract replay
+// ---------------------------------------------------------------------------
+
+struct ContractCtx {
+    r#ref: SessionRef,
+    workspace: WorkspaceRef,
+}
+impl Default for ContractCtx {
+    fn default() -> Self {
+        Self {
+            r#ref: SessionRef {
+                workspace_id: "W".into(),
+                session_id: "SESSION".into(),
+            },
+            workspace: WorkspaceRef {
+                workspace_id: "W".into(),
+                path: "/PROJECT".into(),
+                display_name: None,
+            },
+        }
+    }
+}
+impl MapCtx for ContractCtx {
+    fn r#ref(&self) -> &SessionRef {
+        &self.r#ref
+    }
+    fn workspace(&self) -> &WorkspaceRef {
+        &self.workspace
+    }
+    fn now(&self) -> String {
+        "1970-01-01T00:00:00.000Z".into()
+    }
+    fn snapshot(
+        &self,
+        status: SessionStatus,
+    ) -> pantoken_protocol::session_driver::SessionSnapshot {
+        event_map::snapshot_from_state(
+            None,
+            &self.r#ref,
+            &self.workspace,
+            status,
+            &self.now(),
+            None,
+            None,
+        )
+    }
+    fn live_status(&self) -> SessionStatus {
+        SessionStatus::Idle
+    }
+}
+
+fn event_kind(event: &SessionDriverEvent) -> String {
+    serde_json::to_value(event).unwrap()["type"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+fn effect_kind(effect: &DaemonEffect) -> &'static str {
+    match effect {
+        DaemonEffect::FetchState { .. } => "fetchState",
+        DaemonEffect::Reseed => "reseed",
+        DaemonEffect::RefetchQueue => "refetchQueue",
+        DaemonEffect::SetMonitorMode { .. } => "setMonitorMode",
+        DaemonEffect::SetAutodrainEnabled { .. } => "setAutodrainEnabled",
+        DaemonEffect::RegisterInterrogative { .. } => "registerInterrogative",
+    }
+}
+
+fn replay_contract(
+    scenario: &ScenarioFile,
+) -> (
+    Vec<SessionDriverEvent>,
+    Vec<&'static str>,
+    event_map::FoldAccumulator,
+) {
+    let ctx = ContractCtx::default();
+    let mut acc = event_map::create_accumulator();
+    let mut events = Vec::new();
+    let mut effects = Vec::new();
+    for frame in &scenario.sse {
+        let envelope = frame
+            .envelope()
+            .unwrap_or_else(|e| panic!("{}: {e}", scenario.scenario));
+        let result = event_map::map_daemon_event(&envelope.event, &mut acc, &ctx);
+        events.extend(result.events);
+        effects.extend(result.effects.iter().map(effect_kind));
+    }
+    (events, effects, acc)
+}
+
+fn assert_contract(scenario: &ScenarioFile) {
+    let (events, effects, acc) = replay_contract(scenario);
+    let kinds: Vec<String> = events.iter().map(event_kind).collect();
+    for expected in &scenario.expected_driver_events.events {
+        let count = kinds.iter().filter(|kind| *kind == &expected.kind).count();
+        assert!(
+            count >= expected.min_count,
+            "{}: expected at least {} {} events, got {count}: {kinds:?}",
+            scenario.scenario,
+            expected.min_count,
+            expected.kind
+        );
+    }
+    for effect in &scenario.expected_driver_events.effects {
+        assert!(
+            effects.iter().any(|actual| actual == effect),
+            "{}: missing declared effect {effect}; got {effects:?}",
+            scenario.scenario
+        );
+    }
+    let inv = &scenario.expected_driver_events.final_session;
+    assert!(
+        events.len() >= inv.mapped_event_count_min,
+        "{}: mapped event count below invariant",
+        scenario.scenario
+    );
+    assert!(
+        events
+            .iter()
+            .filter(|e| matches!(e, SessionDriverEvent::AssistantDelta { .. }))
+            .count()
+            >= inv.assistant_delta_count_min,
+        "{}: assistant delta count below invariant",
+        scenario.scenario
+    );
+    assert_eq!(
+        usize::from(acc.block_kind.is_some()),
+        inv.open_block_count,
+        "{}: open block invariant",
+        scenario.scenario
+    );
+    let paths: Vec<String> = scenario
+        .http
+        .iter()
+        .map(|h| format!("{} {}", h.method, h.path))
+        .collect();
+    for required in &scenario.expected_driver_events.required_requests {
+        assert!(
+            paths.iter().any(|path| path == required),
+            "{}: missing required request {required}",
+            scenario.scenario
+        );
+    }
+    for forbidden in &scenario.expected_driver_events.forbidden_requests {
+        assert!(
+            !paths.iter().any(|path| path == forbidden),
+            "{}: forbidden request present {forbidden}",
+            scenario.scenario
+        );
+    }
+}
+
+#[test]
+fn corpus_provenance_is_complete() {
+    for version in version_dirs() {
+        for path in scenario_files(&version) {
+            let scenario = load_scenario(&path);
+            assert!(!scenario.description.trim().is_empty());
+            assert!(
+                !matches!(scenario.provenance.kind, FixtureProvenanceKind::Captured),
+                "{} must not claim unverified capture provenance",
+                scenario.scenario
+            );
+            assert!(
+                !scenario.expected_driver_events.events.is_empty()
+                    || !scenario.expected_driver_events.effects.is_empty(),
+                "{} has no typed expectations",
+                scenario.scenario
+            );
+        }
+    }
+}
+
+#[test]
+fn corpus_expected_driver_contracts_match() {
+    for version in version_dirs() {
+        for path in scenario_files(&version) {
+            assert_contract(&load_scenario(&path));
+        }
+    }
+}
+
+#[test]
+fn corpus_final_state_invariants_match() {
+    for version in version_dirs() {
+        for path in scenario_files(&version) {
+            let scenario = load_scenario(&path);
+            let (_, _, acc) = replay_contract(&scenario);
+            assert_eq!(
+                usize::from(acc.block_kind.is_some()),
+                scenario
+                    .expected_driver_events
+                    .final_session
+                    .open_block_count,
+                "{} leaves an unexpected open block",
+                scenario.scenario
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -468,6 +674,16 @@ const RAW_PROMPT: &str = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 /// A different UUID-shaped value that is NOT a prompt id (a call_id / item_id).
 const RAW_CALL_ID: &str = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 
+fn empty_contract() -> support::corpus::DriverContractExpectations {
+    support::corpus::DriverContractExpectations {
+        events: vec![],
+        effects: vec![],
+        final_session: Default::default(),
+        required_requests: vec![],
+        forbidden_requests: vec![],
+    }
+}
+
 fn synthetic_provenance() -> FixtureProvenance {
     FixtureProvenance {
         kind: FixtureProvenanceKind::SyntheticPantokenRegression,
@@ -515,7 +731,7 @@ fn canon_prompt_dedupes_repeated_uuid_to_one_placeholder() {
                 event: serde_json::json!({ "type": "message_complete", "prompt_id": RAW_PROMPT }),
             },
         ],
-        expected_driver_events: None,
+        expected_driver_events: empty_contract(),
     };
     canonicalize_scenario(&mut scenario);
 
@@ -575,7 +791,7 @@ fn canon_leaves_uuid_shaped_non_prompt_ids_untouched() {
                 "tool_input": { "item_ids": [RAW_CALL_ID] },
             }),
         }],
-        expected_driver_events: None,
+        expected_driver_events: empty_contract(),
     };
     canonicalize_scenario(&mut scenario);
 
@@ -632,7 +848,7 @@ fn canon_maps_plural_prompt_id_arrays() {
                 "item_ids": [RAW_CALL_ID],
             }),
         }],
-        expected_driver_events: None,
+        expected_driver_events: empty_contract(),
     };
     canonicalize_scenario(&mut scenario);
 

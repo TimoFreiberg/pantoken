@@ -1,17 +1,16 @@
 # Golden daemon corpus — `0.5.8`
 
-This directory holds the **golden daemon corpus**: deterministic, canonicalized
-recordings of real daemon (SSE `DaemonEvent` sequences + matching HTTP
-request/response pairs) used to validate the pantoken Rust server's
-`map_daemon_event` accumulator (`server-rs/pantoken-server/src/polytoken/event_map.rs`).
+This directory contains a provider-free, canonicalized **contract corpus** for
+Pantoken's Polytoken integration. The six `0.5.8` scenarios are
+`synthetic_pantoken_regression` fixtures: independently authored from public
+wire schemas and Pantoken's observable event mapper. They are not daemon
+recordings and do not claim capture provenance.
 
-The files here are **seed fixtures** hand-authored from
-`polytoken event-schema` (the authoritative `DaemonEvent` JSON Schema). They are
-designed to be **replaced by real captures** later — but until then they MUST
-deserialize into the real Rust `SseEnvelope` / `DaemonEvent` types. The loader
-test (`server-rs/pantoken-server/tests/corpus.rs`) enforces that bar: it parses
-every `sse[]` entry into `Vec<pantoken_daemon_types::SseEnvelope>` and asserts
-canonicalization is deterministic.
+Each fixture must deserialize into the real Rust `SseEnvelope` / `DaemonEvent`
+types. The corpus tests additionally replay every SSE frame through
+`map_daemon_event`, check typed Pantoken-boundary event/effect expectations,
+request presence/absence, and final accumulator invariants. Canonicalization
+remains deterministic and idempotent.
 
 ## Format
 
@@ -45,7 +44,17 @@ Each scenario is one JSON file. The canonical shape:
       "event": { "type": "heartbeat", "timestamp": "1970-01-01T00:00:00.000Z" }
     }
   ],
-  "expected_driver_events": null
+  "expected_driver_events": {
+    "events": [{"kind": "sessionUpdated", "min_count": 1}],
+    "effects": ["fetchState"],
+    "final_session": {
+      "mapped_event_count_min": 1,
+      "assistant_delta_count_min": 1,
+      "open_block_count": 0
+    },
+    "required_requests": ["GET /state", "POST /prompt"],
+    "forbidden_requests": ["GET /history"]
+  }
 }
 ```
 
@@ -59,7 +68,7 @@ Each scenario is one JSON file. The canonical shape:
 | `canonicalization`       | `object`  | Manifest of the placeholder scheme applied (see below). |
 | `http`                   | `array`   | HTTP request/response pairs in arrival order. `request_body` is `null` for bodyless requests. |
 | `sse`                    | `array`   | Raw SSE frames in arrival order. Each is an `SseEnvelope` (`emitted_at`, `event`, `seq`, `session_id`). |
-| `expected_driver_events` | `array\|null` | `null` in Phase 2.0.5. Phase 2.1 fills these once the accumulator is validated — **do not hand-fabricate.** |
+| `expected_driver_events` | `object` | Typed Pantoken-boundary contract: stable event kinds, effects, final accumulator invariants, required requests, and forbidden requests. |
 
 ### `canonicalization` manifest
 
@@ -101,10 +110,10 @@ When the daemon version bumps and a fresh capture is needed:
    already canonicalized. To re-apply canonicalization to committed files without
    re-capturing or spending model tokens, run `just capture-daemon-corpus --recanon`
    (or pass explicit file paths after `--recanon`).
-4. Run `cd server-rs && cargo test corpus` — the loader test confirms every seed
-   event still deserializes into the real `SseEnvelope`/`DaemonEvent` and that
-   canonicalization is still idempotent. If a daemon event shape changed, this
-   fails loud (no silent fallbacks).
+4. Run `cd server-rs && cargo test corpus` — the loader and contract tests confirm
+   every seed event deserializes, maps to the declared Pantoken boundary, and
+   remains canonical. If a public event shape changes, this fails loudly (no
+   silent fallbacks).
 5. Review the diff; the lead commits.
 
 ## Scenarios

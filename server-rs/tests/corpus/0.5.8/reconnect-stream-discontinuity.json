@@ -123,5 +123,5 @@
       }
     }
   ],
-  "expected_driver_events": null
+  "expected_driver_events": {"events": [], "effects": ["reseed"], "final_session": {"mapped_event_count_min": 1, "assistant_delta_count_min": 1, "open_block_count": 1}, "required_requests": ["GET /history", "GET /state"], "forbidden_requests": ["POST /events"]}
 }

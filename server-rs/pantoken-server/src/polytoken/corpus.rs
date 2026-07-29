@@ -113,6 +113,54 @@ pub struct FixtureProvenance {
 }
 
 /// A full scenario file.
+/// Stable Pantoken-boundary expectation.  These fields intentionally avoid
+/// timestamps, generated ids, and model prose.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DriverEventExpectation {
+    pub kind: String,
+    #[serde(default)]
+    pub min_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub essential: Option<std::collections::BTreeMap<String, Value>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FinalSessionInvariants {
+    #[serde(default)]
+    pub mapped_event_count_min: usize,
+    #[serde(default)]
+    pub assistant_delta_count_min: usize,
+    #[serde(default)]
+    pub open_block_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DriverContractExpectations {
+    pub events: Vec<DriverEventExpectation>,
+    #[serde(default)]
+    pub effects: Vec<String>,
+    #[serde(default)]
+    pub final_session: FinalSessionInvariants,
+    #[serde(default)]
+    pub required_requests: Vec<String>,
+    #[serde(default)]
+    pub forbidden_requests: Vec<String>,
+}
+
+fn deserialize_contract<'de, D>(deserializer: D) -> Result<DriverContractExpectations, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<DriverContractExpectations>::deserialize(deserializer)?;
+    Ok(value.unwrap_or_else(|| DriverContractExpectations {
+        events: vec![],
+        effects: vec![],
+        final_session: FinalSessionInvariants::default(),
+        required_requests: vec![],
+        forbidden_requests: vec![],
+    }))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScenarioFile {
     pub scenario: String,
@@ -123,8 +171,8 @@ pub struct ScenarioFile {
     pub canonicalization: CanonicalizationManifest,
     pub http: Vec<HttpEntry>,
     pub sse: Vec<SseFrame>,
-    #[allow(dead_code)]
-    pub expected_driver_events: Option<Value>,
+    #[serde(deserialize_with = "deserialize_contract")]
+    pub expected_driver_events: DriverContractExpectations,
 }
 
 // ---------------------------------------------------------------------------

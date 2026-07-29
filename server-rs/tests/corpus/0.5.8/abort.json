@@ -249,5 +249,5 @@
       }
     }
   ],
-  "expected_driver_events": null
+  "expected_driver_events": {"events": [{"kind": "sessionUpdated", "min_count": 1}], "effects": ["fetchState"], "final_session": {"mapped_event_count_min": 1, "assistant_delta_count_min": 1, "open_block_count": 0}, "required_requests": ["GET /state", "POST /prompt", "POST /turn/cancel"], "forbidden_requests": ["GET /history"]}
 }
