@@ -211,3 +211,8 @@ curl -fsS http://localhost:8080/status
 sudo launchctl bootout system/com.bazel-remote
 rm /Library/LaunchDaemons/com.bazel-remote.plist
 ```
+
+For a local disk cache fallback pattern (a bazel-remote sidecar with proxy
+backend for offline resilience), see the
+"Local cache fallback" section in
+[`docs/remote-cache-setup.md`](../docs/remote-cache-setup.md).

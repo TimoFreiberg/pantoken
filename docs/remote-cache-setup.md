@@ -63,7 +63,7 @@ from `deploy/com.bazel-remote.plist`, installs it as a system LaunchDaemon at
 `/Library/LaunchDaemons/com.bazel-remote.plist`, and bootstraps it via
 `sudo launchctl bootstrap system`.
 
-The cache directory default is 50 GiB. Override with `--max-size <GiB>`.
+The cache directory default is 50 GiB. Override with `--max_size <GiB>`.
 
 ## Step 3: Verify the cache is running
 
@@ -193,7 +193,7 @@ cache will not exceed `--max_size` GiB. Verify current usage via:
 curl -fsS http://localhost:8080/status | python3 -m json.tool
 ```
 
-If the cache is consistently full, increase `--max-size` and restart the
+If the cache is consistently full, increase `--max_size` and restart the
 daemon. The default 50 GiB is sufficient for the server-rs crate set.
 
 ### Version mismatch
@@ -237,3 +237,82 @@ rm /Library/LaunchDaemons/com.bazel-remote.plist
 # Optionally remove the cache data
 rm -rf /usr/local/var/bazel-remote
 ```
+
+## Local cache fallback (not currently deployed)
+
+Buck2 has no built-in local disk action cache. Unlike Bazel's `--disk_cache`,
+there is no way to persist action cache results across daemon restarts. The
+Buck1 `[cache]` section is not supported (buck2 issue #459, closed wontfix), and
+the daemon's in-memory action cache is volatile — `buck2 kill` triggers full
+rebuilds (issue #547). The `sqlite_materializer_state` option only tracks which
+files are already materialized on disk in `buck-out`; it does not persist action
+cache results, so a daemon restart still re-executes all actions.
+
+This means when the remote bazel-remote on the Mac mini is unreachable, Buck2
+re-executes every action from scratch — no local fallback exists. The workaround
+is a **local bazel-remote sidecar with a proxy backend**: a second bazel-remote
+instance on the MacBook that caches to local disk and proxies to the remote
+host, providing both persistence across daemon restarts and graceful degradation
+when the remote is down.
+
+### Architecture
+
+```
+  MacBook (buck2 client)         Local sidecar (bazel-remote)       Mac mini (bazel-remote)
+  ┌─────────────────┐           ┌────────────────────────┐        ┌──────────────────────────┐
+  │ .buckconfig     │  gRPC     │ bazel-remote            │ gRPC   │ bazel-remote             │
+  │ .remote-cache   │ ────────→ │ :9092 (local disk cache)│ ─────→ │ :9092 (REAPI store)       │
+  │ 127.0.0.1:9092  │           │ ~/.local/share/         │ proxy  │ /usr/local/var/bazel-remote│
+  │                 │           │ bazel-remote-local      │        └──────────────────────────┘
+  └─────────────────┘           └────────────────────────┘
+                                 Read-through: miss → fetch from remote → cache locally
+                                 Write-through: store locally → async upload to remote
+                                 Remote down: serve from local disk (uploads dropped)
+```
+
+bazel-remote supports `--grpc_proxy.url` (or `--http_proxy.url`) to proxy to a
+remote backend. The behavior is:
+
+- **Read-through**: local disk miss → fetch from the remote proxy → cache locally
+  → return the result.
+- **Write-through**: store locally → asynchronously upload to the remote
+  (`--num_uploaders` controls the upload pool).
+- **Graceful degradation**: if the remote is unreachable, serve from local disk;
+  uploads are silently dropped when the upload queue is full
+  (`--max_queued_uploads`).
+
+### Example configuration (reference only)
+
+```bash
+bazel-remote \
+  --dir ~/.local/share/bazel-remote-local \
+  --max_size 100 \
+  --grpc_address 127.0.0.1:9092 \
+  --http_address 127.0.0.1:8080 \
+  --grpc_proxy.url grpc://<tailnet-host>:9092 \
+  --num_uploaders 50
+```
+
+Then `.buckconfig.remote-cache` points to `127.0.0.1:9092` (the local sidecar)
+instead of the remote host directly:
+
+```ini
+[buck2_re_client]
+engine_address = 127.0.0.1:9092
+action_cache_address = 127.0.0.1:9092
+cas_address = 127.0.0.1:9092
+tls = false
+instance_name = buck2
+
+[build]
+execution_platforms = toolchains//platforms:remote_cache
+```
+
+### Current assessment
+
+This setup is **not currently deployed** and is not needed at this time. The
+Mac mini is reliably up, and the developer works with hosted inference (always
+online), so the remote cache is consistently reachable. This section is
+documented for future reference — if the remote cache becomes less reliable or
+offline work is needed, the local sidecar pattern above provides persistence and
+graceful degradation with minimal configuration.
