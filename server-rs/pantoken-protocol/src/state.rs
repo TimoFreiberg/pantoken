@@ -309,11 +309,11 @@ enum EntryIdKind {
 /// Settle tool cards that never received a matching toolFinished event.
 fn interrupt_running_tools(items: &mut [TranscriptItem], finished_at: &str) {
     for item in items.iter_mut() {
-        if let TranscriptItem::Tool(t) = item {
-            if t.status == ToolStatus::Running {
-                t.status = ToolStatus::Interrupted;
-                t.finished_at = Some(finished_at.to_string());
-            }
+        if let TranscriptItem::Tool(t) = item
+            && t.status == ToolStatus::Running
+        {
+            t.status = ToolStatus::Interrupted;
+            t.finished_at = Some(finished_at.to_string());
         }
     }
 }
@@ -541,14 +541,14 @@ pub fn fold_event(state: &mut SessionState, ev: &SessionDriverEvent) {
             ..
         } => {
             for item in state.items.iter_mut() {
-                if let TranscriptItem::Tool(t) = item {
-                    if t.id == *call_id {
-                        if let Some(txt) = text {
-                            t.text = Some(txt.clone());
-                        }
-                        if let Some(p) = progress {
-                            t.progress = Some(*p);
-                        }
+                if let TranscriptItem::Tool(t) = item
+                    && t.id == *call_id
+                {
+                    if let Some(txt) = text {
+                        t.text = Some(txt.clone());
+                    }
+                    if let Some(p) = progress {
+                        t.progress = Some(*p);
                     }
                 }
             }
@@ -563,21 +563,21 @@ pub fn fold_event(state: &mut SessionState, ev: &SessionDriverEvent) {
             ..
         } => {
             for item in state.items.iter_mut() {
-                if let TranscriptItem::Tool(t) = item {
-                    if t.id == *call_id {
-                        t.status = if *interrupted == Some(true) {
-                            ToolStatus::Interrupted
-                        } else if *success {
-                            ToolStatus::Ok
-                        } else {
-                            ToolStatus::Error
-                        };
-                        t.output = output.clone();
-                        if let Some(imgs) = images {
-                            t.images = Some(imgs.clone());
-                        }
-                        t.finished_at = Some(ev.timestamp().clone());
+                if let TranscriptItem::Tool(t) = item
+                    && t.id == *call_id
+                {
+                    t.status = if *interrupted == Some(true) {
+                        ToolStatus::Interrupted
+                    } else if *success {
+                        ToolStatus::Ok
+                    } else {
+                        ToolStatus::Error
+                    };
+                    t.output = output.clone();
+                    if let Some(imgs) = images {
+                        t.images = Some(imgs.clone());
                     }
+                    t.finished_at = Some(ev.timestamp().clone());
                 }
             }
         }

@@ -81,10 +81,10 @@ pub fn remote_root_from_env() -> PathBuf {
 
 /// Home directory (cross-platform). Uses the `HOME` env var on Unix.
 fn home_dir() -> PathBuf {
-    if let Ok(home) = std::env::var("HOME") {
-        if !home.is_empty() {
-            return PathBuf::from(home);
-        }
+    if let Ok(home) = std::env::var("HOME")
+        && !home.is_empty()
+    {
+        return PathBuf::from(home);
     }
     // Fallback — unlikely to be reached on a normal Unix system.
     PathBuf::from("/")

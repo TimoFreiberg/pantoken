@@ -5,7 +5,7 @@
 #   desktop:     fmt + clippy for the Tauri shell, on macOS because that's the only
 #                target the shell builds for. The hub sidecar must be compiled first —
 #                tauri-build stages `externalBin` at compile time and errors if missing.
-#   rust-server: fmt + clippy + buck2 build+test for the Rust server, on Linux.
+#   rust-server: fmt + buck2 clippy + buck2 build+test for the Rust server, on Linux.
 #                Uses the remote cache for trusted PRs/pushes.
 #   buck2:       macOS arm64 Buck2 gate — builds all server-rs crates, tests,
 #                builds + validates the unsigned headless archive, and checks
@@ -234,8 +234,7 @@ jobs:
           workspaces: .
       - uses: mozilla-actions/sccache-action@v0.0.10
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --locked -p pantoken-protocol -p pantoken-daemon-types -p pantoken-server -p pantoken-remote-layout -p pantoken-tar-validate --all-targets -- -D warnings
-      # Install Buck2 + Reindeer for buck2 build+test
+      # Install Buck2 + Reindeer for buck2 clippy + build + test
       - name: Install Buck2 + Reindeer
         run: bash scripts/ci/install-buck2-ci.sh
       - name: Add local bin to PATH
@@ -278,7 +277,9 @@ jobs:
           [build]
           execution_platforms = toolchains//platforms:remote_cache
           EOF
-      # Buck2 build + test (uses remote cache via auto-read .buckconfig.local when available)
+      # Buck2 clippy + build + test (uses remote cache via auto-read .buckconfig.local when available)
+      - name: Buck2 clippy
+        run: just buck2-clippy
       - name: Buck2 build
         run: just buck2-build && just buck2-build-server
       - name: Buck2 test
@@ -355,7 +356,9 @@ jobs:
           [build]
           execution_platforms = toolchains//platforms:remote_cache
           EOF
-      # Build all server-rs crates + server binary
+      # Clippy + build all server-rs crates + server binary
+      - name: Buck2 clippy
+        run: just buck2-clippy
       - name: Buck2 build
         run: just buck2-build && just buck2-build-server
       # Run all Buck2 tests

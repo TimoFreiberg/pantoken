@@ -97,20 +97,25 @@ Cache hit/miss rates appear in the build console summary line
 
 ## CI integration
 
-Buck2 runs in CI as the **primary build+test gate** for the Rust server. The `rust-server` job in `.github/workflows/ci.yml` runs on `ubuntu-latest` on every PR and push: `cargo fmt --check` + `cargo clippy` + `just buck2-build` + `just buck2-build-server` + `just buck2-test` + target/test manifest checks. It uses the remote cache for trusted PRs/pushes.
+Buck2 runs in CI as the **primary build+test gate** for the Rust server. The `rust-server` job in `.github/workflows/ci.yml` runs on `ubuntu-latest` on every PR and push: `cargo fmt --check` + `just buck2-clippy` + `just buck2-build` + `just buck2-build-server` + `just buck2-test` + target/test manifest checks. It uses the remote cache for trusted PRs/pushes.
 
-The `buck2` job runs on `macos-14` (arm64) as an additional gate: it builds + tests all server-rs crates, builds + validates the unsigned headless archive, and checks target/test manifests. It is **not** in the `release` job's `needs` list — the Cargo path remains authoritative for releases.
+The `buck2` job runs on `macos-14` (arm64) as an additional gate: it runs clippy + builds + tests all server-rs crates, builds + validates the unsigned headless archive, and checks target/test manifests. It is **not** in the `release` job's `needs` list — the Cargo path remains authoritative for releases.
+
+### Clippy via Buck2
+
+Clippy runs through Buck2's built-in `[clippy.json]` subtargets on every `rust_library` and `rust_binary` target. The Rust toolchain (`toolchains/BUCK`) sets `deny_lints = ["warnings"]`, matching `cargo clippy -- -D warnings`. Clippy results are cacheable — they participate in the remote action cache like regular builds. The `just buck2-clippy` recipe builds all `[clippy.json]` subtargets for the five server-rs library crates. `cargo fmt --check` remains a fast Cargo command (no cache benefit).
 
 ### What the `buck2` CI job does
 
 1. Installs pinned Buck2 + Reindeer via `scripts/ci/install-buck2-ci.sh`.
 2. Builds `client/dist` (Buck2 consumes pre-built frontend output).
 3. Connects to Tailscale and generates `.buckconfig.local` (trusted runs only).
-4. Builds all server-rs crates + the `pantoken-server` binary via `just buck2-build` / `just buck2-build-server`.
-5. Runs all 13 Buck2 test targets via `just buck2-test`.
-6. Builds the unsigned headless archive with real `PANTOKEN_VERSION` and `PANTOKEN_BUILD_SHA` from CI env (via `.buckconfig.ci` + `--config-file`).
-7. Validates the archive via `just buck2-validate-archive`.
-8. Runs target manifest and test inventory checks.
+4. Runs clippy on all server-rs library crates via `just buck2-clippy`.
+5. Builds all server-rs crates + the `pantoken-server` binary via `just buck2-build` / `just buck2-build-server`.
+6. Runs all 13 Buck2 test targets via `just buck2-test`.
+7. Builds the unsigned headless archive with real `PANTOKEN_VERSION` and `PANTOKEN_BUILD_SHA` from CI env (via `.buckconfig.ci` + `--config-file`).
+8. Validates the archive via `just buck2-validate-archive`.
+9. Runs target manifest and test inventory checks.
 
 ### Remote cache in CI
 

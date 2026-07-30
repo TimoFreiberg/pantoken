@@ -27,11 +27,11 @@ quality:
     just test
 
 # Full Rust formatting, clippy, and buck2 build+test gate.
-# Uses buck2 for build+test (remote cache auto-read from .buckconfig.local).
-# cargo fmt + cargo clippy remain fast cargo commands (no cache benefit).
+# Uses buck2 for clippy+build+test (remote cache auto-read from .buckconfig.local).
+# cargo fmt remains a fast cargo command (no cache benefit).
 check-rs:
     cargo fmt --all -- --check
-    cargo clippy --locked -p pantoken-protocol -p pantoken-daemon-types -p pantoken-server -p pantoken-remote-layout -p pantoken-tar-validate --all-targets -- -D warnings
+    just buck2-clippy
     just buck2-build && just buck2-build-server && just buck2-test
 
 # Cargo-only Rust gate (fmt + clippy + nextest). Fallback for debugging.
@@ -143,6 +143,18 @@ buck2-check:
 buck2-build:
     bash scripts/buck2/check-version.sh && buck2 build '//server-rs/pantoken-protocol:pantoken_protocol' '//server-rs/pantoken-daemon-types:pantoken_daemon_types' '//server-rs/pantoken-remote-layout:pantoken_remote_layout' '//server-rs/pantoken-tar-validate:pantoken_tar_validate'
 
+# Run clippy via Buck2 on all server-rs library crates (cacheable, uses remote cache).
+# Equivalent to `cargo clippy -- -D warnings` but hermetic and cached.
+# The [clippy.json] subtarget fails the build on any clippy error (deny_lints
+# is set on the toolchain in toolchains/BUCK).
+buck2-clippy:
+    bash scripts/buck2/check-version.sh && buck2 build \
+        '//server-rs/pantoken-protocol:pantoken_protocol[clippy.json]' \
+        '//server-rs/pantoken-daemon-types:pantoken_daemon_types[clippy.json]' \
+        '//server-rs/pantoken-remote-layout:pantoken_remote_layout[clippy.json]' \
+        '//server-rs/pantoken-tar-validate:pantoken_tar_validate_lib[clippy.json]' \
+        '//server-rs/pantoken-server:pantoken_server_lib[clippy.json]'
+
 # Build the pantoken-server binary via Buck2 (uses remote cache if .buckconfig.local present).
 buck2-build-server:
     bash scripts/buck2/check-version.sh && buck2 build '//server-rs/pantoken-server:pantoken_server'
@@ -201,10 +213,11 @@ buck2-measure:
 buck2-check-tests:
     bash buck2/test-bootstrap.sh
 
-# Run the CI-equivalent Buck2 gate (build + test + archive + validate + manifest checks).
+# Run the CI-equivalent Buck2 gate (clippy + build + test + archive + validate + manifest checks).
 # Requires Buck2 + Reindeer installed (see buck2/bootstrap.sh).
 # This mirrors the .github/workflows/ci.yml buck2 job (local-only, no remote cache).
 buck2-ci:
+    just buck2-clippy
     just buck2-build
     just buck2-build-server
     just buck2-test

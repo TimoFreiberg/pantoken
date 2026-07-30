@@ -177,18 +177,17 @@ fn prefix_allowed(path: &str) -> bool {
     }
     // PWA static files at client-dist/ root level (icons, manifest, etc.)
     // Must match the build script's copyDirRecursive allowlist.
-    if let Some(name) = path.strip_prefix("client-dist/") {
-        if !name.contains('/')
-            && (name == "index.html"
-                || name.starts_with("apple-touch-icon")
-                || name.starts_with("icon")
-                || name.starts_with("favicon")
-                || name.starts_with("manifest")
-                || name.starts_with("sw")
-                || name.starts_with("registerSW"))
-        {
-            return true;
-        }
+    if let Some(name) = path.strip_prefix("client-dist/")
+        && !name.contains('/')
+        && (name == "index.html"
+            || name.starts_with("apple-touch-icon")
+            || name.starts_with("icon")
+            || name.starts_with("favicon")
+            || name.starts_with("manifest")
+            || name.starts_with("sw")
+            || name.starts_with("registerSW"))
+    {
+        return true;
     }
     false
 }

@@ -38,7 +38,7 @@ See `docs/DESIGN.md` for architecture, `docs/DECISIONS.md` for settled calls, `d
 - **Buck2 is the primary build/test system — Cargo is the fallback and release path.**
   Buck2 builds all 5 server-rs Rust crates (including the `pantoken-server`
   binary) with affected-target execution and a checked-in Reindeer dependency
-  graph. `just check-rs` uses buck2 for build+test (remote cache auto-read
+  graph. `just check-rs` uses buck2 for clippy+build+test (remote cache auto-read
   from `.buckconfig.local` when present); `just check-rs-cargo` is the Cargo
   fallback). The dev server (`scripts/dev.ts`) and desktop hub
   (`scripts/desktop/build-hub.ts`) build the server binary via buck2 by
@@ -92,7 +92,7 @@ PANTOKEN_DRIVER=mock just dev
 just quality                 # check + unit tests, no Rust/E2E/live work
 just check                   # aggregate TypeScript/client checks
 just test                    # unit tests
-just check-rs                # Rust fmt, clippy, and buck2 build+test
+just check-rs                # Rust fmt, clippy (buck2), and buck2 build+test
 just build-client            # client production bundle
 just e2e                    # default mock-driver Playwright suite
 just e2e-live               # corpus-backed live-driver suite
@@ -114,7 +114,7 @@ and platform-specific workflows; for example, use `pnpm exec tsc ...` for one ty
 `tsconfig.scripts.json` and `tsconfig.e2e.json` close the typecheck gap for the
 dev-tooling and Playwright trees. Keep it green. **server-rs has its own CI
 gate** (`rust-server` job in `.github/workflows/ci.yml`: `cargo fmt --check` +
-`cargo clippy --locked --all-targets -- -D warnings` + buck2 build+test);
+`just buck2-clippy` + buck2 build+test);
 run `just check-rs` locally for the same gate.
 
 **Single-runtime (Node + tsx):** tests run via Vitest (`pnpm run test`);
