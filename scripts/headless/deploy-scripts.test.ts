@@ -67,7 +67,7 @@ describe("plist template", () => {
     expect(rendered).not.toMatch(/<string>@@@/);
     expect(rendered).not.toMatch(/<string>~\//);
 
-    const tmp = join(mkdtempSync(tmpdir()), "rendered.plist");
+    const tmp = join(mkdtempSync(join(tmpdir(), "deploy-plist-")), "rendered.plist");
     writeFileSync(tmp, rendered);
     // plutil lint (best-effort; fails gracefully if not on macOS).
     const lint = spawnSync("plutil", ["-lint", tmp]);
@@ -311,7 +311,7 @@ describe("mac-mini-preflight.sh", () => {
       .replaceAll("@@@XDG_CONFIG@@@", "/Users/testuser/.config")
       .replaceAll("@@@XDG_DATA@@@", "/Users/testuser/.local/share");
 
-    const tmp = join(mkdtempSync(tmpdir()), "rendered.plist");
+    const tmp = join(mkdtempSync(join(tmpdir(), "deploy-preflight-plist-")), "rendered.plist");
     writeFileSync(tmp, rendered);
     const lint = spawnSync("plutil", ["-lint", tmp]);
     if (lint.status === 0) {

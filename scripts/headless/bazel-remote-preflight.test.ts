@@ -94,7 +94,7 @@ describe("bazel-remote plist template", () => {
     // Value placeholders must be gone.
     expect(rendered).not.toMatch(/<string>@@@/);
 
-    const tmp = join(mkdtempSync(tmpdir()), "rendered.plist");
+    const tmp = join(mkdtempSync(join(tmpdir(), "br-plist-")), "rendered.plist");
     writeFileSync(tmp, rendered);
     const lint = spawnSync("plutil", ["-lint", tmp]);
     if (lint.status === 0) {

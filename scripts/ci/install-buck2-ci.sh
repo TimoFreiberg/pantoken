@@ -18,7 +18,7 @@ set -euo pipefail
 
 # ── Pinned versions (must match scripts/buck2/check-version.sh) ──────────────
 BUCK2_REPO="facebook/buck2"
-BUCK2_DATE_TAG="2026-07-14"
+BUCK2_DATE_TAG="2026-07-15"
 BUCK2_REVISION="1560aca2002865cd73d7cafb22c705cfb640b2bc"
 
 REINDEER_REPO="facebookincubator/reindeer"
