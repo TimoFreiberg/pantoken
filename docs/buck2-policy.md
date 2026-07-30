@@ -80,8 +80,8 @@ Cache hit/miss rates appear in the build console summary line
   and publishing. The cache contains compiled Rust artifacts and unsigned
   archive inputs only.
 - Instance namespacing: `instance_name = buck2` with
-  `--enable_ac_key_instance_mangling` isolates Buck2's cache entries from
-  Bazel's (during transition).
+  `--enable_ac_key_instance_mangling` isolates Buck2's cache entries in the
+  shared REAPI store.
 - Untrusted PRs: fork PRs do not generate `.buckconfig.remote-cache`, so
   Buck2 uses local-only execution automatically. This prevents cache
   poisoning — untrusted code never writes to the shared cache. Same-repo

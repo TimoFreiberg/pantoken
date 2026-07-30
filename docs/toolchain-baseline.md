@@ -190,6 +190,10 @@ re-capture on the same machine for like-for-like comparison._
 To re-capture timings, run `just baseline-timings` from the default jj
 workspace (repo root). See `scripts/capture-baseline-timings.sh`.
 
+For Buck2 timing comparisons (cold, warm, incremental, test, archive,
+cross-workspace cache reuse), see
+[`docs/buck2-poc-findings.md`](buck2-poc-findings.md) § Timing comparison.
+
 ## How to reproduce
 
 From a clean checkout:

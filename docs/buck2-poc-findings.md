@@ -152,6 +152,53 @@ and published artifacts. The 335MB vendored dependency tree remains a
 maintenance burden. Promote to authoritative after one or more release cycles
 with consistently passing parity comparisons.
 
+## Timing comparison
+
+_Captured: 2026-07-30 on Darwin 25.5.0 (arm64), aarch64-apple-darwin.
+Rust 1.97.1, Buck2 2026-07-14-1560aca2002865cd73d7cafb22c705cfb640b2bc._
+
+_These are machine-specific comparison points, not a performance program.
+The Cargo baseline was captured 2026-07-27 on the same M1 Pro (see
+[`docs/toolchain-baseline.md`](toolchain-baseline.md)). Re-capture on the same
+machine for like-for-like comparison. Note: the Cargo baseline values below are
+hardcoded in `scripts/buck2/measure-poc.sh`; they were captured in a separate
+session and may differ from a fresh Cargo capture._
+
+### Buck2 timings
+
+| Metric | Time | Notes |
+|--------|------|-------|
+| Cold build | 0.95s | Clean buck-out, 4 non-binary server crates |
+| Warm build | 0.02s | No changes, action cache hit |
+| Incremental (1 file) | 0.02s | Content edit to `pantoken-protocol/src/lib.rs` |
+| Test run | 0.04s | 5 test targets |
+| Archive build | 0.03s | Unsigned headless archive |
+| Cross-workspace (cache) | 0.76s | After `buck2 clean`, action cache cold but deps cached |
+
+The cross-workspace timing measures remote action-cache reuse after a local
+`buck2 clean` (local buck-out cleared, but the action cache still holds results
+from the prior build). It is not literal cross-workspace isolation — two
+independent workspaces sharing the same remote REAPI store would see similar
+reuse. The metric demonstrates that the remote action cache survives a local
+clean, which is the mechanism CI relies on for PR-to-PR reuse.
+
+### Cargo vs Buck2 comparison
+
+| Metric | Buck2 | Cargo baseline |
+|--------|-------|----------------|
+| Cold build | 0.95s | 11.4s |
+| Warm build | 0.02s | 8.4s |
+| Incremental | 0.02s | 2.5s |
+| Test run | 0.04s | N/A |
+
+The Buck2 timings are dramatically lower because the action cache was warm from
+prior CI/local builds — the cold build reuses cached action results from the
+remote REAPI store rather than compiling from scratch. A truly cold Buck2 run
+(no action cache, no local buck-out) would be comparable to or slower than
+Cargo's cold build. The comparison is most meaningful for the **incremental**
+and **warm** rows, where Buck2's affected-target execution avoids re-linking
+unchanged crates.
+
 ## Cargo⇄Buck2 test parity mapping
 
 Every Cargo test binary for the 5 server-rs crates has a Buck2 `rust_test` counterpart:
