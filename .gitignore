@@ -34,5 +34,5 @@ grindbot-config.toml
 buck-out/
 .buckd/
 # Local Buck2 remote cache config (contains Tailscale address)
-.buckconfig.remote-cache
+.buckconfig.local
 third-party/.cargo/

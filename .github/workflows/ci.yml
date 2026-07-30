@@ -225,6 +225,7 @@ jobs:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       TS_AUTH_KEY: ${{ secrets.TS_AUTH_KEY }}
       BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
+      BUCK2_TEST_FORCE_CACHE_UPLOAD: "true"
     steps:
       - uses: actions/checkout@v4
       # Rust toolchain is pinned via rust-toolchain.toml; rustup auto-installs it.
@@ -260,13 +261,14 @@ jobs:
         with:
           auth-key: ${{ secrets.TS_AUTH_KEY }}
           version: latest
-      # Generate remote cache config from secret
+      # Generate remote cache config from secret (writes .buckconfig.local,
+      # which buck2 auto-reads — no --config-file flag needed)
       - name: Configure remote cache
         if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.BUCK2_CACHE_HOST != ''
         env:
           BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
         run: |
-          cat > .buckconfig.remote-cache <<EOF
+          cat > .buckconfig.local <<EOF
           [buck2_re_client]
           engine_address = $BUCK2_CACHE_HOST:9092
           action_cache_address = $BUCK2_CACHE_HOST:9092
@@ -276,21 +278,11 @@ jobs:
           [build]
           execution_platforms = toolchains//platforms:remote_cache
           EOF
-      # Buck2 build + test (with remote cache if available)
-      - name: Buck2 build (with remote cache if available)
-        run: |
-          if [ -f .buckconfig.remote-cache ]; then
-            just buck2-build-cached && just buck2-build-server-cached
-          else
-            just buck2-build && just buck2-build-server
-          fi
-      - name: Buck2 test (with remote cache if available)
-        run: |
-          if [ -f .buckconfig.remote-cache ]; then
-            just buck2-test-cached
-          else
-            just buck2-test
-          fi
+      # Buck2 build + test (uses remote cache via auto-read .buckconfig.local when available)
+      - name: Buck2 build
+        run: just buck2-build && just buck2-build-server
+      - name: Buck2 test
+        run: just buck2-test
       # Target + test inventory checks
       - name: Buck2 target manifest check
         run: just buck2-targets-check
@@ -312,6 +304,7 @@ jobs:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       TS_AUTH_KEY: ${{ secrets.TS_AUTH_KEY }}
       BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
+      BUCK2_TEST_FORCE_CACHE_UPLOAD: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -345,13 +338,14 @@ jobs:
         with:
           auth-key: ${{ secrets.TS_AUTH_KEY }}
           version: latest
-      # Generate remote cache config from secret
+      # Generate remote cache config from secret (writes .buckconfig.local,
+      # which buck2 auto-reads — no --config-file flag needed)
       - name: Configure remote cache
         if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.BUCK2_CACHE_HOST != ''
         env:
           BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
         run: |
-          cat > .buckconfig.remote-cache <<EOF
+          cat > .buckconfig.local <<EOF
           [buck2_re_client]
           engine_address = $BUCK2_CACHE_HOST:9092
           action_cache_address = $BUCK2_CACHE_HOST:9092
@@ -362,21 +356,11 @@ jobs:
           execution_platforms = toolchains//platforms:remote_cache
           EOF
       # Build all server-rs crates + server binary
-      - name: Buck2 build (with remote cache if available)
-        run: |
-          if [ -f .buckconfig.remote-cache ]; then
-            just buck2-build-cached && just buck2-build-server-cached
-          else
-            just buck2-build && just buck2-build-server
-          fi
+      - name: Buck2 build
+        run: just buck2-build && just buck2-build-server
       # Run all Buck2 tests
-      - name: Buck2 test (with remote cache if available)
-        run: |
-          if [ -f .buckconfig.remote-cache ]; then
-            just buck2-test-cached
-          else
-            just buck2-test
-          fi
+      - name: Buck2 test
+        run: just buck2-test
       # Determine PANTOKEN_VERSION (from tag or desktop/Cargo.toml)
       - name: Determine PANTOKEN_VERSION
         run: |
@@ -395,19 +379,10 @@ jobs:
           version = $PANTOKEN_VERSION
           build_sha = $PANTOKEN_BUILD_SHA
           EOF
-          if [ -f .buckconfig.remote-cache ]; then
-            buck2 build --config-file .buckconfig.remote-cache --config-file .buckconfig.ci //:pantoken_headless_unsigned
-          else
-            buck2 build --config-file .buckconfig.ci //:pantoken_headless_unsigned
-          fi
+          buck2 build --config-file .buckconfig.ci //:pantoken_headless_unsigned
       # Validate the archive
       - name: Buck2 archive validation
-        run: |
-          if [ -f .buckconfig.remote-cache ]; then
-            just buck2-validate-archive-cached
-          else
-            just buck2-validate-archive
-          fi
+        run: just buck2-validate-archive
       # Target + test inventory checks
       - name: Buck2 target manifest check
         run: just buck2-targets-check

@@ -1,0 +1,25 @@
+# Local Buck2 config for remote cache.
+# Copy to .buckconfig.local and fill in the real Tailscale address.
+# .buckconfig.local is auto-read by buck2 (no --config-file flag needed).
+# .buckconfig.local is gitignored.
+#
+# Requires:
+#   - bazel-remote running on the cache host (see docs/remote-cache-setup.md)
+#   - BUCK2_TEST_FORCE_CACHE_UPLOAD=true in the environment (e.g. .envrc)
+#     (workaround for a buck2 bug where allow_cache_uploads doesn't trigger
+#     the CacheUploader with RemoteEnabledExecutor::Local)
+#
+# Usage:
+#   just buck2-build
+#   just buck2-test
+#   (all buck2 commands auto-read this file — no special flags needed)
+
+[buck2_re_client]
+engine_address = <tailnet-host>:9092
+action_cache_address = <tailnet-host>:9092
+cas_address = <tailnet-host>:9092
+tls = false
+instance_name = buck2
+
+[build]
+execution_platforms = toolchains//platforms:remote_cache

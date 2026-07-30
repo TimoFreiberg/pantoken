@@ -27,16 +27,12 @@ quality:
     just test
 
 # Full Rust formatting, clippy, and buck2 build+test gate.
-# Uses buck2 for build+test (cached when .buckconfig.remote-cache exists).
+# Uses buck2 for build+test (remote cache auto-read from .buckconfig.local).
 # cargo fmt + cargo clippy remain fast cargo commands (no cache benefit).
 check-rs:
     cargo fmt --all -- --check
     cargo clippy --locked -p pantoken-protocol -p pantoken-daemon-types -p pantoken-server -p pantoken-remote-layout -p pantoken-tar-validate --all-targets -- -D warnings
-    @if [ -f .buckconfig.remote-cache ]; then \
-        just buck2-build-cached && just buck2-build-server-cached && just buck2-test-cached; \
-    else \
-        just buck2-build && just buck2-build-server && just buck2-test; \
-    fi
+    just buck2-build && just buck2-build-server && just buck2-test
 
 # Cargo-only Rust gate (fmt + clippy + nextest). Fallback for debugging.
 check-rs-cargo:
@@ -143,15 +139,16 @@ publish *args:
 buck2-check:
     bash scripts/buck2/check-version.sh
 
-# Build all server-rs Rust crates via Buck2.
+# Build all server-rs Rust crates via Buck2 (uses remote cache if .buckconfig.local present).
 buck2-build:
     bash scripts/buck2/check-version.sh && buck2 build '//server-rs/pantoken-protocol:pantoken_protocol' '//server-rs/pantoken-daemon-types:pantoken_daemon_types' '//server-rs/pantoken-remote-layout:pantoken_remote_layout' '//server-rs/pantoken-tar-validate:pantoken_tar_validate'
 
-# Build the pantoken-server binary via Buck2.
+# Build the pantoken-server binary via Buck2 (uses remote cache if .buckconfig.local present).
 buck2-build-server:
     bash scripts/buck2/check-version.sh && buck2 build '//server-rs/pantoken-server:pantoken_server'
 
 # Build pantoken-server via Buck2 and print the binary path.
+# (Uses remote cache if .buckconfig.local present.)
 buck2-server-bin:
     @bash scripts/buck2/check-version.sh && buck2 build --show-output '//server-rs/pantoken-server:pantoken_server' | tail -1 | awk '{print $$2}'
 
@@ -160,40 +157,21 @@ buck2-server-bin:
 buck2-test:
     bash scripts/buck2/check-version.sh && buck2 test '//server-rs/pantoken-protocol:fold_corpus_tests' '//server-rs/pantoken-daemon-types:target_version_test' '//server-rs/pantoken-daemon-types:daemon_types_roundtrip' '//server-rs/pantoken-daemon-types:schema_inventory_test' '//server-rs/pantoken-remote-layout:unit_tests' '//server-rs/pantoken-tar-validate:unit_tests' '//server-rs/pantoken-server:server_lib_unit_tests' '//server-rs/pantoken-server:corpus_tests' '//server-rs/pantoken-server:live_path_tests' '//server-rs/pantoken-server:websocket_adapter_tests' '//server-rs/pantoken-server:stdio_adapter_tests' '//server-rs/pantoken-server:resume_and_recovery_tests' '//server-rs/pantoken-server:remote_runtime_tests'
 
-# Build the unsigned headless archive via Buck2.
+# Build the unsigned headless archive via Buck2 (uses remote cache if .buckconfig.local present).
 buck2-archive:
     bash scripts/buck2/check-version.sh && buck2 build '//:pantoken_headless_unsigned'
 
-# Validate the unsigned headless archive via Buck2.
+# Validate the unsigned headless archive via Buck2 (uses remote cache if .buckconfig.local present).
 buck2-validate-archive:
     bash scripts/buck2/check-version.sh && buck2 test '//:validate_headless_archive'
 
-# --- Buck2 remote cache (opt-in, requires .buckconfig.remote-cache) ---
-# See .buckconfig.remote-cache.example. Requires bazel-remote running on the cache host.
-
-# Build all server-rs Rust crates via Buck2 with remote cache.
-buck2-build-cached:
-    bash scripts/buck2/check-version.sh && buck2 build --config-file .buckconfig.remote-cache '//server-rs/pantoken-protocol:pantoken_protocol' '//server-rs/pantoken-daemon-types:pantoken_daemon_types' '//server-rs/pantoken-remote-layout:pantoken_remote_layout' '//server-rs/pantoken-tar-validate:pantoken_tar_validate'
-
-# Build the pantoken-server binary via Buck2 with remote cache.
-buck2-build-server-cached:
-    bash scripts/buck2/check-version.sh && buck2 build --config-file .buckconfig.remote-cache '//server-rs/pantoken-server:pantoken_server'
-
-# Build pantoken-server via Buck2 with remote cache and print the binary path.
-buck2-server-bin-cached:
-    @bash scripts/buck2/check-version.sh && buck2 build --config-file .buckconfig.remote-cache --show-output '//server-rs/pantoken-server:pantoken_server' | tail -1 | awk '{print $$2}'
-
-# Run all server-rs Rust tests via Buck2 with remote cache.
-buck2-test-cached:
-    bash scripts/buck2/check-version.sh && buck2 test --config-file .buckconfig.remote-cache '//server-rs/pantoken-protocol:fold_corpus_tests' '//server-rs/pantoken-daemon-types:target_version_test' '//server-rs/pantoken-daemon-types:daemon_types_roundtrip' '//server-rs/pantoken-daemon-types:schema_inventory_test' '//server-rs/pantoken-remote-layout:unit_tests' '//server-rs/pantoken-tar-validate:unit_tests' '//server-rs/pantoken-server:server_lib_unit_tests' '//server-rs/pantoken-server:corpus_tests' '//server-rs/pantoken-server:live_path_tests' '//server-rs/pantoken-server:websocket_adapter_tests' '//server-rs/pantoken-server:stdio_adapter_tests' '//server-rs/pantoken-server:resume_and_recovery_tests' '//server-rs/pantoken-server:remote_runtime_tests'
-
-# Build the unsigned headless archive via Buck2 with remote cache.
-buck2-archive-cached:
-    bash scripts/buck2/check-version.sh && buck2 build --config-file .buckconfig.remote-cache '//:pantoken_headless_unsigned'
-
-# Validate the unsigned headless archive via Buck2 with remote cache.
-buck2-validate-archive-cached:
-    bash scripts/buck2/check-version.sh && buck2 test --config-file .buckconfig.remote-cache '//:validate_headless_archive'
+# --- Buck2 remote cache (auto-read from .buckconfig.local) ---
+# Buck2 auto-reads .buckconfig.local (gitignored, contains Tailscale address),
+# so all buck2 commands use the remote cache when available and fall back to
+# local execution when the cache is unreachable. Requires
+# BUCK2_TEST_FORCE_CACHE_UPLOAD=true in the environment (set in .envrc) for
+# cache uploads to work.
+# See .buckconfig.local.example and docs/remote-cache-setup.md.
 
 # List all Buck2 targets in the server-rs tree.
 buck2-targets:

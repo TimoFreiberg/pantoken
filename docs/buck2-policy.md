@@ -36,7 +36,7 @@ Buck2’s sandboxed `buildscript_run` isolates build scripts from the host envir
 
 The `run-reindeer.sh` wrapper sets the absolute `manifest_path` dynamically to avoid hardcoding checkout-specific paths. Generated metadata, including `third-party/BUCK`, must be free of machine- or workspace-local absolute paths; `CARGO_MANIFEST_DIR` values use relative paths such as `vendor/adler2-2.0.1`. `just buck2-test-inventory-check` validates the test inventory against expected targets and rejects undeclared entries. `buck2/test-inventory.toml` documents environment allowlist/clears, socket usage, temp root, and network policy for every test target.
 
-## Remote cache (opt-in)
+## Remote cache (always-on)
 
 Buck2 has no local disk cache (`--disk_cache` equivalent); the daemon is
 in-memory only, so `buck2 kill` causes a full rebuild. A shared `bazel-remote`
@@ -46,11 +46,11 @@ cache (AC).
 
 ### Configuration
 
-Remote cache is **opt-in**. The repo is public, so the Tailscale cache address
-lives in a gitignored `.buckconfig.remote-cache`, not in `.buckconfig`. Copy
-`.buckconfig.remote-cache.example` to `.buckconfig.remote-cache` and fill in the real
-Tailscale address. Use the `just buck2-*-cached` recipes or pass
-`--config-file .buckconfig.remote-cache` to `buck2` directly.
+Remote cache is **always-on**. The repo is public, so the Tailscale cache
+address lives in a gitignored `.buckconfig.local` (auto-read by buck2, no
+`--config-file` flag needed). Copy `.buckconfig.local.example` to
+`.buckconfig.local` and fill in the real Tailscale address. All `just buck2-*`
+recipes use the remote cache automatically.
 
 The local config sets:
 - `[buck2_re_client]` — engine/CAS/AC addresses, `tls = false` (WireGuard
@@ -58,6 +58,14 @@ The local config sets:
 - `[build] execution_platforms = toolchains//platforms:remote_cache` — a custom
   execution platform that sets `CommandExecutorConfig(local_enabled=True,
   remote_enabled=False, remote_cache_enabled=True, allow_cache_uploads=True)`.
+
+### Cache uploads (BUCK2_TEST_FORCE_CACHE_UPLOAD)
+
+Due to a buck2 bug where `allow_cache_uploads=True` doesn't trigger the
+`CacheUploader` with `RemoteEnabledExecutor::Local`, cache uploads require
+`BUCK2_TEST_FORCE_CACHE_UPLOAD=true` in the environment. This is set in
+`.envrc` (local) and in CI job env. Without it, cache reads work (AC GETs)
+but writes don't (no AC/CAS PUTs).
 
 ### Fallback behavior
 
@@ -82,7 +90,7 @@ Cache hit/miss rates appear in the build console summary line
 - Instance namespacing: `instance_name = buck2` with
   `--enable_ac_key_instance_mangling` isolates Buck2's cache entries in the
   shared REAPI store.
-- Untrusted PRs: fork PRs do not generate `.buckconfig.remote-cache`, so
+- Untrusted PRs: fork PRs do not generate `.buckconfig.local`, so
   Buck2 uses local-only execution automatically. This prevents cache
   poisoning — untrusted code never writes to the shared cache. Same-repo
   PRs and pushes connect to Tailscale and use the remote cache.
@@ -97,7 +105,7 @@ The `buck2` job runs on `macos-14` (arm64) as an additional gate: it builds + te
 
 1. Installs pinned Buck2 + Reindeer via `scripts/ci/install-buck2-ci.sh`.
 2. Builds `client/dist` (Buck2 consumes pre-built frontend output).
-3. Connects to Tailscale and generates `.buckconfig.remote-cache` (trusted runs only).
+3. Connects to Tailscale and generates `.buckconfig.local` (trusted runs only).
 4. Builds all server-rs crates + the `pantoken-server` binary via `just buck2-build` / `just buck2-build-server`.
 5. Runs all 13 Buck2 test targets via `just buck2-test`.
 6. Builds the unsigned headless archive with real `PANTOKEN_VERSION` and `PANTOKEN_BUILD_SHA` from CI env (via `.buckconfig.ci` + `--config-file`).
@@ -107,13 +115,13 @@ The `buck2` job runs on `macos-14` (arm64) as an additional gate: it builds + te
 ### Remote cache in CI
 
 Trusted PRs (same-repo) and pushes connect to Tailscale via `tailscale/github-action`
-and generate `.buckconfig.remote-cache` from the `BUCK2_CACHE_HOST` secret. Buck2
-then uses `--config-file .buckconfig.remote-cache` for cache queries/uploads.
+and generate `.buckconfig.local` from the `BUCK2_CACHE_HOST` secret. Buck2
+auto-reads `.buckconfig.local` for cache queries/uploads.
 
 **Fork PR handling:** Fork PRs do not have access to `TS_AUTH_KEY` or
 `BUCK2_CACHE_HOST` secrets. The Tailscale and cache config steps are gated on
 `github.event.pull_request.head.repo.full_name == github.repository`. For fork
-PRs, no `.buckconfig.remote-cache` is generated, so Buck2 uses local-only
+PRs, no `.buckconfig.local` is generated, so Buck2 uses local-only
 execution automatically. This prevents cache poisoning.
 
 **Required GitHub secrets** (operator must set before first CI run):
@@ -137,11 +145,11 @@ published; the Buck2 archive is discarded.
 ### Fallback exercise
 
 A `workflow_dispatch` input `buck2_no_cache` forces local execution (no remote
-cache). When set, the Tailscale and cache config steps are skipped, and the
-build/test steps use local-only `just` recipes. This proves the gate completes
-without the remote cache. The Cargo fallback is available via
-`PANTOKEN_BUILD_SYSTEM=cargo` for dev.ts/build-hub.ts, and `just check-rs-cargo`
-for the full Cargo fmt+clippy+nextest gate.
+cache). When set, the Tailscale and cache config steps are skipped. Buck2
+runs without `.buckconfig.local`, so all commands use local-only execution.
+This proves the gate completes without the remote cache. The Cargo fallback
+is available via `PANTOKEN_BUILD_SYSTEM=cargo` for dev.ts/build-hub.ts, and
+`just check-rs-cargo` for the full Cargo fmt+clippy+nextest gate.
 
 ## Ownership
 

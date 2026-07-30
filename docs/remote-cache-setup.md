@@ -11,7 +11,7 @@ the MacBook can be reused on the Mac mini or in CI without recompilation.
   MacBook (buck2 client)          Mac mini (bazel-remote server)
   ┌─────────────────┐             ┌──────────────────────────┐
   │ .buckconfig     │   Tailscale │ bazel-remote             │
-  │ .remote-cache   │ ─────────→ │ :9092 (gRPC)             │
+  │ .local          │ ─────────→ │ :9092 (gRPC)             │
   │                 │   WireGuard │ :8080 (HTTP status)      │
   └─────────────────┘             │ /usr/local/var/bazel-remote (50 GB) │
                                   └──────────────────────────┘
@@ -19,13 +19,14 @@ the MacBook can be reused on the Mac mini or in CI without recompilation.
   ┌─────────────────┐                    │
   │ Tailscale +     │ ───────────────────┘
   │ .buckconfig     │   (trusted runs only)
-  │ .remote-cache   │
+  │ .local          │
   └─────────────────┘
 ```
 
-The cache is **opt-in**: if `.buckconfig.remote-cache` is absent, Buck2 uses
-local-only execution. Fork PRs never get cache access — the Tailscale and cache
-config steps are gated on `github.event.pull_request.head.repo.full_name ==
+The cache is **always-on** when `.buckconfig.local` is present (which buck2
+auto-reads — no `--config-file` flag needed). When `.buckconfig.local` is absent,
+Buck2 uses local-only execution. Fork PRs never get cache access — the Tailscale
+and cache config steps are gated on `github.event.pull_request.head.repo.full_name ==
 github.repository`.
 
 ## Prerequisites
@@ -106,10 +107,10 @@ If this fails, check:
 ## Step 5: Configure the MacBook's buck2 client
 
 ```bash
-cp .buckconfig.remote-cache.example .buckconfig.remote-cache
+cp .buckconfig.local.example .buckconfig.local
 ```
 
-Edit `.buckconfig.remote-cache` and replace `<tailnet-host>` with the Mac
+Edit `.buckconfig.local` and replace `<tailnet-host>` with the Mac
 mini's tailnet hostname:
 
 ```ini
@@ -124,17 +125,36 @@ instance_name = buck2
 execution_platforms = toolchains//platforms:remote_cache
 ```
 
-> `.buckconfig.remote-cache` is gitignored — the Tailscale address is private.
+> `.buckconfig.local` is gitignored — the Tailscale address is private.
+> Buck2 auto-reads `.buckconfig.local` (no `--config-file` flag needed), so
+> every `buck2 build` / `buck2 test` / `just buck2-*` command uses the remote
+> cache automatically.
 
-Verify cache hits by building with the cached recipes:
+### Uploads: BUCK2_TEST_FORCE_CACHE_UPLOAD
+
+Due to a buck2 bug where `allow_cache_uploads=True` doesn't trigger the
+`CacheUploader` with `RemoteEnabledExecutor::Local` (our config produces
+`local_enabled=True, remote_enabled=False, remote_cache_enabled=True`),
+cache uploads silently don't happen. Setting this env var forces the real
+`CacheUploader` to be used:
+
+```bash
+# In .envrc (already committed):
+export BUCK2_TEST_FORCE_CACHE_UPLOAD=true
+```
+
+Without this, cache reads work (action cache GETs) but writes don't (no AC
+PUTs or CAS PUTs). The cache stays at 0 files.
+
+### Verifying cache hits
 
 ```bash
 # First build populates the cache (all local)
-just buck2-build-cached
+just buck2-build
 
 # Clean then rebuild — should show cache hits
 buck2 clean
-just buck2-build-cached
+just buck2-build
 # Console summary: Commands: N (cached: X, remote: Y, local: Z)
 # X and Y should be non-zero on the second run
 ```
@@ -171,8 +191,8 @@ On subsequent runs of unchanged code, `cached` or `remote` should be non-zero.
 
 For trusted PRs (same-repo), the CI workflow:
 1. Connects to Tailscale via `tailscale/github-action@v4`.
-2. Generates `.buckconfig.remote-cache` from the `BUCK2_CACHE_HOST` secret.
-3. Runs `just buck2-*-cached` recipes.
+2. Generates `.buckconfig.local` from the `BUCK2_CACHE_HOST` secret.
+3. Runs `just buck2-*` recipes (auto-read `.buckconfig.local`).
 
 For fork PRs, no Tailscale connection or cache config is generated — Buck2 uses
 local-only execution automatically.
@@ -217,11 +237,10 @@ To bypass the remote cache (for debugging or benchmarking):
 
 ```bash
 # Remove or rename the cache config
-mv .buckconfig.remote-cache .buckconfig.remote-cache.disabled
+mv .buckconfig.local .buckconfig.local.disabled
 
-# Or use the non-cached recipes
-just buck2-build
-just buck2-test
+# Or use buck2's --local-only flag
+buck2 build --local-only //server-rs/...
 ```
 
 ### CI not using cache
@@ -297,7 +316,7 @@ bazel-remote \
   --num_uploaders 50
 ```
 
-Then `.buckconfig.remote-cache` points to `127.0.0.1:9092` (the local sidecar)
+Then `.buckconfig.local` points to `127.0.0.1:9092` (the local sidecar)
 instead of the remote host directly:
 
 ```ini

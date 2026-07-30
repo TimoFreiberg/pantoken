@@ -6,7 +6,6 @@
 // the binary directly. PANTOKEN_BUILD_SYSTEM=cargo falls back to `cargo run`.
 
 import { join, resolve, isAbsolute } from "node:path";
-import { existsSync } from "node:fs";
 import { spawnAsync } from "./node-compat.js";
 
 /** Resolve Cargo's effective target directory (mirrors build-hub.ts logic). */
@@ -59,12 +58,9 @@ export async function resolveServerBinary(
     return join(targetDir, "debug", "pantoken-server");
   }
 
-  // Buck2 path: build with --show-output, parse the binary path
-  const cached = existsSync(join(root, ".buckconfig.remote-cache"));
+  // Buck2 path: build with --show-output, parse the binary path.
+  // .buckconfig.local is auto-read by buck2 (no --config-file needed).
   const args = ["buck2", "build", "--show-output", "//server-rs/pantoken-server:pantoken_server"];
-  if (cached) {
-    args.splice(2, 0, "--config-file", ".buckconfig.remote-cache");
-  }
   const result = await spawnAsync(args, {
     cwd: root,
     stdout: "pipe",

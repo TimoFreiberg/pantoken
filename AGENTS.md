@@ -38,14 +38,16 @@ See `docs/DESIGN.md` for architecture, `docs/DECISIONS.md` for settled calls, `d
 - **Buck2 is the primary build/test system — Cargo is the fallback and release path.**
   Buck2 builds all 5 server-rs Rust crates (including the `pantoken-server`
   binary) with affected-target execution and a checked-in Reindeer dependency
-  graph. `just check-rs` uses buck2 for build+test (cached when
-  `.buckconfig.remote-cache` exists); `just check-rs-cargo` is the Cargo
-  fallback. The dev server (`scripts/dev.ts`) and desktop hub
+  graph. `just check-rs` uses buck2 for build+test (remote cache auto-read
+  from `.buckconfig.local` when present); `just check-rs-cargo` is the Cargo
+  fallback). The dev server (`scripts/dev.ts`) and desktop hub
   (`scripts/desktop/build-hub.ts`) build the server binary via buck2 by
   default; `PANTOKEN_BUILD_SYSTEM=cargo` is the escape hatch. The `rust-server`
   CI job uses buck2 on Linux; the `buck2` job runs on macOS arm64.
-  Remote cache is used for trusted PRs/pushes via Tailscale + bazel-remote;
-  fork PRs fall back to local-only execution. A parity comparison step in
+  Remote cache is always-on via `.buckconfig.local` (auto-read by buck2)
+  with `BUCK2_TEST_FORCE_CACHE_UPLOAD=true` for uploads; trusted PRs/pushes
+  connect via Tailscale + bazel-remote; fork PRs fall back to local-only
+  execution. A parity comparison step in
   `release-prepare` builds the unsigned archive via both Buck2 and Cargo and
   compares them structurally (informational, non-blocking). The OpenSSL edge
   is eliminated (ece RustCrypto fork + reqwest-based push client); ring's

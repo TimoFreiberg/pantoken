@@ -78,12 +78,9 @@ if (isMain(import.meta.url)) {
   const triple = hostTriple();
 
   if (buildSystem === "buck2") {
-    // Buck2 path: build with --show-output, copy from buck-out
-    const cached = existsSync(join(repoRoot, ".buckconfig.remote-cache"));
+    // Buck2 path: build with --show-output, copy from buck-out.
+    // .buckconfig.local is auto-read by buck2 (no --config-file needed).
     const buck2Args = ["buck2", "build", "--show-output", "//server-rs/pantoken-server:pantoken_server"];
-    if (cached) {
-      buck2Args.splice(2, 0, "--config-file", ".buckconfig.remote-cache");
-    }
     const result = await spawnAsync(buck2Args, {
       cwd: repoRoot,
       stdout: "pipe",
