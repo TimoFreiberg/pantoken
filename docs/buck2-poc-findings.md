@@ -61,7 +61,7 @@ just buck2-measure        # run measurement script
 The `pantoken-server` crate previously depended on `web-push` → `ece` → `openssl` → `ring`.
 This is now resolved (Issue #119):
 
-1. The `ece` RustCrypto fork (`third-party/vendor/ece-2.3.1-rustcrypto`) replaced
+1. The `ece` RustCrypto fork (`third-party/ece-2.3.1-rustcrypto`) replaced
    the OpenSSL backend with pure RustCrypto (`p256`, `aes-gcm`, `hkdf`, `sha2`).
 2. The `web-push` `hyper-client` feature was dropped; an in-tree
    `ReqwestWebPushClient` implements the `WebPushClient` trait over the existing
@@ -231,9 +231,10 @@ Pre-existing Cargo test failures unrelated to Buck2 (also fail under `cargo next
 
 Buck2 is fully additive — removing it requires only:
 1. Delete `buck-out/`, `.buckconfig`, `.buckroot`, `BUCK`, `toolchains/`, `buck2/`, `scripts/buck2/`
-2. Delete `third-party/`, `reindeer.toml`
+2. Delete `third-party/BUCK`, `third-party/fixups/`, `third-party/ece-2.3.1-rustcrypto/`, `reindeer.toml`
 3. Delete `server-rs/*/BUCK` files
 4. Revert the `reqwest` feature change in `Cargo.toml` (optional — it's an improvement)
-5. Run `cargo update` to regenerate `Cargo.lock`
+5. Revert the `[patch.crates-io]` ece path in `Cargo.toml` if the ece fork was deleted
+6. Run `cargo update` to regenerate `Cargo.lock`
 
-Cargo and pnpm workflows are completely unaffected.
+Note: `third-party/vendor/` is gitignored (no deletion needed). Cargo and pnpm workflows are completely unaffected.

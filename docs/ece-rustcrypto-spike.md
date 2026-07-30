@@ -16,7 +16,7 @@ HTTP-wire seam is now covered by adapter tests (Gap #3 closed).
 
 ## Implementation
 
-- Fork: `third-party/vendor/ece-2.3.1-rustcrypto/`, preserving package name/version,
+- Fork: `third-party/ece-2.3.1-rustcrypto/`, preserving package name/version,
   MPL-2.0 provenance, and the existing public API.
 - Backend: `p256` ECDH and SEC1 key parsing/serialization, `hkdf` + `sha2` for
   HKDF-SHA256, `aes-gcm` for AES-128-GCM, and `getrandom` for OS randomness.
@@ -43,7 +43,7 @@ Patched commands and results:
 - `cargo fmt --all -- --check`: passed.
 - `cargo check --locked -p pantoken-server`: passed.
 - `env -u OPENSSL_DIR -u OPENSSL_INCLUDE_DIR -u OPENSSL_LIB_DIR cargo test --locked -p pantoken-server push::tests --no-fail-fast`: 19 passed.
-- `cargo test --manifest-path third-party/vendor/ece-2.3.1-rustcrypto/Cargo.toml --locked --offline --no-default-features --features backend-rustcrypto,backend-test-helper`: 25 passed, including exact RFC 8291 ciphertext, decryption, record-size, padding, key-validation, and invalid-input cases.
+- `cargo test --manifest-path third-party/ece-2.3.1-rustcrypto/Cargo.toml --locked --offline --no-default-features --features backend-rustcrypto,backend-test-helper`: 25 passed, including exact RFC 8291 ciphertext, decryption, record-size, padding, key-validation, and invalid-input cases.
 - `cargo metadata --locked --manifest-path third-party/Cargo.toml`: passed; standalone Reindeer closure resolves the fork.
 - `cargo tree --locked -p pantoken-server -i ece`: resolves to the local fork.
 - No OpenSSL appears in the ece/web-push subtree. `ring` enters via `reqwest[rustls-tls]` → `rustls` (not `superboring` — superboring is pure RustCrypto used by `jwt-simple`); it is not introduced by this fork.

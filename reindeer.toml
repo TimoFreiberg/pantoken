@@ -3,8 +3,11 @@
 # from https://github.com/facebookincubator/reindeer
 #
 # Generation may use network only in the explicit dependency-regeneration
-# command (`just buck2-deps-regenerate`). Normal Buck2 builds require neither
-# Cargo nor network — all vendored sources and generated BUCK files are checked in.
+# command (`just buck2-deps-regenerate`). Normal Buck2 builds download
+# crate sources via http_archive rules (from crates.io, sha256-verified)
+# or hit the remote REAPI cache. The vendor/ directory is generated on
+# demand and gitignored — only the generated BUCK file and fixups are
+# checked in.
 #
 # NOTE: manifest_path must be absolute for Reindeer. Use the
 # scripts/buck2/run-reindeer.sh wrapper which sets this dynamically,

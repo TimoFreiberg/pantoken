@@ -608,7 +608,7 @@ exists. `reqwest` uses `rustls-tls` (not `default-tls`/`native-tls`/OpenSSL).
 
 **Known exception — RESOLVED (Issue #119):** The `web-push` → `ece` → `openssl`
 edge has been eliminated. The `ece` RustCrypto fork
-(`third-party/vendor/ece-2.3.1-rustcrypto`, `[patch.crates-io]` in root `Cargo.toml`)
+(`third-party/ece-2.3.1-rustcrypto`, `[patch.crates-io]` in root `Cargo.toml`)
 replaced the OpenSSL backend with pure RustCrypto. The `web-push` `hyper-client`
 feature was dropped in favor of an in-tree `ReqwestWebPushClient` that implements
 the `WebPushClient` trait over the existing reqwest (rustls) client — no `web-push`

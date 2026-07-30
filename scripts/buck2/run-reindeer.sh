@@ -14,28 +14,20 @@ export PATH="$HOME/.cargo/bin:$PATH"
 
 case "${1:-}" in
   vendor)
-    # The ece RustCrypto fork is a path dependency in third-party/Cargo.toml's
-    # [patch.crates-io]. Reindeer's vendor step runs `cargo metadata` which
-    # requires the path dep to exist, but a previous vendor run may have
-    # deleted it (reindeer doesn't manage path deps). Restore it from VCS
-    # before vendoring.
-    if [ ! -f "$REPO_ROOT/third-party/vendor/ece-2.3.1-rustcrypto/Cargo.toml" ]; then
-      echo "run-reindeer.sh: restoring ece-2.3.1-rustcrypto from VCS before vendor" >&2
-      (cd "$REPO_ROOT" && jj restore third-party/vendor/ece-2.3.1-rustcrypto) 2>/dev/null || \
-      (cd "$REPO_ROOT" && git checkout -- third-party/vendor/ece-2.3.1-rustcrypto) 2>/dev/null || \
-      echo "run-reindeer.sh: WARNING — could not restore ece-2.3.1-rustcrypto; vendor will fail" >&2
-    fi
+    # Downloads all crates to third-party/vendor/ (gitignored) and creates
+    # third-party/.cargo/config.toml redirecting crates.io to vendor/.
+    # Use for offline development; NOT needed for buckify (which generates
+    # http_archive rules when vendor/ is absent).
     reindeer --manifest-path "$MANIFEST_PATH" vendor "${@:2}"
-    # vendor may delete the ece fork again (it doesn't manage path deps).
-    # Restore it so buckify can resolve `cargo metadata`.
-    if [ ! -f "$REPO_ROOT/third-party/vendor/ece-2.3.1-rustcrypto/Cargo.toml" ]; then
-      echo "run-reindeer.sh: restoring ece-2.3.1-rustcrypto from VCS after vendor" >&2
-      (cd "$REPO_ROOT" && jj restore third-party/vendor/ece-2.3.1-rustcrypto) 2>/dev/null || \
-      (cd "$REPO_ROOT" && git checkout -- third-party/vendor/ece-2.3.1-rustcrypto) 2>/dev/null || \
-      echo "run-reindeer.sh: WARNING — could not restore ece-2.3.1-rustcrypto; buckify will fail" >&2
-    fi
     ;;
   buckify)
+    # Ensure .cargo/config.toml (created by `vendor`) doesn't redirect
+    # crates.io to a stale or absent vendor/ directory. Without this,
+    # cargo metadata fails or buckify produces vendor-path rules instead
+    # of http_archive rules.
+    if [ -f "$REPO_ROOT/third-party/.cargo/config.toml" ]; then
+      rm -f "$REPO_ROOT/third-party/.cargo/config.toml"
+    fi
     reindeer --manifest-path "$MANIFEST_PATH" buckify "${@:2}"
     ;;
   *)

@@ -46,9 +46,10 @@ rand = "0.9"
 ignore = "0.4"
 notify = "8"
 
-# SPIKE: reversible local ece backend override; remove after feasibility decision.
+# Local ece RustCrypto fork — replaces the crates.io ece's OpenSSL backend with
+# pure RustCrypto. Not on crates.io, so it can't be an http_archive; tracked in-tree.
 [patch.crates-io]
-ece = { path = "third-party/vendor/ece-2.3.1-rustcrypto" }
+ece = { path = "third-party/ece-2.3.1-rustcrypto" }
 
 [profile.release]
 strip = true

@@ -189,13 +189,17 @@ buck2-validate-archive:
 buck2-targets:
     bash scripts/buck2/check-version.sh && buck2 uquery 'kind(rust_library, //server-rs/...) + kind(rust_binary, //server-rs/...) + kind(rust_test, //server-rs/...)'
 
-# Regenerate Reindeer third-party dependencies (requires network).
+# Regenerate the third-party/BUCK file (requires network for cargo metadata).
+# Generates http_archive rules — crates are downloaded at build time with
+# sha256 verification, not checked in. vendor/ is only for offline dev.
 buck2-deps-regenerate:
-    bash scripts/buck2/check-version.sh && scripts/buck2/run-reindeer.sh vendor && scripts/buck2/run-reindeer.sh buckify
+    bash scripts/buck2/check-version.sh && scripts/buck2/run-reindeer.sh buckify
 
-# Check that Reindeer regeneration produces no diff (vendor sources + BUCK).
+# Check that Reindeer buckify produces no diff (BUCK + fixups).
+# Crates are downloaded at build time via http_archive (sha256-verified),
+# not from checked-in vendor sources.
 buck2-deps-check:
-    bash scripts/buck2/check-version.sh && scripts/buck2/run-reindeer.sh vendor && scripts/buck2/run-reindeer.sh buckify && test -z "$(jj diff --name-only -- third-party/BUCK third-party/vendor/ third-party/fixups/)"
+    bash scripts/buck2/check-version.sh && scripts/buck2/run-reindeer.sh buckify && test -z "$(jj diff --name-only -- third-party/BUCK third-party/fixups/)"
 
 # Validate that Buck2 targets match the expected-target manifest.
 buck2-targets-check:
