@@ -1,0 +1,10 @@
+load("//platforms:defs.bzl", "remote_cache_execution_platform")
+load("@prelude//platforms:defs.bzl", "host_configuration")
+
+remote_cache_execution_platform(
+    name = "remote_cache",
+    cpu_configuration = host_configuration.cpu,
+    os_configuration = host_configuration.os,
+    use_windows_path_separators = False,
+    visibility = ["PUBLIC"],
+)

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  LaunchDaemon template for bazel-remote, the shared REAPI cache server.
+  A system LaunchDaemon (not a per-user LaunchAgent) so it starts at boot
+  with nobody logged in — the cache must survive user sessions and reboots.
+  It runs as root (no UserName key) because bazel-remote is a stateless
+  system cache service that needs root for port binding and cache dir access.
+
+  Do NOT install this file directly. The preflight script replaces
+  @@@PLACEHOLDER@@@ tokens with absolute paths for this host, then installs
+  the rendered plist via sudo launchctl bootstrap.
+
+  See deploy/DEPLOY.md and deploy/bazel-remote-preflight.sh.
+
+  Required placeholders:
+    @@@BAZEL_REMOTE_BIN@@@ — absolute path to the bazel-remote binary
+    @@@CACHE_DIR@@@        — on-disk cache directory
+    @@@MAX_SIZE@@@         — max cache size in GiB
+    @@@GRPC_PORT@@@        — gRPC listen port
+    @@@HTTP_PORT@@@        — HTTP status port
+    @@@LOGDIR@@@           — absolute log directory
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.bazel-remote</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>@@@BAZEL_REMOTE_BIN@@@</string>
+        <string>--dir</string>
+        <string>@@@CACHE_DIR@@@</string>
+        <string>--max_size</string>
+        <string>@@@MAX_SIZE@@@</string>
+        <string>--grpc_address</string>
+        <string>0.0.0.0:@@@GRPC_PORT@@@</string>
+        <string>--http_address</string>
+        <string>0.0.0.0:@@@HTTP_PORT@@@</string>
+        <string>--enable_ac_key_instance_mangling</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>@@@LOGDIR@@@/bazel-remote.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>@@@LOGDIR@@@/bazel-remote.err.log</string>
+</dict>
+</plist>

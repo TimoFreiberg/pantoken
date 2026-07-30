@@ -167,3 +167,43 @@ advertised in the manifest and no artifacts are published for them.
 
 For the user-facing guide to Docker target connections, see
 [`docs/docker-target-guide.md`](../docs/docker-target-guide.md).
+
+## bazel-remote cache server
+
+The Mac mini also runs a `bazel-remote` instance as a second system LaunchDaemon,
+providing a shared REAPI v2 content-addressable store for Buck2 (and Bazel
+during transition). It listens on gRPC port 9092, reachable from any device on
+the tailnet.
+
+### Installation
+
+Download bazel-remote v2.6.2 from
+[GitHub releases](https://github.com/buchgr/bazel-remote/releases):
+`bazel-remote-2.6.2-darwin-arm64`.
+
+### Setup
+
+```bash
+# Read-only preflight checks
+bash deploy/bazel-remote-preflight.sh
+
+# Create cache dir, render plist, install LaunchDaemon
+bash deploy/bazel-remote-preflight.sh --setup --version 2.6.2 --max-size 500
+
+# Render only (don't install)
+bash deploy/bazel-remote-preflight.sh --setup --skip-daemon
+```
+
+### Verification
+
+```bash
+launchctl print system/com.bazel-remote
+curl -fsS http://localhost:8080/status
+```
+
+### Rollback
+
+```bash
+sudo launchctl bootout system/com.bazel-remote
+rm /Library/LaunchDaemons/com.bazel-remote.plist
+```

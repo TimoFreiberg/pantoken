@@ -36,6 +36,56 @@ Buck2’s sandboxed `buildscript_run` isolates build scripts from the host envir
 
 The `run-reindeer.sh` wrapper sets the absolute `manifest_path` dynamically to avoid hardcoding checkout-specific paths. Generated metadata, including `third-party/BUCK`, must be free of machine- or workspace-local absolute paths; `CARGO_MANIFEST_DIR` values use relative paths such as `vendor/adler2-2.0.1`. `just buck2-test-inventory-check` validates the test inventory against expected targets and rejects undeclared entries. `buck2/test-inventory.toml` documents environment allowlist/clears, socket usage, temp root, and network policy for every test target.
 
+## Remote cache (opt-in)
+
+Buck2 has no local disk cache (`--disk_cache` equivalent); the daemon is
+in-memory only, so `buck2 kill` causes a full rebuild. A shared `bazel-remote`
+instance on the always-on Mac mini provides cross-workspace and post-restart
+action-result reuse via the REAPI content-addressable store (CAS) + action
+cache (AC).
+
+### Configuration
+
+Remote cache is **opt-in**. The repo is public, so the Tailscale cache address
+lives in a gitignored `.buckconfig.remote-cache`, not in `.buckconfig`. Copy
+`.buckconfig.remote-cache.example` to `.buckconfig.remote-cache` and fill in the real
+Tailscale address. Use the `just buck2-*-cached` recipes or pass
+`--config-file .buckconfig.remote-cache` to `buck2` directly.
+
+The local config sets:
+- `[buck2_re_client]` — engine/CAS/AC addresses, `tls = false` (WireGuard
+  provides transport security via Tailscale), `instance_name = buck2`.
+- `[build] execution_platforms = toolchains//platforms:remote_cache` — a custom
+  execution platform that sets `CommandExecutorConfig(local_enabled=True,
+  remote_enabled=False, remote_cache_enabled=True, allow_cache_uploads=True)`.
+
+### Fallback behavior
+
+When the remote cache is unreachable, Buck2 falls back to local execution
+automatically (local execution is enabled). No explicit fallback config is
+needed. Use `buck2 build --local-only` to force local execution without cache
+queries.
+
+### Observability
+
+Cache hit/miss rates appear in the build console summary line
+(`Commands: N (cached: X, remote: Y, local: Z)`). Use
+`buck2 log what-ran --recent 0` to see per-command execution kind and
+`buck2 log what-uploaded --recent 0` for upload stats.
+
+### Security
+
+- Transport: WireGuard via Tailscale (no TLS needed for the cache itself).
+- No secrets in cache: the Buck2 POC boundary excludes signing, notarization,
+  and publishing. The cache contains compiled Rust artifacts and unsigned
+  archive inputs only.
+- Instance namespacing: `instance_name = buck2` with
+  `--enable_ac_key_instance_mangling` isolates Buck2's cache entries from
+  Bazel's (during transition).
+- Untrusted PRs: CI is deferred to issue #123. When Buck2 enters CI, untrusted
+  PRs should use `--no-remote-cache` or a read-only cache instance to prevent
+  cache poisoning.
+
 ## Ownership
 
 Ownership is area-based and lightweight: Rust maintainers own `server-rs/*/BUCK`; release/tooling maintainers own the root `BUCK`, `.buckconfig`, `toolchains/BUCK`, `reindeer.toml`, and `third-party/`; documentation maintainers own this policy document. Root, toolchain, and Reindeer configuration changes require one owner review and one reviewer familiar with Cargo/pnpm boundaries. Keep Buck2 changes reversible and update this policy when a supported boundary changes.

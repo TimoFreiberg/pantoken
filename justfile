@@ -152,6 +152,29 @@ buck2-archive:
 buck2-validate-archive:
     bash scripts/buck2/check-version.sh && buck2 test '//:validate_headless_archive'
 
+# --- Buck2 remote cache (opt-in, requires .buckconfig.remote-cache) ---
+# See .buckconfig.remote-cache.example. Requires bazel-remote running on the cache host.
+
+# Build all server-rs Rust crates via Buck2 with remote cache.
+buck2-build-cached:
+    bash scripts/buck2/check-version.sh && buck2 build --config-file .buckconfig.remote-cache '//server-rs/pantoken-protocol:pantoken_protocol' '//server-rs/pantoken-daemon-types:pantoken_daemon_types' '//server-rs/pantoken-remote-layout:pantoken_remote_layout' '//server-rs/pantoken-tar-validate:pantoken_tar_validate'
+
+# Build the pantoken-server binary via Buck2 with remote cache.
+buck2-build-server-cached:
+    bash scripts/buck2/check-version.sh && buck2 build --config-file .buckconfig.remote-cache '//server-rs/pantoken-server:pantoken_server'
+
+# Run buildable server-rs Rust tests via Buck2 with remote cache.
+buck2-test-cached:
+    bash scripts/buck2/check-version.sh && buck2 test --config-file .buckconfig.remote-cache '//server-rs/pantoken-protocol:fold_corpus_tests' '//server-rs/pantoken-daemon-types:target_version_test' '//server-rs/pantoken-daemon-types:daemon_types_roundtrip' '//server-rs/pantoken-daemon-types:schema_inventory_test' '//server-rs/pantoken-remote-layout:unit_tests' '//server-rs/pantoken-tar-validate:unit_tests' '//server-rs/pantoken-server:server_lib_unit_tests' '//server-rs/pantoken-server:corpus_tests' '//server-rs/pantoken-server:live_path_tests' '//server-rs/pantoken-server:websocket_adapter_tests' '//server-rs/pantoken-server:stdio_adapter_tests' '//server-rs/pantoken-server:resume_and_recovery_tests' '//server-rs/pantoken-server:remote_runtime_tests'
+
+# Build the unsigned headless archive via Buck2 with remote cache.
+buck2-archive-cached:
+    bash scripts/buck2/check-version.sh && buck2 build --config-file .buckconfig.remote-cache '//:pantoken_headless_unsigned'
+
+# Validate the unsigned headless archive via Buck2 with remote cache.
+buck2-validate-archive-cached:
+    bash scripts/buck2/check-version.sh && buck2 test --config-file .buckconfig.remote-cache '//:validate_headless_archive'
+
 # List all Buck2 targets in the server-rs tree.
 buck2-targets:
     bash scripts/buck2/check-version.sh && buck2 uquery 'kind(rust_library, //server-rs/...) + kind(rust_binary, //server-rs/...) + kind(rust_test, //server-rs/...)'
