@@ -528,7 +528,7 @@ selectors.
 
 - **Local targeted development:** Cargo remains the supported direct Rust interface,
   and pnpm remains the supported JavaScript/Vite interface. Buck2 is additive for
-  CI/release; the `just buck2-*` commands are additive, not developer-primary.
+  CI/release; the `just *-rs` commands are additive, not developer-primary.
   Vite development, dependency installation, HMR, and the initial frontend production
   build remain pnpm-owned.
 - **CI validation:** Buck2 becomes authoritative for the selected hermetic

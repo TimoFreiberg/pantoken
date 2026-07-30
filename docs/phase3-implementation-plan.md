@@ -382,7 +382,7 @@ existing `FakeSshTransport` from `desktop/src/bridge/fake.rs` as a base.
 | AC.7 — Polytoken policy | ✅ | `polytoken_compatibility_matrix` |
 | AC.8 — Optional polytoken installation | ✅ | `polytoken_install_artifact_matrix`, `polytoken_checksum_failure_is_atomic` |
 | AC.10 — Lightweight cleanup | ⚠️ unchanged | No start-token (deferred); lifecycle manager unchanged |
-| AC.12 — Regression safety | standing | `bun test`, `bun run check`, `bun run check:rs`, `bun run test:e2e`, desktop checks |
+| AC.12 — Regression safety | standing | `bun test`, `bun run check`, `just check-rs`, `bun run test:e2e`, desktop checks |
 
 **AC.4 caveat:** "Seamless Pantoken provisioning" is partially met — the
 polytoken install + compat + XDG isolation + reconciliation flow works

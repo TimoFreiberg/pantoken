@@ -59,7 +59,7 @@ cargo run         # run the server (reads PANTOKEN_PORT, PANTOKEN_DATA_DIR, etc.
 
 CI enforces `cargo fmt --check` + `cargo clippy --locked --all-targets -- -D
 warnings` + `cargo test` (the `rust-server` job in `.github/workflows/ci.yml`);
-run `pnpm run check:rs` from the repo root for the same locally.
+run `just check-rs` from the repo root for the same locally.
 
 ## Codegen
 

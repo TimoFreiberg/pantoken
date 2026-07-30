@@ -1,7 +1,7 @@
 # Expected target manifest for the Buck2 POC.
 # Maps Buck2 labels to Cargo packages/targets, kinds, source sets,
 # dependency/proc-macro edges, and test status.
-# The query comparison check (`just buck2-targets-check`) validates
+# The query comparison check (`just targets-check-rs`) validates
 # that the Buck2 graph exactly matches this manifest — failing on
 # omissions or unexpected targets, including desktop/frontend targets.
 #

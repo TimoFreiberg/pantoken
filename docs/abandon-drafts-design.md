@@ -328,7 +328,7 @@ No code is written by this document; it specifies the test shape each
 follow-up phase must satisfy:
 
 - **Phase 1 (worktree removal):** green `bun run check`, `bun test`,
-  `bun run check:rs`, and `bun run test:e2e` with all worktree specs deleted;
+  `just check-rs`, and `bun run test:e2e` with all worktree specs deleted;
   wire-protocol unit tests updated for the 5→6 bump.
 - **Phase 2 (eager reap):** Rust unit tests for destroy-session in both
   drivers + the two-pass warm-cap call site; e2e for reap-on-navigate-away

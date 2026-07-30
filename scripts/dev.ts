@@ -130,27 +130,14 @@ const backendEnv = {
 // catching the client mid-reconnect-backoff with a stale "Offline" banner and an
 // empty session list. Gating on /health makes the first WS connect succeed.
 //
-// PANTOKEN_BUILD_SYSTEM=buck2 (default) builds via Buck2 and spawns the binary
-// directly. PANTOKEN_BUILD_SYSTEM=cargo falls back to `cargo run` for debugging.
-const buildSystem = process.env.PANTOKEN_BUILD_SYSTEM ?? "buck2";
-let server: ReturnType<typeof spawnManaged>;
-if (buildSystem === "cargo") {
-  // Cargo fallback: use `cargo run` (legacy path, simplest for debugging)
-  server = spawnManaged(["cargo", "run", "--bin", "pantoken-server"], {
-    cwd: "server-rs",
-    env: backendEnv,
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-} else {
-  // Buck2 path: build the binary, then spawn it directly
-  const serverBin = await resolveServerBinary(buildSystem, repoRoot);
-  server = spawnManaged([serverBin], {
-    env: backendEnv,
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-}
+// Builds the server binary via Buck2, then spawns it directly.
+// .buckconfig.local is auto-read by buck2 (no --config-file flag needed).
+const serverBin = await resolveServerBinary(repoRoot);
+const server = spawnManaged([serverBin], {
+  env: backendEnv,
+  stdout: "inherit",
+  stderr: "inherit",
+});
 
 async function waitForHealth(base: string, timeoutMs = 120_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;

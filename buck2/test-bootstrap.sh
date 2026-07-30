@@ -2,7 +2,7 @@
 # buck2/test-bootstrap.sh — Deterministic test harness for buck2/bootstrap.sh.
 #
 # Tests every bootstrap failure path and success path with exact exit code
-# and stderr assertions. Run by `just buck2-check-tests`.
+# and stderr assertions. Run by `just check-tests-rs`.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

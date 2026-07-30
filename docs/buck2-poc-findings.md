@@ -2,9 +2,8 @@
 
 > **Decision gate: PROMOTED — primary build/test system.**
 > Buck2 is now the primary local build+test system for Rust. `just check-rs` uses
-> buck2 for build+test; `just check-rs-cargo` is the Cargo fallback. The dev server
-> and desktop hub build via buck2 by default (`PANTOKEN_BUILD_SYSTEM=cargo` escape
-> hatch). The `rust-server` CI job uses buck2 on Linux; the `buck2` job runs on
+> buck2 for build+test. The dev server and desktop hub build via buck2. The
+> `rust-server` CI job uses buck2 on Linux; the `buck2` job runs on
 > macOS arm64. Releases remain Cargo-authored (buck2 parity comparison only).
 > The `buck2` CI job builds all 5 server crates, tests, archives, and
 > runs manifest checks on every PR/push. Parity comparison runs on every
@@ -39,11 +38,11 @@ Cargo and pnpm remain the source of truth; Buck2 builds the same artifacts from 
 ## How to run
 
 ```bash
-just buck2-check          # verify Buck2/Reindeer/Rust versions
-just buck2-build          # build all server-rs crates
-just buck2-test           # run selected tests
-just buck2-archive        # build unsigned headless archive
-just buck2-measure        # run measurement script
+just verify-rs           # verify Buck2/Reindeer/Rust versions
+just build-rs            # build all server-rs crates
+just test-rs             # run selected tests
+just archive-rs          # build unsigned headless archive
+just measure-rs          # run measurement script
 ```
 
 ## Build results
@@ -115,7 +114,7 @@ instead of `rules_pkg` (which doesn't exist for Buck2). The assembler produces a
 - Deterministic gzip header (no timestamp, no filename, compression level 9)
 
 **Status: PASSING.** The archive target (`//:pantoken_headless_unsigned`) builds
-successfully and `just buck2-validate-archive` passes end-to-end (Issue #120).
+successfully and `just validate-archive-rs` passes end-to-end (Issue #120).
 The sh_test runs both safety validation (`pantoken-tar-validate`) and content
 validation (gzip magic bytes, VERSION/BUILD_SHA format, executable permissions).
 Reproducibility was verified via `scripts/buck2/verify-reproducibility.sh` —
@@ -153,8 +152,7 @@ does not block releases. The parity comparison is `continue-on-error: true`.
 | Maintainability | ✅ Reindeer fixups use cfg-based platform sections; ring fixup is platform-portable | Pass |
 
 **Recommendation:** Buck2 is promoted to the primary build+test system. Cargo
-remains the fallback (`just check-rs-cargo`, `PANTOKEN_BUILD_SYSTEM=cargo`) and
-the release-authoritative path. Releases are Cargo-authored; buck2 parity
+remains the release-authoritative path. Releases are Cargo-authored; buck2 parity
 comparison is informational.
 
 ## Timing comparison

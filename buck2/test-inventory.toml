@@ -1,7 +1,7 @@
 # Test inventory for the Buck2 POC.
 # Lists every selected test target, its data inputs, executable dependencies,
 # environment allowlist/clears, socket/temp-root behavior, and network policy.
-# The `just buck2-test-inventory-check` validates one-to-one coverage against
+# The `just test-inventory-check-rs` validates one-to-one coverage against
 # the expected-target manifest and rejects undeclared entries.
 #
 # Schema:

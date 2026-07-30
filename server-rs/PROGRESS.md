@@ -37,7 +37,7 @@ Rust server is the only server. The TS test files are archived in
 - e2e (Rust server, mock driver): 298/0 (3.0 min, `--project=desktop`). 2 known
   load-induced flakes (dir-picker, sidebar-drafts) pass in isolation.
 - server-rs is in CI: `rust-server` job runs fmt + clippy (`-D warnings`) +
-  test. `pnpm run check:rs` runs the same locally.
+  test. `just check-rs` runs the same locally.
 
 **Phase 1 (mock-e2e cluster burn-down) — COMPLETE:** failures 33 → 0
 deterministic across 7 clusters (models, queue, new-session-failure,
@@ -232,7 +232,7 @@ faithfully.
 - [x] Deleted as-built mock-mode remnants (`Passthrough` variant,
       `fake_daemon_url` plumbing); codegen re-run clean.
 - [x] Added server-rs to CI (`rust-server` job: fmt + clippy `-D warnings` +
-      test); `check:rs` script; `Cargo.lock` tracked.
+      test); `just check-rs`; `Cargo.lock` tracked.
 - [x] Removed blanket `#![allow(dead_code)]` / `#![allow(unused_variables)]`;
       survivors converted to item-level `#[expect]`.
 - [x] Progress claims made reproducible (per-spec failure table).
@@ -340,7 +340,7 @@ faithfully.
 ```bash
 cd server-rs && cargo test                      # 993 tests, green
 cd server-rs && cargo clippy --all-targets -- -D warnings   # 0 warnings
-pnpm run check:rs                               # fmt + clippy + test locally (CI gate)
+just check-rs                                     # fmt + clippy + buck2 build+test locally (CI gate)
 pnpm run test:e2e                               # mock-driver e2e (298/0; 2 load-induced flakes)
 pnpm run test:e2e:live                          # corpus-subset live tier vs fake daemon (5 specs)
 ```

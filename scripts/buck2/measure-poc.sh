@@ -3,7 +3,7 @@
 # Captures cold, warm, incremental, cross-workspace, test, and archive timings
 # comparable to docs/toolchain-baseline.md and docs/buck2-poc-findings.md.
 #
-# Usage: just buck2-measure
+# Usage: just measure-rs
 # Prerequisites: Buck2, Reindeer, Rust 1.97.1, sccache
 
 set -euo pipefail
@@ -22,7 +22,7 @@ RUSTC_VER=$(rustc --version 2>/dev/null || echo "unknown")
 BUCK2_VER=$("${BUCK2:-buck2}" --version 2>/dev/null || echo "unknown")
 
 # Targets measured here (the four non-binary server crates; pantoken-server
-# itself builds via `just buck2-build-server`).
+# itself builds via `just build-server-rs`).
 BUILD_TARGETS=(
   '//server-rs/pantoken-protocol:pantoken_protocol'
   '//server-rs/pantoken-daemon-types:pantoken_daemon_types'

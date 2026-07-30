@@ -10,8 +10,8 @@
 #     the CacheUploader with RemoteEnabledExecutor::Local)
 #
 # Usage:
-#   just buck2-build
-#   just buck2-test
+#   just build-rs
+#   just test-rs
 #   (all buck2 commands auto-read this file — no special flags needed)
 
 [buck2_re_client]

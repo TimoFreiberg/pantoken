@@ -87,7 +87,7 @@ jobs:
         with:
           workspaces: .
       - uses: mozilla-actions/sccache-action@v0.0.10
-      # Install Buck2 for dev.ts's buck2 build path (PANTOKEN_BUILD_SYSTEM=buck2 default)
+      # Install Buck2 for dev.ts's buck2 build path
       - name: Install Buck2 + Reindeer
         run: bash scripts/ci/install-buck2-ci.sh
       - name: Add local bin to PATH
@@ -98,7 +98,7 @@ jobs:
       # Build client/dist (Buck2 consumes pre-built frontend output)
       - run: pnpm run build
       # Pre-warm the Rust binary via Buck2 so dev.ts answers /health quickly
-      - run: just buck2-build-server
+      - run: just build-server-rs
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
@@ -142,7 +142,7 @@ jobs:
           workspaces: .
       - uses: mozilla-actions/sccache-action@v0.0.10
       - run: pnpm install --frozen-lockfile
-      # Install Buck2 for dev.ts's buck2 build path (PANTOKEN_BUILD_SYSTEM=buck2 default)
+      # Install Buck2 for dev.ts's buck2 build path
       - name: Install Buck2 + Reindeer
         run: bash scripts/ci/install-buck2-ci.sh
       - name: Add local bin to PATH
@@ -154,7 +154,7 @@ jobs:
       - run: pnpm run build
       # Pre-warm the Rust binary via Buck2 so dev.ts answers /health quickly.
       # The webServer timeout budgets a cold compile, but warming keeps it comfortable.
-      - run: just buck2-build-server
+      - run: just build-server-rs
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
@@ -194,7 +194,7 @@ jobs:
         with:
           workspaces: .
       - uses: mozilla-actions/sccache-action@v0.0.10
-      # Install Buck2 for build-hub.ts's buck2 build path (PANTOKEN_BUILD_SYSTEM=buck2 default)
+      # Install Buck2 for build-hub.ts's buck2 build path
       - name: Install Buck2 + Reindeer
         run: bash scripts/ci/install-buck2-ci.sh
       - name: Add local bin to PATH
@@ -281,14 +281,14 @@ jobs:
       - name: Buck2 clippy
         run: just buck2-clippy
       - name: Buck2 build
-        run: just buck2-build && just buck2-build-server
+        run: just build-rs && just build-server-rs
       - name: Buck2 test
-        run: just buck2-test
+        run: just test-rs
       # Target + test inventory checks
       - name: Buck2 target manifest check
-        run: just buck2-targets-check
+        run: just targets-check-rs
       - name: Buck2 test inventory check
-        run: just buck2-test-inventory-check
+        run: just test-inventory-check-rs
 
   # Additive Buck2 gate on macOS arm64. Builds all server-rs crates + tests,
   # builds + validates the unsigned headless archive, and checks target/test
@@ -360,10 +360,10 @@ jobs:
       - name: Buck2 clippy
         run: just buck2-clippy
       - name: Buck2 build
-        run: just buck2-build && just buck2-build-server
+        run: just build-rs && just build-server-rs
       # Run all Buck2 tests
       - name: Buck2 test
-        run: just buck2-test
+        run: just test-rs
       # Determine PANTOKEN_VERSION (from tag or desktop/Cargo.toml)
       - name: Determine PANTOKEN_VERSION
         run: |
@@ -385,12 +385,12 @@ jobs:
           buck2 build --config-file .buckconfig.ci //:pantoken_headless_unsigned
       # Validate the archive
       - name: Buck2 archive validation
-        run: just buck2-validate-archive
+        run: just validate-archive-rs
       # Target + test inventory checks
       - name: Buck2 target manifest check
-        run: just buck2-targets-check
+        run: just targets-check-rs
       - name: Buck2 test inventory check
-        run: just buck2-test-inventory-check
+        run: just test-inventory-check-rs
 
   # Tag pushes only (scripts/desktop/release.ts creates them): prepare the signed
   # desktop and headless release bundle in parallel with the gates, then publish only
@@ -466,7 +466,7 @@ jobs:
           EOF
           buck2 build --config-file .buckconfig.ci //:pantoken_headless_unsigned
       - name: Validate Buck2-built archive
-        run: just buck2-validate-archive
+        run: just validate-archive-rs
       - name: Compare Buck2 vs Cargo archives (parity check)
         continue-on-error: true
         env:

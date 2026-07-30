@@ -21,7 +21,7 @@ Read those first; this file is only the delta + the runbook for the live step.
   bites: `canon_prompt_dedupes...` fails with dedupe removed). Two findings
   rebutted (heartbeat churn is deliberate/self-healing; `expected_driver_events`
   is intentionally untyped until Phase 2.1).
-- **Build state:** `bun run check` (0 errors/0 warnings) AND `bun run check:rs`
+- **Build state:** `bun run check` (0 errors/0 warnings) AND `just check-rs`
   (fmt + clippy `-D warnings` + cargo test) both green. 182 Rust tests, 760 TS.
   Pre-existing `scripts/codegen-polytoken-rs.ts` strict-null breakage was fixed
   (commit `1210c4f8`) — it was NOT from Phase 2.0, but blocked `bun run check`.

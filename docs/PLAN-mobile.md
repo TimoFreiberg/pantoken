@@ -199,7 +199,7 @@ on touch paths. Add this as a note to AGENTS.md conventions.
 ## Overnight execution plan
 
 Work on bookmark `mobile-v1`, merge to `main` at gates (G✓ = full suite green:
-`bun run check` + `cargo` gates via `bun run check:rs` + `bun run test:e2e`).
+`bun run check` + `cargo` gates via `just check-rs` + `bun run test:e2e`).
 Each phase lands as its own jj commit(s); e2e specs land *with* their phase.
 
 **Phase 1 — navigation skeleton (biggest risk first).**

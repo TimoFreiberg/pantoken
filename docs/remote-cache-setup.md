@@ -127,7 +127,7 @@ execution_platforms = toolchains//platforms:remote_cache
 
 > `.buckconfig.local` is gitignored — the Tailscale address is private.
 > Buck2 auto-reads `.buckconfig.local` (no `--config-file` flag needed), so
-> every `buck2 build` / `buck2 test` / `just buck2-*` command uses the remote
+> every `buck2 build` / `buck2 test` / `just *-rs` command uses the remote
 > cache automatically.
 
 ### Uploads: BUCK2_TEST_FORCE_CACHE_UPLOAD
@@ -150,11 +150,11 @@ PUTs or CAS PUTs). The cache stays at 0 files.
 
 ```bash
 # First build populates the cache (all local)
-just buck2-build
+just build-rs
 
 # Clean then rebuild — should show cache hits
 buck2 clean
-just buck2-build
+just build-rs
 # Console summary: Commands: N (cached: X, remote: Y, local: Z)
 # X and Y should be non-zero on the second run
 ```
@@ -192,7 +192,7 @@ On subsequent runs of unchanged code, `cached` or `remote` should be non-zero.
 For trusted PRs (same-repo), the CI workflow:
 1. Connects to Tailscale via `tailscale/github-action@v4`.
 2. Generates `.buckconfig.local` from the `BUCK2_CACHE_HOST` secret.
-3. Runs `just buck2-*` recipes (auto-read `.buckconfig.local`).
+3. Runs `just *-rs` recipes (auto-read `.buckconfig.local`).
 
 For fork PRs, no Tailscale connection or cache config is generated — Buck2 uses
 local-only execution automatically.

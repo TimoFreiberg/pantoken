@@ -3,7 +3,7 @@
 # from https://github.com/facebookincubator/reindeer
 #
 # Generation may use network only in the explicit dependency-regeneration
-# command (`just buck2-deps-regenerate`). Normal Buck2 builds download
+# command (`just deps-regenerate-rs`). Normal Buck2 builds download
 # crate sources via http_archive rules (from crates.io, sha256-verified)
 # or hit the remote REAPI cache. The vendor/ directory is generated on
 # demand and gitignored — only the generated BUCK file and fixups are

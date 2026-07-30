@@ -19,25 +19,12 @@
 // not a real release binary. Dev and release-prepare keep the default --release.
 
 import { copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
-import { isAbsolute, join, resolve, dirname } from "node:path";
+import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnManaged, isMain, spawnAsync } from "../lib/node-compat.js";
+import { isMain, spawnAsync } from "../lib/node-compat.js";
 import { parseBuck2ShowOutput } from "../lib/build-server.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const cargoRoot = join(repoRoot, "server-rs");
-
-/** Resolve Cargo's effective target directory before spawning it. Cargo resolves
- * relative CARGO_TARGET_DIR values from its working directory (cargoRoot). */
-export function cargoTargetDir(
-  targetDir = process.env.CARGO_TARGET_DIR,
-): string {
-  return targetDir
-    ? isAbsolute(targetDir)
-      ? resolve(targetDir)
-      : resolve(cargoRoot, targetDir)
-    : join(repoRoot, "target");
-}
 
 /** Rust-style target triple for the host, matching what `tauri build` expects
  *  for externalBin lookup. Extend when a new host platform actually ships. */
@@ -61,65 +48,35 @@ export function hostTriple(
 }
 
 if (isMain(import.meta.url)) {
-  const debug = process.argv.includes("--debug");
-  const profile = debug ? "debug" : "release";
   const outDir = join(repoRoot, "desktop", "binaries");
-  const targetDir = cargoTargetDir();
   mkdirSync(outDir, { recursive: true });
   // tauri.conf.json maps ../client/dist as a bundle resource; guarantee the dir
   // exists so a fresh checkout can `tauri dev` before any client build.
   mkdirSync(join(repoRoot, "client", "dist"), { recursive: true });
 
-  // Build the Rust server binary. PANTOKEN_BUILD_SYSTEM=buck2 (default) uses
-  // Buck2; PANTOKEN_BUILD_SYSTEM=cargo falls back to cargo build.
+  // Build the Rust server binary via Buck2.
   // The Tauri externalBin convention expects the binary at
-  // desktop/binaries/pantoken-server-<target-triple>, so either path copies it there.
-  const buildSystem = process.env.PANTOKEN_BUILD_SYSTEM ?? "buck2";
+  // desktop/binaries/pantoken-server-<target-triple>.
+  // .buckconfig.local is auto-read by buck2 (no --config-file flag needed).
   const triple = hostTriple();
 
-  if (buildSystem === "buck2") {
-    // Buck2 path: build with --show-output, copy from buck-out.
-    // .buckconfig.local is auto-read by buck2 (no --config-file needed).
-    const buck2Args = ["buck2", "build", "--show-output", "//server-rs/pantoken-server:pantoken_server"];
-    const result = await spawnAsync(buck2Args, {
-      cwd: repoRoot,
-      stdout: "pipe",
-      stderr: "inherit",
-    });
-    if (result.code !== 0) {
-      console.error(`buck2 build failed with exit code ${result.code}`);
-      process.exit(result.code ?? 1);
-    }
-    const built = parseBuck2ShowOutput(result.stdout);
-    const outfile = join(outDir, `pantoken-server-${triple}`);
-    if (!existsSync(built)) {
-      console.error(`buck2 build succeeded but ${built} is missing`);
-      process.exit(1);
-    }
-    copyFileSync(built, outfile);
-    const size = (statSync(outfile).size / 1024 / 1024).toFixed(1);
-    console.log(`server compiled (buck2) → ${outfile} (${size} MB)`);
-  } else {
-    // Cargo fallback: build then copy from target dir
-    const cargoArgs = ["cargo", "build", "--bin", "pantoken-server"];
-    if (!debug) cargoArgs.push("--release");
-    const build = spawnManaged(cargoArgs, {
-      cwd: cargoRoot,
-      env: { ...process.env, CARGO_TARGET_DIR: targetDir },
-      stdout: "inherit",
-      stderr: "inherit",
-    });
-    const code = await build.exited;
-    if (code !== 0) process.exit(code);
-
-    const built = join(targetDir, profile, "pantoken-server");
-    const outfile = join(outDir, `pantoken-server-${triple}`);
-    if (!existsSync(built)) {
-      console.error(`cargo build succeeded but ${built} is missing`);
-      process.exit(1);
-    }
-    copyFileSync(built, outfile);
-    const size = (statSync(outfile).size / 1024 / 1024).toFixed(1);
-    console.log(`server compiled (cargo) → ${outfile} (${size} MB)`);
+  const buck2Args = ["buck2", "build", "--show-output", "//server-rs/pantoken-server:pantoken_server"];
+  const result = await spawnAsync(buck2Args, {
+    cwd: repoRoot,
+    stdout: "pipe",
+    stderr: "inherit",
+  });
+  if (result.code !== 0) {
+    console.error(`buck2 build failed with exit code ${result.code}`);
+    process.exit(result.code ?? 1);
   }
+  const built = parseBuck2ShowOutput(result.stdout);
+  const outfile = join(outDir, `pantoken-server-${triple}`);
+  if (!existsSync(built)) {
+    console.error(`buck2 build succeeded but ${built} is missing`);
+    process.exit(1);
+  }
+  copyFileSync(built, outfile);
+  const size = (statSync(outfile).size / 1024 / 1024).toFixed(1);
+  console.log(`server compiled (buck2) → ${outfile} (${size} MB)`);
 }

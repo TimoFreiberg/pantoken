@@ -13,18 +13,26 @@ install:
 dev *args:
     pnpm exec tsx scripts/dev.ts {{ args }}
 
-# Aggregate TypeScript/client checks (normal, non-live).
-check:
+# Aggregate TypeScript checks (normal, non-live).
+check-ts:
     pnpm run check
 
-# Run the project unit tests (normal, non-live).
-test:
+# Run the project unit tests (TypeScript).
+test-ts:
     pnpm run test
 
-# Quick local gate: check followed by unit tests; no Rust, E2E, or live work.
+# Full local gate: TypeScript checks + unit tests + Rust fmt/clippy/build/test.
+check:
+    just check-ts && just check-rs
+
+# Full local gate: TypeScript tests + Rust tests.
+test:
+    just test-ts && just test-rs
+
+# Quick local gate: TypeScript checks followed by unit tests; no Rust or E2E.
 quality:
-    just check
-    just test
+    just check-ts
+    just test-ts
 
 # Full Rust formatting, clippy, and buck2 build+test gate.
 # Uses buck2 for clippy+build+test (remote cache auto-read from .buckconfig.local).
@@ -32,11 +40,7 @@ quality:
 check-rs:
     cargo fmt --all -- --check
     just buck2-clippy
-    just buck2-build && just buck2-build-server && just buck2-test
-
-# Cargo-only Rust gate (fmt + clippy + nextest). Fallback for debugging.
-check-rs-cargo:
-    pnpm run check:rs
+    just build-rs && just build-server-rs && just test-rs
 
 # Build the client production bundle.
 build-client:
@@ -131,16 +135,15 @@ release *args:
 publish *args:
     pnpm exec tsx scripts/desktop/publish.ts {{ args }}
 
-# --- Buck2 (primary build/test system for Rust) ---
-# See docs/buck2-policy.md. Cargo is the fallback (just check-rs-cargo).
-# Supported platforms: aarch64-apple-darwin, x86_64-unknown-linux-gnu.
+# --- Buck2 (build/test system for Rust) ---
+# See docs/buck2-policy.md. Supported platforms: aarch64-apple-darwin, x86_64-unknown-linux-gnu.
 
 # Verify Buck2, Reindeer, and Rust toolchain versions.
-buck2-check:
+verify-rs:
     bash scripts/buck2/check-version.sh
 
 # Build all server-rs Rust crates via Buck2 (uses remote cache if .buckconfig.local present).
-buck2-build:
+build-rs:
     bash scripts/buck2/check-version.sh && buck2 build '//server-rs/pantoken-protocol:pantoken_protocol' '//server-rs/pantoken-daemon-types:pantoken_daemon_types' '//server-rs/pantoken-remote-layout:pantoken_remote_layout' '//server-rs/pantoken-tar-validate:pantoken_tar_validate'
 
 # Run clippy via Buck2 on all server-rs library crates (cacheable, uses remote cache).
@@ -156,25 +159,25 @@ buck2-clippy:
         '//server-rs/pantoken-server:pantoken_server_lib[clippy.json]'
 
 # Build the pantoken-server binary via Buck2 (uses remote cache if .buckconfig.local present).
-buck2-build-server:
+build-server-rs:
     bash scripts/buck2/check-version.sh && buck2 build '//server-rs/pantoken-server:pantoken_server'
 
 # Build pantoken-server via Buck2 and print the binary path.
 # (Uses remote cache if .buckconfig.local present.)
-buck2-server-bin:
+server-bin-rs:
     @bash scripts/buck2/check-version.sh && buck2 build --show-output '//server-rs/pantoken-server:pantoken_server' | tail -1 | awk '{print $$2}'
 
 # Run all server-rs Rust tests via Buck2 (13 targets — all build and test
 # after Issue #119 resolved the OpenSSL/ring compilation blocker).
-buck2-test:
+test-rs:
     bash scripts/buck2/check-version.sh && buck2 test '//server-rs/pantoken-protocol:fold_corpus_tests' '//server-rs/pantoken-daemon-types:target_version_test' '//server-rs/pantoken-daemon-types:daemon_types_roundtrip' '//server-rs/pantoken-daemon-types:schema_inventory_test' '//server-rs/pantoken-remote-layout:unit_tests' '//server-rs/pantoken-tar-validate:unit_tests' '//server-rs/pantoken-server:server_lib_unit_tests' '//server-rs/pantoken-server:corpus_tests' '//server-rs/pantoken-server:live_path_tests' '//server-rs/pantoken-server:websocket_adapter_tests' '//server-rs/pantoken-server:stdio_adapter_tests' '//server-rs/pantoken-server:resume_and_recovery_tests' '//server-rs/pantoken-server:remote_runtime_tests'
 
 # Build the unsigned headless archive via Buck2 (uses remote cache if .buckconfig.local present).
-buck2-archive:
+archive-rs:
     bash scripts/buck2/check-version.sh && buck2 build '//:pantoken_headless_unsigned'
 
 # Validate the unsigned headless archive via Buck2 (uses remote cache if .buckconfig.local present).
-buck2-validate-archive:
+validate-archive-rs:
     bash scripts/buck2/check-version.sh && buck2 test '//:validate_headless_archive'
 
 # --- Buck2 remote cache (auto-read from .buckconfig.local) ---
@@ -186,46 +189,46 @@ buck2-validate-archive:
 # See .buckconfig.local.example and docs/remote-cache-setup.md.
 
 # List all Buck2 targets in the server-rs tree.
-buck2-targets:
+targets-rs:
     bash scripts/buck2/check-version.sh && buck2 uquery 'kind(rust_library, //server-rs/...) + kind(rust_binary, //server-rs/...) + kind(rust_test, //server-rs/...)'
 
 # Regenerate the third-party/BUCK file (requires network for cargo metadata).
 # Generates http_archive rules — crates are downloaded at build time with
 # sha256 verification, not checked in. vendor/ is only for offline dev.
-buck2-deps-regenerate:
+deps-regenerate-rs:
     bash scripts/buck2/check-version.sh && scripts/buck2/run-reindeer.sh buckify
 
 # Check that Reindeer buckify produces no diff (BUCK + fixups).
 # Crates are downloaded at build time via http_archive (sha256-verified),
 # not from checked-in vendor sources.
-buck2-deps-check:
+deps-check-rs:
     bash scripts/buck2/check-version.sh && scripts/buck2/run-reindeer.sh buckify && test -z "$(jj diff --name-only -- third-party/BUCK third-party/fixups/)"
 
 # Validate that Buck2 targets match the expected-target manifest.
-buck2-targets-check:
+targets-check-rs:
     bash scripts/buck2/check-version.sh && python3 scripts/buck2/check-targets.py
 
 # Validate test inventory against expected targets.
-buck2-test-inventory-check:
+test-inventory-check-rs:
     bash scripts/buck2/check-version.sh && python3 scripts/buck2/check-test-inventory.py
 
 # Run the Buck2 POC measurement script.
-buck2-measure:
+measure-rs:
     bash scripts/buck2/measure-poc.sh
 
 # Run bootstrap test harness (tests version-check failure paths).
-buck2-check-tests:
+check-tests-rs:
     bash buck2/test-bootstrap.sh
 
 # Run the CI-equivalent Buck2 gate (clippy + build + test + archive + validate + manifest checks).
 # Requires Buck2 + Reindeer installed (see buck2/bootstrap.sh).
 # This mirrors the .github/workflows/ci.yml buck2 job (local-only, no remote cache).
-buck2-ci:
+ci-rs:
     just buck2-clippy
-    just buck2-build
-    just buck2-build-server
-    just buck2-test
-    just buck2-archive
-    just buck2-validate-archive
-    just buck2-targets-check
-    just buck2-test-inventory-check
+    just build-rs
+    just build-server-rs
+    just test-rs
+    just archive-rs
+    just validate-archive-rs
+    just targets-check-rs
+    just test-inventory-check-rs

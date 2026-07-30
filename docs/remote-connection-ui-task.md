@@ -534,7 +534,7 @@ Run formatters and the smallest relevant tests while iterating, then run:
 bun test
 bun run check
 bun run test:e2e
-bun run check:rs
+just check-rs
 cargo check --manifest-path desktop/Cargo.toml
 cargo clippy --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
 ```

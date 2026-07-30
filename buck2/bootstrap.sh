@@ -107,7 +107,7 @@ check_reindeer() {
         reindeer_bin="$(command -v reindeer)"
     else
         # Not a hard failure for build/test — only for deps regeneration.
-        echo "buck2-bootstrap: reindeer not found (only needed for 'just buck2-deps-regenerate')" >&2
+        echo "buck2-bootstrap: reindeer not found (only needed for 'just deps-regenerate-rs')" >&2
         echo "  Install: cargo install --git $REINDEER_REPO_URL --rev $REINDEER_ACCEPTED_COMMIT reindeer" >&2
         return 0
     fi
