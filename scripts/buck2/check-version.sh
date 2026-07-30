@@ -35,7 +35,9 @@ set -euo pipefail
 ACCEPTED_BUCK2_REVISION="1560aca2002865cd73d7cafb22c705cfb640b2bc"
 ACCEPTED_BUCK2_DATE="2026-07-14"
 ACCEPTED_RUSTC_VERSION="rustc 1.97.1"
-ACCEPTED_HOST_TRIPLE="aarch64-apple-darwin"
+# Override the expected host triple via env var (default: aarch64-apple-darwin).
+# This allows CI or future Linux support to override without changing the default.
+ACCEPTED_HOST_TRIPLE="${BUCK2_EXPECTED_HOST_TRIPLE:-aarch64-apple-darwin}"
 ACCEPTED_REINDEER_COMMIT="efe17c7bb0b547ed07d48111ebcbeea5fa42a904"
 REINDEER_REPO="https://github.com/facebookincubator/reindeer"
 
@@ -121,6 +123,7 @@ HOST_TRIPLE=$(echo "$RUSTC_VERBOSE" | grep "^host:" | awk '{print $2}')
 if [[ "$HOST_TRIPLE" != "$ACCEPTED_HOST_TRIPLE" ]]; then
   echo "ERROR: Host triple is $HOST_TRIPLE, expected $ACCEPTED_HOST_TRIPLE" >&2
   echo "  Buck2 POC is tested only on $ACCEPTED_HOST_TRIPLE." >&2
+  echo "  Override with BUCK2_EXPECTED_HOST_TRIPLE if needed." >&2
   echo "  x86_64-unknown-linux-gnu is explicitly excluded from Buck2 targets." >&2
   exit 3
 fi

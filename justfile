@@ -139,8 +139,8 @@ buck2-build:
 buck2-build-server:
     bash scripts/buck2/check-version.sh && buck2 build '//server-rs/pantoken-server:pantoken_server'
 
-# Run buildable server-rs Rust tests via Buck2 (5 of 13 targets;
-# pantoken-server tests are blocked by the OpenSSL/ring POC blocker).
+# Run all server-rs Rust tests via Buck2 (13 targets — all build and test
+# after Issue #119 resolved the OpenSSL/ring compilation blocker).
 buck2-test:
     bash scripts/buck2/check-version.sh && buck2 test '//server-rs/pantoken-protocol:fold_corpus_tests' '//server-rs/pantoken-daemon-types:target_version_test' '//server-rs/pantoken-daemon-types:daemon_types_roundtrip' '//server-rs/pantoken-daemon-types:schema_inventory_test' '//server-rs/pantoken-remote-layout:unit_tests' '//server-rs/pantoken-tar-validate:unit_tests' '//server-rs/pantoken-server:server_lib_unit_tests' '//server-rs/pantoken-server:corpus_tests' '//server-rs/pantoken-server:live_path_tests' '//server-rs/pantoken-server:websocket_adapter_tests' '//server-rs/pantoken-server:stdio_adapter_tests' '//server-rs/pantoken-server:resume_and_recovery_tests' '//server-rs/pantoken-server:remote_runtime_tests'
 
@@ -163,7 +163,7 @@ buck2-build-cached:
 buck2-build-server-cached:
     bash scripts/buck2/check-version.sh && buck2 build --config-file .buckconfig.remote-cache '//server-rs/pantoken-server:pantoken_server'
 
-# Run buildable server-rs Rust tests via Buck2 with remote cache.
+# Run all server-rs Rust tests via Buck2 with remote cache.
 buck2-test-cached:
     bash scripts/buck2/check-version.sh && buck2 test --config-file .buckconfig.remote-cache '//server-rs/pantoken-protocol:fold_corpus_tests' '//server-rs/pantoken-daemon-types:target_version_test' '//server-rs/pantoken-daemon-types:daemon_types_roundtrip' '//server-rs/pantoken-daemon-types:schema_inventory_test' '//server-rs/pantoken-remote-layout:unit_tests' '//server-rs/pantoken-tar-validate:unit_tests' '//server-rs/pantoken-server:server_lib_unit_tests' '//server-rs/pantoken-server:corpus_tests' '//server-rs/pantoken-server:live_path_tests' '//server-rs/pantoken-server:websocket_adapter_tests' '//server-rs/pantoken-server:stdio_adapter_tests' '//server-rs/pantoken-server:resume_and_recovery_tests' '//server-rs/pantoken-server:remote_runtime_tests'
 
@@ -202,3 +202,15 @@ buck2-measure:
 # Run bootstrap test harness (tests version-check failure paths).
 buck2-check-tests:
     bash buck2/test-bootstrap.sh
+
+# Run the CI-equivalent Buck2 gate (build + test + archive + validate + manifest checks).
+# Requires Buck2 + Reindeer installed (see buck2/bootstrap.sh).
+# This mirrors the .github/workflows/ci.yml buck2 job (local-only, no remote cache).
+buck2-ci:
+    just buck2-build
+    just buck2-build-server
+    just buck2-test
+    just buck2-archive
+    just buck2-validate-archive
+    just buck2-targets-check
+    just buck2-test-inventory-check

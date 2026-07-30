@@ -1,11 +1,11 @@
 # Buck2 POC Findings
 
-> **Decision gate: CONDITIONAL — not ready for broad adoption.**
-> The previous foundation has been removed; Buck2 is now the sole additive build system.
-> Buck2 successfully builds all 5 server crates with affected-target execution
-> and a checked-in dependency graph. The unsigned headless archive assembles
-> deterministically and passes safety + content validation.
-> See `docs/buck2-policy.md` for the foundation policy.
+> **Decision gate: PROMOTED — additive CI gate; not yet authoritative.**
+> Buck2 is now in CI as an additive gate alongside Cargo/pnpm checks.
+> The `buck2` CI job builds all 5 server crates, tests, archives, and
+> runs manifest checks on every PR/push. Parity comparison runs on every
+> release. Cargo remains authoritative for releases.
+> See `docs/buck2-policy.md` for the foundation policy and CI integration.
 
 ## Overview
 
@@ -122,20 +122,35 @@ Requires `just build-client` to have been run first (Buck2 consumes pre-built
 client/dist, it does not invoke pnpm/Vite).
 
 
-## Decision gate: CONDITIONAL — all 5 crates build, archive + reproducibility verified
+## Decision gate: PROMOTED — additive CI gate; not yet authoritative
+
+Buck2 is now in CI as an additive gate. The `buck2` CI job runs on every PR/push
+on `macos-14`, builds all 5 server-rs crates, runs all 13 test targets, builds +
+validates the unsigned headless archive, and checks target/test manifests. Remote
+cache is used for trusted PRs/pushes via Tailscale + bazel-remote.
+
+Parity comparison runs on every release (`release-prepare` job): the unsigned
+headless archive is built via both Buck2 and Cargo, then structurally compared.
+The Cargo artifact remains the one that gets signed and published.
+
+The `buck2` job is NOT in the `release` job's `needs` list — it gates merges but
+does not block releases. The parity comparison is `continue-on-error: true`.
 
 | Criterion | Assessment | Verdict |
 |-----------|------------|---------|
 | Reproducibility | ✅ Pinned toolchain, locked deps, deterministic archive; ring is the sole native C dep with sandboxed `cc` build | Pass |
 | Affected-target execution | ✅ Only dependents of changed files rebuild | Pass |
 | Test/artifact caching | ✅ Action cache works for all 5 crates; archive assembly passing | Pass |
-| Cross-workspace/CI reuse | ⚠️ Buck2 cache works; but 335MB vendored deps is a maintenance burden | Conditional |
+| CI integration | ✅ Additive `buck2` CI job on every PR/push; remote cache for trusted runs | Pass |
+| Parity comparison | ✅ Structural comparison in release-prepare (informational, non-blocking) | Pass |
+| Cross-workspace/CI reuse | ✅ Remote cache via Tailscale + bazel-remote for trusted PRs/pushes | Pass |
 | Maintainability | ⚠️ Reindeer fixups are complex but stable; ring fixup requires platform-specific env | Conditional |
 
-**Recommendation:** Do not promote Buck2 to authoritative CI yet. All 5 crates
-build and all test targets pass (3 pre-existing Cargo test failures are unrelated
-to Buck2). The 335MB vendored dependency tree remains a maintenance burden.
-Cargo remains authoritative.
+**Recommendation:** Buck2 is promoted to an additive CI gate. It is not yet
+authoritative — the Cargo release path remains the source of truth for signed
+and published artifacts. The 335MB vendored dependency tree remains a
+maintenance burden. Promote to authoritative after one or more release cycles
+with consistently passing parity comparisons.
 
 ## Cargo⇄Buck2 test parity mapping
 

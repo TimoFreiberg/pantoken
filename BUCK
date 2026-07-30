@@ -25,18 +25,22 @@ filegroup(
 )
 
 # ── VERSION + BUILD_SHA files ────────────────────────────────────────────────
+# CI provides real values via --config-file .buckconfig.ci with [pantoken]
+# section. read_config() returns the default when no config file is provided,
+# so local builds behave exactly as before. The value participates in the
+# action cache key automatically (different versions → different cache entries).
 
 genrule(
     name = "version_file",
     out = "VERSION",
-    cmd = "echo '0.0.0' > $OUT",
+    cmd = "echo '%s' > $OUT" % read_config("pantoken", "version", "0.0.0"),
     visibility = ["PUBLIC"],
 )
 
 genrule(
     name = "build_sha_file",
     out = "BUILD_SHA",
-    cmd = "echo '0000000000000000000000000000000000000000' > $OUT",
+    cmd = "echo '%s' > $OUT" % read_config("pantoken", "build_sha", "0000000000000000000000000000000000000000"),
     visibility = ["PUBLIC"],
 )
 

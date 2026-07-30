@@ -6,6 +6,9 @@
 #                target the shell builds for. The hub sidecar must be compiled first —
 #                tauri-build stages `externalBin` at compile time and errors if missing.
 #   rust-server: fmt + clippy + tests for the Rust server port.
+#   buck2:       additive Buck2 gate on macOS arm64 — builds all server-rs crates,
+#                tests, builds + validates the unsigned headless archive, and checks
+#                target/test manifests. Uses remote cache for trusted PRs/pushes.
 #
 # The release pipeline (tag-triggered) hangs off these jobs via `needs`; see
 # desktop/README.md "Publishing a release".
@@ -21,6 +24,11 @@ on:
       - "**/*.md"
       - "docs/**"
   workflow_dispatch:
+    inputs:
+      buck2_no_cache:
+        description: 'Force Buck2 local execution (no remote cache)'
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -195,6 +203,120 @@ jobs:
       - run: cargo clippy --locked -p pantoken-protocol -p pantoken-daemon-types -p pantoken-server -p pantoken-remote-layout --all-targets -- -D warnings
       - run: cargo nextest run -p pantoken-protocol -p pantoken-daemon-types -p pantoken-server -p pantoken-remote-layout
 
+  # Additive Buck2 gate on macOS arm64. Builds all server-rs crates + tests,
+  # builds + validates the unsigned headless archive, and checks target/test
+  # manifests. Uses remote cache for trusted PRs/pushes (Tailscale + bazel-remote).
+  # Fork PRs and manual no-cache dispatches fall back to local-only execution.
+  # NOT in the release job's needs — parity comparison in release-prepare is
+  # informational (continue-on-error), not a release blocker.
+  buck2:
+    name: buck2 — build, test, archive (macOS arm64)
+    if: github.ref_type == 'tag' || github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Release v')
+    runs-on: macos-14
+    timeout-minutes: 30
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.17.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Rust toolchain is pinned via rust-toolchain.toml; rustup auto-installs it.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+      # Install pinned Buck2 + Reindeer
+      - name: Install Buck2 + Reindeer
+        run: bash scripts/ci/install-buck2-ci.sh
+      - name: Add local bin to PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+      # Install just (used by buck2-* recipes; not pre-installed on GitHub runners)
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      # Build client/dist (Buck2 consumes pre-built frontend output)
+      - run: pnpm run build
+      # Tailscale connection for remote cache (trusted PRs/pushes only)
+      - name: Connect to Tailscale
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache
+        uses: tailscale/github-action@v4
+        with:
+          auth-key: ${{ secrets.TS_AUTH_KEY }}
+          version: latest
+      # Generate remote cache config from secret
+      - name: Configure remote cache
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache
+        env:
+          BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
+        run: |
+          cat > .buckconfig.remote-cache <<EOF
+          [buck2_re_client]
+          engine_address = $BUCK2_CACHE_HOST:9092
+          action_cache_address = $BUCK2_CACHE_HOST:9092
+          cas_address = $BUCK2_CACHE_HOST:9092
+          tls = false
+          instance_name = buck2
+          [build]
+          execution_platforms = toolchains//platforms:remote_cache
+          EOF
+      # Build all server-rs crates + server binary
+      - name: Buck2 build (with remote cache if available)
+        run: |
+          if [ -f .buckconfig.remote-cache ]; then
+            just buck2-build-cached && just buck2-build-server-cached
+          else
+            just buck2-build && just buck2-build-server
+          fi
+      # Run all Buck2 tests
+      - name: Buck2 test (with remote cache if available)
+        run: |
+          if [ -f .buckconfig.remote-cache ]; then
+            just buck2-test-cached
+          else
+            just buck2-test
+          fi
+      # Determine PANTOKEN_VERSION (from tag or desktop/Cargo.toml)
+      - name: Determine PANTOKEN_VERSION
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "PANTOKEN_VERSION=$(echo ${{ github.ref_name }} | sed 's/^v//')" >> $GITHUB_ENV
+          else
+            echo "PANTOKEN_VERSION=$(grep '^version' desktop/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')" >> $GITHUB_ENV
+          fi
+      # Build unsigned headless archive (with real VERSION/BUILD_SHA)
+      - name: Buck2 archive build
+        env:
+          PANTOKEN_BUILD_SHA: ${{ github.sha }}
+        run: |
+          cat > .buckconfig.ci <<EOF
+          [pantoken]
+          version = $PANTOKEN_VERSION
+          build_sha = $PANTOKEN_BUILD_SHA
+          EOF
+          if [ -f .buckconfig.remote-cache ]; then
+            buck2 build --config-file .buckconfig.remote-cache --config-file .buckconfig.ci //:pantoken_headless_unsigned
+          else
+            buck2 build --config-file .buckconfig.ci //:pantoken_headless_unsigned
+          fi
+      # Validate the archive
+      - name: Buck2 archive validation
+        run: |
+          if [ -f .buckconfig.remote-cache ]; then
+            just buck2-validate-archive-cached
+          else
+            just buck2-validate-archive
+          fi
+      # Target + test inventory checks
+      - name: Buck2 target manifest check
+        run: just buck2-targets-check
+      - name: Buck2 test inventory check
+        run: just buck2-test-inventory-check
+
   # Tag pushes only (scripts/desktop/release.ts creates them): prepare the signed
   # desktop and headless release bundle in parallel with the gates, then publish only
   # after those gates pass. Releases live in TimoFreiberg/pantoken.
@@ -245,6 +367,43 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_TEXT: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_TEXT }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: pnpm exec tsx scripts/headless/build.ts --tag "${{ github.ref_name }}"
+      # ── Buck2 parity comparison (additive, informational) ──────────────────
+      # Builds the unsigned headless archive via Buck2 and compares it
+      # structurally with the Cargo-built archive. The Cargo artifact is the
+      # one that proceeds to signing and publishing — the Buck2 archive is
+      # discarded. continue-on-error: the release proceeds even if parity fails.
+      - name: Install Buck2 + Reindeer
+        run: bash scripts/ci/install-buck2-ci.sh
+      - name: Add local bin to PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Build unsigned headless archive via Buck2
+        env:
+          PANTOKEN_BUILD_SHA: ${{ github.sha }}
+        run: |
+          PANTOKEN_VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
+          cat > .buckconfig.ci <<EOF
+          [pantoken]
+          version = $PANTOKEN_VERSION
+          build_sha = $PANTOKEN_BUILD_SHA
+          EOF
+          buck2 build --config-file .buckconfig.ci //:pantoken_headless_unsigned
+      - name: Validate Buck2-built archive
+        run: just buck2-validate-archive
+      - name: Compare Buck2 vs Cargo archives (parity check)
+        continue-on-error: true
+        env:
+          CARGO_ARCHIVE: target/release/headless/pantoken-headless-macos-aarch64.tar.gz
+        run: |
+          BUCK2_ARCHIVE=$(buck2 build --show-output //:pantoken_headless_unsigned | tail -1 | awk '{print $2}')
+          if [[ -z "$BUCK2_ARCHIVE" || ! -f "$BUCK2_ARCHIVE" ]]; then
+            echo "ERROR: could not locate Buck2 archive output" >&2
+            exit 1
+          fi
+          bash scripts/ci/buck2-parity-compare.sh "$BUCK2_ARCHIVE" "$CARGO_ARCHIVE"
+      # ── End Buck2 parity comparison ─────────────────────────────────────────
       - name: Install trusted tar validator for preparation
         run: test -x target/release/pantoken-tar-validate
       - name: Validate headless artifact

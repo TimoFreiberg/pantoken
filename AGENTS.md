@@ -38,8 +38,15 @@ See `docs/DESIGN.md` for architecture, `docs/DECISIONS.md` for settled calls, `d
 - **Buck2 is the additive build system — Cargo/pnpm remain authoritative.**
   Buck2 builds all 5 server-rs Rust crates (including the `pantoken-server`
   binary) with affected-target execution and a checked-in Reindeer dependency
-  graph. The OpenSSL edge is eliminated (ece RustCrypto fork + reqwest-based
-  push client); ring's `cc`-based buildscript compiles under Buck2's sandbox
+  graph. Buck2 is now in CI as an additive gate: the `buck2` job in
+  `.github/workflows/ci.yml` runs on `macos-14` on every PR/push, building +
+  testing all crates, building + validating the unsigned headless archive, and
+  checking target/test manifests. Remote cache is used for trusted PRs/pushes
+  via Tailscale + bazel-remote; fork PRs fall back to local-only execution.
+  A parity comparison step in `release-prepare` builds the unsigned archive via
+  both Buck2 and Cargo and compares them structurally (informational, non-blocking).
+  The OpenSSL edge is eliminated (ece RustCrypto fork + reqwest-based push
+  client); ring's `cc`-based buildscript compiles under Buck2's sandbox
   with env fixups (see `docs/DECISIONS.md` "No OpenSSL policy"). The
   `just buck2-*` commands are additive. See [`docs/buck2-policy.md`](docs/buck2-policy.md),
   `docs/DECISIONS.md`, and `docs/buck2-poc-findings.md`. Requires `buck2`

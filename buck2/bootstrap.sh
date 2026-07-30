@@ -30,7 +30,7 @@ REINDEER_ACCEPTED_COMMIT="efe17c7bb0b547ed07d48111ebcbeea5fa42a904"
 REINDEER_REPO_URL="https://github.com/facebookincubator/reindeer"
 
 RUST_ACCEPTED_VERSION="1.97.1"
-RUST_ACCEPTED_HOST="aarch64-apple-darwin"
+RUST_ACCEPTED_HOST="${BUCK2_EXPECTED_HOST_TRIPLE:-aarch64-apple-darwin}"
 
 # The operator's manually-installed binary; treated as environment-specific.
 BUCK2_DEFAULT="/Users/timo/.local/bin/buck2"
@@ -141,7 +141,7 @@ check_rust() {
     fi
 
     if [[ "$host_triple" != "$RUST_ACCEPTED_HOST" ]]; then
-        fail "rustc host triple mismatch: got '$host_triple', expected '$RUST_ACCEPTED_HOST'. Buck2 POC is host-only aarch64-apple-darwin." 3
+        fail "rustc host triple mismatch: got '$host_triple', expected '$RUST_ACCEPTED_HOST'. Buck2 POC is host-only aarch64-apple-darwin (override via BUCK2_EXPECTED_HOST_TRIPLE)." 3
     fi
 
     echo "buck2-bootstrap: rust OK ($rust_version, host=$host_triple, binary=$rustc_bin)"

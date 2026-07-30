@@ -82,9 +82,67 @@ Cache hit/miss rates appear in the build console summary line
 - Instance namespacing: `instance_name = buck2` with
   `--enable_ac_key_instance_mangling` isolates Buck2's cache entries from
   Bazel's (during transition).
-- Untrusted PRs: CI is deferred to issue #123. When Buck2 enters CI, untrusted
-  PRs should use `--no-remote-cache` or a read-only cache instance to prevent
-  cache poisoning.
+- Untrusted PRs: fork PRs do not generate `.buckconfig.remote-cache`, so
+  Buck2 uses local-only execution automatically. This prevents cache
+  poisoning — untrusted code never writes to the shared cache. Same-repo
+  PRs and pushes connect to Tailscale and use the remote cache.
+
+## CI integration
+
+Buck2 runs in CI as an **additive gate** alongside the existing Cargo/pnpm checks.
+The `buck2` job in `.github/workflows/ci.yml` runs on `macos-14` (arm64) on every
+PR and push. It is **not** in the `release` job's `needs` list — the Cargo path
+remains authoritative for releases.
+
+### What the `buck2` CI job does
+
+1. Installs pinned Buck2 + Reindeer via `scripts/ci/install-buck2-ci.sh`.
+2. Builds `client/dist` (Buck2 consumes pre-built frontend output).
+3. Connects to Tailscale and generates `.buckconfig.remote-cache` (trusted runs only).
+4. Builds all server-rs crates + the `pantoken-server` binary via `just buck2-build` / `just buck2-build-server`.
+5. Runs all 13 Buck2 test targets via `just buck2-test`.
+6. Builds the unsigned headless archive with real `PANTOKEN_VERSION` and `PANTOKEN_BUILD_SHA` from CI env (via `.buckconfig.ci` + `--config-file`).
+7. Validates the archive via `just buck2-validate-archive`.
+8. Runs target manifest and test inventory checks.
+
+### Remote cache in CI
+
+Trusted PRs (same-repo) and pushes connect to Tailscale via `tailscale/github-action`
+and generate `.buckconfig.remote-cache` from the `BUCK2_CACHE_HOST` secret. Buck2
+then uses `--config-file .buckconfig.remote-cache` for cache queries/uploads.
+
+**Fork PR handling:** Fork PRs do not have access to `TS_AUTH_KEY` or
+`BUCK2_CACHE_HOST` secrets. The Tailscale and cache config steps are gated on
+`github.event.pull_request.head.repo.full_name == github.repository`. For fork
+PRs, no `.buckconfig.remote-cache` is generated, so Buck2 uses local-only
+execution automatically. This prevents cache poisoning.
+
+**Required GitHub secrets** (operator must set before first CI run):
+- `TS_AUTH_KEY` — Tailscale auth key (reusable ephemeral).
+- `BUCK2_CACHE_HOST` — Mac mini's tailnet hostname running bazel-remote.
+
+The CI job functions without these secrets — it falls back to local execution.
+
+### Parity comparison in release-prepare
+
+The `release-prepare` CI job (tag-triggered) includes additional Buck2 steps
+that build the unsigned headless archive via Buck2 and compare it structurally
+with the Cargo-built archive using `scripts/ci/buck2-parity-compare.sh`. The
+comparison checks file listing, executable permissions, VERSION content,
+BUILD_SHA content, index.html content, gzip magic, and binary sizes.
+
+The parity comparison uses `continue-on-error: true` — it is informational and
+does not block the release. The Cargo artifact is the one that gets signed and
+published; the Buck2 archive is discarded.
+
+### Fallback exercise
+
+A `workflow_dispatch` input `buck2_no_cache` forces local execution (no remote
+cache). When set, the Tailscale and cache config steps are skipped, and the
+build/test steps use local-only `just` recipes. This proves the gate completes
+without the remote cache. The existing Cargo/pnpm jobs (`rust-server`,
+`web-check`, `web-e2e`, `desktop`) are the non-Buck2 fallback and remain
+unchanged.
 
 ## Ownership
 
