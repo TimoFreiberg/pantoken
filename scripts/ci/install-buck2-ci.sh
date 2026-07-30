@@ -199,15 +199,39 @@ install_reindeer
 verify
 
 # Ensure rustc is discoverable inside buck2's sandboxed buildscript_run env.
-# ring's fixups narrow PATH to /usr/bin:/bin:..., which excludes rustup's bin.
-# Symlink rustc into /usr/bin so the __rustc_shim.sh can find it.
+# The system_rust_toolchain uses RunInfo(args=["rustc"]) — a bare name, not an
+# absolute path — so rustc must be findable on PATH. ring's fixups narrow PATH
+# to /usr/bin:/bin:/usr/sbin:/sbin:[/Library/Developer/CommandLineTools/usr/bin
+# on macOS], which excludes rustup's ~/.cargo/bin.
+#
+# On Linux, /usr/bin is writable (with sudo) → symlink rustc there.
+# On macOS, /usr/bin is SIP-protected (read-only, even for root). We symlink
+# to /Library/Developer/CommandLineTools/usr/bin instead, which is in the
+# narrowed PATH and writable with sudo (not under SIP protection).
 if ! command -v rustc &>/dev/null; then
   echo "WARN: rustc not on PATH — cannot symlink for buck2 sandbox" >&2
-elif [[ ! -x /usr/bin/rustc ]]; then
-  ln -sf "$(command -v rustc)" /usr/bin/rustc 2>/dev/null || \
-    sudo ln -sf "$(command -v rustc)" /usr/bin/rustc 2>/dev/null || \
-    echo "WARN: could not symlink rustc to /usr/bin — buck2 sandbox builds may fail" >&2
-  echo "  Symlinked rustc → /usr/bin/rustc for buck2 sandbox PATH"
+else
+  RUSTC_SRC="$(command -v rustc)"
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    # macOS: /usr/bin is SIP-protected. Use CommandLineTools/usr/bin (in PATH).
+    SYMLINK_DIR="/Library/Developer/CommandLineTools/usr/bin"
+    if [[ ! -d "$SYMLINK_DIR" ]]; then
+      echo "WARN: $SYMLINK_DIR not found — cannot symlink rustc for buck2 sandbox" >&2
+    elif [[ ! -x "$SYMLINK_DIR/rustc" ]]; then
+      sudo mkdir -p "$SYMLINK_DIR" 2>/dev/null || true
+      sudo ln -sf "$RUSTC_SRC" "$SYMLINK_DIR/rustc" 2>/dev/null || \
+        echo "WARN: could not symlink rustc to $SYMLINK_DIR — buck2 sandbox builds may fail" >&2
+      echo "  Symlinked rustc → $SYMLINK_DIR/rustc for buck2 sandbox PATH"
+    fi
+  else
+    # Linux: /usr/bin is writable with sudo.
+    if [[ ! -x /usr/bin/rustc ]]; then
+      sudo ln -sf "$RUSTC_SRC" /usr/bin/rustc 2>/dev/null || \
+        ln -sf "$RUSTC_SRC" /usr/bin/rustc 2>/dev/null || \
+        echo "WARN: could not symlink rustc to /usr/bin — buck2 sandbox builds may fail" >&2
+      echo "  Symlinked rustc → /usr/bin/rustc for buck2 sandbox PATH"
+    fi
+  fi
 fi
 
 echo ""

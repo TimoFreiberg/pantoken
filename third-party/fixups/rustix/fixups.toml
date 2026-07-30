@@ -1,2 +1,30 @@
 buildscript.run = false
-cfgs = ["libc", "apple", "bsd", "static_assertions", "lower_upper_exp_for_non_zero", "rustc_diagnostics"]
+
+# rustix's build.rs normally does feature detection and sets cfgs based on
+# target OS and rustc capabilities. Since the buildscript is disabled here,
+# we hardcode the cfgs per platform.
+#
+# Common cfgs (rustc feature detection — same result on Rust 1.97.1 for all
+# platforms) are in the base config. Backend/OS-specific cfgs are in cfg
+# sections so they only apply to the relevant platform.
+
+# Common to all platforms:
+#   static_assertions     — rustc 1.65+ (offset_from const)
+#   lower_upper_exp_for_non_zero — rustc 1.84+
+#   rustc_diagnostics     — rustc supports #[diagnostic::on_unimplemented]
+cfgs = ["static_assertions", "lower_upper_exp_for_non_zero", "rustc_diagnostics"]
+
+# Linux: use the linux_raw backend (direct syscalls, no libc).
+#   linux_raw       — selects backend/linux_raw/mod.rs
+#   linux_raw_dep   — enables linux-raw-sys-dependent code paths
+#   linux_like      — OS grouping (linux/android/emscripten)
+#   linux_kernel    — enables Linux-kernel-specific APIs (O_TMPFILE, etc.)
+["cfg(target_os = \"linux\")"]
+cfgs = ["linux_raw", "linux_raw_dep", "linux_like", "linux_kernel"]
+
+# macOS: use the libc backend (no inline asm for darwin).
+#   libc   — selects backend/libc/mod.rs
+#   apple  — OS grouping (macos/ios/tvos/visionos/watchos)
+#   bsd    — OS grouping (apple + freebsd-like + netbsd-like)
+["cfg(target_os = \"macos\")"]
+cfgs = ["libc", "apple", "bsd"]

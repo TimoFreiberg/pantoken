@@ -7862,28 +7862,47 @@ cargo.rust_library(
     ],
     platform = {
         "linux-arm64": dict(
+            rustc_flags = [
+                "--cfg=linux_kernel",
+                "--cfg=linux_like",
+                "--cfg=linux_raw",
+                "--cfg=linux_raw_dep",
+            ],
             deps = [":linux-raw-sys-0.12"],
         ),
         "linux-x86_64": dict(
+            rustc_flags = [
+                "--cfg=linux_kernel",
+                "--cfg=linux_like",
+                "--cfg=linux_raw",
+                "--cfg=linux_raw_dep",
+            ],
             deps = [":linux-raw-sys-0.12"],
         ),
         "macos-arm64": dict(
             named_deps = {
                 "libc_errno": ":errno-0.3",
             },
+            rustc_flags = [
+                "--cfg=apple",
+                "--cfg=bsd",
+                "--cfg=libc",
+            ],
             deps = [":libc-0.2"],
         ),
         "macos-x86_64": dict(
             named_deps = {
                 "libc_errno": ":errno-0.3",
             },
+            rustc_flags = [
+                "--cfg=apple",
+                "--cfg=bsd",
+                "--cfg=libc",
+            ],
             deps = [":libc-0.2"],
         ),
     },
     rustc_flags = [
-        "--cfg=apple",
-        "--cfg=bsd",
-        "--cfg=libc",
         "--cfg=lower_upper_exp_for_non_zero",
         "--cfg=rustc_diagnostics",
         "--cfg=static_assertions",
