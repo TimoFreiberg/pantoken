@@ -29,7 +29,7 @@ filegroup(
 genrule(
     name = "version_file",
     out = "VERSION",
-    cmd = "echo '0.0.0-dev' > $OUT",
+    cmd = "echo '0.0.0' > $OUT",
     visibility = ["PUBLIC"],
 )
 

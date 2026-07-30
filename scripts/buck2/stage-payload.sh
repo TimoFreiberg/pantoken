@@ -34,7 +34,7 @@ chmod 0755 "$STAGING/update.sh"
 if [[ -n "${VERSION_FILE:-}" && -f "$VERSION_FILE" ]]; then
     cp "$VERSION_FILE" "$STAGING/VERSION"
 else
-    echo '0.0.0-dev' > "$STAGING/VERSION"
+    echo '0.0.0' > "$STAGING/VERSION"
 fi
 if [[ -n "${BUILD_SHA_FILE:-}" && -f "$BUILD_SHA_FILE" ]]; then
     cp "$BUILD_SHA_FILE" "$STAGING/BUILD_SHA"

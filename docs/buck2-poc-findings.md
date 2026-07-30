@@ -2,10 +2,9 @@
 
 > **Decision gate: CONDITIONAL — not ready for broad adoption.**
 > The previous foundation has been removed; Buck2 is now the sole additive build system.
-> Buck2 successfully builds 4 of 5 server crates with affected-target execution
-> and a checked-in dependency graph. The `pantoken-server` binary remains blocked
-> by an OpenSSL/ring native compilation issue that has no pure-Rust workaround.
-> This known gap is tracked in `docs/DECISIONS.md` under “No OpenSSL policy”.
+> Buck2 successfully builds all 5 server crates with affected-target execution
+> and a checked-in dependency graph. The unsigned headless archive assembles
+> deterministically and passes safety + content validation.
 > See `docs/buck2-policy.md` for the foundation policy.
 
 ## Overview
@@ -26,8 +25,6 @@ Cargo and pnpm remain the source of truth; Buck2 builds the same artifacts from 
   Or download a prebuilt binary from [releases](https://github.com/facebookincubator/reindeer/releases)
   (closest tag: `v2026.07.27.00`).
 - **Rust 1.97.1** (aarch64-apple-darwin) — via `rust-toolchain.toml`.
-- **OpenSSL** (Homebrew) — required for the `openssl-sys` build script.
-  `OPENSSL_DIR=/opt/homebrew/opt/openssl@3` must be set for the server build.
 
 ## POC target scope
 
@@ -114,14 +111,18 @@ instead of `rules_pkg` (which doesn't exist for Buck2). The assembler produces a
 - Deterministic gzip header (no timestamp, no filename, compression level 9)
 
 **Status: PASSING.** The archive target (`//:pantoken_headless_unsigned`) builds
-successfully and `just buck2-validate-archive` passes end-to-end (Issue #119).
+successfully and `just buck2-validate-archive` passes end-to-end (Issue #120).
+The sh_test runs both safety validation (`pantoken-tar-validate`) and content
+validation (gzip magic bytes, VERSION/BUILD_SHA format, executable permissions).
+Reproducibility was verified via `scripts/buck2/verify-reproducibility.sh` —
+two independent builds produce byte-for-byte identical sha256 (Issue #120).
 The staging script handles Buck2's filegroup materialization (source files are
 nested at their project-relative paths within the filegroup output directory).
 Requires `just build-client` to have been run first (Buck2 consumes pre-built
 client/dist, it does not invoke pnpm/Vite).
 
 
-## Decision gate: CONDITIONAL — improving
+## Decision gate: CONDITIONAL — all 5 crates build, archive + reproducibility verified
 
 | Criterion | Assessment | Verdict |
 |-----------|------------|---------|

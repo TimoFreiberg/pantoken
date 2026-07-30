@@ -16,7 +16,7 @@ macOS arm64 (`aarch64-apple-darwin`) is the primary and only tested target. Linu
 
 The initial boundary is deterministic `server-rs` Rust libraries, binaries, tests, and unsigned headless archive inputs. Buck2 consumes declared frontend outputs only; it does not run Vite, JavaScript tests, or Playwright. It does not package Tauri, sign artifacts, access credentials, deploy, or publish.
 
-The `pantoken-server` binary is a known gap: `ece → openssl → ring` native compilation currently fails under Buck2 sandboxing. See the “No OpenSSL policy” decision in `docs/DECISIONS.md`. Cargo and pnpm direct workflows must remain usable.
+All 5 server-rs crates build successfully under Buck2, including the `pantoken-server` binary (the OpenSSL gap was resolved in Issue #119 via the ece RustCrypto fork and reqwest rustls-tls switch). See the “No OpenSSL policy” decision in `docs/DECISIONS.md`. Cargo and pnpm direct workflows must remain usable.
 
 ## Target conventions
 
