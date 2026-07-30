@@ -198,6 +198,18 @@ install_buck2
 install_reindeer
 verify
 
+# Ensure rustc is discoverable inside buck2's sandboxed buildscript_run env.
+# ring's fixups narrow PATH to /usr/bin:/bin:..., which excludes rustup's bin.
+# Symlink rustc into /usr/bin so the __rustc_shim.sh can find it.
+if ! command -v rustc &>/dev/null; then
+  echo "WARN: rustc not on PATH — cannot symlink for buck2 sandbox" >&2
+elif [[ ! -x /usr/bin/rustc ]]; then
+  ln -sf "$(command -v rustc)" /usr/bin/rustc 2>/dev/null || \
+    sudo ln -sf "$(command -v rustc)" /usr/bin/rustc 2>/dev/null || \
+    echo "WARN: could not symlink rustc to /usr/bin — buck2 sandbox builds may fail" >&2
+  echo "  Symlinked rustc → /usr/bin/rustc for buck2 sandbox PATH"
+fi
+
 echo ""
 echo "=== Installation complete ==="
 echo "  buck2: ${INSTALL_DIR}/buck2"

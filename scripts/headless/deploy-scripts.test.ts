@@ -224,6 +224,10 @@ describe("mac-mini-preflight.sh", () => {
     const fakePlutil = join(fakeBinDir, "plutil");
     writeFileSync(fakePlutil, "#!/bin/sh\nexit 0\n");
     chmodSync(fakePlutil, 0o755);
+    // Create a fake uname that reports Darwin arm64 (script checks host arch)
+    const fakeUname = join(fakeBinDir, "uname");
+    writeFileSync(fakeUname, "#!/bin/sh\nif [ \"$1\" = \"-s\" ]; then echo Darwin; elif [ \"$1\" = \"-m\" ]; then echo arm64; fi\n");
+    chmodSync(fakeUname, 0o755);
 
     const proc = await spawnAsync([MAC_MINI_PREFLIGHT, "--setup", "--version", "1.2.3", "--archive", archiveDir], {
       stderr: "pipe",
@@ -236,6 +240,7 @@ describe("mac-mini-preflight.sh", () => {
         SUDO_BIN: fakeSudo,
         TAILSCALE_BIN: fakeTailscale,
         PLUTIL_BIN: fakePlutil,
+        UNAME_BIN: fakeUname,
       },
     });
     expect(proc.code).toBe(0);
@@ -275,6 +280,9 @@ describe("mac-mini-preflight.sh", () => {
     const fakePlutil = join(fakeBinDir, "plutil");
     writeFileSync(fakePlutil, "#!/bin/sh\nexit 0\n");
     chmodSync(fakePlutil, 0o755);
+    const fakeUname = join(fakeBinDir, "uname");
+    writeFileSync(fakeUname, "#!/bin/sh\nif [ \"$1\" = \"-s\" ]; then echo Darwin; elif [ \"$1\" = \"-m\" ]; then echo arm64; fi\n");
+    chmodSync(fakeUname, 0o755);
 
     const env = {
       ...process.env,
@@ -284,6 +292,7 @@ describe("mac-mini-preflight.sh", () => {
       SUDO_BIN: fakeSudo,
       TAILSCALE_BIN: fakeTailscale,
       PLUTIL_BIN: fakePlutil,
+      UNAME_BIN: fakeUname,
     };
 
     // First run
