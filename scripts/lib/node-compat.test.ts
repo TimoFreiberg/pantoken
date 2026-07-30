@@ -147,7 +147,8 @@ describe("sleep", () => {
 
 describe("isMain", () => {
   test("returns false when imported as a module", () => {
-    // This file is being imported by vitest, not run directly
-    expect(isMain()).toBe(false);
+    // This file is being imported by vitest, not run directly.
+    // Pass our own import.meta.url to test the comparison.
+    expect(isMain(import.meta.url)).toBe(false);
   });
 });

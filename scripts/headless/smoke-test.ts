@@ -253,4 +253,4 @@ async function main(): Promise<void> {
   process.exit(0);
 }
 
-if (isMain()) main();
+if (isMain(import.meta.url)) main();

@@ -85,6 +85,6 @@ export async function down(
   console.error("[parity down] done");
 }
 
-if (isMain()) {
+if (isMain(import.meta.url)) {
   await down({ purge: process.argv.includes("--purge") });
 }

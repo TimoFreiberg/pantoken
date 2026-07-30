@@ -207,7 +207,12 @@ fi
 
 echo "--- Check 10: Env file ---"
 if [[ -f "$ENV_FILE" ]]; then
-  env_mode="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || stat -c '%a' "$ENV_FILE" 2>/dev/null || true)"
+  # Portable octal mode check (see deploy/run.sh for rationale).
+  if env_mode="$(stat -c '%a' "$ENV_FILE" 2>/dev/null)"; then
+    :
+  else
+    env_mode="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || true)"
+  fi
   has_token="$(grep -c '^PANTOKEN_TOKEN=' "$ENV_FILE" 2>/dev/null || echo 0)"
   has_bin="$(grep -c '^PANTOKEN_POLYTOKEN_BIN=' "$ENV_FILE" 2>/dev/null || echo 0)"
   # Check for shell metacharacters in values (run.sh rejects these)

@@ -89,8 +89,10 @@ for exec_path in bin/pantoken-server bin/pantoken-tar-validate run.sh update.sh;
         echo "Error: $exec_path not found in archive" >&2
         exit 1
     fi
-    # stat -f '%Lp' on macOS, stat -c '%a' on Linux — for diagnostic output only.
-    mode=$(stat -f '%Lp' "$full_path" 2>/dev/null || stat -c '%a' "$full_path" 2>/dev/null)
+    # Portable octal mode: probe -c (GNU) first, then -f (BSD).
+    if ! mode=$(stat -c '%a' "$full_path" 2>/dev/null); then
+        mode=$(stat -f '%Lp' "$full_path" 2>/dev/null)
+    fi
     if [ -z "$mode" ]; then
         echo "Error: could not stat $exec_path" >&2
         exit 1

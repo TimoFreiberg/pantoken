@@ -66,7 +66,7 @@ export async function ensureProject(p: Paths = paths()): Promise<string> {
 }
 
 // CLI: `bun parity/project.ts reset|path|ensure`
-if (isMain()) {
+if (isMain(import.meta.url)) {
   const cmd = process.argv[2] ?? "ensure";
   const p = paths();
   if (cmd === "path") {

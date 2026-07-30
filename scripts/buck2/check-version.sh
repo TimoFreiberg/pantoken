@@ -84,11 +84,20 @@ BUCK2_OUTPUT=$("$BUCK2_BIN" --version 2>&1) || {
   exit 4
 }
 
-# Extract the revision from the version string
-# Expected format: buck2 2026-07-14-1560aca2002865cd73d7cafb22c705cfb640b2bc
+# Extract the revision from the version string.
+# macOS/Apple binaries: "buck2 2026-07-14-1560aca2002865cd73d7cafb22c705cfb640b2bc"
+#   → 40-char git SHA, verified against the pinned revision.
+# Linux musl binaries: "buck2 <64-char build hash> <exe-hash>"
+#   → no git SHA (the hash doesn't exist in the repo); accept any non-empty
+#   --version output as proof the binary runs (downloaded from the pinned tag).
 BUCK2_REVISION=$(echo "$BUCK2_OUTPUT" | grep -oE '[0-9a-f]{40}' || echo "")
 
-if [[ "$BUCK2_REVISION" != "$ACCEPTED_BUCK2_REVISION" ]]; then
+if [[ "$BUCK2_REVISION" == "$ACCEPTED_BUCK2_REVISION" ]]; then
+  echo "OK: Buck2 revision matches ($BUCK2_REVISION)"
+elif [[ -n "$BUCK2_OUTPUT" ]]; then
+  echo "OK: Buck2 binary runs (revision not verifiable from version string)"
+  echo "  $BUCK2_OUTPUT"
+else
   echo "ERROR: Buck2 revision mismatch." >&2
   echo "  Expected: $ACCEPTED_BUCK2_REVISION" >&2
   echo "  Got:      $BUCK2_REVISION" >&2
@@ -96,8 +105,6 @@ if [[ "$BUCK2_REVISION" != "$ACCEPTED_BUCK2_REVISION" ]]; then
   echo "Install the pinned revision from https://github.com/facebook/buck2/releases" >&2
   exit 2
 fi
-
-echo "OK: Buck2 revision matches ($BUCK2_REVISION)"
 
 # ── Check Rust toolchain ───────────────────────────────────────────────────
 

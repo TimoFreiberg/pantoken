@@ -159,19 +159,30 @@ verify() {
     return 1
   }
 
+  # macOS/Apple binaries report "buck2 <date>-<40-char git SHA>" — we verify
+  # the SHA matches the pinned revision.
+  #
+  # Linux musl binaries report "buck2 <64-char build hash> <exe-hash>" — the
+  # 64-char hash is NOT a git commit (it doesn't exist in the buck2 repo), so
+  # we can't verify the revision. Instead, we accept any non-empty --version
+  # output as proof the binary is the right release (it was downloaded from the
+  # pinned tag).
   local extracted_rev
   extracted_rev=$(echo "$version_output" | grep -oE '[0-9a-f]{40}' | head -1)
 
-  if [[ "$extracted_rev" != "$BUCK2_REVISION" ]]; then
+  if [[ "$extracted_rev" == "$BUCK2_REVISION" ]]; then
+    echo "OK: Buck2 revision matches ($extracted_rev)"
+    echo "  $version_output"
+  elif [[ -n "$version_output" && "$ASSET_TRIPLE" == *"linux-musl"* ]]; then
+    echo "OK: Buck2 binary runs (Linux musl — revision not verifiable, downloaded from pinned tag $BUCK2_DATE_TAG)"
+    echo "  $version_output"
+  else
     echo "ERROR: Buck2 revision mismatch." >&2
     echo "  Expected: $BUCK2_REVISION" >&2
     echo "  Got:      $extracted_rev" >&2
     echo "  Full version: $version_output" >&2
     return 1
   fi
-
-  echo "OK: Buck2 revision matches ($extracted_rev)"
-  echo "  $version_output"
 
   # Verify Reindeer presence (commit not verified — Reindeer has no --version)
   if command -v reindeer &>/dev/null; then

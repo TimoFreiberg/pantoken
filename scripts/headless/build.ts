@@ -390,7 +390,7 @@ function copyDirRecursive(src: string, dst: string): void {
 
 // ── main ──
 
-if (isMain()) {
+if (isMain(import.meta.url)) {
   const { dryRun, skipBuild, tag: cliTag, targetTriple } = parseArgs(process.argv.slice(2));
   const target = headlessTargetForTriple(targetTriple);
 

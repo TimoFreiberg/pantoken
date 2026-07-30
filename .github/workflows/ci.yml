@@ -247,16 +247,17 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      # Tailscale connection for remote cache (trusted PRs/pushes only)
+      # Tailscale connection for remote cache (trusted PRs/pushes only).
+      # Skips gracefully when TS_AUTH_KEY is not configured (local-only builds).
       - name: Connect to Tailscale
-        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && secrets.TS_AUTH_KEY != ''
         uses: tailscale/github-action@v4
         with:
           auth-key: ${{ secrets.TS_AUTH_KEY }}
           version: latest
       # Generate remote cache config from secret
       - name: Configure remote cache
-        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && secrets.BUCK2_CACHE_HOST != ''
         env:
           BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
         run: |
@@ -329,16 +330,17 @@ jobs:
           tool: just
       # Build client/dist (Buck2 consumes pre-built frontend output)
       - run: pnpm run build
-      # Tailscale connection for remote cache (trusted PRs/pushes only)
+      # Tailscale connection for remote cache (trusted PRs/pushes only).
+      # Skips gracefully when TS_AUTH_KEY is not configured (local-only builds).
       - name: Connect to Tailscale
-        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && secrets.TS_AUTH_KEY != ''
         uses: tailscale/github-action@v4
         with:
           auth-key: ${{ secrets.TS_AUTH_KEY }}
           version: latest
       # Generate remote cache config from secret
       - name: Configure remote cache
-        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && secrets.BUCK2_CACHE_HOST != ''
         env:
           BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
         run: |

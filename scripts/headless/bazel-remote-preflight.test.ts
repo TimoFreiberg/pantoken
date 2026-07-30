@@ -63,7 +63,8 @@ function fakeEnv(tmpHome: string, overrides: Record<string, string> = {}): {
   // Fake sudo: just passes through to the command
   fakeBin(fakeBinDir, "sudo", "#!/bin/sh\nexec \"$@\"\n");
 
-  // Use real plutil and launchctl (we need plutil for lint, launchctl check is non-fatal)
+  // Fake plutil: always succeeds (real plutil is macOS-only)
+  fakeBin(fakeBinDir, "plutil", "#!/bin/sh\nexit 0\n");
 
   const env: Record<string, string | undefined> = {
     ...process.env,
@@ -72,6 +73,7 @@ function fakeEnv(tmpHome: string, overrides: Record<string, string> = {}): {
     TAILSCALE_BIN: join(fakeBinDir, "tailscale"),
     DF_BIN: join(fakeBinDir, "df"),
     SUDO_BIN: join(fakeBinDir, "sudo"),
+    PLUTIL_BIN: join(fakeBinDir, "plutil"),
     ...overrides,
   };
   // Remove real PATH bazel-remote if present to ensure fake is used

@@ -220,6 +220,10 @@ describe("mac-mini-preflight.sh", () => {
     const fakeTailscale = join(fakeBinDir, "tailscale");
     writeFileSync(fakeTailscale, "#!/bin/sh\necho 'http://127.0.0.1:8787'\nexit 0\n");
     chmodSync(fakeTailscale, 0o755);
+    // Create a fake plutil (real plutil is macOS-only)
+    const fakePlutil = join(fakeBinDir, "plutil");
+    writeFileSync(fakePlutil, "#!/bin/sh\nexit 0\n");
+    chmodSync(fakePlutil, 0o755);
 
     const proc = await spawnAsync([MAC_MINI_PREFLIGHT, "--setup", "--version", "1.2.3", "--archive", archiveDir], {
       stderr: "pipe",
@@ -231,6 +235,7 @@ describe("mac-mini-preflight.sh", () => {
         PANTOKEN_POLYTOKEN_BIN: "/usr/local/bin/polytoken",
         SUDO_BIN: fakeSudo,
         TAILSCALE_BIN: fakeTailscale,
+        PLUTIL_BIN: fakePlutil,
       },
     });
     expect(proc.code).toBe(0);
@@ -267,6 +272,9 @@ describe("mac-mini-preflight.sh", () => {
     const fakeTailscale = join(fakeBinDir, "tailscale");
     writeFileSync(fakeTailscale, "#!/bin/sh\necho 'http://127.0.0.1:8787'\nexit 0\n");
     chmodSync(fakeTailscale, 0o755);
+    const fakePlutil = join(fakeBinDir, "plutil");
+    writeFileSync(fakePlutil, "#!/bin/sh\nexit 0\n");
+    chmodSync(fakePlutil, 0o755);
 
     const env = {
       ...process.env,
@@ -275,6 +283,7 @@ describe("mac-mini-preflight.sh", () => {
       PANTOKEN_POLYTOKEN_BIN: "/usr/local/bin/polytoken",
       SUDO_BIN: fakeSudo,
       TAILSCALE_BIN: fakeTailscale,
+      PLUTIL_BIN: fakePlutil,
     };
 
     // First run

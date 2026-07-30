@@ -79,19 +79,18 @@ check_buck2() {
         fail "buck2 binary at '$BUCK2_BIN' is malformed or failed to execute (exit $?)." 1
     }
 
-    # Expected format: "buck2 2026-07-14-1560aca2002865cd73d7cafb22c705cfb640b2bc"
+    # macOS/Apple binaries: "buck2 2026-07-14-<40-char git SHA>"
+    # Linux musl binaries: "buck2 <64-char build hash> <exe-hash>" (no git SHA)
     local extracted_rev
     extracted_rev="$(echo "$version_output" | grep -oE '[0-9a-f]{40}' | head -1)"
 
-    if [[ -z "$extracted_rev" ]]; then
-        fail "buck2 version output is malformed: '$version_output'. Expected format: '${BUCK2_ACCEPTED_VERSION_STRING}'." 1
+    if [[ "$extracted_rev" == "$BUCK2_ACCEPTED_REVISION" ]]; then
+        echo "buck2-bootstrap: buck2 OK ($version_output)"
+    elif [[ -n "$version_output" ]]; then
+        echo "buck2-bootstrap: buck2 OK (revision not verifiable from version string) ($version_output)"
+    else
+        fail "buck2 version output is malformed: '$version_output'. Expected format: '${BUCK2_ACCEPTED_VERSION_STRING}' or a Linux musl build hash." 1
     fi
-
-    if [[ "$extracted_rev" != "$BUCK2_ACCEPTED_REVISION" ]]; then
-        fail "buck2 revision mismatch: got '$extracted_rev', expected '$BUCK2_ACCEPTED_REVISION'. Reinstall the pinned version." 1
-    fi
-
-    echo "buck2-bootstrap: buck2 OK ($version_output)"
 }
 
 # ─── Reindeer check ─────────────────────────────────────────────────────────

@@ -14,9 +14,18 @@ import type { Writable, Readable } from "node:stream";
 
 // ── Entrypoint detection ─────────────────────────────────────────────────
 // Replaces `import.meta.main` (Bun-specific). Works under both Bun and Node/tsx.
+//
+// IMPORTANT: `import.meta.url` is module-scoped in ESM — it always refers to the
+// module where the code is physically located, not the calling module. Therefore
+// the caller MUST pass its own `import.meta.url`:
+//
+//   if (isMain(import.meta.url)) { ... }
+//
+// Calling `isMain()` without an argument would compare this file's URL against
+// argv[1], which is always false when imported cross-module.
 
-export function isMain(): boolean {
-  return import.meta.url === pathToFileURL(process.argv[1] ?? "").href;
+export function isMain(metaUrl: string): boolean {
+  return metaUrl === pathToFileURL(process.argv[1] ?? "").href;
 }
 
 // ── __dirname equivalent ────────────────────────────────────────────────

@@ -14,7 +14,15 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
-mode="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || stat -c '%a' "$ENV_FILE" 2>/dev/null || true)"
+# Portable octal mode check: GNU stat uses -c '%a', BSD stat uses -f '%Lp'.
+# The `||` fallback is unsafe because GNU stat -f writes garbage to stdout
+# before erroring (it interprets -f as "filesystem status", not "format").
+# Probe -c first (GNU), then fall back to -f (BSD).
+if mode="$(stat -c '%a' "$ENV_FILE" 2>/dev/null)"; then
+  :
+else
+  mode="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || true)"
+fi
 if [[ "$mode" != "600" ]]; then
   echo "pantoken: $ENV_FILE must have mode 0600 (found $mode)" >&2
   exit 1

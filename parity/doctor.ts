@@ -156,7 +156,7 @@ async function execProbe(p: Paths): Promise<{ ok: boolean; detail: string }> {
 }
 
 // CLI: `bun parity/doctor.ts [--quick]`
-if (isMain()) {
+if (isMain(import.meta.url)) {
   const quick = process.argv.includes("--quick");
   const p = paths();
   const { ok, checks } = await preflight({ promptCheck: !quick }, p);

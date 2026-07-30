@@ -206,7 +206,7 @@ function signingEnv(): Record<string, string> {
   };
 }
 
-if (isMain()) {
+if (isMain(import.meta.url)) {
   const { repo, dryRun, skipBuild, mustMatchTag } = parseArgs(
     process.argv.slice(2),
   );

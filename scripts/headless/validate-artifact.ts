@@ -174,4 +174,4 @@ async function main(): Promise<void> {
   }
 }
 
-if (isMain()) main();
+if (isMain(import.meta.url)) main();

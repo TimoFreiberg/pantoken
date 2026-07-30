@@ -231,7 +231,7 @@ export async function tuiCommand(
   }
 }
 
-if (isMain()) {
+if (isMain(import.meta.url)) {
   try {
     await tuiCommand(process.argv.slice(2));
   } catch (e) {

@@ -106,8 +106,8 @@ for f in "${EXEC_FILES[@]}"; do
     check_fail "$f not in Cargo archive" "missing"
     continue
   fi
-  BUCK2_MODE=$(stat -f '%Lp' "$BUCK2_DIR/$f" 2>/dev/null || stat -c '%a' "$BUCK2_DIR/$f" 2>/dev/null)
-  CARGO_MODE=$(stat -f '%Lp' "$CARGO_DIR/$f" 2>/dev/null || stat -c '%a' "$CARGO_DIR/$f" 2>/dev/null)
+  BUCK2_MODE=$(stat -c '%a' "$BUCK2_DIR/$f" 2>/dev/null || stat -f '%Lp' "$BUCK2_DIR/$f" 2>/dev/null)
+  CARGO_MODE=$(stat -c '%a' "$CARGO_DIR/$f" 2>/dev/null || stat -f '%Lp' "$CARGO_DIR/$f" 2>/dev/null)
   if [[ "$BUCK2_MODE" == "$CARGO_MODE" ]]; then
     check_pass "$f mode matches ($BUCK2_MODE)"
   else

@@ -177,6 +177,6 @@ export async function launch(p: Paths = paths()): Promise<void> {
   await Promise.all(procs.map((proc) => proc.exited));
 }
 
-if (isMain()) {
+if (isMain(import.meta.url)) {
   await launch();
 }

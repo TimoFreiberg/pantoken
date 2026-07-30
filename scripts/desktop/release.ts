@@ -53,7 +53,7 @@ export function bumpVersion(
   return `${major}.${minor}.${patch + 1}`;
 }
 
-if (isMain()) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2);
   const dryRun = argv.includes("--dry-run");
   const noPush = argv.includes("--no-push");

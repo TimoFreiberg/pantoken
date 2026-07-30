@@ -60,7 +60,7 @@ export function hostTriple(
   return triple;
 }
 
-if (isMain()) {
+if (isMain(import.meta.url)) {
   const debug = process.argv.includes("--debug");
   const profile = debug ? "debug" : "release";
   const outDir = join(repoRoot, "desktop", "binaries");

@@ -954,7 +954,7 @@ async function main() {
 // Only auto-run the capture CLI when invoked directly. Guarding on
 // `isMain()` lets the cross-language parity test import
 // `canonicalizeScenario` without spawning a daemon on import.
-if (isMain()) {
+if (isMain(import.meta.url)) {
   main().catch((e) => {
     console.error(`capture failed: ${e instanceof Error ? e.message : e}`);
     process.exit(1);
