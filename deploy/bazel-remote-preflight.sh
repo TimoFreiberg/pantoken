@@ -123,16 +123,17 @@ echo ""
 echo "--- Check 1: bazel-remote binary ---"
 br_path="$(command -v "$BAZEL_REMOTE_BIN" 2>/dev/null || true)"
 if [[ -n "$br_path" ]]; then
-  br_ver="$("$BAZEL_REMOTE_BIN" --version 2>/dev/null || true)"
-  br_ver_num="$(echo "$br_ver" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
-  if [[ -n "$br_ver_num" ]]; then
-    if [[ "$br_ver_num" == "$VERSION_DEFAULT" ]]; then
-      check_pass "bazel-remote $br_ver_num at $br_path"
-    else
-      check_fail "bazel-remote version $br_ver_num (expected $VERSION_DEFAULT)"
-    fi
+  # bazel-remote has no --version flag; verify identity via --help.
+  br_help="$("$BAZEL_REMOTE_BIN" --help 2>&1 | head -1 || true)"
+  if echo "$br_help" | grep -q "bazel-remote"; then
+    check_pass "bazel-remote binary found at $br_path"
   else
-    check_warn "bazel-remote found but version unparseable: $br_ver"
+    check_fail "binary at $br_path does not identify as bazel-remote: $br_help"
+  fi
+  # Report SHA256 for manual verification against the release page.
+  br_sha="$(shasum -a 256 "$br_path" 2>/dev/null | awk '{print $1}' || true)"
+  if [[ -n "$br_sha" ]]; then
+    check_info "sha256: $br_sha (verify at https://github.com/buchgr/bazel-remote/releases/tag/v${VERSION_DEFAULT})"
   fi
 else
   if [[ "$DO_SETUP" == true ]]; then
@@ -197,6 +198,15 @@ echo "--- Check 6: HTTP status endpoint ---"
 http_status="$("$CURL_BIN" -fsS "http://localhost:${HTTP_PORT}/status" 2>/dev/null || true)"
 if [[ -n "$http_status" ]]; then
   check_pass "bazel-remote HTTP status reachable on port $HTTP_PORT"
+  # Verify the running version via GitTags in /status JSON.
+  git_tags="$(echo "$http_status" | python3 -c "import sys,json; print(json.load(sys.stdin).get('GitTags',''))" 2>/dev/null || true)"
+  if [[ -n "$git_tags" ]]; then
+    if echo "$git_tags" | grep -q "v${VERSION_DEFAULT}"; then
+      check_pass "running version $git_tags (expected v${VERSION_DEFAULT})"
+    else
+      check_warn "running version $git_tags (expected v${VERSION_DEFAULT})"
+    fi
+  fi
 else
   check_info "bazel-remote HTTP status not reachable (expected if not running yet)"
 fi

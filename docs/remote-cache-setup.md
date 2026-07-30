@@ -43,7 +43,10 @@ github.repository`.
 curl -L -o /usr/local/bin/bazel-remote \
   https://github.com/buchgr/bazel-remote/releases/download/v2.6.2/bazel-remote-2.6.2-darwin-arm64
 chmod +x /usr/local/bin/bazel-remote
-bazel-remote --version  # verify: Build: 2.6.2
+
+# bazel-remote has no --version flag; verify identity and integrity instead.
+bazel-remote --help | head -1           # should print "bazel-remote - A remote build cache..."
+shasum -a 256 /usr/local/bin/bazel-remote  # compare against the SHA on the release page
 ```
 
 ## Step 2: Run the preflight + setup script
@@ -75,7 +78,8 @@ launchctl print system/com.bazel-remote
 curl -fsS http://localhost:8080/status
 ```
 
-The `/status` endpoint returns JSON with cache size, entry count, and uptime.
+The `/status` endpoint returns JSON with cache size, entry count, uptime, and a
+`GitTags` field (e.g. `"v2.6.2"`) that confirms the running version.
 
 ## Step 4: Verify Tailscale reachability from the MacBook
 

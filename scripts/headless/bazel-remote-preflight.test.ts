@@ -45,12 +45,12 @@ function fakeEnv(tmpHome: string, overrides: Record<string, string> = {}): {
 } {
   const fakeBinDir = mkdtempSync(join(tmpdir(), "br-fakebin-"));
 
-  // Fake bazel-remote: outputs version string matching default 2.6.2
+  // Fake bazel-remote: responds to --help with identity string.
   fakeBin(fakeBinDir, "bazel-remote", "#!/bin/sh\n" +
-    'if [ "$1" = "--version" ]; then\n' +
-    '  echo "bazel-remote version 2.6.2"\n' +
+    'if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then\n' +
+    '  echo "bazel-remote - A remote build cache for Bazel and other REAPI clients"\n' +
     "else\n" +
-    '  echo "bazel-remote version 2.6.2"\n' +
+    '  echo "bazel-remote - A remote build cache for Bazel and other REAPI clients"\n' +
     "fi\n");
 
   // Fake tailscale: outputs a status line
@@ -66,6 +66,14 @@ function fakeEnv(tmpHome: string, overrides: Record<string, string> = {}): {
   // Fake plutil: always succeeds (real plutil is macOS-only)
   fakeBin(fakeBinDir, "plutil", "#!/bin/sh\nexit 0\n");
 
+  // Fake curl: returns /status JSON with GitTags for version verification
+  fakeBin(fakeBinDir, "curl", "#!/bin/sh\n" +
+    'if echo "$*" | grep -q "/status"; then\n' +
+    '  echo \'{"CurrSize":0,"NumFiles":0,"GitTags":"v2.6.2","GitCommit":"abc1234"}\'\n' +
+    "else\n" +
+    "  exit 1\n" +
+    "fi\n");
+
   const env: Record<string, string | undefined> = {
     ...process.env,
     HOME: tmpHome,
@@ -74,6 +82,7 @@ function fakeEnv(tmpHome: string, overrides: Record<string, string> = {}): {
     DF_BIN: join(fakeBinDir, "df"),
     SUDO_BIN: join(fakeBinDir, "sudo"),
     PLUTIL_BIN: join(fakeBinDir, "plutil"),
+    CURL_BIN: join(fakeBinDir, "curl"),
     ...overrides,
   };
   // Remove real PATH bazel-remote if present to ensure fake is used
@@ -140,7 +149,9 @@ describe("bazel-remote-preflight.sh", () => {
 
     expect(proc.code).toBe(0);
     expect(output).toContain("Bazel-Remote Preflight");
-    expect(output).toContain("bazel-remote 2.6.2");
+    expect(output).toContain("bazel-remote binary found at");
+    expect(output).toContain("sha256:");
+    expect(output).toContain("running version v2.6.2");
     expect(output).toContain("Tailscale running");
     expect(output).toMatch(/[✓✗⚠ℹ]/);
 
@@ -148,22 +159,21 @@ describe("bazel-remote-preflight.sh", () => {
     rmSync(fakeBinDir, { recursive: true, force: true });
   });
 
-  test("preflight version mismatch produces ✗ and exit 1", async () => {
+  test("preflight identity check fails on non-bazel-remote binary", async () => {
     const tmpHome = mkdtempSync(join(tmpdir(), "br-preflight-ver-"));
     const { env, fakeBinDir } = fakeEnv(tmpHome);
 
-    // Override with a fake bazel-remote that reports wrong version
+    // Override with a fake bazel-remote that doesn't identify as bazel-remote
     const fakeBinDir2 = mkdtempSync(join(tmpdir(), "br-fakebin-ver-"));
     const fakeBr = fakeBin(fakeBinDir2, "bazel-remote",
-      "#!/bin/sh\necho 'bazel-remote version 1.0.0'\n");
+      "#!/bin/sh\necho 'some other tool'\n");
     env.BAZEL_REMOTE_BIN = fakeBr;
 
     const proc = await spawnAsync([PREFLIGHT], { stderr: "pipe", stdout: "pipe", env });
     const output = proc.stdout + proc.stderr;
 
     expect(proc.code).toBe(1);
-    expect(output).toContain("1.0.0");
-    expect(output).toContain("expected 2.6.2");
+    expect(output).toContain("does not identify as bazel-remote");
 
     rmSync(tmpHome, { recursive: true, force: true });
     rmSync(fakeBinDir, { recursive: true, force: true });
@@ -175,11 +185,12 @@ describe("bazel-remote-preflight.sh", () => {
     const fakeBinDir = mkdtempSync(join(tmpdir(), "br-fakebin-disk-"));
 
     fakeBin(fakeBinDir, "bazel-remote",
-      "#!/bin/sh\necho 'bazel-remote version 2.6.2'\n");
+      "#!/bin/sh\necho 'bazel-remote - A remote build cache for Bazel and other REAPI clients'\n");
     fakeBin(fakeBinDir, "tailscale", "#!/bin/sh\necho '100.64.0.1 macmini'\n");
     // Only 10000 1K-blocks = ~10 MiB — way below 2×500 GiB threshold
     fakeBin(fakeBinDir, "df", "#!/bin/sh\necho 'Filesystem 1K-blocks Used Avail Capacity Mounted on'\n" +
       "echo '/dev/disk1 10000 5000 5000 50% /'\n");
+    fakeBin(fakeBinDir, "curl", "#!/bin/sh\nexit 1\n");
 
     const env: Record<string, string | undefined> = {
       ...process.env,
@@ -187,6 +198,7 @@ describe("bazel-remote-preflight.sh", () => {
       BAZEL_REMOTE_BIN: join(fakeBinDir, "bazel-remote"),
       TAILSCALE_BIN: join(fakeBinDir, "tailscale"),
       DF_BIN: join(fakeBinDir, "df"),
+      CURL_BIN: join(fakeBinDir, "curl"),
     };
 
     // Use a cache dir whose parent exists so the df check actually runs.
@@ -256,6 +268,7 @@ describe("bazel-remote-preflight.sh", () => {
     fakeBin(fakeBinDir, "tailscale", "#!/bin/sh\necho '100.64.0.1 macmini'\n");
     fakeBin(fakeBinDir, "df", "#!/bin/sh\necho 'Filesystem 1K-blocks Used Avail Capacity Mounted on'\n" +
       "echo '/dev/disk1 2000000 500000 1500000 25% /'\n");
+    fakeBin(fakeBinDir, "curl", "#!/bin/sh\nexit 1\n");
 
     const env: Record<string, string | undefined> = {
       ...process.env,
@@ -263,6 +276,7 @@ describe("bazel-remote-preflight.sh", () => {
       BAZEL_REMOTE_BIN: "/nonexistent/bazel-remote",
       TAILSCALE_BIN: join(fakeBinDir, "tailscale"),
       DF_BIN: join(fakeBinDir, "df"),
+      CURL_BIN: join(fakeBinDir, "curl"),
     };
 
     const proc = await spawnAsync(
