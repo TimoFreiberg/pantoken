@@ -12,10 +12,15 @@ import {
   statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { platform } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { spawnAsync } from "../lib/node-compat.js";
+
+// These tests exercise macOS-only deploy scripts (launchctl, plutil, shasum).
+// Skip on non-darwin — the macOS desktop CI job runs them natively.
+const describeOnMac = platform() === "darwin" ? describe : describe.skip;
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -51,7 +56,7 @@ function fixtureRelease(version: string, tmpBase: string): string {
 }
 
 // ── Plist template tests ─────────────────────────────────────────────────────
-describe("plist template", () => {
+describeOnMac("plist template", () => {
   test("renders to valid plist via sed substitution", async () => {
     const content = readAll(PLIST_TEMPLATE);
     const rendered = content
@@ -79,7 +84,7 @@ describe("plist template", () => {
 });
 
 // ── bootstrap-headless.sh tests ──────────────────────────────────────────────
-describe("bootstrap-headless.sh", () => {
+describeOnMac("bootstrap-headless.sh", () => {
   test("rejects missing version", async () => {
     const proc = await spawnAsync([BOOTSTRAP_HEADLESS], { stderr: "pipe", stdout: "pipe" });
     expect((proc.stdout + proc.stderr).toLowerCase()).toContain("error");
@@ -137,7 +142,7 @@ describe("bootstrap-headless.sh", () => {
 });
 
 // ── bootstrap-tar-validator.sh tests ─────────────────────────────────────────
-describe("bootstrap-tar-validator.sh", () => {
+describeOnMac("bootstrap-tar-validator.sh", () => {
   test("rejects missing --binary", async () => {
     const proc = await spawnAsync([BOOTSTRAP_VALIDATOR], { stderr: "pipe", stdout: "pipe" });
     expect((proc.stdout + proc.stderr).toLowerCase()).toContain("error");
@@ -167,7 +172,7 @@ describe("bootstrap-tar-validator.sh", () => {
 // ── mac-mini-preflight.sh tests ──────────────────────────────────────────────
 const MAC_MINI_PREFLIGHT = join(SCRIPT_DIR, "../../deploy/mac-mini-preflight.sh");
 
-describe("mac-mini-preflight.sh", () => {
+describeOnMac("mac-mini-preflight.sh", () => {
   test("exists and is executable", () => {
     expect(existsSync(MAC_MINI_PREFLIGHT)).toBe(true);
     const stat = statSync(MAC_MINI_PREFLIGHT);
@@ -211,23 +216,23 @@ describe("mac-mini-preflight.sh", () => {
     chmodSync(join(archiveDir, "update.sh"), 0o755);
     writeFileSync(join(archiveDir, "client-dist", "index.html"), "<html>ok</html>");
 
-    // Create a fake sudo that always succeeds (for the sudoers check)
+    // Fake binaries for commands not available (or not passwordless) on CI runners.
+    // On macOS: plutil, uname, launchctl exist natively. polytoken and tailscale
+    // are not installed; sudo -n fails without a passwordless NOPASSWD entry.
+    // - polytoken: Check 2 is fatal in --setup mode → must fake
+    // - sudo: Check 9 sudoers check is fatal in --setup mode → must fake
+    // - tailscale: Check 4 is a warning (not fatal) but faking it lets the test
+    //   assert the full setup path succeeds
     const fakeBinDir = mkdtempSync(join(tmpdir(), "pantoken-fakebin-"));
     const fakeSudo = join(fakeBinDir, "sudo");
     writeFileSync(fakeSudo, "#!/bin/sh\nexit 0\n");
     chmodSync(fakeSudo, 0o755);
-    // Create a fake tailscale that reports the expected serve config
     const fakeTailscale = join(fakeBinDir, "tailscale");
     writeFileSync(fakeTailscale, "#!/bin/sh\necho 'http://127.0.0.1:8787'\nexit 0\n");
     chmodSync(fakeTailscale, 0o755);
-    // Create a fake plutil (real plutil is macOS-only)
-    const fakePlutil = join(fakeBinDir, "plutil");
-    writeFileSync(fakePlutil, "#!/bin/sh\nexit 0\n");
-    chmodSync(fakePlutil, 0o755);
-    // Create a fake uname that reports Darwin arm64 (script checks host arch)
-    const fakeUname = join(fakeBinDir, "uname");
-    writeFileSync(fakeUname, "#!/bin/sh\nif [ \"$1\" = \"-s\" ]; then echo Darwin; elif [ \"$1\" = \"-m\" ]; then echo arm64; fi\n");
-    chmodSync(fakeUname, 0o755);
+    const fakePolytoken = join(fakeBinDir, "polytoken");
+    writeFileSync(fakePolytoken, "#!/bin/sh\necho 'polytoken 0.5.8'\n");
+    chmodSync(fakePolytoken, 0o755);
 
     const proc = await spawnAsync([MAC_MINI_PREFLIGHT, "--setup", "--version", "1.2.3", "--archive", archiveDir], {
       stderr: "pipe",
@@ -239,8 +244,7 @@ describe("mac-mini-preflight.sh", () => {
         PANTOKEN_POLYTOKEN_BIN: "/usr/local/bin/polytoken",
         SUDO_BIN: fakeSudo,
         TAILSCALE_BIN: fakeTailscale,
-        PLUTIL_BIN: fakePlutil,
-        UNAME_BIN: fakeUname,
+        POLYTOKEN_BIN: fakePolytoken,
       },
     });
     expect(proc.code).toBe(0);
@@ -277,12 +281,9 @@ describe("mac-mini-preflight.sh", () => {
     const fakeTailscale = join(fakeBinDir, "tailscale");
     writeFileSync(fakeTailscale, "#!/bin/sh\necho 'http://127.0.0.1:8787'\nexit 0\n");
     chmodSync(fakeTailscale, 0o755);
-    const fakePlutil = join(fakeBinDir, "plutil");
-    writeFileSync(fakePlutil, "#!/bin/sh\nexit 0\n");
-    chmodSync(fakePlutil, 0o755);
-    const fakeUname = join(fakeBinDir, "uname");
-    writeFileSync(fakeUname, "#!/bin/sh\nif [ \"$1\" = \"-s\" ]; then echo Darwin; elif [ \"$1\" = \"-m\" ]; then echo arm64; fi\n");
-    chmodSync(fakeUname, 0o755);
+    const fakePolytoken = join(fakeBinDir, "polytoken");
+    writeFileSync(fakePolytoken, "#!/bin/sh\necho 'polytoken 0.5.8'\n");
+    chmodSync(fakePolytoken, 0o755);
 
     const env = {
       ...process.env,
@@ -291,8 +292,7 @@ describe("mac-mini-preflight.sh", () => {
       PANTOKEN_POLYTOKEN_BIN: "/usr/local/bin/polytoken",
       SUDO_BIN: fakeSudo,
       TAILSCALE_BIN: fakeTailscale,
-      PLUTIL_BIN: fakePlutil,
-      UNAME_BIN: fakeUname,
+      POLYTOKEN_BIN: fakePolytoken,
     };
 
     // First run

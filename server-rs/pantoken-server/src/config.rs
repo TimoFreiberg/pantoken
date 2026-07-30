@@ -43,6 +43,14 @@ pub fn migrate_legacy_data_dir(cfg: &Config) {
         return;
     }
     let legacy = legacy_data_dir();
+    migrate_legacy_dir(cfg, &legacy);
+}
+
+/// Core migration logic with an explicit legacy dir. Separated from
+/// [`migrate_legacy_data_dir`] so tests can pass a concrete path without
+/// mutating process-global env vars (`XDG_STATE_HOME`), which races under
+/// parallel test execution.
+fn migrate_legacy_dir(cfg: &Config, legacy: &Path) {
     if !legacy.exists() {
         return;
     }
@@ -59,7 +67,7 @@ pub fn migrate_legacy_data_dir(cfg: &Config) {
             return;
         }
     }
-    match std::fs::rename(&legacy, &cfg.data_dir) {
+    match std::fs::rename(legacy, &cfg.data_dir) {
         Ok(()) => {
             eprintln!(
                 "pantoken: migrated data dir {} → {}",
@@ -289,19 +297,11 @@ mod tests {
         // without trying to parse or claim ownership of the file.
         std::fs::write(legacy.join("worktrees.json"), "{}").unwrap();
 
-        // Point both XDG vars at the temp root so default_data_dir and
-        // legacy_data_dir resolve under it.
-        unsafe {
-            std::env::set_var("XDG_DATA_HOME", temp.path().join(".local").join("share"));
-            std::env::set_var("XDG_STATE_HOME", temp.path().join(".local").join("state"));
-            std::env::remove_var("PANTOKEN_DATA_DIR");
-        }
-
         let cfg = Config {
             data_dir: new_dir.clone(),
             ..test_config()
         };
-        migrate_legacy_data_dir(&cfg);
+        migrate_legacy_dir(&cfg, &legacy);
 
         assert!(new_dir.exists(), "new dir should exist after migration");
         assert!(
@@ -313,11 +313,6 @@ mod tests {
             "legacy worktree file should be tolerated and moved"
         );
         assert!(!legacy.exists(), "legacy dir should be gone");
-
-        unsafe {
-            std::env::remove_var("XDG_DATA_HOME");
-            std::env::remove_var("XDG_STATE_HOME");
-        }
     }
 
     #[test]
@@ -330,27 +325,16 @@ mod tests {
         std::fs::create_dir_all(&new_dir).unwrap();
         std::fs::write(new_dir.join("new.txt"), "new").unwrap();
 
-        unsafe {
-            std::env::set_var("XDG_DATA_HOME", temp.path().join(".local").join("share"));
-            std::env::set_var("XDG_STATE_HOME", temp.path().join(".local").join("state"));
-            std::env::remove_var("PANTOKEN_DATA_DIR");
-        }
-
         let cfg = Config {
             data_dir: new_dir.clone(),
             ..test_config()
         };
-        migrate_legacy_data_dir(&cfg);
+        migrate_legacy_dir(&cfg, &legacy);
 
         // New dir wins — its file is intact, legacy untouched (left for manual cleanup).
         assert!(new_dir.join("new.txt").exists());
         assert!(!new_dir.join("old.txt").exists());
         assert!(legacy.exists(), "legacy should be left in place");
-
-        unsafe {
-            std::env::remove_var("XDG_DATA_HOME");
-            std::env::remove_var("XDG_STATE_HOME");
-        }
     }
 
     #[test]
@@ -360,8 +344,11 @@ mod tests {
         std::fs::create_dir_all(&legacy).unwrap();
         std::fs::write(legacy.join("data.txt"), "data").unwrap();
 
+        // Setting PANTOKEN_DATA_DIR makes migrate_legacy_data_dir skip migration
+        // entirely (early return before touching legacy_data_dir). This is the
+        // only test that still mutates an env var — it's safe because no other
+        // test in this module reads PANTOKEN_DATA_DIR.
         unsafe {
-            std::env::set_var("XDG_STATE_HOME", temp.path().join(".local").join("state"));
             std::env::set_var("PANTOKEN_DATA_DIR", "/custom/explicit");
         }
 
@@ -376,7 +363,6 @@ mod tests {
         assert!(legacy.join("data.txt").exists());
 
         unsafe {
-            std::env::remove_var("XDG_STATE_HOME");
             std::env::remove_var("PANTOKEN_DATA_DIR");
         }
     }

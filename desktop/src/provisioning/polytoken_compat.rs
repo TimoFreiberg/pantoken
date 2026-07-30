@@ -214,9 +214,9 @@ mod tests {
 
         // Newer.
         assert_eq!(
-            classify_compat(Some("0.5.0".into()), target),
+            classify_compat(Some("0.6.0".into()), target),
             PolytokenCompat::Compatible {
-                found: "0.5.0".into(),
+                found: "0.6.0".into(),
                 target: target.into(),
                 newer_than_target: true
             }

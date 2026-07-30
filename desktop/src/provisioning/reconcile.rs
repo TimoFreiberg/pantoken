@@ -353,7 +353,7 @@ mod tests {
 
     fn compatible_probe_response() -> CommandOutput {
         CommandOutput {
-            stdout: r#"{"os":"linux","arch":"x86_64","bitness":64,"libc":"glibc","homeDir":"/home/user","writableTemp":"/tmp/x","tools":{"tar":true,"unzip":false,"curl":true,"sha256sum":true},"polytokenVersion":"0.5.0-unstable.9"}"#.into(),
+            stdout: r#"{"os":"linux","arch":"x86_64","bitness":64,"libc":"glibc","homeDir":"/home/user","writableTemp":"/tmp/x","tools":{"tar":true,"unzip":false,"curl":true,"sha256sum":true},"polytokenVersion":"0.5.8"}"#.into(),
             stderr: String::new(),
             exit_code: Some(0),
         }

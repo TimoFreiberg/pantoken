@@ -205,6 +205,9 @@ jobs:
       # Build client/dist (Buck2 consumes pre-built frontend output)
       - run: pnpm run build
       - run: pnpm exec tsx scripts/desktop/build-hub.ts --debug
+      # Run the full vitest suite — deploy-scripts.test.ts exercises macOS-only
+      # deploy scripts (launchctl, plutil, shasum) that are skipped on Linux.
+      - run: pnpm run test
       - uses: taiki-e/install-action@v2
         with:
           tool: nextest

@@ -213,7 +213,7 @@ mod tests {
 
     #[test]
     fn probe_parses_structured_json() {
-        let json = r#"{"os":"linux","arch":"x86_64","bitness":64,"libc":"glibc","homeDir":"/home/user","writableTemp":"/tmp/tmp.xxx","tools":{"tar":true,"unzip":false,"curl":true,"sha256sum":true},"polytokenVersion":"0.5.0-unstable.9"}"#;
+        let json = r#"{"os":"linux","arch":"x86_64","bitness":64,"libc":"glibc","homeDir":"/home/user","writableTemp":"/tmp/tmp.xxx","tools":{"tar":true,"unzip":false,"curl":true,"sha256sum":true},"polytokenVersion":"0.5.8"}"#;
         let output = success_output(json);
         let result = parse_probe_output(&output).expect("parse");
         assert_eq!(result.os, "linux");

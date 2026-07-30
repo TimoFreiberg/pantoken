@@ -480,7 +480,8 @@ mod tests {
 
     #[test]
     fn polytoken_install_artifact_matrix() {
-        let version = POLYTOKEN_DAEMON_TARGET_VERSION;
+        // Use an explicit prerelease version to exercise the unstable URL path.
+        let version = "0.5.0-unstable.9";
 
         // Only targets with published, smoke-tested artifacts are supported.
         // aarch64-unknown-linux-gnu and x86_64-apple-darwin are intentionally
