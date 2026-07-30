@@ -507,106 +507,96 @@ trail the last assistant response are collected into a `postResponse` array
 and rendered after the response, so the work block can collapse behind the
 summary while the trailing items stay visible.
 
-## Bazel boundary: conditional hybrid (Issue #101)
+## Buck2 boundary: conditional hybrid (Issue #122)
 
-**Superseded by Issue #118:** Bazel has been removed. Buck2 is now the sole additive build system. See `docs/buck2-policy.md`.
+**Supersedes Issue #101 (Bazel boundary, removed in #118).** Buck2 is now the sole
+additive build system. This record redefines the hybrid boundary for Buck2; the
+boundary concept is identical to the former Bazel decision, only the tool changes.
+See `docs/buck2-policy.md` for the foundation policy and `docs/buck2-poc-findings.md`
+for the POC evaluation.
 
-**Date:** 2026-07-28
+**Date:** 2026-07-30
 
-**Decision:** Adopt a conditional hybrid Bazel boundary. Bazel is the eventual
+**Decision:** Adopt a conditional hybrid Buck2 boundary. Buck2 is the eventual
 CI/release authority only for hermetic server-Rust targets and deterministic
-unsigned headless archive/validator outputs, after the promotion gates below
-are met. This records the architecture for migration; it does not make Bazel
-authoritative today.
+unsigned headless archive/validator outputs, after the promotion gates below are
+met. This records the boundary for the additive system; it does not make Buck2
+authoritative today — Cargo/pnpm remain authoritative and are retained as rollback
+selectors.
 
 ### Ownership by environment
 
-- **Local targeted development:** Cargo remains the supported direct Rust
-  interface, and pnpm remains the supported JavaScript/Vite interface. The
-  existing `just bazel-*` commands are additive POC/migration commands. Vite
-  development, dependency installation, HMR, and the initial frontend
-  production build remain pnpm-owned.
-- **CI validation:** Bazel may become authoritative for the selected hermetic
-  server-Rust checks and deterministic unsigned headless artifact checks only
-  after all gates pass. Cargo/pnpm checks continue alongside it during staged
+- **Local targeted development:** Cargo remains the supported direct Rust interface,
+  and pnpm remains the supported JavaScript/Vite interface. Buck2 is additive for
+  CI/release; the `just buck2-*` commands are additive, not developer-primary.
+  Vite development, dependency installation, HMR, and the initial frontend production
+  build remain pnpm-owned.
+- **CI validation:** Buck2 becomes authoritative for the selected hermetic
+  server-Rust checks and deterministic unsigned headless artifact checks only after
+  the promotion gates pass. Cargo/pnpm checks continue alongside during staged
   rollout and remain the fallback selector.
-- **Release assembly:** Bazel can provide unsigned server and headless archive
-  inputs. The existing tag-triggered pnpm/TypeScript release workflow remains
-  responsible for the supported macOS/Linux release matrix, metadata assembly,
-  validation and smoke tests, signing, notarization, deployment, and
-  publishing. Secret-bearing steps stay outside ordinary cacheable Bazel
-  actions.
+- **Release assembly:** Buck2 provides unsigned server and headless archive inputs.
+  The existing tag-triggered pnpm/TypeScript release workflow remains responsible
+  for the supported macOS/Linux release matrix, metadata assembly, validation and
+  smoke tests, signing, notarization, deployment, and publishing. Secret-bearing
+  steps stay outside ordinary cacheable Buck2 actions.
 
 ### Rust and desktop scope
 
-Bazel initially owns only hermetic server crates and their selected
-integration/parity tests. It does not own the Tauri desktop/native packaging
-path, desktop artifacts, or platform-native desktop release work; that path
-remains Cargo/Tauri-owned unless a later decision expands the boundary. Bazel
-may produce the unsigned headless archive and its archive validator, but not
-signed `.sig` outputs.
+Buck2 initially owns only hermetic server crates and their selected
+integration/parity tests. It does not own the Tauri desktop/native packaging path,
+desktop artifacts, or platform-native desktop release work; that path remains
+Cargo/Tauri-owned unless a later decision expands the boundary. Buck2 produces the
+unsigned headless archive and its archive validator, but not signed `.sig` outputs.
 
 ### Frontend, JavaScript, and Playwright scope
 
-pnpm/Vite owns frontend development, HMR, dependency installation, and the
-initial production bundle. Bazel may consume declared `client/dist` output as
-an input to the unsigned headless archive, but does not run Vite initially.
-JS unit tests and TypeScript checks remain pnpm-owned because the POC did not
-establish a hermetic Node/Bazel toolchain or a benefit that justifies adding
-that graph. Both Playwright tiers also remain pnpm-owned initially: the
-standard mock E2E tier and the corpus-backed live/fake-daemon tier.
+pnpm/Vite owns frontend development, HMR, dependency installation, and the initial
+production bundle. Buck2 may consume declared `client/dist` output as an input to
+the unsigned headless archive, but does not run Vite initially. JS unit tests and
+TypeScript checks remain pnpm-owned. Both Playwright tiers also remain pnpm-owned
+initially: the standard mock E2E tier and the corpus-backed live/fake-daemon tier.
 
 ### Generated types, parity, and hermetic tests
 
-Checked-in generated daemon types are the build input. Code generation and
-freshness checks remain an explicit pnpm/polytoken workflow; Bazel must not
-invoke an ambient daemon to regenerate them. protocol parity and corpus tests
-may enter Bazel only as deterministic tests with declared generated files and
-corpus inputs. An in-process or loopback fake-daemon harness is permitted only
-with declared inputs and an explicit test environment. Hermetic cacheable
-Bazel actions must not use an ambient real daemon, provider, external network,
-or undeclared filesystem input; inherited `HOME` is not a promotion pattern
-unless justified by later foundation work.
-
-### Non-goals and release boundary
-
-This decision does not mandate universal Bazel usage, a Bazel development
-server or HMR, immediate CI replacement, target deletion, lockfile/toolchain
-changes, or migration of frontend, JS tests, Playwright, desktop packaging,
-signing, notarization, credentials, deployment, or publishing. Signing is not
-simply Cargo-owned: it remains in the external credential-bearing release
-orchestration, outside ordinary cacheable actions.
+Checked-in generated daemon types are the build input. Code generation and freshness
+checks remain an explicit pnpm/polytoken workflow; Buck2 must not invoke an ambient
+daemon to regenerate them. protocol parity and corpus tests may enter Buck2 only as
+deterministic tests with declared generated files and corpus inputs. An in-process
+or loopback fake-daemon harness is permitted only with declared inputs and an
+explicit test environment. Hermetic cacheable Buck2 actions must not use an ambient
+real daemon, provider, external network, or undeclared filesystem input; inherited
+`HOME` is not a promotion pattern unless justified by later foundation work.
 
 ### Promotion criteria and rollback
 
-Bazel becomes authoritative only when the selected checks have parity with the
-existing Cargo/pnpm checks, all selected Bazel tests pass (including the two
-currently failing POC targets and inline-test coverage), and deterministic
-source/configuration/generated-input invalidation is demonstrated. The team
-must rerun cold, warm, incremental, and cross-workspace measurements on the
-same scenario and machine, record absolute values and ratios against both
-`docs/toolchain-baseline.md` and the POC timing table, and explain any
-correctness difference. There must be no unexplained correctness regression;
-any accepted clean-build regression requires explicit owner sign-off. The
-process must include a concrete CI fallback exercise that disables or makes
-the Bazel cache unavailable (or selects the Cargo/pnpm path) and verifies the
-existing gate completes. Dependency and BUILD-file updates must have a
-maintainable, documented procedure, including the generated-lockfile burden.
+Buck2 becomes authoritative only when the selected checks have parity with the
+existing Cargo/pnpm checks, all selected Buck2 tests pass (including full
+inline-test coverage), and deterministic source/configuration/generated-input
+invalidation is demonstrated. The team must record cold, warm, incremental, and
+cross-workspace measurements and explain any correctness difference. There must be
+no unexplained correctness regression. The process must include a concrete CI
+fallback exercise that disables the Buck2 cache and verifies the Cargo/pnpm gate
+completes.
 
-Roll out quickly but reversibly: run Bazel alongside the existing paths, retain
-Cargo/pnpm direct workflows through epic completion and as rollback selectors,
-and promote each migrated boundary only after its gates pass. If a gate fails,
-revert CI selectors or `just` entry points to Cargo/pnpm without deleting the
-direct paths. Final signed-release integration is a separate follow-up
-validation, not a gate for this migration.
+Roll out quickly but reversibly: run Buck2 alongside the existing paths, retain
+Cargo/pnpm direct workflows through epic completion and as rollback selectors, and
+promote each migrated boundary only after its gates pass. If a gate fails, revert
+CI selectors or `just` entry points to Cargo/pnpm without deleting the direct paths.
+Final signed-release integration is a separate follow-up validation, not a gate for
+this migration.
 
-**POC rationale:** The POC measured near-instant warm builds, surgical
-affected-target execution, cross-workspace cache reuse, and deterministic
-archive assembly. It also measured a slower clean build and maintenance cost,
-and left two Bazel tests failing, inline tests uncovered, a large generated
-`MODULE.bazel.lock`, and no CI, frontend build, or signing validation. Those
-are promotion blockers and follow-up work, not reasons to discard the existing
-Cargo/pnpm workflows.
+### Current state (as of this decision)
+
+Per `docs/buck2-poc-findings.md` (verdict: CONDITIONAL — not ready for broad adoption): Buck2 builds
+all 5 server-rs crates including the `pantoken-server` binary, with affected-target
+execution and a checked-in Reindeer dependency graph. The OpenSSL/ring native
+compilation blocker is resolved (Issue #119). Archive assembly and validation pass
+end-to-end. All test targets pass (3 pre-existing Cargo failures are unrelated to
+Buck2). The remote cache is opt-in via a shared `bazel-remote` REAPI instance. Cargo
+remains authoritative; Buck2 is not promoted to authoritative CI. Known maintenance
+burden: the checked-in ~335MB vendored dependency tree. These are promotion
+follow-ups, not reasons to discard the existing Cargo/pnpm workflows.
 
 ## No OpenSSL policy (Issue #117)
 
