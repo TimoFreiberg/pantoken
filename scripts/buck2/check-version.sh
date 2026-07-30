@@ -17,7 +17,7 @@
 # Pinned revisions:
 #   Buck2: 2026-07-14-1560aca2002865cd73d7cafb22c705cfb640b2bc
 #   Reindeer: efe17c7bb0b547ed07d48111ebcbeea5fa42a904
-#   Rust: 1.97.1 (aarch64-apple-darwin)
+#   Rust: 1.97.1 (aarch64-apple-darwin, x86_64-unknown-linux-gnu)
 #
 # CI bootstrap: download the prebuilt binary from GitHub releases at
 # https://github.com/facebook/buck2/releases matching the pinned revision.
@@ -121,11 +121,25 @@ RUSTC_VERBOSE=$("$RUSTC_BIN" --version --verbose 2>&1)
 HOST_TRIPLE=$(echo "$RUSTC_VERBOSE" | grep "^host:" | awk '{print $2}')
 
 if [[ "$HOST_TRIPLE" != "$ACCEPTED_HOST_TRIPLE" ]]; then
-  echo "ERROR: Host triple is $HOST_TRIPLE, expected $ACCEPTED_HOST_TRIPLE" >&2
-  echo "  Buck2 POC is tested only on $ACCEPTED_HOST_TRIPLE." >&2
-  echo "  Override with BUCK2_EXPECTED_HOST_TRIPLE if needed." >&2
-  echo "  x86_64-unknown-linux-gnu is explicitly excluded from Buck2 targets." >&2
-  exit 3
+  # If the env override is set, require an exact match. Otherwise, check
+  # against the set of supported triples.
+  if [[ -z "${BUCK2_EXPECTED_HOST_TRIPLE:-}" ]]; then
+    case "$HOST_TRIPLE" in
+      aarch64-apple-darwin|x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu)
+        : # supported
+        ;;
+      *)
+        echo "ERROR: Host triple is $HOST_TRIPLE, not in the supported set:" >&2
+        echo "  aarch64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu" >&2
+        echo "  Override with BUCK2_EXPECTED_HOST_TRIPLE if needed." >&2
+        exit 3
+        ;;
+    esac
+  else
+    echo "ERROR: Host triple is $HOST_TRIPLE, expected $ACCEPTED_HOST_TRIPLE" >&2
+    echo "  Override with BUCK2_EXPECTED_HOST_TRIPLE if needed." >&2
+    exit 3
+  fi
 fi
 
 echo "OK: Rust toolchain matches ($RUSTC_OUTPUT)"

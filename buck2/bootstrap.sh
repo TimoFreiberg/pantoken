@@ -141,7 +141,20 @@ check_rust() {
     fi
 
     if [[ "$host_triple" != "$RUST_ACCEPTED_HOST" ]]; then
-        fail "rustc host triple mismatch: got '$host_triple', expected '$RUST_ACCEPTED_HOST'. Buck2 POC is host-only aarch64-apple-darwin (override via BUCK2_EXPECTED_HOST_TRIPLE)." 3
+        # If the env override is set, require an exact match. Otherwise, check
+        # against the set of supported triples.
+        if [[ -z "${BUCK2_EXPECTED_HOST_TRIPLE:-}" ]]; then
+            case "$host_triple" in
+                aarch64-apple-darwin|x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu)
+                    : # supported
+                    ;;
+                *)
+                    fail "rustc host triple is '$host_triple', which is not in the supported set: aarch64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu. Override with BUCK2_EXPECTED_HOST_TRIPLE." 3
+                    ;;
+            esac
+        else
+            fail "rustc host triple mismatch: got '$host_triple', expected '$RUST_ACCEPTED_HOST' (set via BUCK2_EXPECTED_HOST_TRIPLE)." 3
+        fi
     fi
 
     echo "buck2-bootstrap: rust OK ($rust_version, host=$host_triple, binary=$rustc_bin)"

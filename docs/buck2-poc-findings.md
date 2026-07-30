@@ -1,7 +1,11 @@
-# Buck2 POC Findings
+# Buck2 Findings
 
-> **Decision gate: PROMOTED — additive CI gate; not yet authoritative.**
-> Buck2 is now in CI as an additive gate alongside Cargo/pnpm checks.
+> **Decision gate: PROMOTED — primary build/test system.**
+> Buck2 is now the primary local build+test system for Rust. `just check-rs` uses
+> buck2 for build+test; `just check-rs-cargo` is the Cargo fallback. The dev server
+> and desktop hub build via buck2 by default (`PANTOKEN_BUILD_SYSTEM=cargo` escape
+> hatch). The `rust-server` CI job uses buck2 on Linux; the `buck2` job runs on
+> macOS arm64. Releases remain Cargo-authored (buck2 parity comparison only).
 > The `buck2` CI job builds all 5 server crates, tests, archives, and
 > runs manifest checks on every PR/push. Parity comparison runs on every
 > release. Cargo remains authoritative for releases.
@@ -9,7 +13,7 @@
 
 ## Overview
 
-This POC evaluated Buck2 as the **sole additive** build system alongside the authoritative Cargo/pnpm
+This evaluation assessed Buck2 as the **primary** build system alongside the Cargo/pnpm
 workflows. It covers all 5 `server-rs` Rust crates (all 5 build successfully),
 Reindeer-generated third-party dependencies, and unsigned headless archive assembly.
 Cargo and pnpm remain the source of truth; Buck2 builds the same artifacts from the same sources.
@@ -122,12 +126,14 @@ Requires `just build-client` to have been run first (Buck2 consumes pre-built
 client/dist, it does not invoke pnpm/Vite).
 
 
-## Decision gate: PROMOTED — additive CI gate; not yet authoritative
+## Decision gate: PROMOTED — primary build/test system
 
-Buck2 is now in CI as an additive gate. The `buck2` CI job runs on every PR/push
-on `macos-14`, builds all 5 server-rs crates, runs all 13 test targets, builds +
-validates the unsigned headless archive, and checks target/test manifests. Remote
-cache is used for trusted PRs/pushes via Tailscale + bazel-remote.
+Buck2 is now the primary build+test system. The `rust-server` CI job runs on
+`ubuntu-latest` and uses buck2 for build+test (with remote cache for trusted
+runs). The `buck2` CI job runs on `macos-14`, builds all 5 server-rs crates,
+runs all 13 test targets, builds + validates the unsigned headless archive, and
+checks target/test manifests. `just check-rs` uses buck2 locally; the dev server
+and desktop hub build via buck2 by default.
 
 Parity comparison runs on every release (`release-prepare` job): the unsigned
 headless archive is built via both Buck2 and Cargo, then structurally compared.
@@ -138,19 +144,18 @@ does not block releases. The parity comparison is `continue-on-error: true`.
 
 | Criterion | Assessment | Verdict |
 |-----------|------------|---------|
-| Reproducibility | ✅ Pinned toolchain, locked deps, deterministic archive; ring is the sole native C dep with sandboxed `cc` build | Pass |
+| Reproducibility | ✅ Pinned toolchain, locked deps, deterministic archive; ring is the sole native C dep with sandboxed `cc` build (platform-conditional env fixups) | Pass |
 | Affected-target execution | ✅ Only dependents of changed files rebuild | Pass |
 | Test/artifact caching | ✅ Action cache works for all 5 crates; archive assembly passing | Pass |
-| CI integration | ✅ Additive `buck2` CI job on every PR/push; remote cache for trusted runs | Pass |
+| CI integration | ✅ `rust-server` job uses buck2 on Linux; `buck2` job on macOS; remote cache for trusted runs | Pass |
 | Parity comparison | ✅ Structural comparison in release-prepare (informational, non-blocking) | Pass |
 | Cross-workspace/CI reuse | ✅ Remote cache via Tailscale + bazel-remote for trusted PRs/pushes | Pass |
-| Maintainability | ⚠️ Reindeer fixups are complex but stable; ring fixup requires platform-specific env | Conditional |
+| Maintainability | ✅ Reindeer fixups use cfg-based platform sections; ring fixup is platform-portable | Pass |
 
-**Recommendation:** Buck2 is promoted to an additive CI gate. It is not yet
-authoritative — the Cargo release path remains the source of truth for signed
-and published artifacts. The 335MB vendored dependency tree remains a
-maintenance burden. Promote to authoritative after one or more release cycles
-with consistently passing parity comparisons.
+**Recommendation:** Buck2 is promoted to the primary build+test system. Cargo
+remains the fallback (`just check-rs-cargo`, `PANTOKEN_BUILD_SYSTEM=cargo`) and
+the release-authoritative path. Releases are Cargo-authored; buck2 parity
+comparison is informational.
 
 ## Timing comparison
 

@@ -1,20 +1,20 @@
 # Buck2 policy
 
-Buck2 is the additive, explicitly non-authoritative build system. Cargo remains authoritative for Rust and pnpm remains authoritative for JavaScript. The policy is intentionally narrow: it defines the supported Buck2 foundation without requiring a release migration.
+Buck2 is the primary local build and test system for the Rust server crates. Cargo remains the fallback and the release-authoritative path — release builds are Cargo-authored, with Buck2 used for parity comparison only. pnpm remains authoritative for JavaScript.
 
 ## Pins and ownership
 
-The supported Buck2 revision is `2026-07-14-1560aca2002865cd73d7cafb22c705cfb640b2bc`, verified by `buck2/bootstrap.sh` and `scripts/buck2/check-version.sh`. Reindeer must be installed from commit `efe17c7bb0b547ed7d48111ebcbeea5fa42a904`; the check script verifies that Reindeer is available, while the installer command or reviewed installation record is responsible for confirming this revision. Rust is pinned to 1.97.1 for `aarch64-apple-darwin`, matching `rust-toolchain.toml`.
+The supported Buck2 revision is `2026-07-14-1560aca2002865cd73d7cafb22c705cfb640b2bc`, verified by `buck2/bootstrap.sh` and `scripts/buck2/check-version.sh`. Reindeer must be installed from commit `efe17c7bb0b547ed7d48111ebcbeea5fa42a904`; the check script verifies that Reindeer is available, while the installer command or reviewed installation record is responsible for confirming this revision. Rust is pinned to 1.97.1 for `aarch64-apple-darwin` and `x86_64-unknown-linux-gnu`, matching `rust-toolchain.toml`.
 
 Update these pins together: edit the pin in `buck2/bootstrap.sh` and `scripts/buck2/check-version.sh`, reinstall the pinned Buck2 binary, run `just buck2-check`, then run `just buck2-build`, `just buck2-test`, and the Cargo checks. Keep the pin and generated dependency changes in one reversible diff.
 
 ## Supported platforms
 
-macOS arm64 (`aarch64-apple-darwin`) is the primary and only tested target. Linux amd64 is a follow-up: no pinned cross toolchain, linker, or sysroot exists yet. Windows is unsupported in this phase.
+macOS arm64 (`aarch64-apple-darwin`) is the primary development target. Linux amd64 (`x86_64-unknown-linux-gnu`) is supported in CI via the `rust-server` job. Linux arm64 (`aarch64-unknown-linux-gnu`) is accepted by the version check but not yet tested in CI. Windows is unsupported.
 
 ## Boundary and non-goals
 
-The initial boundary is deterministic `server-rs` Rust libraries, binaries, tests, and unsigned headless archive inputs. Buck2 consumes declared frontend outputs only; it does not run Vite, JavaScript tests, or Playwright. It does not package Tauri, sign artifacts, access credentials, deploy, or publish.
+The initial boundary is the deterministic `server-rs` Rust libraries, binaries, tests, and unsigned headless archive inputs. Buck2 also builds the server binary consumed by the dev server (`scripts/dev.ts`) and the desktop hub (`scripts/desktop/build-hub.ts`). The `PANTOKEN_BUILD_SYSTEM=cargo` env var provides an escape hatch to use Cargo instead for debugging. Buck2 consumes declared frontend outputs only; it does not run Vite, JavaScript tests, or Playwright. It does not package Tauri, sign artifacts, access credentials, deploy, or publish.
 
 All 5 server-rs crates build successfully under Buck2, including the `pantoken-server` binary (the OpenSSL gap was resolved in Issue #119 via the ece RustCrypto fork and reqwest rustls-tls switch). See the “No OpenSSL policy” decision in `docs/DECISIONS.md`. Cargo and pnpm direct workflows must remain usable.
 
@@ -89,10 +89,9 @@ Cache hit/miss rates appear in the build console summary line
 
 ## CI integration
 
-Buck2 runs in CI as an **additive gate** alongside the existing Cargo/pnpm checks.
-The `buck2` job in `.github/workflows/ci.yml` runs on `macos-14` (arm64) on every
-PR and push. It is **not** in the `release` job's `needs` list — the Cargo path
-remains authoritative for releases.
+Buck2 runs in CI as the **primary build+test gate** for the Rust server. The `rust-server` job in `.github/workflows/ci.yml` runs on `ubuntu-latest` on every PR and push: `cargo fmt --check` + `cargo clippy` + `just buck2-build` + `just buck2-build-server` + `just buck2-test` + target/test manifest checks. It uses the remote cache for trusted PRs/pushes.
+
+The `buck2` job runs on `macos-14` (arm64) as an additional gate: it builds + tests all server-rs crates, builds + validates the unsigned headless archive, and checks target/test manifests. It is **not** in the `release` job's `needs` list — the Cargo path remains authoritative for releases.
 
 ### What the `buck2` CI job does
 
@@ -140,9 +139,9 @@ published; the Buck2 archive is discarded.
 A `workflow_dispatch` input `buck2_no_cache` forces local execution (no remote
 cache). When set, the Tailscale and cache config steps are skipped, and the
 build/test steps use local-only `just` recipes. This proves the gate completes
-without the remote cache. The existing Cargo/pnpm jobs (`rust-server`,
-`web-check`, `web-e2e`, `desktop`) are the non-Buck2 fallback and remain
-unchanged.
+without the remote cache. The Cargo fallback is available via
+`PANTOKEN_BUILD_SYSTEM=cargo` for dev.ts/build-hub.ts, and `just check-rs-cargo`
+for the full Cargo fmt+clippy+nextest gate.
 
 ## Ownership
 

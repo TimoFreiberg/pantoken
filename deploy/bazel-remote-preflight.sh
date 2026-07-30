@@ -12,7 +12,7 @@
 #   --setup           render plist, create cache dir, write env file, install daemon
 #   --version         bazel-remote version (default: 2.6.2)
 #   --cache-dir       on-disk cache directory (default: /usr/local/var/bazel-remote)
-#   --max-size        max cache size in GiB (default: 500)
+#   --max-size        max cache size in GiB (default: 50)
 #   --grpc-port       gRPC listen port (default: 9092)
 #   --http-port       HTTP status port (default: 8080)
 #   --instance-name   REAPI instance name for namespacing (default: buck2)
@@ -44,7 +44,7 @@ DF_BIN="${DF_BIN:-df}"
 # ── Paths ──────────────────────────────────────────────────────────────────────
 HOME_DIR="${HOME}"
 CACHE_DIR="/usr/local/var/bazel-remote"
-MAX_SIZE="500"
+MAX_SIZE="50"
 GRPC_PORT="9092"
 HTTP_PORT="8080"
 INSTANCE_NAME="buck2"

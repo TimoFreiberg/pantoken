@@ -20,6 +20,13 @@ import { join } from "node:path";
 import { createServer, createConnection } from "node:net";
 import type { AddressInfo } from "node:net";
 import { spawnManaged, sleep } from "./lib/node-compat.js";
+import { resolveServerBinary } from "./lib/build-server.js";
+
+// Re-export for testability (dev.ts is a script, not importable in tests)
+export { parseBuck2ShowOutput } from "./lib/build-server.js";
+
+// Repo root — used for buck2 build invocations.
+const repoRoot = process.cwd();
 
 // Ask the OS for an unused TCP port (bind :0, read it back, release). Used on the auto-port
 // paths (Claude_Preview's $PORT, e2e's PANTOKEN_AUTO_PORT) so parallel — or leaked — instances
@@ -122,12 +129,28 @@ const backendEnv = {
 // still booting — a tool like Claude_Preview returns as soon as the port listens,
 // catching the client mid-reconnect-backoff with a stale "Offline" banner and an
 // empty session list. Gating on /health makes the first WS connect succeed.
-const server = spawnManaged(["cargo", "run", "--bin", "pantoken-server"], {
-  cwd: "server-rs",
-  env: backendEnv,
-  stdout: "inherit",
-  stderr: "inherit",
-});
+//
+// PANTOKEN_BUILD_SYSTEM=buck2 (default) builds via Buck2 and spawns the binary
+// directly. PANTOKEN_BUILD_SYSTEM=cargo falls back to `cargo run` for debugging.
+const buildSystem = process.env.PANTOKEN_BUILD_SYSTEM ?? "buck2";
+let server: ReturnType<typeof spawnManaged>;
+if (buildSystem === "cargo") {
+  // Cargo fallback: use `cargo run` (legacy path, simplest for debugging)
+  server = spawnManaged(["cargo", "run", "--bin", "pantoken-server"], {
+    cwd: "server-rs",
+    env: backendEnv,
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+} else {
+  // Buck2 path: build the binary, then spawn it directly
+  const serverBin = await resolveServerBinary(buildSystem, repoRoot);
+  server = spawnManaged([serverBin], {
+    env: backendEnv,
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+}
 
 async function waitForHealth(base: string, timeoutMs = 120_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;

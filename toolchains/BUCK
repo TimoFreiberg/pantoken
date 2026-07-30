@@ -1,13 +1,12 @@
-# Buck2 toolchain configuration for the pantoken Buck2 POC.
+# Buck2 toolchain configuration for the pantoken project.
 #
 # Uses the prelude's demo toolchains which register system-provided
 # toolchains for Rust, CXX, genrule, and test execution.
 # The `buck2-check` preflight script verifies the exact rustc version,
 # host/target triple, and edition before any Buck2 graph command.
 #
-# POC target scope: host-only aarch64-apple-darwin.
-# x86_64-unknown-linux-gnu is explicitly excluded from Buck2 targets because
-# this POC does not provide a pinned Linux cross toolchain/linker/sysroot.
+# Supported platforms: aarch64-apple-darwin, x86_64-unknown-linux-gnu,
+# aarch64-unknown-linux-gnu.
 
 load("@prelude//toolchains:demo.bzl", "system_demo_toolchains")
 

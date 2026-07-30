@@ -35,22 +35,25 @@ See `docs/DESIGN.md` for architecture, `docs/DECISIONS.md` for settled calls, `d
   the toolchain file for every `cargo` command. See
   [`docs/toolchain-baseline.md`](docs/toolchain-baseline.md) for the full
   baseline (versions, checks, timings, and how to reproduce).
-- **Buck2 is the additive build system — Cargo/pnpm remain authoritative.**
+- **Buck2 is the primary build/test system — Cargo is the fallback and release path.**
   Buck2 builds all 5 server-rs Rust crates (including the `pantoken-server`
   binary) with affected-target execution and a checked-in Reindeer dependency
-  graph. Buck2 is now in CI as an additive gate: the `buck2` job in
-  `.github/workflows/ci.yml` runs on `macos-14` on every PR/push, building +
-  testing all crates, building + validating the unsigned headless archive, and
-  checking target/test manifests. Remote cache is used for trusted PRs/pushes
-  via Tailscale + bazel-remote; fork PRs fall back to local-only execution.
-  A parity comparison step in `release-prepare` builds the unsigned archive via
-  both Buck2 and Cargo and compares them structurally (informational, non-blocking).
-  The OpenSSL edge is eliminated (ece RustCrypto fork + reqwest-based push
-  client); ring's `cc`-based buildscript compiles under Buck2's sandbox
-  with env fixups (see `docs/DECISIONS.md` "No OpenSSL policy"). The
-  `just buck2-*` commands are additive. See [`docs/buck2-policy.md`](docs/buck2-policy.md),
-  `docs/DECISIONS.md`, and `docs/buck2-poc-findings.md`. Requires `buck2`
-  and `reindeer` (install instructions in `buck2/bootstrap.sh`).
+  graph. `just check-rs` uses buck2 for build+test (cached when
+  `.buckconfig.remote-cache` exists); `just check-rs-cargo` is the Cargo
+  fallback. The dev server (`scripts/dev.ts`) and desktop hub
+  (`scripts/desktop/build-hub.ts`) build the server binary via buck2 by
+  default; `PANTOKEN_BUILD_SYSTEM=cargo` is the escape hatch. The `rust-server`
+  CI job uses buck2 on Linux; the `buck2` job runs on macOS arm64.
+  Remote cache is used for trusted PRs/pushes via Tailscale + bazel-remote;
+  fork PRs fall back to local-only execution. A parity comparison step in
+  `release-prepare` builds the unsigned archive via both Buck2 and Cargo and
+  compares them structurally (informational, non-blocking). The OpenSSL edge
+  is eliminated (ece RustCrypto fork + reqwest-based push client); ring's
+  `cc`-based buildscript compiles under Buck2's sandbox with platform-conditional
+  env fixups (see `docs/DECISIONS.md` "No OpenSSL policy"). See
+  [`docs/buck2-policy.md`](docs/buck2-policy.md), `docs/DECISIONS.md`, and
+  `docs/buck2-poc-findings.md`. Requires `buck2` and `reindeer` (install
+  instructions in `buck2/bootstrap.sh`).
 
 ## Stack & layout
 
@@ -87,7 +90,7 @@ PANTOKEN_DRIVER=mock just dev
 just quality                 # check + unit tests, no Rust/E2E/live work
 just check                   # aggregate TypeScript/client checks
 just test                    # unit tests
-just check-rs                # Rust fmt, clippy, and nextest
+just check-rs                # Rust fmt, clippy, and buck2 build+test
 just build-client            # client production bundle
 just e2e                    # default mock-driver Playwright suite
 just e2e-live               # corpus-backed live-driver suite
@@ -109,8 +112,8 @@ and platform-specific workflows; for example, use `pnpm exec tsc ...` for one ty
 `tsconfig.scripts.json` and `tsconfig.e2e.json` close the typecheck gap for the
 dev-tooling and Playwright trees. Keep it green. **server-rs has its own CI
 gate** (`rust-server` job in `.github/workflows/ci.yml`: `cargo fmt --check` +
-`cargo clippy --locked --all-targets -- -D warnings` + `cargo nextest run`);
-run `just check-rs` locally for the same three checks.
+`cargo clippy --locked --all-targets -- -D warnings` + buck2 build+test);
+run `just check-rs` locally for the same gate.
 
 **Single-runtime (Node + tsx):** tests run via Vitest (`pnpm run test`);
 scripts run via `tsx` (`tsx scripts/foo.ts`). `bun:test` is retired;

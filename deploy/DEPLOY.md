@@ -187,12 +187,16 @@ Download bazel-remote v2.6.2 from
 # Read-only preflight checks
 bash deploy/bazel-remote-preflight.sh
 
-# Create cache dir, render plist, install LaunchDaemon
-bash deploy/bazel-remote-preflight.sh --setup --version 2.6.2 --max-size 500
+# Create cache dir, render plist, install LaunchDaemon (50 GiB default)
+bash deploy/bazel-remote-preflight.sh --setup --version 2.6.2
 
 # Render only (don't install)
 bash deploy/bazel-remote-preflight.sh --setup --skip-daemon
 ```
+
+For the complete step-by-step guide — including Tailscale setup, GitHub
+secrets for CI, and client configuration — see
+[`docs/remote-cache-setup.md`](../docs/remote-cache-setup.md).
 
 ### Verification
 

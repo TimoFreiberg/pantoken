@@ -26,8 +26,20 @@ quality:
     just check
     just test
 
-# Full Rust formatting, clippy, and nextest gate.
+# Full Rust formatting, clippy, and buck2 build+test gate.
+# Uses buck2 for build+test (cached when .buckconfig.remote-cache exists).
+# cargo fmt + cargo clippy remain fast cargo commands (no cache benefit).
 check-rs:
+    cargo fmt --all -- --check
+    cargo clippy --locked -p pantoken-protocol -p pantoken-daemon-types -p pantoken-server -p pantoken-remote-layout -p pantoken-tar-validate --all-targets -- -D warnings
+    @if [ -f .buckconfig.remote-cache ]; then \
+        just buck2-build-cached && just buck2-build-server-cached && just buck2-test-cached; \
+    else \
+        just buck2-build && just buck2-build-server && just buck2-test; \
+    fi
+
+# Cargo-only Rust gate (fmt + clippy + nextest). Fallback for debugging.
+check-rs-cargo:
     pnpm run check:rs
 
 # Build the client production bundle.
@@ -123,9 +135,9 @@ release *args:
 publish *args:
     pnpm exec tsx scripts/desktop/publish.ts {{ args }}
 
-# --- Buck2 foundation (additive, experimental) ---
-# See docs/buck2-poc-findings.md. Cargo/pnpm remain authoritative.
-# POC target scope: host-only aarch64-apple-darwin.
+# --- Buck2 (primary build/test system for Rust) ---
+# See docs/buck2-policy.md. Cargo is the fallback (just check-rs-cargo).
+# Supported platforms: aarch64-apple-darwin, x86_64-unknown-linux-gnu.
 
 # Verify Buck2, Reindeer, and Rust toolchain versions.
 buck2-check:
@@ -138,6 +150,10 @@ buck2-build:
 # Build the pantoken-server binary via Buck2.
 buck2-build-server:
     bash scripts/buck2/check-version.sh && buck2 build '//server-rs/pantoken-server:pantoken_server'
+
+# Build pantoken-server via Buck2 and print the binary path.
+buck2-server-bin:
+    @bash scripts/buck2/check-version.sh && buck2 build --show-output '//server-rs/pantoken-server:pantoken_server' | tail -1 | awk '{print $$2}'
 
 # Run all server-rs Rust tests via Buck2 (13 targets — all build and test
 # after Issue #119 resolved the OpenSSL/ring compilation blocker).
@@ -162,6 +178,10 @@ buck2-build-cached:
 # Build the pantoken-server binary via Buck2 with remote cache.
 buck2-build-server-cached:
     bash scripts/buck2/check-version.sh && buck2 build --config-file .buckconfig.remote-cache '//server-rs/pantoken-server:pantoken_server'
+
+# Build pantoken-server via Buck2 with remote cache and print the binary path.
+buck2-server-bin-cached:
+    @bash scripts/buck2/check-version.sh && buck2 build --config-file .buckconfig.remote-cache --show-output '//server-rs/pantoken-server:pantoken_server' | tail -1 | awk '{print $$2}'
 
 # Run all server-rs Rust tests via Buck2 with remote cache.
 buck2-test-cached:

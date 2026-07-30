@@ -34,11 +34,39 @@ if [[ -z "$HOST_TRIPLE" ]]; then
   exit 1
 fi
 
+# Map the rustc host triple → Buck2/Reindeer release asset suffix.
+# Buck2 publishes Linux binaries as *-musl, but rustc reports *-gnu.
+asset_triple() {
+  case "$1" in
+    aarch64-apple-darwin)       echo "aarch64-apple-darwin" ;;
+    x86_64-unknown-linux-gnu)   echo "x86_64-unknown-linux-musl" ;;
+    aarch64-unknown-linux-gnu)  echo "aarch64-unknown-linux-musl" ;;
+    *) echo "$1" ;;
+  esac
+}
+
+ASSET_TRIPLE=$(asset_triple "$HOST_TRIPLE")
+
+# Install zstd if not available (needed for decompressing Buck2/Reindeer assets).
+# macOS runners have zstd pre-installed; ubuntu-latest does not.
+if ! command -v zstd &>/dev/null; then
+  echo "  zstd not found — installing..."
+  if command -v apt-get &>/dev/null; then
+    sudo apt-get update -qq && sudo apt-get install -y -qq zstd
+  elif command -v brew &>/dev/null; then
+    brew install zstd
+  else
+    echo "ERROR: zstd not found and no package manager available to install it." >&2
+    exit 1
+  fi
+fi
+
 INSTALL_DIR="${HOME}/.local/bin"
 mkdir -p "$INSTALL_DIR"
 
 echo "=== Installing Buck2 + Reindeer for CI ==="
 echo "  Host triple: $HOST_TRIPLE"
+echo "  Asset triple: $ASSET_TRIPLE"
 echo "  Install dir: $INSTALL_DIR"
 echo "  Buck2 pin:   ${BUCK2_DATE_TAG}-${BUCK2_REVISION}"
 echo "  Reindeer tag: ${REINDEER_TAG}"
@@ -60,7 +88,7 @@ download_asset() {
 
 # ── Install Buck2 ────────────────────────────────────────────────────────────
 install_buck2() {
-  local asset="buck2-${HOST_TRIPLE}.zst"
+  local asset="buck2-${ASSET_TRIPLE}.zst"
   local tmp_zst
   tmp_zst=$(mktemp -t buck2.XXXXXX.zst)
   local tmp_bin
@@ -83,7 +111,7 @@ install_buck2() {
 
 # ── Install Reindeer ─────────────────────────────────────────────────────────
 install_reindeer() {
-  local asset="reindeer-${HOST_TRIPLE}.zst"
+  local asset="reindeer-${ASSET_TRIPLE}.zst"
   local tmp_zst
   tmp_zst=$(mktemp -t reindeer.XXXXXX.zst)
   local tmp_bin

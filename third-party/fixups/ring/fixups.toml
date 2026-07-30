@@ -1,20 +1,33 @@
 extra_srcs = ["src/data/**", "src/ec/curve25519/ed25519/ed25519_pkcs8_v2_template.der", "src/ec/suite_b/ecdsa/ecPublicKey_p256_pkcs8_v1_template.der", "src/ec/suite_b/ecdsa/ecPublicKey_p384_pkcs8_v1_template.der"]
 
-[buildscript.run]
 # ring's buildscript compiles C files via cc-rs. The Buck2 sandbox doesn't
 # inherit the user's PATH, and the prelude's from_any_dir.py uses os.execl
 # (which does NOT search PATH) to invoke the C compiler. So we must provide
 # CC as an absolute path. We also provide PATH for rustc (via rustup) and
 # other tools, SDKROOT for system headers, and DEVELOPER_DIR for xcrun.
-# NOTE: POC-scoped to the owner's machine (aarch64-apple-darwin), same as
-# the OPENSSL_DIR justfile vars it replaces. The buck2-check preflight
-# verifies the exact rustc version.
 #
 # rustc_link_lib / rustc_link_search: ring emits
 # cargo:rustc-link-lib=static=ring_core_0_17_14_ and a link-search path for
 # the archives cc-rs produced. The prelude only translates these into
 # -l/-L rustc flags when explicitly enabled — without them the final link
 # fails with undefined ring_core_* symbols.
+#
+# Top-level [buildscript.run] fields are shared across all platforms.
+# Platform-specific env overrides use cfg sections (Reindeer deserializes
+# each cfg section as a standalone FixupConfig, so dotted keys within the
+# cfg table scope don't conflict with the top-level [buildscript.run]).
+
+[buildscript.run]
 rustc_link_lib = true
 rustc_link_search = true
-env = { OPT_LEVEL = "3", DEBUG = "false", NUM_JOBS = "1", CC = "/usr/bin/clang", CXX = "/usr/bin/clang++", AR = "/usr/bin/ar", PATH = "/usr/bin:/bin:/usr/sbin:/sbin:/Library/Developer/CommandLineTools/usr/bin:/Users/timo/.cargo/bin", SDKROOT = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk", DEVELOPER_DIR = "/Library/Developer/CommandLineTools" }
+env = { OPT_LEVEL = "3", DEBUG = "false", NUM_JOBS = "1", CXX = "/usr/bin/clang++", AR = "/usr/bin/ar" }
+
+# macOS-specific env — SDKROOT, DEVELOPER_DIR, CC=clang.
+# CC is an absolute path because the prelude's os.execl does NOT search PATH.
+# The machine-specific /Users/timo/.cargo/bin path has been removed.
+["cfg(target_os = \"macos\")"]
+buildscript.run.env = { CC = "/usr/bin/clang", PATH = "/usr/bin:/bin:/usr/sbin:/sbin:/Library/Developer/CommandLineTools/usr/bin", SDKROOT = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk", DEVELOPER_DIR = "/Library/Developer/CommandLineTools" }
+
+# Linux-specific env — no SDKROOT/DEVELOPER_DIR, CC=cc (system GCC).
+["cfg(target_os = \"linux\")"]
+buildscript.run.env = { CC = "/usr/bin/cc", CXX = "/usr/bin/c++", PATH = "/usr/bin:/bin:/usr/sbin:/sbin" }
