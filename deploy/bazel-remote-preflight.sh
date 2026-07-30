@@ -236,7 +236,8 @@ echo ""
 
 echo "--- Step 1: Create cache directory ---"
 if [[ ! -d "$CACHE_DIR" ]]; then
-  mkdir -p "$CACHE_DIR"
+  # The default cache dir (/usr/local/var/bazel-remote) requires root.
+  "$SUDO_BIN" mkdir -p "$CACHE_DIR"
   check_pass "created cache dir: $CACHE_DIR"
 else
   check_pass "cache dir already exists: $CACHE_DIR"
