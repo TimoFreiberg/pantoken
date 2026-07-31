@@ -1,59 +1,14 @@
 # AGENTS.md — working in the pantoken repo
 
-Pantoken is a personal, single-user remote-control GUI for a coding agent.
+Pantoken is a personal, single-user remote-control GUI for the polytoken coding agent.
+The codebase is Rust and Svelte, built with buck2.
+All build commands go through `just`, see `justfile`.
+
 The agent is a separate codebase, maintained by a separate author, we only build a GUI for an existing product here.
 Pantoken is (/ aims to be) a desktop GUI and a mobile app.
 The UI/UX mirror the Claude app or Codex desktop, but with focused features.
 See `docs/DESIGN.md` for architecture, `docs/DECISIONS.md` for settled calls, `docs/TODO.md` for the backlog.
 
-> **This branch is polytoken-only.** The live driver is the **polytoken** daemon,
-> with a **mock** driver for dev/e2e. `PANTOKEN_DRIVER=pi` is a hard error.
-
-## Facts that save you a wrong turn
-
-- **The live driver is `polytoken`** — an out-of-process daemon pantoken talks to over a
-  local socket/HTTP. The server's `PantokenDriver` seam has two implementors: `mock`
-  (deterministic, for dev/e2e) and `polytoken` (the live daemon). There is no in-process
-  agent SDK on this branch; `PANTOKEN_DRIVER=pi` is a hard error.
-- **Ports 8787 (WS backend) and 5173 (Vite proxy) are the agent harness's own dev
-  server.** Never `kill` or `lsof -ti:8787 | xargs kill` them — that nukes the
-  harness you're talking through, and the session dies. If `EADDRINUSE` on 8787,
-  something else is holding the port; find and stop it, not the harness's process.
-- **Cargo builds share a target dir across jj worktrees.** `CARGO_TARGET_DIR`
-  is set in `.envrc` (direnv) so all jj worktrees share compiled artifacts —
-  switching worktrees goes from "recompile everything" to instant. (Buck2 has
-  its own action cache and needs none of this.) Requires direnv
-  (`brew install direnv`, then `direnv allow`). CI sets
-  `CARGO_TARGET_DIR: ${{ github.workspace }}/target` in the cargo-compiling
-  jobs (desktop, release) since direnv isn't active there.
-- **Tool versions are pinned.** pnpm is pinned via `packageManager` in
-  `package.json` (`pnpm@11.17.0`); Node via `.nvmrc` (Node 22 LTS);
-  Rust via `rust-toolchain.toml` at the repo
-  root (channel `1.97.1` + `rustfmt`/`clippy` components). rustup auto-reads
-  the toolchain file for every `cargo` command. See
-  [`docs/toolchain-baseline.md`](docs/toolchain-baseline.md) for the full
-  baseline (versions, checks, timings, and how to reproduce).
-- **Buck2 is the primary build/test system and the release-authoritative builder for
-  headless artifacts — Cargo is the local fallback.**
-  Buck2 builds all 5 server Rust crates (including the `pantoken-server`
-  binary) with affected-target execution and a checked-in Reindeer dependency
-  graph. `just check-rs` uses buck2 for clippy+build+test (remote cache auto-read
-  from `.buckconfig.local` when present). The dev server (`scripts/dev.ts`) and desktop hub
-  (`scripts/desktop/build-hub.ts`) build the server binary via buck2. The `rust-server`
-  CI job uses buck2 on Linux; the `buck2` job runs on macOS arm64.
-  Release headless artifacts are Buck2-built in CI (`build.ts --builder buck2`,
-  release-mode flags + real build SHA via `.buckconfig.ci`); `--builder cargo`
-  remains the local fallback selector. The desktop `.app` stays Tauri/Cargo-owned.
-  Remote cache is always-on via `.buckconfig.local` (auto-read by buck2)
-  with `BUCK2_TEST_FORCE_CACHE_UPLOAD=true` for uploads; trusted PRs/pushes
-  connect via Tailscale + bazel-remote; fork PRs fall back to local-only
-  execution. The OpenSSL edge
-  is eliminated (ece RustCrypto fork + reqwest-based push client); ring's
-  `cc`-based buildscript compiles under Buck2's sandbox with platform-conditional
-  env fixups (see `docs/DECISIONS.md` "No OpenSSL policy"). See
-  [`docs/buck2-policy.md`](docs/buck2-policy.md), `docs/DECISIONS.md`, and
-  `docs/buck2-poc-findings.md`. Requires `buck2` and `reindeer` (install
-  instructions in `buck2/bootstrap.sh`).
 
 ## Stack & layout
 
@@ -101,107 +56,10 @@ just release                 # signing/release workflow
 just publish                 # publishing workflow
 ```
 
-`just dev <script-args>` passes script arguments through. The `just` recipes are thin
-wrappers around the authoritative package scripts and Rust commands. Direct `pnpm`,
-`pnpm exec`, `cargo`, and Playwright commands remain supported for targeted debugging,
-individual typechecks, Rust package selection, CI-specific setup, browser installation,
-and platform-specific workflows; for example, use `pnpm exec tsc ...` for one typecheck or
-`cd server && cargo run` to run the Rust server directly.
-
-`pnpm run check` runs protocol + scripts + e2e + client typechecks end to end.
-`tsconfig.scripts.json` and `tsconfig.e2e.json` close the typecheck gap for the
-dev-tooling and Playwright trees. Keep it green. **server has its own CI
-gate** (`rust-server` job in `.github/workflows/ci.yml`: `cargo fmt --check` +
-`just buck2-clippy` + buck2 build+test);
-run `just check-rs` locally for the same gate.
-
-**Single-runtime (Node + tsx):** tests run via Vitest (`pnpm run test`);
-scripts run via `tsx` (`tsx scripts/foo.ts`). `bun:test` is retired;
-`vitest.config.ts` configures the runner. `scripts/lib/node-compat.ts` provides
-Node-compatible helpers (`spawnAsync`, `spawnManaged`, `isMain`, `sleep`) that
-replace Bun-specific APIs.
-
-**Implementing an issue — two paths:**
-- **CLI path** (out-of-session orchestration): `just implement-issue <issue-url>`
-  runs `scripts/implement-issue.ts`, which spawns a polytoken daemon, and
-  opens a zellij tab.
-- **Pantoken path** (in-session): invoke `@skill:implement-issue <N>` from a
-  pantoken session. The skill runs `scripts/gh-issue-fetch.sh <N>` to fetch the
-  issue body + screenshots, then drives the clarify → plan → execute → review →
-  integrate workflow. A stop hook (`.polytoken/hooks/stop-check-integration.sh`)
-  fires on every stop and redirects to `just integrate-into-main <N>` if there
-  are unpushed commits above main.
-
-**Driver note:** the server defaults to the polytoken daemon driver. Set
-`PANTOKEN_DRIVER=mock` to use the deterministic mock instead — you want this for UI dev
-without a running daemon and for the dev-bar (`/?dev`). The e2e suite sets it
-automatically; unit tests don't touch the driver at all. `PANTOKEN_DRIVER=pi` is a hard
-error (the driver was removed on this branch).
-
-A third mode, **`PANTOKEN_DRIVER=fake`**, runs the real `PolytokenDriver` over an
-*in-process, corpus-backed fake daemon*: deterministic like the mock, but it
-exercises the live driver stack (`daemon_client → event_map → driver`)
-end-to-end. It reads the frozen corpus (`server/tests/corpus`) and fails loud
-if it's absent, so it's dev/e2e-only (never shipped). The corpus-backed **live e2e
-tier** drives it: `pnpm run test:e2e:live` (separate `playwright.live.config.ts`
-over `e2e/live/`; the default `pnpm run test:e2e` mock tier — `desktop`/`mobile` —
-is unchanged). It's a deliberate subset over the frozen corpus flows, not the full
-mock suite (see `docs/DECISIONS.md` D21).
-
-**Worktree note:** if you're spawned in an isolated worktree, work there — don't
-fall back to `~/src/pantoken` (a concurrent session may be committing there; two
-agents on one working copy scramble each other's commits). A fresh worktree
-starts without `node_modules` (gitignored), so run `pnpm install` in it before
-building/testing. The e2e suite runs fully inside one checkout — it boots its own
-dev server — so a worktree can run it standalone.
-
 **Workspace creation:** always use `just create-workspace <name>` to create jj
 workspaces in this repo. It validates names, checks collisions, and ensures the
 workspace is created under `.workspaces/` from the default workspace. Never use
 `jj workspace add` directly.
-
-**Auto-port self-isolation (why `pnpm run test:e2e` and the preview "just work"):**
-the e2e suite (`PANTOKEN_AUTO_PORT=1`) and the mock preview (`scripts/dev.ts` with
-`$PORT` set) run in **auto-port mode**, which deliberately **ignores any inherited
-`PANTOKEN_PORT` / `PANTOKEN_DATA_DIR`** and grabs its own OS-assigned free backend port +
-a per-port data dir. This matters because the live pantoken **desktop app exports both
-vars into every shell it spawns** (so an agent session running inside it inherits
-`PANTOKEN_PORT=<app port>` and the app's data dir). Auto-port mode means a run launched
-from inside the app never aims at — nor fights the PID lock of — the running app's
-backend/data dir, and two concurrent agent sessions never collide either. So just run
-`pnpm run test:e2e` / launch the preview as-is; **no `env -u` or `PANTOKEN_DATA_DIR=$(mktemp -d)`
-scrubbing needed.** (Only Vite stays on a fixed port — Playwright health-checks it as a
-known URL and re-evaluates the config per worker, so it can't be a random free port;
-override `PANTOKEN_E2E_VITE_PORT` to run two e2e suites at literally the same time.)
-Bare, non-auto `pnpm run dev` still honors an explicit `PANTOKEN_PORT` (default 8787) —
-but note it would *also* inherit the app's, so prefer the auto-port preview for UI work.
-
-## Verifying the UI (agent-legible introspection)
-
-This is set up so you can verify autonomously — use it.
-- **Launch + screenshot:** the `Claude_Preview` config named `pantoken` runs the
-  **mock driver** on an **auto-assigned free port** (`autoPort`, so parallel worktree
-  sessions never fight over one hardcoded port — `scripts/dev.ts` takes the harness's
-  `$PORT` for Vite and grabs its own free backend port). It boots deterministic fixture
-  sessions + the `/?dev` dev bar, which is what you want for UI work (no running daemon
-  needed). `preview_start("pantoken")` → `preview_screenshot`; the call's returned `port`
-  is where it landed. Use `preview_resize` for mobile/light/dark. Verify text/structure
-  with `preview_snapshot`, errors with `preview_console_logs`. (`pantoken-real`, port 5173,
-  runs the real daemon driver for eyeballing live output — rarely what you want from an
-  agent.) `scripts/dev.ts` gates Vite on the server's `/health`, so the page is
-  connected on first load — no "Offline" warmup window to wait through.
-- **Drive any UI state deterministically:** open `/?dev` to get a dev bar with
-  buttons (`reply`, `confirm`, `input`, `ambient`) that push the mock to
-  that state. Or send a `{type:"mock", script}` WS message.
-- **Inspect server state directly:** `GET /debug/state` returns the full
-  authoritative `SessionState` as JSON. `curl localhost:8787/debug/state | …`.
-- Fixtures + scripts live in the Rust server's `mock_driver.rs`. Add a script there to get a
-  new reproducible UI state.
-- **Committed regression suite:** `pnpm run test:e2e` (Playwright, in `e2e/`). It
-  reuses a running `pnpm run dev` (or starts one), resets the mock via `/debug/reset`
-  in `beforeEach`, and asserts DOM across desktop + a mobile (Pixel 7) project. Add a
-  spec when you add UI. This is the repeatable feedback loop; `Claude_Preview` is for
-  live eyeballing.
 
 ## Conventions
 
