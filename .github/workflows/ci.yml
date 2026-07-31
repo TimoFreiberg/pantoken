@@ -291,10 +291,26 @@ jobs:
         with:
           authkey: ${{ secrets.TS_AUTH_KEY }}
           version: latest
+      # Fail fast when the cache is unreachable: without this, a runner that
+      # never joined the tailnet still writes a cache config and Buck2 then
+      # dies on every action with a cryptic "tcp connect error ... Operation
+      # timed out" (v0.2.97's failure — TS_AUTH_KEY was empty and the Connect
+      # to Tailscale step silently skipped). Gated on the same conditions as
+      # Connect to Tailscale; addressed by IP so MagicDNS isn't needed.
+      - name: Verify remote cache reachability
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.TS_AUTH_KEY != '' && env.BUCK2_CACHE_HOST != ''
+        env:
+          BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
+        run: |
+          if ! nc -z -w 5 "$BUCK2_CACHE_HOST" 9092; then
+            echo "::error::Remote cache ${BUCK2_CACHE_HOST}:9092 is unreachable from the runner. Check that (1) Connect to Tailscale succeeded and TS_AUTH_KEY is a valid reusable Tailscale auth key, (2) BUCK2_CACHE_HOST is the cache host's current Tailscale IP (run 'tailscale ip -4' on the host), and (3) bazel-remote is running on the host (gRPC on 9092)."
+            exit 1
+          fi
+          echo "Remote cache reachable at ${BUCK2_CACHE_HOST}:9092"
       # Generate remote cache config from secret (writes .buckconfig.local,
       # which buck2 auto-reads — no --config-file flag needed)
       - name: Configure remote cache
-        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.BUCK2_CACHE_HOST != ''
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.TS_AUTH_KEY != '' && env.BUCK2_CACHE_HOST != ''
         env:
           BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
         run: |
@@ -376,10 +392,26 @@ jobs:
         run: |
           sudo networksetup -setdnsservers Ethernet Empty
           sudo networksetup -setsearchdomains Ethernet Empty
+      # Fail fast when the cache is unreachable: without this, a runner that
+      # never joined the tailnet still writes a cache config and Buck2 then
+      # dies on every action with a cryptic "tcp connect error ... Operation
+      # timed out" (v0.2.97's failure — TS_AUTH_KEY was empty and the Connect
+      # to Tailscale step silently skipped). Gated on the same conditions as
+      # Connect to Tailscale; addressed by IP so MagicDNS isn't needed.
+      - name: Verify remote cache reachability
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.TS_AUTH_KEY != '' && env.BUCK2_CACHE_HOST != ''
+        env:
+          BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
+        run: |
+          if ! nc -z -w 5 "$BUCK2_CACHE_HOST" 9092; then
+            echo "::error::Remote cache ${BUCK2_CACHE_HOST}:9092 is unreachable from the runner. Check that (1) Connect to Tailscale succeeded and TS_AUTH_KEY is a valid reusable Tailscale auth key, (2) BUCK2_CACHE_HOST is the cache host's current Tailscale IP (run 'tailscale ip -4' on the host), and (3) bazel-remote is running on the host (gRPC on 9092)."
+            exit 1
+          fi
+          echo "Remote cache reachable at ${BUCK2_CACHE_HOST}:9092"
       # Generate remote cache config from secret (writes .buckconfig.local,
       # which buck2 auto-reads — no --config-file flag needed)
       - name: Configure remote cache
-        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.BUCK2_CACHE_HOST != ''
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.TS_AUTH_KEY != '' && env.BUCK2_CACHE_HOST != ''
         env:
           BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
         run: |
@@ -525,10 +557,26 @@ jobs:
         run: |
           sudo networksetup -setdnsservers Ethernet Empty
           sudo networksetup -setsearchdomains Ethernet Empty
+      # Fail fast when the cache is unreachable: without this, a runner that
+      # never joined the tailnet still writes a cache config and Buck2 then
+      # dies on every action with a cryptic "tcp connect error ... Operation
+      # timed out" (v0.2.97's failure — TS_AUTH_KEY was empty and the Connect
+      # to Tailscale step silently skipped). Gated on the same conditions as
+      # Connect to Tailscale; addressed by IP so MagicDNS isn't needed.
+      - name: Verify remote cache reachability
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.TS_AUTH_KEY != '' && env.BUCK2_CACHE_HOST != ''
+        env:
+          BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
+        run: |
+          if ! nc -z -w 5 "$BUCK2_CACHE_HOST" 9092; then
+            echo "::error::Remote cache ${BUCK2_CACHE_HOST}:9092 is unreachable from the runner. Check that (1) Connect to Tailscale succeeded and TS_AUTH_KEY is a valid reusable Tailscale auth key, (2) BUCK2_CACHE_HOST is the cache host's current Tailscale IP (run 'tailscale ip -4' on the host), and (3) bazel-remote is running on the host (gRPC on 9092)."
+            exit 1
+          fi
+          echo "Remote cache reachable at ${BUCK2_CACHE_HOST}:9092"
       # Generate remote cache config from secret (writes .buckconfig.local,
       # which buck2 auto-reads — no --config-file flag needed)
       - name: Configure remote cache
-        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.BUCK2_CACHE_HOST != ''
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.TS_AUTH_KEY != '' && env.BUCK2_CACHE_HOST != ''
         env:
           BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
         run: |
@@ -650,10 +698,26 @@ jobs:
         with:
           authkey: ${{ secrets.TS_AUTH_KEY }}
           version: latest
+      # Fail fast when the cache is unreachable: without this, a runner that
+      # never joined the tailnet still writes a cache config and Buck2 then
+      # dies on every action with a cryptic "tcp connect error ... Operation
+      # timed out" (v0.2.97's failure — TS_AUTH_KEY was empty and the Connect
+      # to Tailscale step silently skipped). Gated on the same conditions as
+      # Connect to Tailscale; addressed by IP so MagicDNS isn't needed.
+      - name: Verify remote cache reachability
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.TS_AUTH_KEY != '' && env.BUCK2_CACHE_HOST != ''
+        env:
+          BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
+        run: |
+          if ! nc -z -w 5 "$BUCK2_CACHE_HOST" 9092; then
+            echo "::error::Remote cache ${BUCK2_CACHE_HOST}:9092 is unreachable from the runner. Check that (1) Connect to Tailscale succeeded and TS_AUTH_KEY is a valid reusable Tailscale auth key, (2) BUCK2_CACHE_HOST is the cache host's current Tailscale IP (run 'tailscale ip -4' on the host), and (3) bazel-remote is running on the host (gRPC on 9092)."
+            exit 1
+          fi
+          echo "Remote cache reachable at ${BUCK2_CACHE_HOST}:9092"
       # Generate remote cache config from secret (writes .buckconfig.local,
       # which buck2 auto-reads — no --config-file flag needed)
       - name: Configure remote cache
-        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.BUCK2_CACHE_HOST != ''
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.TS_AUTH_KEY != '' && env.BUCK2_CACHE_HOST != ''
         env:
           BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
         run: |
