@@ -12,6 +12,26 @@ Update these pins together: edit the pin in `buck2/bootstrap.sh` and `scripts/bu
 
 macOS arm64 (`aarch64-apple-darwin`) is the primary development target. Linux amd64 (`x86_64-unknown-linux-gnu`) is supported in CI via the `rust-server` job. Linux arm64 (`aarch64-unknown-linux-gnu`) is accepted by the version check but not yet tested in CI. Windows is unsupported.
 
+## Local setup (one-time)
+
+Buck2's `system_rust_toolchain` invokes `rustc` by bare name, and ring's
+buildscript fixup narrows the sandbox PATH to system directories
+(`/usr/bin:/bin:/usr/sbin:/sbin` on Linux, plus
+`/Library/Developer/CommandLineTools/usr/bin` on macOS). This excludes
+rustup's `~/.cargo/bin`, so `rustc` is invisible inside the sandbox. The
+prelude's `buildscript_run.py` calls `ensure_rustc_available()` before any
+buildscript, causing ring (and any `cc`-based crate) to fail with
+`rustc: command not found`.
+
+Fix: run `just setup-sandbox-rustc` once. It symlinks `rustc` into a
+sandbox-visible directory (`/Library/Developer/CommandLineTools/usr/bin` on
+macOS, `/usr/bin` on Linux). CI does this automatically via
+`scripts/ci/install-buck2-ci.sh`.
+
+The preflight check (`scripts/buck2/check-version.sh`) warns when this is
+missing. Targets that don't depend on ring (e.g. `pantoken-protocol`,
+`pantoken-daemon-types`) build fine without it.
+
 ## Boundary and non-goals
 
 The initial boundary is the deterministic `server-rs` Rust libraries, binaries, tests, and unsigned headless archive inputs. Buck2 also builds the server binary consumed by the dev server (`scripts/dev.ts`) and the desktop hub (`scripts/desktop/build-hub.ts`). Buck2 consumes declared frontend outputs only; it does not run Vite, JavaScript tests, or Playwright. It does not package Tauri, sign artifacts, access credentials, deploy, or publish.

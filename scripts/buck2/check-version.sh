@@ -165,5 +165,20 @@ else
   echo "  Install: cargo install --git $REINDEER_REPO --rev $ACCEPTED_REINDEER_COMMIT reindeer" >&2
 fi
 
+# ── Check sandbox rustc discoverability ─────────────────────────────────────
+# The system_rust_toolchain uses RunInfo(args=["rustc"]) — a bare name.
+# ring's buildscript fixup narrows the sandbox PATH to system directories,
+# excluding rustup's ~/.cargo/bin. Verify rustc is reachable on that PATH.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  SANDBOX_RUSTC="/Library/Developer/CommandLineTools/usr/bin/rustc"
+else
+  SANDBOX_RUSTC="/usr/bin/rustc"
+fi
+if [[ ! -x "$SANDBOX_RUSTC" ]]; then
+  echo "INFO: rustc not in buck2 sandbox PATH — run 'just setup-sandbox-rustc' if building ring/cc crates" >&2
+  # Non-fatal: warn only. The build will fail with a clear error if the user proceeds.
+  # This keeps the preflight usable for targets that don't touch ring (e.g. protocol, daemon-types).
+fi
+
 echo ""
 echo "All preflight checks passed."

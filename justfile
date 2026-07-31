@@ -142,6 +142,11 @@ publish *args:
 verify-rs:
     bash scripts/buck2/check-version.sh
 
+# One-time setup: symlink rustc into buck2's sandbox PATH (requires sudo).
+# Needed for ring and other cc-based crates. CI does this automatically.
+setup-sandbox-rustc:
+    bash scripts/buck2/setup-sandbox-rustc.sh
+
 # Build all server-rs Rust crates via Buck2 (uses remote cache if .buckconfig.local present).
 build-rs:
     bash scripts/buck2/check-version.sh && buck2 build '//server-rs/pantoken-protocol:pantoken_protocol' '//server-rs/pantoken-daemon-types:pantoken_daemon_types' '//server-rs/pantoken-remote-layout:pantoken_remote_layout' '//server-rs/pantoken-tar-validate:pantoken_tar_validate'
