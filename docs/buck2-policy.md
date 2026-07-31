@@ -1,6 +1,6 @@
 # Buck2 policy
 
-Buck2 is the primary local build and test system for the Rust server crates. Cargo remains the fallback and the release-authoritative path — release builds are Cargo-authored, with Buck2 used for parity comparison only. pnpm remains authoritative for JavaScript.
+Buck2 is the primary local build and test system for the Rust server crates and the **release-authoritative builder for the headless artifacts** (the unsigned archive + tar validator are built via `build.ts --builder buck2` with release-mode flags). Cargo remains the local fallback builder (`--builder cargo`) and still owns the Tauri desktop packaging path. pnpm remains authoritative for JavaScript.
 
 ## Pins and ownership
 
@@ -115,11 +115,57 @@ Cache hit/miss rates appear in the build console summary line
   poisoning — untrusted code never writes to the shared cache. Same-repo
   PRs and pushes connect to Tailscale and use the remote cache.
 
+## Release mode
+
+Release headless artifacts are built via `build.ts --builder buck2` (CI's
+`release-prepare` / `release-prepare-linux` jobs; see "Release builds in CI"
+below). The build writes `.buckconfig.ci` (gitignored) with a `[pantoken]`
+section and passes it via `--config-file`:
+
+```ini
+[pantoken]
+version = <tag version>
+build_sha = <40-hex build SHA>
+release_build = 1
+```
+
+Config values participate in the action cache key (same mechanism as the root
+`BUCK`'s `version_file`/`build_sha_file`), so dev and release builds get
+separate cache entries and coexist in the remote cache.
+
+`release_build = 1` switches on release codegen flags **toolchain-level** in
+`toolchains/BUCK`: `-C opt-level=3 -C codegen-units=1 -C strip=symbols`. The
+pinned prelude's `_compute_common_args` applies `toolchain_info.rustc_flags`
+to every rustc invocation, so first-party crates **and** reindeer-generated
+third-party crates (tokio/axum/reqwest/ring) are optimized in the release
+binary — matching Cargo's `[profile.release]` behaviorally.
+
+Divergences from Cargo's release profile (both accepted and documented here):
+
+- **No thin LTO.** Cargo's `lto = "thin"` applies profile-wide; propagating it
+  into the reindeer-generated `third-party/BUCK` is invasive. Measured locally
+  (macOS arm64, current source, 2026-07-31): Buck2 release binary ≈ 10.08 MiB
+  vs Cargo release ≈ 10.34 MiB (Buck2 ≈ 2.5% smaller; both stripped). Parity to
+  Cargo is behavioral, not byte-identical.
+- **`build.rs` SHA validation doesn't run under Buck2.** Cargo's `build.rs`
+  enforces a 40-hex `PANTOKEN_BUILD_SHA` for release; under Buck2 the value
+  comes from the config directly. The smoke test's SHA assertion (archive
+  `BUILD_SHA` == running binary's reported `PANTOKEN_BUILD_SHA`) is the
+  backstop — it stays mandatory in CI.
+- **Relative `CARGO_MANIFEST_DIR` at runtime (latent).** The BUCK env sets
+  `CARGO_MANIFEST_DIR` relative (`server-rs/pantoken-server`), while Cargo
+  sets an absolute path; `config.rs` resolves client-dist relative to CWD at
+  runtime. The headless archive ships no client-dist and the smoke test runs
+  from the repo root, so this is latent.
+
+`--builder cargo` remains available (`build.ts --builder cargo`) as the local
+rollback selector; it builds with Cargo's release profile exactly as before.
+
 ## CI integration
 
 Buck2 runs in CI as the **primary build+test gate** for the Rust server. The `rust-server` job in `.github/workflows/ci.yml` runs on `ubuntu-latest` on every PR and push: `cargo fmt --check` + `just buck2-clippy` + `just build-rs` + `just build-server-rs` + `just test-rs` + target/test manifest checks. It uses the remote cache for trusted PRs/pushes.
 
-The `buck2` job runs on `macos-14` (arm64) as an additional gate: it runs clippy + builds + tests all server-rs crates, builds + validates the unsigned headless archive, and checks target/test manifests. It is **not** in the `release` job's `needs` list — the Cargo path remains authoritative for releases.
+The `buck2` job runs on `macos-14` (arm64) as an additional gate: it runs clippy + builds + tests all server-rs crates, builds + validates the unsigned headless archive **in the release configuration** (`release_build=1`, real version/SHA — the same config the release-prepare jobs use), and checks target/test manifests. It **is** in the `release` job's `needs` list — it is a release gate, and its release-config archive actions warm the remote cache for the tag-triggered release-prepare jobs (first tag run compiles cold; later runs and retries hit the cache).
 
 ### Clippy via Buck2
 
@@ -133,8 +179,8 @@ Clippy runs through Buck2's built-in `[clippy.json]` subtargets on every `rust_l
 4. Runs clippy on all server-rs library crates via `just buck2-clippy`.
 5. Builds all server-rs crates + the `pantoken-server` binary via `just build-rs` / `just build-server-rs`.
 6. Runs all 13 Buck2 test targets via `just test-rs`.
-7. Builds the unsigned headless archive with real `PANTOKEN_VERSION` and `PANTOKEN_BUILD_SHA` from CI env (via `.buckconfig.ci` + `--config-file`).
-8. Validates the archive via `just validate-archive-rs`.
+7. Builds the unsigned headless archive in the release configuration (via `.buckconfig.ci` with `release_build = 1` + `--config-file`).
+8. Validates the archive via `just validate-archive-rs-ci` (passes `--config-file .buckconfig.ci`, so the sh_test validates the release-config archive — plain `validate-archive-rs` would rebuild + validate a dev-config archive).
 9. Runs target manifest and test inventory checks.
 
 ### Remote cache in CI
@@ -155,17 +201,29 @@ execution automatically. This prevents cache poisoning.
 
 The CI job functions without these secrets — it falls back to local execution.
 
-### Parity comparison in release-prepare
+### Release builds in CI
 
-The `release-prepare` CI job (tag-triggered) includes additional Buck2 steps
-that build the unsigned headless archive via Buck2 and compare it structurally
-with the Cargo-built archive using `scripts/ci/buck2-parity-compare.sh`. The
-comparison checks file listing, executable permissions, VERSION content,
-BUILD_SHA content, index.html content, gzip magic, and binary sizes.
+The tag-triggered `release-prepare` (macOS arm64) and `release-prepare-linux`
+(x86_64) jobs build the signed headless artifacts entirely via Buck2:
+`pnpm exec tsx scripts/headless/build.ts --builder buck2 --tag <tag>`
+(plus `--target x86_64-unknown-linux-gnu` on Linux). `build.ts` writes
+`.buckconfig.ci` (version, build SHA, `release_build=1`), builds
+`//:pantoken_headless_unsigned` and
+`//server-rs/pantoken-tar-validate:pantoken_tar_validate`, copies them to the
+release asset paths (`target/release/headless/<asset>`,
+`target/release/pantoken-tar-validate`), then signs with minisign, verifies,
+and assembles metadata — signing secrets never enter cacheable Buck2 actions.
 
-The parity comparison uses `continue-on-error: true` — it is informational and
-does not block the release. The Cargo artifact is the one that gets signed and
-published; the Buck2 archive is discarded.
+Both jobs connect to the Tailscale remote cache (secrets-gated, skips
+gracefully), so release-config actions cached by the `buck2` gate job are
+reused across tags once populated. `release-prepare` additionally runs
+`just validate-archive-rs-ci` after the build as a hermetic gate against the
+release-config archive.
+
+The old informational Buck2⇄Cargo parity comparison step was removed from CI
+with this cutover. `scripts/ci/buck2-parity-compare.sh` stays in-tree as a
+local dev tool for manual Cargo-vs-Buck2 spot checks (structural comparison of
+two archives; not a CI gate).
 
 ### Fallback exercise
 

@@ -18,10 +18,12 @@ rust_library(
     crate = "pantoken_server",
     edition = "2024",
     # PANTOKEN_BUILD_SHA is set via build.rs in Cargo. Under Buck2, we set it
-    # directly as a rustc env var.
+    # directly as a rustc env var. Values come from the [pantoken] config
+    # section (.buckconfig.ci in CI; see root BUCK's version_file/build_sha_file
+    # for the same mechanism), so release builds embed the real SHA.
     env = {
-        "PANTOKEN_BUILD_SHA": "dev-buck2",
-        "PANTOKEN_RELEASE_BUILD": "0",
+        "PANTOKEN_BUILD_SHA": read_config("pantoken", "build_sha", "dev-buck2"),
+        "PANTOKEN_RELEASE_BUILD": "1" if read_config("pantoken", "release_build", "0") == "1" else "0",
         # CARGO_MANIFEST_DIR is used by env!() in config.rs and corpus.rs to
         # locate client/dist and tests/corpus. Cargo sets this automatically;
         # Buck2 doesn't, so we set it to the crate's source directory.
@@ -71,8 +73,8 @@ rust_test(
     crate = "pantoken_server",
     edition = "2024",
     env = {
-        "PANTOKEN_BUILD_SHA": "dev-buck2",
-        "PANTOKEN_RELEASE_BUILD": "0",
+        "PANTOKEN_BUILD_SHA": read_config("pantoken", "build_sha", "dev-buck2"),
+        "PANTOKEN_RELEASE_BUILD": "1" if read_config("pantoken", "release_build", "0") == "1" else "0",
         "CARGO_MANIFEST_DIR": "server-rs/pantoken-server",
     },
     run_env = {
@@ -121,8 +123,8 @@ rust_binary(
     srcs = ["src/main.rs"],
     edition = "2024",
     env = {
-        "PANTOKEN_BUILD_SHA": "dev-buck2",
-        "PANTOKEN_RELEASE_BUILD": "0",
+        "PANTOKEN_BUILD_SHA": read_config("pantoken", "build_sha", "dev-buck2"),
+        "PANTOKEN_RELEASE_BUILD": "1" if read_config("pantoken", "release_build", "0") == "1" else "0",
         "CARGO_MANIFEST_DIR": "server-rs/pantoken-server",
     },
     deps = [

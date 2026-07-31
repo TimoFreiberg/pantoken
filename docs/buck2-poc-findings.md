@@ -1,13 +1,14 @@
 # Buck2 Findings
 
-> **Decision gate: PROMOTED — primary build/test system.**
+> **Decision gate: PROMOTED — primary build/test system + release authority.**
 > Buck2 is now the primary local build+test system for Rust. `just check-rs` uses
 > buck2 for build+test. The dev server and desktop hub build via buck2. The
 > `rust-server` CI job uses buck2 on Linux; the `buck2` job runs on
-> macOS arm64. Releases remain Cargo-authored (buck2 parity comparison only).
-> The `buck2` CI job builds all 5 server crates, tests, archives, and
-> runs manifest checks on every PR/push. Parity comparison runs on every
-> release. Cargo remains authoritative for releases.
+> macOS arm64. **Release headless artifacts are Buck2-built** (`build.ts
+> --builder buck2`, release-mode flags via `.buckconfig.ci` with
+> `release_build=1`); the informational Buck2⇄Cargo parity comparison step was
+> retired from CI (the script stays in-tree as a local tool). Cargo remains the
+> local fallback builder and owns the Tauri desktop packaging path.
 > See `docs/buck2-policy.md` for the foundation policy and CI integration.
 
 ## Overview
@@ -32,8 +33,8 @@ Cargo and pnpm remain the source of truth; Buck2 builds the same artifacts from 
 ## POC target scope
 
 - **Host-only `aarch64-apple-darwin`** — tested on macOS arm64.
-- **x86_64-unknown-linux-gnu is excluded** — no pinned Linux cross toolchain/linker/sysroot.
-  The existing Cargo/CI Linux artifact path is unchanged.
+- **x86_64-unknown-linux-gnu** — supported in CI (the `rust-server` and
+  `release-prepare-linux` jobs; Linux release artifacts are Buck2-built).
 
 ## How to run
 
@@ -130,16 +131,14 @@ client/dist, it does not invoke pnpm/Vite).
 Buck2 is now the primary build+test system. The `rust-server` CI job runs on
 `ubuntu-latest` and uses buck2 for build+test (with remote cache for trusted
 runs). The `buck2` CI job runs on `macos-14`, builds all 5 server-rs crates,
-runs all 13 test targets, builds + validates the unsigned headless archive, and
-checks target/test manifests. `just check-rs` uses buck2 locally; the dev server
-and desktop hub build via buck2 by default.
+runs all 13 test targets, builds + validates the unsigned headless archive in
+the release configuration, and checks target/test manifests. `just check-rs`
+uses buck2 locally; the dev server and desktop hub build via buck2 by default.
 
-Parity comparison runs on every release (`release-prepare` job): the unsigned
-headless archive is built via both Buck2 and Cargo, then structurally compared.
-The Cargo artifact remains the one that gets signed and published.
-
-The `buck2` job is NOT in the `release` job's `needs` list — it gates merges but
-does not block releases. The parity comparison is `continue-on-error: true`.
+Release headless artifacts are Buck2-built (`build.ts --builder buck2`,
+release-mode flags via `.buckconfig.ci`); the old informational parity
+comparison step was removed from CI with the release cutover. The `buck2` job
+is in the `release` job's `needs` list — it is a release gate.
 
 | Criterion | Assessment | Verdict |
 |-----------|------------|---------|
@@ -147,13 +146,15 @@ does not block releases. The parity comparison is `continue-on-error: true`.
 | Affected-target execution | ✅ Only dependents of changed files rebuild | Pass |
 | Test/artifact caching | ✅ Action cache works for all 5 crates; archive assembly passing | Pass |
 | CI integration | ✅ `rust-server` job uses buck2 on Linux; `buck2` job on macOS; remote cache for trusted runs | Pass |
-| Parity comparison | ✅ Structural comparison in release-prepare (informational, non-blocking) | Pass |
+| Parity comparison | ✅ Retired from CI at the release cutover; `scripts/ci/buck2-parity-compare.sh` remains a local dev tool | Pass |
 | Cross-workspace/CI reuse | ✅ Remote cache via Tailscale + bazel-remote for trusted PRs/pushes | Pass |
 | Maintainability | ✅ Reindeer fixups use cfg-based platform sections; ring fixup is platform-portable | Pass |
 
-**Recommendation:** Buck2 is promoted to the primary build+test system. Cargo
-remains the release-authoritative path. Releases are Cargo-authored; buck2 parity
-comparison is informational.
+**Recommendation:** Buck2 is promoted to the primary build+test system and the
+release-authoritative builder for headless artifacts. Release headless builds
+run `build.ts --builder buck2` (release-mode flags via `.buckconfig.ci`);
+Cargo remains the local fallback (`--builder cargo`) and owns the Tauri desktop
+packaging path.
 
 ## Timing comparison
 

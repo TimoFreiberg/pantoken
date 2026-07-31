@@ -6,7 +6,9 @@
 // Steps:
 //   1. Run bin/pantoken-server with PANTOKEN_DRIVER=mock, bound to a non-8787 port
 //   2. Assert /health returns { ok: true }
-//   3. Assert / serves real HTML (not an error page)
+//   3. Assert / responds without crashing (HTML when a client build is present,
+//      otherwise the server's 200 "no client build" hint — the slim archive
+//      ships no client assets, so the hint is the expected response)
 //   4. Connect via WebSocket and verify the hello message contains build_sha
 //   5. Compare build_sha with the payload BUILD_SHA file
 //   6. Clean up the process
@@ -155,16 +157,21 @@ async function main(): Promise<void> {
     }
 
     // ── Check / responds (no client-dist in the slim archive, so the server
-    // returns a hint page or non-200 — we just verify it doesn't hang/crash) ──
+    // returns the hint page or non-200 — we just verify it doesn't hang/crash) ──
     console.log("Checking / responds...");
     const rootResp = await fetchText(`http://127.0.0.1:${port}/`);
-    // Without client-dist, the server returns a hint (not 200). That's fine —
-    // the archive no longer ships static assets. We just verify the server
-    // responds without crashing.
+    // Without client-dist, the server returns the "no client build" hint with
+    // status 200 (main.rs static_fallback), or a non-200. Both prove the server
+    // responds without crashing — the archive ships no client assets, so the
+    // hint page IS the expected "/" response for a headless artifact.
     if (rootResp.status === 200) {
-      if (!rootResp.text.includes("<!doctype") && !rootResp.text.includes("<html"))
-        fail(`/ returned 200 but not HTML (first 100 chars: ${rootResp.text.slice(0, 100)})`);
-      console.log(`  / served ${rootResp.text.length} bytes of HTML`);
+      if (rootResp.text.includes("<!doctype") || rootResp.text.includes("<html")) {
+        console.log(`  / served ${rootResp.text.length} bytes of HTML`);
+      } else if (rootResp.text.includes("no client build")) {
+        console.log(`  / returned the no-client-build hint (expected — slim archive)`);
+      } else {
+        fail(`/ returned 200 with unexpected body (first 100 chars: ${rootResp.text.slice(0, 100)})`);
+      }
     } else {
       console.log(`  / returned status ${rootResp.status} (expected — no client-dist in slim archive)`);
     }

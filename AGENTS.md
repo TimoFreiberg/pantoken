@@ -33,19 +33,21 @@ See `docs/DESIGN.md` for architecture, `docs/DECISIONS.md` for settled calls, `d
   the toolchain file for every `cargo` command. See
   [`docs/toolchain-baseline.md`](docs/toolchain-baseline.md) for the full
   baseline (versions, checks, timings, and how to reproduce).
-- **Buck2 is the primary build/test system — Cargo is the fallback and release path.**
+- **Buck2 is the primary build/test system and the release-authoritative builder for
+  headless artifacts — Cargo is the local fallback.**
   Buck2 builds all 5 server-rs Rust crates (including the `pantoken-server`
   binary) with affected-target execution and a checked-in Reindeer dependency
   graph. `just check-rs` uses buck2 for clippy+build+test (remote cache auto-read
   from `.buckconfig.local` when present). The dev server (`scripts/dev.ts`) and desktop hub
   (`scripts/desktop/build-hub.ts`) build the server binary via buck2. The `rust-server`
   CI job uses buck2 on Linux; the `buck2` job runs on macOS arm64.
+  Release headless artifacts are Buck2-built in CI (`build.ts --builder buck2`,
+  release-mode flags + real build SHA via `.buckconfig.ci`); `--builder cargo`
+  remains the local fallback selector. The desktop `.app` stays Tauri/Cargo-owned.
   Remote cache is always-on via `.buckconfig.local` (auto-read by buck2)
   with `BUCK2_TEST_FORCE_CACHE_UPLOAD=true` for uploads; trusted PRs/pushes
   connect via Tailscale + bazel-remote; fork PRs fall back to local-only
-  execution. A parity comparison step in
-  `release-prepare` builds the unsigned archive via both Buck2 and Cargo and
-  compares them structurally (informational, non-blocking). The OpenSSL edge
+  execution. The OpenSSL edge
   is eliminated (ece RustCrypto fork + reqwest-based push client); ring's
   `cc`-based buildscript compiles under Buck2's sandbox with platform-conditional
   env fixups (see `docs/DECISIONS.md` "No OpenSSL policy"). See

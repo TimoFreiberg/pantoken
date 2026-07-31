@@ -16,6 +16,23 @@ load("@prelude//toolchains:remote_test_execution.bzl", "remote_test_execution_to
 load("@prelude//tests:test_toolchain.bzl", "noop_test_toolchain")
 load("@prelude//toolchains:zip_file.bzl", "zip_file_toolchain")
 
+# Release mode is a config-level switch ([pantoken] release_build = 1, set via
+# .buckconfig.ci). When enabled, the toolchain passes release codegen flags to
+# EVERY rust compile — first-party and reindeer-generated third-party crates
+# alike (the prelude's `_compute_common_args` applies toolchain_info.rustc_flags
+# to every rustc invocation). Config values participate in the action cache
+# key, so dev and release builds get separate cache entries.
+#
+# Parity to Cargo's [profile.release] is behavioral, not byte-identical: thin
+# LTO is not propagated here (see docs/buck2-policy.md). With release_build=0
+# (the default), no flags are added and builds are unchanged.
+_RELEASE = read_config("pantoken", "release_build", "0") == "1"
+_RELEASE_FLAGS = (
+    ["-C", "opt-level=3", "-C", "codegen-units=1", "-C", "strip=symbols"]
+    if _RELEASE
+    else []
+)
+
 # Register only the toolchains this project uses (instead of the demo kitchen sink).
 # The Rust toolchain denies warnings to match `cargo clippy -- -D warnings`;
 # `deny_lints` applies to all Rust compilations (build, test, clippy, check subtargets).
@@ -38,6 +55,7 @@ system_rust_toolchain(
     name = "rust",
     default_edition = "2021",
     deny_lints = ["warnings"],
+    rustc_flags = _RELEASE_FLAGS,
     visibility = ["PUBLIC"],
 )
 

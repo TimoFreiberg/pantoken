@@ -599,6 +599,35 @@ remains authoritative; Buck2 is not promoted to authoritative CI. Known maintena
 burden: the checked-in ~335MB vendored dependency tree. These are promotion
 follow-ups, not reasons to discard the existing Cargo/pnpm workflows.
 
+## Buck2 release-authoritative for headless artifacts
+
+**Date:** 2026-07-31
+
+**Supersedes** the "Release assembly" part of the Issue #122 boundary above:
+Buck2 now provides the *built* headless release artifacts, not just unsigned
+inputs, for the supported macOS/Linux release matrix.
+
+**Decision:** The tag-triggered `release-prepare` / `release-prepare-linux` CI
+jobs build the signed headless artifacts entirely via Buck2 —
+`build.ts --builder buck2` — with release-mode codegen flags
+(`-C opt-level=3 -C codegen-units=1 -C strip=symbols`, toolchain-level so
+third-party crates are optimized too) and the real version/build SHA embedded
+via `.buckconfig.ci` (`release_build = 1`). Signing, verification, and metadata
+assembly remain in the pnpm/TypeScript workflow, unchanged; secrets never enter
+cacheable Buck2 actions. The informational Buck2⇄Cargo parity comparison step
+was removed from CI (immediate cutover, operator decision 2026-07-31).
+
+**Rollback selector:** `--builder cargo` remains available locally (and is the
+default when the flag is omitted); re-flipping the CI release jobs is a
+one-line change. Desktop `.app` packaging stays Tauri/Cargo-owned (Buck2 cannot
+package Tauri); the `.app`'s hub sidecar was already Buck2-built.
+
+**Known accepted divergences (documented in `docs/buck2-policy.md` "Release
+mode"):** no thin LTO under Buck2 (measured ~2.5% smaller binary locally;
+perf-only), `build.rs` SHA validation bypassed (smoke-test SHA assertion is
+the backstop), relative `CARGO_MANIFEST_DIR` latent at runtime (headless
+archive ships no client-dist).
+
 ## No OpenSSL policy (Issue #117)
 
 **Date:** 2026-07-28

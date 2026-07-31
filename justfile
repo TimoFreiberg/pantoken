@@ -185,6 +185,14 @@ archive-rs:
 validate-archive-rs:
     bash scripts/buck2/check-version.sh && buck2 test '//:validate_headless_archive'
 
+# Validate the RELEASE-config unsigned headless archive via Buck2.
+# Passes --config-file .buckconfig.ci so the sh_test rebuilds its
+# :pantoken_headless_unsigned resource under the release configuration (the one
+# the CI jobs build with release_build=1); plain validate-archive-rs would
+# rebuild + validate a dev-config archive.
+validate-archive-rs-ci:
+    bash scripts/buck2/check-version.sh && buck2 test --config-file .buckconfig.ci '//:validate_headless_archive'
+
 # --- Buck2 remote cache (auto-read from .buckconfig.local) ---
 # Buck2 auto-reads .buckconfig.local (gitignored, contains Tailscale address),
 # so all buck2 commands use the remote cache when available and fall back to

@@ -8,11 +8,14 @@
 #   rust-server: fmt + buck2 clippy + buck2 build+test for the Rust server, on Linux.
 #                Uses the remote cache for trusted PRs/pushes.
 #   buck2:       macOS arm64 Buck2 gate — builds all server-rs crates, tests,
-#                builds + validates the unsigned headless archive, and checks
+#                builds + validates the unsigned headless archive in the RELEASE
+#                configuration (release_build=1, real version/SHA), and checks
 #                target/test manifests. Uses remote cache for trusted PRs/pushes.
 #
-# The release pipeline (tag-triggered) hangs off these jobs via `needs`; see
-# desktop/README.md "Publishing a release".
+# The release pipeline (tag-triggered) hangs off these jobs via `needs`; the
+# release-prepare jobs build the signed headless artifacts via Buck2
+# (`build.ts --builder buck2`, release config) and the desktop bundle via
+# Tauri/Cargo; see desktop/README.md "Publishing a release".
 
 name: CI
 
@@ -268,17 +271,20 @@ jobs:
       - name: Buck2 test inventory check
         run: just test-inventory-check-rs
 
-  # Additive Buck2 gate on macOS arm64. Builds all server-rs crates + tests,
-  # builds + validates the unsigned headless archive, and checks target/test
-  # manifests. Uses remote cache for trusted PRs/pushes (Tailscale + bazel-remote).
+  # Buck2 gate on macOS arm64. Builds all server-rs crates + tests, builds +
+  # validates the unsigned headless archive in the RELEASE configuration
+  # (release_build=1, real VERSION/BUILD_SHA — the same config the
+  # release-prepare jobs use), and checks target/test manifests. Uses remote
+  # cache for trusted PRs/pushes (Tailscale + bazel-remote).
   # Fork PRs and manual no-cache dispatches fall back to local-only execution.
-  # NOT in the release job's needs — parity comparison in release-prepare is
-  # informational (continue-on-error), not a release blocker.
+  # This job is a release gate: it is in the release job's needs, and its
+  # release-config archive actions warm the remote cache for the tag-triggered
+  # release-prepare jobs (first tag run compiles cold; later runs hit the cache).
   buck2:
     name: buck2 — build, test, archive (macOS arm64)
     if: github.ref_type == 'tag' || github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Release v')
     runs-on: macos-14
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       TS_AUTH_KEY: ${{ secrets.TS_AUTH_KEY }}
       BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
@@ -346,7 +352,11 @@ jobs:
           else
             echo "PANTOKEN_VERSION=$(grep '^version' desktop/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')" >> $GITHUB_ENV
           fi
-      # Build unsigned headless archive (with real VERSION/BUILD_SHA)
+      # Build unsigned headless archive in the RELEASE configuration (optimized
+      # + stripped binary with the real VERSION/BUILD_SHA). First run on a cold
+      # cache recompiles first-party + third-party crates at release flags (new
+      # action keys after the dev-config steps above); later runs warm via the
+      # remote cache.
       - name: Buck2 archive build
         env:
           PANTOKEN_BUILD_SHA: ${{ github.sha }}
@@ -355,11 +365,15 @@ jobs:
           [pantoken]
           version = $PANTOKEN_VERSION
           build_sha = $PANTOKEN_BUILD_SHA
+          release_build = 1
           EOF
           buck2 build --config-file .buckconfig.ci //:pantoken_headless_unsigned
-      # Validate the archive
+      # Validate the archive under the same release config. Plain
+      # validate-archive-rs (no --config-file) would rebuild the sh_test's
+      # :pantoken_headless_unsigned resource with the dev config and validate
+      # THAT archive — not the release archive built above.
       - name: Buck2 archive validation
-        run: just validate-archive-rs
+        run: just validate-archive-rs-ci
       # Target + test inventory checks
       - name: Buck2 target manifest check
         run: just targets-check-rs
@@ -375,9 +389,15 @@ jobs:
     name: release — prepare signed desktop + headless artifacts
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-14 # arm64 → the darwin-aarch64 artifact installed apps expect
-    timeout-minutes: 40
+    # 50m: the job stacks the Tauri cargo release build with a full cold
+    # optimized Buck2 compile on the first tag run; later runs warm via the
+    # remote cache (see the Tailscale/cache steps below).
+    timeout-minutes: 50
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      TS_AUTH_KEY: ${{ secrets.TS_AUTH_KEY }}
+      BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
+      BUCK2_TEST_FORCE_CACHE_UPLOAD: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -389,6 +409,15 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # Rust toolchain is pinned via rust-toolchain.toml; rustup auto-installs it.
+      # Install Buck2 + Reindeer — the headless release artifact is Buck2-built
+      # (build.ts --builder buck2), so the install moves up front.
+      - name: Install Buck2 + Reindeer
+        run: bash scripts/ci/install-buck2-ci.sh
+      - name: Add local bin to PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
@@ -406,6 +435,37 @@ jobs:
           --dry-run
           --repo TimoFreiberg/pantoken
           --tag-must-match "${{ github.ref_name }}"
+      # Tailscale connection for the Buck2 remote cache (tag pushes; trusted).
+      # The buck2 gate job populates the release-config entries on every PR;
+      # the release-config action keys are config+source, so they're reusable
+      # across tags once populated. Skips gracefully without the secrets.
+      - name: Connect to Tailscale
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.TS_AUTH_KEY != ''
+        uses: tailscale/github-action@v4
+        with:
+          auth-key: ${{ secrets.TS_AUTH_KEY }}
+          version: latest
+      # Generate remote cache config from secret (writes .buckconfig.local,
+      # which buck2 auto-reads — no --config-file flag needed)
+      - name: Configure remote cache
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.BUCK2_CACHE_HOST != ''
+        env:
+          BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
+        run: |
+          cat > .buckconfig.local <<EOF
+          [buck2_re_client]
+          engine_address = $BUCK2_CACHE_HOST:9092
+          action_cache_address = $BUCK2_CACHE_HOST:9092
+          cas_address = $BUCK2_CACHE_HOST:9092
+          tls = false
+          instance_name = buck2
+          [build]
+          execution_platforms = toolchains//platforms:remote_cache
+          EOF
+      # Headless release artifact via Buck2: build.ts --builder buck2 writes
+      # .buckconfig.ci (version/build_sha/release_build=1), builds the archive
+      # + tar validator, and continues with signing + verification + metadata.
+      # Secrets never enter cacheable Buck2 actions (docs/buck2-policy.md).
       - name: Build headless release artifact
         env:
           PANTOKEN_BUILD_SHA: ${{ github.sha }}
@@ -413,44 +473,12 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_TEXT: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_TEXT }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-        run: pnpm exec tsx scripts/headless/build.ts --tag "${{ github.ref_name }}"
-      # ── Buck2 parity comparison (additive, informational) ──────────────────
-      # Builds the unsigned headless archive via Buck2 and compares it
-      # structurally with the Cargo-built archive. The Cargo artifact is the
-      # one that proceeds to signing and publishing — the Buck2 archive is
-      # discarded. continue-on-error: the release proceeds even if parity fails.
-      - name: Install Buck2 + Reindeer
-        run: bash scripts/ci/install-buck2-ci.sh
-      - name: Add local bin to PATH
-        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-      - name: Build unsigned headless archive via Buck2
-        env:
-          PANTOKEN_BUILD_SHA: ${{ github.sha }}
-        run: |
-          PANTOKEN_VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
-          cat > .buckconfig.ci <<EOF
-          [pantoken]
-          version = $PANTOKEN_VERSION
-          build_sha = $PANTOKEN_BUILD_SHA
-          EOF
-          buck2 build --config-file .buckconfig.ci //:pantoken_headless_unsigned
-      - name: Validate Buck2-built archive
-        run: just validate-archive-rs
-      - name: Compare Buck2 vs Cargo archives (parity check)
-        continue-on-error: true
-        env:
-          CARGO_ARCHIVE: target/release/headless/pantoken-headless-macos-aarch64.tar.gz
-        run: |
-          BUCK2_ARCHIVE=$(buck2 build --show-output //:pantoken_headless_unsigned | tail -1 | awk '{print $2}')
-          if [[ -z "$BUCK2_ARCHIVE" || ! -f "$BUCK2_ARCHIVE" ]]; then
-            echo "ERROR: could not locate Buck2 archive output" >&2
-            exit 1
-          fi
-          bash scripts/ci/buck2-parity-compare.sh "$BUCK2_ARCHIVE" "$CARGO_ARCHIVE"
-      # ── End Buck2 parity comparison ─────────────────────────────────────────
+        run: pnpm exec tsx scripts/headless/build.ts --builder buck2 --tag "${{ github.ref_name }}"
+      # Extra hermetic gate: run the archive sh_test against the release-config
+      # Buck2 archive (validate-archive-rs-ci passes --config-file .buckconfig.ci,
+      # so the test validates the archive built above, not a dev-config one).
+      - name: Validate Buck2-built archive (release config)
+        run: just validate-archive-rs-ci
       - name: Install trusted tar validator for preparation
         run: test -x target/release/pantoken-tar-validate
       - name: Validate headless artifact
@@ -489,9 +517,14 @@ jobs:
     name: release — prepare Linux x86_64 headless artifact
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 40m: cold Buck2 release compile on the first tag run; later runs warm
+    # via the remote cache (see the Tailscale/cache steps below).
+    timeout-minutes: 40
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      TS_AUTH_KEY: ${{ secrets.TS_AUTH_KEY }}
+      BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
+      BUCK2_TEST_FORCE_CACHE_UPLOAD: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -503,6 +536,16 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # Rust toolchain is pinned via rust-toolchain.toml; rustup auto-installs it.
+      # Install Buck2 + Reindeer — the headless release artifact is Buck2-built
+      # (build.ts --builder buck2). The install script handles
+      # x86_64-unknown-linux-gnu (installs zstd, symlinks rustc into /usr/bin).
+      - name: Install Buck2 + Reindeer
+        run: bash scripts/ci/install-buck2-ci.sh
+      - name: Add local bin to PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
@@ -512,6 +555,33 @@ jobs:
           sudo apt-get install -y -qq minisign
       - name: Check minisign
         run: minisign -v
+      # Tailscale connection for the Buck2 remote cache (tag pushes; trusted).
+      # Without it the cold Linux release compile can exceed the timeout;
+      # skips gracefully without the secrets.
+      - name: Connect to Tailscale
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.TS_AUTH_KEY != ''
+        uses: tailscale/github-action@v4
+        with:
+          auth-key: ${{ secrets.TS_AUTH_KEY }}
+          version: latest
+      # Generate remote cache config from secret (writes .buckconfig.local,
+      # which buck2 auto-reads — no --config-file flag needed)
+      - name: Configure remote cache
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.BUCK2_CACHE_HOST != ''
+        env:
+          BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
+        run: |
+          cat > .buckconfig.local <<EOF
+          [buck2_re_client]
+          engine_address = $BUCK2_CACHE_HOST:9092
+          action_cache_address = $BUCK2_CACHE_HOST:9092
+          cas_address = $BUCK2_CACHE_HOST:9092
+          tls = false
+          instance_name = buck2
+          [build]
+          execution_platforms = toolchains//platforms:remote_cache
+          EOF
+      # Headless release artifact via Buck2 (release config, real version/SHA)
       - name: Build Linux x86_64 headless release artifact
         env:
           PANTOKEN_BUILD_SHA: ${{ github.sha }}
@@ -520,6 +590,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: >
           pnpm exec tsx scripts/headless/build.ts
+          --builder buck2
           --target x86_64-unknown-linux-gnu
           --tag "${{ github.ref_name }}"
       - name: Install trusted tar validator for preparation
@@ -552,7 +623,7 @@ jobs:
   release:
     name: release — publish
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [web-check, web-e2e, desktop, rust-server, release-prepare, release-prepare-linux]
+    needs: [web-check, web-e2e, desktop, rust-server, buck2, release-prepare, release-prepare-linux]
     runs-on: macos-14 # publish.ts validates the macOS bundle with plutil
     timeout-minutes: 10
     permissions:

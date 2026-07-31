@@ -1,17 +1,25 @@
 #!/usr/bin/env tsx
 // build.ts — build a headless release artifact for a supported target triple.
 //
-//   tsx scripts/headless/build.ts [--target <triple>] [--dry-run] [--skip-build] [--tag <vMAJOR.MINOR.PATCH>]
+//   tsx scripts/headless/build.ts [--builder cargo|buck2] [--target <triple>] [--dry-run] [--skip-build] [--tag <vMAJOR.MINOR.PATCH>]
 //
 // Default --target: aarch64-apple-darwin (the macOS arm64 host).
 // Supported targets are defined in release-constants.ts HEADLESS_TARGETS and
 // must match SUPPORTED_TARGET_TRIPLES in the Rust manifest module.
+//
+// Default --builder: cargo (the local fallback). CI passes --builder buck2 —
+// the release-authoritative builder for headless artifacts. Buck2 mode builds
+// //:pantoken_headless_unsigned + //server-rs/pantoken-tar-validate via
+// .buckconfig.ci (release_build=1, real version/build SHA), copies the outputs
+// to the release asset paths, and continues with the unchanged signing,
+// verification, and metadata steps.
 //
 // Produces (per target):
 //   target/release/headless/<asset>           (archive)
 //   target/release/headless/<asset>.sig      (minisign signature)
 //   target/release/headless/release-metadata.json  (aggregated, written by the
 //       CI aggregation step or publish.ts, not by a single build invocation)
+//   target/release/pantoken-tar-validate     (Buck2 mode: trusted tar validator)
 //
 // The artifact contains:
 //   VERSION              (plain text: MAJOR.MINOR.PATCH)
@@ -41,6 +49,7 @@ import {
   TAURI_UPDATER_PUBLIC_KEY,
   assertReleaseTag,
 } from "../desktop/release-constants";
+import { buildViaBuck2 } from "../lib/headless-build";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -86,11 +95,14 @@ async function run(
 
 // ── argument parsing ──
 
+type Builder = "cargo" | "buck2";
+
 function parseArgs(argv: string[]): {
   dryRun: boolean;
   skipBuild: boolean;
   tag: string | undefined;
   targetTriple: string;
+  builder: Builder;
 } {
   const dryRun = argv.includes("--dry-run");
   const skipBuild = argv.includes("--skip-build");
@@ -106,7 +118,11 @@ function parseArgs(argv: string[]): {
       : "aarch64-apple-darwin";
   // Validate against the supported matrix.
   headlessTargetForTriple(targetTriple);
-  return { dryRun, skipBuild, tag, targetTriple };
+  const builderIdx = argv.indexOf("--builder");
+  const builderRaw = builderIdx >= 0 ? argv[builderIdx + 1] : "cargo";
+  if (builderRaw !== "cargo" && builderRaw !== "buck2")
+    fail(`--builder must be 'cargo' or 'buck2' (got '${builderRaw}')`);
+  return { dryRun, skipBuild, tag, targetTriple, builder: builderRaw };
 }
 
 // ── version extraction ──
@@ -322,7 +338,7 @@ function mkdirRecursively(dir: string): void {
 // ── main ──
 
 if (isMain(import.meta.url)) {
-  const { dryRun, skipBuild, tag: cliTag, targetTriple } = parseArgs(process.argv.slice(2));
+  const { dryRun, skipBuild, tag: cliTag, targetTriple, builder } = parseArgs(process.argv.slice(2));
   const target = headlessTargetForTriple(targetTriple);
 
   // ── preflight: platform ──
@@ -343,40 +359,11 @@ if (isMain(import.meta.url)) {
   // ── build SHA ──
   const buildSha = await resolveBuildSha(cliTag);
 
-  // ── build Rust binary ──
-  let binaryPath: string;
-  if (!skipBuild) {
-    console.log("Building pantoken-server (Cargo release)...");
-    const serverRs = join(repoRoot, "server-rs");
-    await run(["cargo", "build", "--release", "-p", "pantoken-server", "-p", "pantoken-tar-validate"], {
-      cwd: repoRoot,
-      env: {
-        PANTOKEN_RELEASE_BUILD: "1",
-        PANTOKEN_BUILD_SHA: buildSha,
-      },
-    });
-    binaryPath = join(repoRoot, "target", "release", "pantoken-server");
-    if (!existsSync(binaryPath))
-      fail(`built binary not found: ${binaryPath}`);
-  } else {
-    // In skip-build mode, look for an existing binary
-    binaryPath = join(
-      repoRoot,
-      "target",
-      "release",
-      "pantoken-server",
-    );
-    if (!existsSync(binaryPath))
-      fail(
-        `--skip-build: no existing binary at ${binaryPath}. ` +
-          `Build first or ensure the binary exists.`,
-      );
-  }
-
   // ── extract version ──
   // The version comes from the release tag if provided. On macOS, the desktop
   // bundle's Info.plist is the fallback. On Linux (no desktop bundle), the tag
-  // is required for release builds.
+  // is required for release builds. Resolved before the build so Buck2 mode
+  // can write it into .buckconfig.ci.
   const tagPrefix = cliTag ? assertReleaseTag(cliTag).slice(1) : undefined;
   let version: string;
   if (tagPrefix) {
@@ -393,16 +380,77 @@ if (isMain(import.meta.url)) {
     console.log(`[warning] no --tag; using version ${version} from desktop/Cargo.toml (dev build)`);
   }
 
-  // ── assemble tar.gz ──
+  // ── build ──
   const outputDir = join(repoRoot, "target", "release", "headless");
   mkdirSync(outputDir, { recursive: true });
-  const archivePath = await assembleTarGz(
-    version,
-    buildSha,
-    outputDir,
-    binaryPath,
-    target.asset,
-  );
+
+  let archivePath: string;
+  if (builder === "buck2") {
+    // Buck2 backend: build the unsigned archive + tar validator in release
+    // mode via .buckconfig.ci and copy them to the release asset paths.
+    if (!skipBuild) {
+      console.log("Building pantoken-server (Buck2 release)...");
+      archivePath = await buildViaBuck2({
+        root: repoRoot,
+        version,
+        buildSha,
+        outputDir,
+        asset: target.asset,
+      });
+    } else {
+      // Reuse previously built artifacts (no Cargo fallback inside buck2 mode).
+      archivePath = join(outputDir, target.asset);
+      const validatorPath = join(repoRoot, "target", "release", "pantoken-tar-validate");
+      if (!existsSync(archivePath))
+        fail(
+          `--skip-build --builder buck2: no existing archive at ${archivePath}. ` +
+            `Build first (--builder buck2 without --skip-build).`,
+        );
+      if (!existsSync(validatorPath))
+        fail(
+          `--skip-build --builder buck2: no existing validator at ${validatorPath}. ` +
+            `Build first (--builder buck2 without --skip-build).`,
+        );
+    }
+  } else {
+    // ── build Rust binary (Cargo fallback) ──
+    let binaryPath: string;
+    if (!skipBuild) {
+      console.log("Building pantoken-server (Cargo release)...");
+      await run(["cargo", "build", "--release", "-p", "pantoken-server", "-p", "pantoken-tar-validate"], {
+        cwd: repoRoot,
+        env: {
+          PANTOKEN_RELEASE_BUILD: "1",
+          PANTOKEN_BUILD_SHA: buildSha,
+        },
+      });
+      binaryPath = join(repoRoot, "target", "release", "pantoken-server");
+      if (!existsSync(binaryPath))
+        fail(`built binary not found: ${binaryPath}`);
+    } else {
+      // In skip-build mode, look for an existing binary
+      binaryPath = join(
+        repoRoot,
+        "target",
+        "release",
+        "pantoken-server",
+      );
+      if (!existsSync(binaryPath))
+        fail(
+          `--skip-build: no existing binary at ${binaryPath}. ` +
+            `Build first or ensure the binary exists.`,
+        );
+    }
+
+    // ── assemble tar.gz ──
+    archivePath = await assembleTarGz(
+      version,
+      buildSha,
+      outputDir,
+      binaryPath,
+      target.asset,
+    );
+  }
   console.log(`Assembled archive: ${archivePath}`);
 
   // ── sign with minisign ──
