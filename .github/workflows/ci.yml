@@ -1,8 +1,14 @@
 # CI — every PR and every push to main. Independent jobs:
 #   web-check:   typechecks (protocol/scripts/e2e/parity/svelte) + unit tests.
-#   web-e2e:     the Playwright e2e suite, sharded across isolated mock-driver
+#   detect-changes: fast paths-filter gate for web-e2e on PRs. Skips e2e when no
+#                e2e-relevant files changed (docs-only, buck2 config, .github/, etc.).
+#                Tags, pushes, and manual dispatches bypass the gate via web-e2e's
+#                if: and always run. Uses !cancelled() so a detect-changes failure
+#                never blocks a release (web-e2e runs on tags regardless).
+#   web-e2e:     the Playwright e2e suite, sharded 4 ways across isolated mock-driver
 #                runners. Each shard boots its own dev server on auto-assigned ports;
 #                Vite serves the client, so no production client build runs here.
+#                On PRs, only runs when detect-changes reports e2e-relevant=true.
 #   desktop:     fmt + clippy for the Tauri shell, on macOS because that's the only
 #                target the shell builds for. The hub sidecar must be compiled first —
 #                tauri-build stages `externalBin` at compile time and errors if missing.
@@ -67,15 +73,49 @@ jobs:
       - run: pnpm run check
       - run: pnpm run test
 
+  detect-changes:
+    name: detect changes
+    # Fast paths-filter gate for web-e2e on PRs. Not a release gate — tags,
+    # pushes, and manual dispatches bypass it via web-e2e's if:.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      e2e-relevant: ${{ steps.filter.outputs.e2e-relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        # dorny/paths-filter diffs against the merge-base on pushes; fetch full
+        # history so shallow checkout can't cause a false "no changes" result.
+        with:
+          fetch-depth: 0
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            e2e-relevant:
+              - 'client/**'
+              - 'server-rs/**'
+              - 'protocol/**'
+              - 'e2e/**'
+              - 'scripts/**'
+              - 'playwright.config.ts'
+              - 'playwright.live.config.ts'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'rust-toolchain.toml'
+              - 'justfile'
+              - 'tsconfig*.json'
+              - '.nvmrc'
+
   web-e2e:
-    name: web — e2e (${{ matrix.shard }}/2)
-    if: github.ref_type == 'tag' || github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Release v')
+    name: web — e2e (${{ matrix.shard }}/4)
+    needs: [detect-changes]
+    if: ${{ !cancelled() && (github.ref_type == 'tag' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'Release v')) || (github.event_name == 'pull_request' && needs.detect-changes.outputs.e2e-relevant == 'true') || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -103,7 +143,7 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm run test:e2e -- --shard=${{ matrix.shard }}/2
+      - run: pnpm run test:e2e -- --shard=${{ matrix.shard }}/4
       - name: Upload traces on e2e failure
         if: failure()
         uses: actions/upload-artifact@v4
