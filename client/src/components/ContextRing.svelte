@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { SessionUsage } from "@pantoken/protocol";
   import { contextTone } from "../lib/context-tone.js";
+  import { clampContextPercent } from "../lib/context-usage.js";
 
   // A color-coded context-window gauge: a fill ring + optional % label. Shared by the
   // composer meter and the sidebar rows so the scale + colors stay identical. The host
@@ -17,14 +18,21 @@
     testid?: string;
   } = $props();
 
-  // pct drives the ring; clamp the arc to 100. Null tokens = window known but count
-  // pending (post-compaction).
-  const pct = $derived(usage.percent);
-  const arc = $derived(pct === null ? 0 : Math.max(0, Math.min(100, pct)));
+  // pct drives the ring; clamp both the arc and the label to 100 — the wire
+  // percent can exceed 100 when used_tokens > limit_tokens (the server clamps in
+  // usage_from_state, but the mock constructs SessionUsage directly and bypasses
+  // that, so this client clamp is load-bearing). Null tokens = window known but
+  // count pending (post-compaction).
+  const clamped = $derived(clampContextPercent(usage.percent));
+  const arc = $derived(clamped ?? 0);
   const pctLabel = $derived(
-    pct === null ? "—" : pct < 1 && pct > 0 ? "<1%" : `${Math.round(pct)}%`,
+    clamped === null
+      ? "—"
+      : clamped < 1 && clamped > 0
+        ? "<1%"
+        : `${Math.round(clamped)}%`,
   );
-  const tone = $derived(contextTone(pct));
+  const tone = $derived(contextTone(clamped));
 
 </script>
 

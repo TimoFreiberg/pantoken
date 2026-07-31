@@ -39,6 +39,7 @@
     caretOnLastVisualLine,
   } from "../lib/caret-visual-line.js";
   import { contextTone } from "../lib/context-tone.js";
+  import { clampContextPercent } from "../lib/context-usage.js";
   import SlashMenu from "./SlashMenu.svelte";
   import McpArgMenu from "./McpArgMenu.svelte";
   import ArgMenu from "./ArgMenu.svelte";
@@ -133,7 +134,13 @@
   );
   const contextCue = $derived(
     contextPct !== null && contextPct >= 85
-      ? { pct: Math.round(contextPct), tone: contextTone(contextPct) }
+      ? {
+          // Clamp the rendered percent at 100: the wire value can exceed 100
+          // (the server clamps in usage_from_state, but the mock bypasses it),
+          // and the cue's message is "at/over the window", not a raw overage.
+          pct: Math.round(clampContextPercent(contextPct) ?? 0),
+          tone: contextTone(contextPct),
+        }
       : null,
   );
   // Project chip → server-side directory browser (DirPicker). The path is chosen on the

@@ -364,10 +364,17 @@ fn project_goal(g: Option<Option<&CurrentGoal>>) -> Option<Option<GoalInfo>> {
 
 /// Extract pantoken's `SessionUsage` from a daemon state snapshot's `context_usage`.
 /// Returns `None` when the daemon didn't carry context_usage.
+///
+/// `percent` is clamped to 100: the daemon's `used_tokens` can legitimately
+/// exceed `limit_tokens` (e.g. after a large-output turn — `used_context_tokens`
+/// is occupancy + output), and every UI render site displays this percent, so an
+/// unclamped value would show "200%" with no user value. The raw truth stays
+/// visible: `tokens`/`context_window` are intentionally unclamped, and the
+/// meter popup renders "`tokens` / `contextWindow` tokens" from those fields.
 pub fn usage_from_state(state: Option<&SessionStateSnapshot>) -> Option<SessionUsage> {
     let cu = state.and_then(|s| s.context_usage.as_ref())?;
     let percent = if cu.limit_tokens > 0 {
-        Some((cu.used_tokens as f64 / cu.limit_tokens as f64 * 100.0).round())
+        Some(((cu.used_tokens as f64 / cu.limit_tokens as f64 * 100.0).round()).clamp(0.0, 100.0))
     } else {
         None
     };
@@ -2826,6 +2833,75 @@ mod tests {
             todos: vec![],
             turn_in_flight: Some(false),
         }
+    }
+
+    // --- usage_from_state (context-meter percent clamp) ---
+
+    #[test]
+    fn usage_from_state_clamps_percent_at_100() {
+        // used > limit: percent saturates at 100 while tokens/window stay raw —
+        // the popup's "tokens / contextWindow tokens" line remains the truth.
+        let mut state = base_state();
+        state.context_usage = Some(ContextUsageSnapshot {
+            limit_tokens: 200_000,
+            used_tokens: 400_000,
+        });
+        let usage = usage_from_state(Some(&state)).expect("context_usage present");
+        assert_eq!(usage.percent, Some(100.0));
+        assert_eq!(usage.tokens, Some(400_000));
+        assert_eq!(usage.context_window, 200_000);
+    }
+
+    #[test]
+    fn usage_from_state_at_exact_limit_is_100() {
+        let mut state = base_state();
+        state.context_usage = Some(ContextUsageSnapshot {
+            limit_tokens: 200_000,
+            used_tokens: 200_000,
+        });
+        let usage = usage_from_state(Some(&state)).expect("context_usage present");
+        assert_eq!(usage.percent, Some(100.0));
+        assert_eq!(usage.tokens, Some(200_000));
+        assert_eq!(usage.context_window, 200_000);
+    }
+
+    #[test]
+    fn usage_from_state_below_limit_is_raw_rounded_percent() {
+        let mut state = base_state();
+        state.context_usage = Some(ContextUsageSnapshot {
+            limit_tokens: 200_000,
+            used_tokens: 50_000,
+        });
+        let usage = usage_from_state(Some(&state)).expect("context_usage present");
+        assert_eq!(usage.percent, Some(25.0));
+        // Fractional rounding is unchanged (87_600 / 200_000 = 43.8% → 44).
+        state.context_usage = Some(ContextUsageSnapshot {
+            limit_tokens: 200_000,
+            used_tokens: 87_600,
+        });
+        let usage = usage_from_state(Some(&state)).expect("context_usage present");
+        assert_eq!(usage.percent, Some(44.0));
+    }
+
+    #[test]
+    fn usage_from_state_zero_limit_yields_none_percent() {
+        let mut state = base_state();
+        state.context_usage = Some(ContextUsageSnapshot {
+            limit_tokens: 0,
+            used_tokens: 123,
+        });
+        let usage = usage_from_state(Some(&state)).expect("context_usage present");
+        assert_eq!(usage.percent, None);
+        assert_eq!(usage.tokens, Some(123));
+        assert_eq!(usage.context_window, 0);
+    }
+
+    #[test]
+    fn usage_from_state_absent_context_usage_yields_none() {
+        let mut state = base_state();
+        state.context_usage = None;
+        assert!(usage_from_state(Some(&state)).is_none());
+        assert!(usage_from_state(None).is_none());
     }
 
     fn make_goal(summary: &str, lifecycle: &str) -> CurrentGoal {

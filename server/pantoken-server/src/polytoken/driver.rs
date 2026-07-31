@@ -43,6 +43,15 @@
 //!
 //! On disposal (`reload_session`/`shutdown`), the consumer's `JoinHandle` is
 //! aborted + awaited alongside the SSE-subscription teardown so no task leaks.
+//!
+//! ## Mid-turn usage polling
+//!
+//! `get_usage` returns the warm session's CACHED `SessionUsage` (via
+//! `event_map::usage_from_state`) and, while a turn is in flight, kicks a
+//! throttled (3s), single-flight `GET /state` refresh so the context meter
+//! climbs during long turns instead of freezing at the last turn boundary.
+//! Port of the TS usage poll (`polytoken-driver.ts:1318-1350`); see
+//! `USAGE_POLL_MS` and the `get_usage` doc comment.
 //
 
 use std::collections::HashMap;
@@ -52,6 +61,7 @@ use std::pin::Pin;
 use std::process::Output;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use pantoken_daemon_types::*;
 use pantoken_protocol::session_driver::{
@@ -93,6 +103,14 @@ use crate::shared::session_list::merge_session_lists;
 use crate::shared::warm_cap::eviction_plan;
 use pantoken_protocol::session_driver::ModelCatalogDiagnostic;
 
+/// Mid-turn usage-poll interval. `get_usage` returns the CACHED usage and kicks
+/// at most one `GET /state` refresh per `USAGE_POLL_MS` while a turn is in
+/// flight, so the context meter climbs during long turns instead of freezing at
+/// the last turn boundary. Mirrors TS `USAGE_POLL_MS = 3000`
+/// (`polytoken-driver.ts:159`; the mid-turn poll itself was
+/// `polytoken-driver.ts:1318-1350`).
+const USAGE_POLL_MS: Duration = Duration::from_millis(3000);
+
 /// A warm session: a daemon client + accumulator + cached state.
 struct WarmSession {
     client: Arc<DaemonClient>,
@@ -129,6 +147,14 @@ struct WarmSession {
     /// guarantees ONE consumer per session (the `debug_assert` in `install_warm`
     /// catches a second spawn at the code level).
     sse_consumer_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Mid-turn usage-poll throttle state, mirroring TS `usagePolledAt`/`usagePoll`
+    /// (`polytoken-driver.ts:151-159`): `get_usage` returns the cached usage and
+    /// kicks at most one `GET /state` refresh per `USAGE_POLL_MS` while a turn is
+    /// in flight, so the context meter climbs during long turns instead of
+    /// freezing at the last turn boundary. `usage_poll_in_flight` is the
+    /// single-flight gate; the spawned poll clears it after writing `last_state`.
+    usage_polled_at: Mutex<Instant>,
+    usage_poll_in_flight: AtomicBool,
 }
 
 type SessionViewed = dyn Fn(SessionId) -> bool + Send + Sync;
@@ -1131,6 +1157,12 @@ impl PolytokenInner {
             owned_process: Mutex::new(owned_process),
             sse_tx: Mutex::new(Some(sse_tx)),
             sse_consumer_handle: Mutex::new(None),
+            // Plain `Instant::now()` — no `now - USAGE_POLL_MS` backdating (avoids
+            // the epoch-underflow edge case on some platforms); the first mid-turn
+            // poll fires one `USAGE_POLL_MS` window in, matching the TS first-tick
+            // behavior.
+            usage_polled_at: Mutex::new(Instant::now()),
+            usage_poll_in_flight: AtomicBool::new(false),
         });
 
         // Install exactly one ordered consumer only after hydration is complete.
@@ -1644,6 +1676,59 @@ impl PantokenDriver for PolytokenDriver {
 
     fn unsubscribe(&self, id: usize) {
         self.inner.subscribers.lock().retain(|(sid, _)| *sid != id);
+    }
+
+    fn get_usage(&self, session_id: Option<SessionId>) -> Option<SessionUsage> {
+        // Port of TS `polytoken-driver.ts:1318-1350` (the `usagePoll` timer +
+        // `usagePolledAt` throttle; see `USAGE_POLL_MS` above). Why: `last_state`
+        // only refreshes on `fetchState` effects, which fire at turn boundaries —
+        // so without this the context meter freezes at the last turn boundary for
+        // the whole turn. The sync return stays the CACHED usage; when a turn is
+        // in flight we kick a throttled, single-flight `GET /state` refresh that
+        // updates `last_state`, and the hub's 1s live-refresh ticker picks the
+        // refreshed usage up on a later tick (its `last_usage_emitted` change-gate
+        // then emits `usageUpdated` only when the value differs).
+        let sid = session_id?;
+        let ws = self.inner.get_warm(&sid)?;
+        let turn_in_flight = {
+            let state = ws.last_state.read();
+            state
+                .as_ref()
+                .and_then(|s| s.turn_in_flight)
+                .unwrap_or(false)
+        };
+        if turn_in_flight {
+            // The throttle gate and the single-flight gate are checked under the
+            // `usage_polled_at` lock so two racing `get_usage` calls can't both
+            // pass them and double-fire.
+            let mut polled_at = ws.usage_polled_at.lock();
+            if !ws.usage_poll_in_flight.load(Ordering::Acquire)
+                && polled_at.elapsed() >= USAGE_POLL_MS
+            {
+                *polled_at = Instant::now();
+                ws.usage_poll_in_flight.store(true, Ordering::Release);
+                drop(polled_at);
+                let poll_ws = ws.clone();
+                tokio::spawn(async move {
+                    // Best-effort refresh, mirroring TS `usagePoll`: on error the
+                    // meter just stays at the cached value until the next
+                    // successful poll or SSE-driven `fetchState`. `last_state` is
+                    // written BEFORE the in-flight flag clears, so a
+                    // `get_usage` that observes the flag released also observes
+                    // the refreshed value.
+                    let res = poll_ws.client.state().await;
+                    if let Some(state) = res.data {
+                        *poll_ws.last_state.write() = Some(state);
+                    }
+                    poll_ws.usage_poll_in_flight.store(false, Ordering::Release);
+                });
+            }
+        }
+        // Bind the guard so the borrow lives across the call (a bare
+        // `ws.last_state.read().as_ref()` tail expression trips E0716 under the
+        // async_trait expansion).
+        let cached = ws.last_state.read();
+        event_map::usage_from_state(cached.as_ref())
     }
 
     async fn prompt(
@@ -3758,6 +3843,8 @@ mod tests {
             owned_process: Mutex::new(None),
             sse_tx: Mutex::new(None),
             sse_consumer_handle: Mutex::new(None),
+            usage_polled_at: Mutex::new(Instant::now()),
+            usage_poll_in_flight: AtomicBool::new(false),
         })
     }
 

@@ -98,6 +98,16 @@ deterministic across 7 clusters (models, queue, new-session-failure,
 context-meter, reload-session, update-card, singletons), each test-first and
 review-approved.
 
+**Status (2026-07-31):** restored the TS-era mid-turn usage poll for the live
+polytoken driver — `PolytokenDriver::get_usage` now returns the warm session's
+cached usage and kicks a throttled (one `GET /state` per 3s), single-flight
+refresh while a turn is in flight, so the context meter climbs during long
+turns instead of freezing at the last turn boundary (the Rust port had left the
+trait default `None`, so the hub's `refresh_usage` no-oped for live sessions).
+Also clamped the context-meter percent at 100 in `usage_from_state`; the raw
+token counts stay visible in the meter popup's "`tokens` / `contextWindow`
+tokens" line. Driver tests: `contract_scenarios.rs` §4 (strict gated fake).
+
 ### What is done and trustworthy
 
 - `pantoken-protocol` — wire types, fold reducer, session-driver types; ported with

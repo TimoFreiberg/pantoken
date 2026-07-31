@@ -455,6 +455,19 @@ fn mock_usage_full() -> SessionUsage {
     }
 }
 
+/// Over-window fixture: `used_tokens` above `limit_tokens` (e.g. after a
+/// large-output turn). The mock constructs `SessionUsage` directly and bypasses
+/// `usage_from_state`, so the wire percent is the raw 200.0 — the client-side
+/// `clampContextPercent` is the load-bearing clamp for this path (e2e drives it
+/// via the `contextover` script).
+fn mock_usage_over_window() -> SessionUsage {
+    SessionUsage {
+        tokens: Some(400000),
+        context_window: 200000,
+        percent: Some(200.0),
+    }
+}
+
 pub(crate) fn session_ref_for(session_id: &str) -> SessionRef {
     SessionRef {
         workspace_id: WORKSPACE_ID.into(),
@@ -4495,6 +4508,9 @@ impl PantokenDriver for MockDriver {
             }
             "contextfull" => vec![
                 ScriptStep { wait_ms: 0, event: SessionDriverEvent::UsageUpdated { base: base(), usage: mock_usage_full() } },
+            ],
+            "contextover" => vec![
+                ScriptStep { wait_ms: 0, event: SessionDriverEvent::UsageUpdated { base: base(), usage: mock_usage_over_window() } },
             ],
             // ── Non-script controls (return early, no play_script) ─────────
             "queue" => {

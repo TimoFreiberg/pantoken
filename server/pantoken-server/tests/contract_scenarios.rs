@@ -24,7 +24,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use pantoken_protocol::session_driver::{
-    HostUiRequest, NotifyLevel, SessionDriverEvent, SessionStatus,
+    HostUiRequest, NotifyLevel, SessionDriverEvent, SessionStatus, SessionUsage,
 };
 use pantoken_protocol::wire::SessionAction;
 use serde_json::{Value, json};
@@ -2222,4 +2222,241 @@ async fn command_action_error_propagation_preserves_daemon_error() {
         fake.assert_expectations_consumed()
             .expect("action-error contract consumed");
     }
+}
+
+// ---------------------------------------------------------------------------
+// 4. Mid-turn usage polling + context-meter percent clamp (`get_usage`)
+//
+// Port of the TS-era usage poll (`polytoken-driver.ts:1318-1350`,
+// `USAGE_POLL_MS = 3000`): the sync return stays the CACHED usage and, while a
+// turn is in flight, at most one throttled, single-flight `GET /state` refresh
+// keeps `last_state` (and thus the context meter) climbing mid-turn. These
+// tests use the STRICT GATED fake (stream held open, no reconnect, no
+// synthetic discontinuity → no reseed traffic) so the only `/state` calls are
+// the hydration fetch + the declared polls, in a deterministic global order.
+// ---------------------------------------------------------------------------
+
+/// A `/state` body carrying `turn_in_flight` + a `context_usage` snapshot —
+/// the two fields the usage-poll/clamp contract needs beyond the minimal
+/// `state_body` shape.
+fn state_body_with_usage(
+    title: &str,
+    used_tokens: i64,
+    limit_tokens: i64,
+    turn_in_flight: bool,
+) -> Value {
+    json!({
+        "session_title": title, "todos": [], "flags": [], "env": {},
+        "active_facet": "execute", "plugin_config": {}, "project_cwd": "/PROJECT",
+        "turn_in_flight": turn_in_flight,
+        "context_usage": {"used_tokens": used_tokens, "limit_tokens": limit_tokens}
+    })
+}
+
+fn count_state_calls(fake: &fake_daemon::FakeDaemon) -> usize {
+    fake.recorded_calls()
+        .iter()
+        .filter(|(m, p)| m == "GET" && p == "/state")
+        .count()
+}
+
+/// Warm a session against a strict gated fake; returns the driver's session id.
+async fn warm_strict_session(
+    driver: &PolytokenDriver,
+    fake: &Arc<fake_daemon::FakeDaemon>,
+) -> String {
+    driver
+        .new_session(NewSessionOptsData::default())
+        .await
+        .expect("warm path must succeed");
+    fake.session_id.clone()
+}
+
+#[tokio::test]
+async fn get_usage_returns_cached_usage_for_warm_session() {
+    let _guard = OVERRIDE_MUTEX.lock().await;
+
+    // Hydration /state carries usage over the window (300k / 200k = 150%) with
+    // a turn in flight. No poll fires: the `USAGE_POLL_MS` throttle window
+    // starts at warm and this test reads the cache immediately.
+    let scenario = synthetic_scenario(
+        "usage-warm",
+        vec![
+            http_entry(
+                "GET",
+                "/state",
+                200,
+                state_body_with_usage("main", 300_000, 200_000, true),
+            ),
+            http_entry("GET", "/history", 200, history_body(vec![], 0)),
+        ],
+    );
+    let (fake, _gate) = fake_daemon::spawn_strict_gated(scenario, "usage-warm".into()).await;
+    let fake = Arc::new(fake);
+    let _ovr = OverrideGuard::install(fake.clone());
+    let (driver, _dir) = make_driver().await;
+    let sid = warm_strict_session(&driver, &fake).await;
+
+    let usage = driver
+        .get_usage(Some(sid.clone()))
+        .expect("warm session has cached usage");
+    // Percent clamped at 100 (the raw ratio is 150%); tokens/window stay raw so
+    // the popup's "tokens / window tokens" line remains the truth.
+    assert_eq!(usage.percent, Some(100.0));
+    assert_eq!(usage.tokens, Some(300_000));
+    assert_eq!(usage.context_window, 200_000);
+
+    // Unknown / cold / absent sessions yield None.
+    assert!(driver.get_usage(Some("unknown".into())).is_none());
+    assert!(driver.get_usage(None).is_none());
+
+    // No poll fired inside the throttle window: exactly the hydration fetch.
+    assert_eq!(count_state_calls(&fake), 1);
+    fake.assert_expectations_consumed()
+        .expect("usage-warm contract consumed");
+}
+
+#[tokio::test]
+async fn mid_turn_usage_poll_is_throttled_and_single_flight() {
+    let _guard = OVERRIDE_MUTEX.lock().await;
+
+    // Hydration /state + seed /history, then ONE declared poll /state. The
+    // throttle (one fetch per 3s) + single-flight gates allow exactly one extra
+    // fetch; a second would be an undeclared request and fail the strict fake
+    // loudly (and leave an unconsumed expectation on drop).
+    let scenario = synthetic_scenario(
+        "usage-throttle",
+        vec![
+            http_entry(
+                "GET",
+                "/state",
+                200,
+                state_body_with_usage("main", 100_000, 200_000, true),
+            ),
+            http_entry("GET", "/history", 200, history_body(vec![], 0)),
+            http_entry(
+                "GET",
+                "/state",
+                200,
+                state_body_with_usage("main", 120_000, 200_000, true),
+            ),
+        ],
+    );
+    let (fake, _gate) = fake_daemon::spawn_strict_gated(scenario, "usage-throttle".into()).await;
+    let fake = Arc::new(fake);
+    let _ovr = OverrideGuard::install(fake.clone());
+    let (driver, _dir) = make_driver().await;
+    let sid = warm_strict_session(&driver, &fake).await;
+
+    let baseline = count_state_calls(&fake);
+    assert_eq!(baseline, 1, "hydration fetch only");
+
+    // Bounded retry: keep firing get_usage until the poll lands (the 3s
+    // throttle window opens inside this loop; only ONE call can pass the
+    // gates). Synchronizes against the detached tokio::spawn poll via the fake
+    // daemon's /state call log — no fixed sleeps.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(6);
+    while count_state_calls(&fake) < baseline + 1 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "usage poll never fired; calls: {:?}",
+            fake.recorded_calls()
+        );
+        let _ = driver.get_usage(Some(sid.clone()));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // A back-to-back call immediately after the poll was kicked: suppressed by
+    // the in-flight gate (and/or the 3s throttle). Exactly one extra fetch.
+    let _ = driver.get_usage(Some(sid.clone()));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        count_state_calls(&fake),
+        baseline + 1,
+        "the second get_usage must be suppressed by the throttle + single-flight gates"
+    );
+    fake.assert_expectations_consumed()
+        .expect("usage-throttle contract consumed");
+}
+
+#[tokio::test]
+async fn usage_poll_refreshes_cached_state() {
+    let _guard = OVERRIDE_MUTEX.lock().await;
+
+    // Hydration serves usage X (100k / 200k = 50%); the polls' /state serves
+    // the CHANGED usage Y (160k / 200k = 80%) — strict order declares both.
+    let scenario = synthetic_scenario(
+        "usage-refresh",
+        vec![
+            http_entry(
+                "GET",
+                "/state",
+                200,
+                state_body_with_usage("main", 100_000, 200_000, true),
+            ),
+            http_entry("GET", "/history", 200, history_body(vec![], 0)),
+            http_entry(
+                "GET",
+                "/state",
+                200,
+                state_body_with_usage("main", 160_000, 200_000, true),
+            ),
+            http_entry(
+                "GET",
+                "/state",
+                200,
+                state_body_with_usage("main", 160_000, 200_000, true),
+            ),
+        ],
+    );
+    let (fake, _gate) = fake_daemon::spawn_strict_gated(scenario, "usage-refresh".into()).await;
+    let fake = Arc::new(fake);
+    let _ovr = OverrideGuard::install(fake.clone());
+    let (driver, _dir) = make_driver().await;
+    let sid = warm_strict_session(&driver, &fake).await;
+    let baseline = count_state_calls(&fake);
+    assert_eq!(baseline, 1);
+
+    // Pre-poll: the sync return is the CACHED usage X (no fetch — the throttle
+    // window hasn't opened).
+    let cached = driver.get_usage(Some(sid.clone())).expect("cached usage");
+    assert_eq!(cached.tokens, Some(100_000));
+    assert_eq!(cached.percent, Some(50.0));
+
+    // Bounded retry until the poll lands and refreshes last_state to Y (the
+    // sync return is the cached value until the refresh completes).
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(6);
+    let mut refreshed: Option<SessionUsage> = None;
+    while !matches!(refreshed, Some(ref u) if u.tokens == Some(160_000)) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "usage never refreshed; calls: {:?}",
+            fake.recorded_calls()
+        );
+        refreshed = driver.get_usage(Some(sid.clone()));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let usage = refreshed.expect("refreshed usage");
+    assert_eq!(usage.tokens, Some(160_000));
+    assert_eq!(usage.context_window, 200_000);
+    assert_eq!(usage.percent, Some(80.0));
+
+    // The single-flight gate released: once the 3s throttle window reopens, a
+    // SECOND poll can fire (if the in-flight flag never cleared, no second
+    // fetch would ever happen). Serves the same Y recording.
+    let deadline2 = tokio::time::Instant::now() + Duration::from_secs(10);
+    while count_state_calls(&fake) < baseline + 2 {
+        assert!(
+            tokio::time::Instant::now() < deadline2,
+            "usage-poll gate never released; calls: {:?}",
+            fake.recorded_calls()
+        );
+        let _ = driver.get_usage(Some(sid.clone()));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    // Still exactly one fetch per throttle window.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(count_state_calls(&fake), baseline + 2);
+    fake.assert_expectations_consumed()
+        .expect("usage-refresh contract consumed");
 }

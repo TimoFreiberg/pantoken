@@ -2,6 +2,7 @@
   import { onDestroy } from "svelte";
   import { store } from "../lib/store.svelte.js";
   import { PERMISSION_MODES } from "../lib/composer-controls.js";
+  import { clampContextPercent } from "../lib/context-usage.js";
 
   interface Props {
     onclose: () => void;
@@ -232,7 +233,8 @@
             <span style={`width: ${Math.min(100, usage.percent ?? 0)}%`}></span>
           </div>
           <p class="section-help">
-            {Math.round(usage.percent ?? 0)}% of the context window used
+            {Math.round(clampContextPercent(usage.percent) ?? 0)}% of the context
+            window used
           </p>
         {/if}
         <div class="context-actions">

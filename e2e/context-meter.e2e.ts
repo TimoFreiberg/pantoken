@@ -36,6 +36,29 @@ test("a context-pressure cue surfaces once the window is nearly full", async ({
   await expect(page.getByTestId("context-trigger")).toHaveAttribute("aria-label", /91% used/);
 });
 
+test("an over-window usage renders 100% — never 200% — while the popup keeps raw counts", async ({
+  page,
+}) => {
+  // `contextover` pushes the mock's usage to tokens 400_000 / window 200_000
+  // (percent 200.0). The mock constructs SessionUsage directly and bypasses the
+  // server's usage_from_state clamp, so this exercises the client-side
+  // clampContextPercent path end-to-end.
+  await drive(page, "contextover");
+
+  const cue = page.getByTestId("context-cue");
+  await expect(cue).toBeVisible();
+  await expect(cue).toContainText("Context 100% full");
+
+  const trigger = page.getByTestId("context-trigger");
+  await expect(trigger).toHaveAttribute("aria-label", "Context window: 100% used");
+
+  // The raw truth stays visible: the popup keeps the unclamped token counts.
+  await page.getByTestId("context-meter").click();
+  const popup = page.getByTestId("context-popup");
+  await expect(popup).toContainText("400,000 / 200,000 tokens");
+  await expect(popup).toContainText("100% of window");
+});
+
 // Journey: the model and effort pickers live beside the context ring
 test("the model and effort pickers live beside the context ring", async ({
   page,

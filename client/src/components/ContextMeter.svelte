@@ -3,6 +3,7 @@
   import { store } from "../lib/store.svelte.js";
   import ContextRing from "./ContextRing.svelte";
   import { contextTone } from "../lib/context-tone.js";
+  import { clampContextPercent } from "../lib/context-usage.js";
 
   // Context-window fill for the active session, server-authoritative (folded from the
   // snapshot's `usage`; recomputed at turn boundaries + model switches). Undefined
@@ -124,7 +125,9 @@
             <div class="bar {tone}">
               <div class="bar-fill" style="width: {barWidth}%"></div>
             </div>
-            <div class="detail muted">{Math.round(usage.percent ?? 0)}% of window</div>
+            <div class="detail muted"
+              >{Math.round(clampContextPercent(usage.percent) ?? 0)}% of window</div
+            >
           {/if}
           <div class="actions">
             <button
@@ -155,7 +158,7 @@
       data-testid="context-trigger"
       aria-label={usage.tokens === null
         ? "Context window usage details"
-        : `Context window: ${Math.round(usage.percent ?? 0)}% used`}
+        : `Context window: ${Math.round(clampContextPercent(usage.percent) ?? 0)}% used`}
       title="Show exact context window usage"
       aria-expanded={open}
       aria-haspopup="dialog"
