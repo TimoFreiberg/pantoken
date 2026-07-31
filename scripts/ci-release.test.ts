@@ -9,7 +9,10 @@ import { resolve } from "node:path";
 //   - the Buck2⇄Cargo parity comparison step is gone (no CI consumer)
 //   - the buck2 gate job is in the release job's `needs`
 //   - the buck2 job exercises the release configuration (release_build=1)
-//     and validates the archive with the same config file
+//     and validates the archive with the same config file; those
+//     release-config steps are skipped on PRs
+//     (if: github.event_name != 'pull_request') and run on tags,
+//     non-release main pushes, and manual dispatches
 const CI_YML = resolve(import.meta.dirname, "../.github/workflows/ci.yml");
 const ci = readFileSync(CI_YML, "utf8");
 
@@ -22,6 +25,19 @@ function jobBlock(name: string): string {
     (l, i) => i > start && /^  \S/.test(l) && !l.startsWith("    "),
   );
   return lines.slice(start, end < 0 ? undefined : end).join("\n");
+}
+
+/** The PR-skip gating expression used on the buck2 job's release-config steps. */
+const PR_GATING = "if: github.event_name != 'pull_request'";
+
+/** Extract a step block (from `- name: <name>` to the next step or job end). */
+function stepBlock(job: string, name: string): string {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = job.match(
+    new RegExp(`- name: ${escaped}[\\s\\S]*?(?=\\n      - |\\n  [A-Za-z]|$)`),
+  );
+  if (!m) throw new Error(`step '${name}' not found in job block`);
+  return m[0];
 }
 
 describe("ci.yml release path (Buck2-authoritative)", () => {
@@ -102,5 +118,26 @@ describe("ci.yml release path (Buck2-authoritative)", () => {
     const recipe = justfile.match(/validate-archive-rs-ci:[\s\S]*?buck2 test[^\n]*/);
     expect(recipe).not.toBeNull();
     expect(recipe![0]).toContain("--config-file .buckconfig.ci");
+  });
+
+  it("gates the buck2 job's release-config steps on PRs", () => {
+    const block = jobBlock("buck2");
+    // Exactly the three release-config steps carry the PR-skip gating — no
+    // other buck2 step (clippy, dev build/test, manifest checks, cache setup).
+    expect(block.match(/if: github.event_name != 'pull_request'/g)).toHaveLength(3);
+    for (const step of [
+      "Determine PANTOKEN_VERSION",
+      "Buck2 archive build",
+      "Buck2 archive validation",
+    ]) {
+      expect(stepBlock(block, step)).toContain(PR_GATING);
+    }
+  });
+
+  it("does not gate the release-prepare jobs on PRs", () => {
+    // The PR-skip gating is scoped to the buck2 gate job's release-config
+    // steps; the tag-only release jobs must never inherit it.
+    expect(jobBlock("release-prepare")).not.toContain(PR_GATING);
+    expect(jobBlock("release-prepare-linux")).not.toContain(PR_GATING);
   });
 });

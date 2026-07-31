@@ -19,8 +19,10 @@
 #   buck2:       macOS arm64 Buck2 gate — builds all server crates, tests,
 #                builds + validates the unsigned headless archive in the RELEASE
 #                configuration (release_build=1, real version/SHA), and checks
-#                target/test manifests. Node-free — no client build. Uses remote
-#                cache for trusted PRs/pushes.
+#                target/test manifests. The release-config steps run on tags +
+#                non-release main pushes (and manual dispatches), not PRs.
+#                Node-free — no client build. Uses remote cache for trusted
+#                PRs/pushes.
 #
 # The release pipeline (tag-triggered) hangs off these jobs via `needs`; the
 # release-prepare jobs build the signed headless artifacts via Buck2
@@ -309,9 +311,12 @@ jobs:
   # release-prepare jobs use), and checks target/test manifests. Uses remote
   # cache for trusted PRs/pushes (Tailscale + bazel-remote).
   # Fork PRs and manual no-cache dispatches fall back to local-only execution.
-  # This job is a release gate: it is in the release job's needs, and its
-  # release-config archive actions warm the remote cache for the tag-triggered
-  # release-prepare jobs (first tag run compiles cold; later runs hit the cache).
+  # The release-config archive build + validation steps are skipped on PRs
+  # (if: github.event_name != 'pull_request'); they run on tags, non-release
+  # main pushes, and manual dispatches. This job is a release gate: it is in
+  # the release job's needs, and its release-config archive actions warm the
+  # remote cache for the tag-triggered release-prepare jobs (first tag run
+  # compiles cold; later runs hit the cache).
   buck2:
     name: buck2 — build, test, archive (macOS arm64)
     if: github.ref_type == 'tag' || github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Release v')
@@ -366,8 +371,10 @@ jobs:
       # Run all Buck2 tests
       - name: Buck2 test
         run: just test-rs
-      # Determine PANTOKEN_VERSION (from tag or desktop/Cargo.toml)
+      # Determine PANTOKEN_VERSION (from tag or desktop/Cargo.toml). Only
+      # consumed by the release-config archive build, so skip it on PRs too.
       - name: Determine PANTOKEN_VERSION
+        if: github.event_name != 'pull_request'
         run: |
           if [ "${{ github.ref_type }}" = "tag" ]; then
             echo "PANTOKEN_VERSION=$(echo ${{ github.ref_name }} | sed 's/^v//')" >> $GITHUB_ENV
@@ -378,8 +385,10 @@ jobs:
       # + stripped binary with the real VERSION/BUILD_SHA). First run on a cold
       # cache recompiles first-party + third-party crates at release flags (new
       # action keys after the dev-config steps above); later runs warm via the
-      # remote cache.
+      # remote cache. Skipped on PRs; runs on tags, non-release main pushes,
+      # and manual dispatches (see the job comment above).
       - name: Buck2 archive build
+        if: github.event_name != 'pull_request'
         env:
           PANTOKEN_BUILD_SHA: ${{ github.sha }}
         run: |
@@ -393,8 +402,10 @@ jobs:
       # Validate the archive under the same release config. Plain
       # validate-archive-rs (no --config-file) would rebuild the sh_test's
       # :pantoken_headless_unsigned resource with the dev config and validate
-      # THAT archive — not the release archive built above.
+      # THAT archive — not the release archive built above. Skipped on PRs
+      # alongside the release-config build.
       - name: Buck2 archive validation
+        if: github.event_name != 'pull_request'
         run: just validate-archive-rs-ci
       # Target + test inventory checks
       - name: Buck2 target manifest check
@@ -448,8 +459,9 @@ jobs:
       - name: Check minisign
         run: minisign -v
       # Tailscale connection for the Buck2 remote cache (tag pushes; trusted).
-      # The buck2 gate job populates the release-config entries on every PR;
-      # the release-config action keys are config+source, so they're reusable
+      # The buck2 gate job populates the release-config entries on non-release
+      # main pushes and tags (PRs skip the release-config build); the
+      # release-config action keys are config+source, so they're reusable
       # across tags once populated. Skips gracefully without the secrets.
       #
       # MUST precede the publish.ts step below: tauri's beforeBuildCommand

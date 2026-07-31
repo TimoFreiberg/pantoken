@@ -177,7 +177,7 @@ rollback selector; it builds with Cargo's release profile exactly as before.
 
 Buck2 runs in CI as the **primary build+test gate** for the Rust server. The `rust-server` job in `.github/workflows/ci.yml` runs on `ubuntu-latest` on every PR and push: `cargo fmt --check` + `just buck2-clippy` + `just build-rs` + `just build-server-rs` + `just test-rs` + target/test manifest checks. It uses the remote cache for trusted PRs/pushes.
 
-The `buck2` job runs on `macos-14` (arm64) as an additional gate: it runs clippy + builds + tests all server crates, builds + validates the unsigned headless archive **in the release configuration** (`release_build=1`, real version/SHA — the same config the release-prepare jobs use), and checks target/test manifests. It **is** in the `release` job's `needs` list — it is a release gate, and its release-config archive actions warm the remote cache for the tag-triggered release-prepare jobs (first tag run compiles cold; later runs and retries hit the cache).
+The `buck2` job runs on `macos-14` (arm64) as an additional gate: it runs clippy + builds + tests all server crates, builds + validates the unsigned headless archive **in the release configuration** (`release_build=1`, real version/SHA — the same config the release-prepare jobs use), and checks target/test manifests. It **is** in the `release` job's `needs` list — it is a release gate. PR runs skip the release-config archive build + validation (those steps carry `if: github.event_name != 'pull_request'`); they run on tags, non-release main pushes, and manual dispatches, whose release-config archive actions warm the remote cache for the tag-triggered release-prepare jobs (first tag run compiles cold; later runs and retries hit the cache). PRs still run clippy + dev build/test + manifest checks.
 
 ### Clippy via Buck2
 
@@ -190,8 +190,8 @@ Clippy runs through Buck2's built-in `[clippy.json]` subtargets on every `rust_l
 3. Runs clippy on all server library crates via `just buck2-clippy`.
 4. Builds all server crates + the `pantoken-server` binary via `just build-rs` / `just build-server-rs`.
 5. Runs all 13 Buck2 test targets via `just test-rs`.
-6. Builds the unsigned headless archive in the release configuration (via `.buckconfig.ci` with `release_build = 1` + `--config-file`).
-7. Validates the archive via `just validate-archive-rs-ci` (passes `--config-file .buckconfig.ci`, so the sh_test validates the release-config archive — plain `validate-archive-rs` would rebuild + validate a dev-config archive).
+6. Builds the unsigned headless archive in the release configuration (via `.buckconfig.ci` with `release_build = 1` + `--config-file`). **Skipped on PRs** (`if: github.event_name != 'pull_request'`); runs on tags, non-release main pushes, and manual dispatches.
+7. Validates the archive via `just validate-archive-rs-ci` (passes `--config-file .buckconfig.ci`, so the sh_test validates the release-config archive — plain `validate-archive-rs` would rebuild + validate a dev-config archive). Also skipped on PRs, alongside the build.
 8. Runs target manifest and test inventory checks.
 
 ### Remote cache in CI
@@ -227,7 +227,12 @@ and assembles metadata — signing secrets never enter cacheable Buck2 actions.
 
 Both jobs connect to the Tailscale remote cache (secrets-gated, skips
 gracefully), so release-config actions cached by the `buck2` gate job are
-reused across tags once populated. `release-prepare` additionally runs
+reused across tags once populated. Warmth comes from the gate's non-release
+main pushes and tags (PRs skip the release-config build): the last dev main
+push before a release warms the third-party release-config actions, while the
+tag run itself still recompiles the SHA-embedded server crate (inherent to
+embedding `PANTOKEN_BUILD_SHA` as a rustc env).
+`release-prepare` additionally runs
 `just validate-archive-rs-ci` after the build as a hermetic gate against the
 release-config archive.
 
