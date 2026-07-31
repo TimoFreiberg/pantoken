@@ -29,6 +29,14 @@
 # (`build.ts --builder buck2`, release config) and the desktop bundle via
 # Tauri/Cargo; see desktop/README.md "Publishing a release".
 #
+# Tailscale DNS: the macOS jobs that connect to Tailscale (buck2,
+# release-prepare) add a "Revert Tailscale DNS override" step right after
+# connecting. tailscale/github-action repoints the runner's system DNS at
+# MagicDNS (100.100.100.100), which intermittently breaks public name
+# resolution — v0.2.94/v0.2.95 died on buck2's static.crates.io fetches. The
+# remote cache is addressed by IP (BUCK2_CACHE_HOST), so the override is
+# reverted before any build runs.
+#
 # Transient network retry: every Buck2 *build* step below runs through
 # scripts/ci/retry-transient.sh, which re-runs the command once when its
 # output matches transient-looking network/DNS errors (crates.io fetches).
@@ -357,6 +365,17 @@ jobs:
         with:
           authkey: ${{ secrets.TS_AUTH_KEY }}
           version: latest
+      # tailscale/github-action on macOS unconditionally repoints the runner's
+      # system DNS at MagicDNS (100.100.100.100), which intermittently breaks
+      # public name resolution — the failure class that killed v0.2.94 and
+      # v0.2.95 releases (buck2 couldn't resolve static.crates.io). The remote
+      # cache is reached by tailnet IP (the BUCK2_CACHE_HOST secret), so
+      # MagicDNS isn't needed here: revert the override so public DNS works.
+      - name: Revert Tailscale DNS override
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.TS_AUTH_KEY != ''
+        run: |
+          sudo networksetup -setdnsservers Ethernet Empty
+          sudo networksetup -setsearchdomains Ethernet Empty
       # Generate remote cache config from secret (writes .buckconfig.local,
       # which buck2 auto-reads — no --config-file flag needed)
       - name: Configure remote cache
@@ -495,6 +514,17 @@ jobs:
         with:
           authkey: ${{ secrets.TS_AUTH_KEY }}
           version: latest
+      # tailscale/github-action on macOS unconditionally repoints the runner's
+      # system DNS at MagicDNS (100.100.100.100), which intermittently breaks
+      # public name resolution — the failure class that killed v0.2.94 and
+      # v0.2.95 releases (buck2 couldn't resolve static.crates.io). The remote
+      # cache is reached by tailnet IP (the BUCK2_CACHE_HOST secret), so
+      # MagicDNS isn't needed here: revert the override so public DNS works.
+      - name: Revert Tailscale DNS override
+        if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.TS_AUTH_KEY != ''
+        run: |
+          sudo networksetup -setdnsservers Ethernet Empty
+          sudo networksetup -setsearchdomains Ethernet Empty
       # Generate remote cache config from secret (writes .buckconfig.local,
       # which buck2 auto-reads — no --config-file flag needed)
       - name: Configure remote cache

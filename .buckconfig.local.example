@@ -1,7 +1,11 @@
 # Local Buck2 config for remote cache.
-# Copy to .buckconfig.local and fill in the real Tailscale address.
+# Copy to .buckconfig.local and fill in the Mac mini's Tailscale IP.
 # .buckconfig.local is auto-read by buck2 (no --config-file flag needed).
 # .buckconfig.local is gitignored.
+#
+# The address is the Mac mini's Tailscale IP (not its MagicDNS hostname) —
+# CI reverts Tailscale's MagicDNS DNS override right after connecting, so
+# cache access must not depend on name resolution.
 #
 # Requires:
 #   - bazel-remote running on the cache host (see docs/remote-cache-setup.md)
@@ -15,9 +19,9 @@
 #   (all buck2 commands auto-read this file — no special flags needed)
 
 [buck2_re_client]
-engine_address = <tailnet-host>:9092
-action_cache_address = <tailnet-host>:9092
-cas_address = <tailnet-host>:9092
+engine_address = <tailnet-ip>:9092
+action_cache_address = <tailnet-ip>:9092
+cas_address = <tailnet-ip>:9092
 tls = false
 instance_name = buck2
 

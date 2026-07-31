@@ -84,18 +84,18 @@ The `/status` endpoint returns JSON with cache size, entry count, uptime, and a
 
 ## Step 4: Verify Tailscale reachability from the MacBook
 
-Find the Mac mini's tailnet hostname:
+Find the Mac mini's tailnet IP:
 
 ```bash
 # On the Mac mini:
-tailscale status | head -1
-# Output: e.g. "macmini.tailnet-name.ts.net"
+tailscale ip -4
+# Output: e.g. "100.x.y.z"
 ```
 
 From the MacBook, verify the cache is reachable over Tailscale:
 
 ```bash
-curl -fsS http://<mac-mini-tailnet-host>:8080/status
+curl -fsS http://<mac-mini-tailnet-ip>:8080/status
 ```
 
 If this fails, check:
@@ -110,14 +110,14 @@ If this fails, check:
 cp .buckconfig.local.example .buckconfig.local
 ```
 
-Edit `.buckconfig.local` and replace `<tailnet-host>` with the Mac
-mini's tailnet hostname:
+Edit `.buckconfig.local` and replace `<tailnet-ip>` with the Mac
+mini's Tailscale IP:
 
 ```ini
 [buck2_re_client]
-engine_address = macmini.tailnet-name.ts.net:9092
-action_cache_address = macmini.tailnet-name.ts.net:9092
-cas_address = macmini.tailnet-name.ts.net:9092
+engine_address = <tailnet-ip>:9092
+action_cache_address = <tailnet-ip>:9092
+cas_address = <tailnet-ip>:9092
 tls = false
 instance_name = buck2
 
@@ -169,13 +169,25 @@ tailscale authkey --reusable
 
 # Set the GitHub secrets:
 gh secret set TS_AUTH_KEY < ~/.tailscale/auth-key
-gh secret set BUCK2_CACHE_HOST --body "macmini.tailnet-name.ts.net"
+gh secret set BUCK2_CACHE_HOST --body "<mac-mini-tailnet-ip>"
 ```
 
-- `TS_AUTH_KEY` — a reusable Tailscale auth key. CI uses it to join the tailnet
-  for the duration of the job, then disconnects.
-- `BUCK2_CACHE_HOST` — the Mac mini's tailnet hostname (no port; the CI
-  workflow appends `:9092` for the gRPC address).
+- `TS_AUTH_KEY` — a reusable, **ephemeral** Tailscale auth key. CI uses it to join
+  the tailnet for the duration of the job; ephemeral keys make the runner's node
+  disappear automatically on disconnect (see "Ephemeral nodes" in Tailscale's
+  docs — old `github-runner-*` nodes piling up in `tailscale status` means the
+  key was created without the Ephemeral checkbox).
+- `BUCK2_CACHE_HOST` — the Mac mini's **Tailscale IP** (no port; the CI workflow
+  appends `:9092` for the gRPC address). The IP is stable for as long as the
+  node remains registered; if the Mac mini is ever reset/reinstalled, update it
+  (`tailscale ip -4` on the mini or the admin console). Get it from `tailscale
+  ip -4` on the Mac mini — don't hardcode the value in this repo, it lives only
+  in the GitHub secret. Using the IP instead of the MagicDNS hostname is
+  deliberate: `tailscale/github-action` on macOS repoints the runner's system
+  DNS at MagicDNS (100.100.100.100), which intermittently breaks public
+  resolution (the failure class that killed v0.2.94/v0.2.95 releases). CI
+  reverts that override right after connecting, so cache access must not depend
+  on MagicDNS name resolution.
 
 ## Step 7: Verify CI remote cache
 

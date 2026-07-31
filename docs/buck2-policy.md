@@ -198,8 +198,10 @@ Clippy runs through Buck2's built-in `[clippy.json]` subtargets on every `rust_l
 ### Remote cache in CI
 
 Trusted PRs (same-repo) and pushes connect to Tailscale via `tailscale/github-action`
-and generate `.buckconfig.local` from the `BUCK2_CACHE_HOST` secret. Buck2
-auto-reads `.buckconfig.local` for cache queries/uploads.
+and generate `.buckconfig.local` from the `BUCK2_CACHE_HOST` secret (the Mac
+mini's Tailscale IP — not a MagicDNS hostname, because the macOS jobs revert
+Tailscale's DNS override right after connecting; see "Remote cache in CI" below).
+Buck2 auto-reads `.buckconfig.local` for cache queries/uploads.
 
 **Fork PR handling:** Fork PRs do not have access to `TS_AUTH_KEY` or
 `BUCK2_CACHE_HOST` secrets. The Tailscale and cache config steps are gated on
@@ -209,9 +211,18 @@ execution automatically. This prevents cache poisoning.
 
 **Required GitHub secrets** (operator must set before first CI run):
 - `TS_AUTH_KEY` — Tailscale auth key (reusable ephemeral).
-- `BUCK2_CACHE_HOST` — Mac mini's tailnet hostname running bazel-remote.
+- `BUCK2_CACHE_HOST` — Mac mini's Tailscale IP (set via `gh secret set`; see
+  docs/remote-cache-setup.md — don't commit the value, it lives only in the
+  secret) running bazel-remote.
 
 The CI job functions without these secrets — it falls back to local execution.
+
+The macOS jobs (`buck2`, `release-prepare`) add a "Revert Tailscale DNS override"
+step right after connecting: `tailscale/github-action` repoints the runner's
+system DNS at MagicDNS (100.100.100.100), which intermittently breaks public
+name resolution (v0.2.94/v0.2.95 died on buck2's static.crates.io fetches).
+Because the cache host is addressed by IP, MagicDNS isn't needed, so the step
+restores the runner's normal DNS before any build runs.
 
 ### Release builds in CI
 
