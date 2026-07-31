@@ -45,6 +45,30 @@ on reconnect). `hub_idle_ms` is now a first-class `Config` field (read from
 `hub_idle_ms: 0` directly in their `Config` literals, eliminating the env-var
 mutation entirely.
 
+**Status (2026-07-31, issue #136):** Corpus coverage gate + version coexistence
+proof landed. `coverage_report` (in `server/pantoken-server/tests/corpus.rs`,
+part of the `corpus_tests` buck2 target) classifies every corpus scenario in
+every version dir across four dimensions — endpoints against
+`endpoint_inventory::ENDPOINTS` (query-aware, `{param}`-wildcard, method-exact
+matcher), `sse[].event.type` against `event_disposition_for_wire_name`, and
+`/history` `items[].type` against a hand-maintained `KNOWN_HISTORY_KINDS`
+mirror of the `history_seed.rs` vocabulary — prints the map, and fails ONLY on
+unclassified public-contract additions (never on coverage percentages). A
+synthetic second version dir `server/tests/corpus/0.6.0-synthetic/abort.json`
+(a byte-faithful copy of `0.5.8/abort.json`, re-versioned to
+`0.6.0-synthetic` with `synthetic_public_schema` provenance) backs the
+`multiple_corpus_versions_load_with_explicit_active_selector` coexistence
+test, and every pre-existing corpus gate now validates both version dirs.
+The loader gained a pure `active_version_with(Option<&str>)` selector so the
+explicit-version path is testable without mutating `PANTOKEN_CORPUS_VERSION`
+(process-env mutation in a multithreaded test binary is the flake vector fixed
+in #135 above); `active_version()` is now a thin wrapper.
+`scripts/capture-daemon-corpus.test.ts` proves `captureTarget()` refuses
+overwrite without `--force` AND permits it with `--force` under the issue's
+named test. The corpus README documents the coexistence dir + coverage gate and
+replaces the stale `cargo test corpus` commands with the buck2 ones
+(`just test-rs` / `buck2 test //server/pantoken-server:corpus_tests`).
+
 ## Phase 2 session lifecycle
 
 Destroy-session protocol and driver seams are implemented. Empty/default mock sessions can be reaped with lifecycle guards; live sessions use a pantoken-owned durable lifecycle/tombstone store and filter tombstoned rows. Prompt acceptance and successful live configuration actions are recorded authoritatively, and warm-cap eviction prefers eligible empty/default attachments. The daemon surface exposes process termination but no registry-delete endpoint, so tombstones remain the deletion fallback.

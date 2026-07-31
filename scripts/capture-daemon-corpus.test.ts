@@ -36,12 +36,19 @@ const PARITY_DIR = join(
   "canon-parity",
 );
 
-test("capture refuses an existing version without explicit override", () => {
+test("capture_refuses_existing_version_without_explicit_override", () => {
+  // Refusal without --force: an existing 0.5.8 scenario target throws.
   expect(() => captureTarget("0.5.8", "streaming-turn", false)).toThrow(
     /refusing to overwrite existing capture/,
   );
+  // A non-existing version target resolves (nothing to overwrite).
   expect(captureTarget("future-test-version", "streaming-turn", false)).toMatch(
     /future-test-version\/streaming-turn\.json$/,
+  );
+  // Explicit override permits overwrite: --force returns the 0.5.8 target
+  // without throwing.
+  expect(captureTarget("0.5.8", "streaming-turn", true)).toMatch(
+    /0\.5\.8\/streaming-turn\.json$/,
   );
 });
 

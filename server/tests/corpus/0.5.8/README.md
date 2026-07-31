@@ -1,7 +1,7 @@
 # Golden daemon corpus — `0.5.8`
 
 This directory contains a provider-free, canonicalized **contract corpus** for
-Pantoken's Polytoken integration. The six `0.5.8` scenarios are
+Pantoken's Polytoken integration. The ten `0.5.8` scenarios are
 `synthetic_pantoken_regression` fixtures: independently authored from public
 wire schemas and Pantoken's observable event mapper. They are not daemon
 recordings and do not claim capture provenance.
@@ -99,6 +99,44 @@ placeholder scheme and records it here:
 Canonicalization is **idempotent**: running it on already-canonicalized data
 yields identical output. The loader test asserts this (replay determinism).
 
+## Version coexistence
+
+The corpus root (`server/tests/corpus/`) holds one subdirectory per daemon
+version, and the loader's `version_dirs()` enumerates **every** subdir. Today
+that is the active `0.5.8/` corpus plus a synthetic companion
+`0.6.0-synthetic/` — a byte-faithful copy of the smallest passing scenario
+(`abort.json`) re-versioned to `0.6.0-synthetic` with `synthetic_public_schema`
+provenance. It exists to prove version coexistence: every corpus test
+(provenance, contract replay, canonicalization idempotency, required sections,
+no-machine-data, and the coverage gate below) iterates `version_dirs()`, so the
+whole suite validates both version dirs on every run. A future corpus-format
+change must keep the synthetic fixture valid; the `coverage_report` gate also
+classifies it.
+
+The active version resolves to `POLYTOKEN_DAEMON_TARGET_VERSION`
+(`PANTOKEN_CORPUS_VERSION` env override wins) — never the synthetic dir by
+default. `multiple_corpus_versions_load_with_explicit_active_selector` proves
+both dirs load and that explicit per-version selection works.
+
+## Coverage gate
+
+`coverage_report` (in `server/pantoken-server/tests/corpus.rs`) classifies
+every scenario in every version dir across four dimensions and prints the map:
+
+- **endpoints** — every `http[]` entry must match at least one
+  `endpoint_inventory::ENDPOINTS` row (query-aware, `{param}`-wildcard,
+  method-exact; alias rows like `files`/`file_catalog` are fine);
+- **event dispositions** — every distinct `sse[].event.type` must have an
+  `event_disposition_for_wire_name` disposition;
+- **state/history kinds** — every `/history` `items[].type` must be within the
+  projected `KNOWN_HISTORY_KINDS` vocabulary (`history_seed.rs`'s documented
+  kinds);
+- **scenario map** — scenario name + capabilities + exercised endpoints/events.
+
+The gate fails **only on unclassified public-contract additions** (a new
+endpoint, event type, or history kind the mapper/inventory doesn't know) — it
+never fails on coverage percentages.
+
 ## Canonicalization procedure (re-capture on a daemon bump)
 
 When the daemon version bumps and a fresh capture is needed:
@@ -112,10 +150,10 @@ When the daemon version bumps and a fresh capture is needed:
    explicit `--force` approval is supplied. Captures are written to the selected
    version directory and canonicalized before review. Canonicalization-only work
    may use `just capture-daemon-corpus --recanon <file...>` without provider spend.
-4. Run `cd server && cargo test corpus` — the loader and contract tests confirm
-   every seed event deserializes, maps to the declared Pantoken boundary, and
-   remains canonical. If a public event shape changes, this fails loudly (no
-   silent fallbacks).
+4. Run `just test-rs` (or `buck2 test //server/pantoken-server:corpus_tests`) — the
+   loader and contract tests confirm every seed event deserializes, maps to the
+   declared Pantoken boundary, and remains canonical. If a public event shape
+   changes, this fails loudly (no silent fallbacks).
 5. Review the diff; the lead commits.
 
 ## Scenarios
@@ -136,8 +174,7 @@ When the daemon version bumps and a fresh capture is needed:
 ## Running the tests
 
 ```bash
-cd server
-cargo test corpus                              # both corpus tests
-cargo test corpus_loads_and_canonicalizes      # deserialization + idempotency
-cargo test capture_corpus_writes_required_sections
+just test-rs                                        # full Rust buck2 test suite
+buck2 test //server/pantoken-server:corpus_tests    # just the corpus tests
+buck2 test //server/pantoken-server:corpus_tests -- --nocapture  # + coverage report printout
 ```

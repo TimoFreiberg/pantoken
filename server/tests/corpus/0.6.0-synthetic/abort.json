@@ -1,0 +1,305 @@
+{
+  "scenario": "abort",
+  "version": "0.6.0-synthetic",
+  "provenance": {
+    "kind": "synthetic_public_schema"
+  },
+  "description": "A streaming turn aborted mid-flight via POST /turn/cancel \u2192 turn_cancelled (user_cancelled).",
+  "canonicalization": {
+    "session_id": "SESSION",
+    "prompt_ids": {
+      "019f348b-8e22-7490-9781-1ad8ef22f692": "PROMPT_0"
+    },
+    "timestamps": "monotonic-from-T0"
+  },
+  "http": [
+    {
+      "method": "GET",
+      "path": "/state",
+      "request_body": null,
+      "status": 200,
+      "response_body": {
+        "session_title": "main",
+        "todos": [],
+        "flags": [],
+        "env": {},
+        "available_subagents": [
+          "general-purpose",
+          "general-purpose-mini",
+          "plan-reviewer",
+          "researcher"
+        ],
+        "available_skills": [
+          "polytoken:investigating-a-codebase",
+          "polytoken:modifying-polytoken",
+          "polytoken:researching-on-the-internet"
+        ],
+        "active_facet": "execute",
+        "active_model": "deepseek/deepseek-v4-pro",
+        "active_reasoning_effort": "high",
+        "project_cwd": "/PROJECT",
+        "source_control": {
+          "kind": "git",
+          "label": "BRANCH",
+          "dirty": false
+        },
+        "adventurous_handoff_active": false,
+        "available_models": [
+          {
+            "name": "deepseek/deepseek-v4-pro",
+            "label": "deepseek/deepseek-v4-pro",
+            "reasoning": {
+              "type": "effort",
+              "effort_set": "deepseek_v4",
+              "can_disable": true,
+              "levels": [
+                "high",
+                "max"
+              ],
+              "default_level": "high"
+            }
+          },
+          {
+            "name": "deepseek/deepseek-v4-flash",
+            "label": "deepseek/deepseek-v4-flash",
+            "reasoning": {
+              "type": "effort",
+              "effort_set": "deepseek_v4",
+              "can_disable": true,
+              "levels": [
+                "high",
+                "max"
+              ],
+              "default_level": "high"
+            }
+          }
+        ],
+        "plugin_config": null
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/prompt",
+      "request_body": {
+        "content": "Write a very long, detailed essay (at least 2000 words) on the full history of computing, from the abacus to modern GPUs. Do not stop early.",
+        "max_tool_turns": null
+      },
+      "status": 202,
+      "response_body": {
+        "prompt_id": "PROMPT_0",
+        "session_id": "SESSION"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/turn/cancel",
+      "request_body": null,
+      "status": 202,
+      "response_body": {
+        "prompt_id": null,
+        "status": "cancel_requested"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "request_body": null,
+      "status": 200,
+      "response_body": {
+        "session_title": "main",
+        "todos": [],
+        "flags": [],
+        "env": {},
+        "available_subagents": [
+          "general-purpose",
+          "general-purpose-mini",
+          "plan-reviewer",
+          "researcher"
+        ],
+        "available_skills": [
+          "polytoken:investigating-a-codebase",
+          "polytoken:modifying-polytoken",
+          "polytoken:researching-on-the-internet"
+        ],
+        "active_facet": "execute",
+        "active_model": "deepseek/deepseek-v4-pro",
+        "active_reasoning_effort": "high",
+        "project_cwd": "/PROJECT",
+        "source_control": {
+          "kind": "git",
+          "label": "BRANCH",
+          "dirty": false
+        },
+        "context_usage": {
+          "used_tokens": 0,
+          "limit_tokens": 1000000
+        },
+        "adventurous_handoff_active": false,
+        "available_models": [
+          {
+            "name": "deepseek/deepseek-v4-pro",
+            "label": "deepseek/deepseek-v4-pro",
+            "reasoning": {
+              "type": "effort",
+              "effort_set": "deepseek_v4",
+              "can_disable": true,
+              "levels": [
+                "high",
+                "max"
+              ],
+              "default_level": "high"
+            }
+          },
+          {
+            "name": "deepseek/deepseek-v4-flash",
+            "label": "deepseek/deepseek-v4-flash",
+            "reasoning": {
+              "type": "effort",
+              "effort_set": "deepseek_v4",
+              "can_disable": true,
+              "levels": [
+                "high",
+                "max"
+              ],
+              "default_level": "high"
+            }
+          }
+        ],
+        "plugin_config": null
+      }
+    }
+  ],
+  "sse": [
+    {
+      "seq": 1,
+      "emitted_at": "1970-01-01T00:00:00.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "notification_autodrain_switch",
+        "enabled": true
+      }
+    },
+    {
+      "seq": 2,
+      "emitted_at": "1970-01-01T00:00:01.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "system_reminder",
+        "slug": "repository-status",
+        "display_name": "Repository status",
+        "body": "Reminder: repository-status (Repository status)\n\nRepository status captured at session start.\n\nSource control: git\nRepository root: .\nCurrent branch: main\nDefault branch: main\nWorking tree: clean\n\nThis is a snapshot. Do not run source-control status or diff commands solely to rediscover this information. Run source-control commands when the user's request asks for them, when you need file-level details not shown here, or when the repository may have changed since this snapshot.",
+        "reason": {
+          "type": "session_start"
+        },
+        "emitted_at": "1970-01-01T00:00:01.000Z"
+      }
+    },
+    {
+      "seq": 3,
+      "emitted_at": "1970-01-01T00:00:02.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "message_start",
+        "prompt_id": "PROMPT_0"
+      }
+    },
+    {
+      "seq": 4,
+      "emitted_at": "1970-01-01T00:00:03.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_start",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "block_type": {
+          "type": "thinking"
+        }
+      }
+    },
+    {
+      "seq": 5,
+      "emitted_at": "1970-01-01T00:00:04.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "thinking",
+          "text": "The"
+        }
+      }
+    },
+    {
+      "seq": 6,
+      "emitted_at": "1970-01-01T00:00:05.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_stop",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0
+      }
+    },
+    {
+      "seq": 7,
+      "emitted_at": "1970-01-01T00:00:06.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "turn_cancelled",
+        "prompt_id": "PROMPT_0",
+        "reason": "user_cancelled"
+      }
+    }
+  ],
+  "expected_driver_events": {
+    "events": [
+      {
+        "kind": "sessionUpdated",
+        "count": 1,
+        "essential": {
+          "type": "sessionUpdated"
+        }
+      },
+      {
+        "kind": "customMessage",
+        "count": 1,
+        "essential": {
+          "type": "customMessage"
+        }
+      },
+      {
+        "kind": "sessionUpdated",
+        "count": 1,
+        "essential": {
+          "type": "sessionUpdated"
+        }
+      },
+      {
+        "kind": "assistantDelta",
+        "count": 1,
+        "essential": {
+          "type": "assistantDelta"
+        }
+      }
+    ],
+    "effects": [
+      {
+        "kind": "setAutodrainEnabled"
+      },
+      {
+        "emit": "SessionUpdated",
+        "kind": "fetchState"
+      }
+    ],
+    "final_session": {
+      "mapped_event_count": 4,
+      "assistant_delta_count": 1,
+      "open_block_count": 0,
+      "tool_input_buffer_empty": true,
+      "turn_error_present": false
+    },
+    "capabilities": [
+      "abort"
+    ]
+  }
+}

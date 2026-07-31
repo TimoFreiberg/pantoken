@@ -220,18 +220,32 @@ pub fn version_dirs() -> Vec<String> {
     dirs
 }
 
-/// Select the active corpus explicitly. Tests and fake mode may override with
-/// `PANTOKEN_CORPUS_VERSION`; otherwise use the public codegen target version.
+/// Resolve the active corpus version: an explicit selector (the runtime env
+/// override in [`active_version`], or a test-supplied value) wins; otherwise
+/// the public codegen target version (`POLYTOKEN_DAEMON_TARGET_VERSION`).
 /// Historical version directories remain loadable through `version_dirs()`.
-pub fn active_version() -> String {
-    let selected = std::env::var("PANTOKEN_CORPUS_VERSION")
-        .unwrap_or_else(|_| pantoken_daemon_types::POLYTOKEN_DAEMON_TARGET_VERSION.to_string());
+/// Panics if the selected version dir does not exist.
+///
+/// The pure `Option` form exists so tests can exercise explicit selection
+/// without mutating `PANTOKEN_CORPUS_VERSION` (process-env mutation is racy in
+/// a multithreaded test binary).
+pub fn active_version_with(selected: Option<&str>) -> String {
+    let selected = selected
+        .map(str::to_string)
+        .unwrap_or_else(|| pantoken_daemon_types::POLYTOKEN_DAEMON_TARGET_VERSION.to_string());
     let dirs = version_dirs();
     assert!(
         dirs.contains(&selected),
         "active corpus version {selected:?} missing; available versions: {dirs:?}"
     );
     selected
+}
+
+/// Select the active corpus explicitly. Tests and fake mode may override with
+/// `PANTOKEN_CORPUS_VERSION`; otherwise use the public codegen target version.
+/// Historical version directories remain loadable through `version_dirs()`.
+pub fn active_version() -> String {
+    active_version_with(std::env::var("PANTOKEN_CORPUS_VERSION").ok().as_deref())
 }
 
 #[deprecated(note = "use active_version; historical corpus versions may coexist")]

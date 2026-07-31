@@ -14,10 +14,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-use pantoken_daemon_types::SseEnvelope;
+use pantoken_daemon_types::{POLYTOKEN_DAEMON_TARGET_VERSION, SseEnvelope};
 use pantoken_protocol::session_driver::{
     SessionDriverEvent, SessionRef, SessionStatus, WorkspaceRef,
 };
+use pantoken_server::polytoken::endpoint_inventory::{ENDPOINTS, EndpointContract};
 use pantoken_server::polytoken::event_map::{self, DaemonEffect, MapCtx};
 use serde_json::Value;
 
@@ -26,10 +27,12 @@ mod support;
 // + helpers (`load_scenario`/`scenario_files`/`version_dirs`/`corpus_dir`) live in
 // `support::corpus` and are shared with the fake-daemon harness. The
 // canonicalization machinery below is corpus-test-only.
+#[allow(deprecated)] // sole_version() is the deprecated alias the coexistence test pins
 use support::corpus::{
     CanonicalizationManifest, DriverContractExpectations, DriverEffectExpectation,
     FinalSessionInvariants, FixtureProvenance, FixtureProvenanceKind, HttpEntry, ScenarioFile,
-    SseFrame, corpus_dir, load_scenario, scenario_files, version_dirs,
+    SseFrame, active_version, active_version_with, corpus_dir, load_named, load_scenario,
+    scenario_files, sole_version, version_dirs,
 };
 
 // ---------------------------------------------------------------------------
@@ -1257,4 +1260,327 @@ fn canon_matches_ts_golden() {
         serde_json::to_string_pretty(&golden).unwrap(),
         "Rust canonicalization drifted from TS golden"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Issue #136: corpus version coexistence + coverage gate.
+// ---------------------------------------------------------------------------
+
+/// The projected history-kind vocabulary, mirroring the kinds `history_seed.rs`
+/// documents (its top-of-file comment and match arms): the three renderable
+/// transcript kinds (`user`, `assistant`, `tool_result`) plus the ambient
+/// metadata kinds. This is a hand-maintained mirror — intentionally a separate
+/// assertion surface from `history_seed.rs`'s own match, so an unclassified NEW
+/// kind in a corpus `/history` response panics the coverage gate (additions are
+/// caught; removals from `history_seed.rs` would not be caught by this const —
+/// an acceptable coverage-gate trade-off). Do not auto-derive from
+/// `history_seed.rs`.
+const KNOWN_HISTORY_KINDS: &[&str] = &[
+    "user",
+    "assistant",
+    "tool_result",
+    "session_lifecycle",
+    "model_switch",
+    "state_update",
+    "facet_switch",
+    "compaction_fencepost",
+    "system_reminder",
+    "classifier_decision",
+    "context_cleared",
+    "image_reference",
+];
+
+/// Match one corpus `http[]` entry against one inventory row: the method must
+/// match exactly; query strings are stripped from both the corpus path and the
+/// inventory `path_template` (split on `?`), and the remaining path is compared
+/// segment-wise; a template segment of the form `{name}` matches exactly one
+/// concrete segment (covers `/interrogative/{id}/respond`,
+/// `/tui-attachment/{lease_id}`, `/mcp/{server}/{action}`, `/todos/{id}`).
+/// Classification succeeds if ANY inventory row matches, so alias rows (e.g.
+/// `files` and `file_catalog`, both `GET /files`) are fine.
+fn matches_inventory_endpoint(method: &str, path: &str, ep: &EndpointContract) -> bool {
+    if method != ep.method {
+        return false;
+    }
+    let path_segments: Vec<&str> = path.split('?').next().unwrap_or(path).split('/').collect();
+    let template_segments: Vec<&str> = ep
+        .path_template
+        .split('?')
+        .next()
+        .unwrap_or(ep.path_template)
+        .split('/')
+        .collect();
+    path_segments.len() == template_segments.len()
+        && template_segments
+            .iter()
+            .zip(path_segments)
+            .all(|(t, p)| (t.starts_with('{') && t.ends_with('}')) || *t == p)
+}
+
+fn disposition_label(d: event_map::EventDisposition) -> &'static str {
+    use event_map::EventDisposition::*;
+    match d {
+        Mapped => "mapped",
+        StateRefetch => "state_refetch",
+        Reseed => "reseed",
+        UserNotice => "user_notice",
+        IntentionalNoop => "intentional_noop",
+    }
+}
+
+#[test]
+fn coverage_endpoint_matcher_handles_wildcards_query_and_aliases() {
+    let find = |method: &str, path: &str| -> Vec<&EndpointContract> {
+        ENDPOINTS
+            .iter()
+            .filter(|ep| matches_inventory_endpoint(method, path, ep))
+            .collect()
+    };
+
+    // Query string in the inventory template, none in the corpus path.
+    assert!(
+        find("GET", "/history")
+            .iter()
+            .any(|ep| ep.client_method == "history"),
+        "GET /history must match the /history?offset=..&limit=.. template"
+    );
+    // Wildcard `{id}` segment.
+    assert!(
+        find(
+            "POST",
+            "/interrogative/019f3494-3034-7b83-9572-30006722bb21/respond"
+        )
+        .iter()
+        .any(|ep| ep.client_method == "respond_interrogative"),
+        "POST /interrogative/<uuid>/respond must match /interrogative/{{id}}/respond"
+    );
+    // `{id}` tail segment with a matching method.
+    assert!(
+        find("DELETE", "/todos/abc")
+            .iter()
+            .any(|ep| ep.client_method == "delete_todo"),
+        "DELETE /todos/abc must match /todos/{{id}}"
+    );
+    // The same row must NOT match on a method mismatch.
+    assert!(
+        !find("POST", "/todos/abc")
+            .iter()
+            .any(|ep| ep.client_method == "delete_todo"),
+        "POST /todos/abc must NOT match DELETE /todos/{{id}} (method mismatch)"
+    );
+    // Alias rows: both `files` and `file_catalog` classify GET /files.
+    assert!(
+        find("GET", "/files")
+            .iter()
+            .any(|ep| ep.client_method == "files"),
+        "GET /files must match the `files` row"
+    );
+    assert!(
+        find("GET", "/files")
+            .iter()
+            .any(|ep| ep.client_method == "file_catalog"),
+        "GET /files must match the `file_catalog` alias row"
+    );
+    // A made-up path matches nothing.
+    assert!(
+        find("GET", "/brand/new").is_empty(),
+        "GET /brand/new must match no inventory row"
+    );
+}
+
+/// The Phase 5.8 corpus coverage gate: classify every corpus scenario across
+/// four dimensions — endpoint (against `endpoint_inventory::ENDPOINTS`),
+/// event disposition (against `event_disposition_for_wire_name`),
+/// state/history kind (against `KNOWN_HISTORY_KINDS`), and scenario map —
+/// print the report, and fail ONLY on unclassified public-contract additions
+/// (an `http[]` entry matching no inventory row, an `sse[]` event type with no
+/// disposition, or a `/history` item kind outside the projected vocabulary).
+/// It never asserts a coverage percentage.
+#[test]
+fn coverage_report() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut endpoint_coverage: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut disposition_coverage: BTreeMap<&'static str, BTreeSet<String>> = BTreeMap::new();
+    let mut history_kinds: BTreeSet<String> = BTreeSet::new();
+    let mut scenario_report: Vec<(String, Vec<String>, Vec<String>, Vec<String>)> = Vec::new();
+
+    for version in version_dirs() {
+        for path in scenario_files(&version) {
+            let scenario = load_scenario(&path);
+            let name = scenario.scenario.clone();
+
+            // --- Endpoint map: every http[] entry must classify against the
+            // independently authored inventory (unclassified additions panic).
+            let mut endpoints: BTreeSet<String> = BTreeSet::new();
+            for entry in &scenario.http {
+                let matching: Vec<&EndpointContract> = ENDPOINTS
+                    .iter()
+                    .filter(|ep| matches_inventory_endpoint(&entry.method, &entry.path, ep))
+                    .collect();
+                assert!(
+                    !matching.is_empty(),
+                    "{name}: {} {} matches no endpoint_inventory::ENDPOINTS row \
+                     (unclassified public-contract addition); inventory: {}",
+                    entry.method,
+                    entry.path,
+                    ENDPOINTS
+                        .iter()
+                        .map(|ep| format!("{} {}", ep.method, ep.path_template))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                for ep in &matching {
+                    let key = format!("{} {}", ep.method, ep.path_template);
+                    endpoints.insert(key.clone());
+                    endpoint_coverage
+                        .entry(key)
+                        .or_default()
+                        .insert(name.clone());
+                }
+            }
+
+            // --- Event-disposition map: every distinct sse event type must
+            // have a disposition (unclassified additions panic).
+            let mut event_types: BTreeSet<String> = BTreeSet::new();
+            for frame in &scenario.sse {
+                if let Some(wire) = frame.event.get("type").and_then(Value::as_str) {
+                    event_types.insert(wire.to_string());
+                }
+            }
+            for wire in &event_types {
+                let disposition =
+                    event_map::event_disposition_for_wire_name(wire).unwrap_or_else(|| {
+                        panic!(
+                            "{name}: sse event type {wire:?} has no \
+                             event_disposition_for_wire_name (unclassified public-contract \
+                             addition)"
+                        )
+                    });
+                disposition_coverage
+                    .entry(disposition_label(disposition))
+                    .or_default()
+                    .insert(wire.clone());
+            }
+
+            // --- State/history-kind map: every /history response body's
+            // items[].type must be within the projected vocabulary
+            // (unclassified additions panic).
+            for entry in &scenario.http {
+                if entry.method != "GET" || entry.path.split('?').next() != Some("/history") {
+                    continue;
+                }
+                let Some(body) = entry.response_body.as_ref() else {
+                    continue;
+                };
+                let Some(items) = body.get("items").and_then(Value::as_array) else {
+                    continue;
+                };
+                for item in items {
+                    let Some(kind) = item.get("type").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    assert!(
+                        KNOWN_HISTORY_KINDS.contains(&kind),
+                        "{name}: /history item kind {kind:?} is outside KNOWN_HISTORY_KINDS \
+                         (unclassified state/history-kind addition)"
+                    );
+                    history_kinds.insert(kind.to_string());
+                }
+            }
+
+            scenario_report.push((
+                name,
+                scenario.expected_driver_events.capabilities.clone(),
+                endpoints.into_iter().collect(),
+                event_types.into_iter().collect(),
+            ));
+        }
+    }
+
+    // --- Print the four-dimension report (visible under
+    // `buck2 test … -- --nocapture` or on failure).
+    println!("\n=== corpus coverage report ===");
+    println!("\n-- endpoint -> scenarios --");
+    for (ep, scenarios) in &endpoint_coverage {
+        println!(
+            "  {ep}: {}",
+            scenarios.iter().cloned().collect::<Vec<_>>().join(", ")
+        );
+    }
+    println!("\n-- event disposition -> wire types --");
+    for (disposition, types) in &disposition_coverage {
+        println!(
+            "  {disposition}: {}",
+            types.iter().cloned().collect::<Vec<_>>().join(", ")
+        );
+    }
+    println!("\n-- history kinds seen in /history responses --");
+    for kind in &history_kinds {
+        println!("  {kind}");
+    }
+    println!("\n-- scenarios (name, capabilities, endpoints, event types) --");
+    for (name, caps, eps, types) in &scenario_report {
+        println!(
+            "  {name}: capabilities={caps:?} endpoints=[{}] event_types=[{}]",
+            eps.join(", "),
+            types.join(", ")
+        );
+    }
+    println!("\n=== end coverage report ===");
+}
+
+/// AC.10 coexistence proof: both version dirs enumerate and load, the default
+/// selector resolves to the codegen target, the explicit selector resolves to
+/// the synthetic version, per-version `load_named` works, unknown selectors
+/// panic, and the deprecated `sole_version` alias still agrees.
+#[test]
+#[allow(deprecated)] // sole_version() is the deprecated alias this test pins
+fn multiple_corpus_versions_load_with_explicit_active_selector() {
+    let dirs = version_dirs();
+    assert!(
+        dirs.contains(&"0.5.8".to_string()) && dirs.contains(&"0.6.0-synthetic".to_string()),
+        "expected both 0.5.8 and 0.6.0-synthetic corpus version dirs; got {dirs:?}"
+    );
+
+    // Both version dirs must enumerate non-empty scenario sets, and every file
+    // in both must load through the shared parser.
+    for version in ["0.5.8", "0.6.0-synthetic"] {
+        let files = scenario_files(version);
+        assert!(!files.is_empty(), "{version}: no scenario files");
+        for path in &files {
+            load_scenario(path);
+        }
+    }
+
+    // Default selector resolves to the codegen target, not the synthetic dir.
+    assert_eq!(
+        active_version_with(None),
+        POLYTOKEN_DAEMON_TARGET_VERSION,
+        "default selector must resolve to the codegen target"
+    );
+    // Explicit selector resolves to the historical/synthetic version.
+    assert_eq!(
+        active_version_with(Some("0.6.0-synthetic")),
+        "0.6.0-synthetic",
+        "explicit selector must resolve to the synthetic version"
+    );
+
+    // Explicit per-version loading works.
+    let synthetic_abort = load_named("0.6.0-synthetic", "abort");
+    assert_eq!(synthetic_abort.version, "0.6.0-synthetic");
+    assert!(
+        !synthetic_abort.sse.is_empty(),
+        "synthetic abort sse must be non-empty"
+    );
+
+    // Unknown selectors are rejected (panic), never silently resolved.
+    let panicked = std::panic::catch_unwind(|| active_version_with(Some("does-not-exist")));
+    assert!(
+        panicked.is_err(),
+        "unknown active-version selector must panic"
+    );
+
+    // The deprecated alias still agrees with the active selector.
+    assert_eq!(sole_version(), active_version());
 }
