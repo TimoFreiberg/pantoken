@@ -94,7 +94,7 @@ just check-rs                # Rust fmt, clippy (buck2), and buck2 build+test
 just build-client            # client production bundle
 just e2e                    # default mock-driver Playwright suite
 just e2e-live               # corpus-backed live-driver suite
-just build-headless         # headless artifact
+just build-headless         # remote server artifact
 just validate-headless-artifact
 just smoke-test-headless
 just release                 # signing/release workflow

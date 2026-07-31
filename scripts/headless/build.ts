@@ -17,10 +17,6 @@
 //   VERSION              (plain text: MAJOR.MINOR.PATCH)
 //   BUILD_SHA            (40-char lowercase hex)
 //   bin/pantoken-server  (compiled Rust binary for the target)
-//   run.sh               (runtime wrapper, executable)
-//   update.sh            (updater, executable)
-//   client-dist/index.html  (bundled static client)
-//   client-dist/assets/<hashed>  (Vite-hashed static assets)
 //
 // No Bun, node_modules, or source checkout is shipped.
 
@@ -31,8 +27,6 @@ import {
   writeFileSync,
   chmodSync,
   copyFileSync,
-  readdirSync,
-  statSync,
   mkdirSync,
 } from "node:fs";
 import { join, resolve, dirname } from "node:path";
@@ -183,17 +177,6 @@ async function resolveBuildSha(cliTag: string | undefined): Promise<string> {
   return sha;
 }
 
-// ── build client-dist ──
-
-/**
- * Build the Vite client and return the output directory path.
- */
-async function buildClientDist(): Promise<string> {
-  console.log("Building client-dist (Vite)...");
-  await run(["pnpm", "--filter", "@pantoken/client", "build"]);
-  return join(repoRoot, "client", "dist");
-}
-
 // ── tar assembly ──
 
 /**
@@ -201,10 +184,6 @@ async function buildClientDist(): Promise<string> {
  *   VERSION
  *   BUILD_SHA
  *   bin/pantoken-server
- *   run.sh
- *   update.sh
- *   client-dist/index.html
- *   client-dist/assets/<hashed>
  *
  * No nested prefix directory, no source, no node_modules.
  */
@@ -212,7 +191,6 @@ async function assembleTarGz(
   version: string,
   buildSha: string,
   outputDir: string,
-  clientDist: string,
   binaryPath: string,
   assetName: string,
 ): Promise<string> {
@@ -227,29 +205,6 @@ async function assembleTarGz(
     mkdirRecursively(binDir);
     copyFileSync(binaryPath, join(binDir, "pantoken-server"));
     chmodSync(join(binDir, "pantoken-server"), 0o755);
-
-    // Copy run.sh from deploy
-    const runSrc = join(repoRoot, "deploy", "run.sh");
-    if (!existsSync(runSrc))
-      fail(`deploy/run.sh not found at ${runSrc}`);
-    copyFileSync(runSrc, join(stagingDir, "run.sh"));
-    chmodSync(join(stagingDir, "run.sh"), 0o755);
-
-    // Copy the canonical updater; an artifact without it is invalid.
-    const updateSrc = join(repoRoot, "deploy", "update-headless.sh");
-    if (!existsSync(updateSrc)) fail(`deploy/update-headless.sh not found at ${updateSrc}`);
-    copyFileSync(updateSrc, join(stagingDir, "update.sh"));
-    chmodSync(join(stagingDir, "update.sh"), 0o755);
-
-    // Copy the separately trusted validator into the payload for inspection only.
-    const validatorPath = join(repoRoot, "target", "release", "pantoken-tar-validate");
-    if (!existsSync(validatorPath)) fail(`validator binary not found: ${validatorPath}`);
-    copyFileSync(validatorPath, join(binDir, "pantoken-tar-validate"));
-    chmodSync(join(binDir, "pantoken-tar-validate"), 0o755);
-
-    // Copy client-dist
-    const clientDistOut = join(stagingDir, "client-dist");
-    copyDirRecursive(clientDist, clientDistOut);
 
     // Build tar.gz (no wrapper prefix, direct root)
     // COPYFILE_DISABLE=1 prevents BSD tar from adding AppleDouble (._*) metadata.
@@ -364,30 +319,6 @@ function mkdirRecursively(dir: string): void {
   if (!existsSync(dir)) mkdirSync(dir);
 }
 
-// ── copy dir recursive ──
-
-function copyDirRecursive(src: string, dst: string): void {
-  mkdirRecursively(dst);
-  for (const name of readdirSync(src)) {
-    if (name === ".pantoken-built-sha") continue;
-    const srcPath = join(src, name);
-    const dstPath = join(dst, name);
-    const st = statSync(srcPath);
-    if (st.isDirectory()) {
-      if (name !== "assets") fail(`unexpected client-dist directory: ${name}`);
-      copyDirRecursive(srcPath, dstPath);
-    } else if (
-      name === "index.html" ||
-      src.includes(`${join("client", "dist", "assets")}`) ||
-      name.match(/^(apple-touch-icon|icon|favicon|manifest|sw)\b.*$/)
-    ) {
-      copyFileSync(srcPath, dstPath);
-    } else {
-      fail(`unexpected client-dist file: ${name}`);
-    }
-  }
-}
-
 // ── main ──
 
 if (isMain(import.meta.url)) {
@@ -442,20 +373,6 @@ if (isMain(import.meta.url)) {
       );
   }
 
-  // ── build / locate client-dist ──
-  let clientDist: string;
-  if (!skipBuild) {
-    clientDist = await buildClientDist();
-  } else {
-    // Assume client/dist exists from a prior build
-    clientDist = join(repoRoot, "client", "dist");
-    if (!existsSync(join(clientDist, "index.html")))
-      fail(
-        `--skip-build: no client/dist/index.html found. ` +
-          `Build the client first.`,
-      );
-  }
-
   // ── extract version ──
   // The version comes from the release tag if provided. On macOS, the desktop
   // bundle's Info.plist is the fallback. On Linux (no desktop bundle), the tag
@@ -483,7 +400,6 @@ if (isMain(import.meta.url)) {
     version,
     buildSha,
     outputDir,
-    clientDist,
     binaryPath,
     target.asset,
   );

@@ -6,7 +6,8 @@ for cross-reference with git history.
 ## Monorepo: GUI + remote infra in one repo
 
 `protocol/` (shared types + fold reducer, no runtime deps) · `server-rs/` (Rust
-WS hub + drivers) · `client/` (Svelte 5 PWA) · `deploy/`. The server _is_ the
+WS hub + drivers) · `client/` (Svelte 5 PWA) · `desktop/` (Tauri app). The
+server _is_ the
 protocol contract — WS schema, server-side fold, and client reducer must evolve
 together, so splitting now forces premature version coordination.
 

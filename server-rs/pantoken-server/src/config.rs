@@ -1,5 +1,5 @@
 //! Server configuration from the environment. Defaults are safe for local dev;
-//! the deploy sets PANTOKEN_TOKEN and runs behind `tailscale serve`.
+//! the desktop app or remote runtime sets PANTOKEN_TOKEN and other vars.
 //
 // Port of `server/src/config.ts`.
 
@@ -179,8 +179,8 @@ fn env_parse<T: std::str::FromStr>(var: &str, default: T) -> T {
 }
 
 /// Token check. None token = auth disabled. This is a plain string compare, not a
-/// constant-time one: pantoken is single-user behind `tailscale serve`, so a timing
-/// side-channel on the token isn't in the threat model.
+/// constant-time one: pantoken is single-user on a loopback or SSH-tunneled
+/// connection, so a timing side-channel on the token isn't in the threat model.
 pub fn token_ok(provided: Option<&str>, config: &Config) -> bool {
     config.token.is_none() || provided == config.token.as_deref()
 }

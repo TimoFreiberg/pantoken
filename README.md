@@ -1,9 +1,29 @@
 # pantoken
 
-A personal, single-user gui for the [`polytoken`](https://docs.polytoken.dev/introduction/)
+A personal, single-user GUI for the [`polytoken`](https://docs.polytoken.dev/introduction/)
 coding agent, with remote control and mobile app aspirations.
 
 Tauri app with a Svelte frontend and an internal Rust server.
+
+## Architecture (high level)
+
+Pantoken is a macOS desktop app (`.app`, built with Tauri). It bundles an
+internal Rust hub (`pantoken-server`) that serves a Svelte 5 client to a
+local browser window and drives the [`polytoken`](https://docs.polytoken.dev)
+coding agent daemon.
+
+For remote development, the desktop app SSHes into a remote Mac or Linux
+machine, provisions a `pantoken-server` binary there (from a signed release
+archive), and bridges the local browser to the remote runtime over a framed
+stdio transport. There is no standalone server deployment — the remote
+binary is always provisioned and managed by the desktop app.
+
+The release matrix is two targets:
+- `aarch64-apple-darwin` — macOS arm64 (local hub + remote Mac provisioning)
+- `x86_64-unknown-linux-gnu` — Linux x86_64 (remote provisioning / Docker)
+
+See [`docs/DESIGN.md`](docs/DESIGN.md) for the full architecture and
+[`docs/DECISIONS.md`](docs/DECISIONS.md) for settled design decisions.
 
 ## Status
 

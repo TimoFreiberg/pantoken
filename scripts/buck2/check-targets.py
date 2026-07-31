@@ -58,8 +58,7 @@ def main():
     # Filter out third-party targets and internal helper targets (they're
     # intermediate genrules/filegroups used by the archive assembly, not POC deliverables)
     _INTERNAL_PREFIXES = ("//third-party:",)
-    _INTERNAL_TARGETS = {"//:version_file", "//:build_sha_file", "//:client_dist",
-                         "//:run_sh", "//:update_headless_sh"}
+    _INTERNAL_TARGETS = {"//:version_file", "//:build_sha_file"}
     unexpected = {t for t in unexpected
                   if not any(t.startswith(p) for p in _INTERNAL_PREFIXES)
                   and t not in _INTERNAL_TARGETS}

@@ -22,10 +22,10 @@
 //!
 //! ## Headless artifact repurposing
 //!
-//! The headless tar.gz contains `bin/pantoken-server` + other files
-//! (`bin/pantoken-tar-validate`, `run.sh`, `update.sh`, `client-dist/`). The
-//! server install only needs `bin/pantoken-server`. The extract step pulls
-//! just that file via a targeted `tar xzf` (the other files are ignored).
+//! The headless tar.gz contains `bin/pantoken-server` + metadata (`VERSION`,
+//! `BUILD_SHA`). The server install only needs `bin/pantoken-server`. The
+//! extract step pulls just that file via a targeted `tar xzf` (the other
+//! files are ignored).
 
 // Several builder functions are part of the provisioning API but not yet
 // called from the main binary path (only from tests). They will be wired as

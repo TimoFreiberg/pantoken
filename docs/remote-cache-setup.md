@@ -56,14 +56,14 @@ From the pantoken repo checkout on the Mac mini:
 
 ```bash
 # Read-only checks (verifies Tailscale, disk space, ports)
-bash deploy/bazel-remote-preflight.sh
+bash scripts/remote-cache/bazel-remote-preflight.sh
 
 # Install LaunchDaemon (creates 50 GiB cache, renders plist, starts daemon)
-bash deploy/bazel-remote-preflight.sh --setup
+bash scripts/remote-cache/bazel-remote-preflight.sh --setup
 ```
 
 This creates `/usr/local/var/bazel-remote` (50 GiB cache), renders the plist
-from `deploy/com.bazel-remote.plist`, installs it as a system LaunchDaemon at
+from `scripts/remote-cache/com.bazel-remote.plist`, installs it as a system LaunchDaemon at
 `/Library/LaunchDaemons/com.bazel-remote.plist`, and bootstraps it via
 `sudo launchctl bootstrap system`.
 

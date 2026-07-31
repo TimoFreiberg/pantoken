@@ -20,19 +20,11 @@ create_archive_content() {
   local version="${2:-1.0.0}"
   local sha="${3:-abcdef1234567890abcdef1234567890abcdef12}"
 
-  mkdir -p "$dir/bin" "$dir/client-dist/assets"
+  mkdir -p "$dir/bin"
   echo "$version" > "$dir/VERSION"
   echo "$sha" > "$dir/BUILD_SHA"
   echo "#!/bin/sh" > "$dir/bin/pantoken-server"
   chmod 0755 "$dir/bin/pantoken-server"
-  echo "#!/bin/sh" > "$dir/bin/pantoken-tar-validate"
-  chmod 0755 "$dir/bin/pantoken-tar-validate"
-  echo "#!/bin/sh" > "$dir/run.sh"
-  chmod 0755 "$dir/run.sh"
-  echo "#!/bin/sh" > "$dir/update.sh"
-  chmod 0755 "$dir/update.sh"
-  echo "<html>index</html>" > "$dir/client-dist/index.html"
-  echo "body{}" > "$dir/client-dist/assets/style.css"
 }
 
 make_archive() {
@@ -92,7 +84,7 @@ echo ""
 echo "=== Test 4: Missing file → exit 1 ==="
 create_archive_content "$TMPDIR/missing-a" "1.0.0" "abcdef1234567890abcdef1234567890abcdef12"
 create_archive_content "$TMPDIR/missing-b" "1.0.0" "abcdef1234567890abcdef1234567890abcdef12"
-rm "$TMPDIR/missing-b/bin/pantoken-tar-validate"
+rm "$TMPDIR/missing-b/bin/pantoken-server"
 make_archive "$TMPDIR/missing-a" "$TMPDIR/missing-a.tar.gz"
 make_archive "$TMPDIR/missing-b" "$TMPDIR/missing-b.tar.gz"
 
@@ -108,7 +100,7 @@ echo ""
 echo "=== Test 5: Differing permissions → exit 1 ==="
 create_archive_content "$TMPDIR/perm-a" "1.0.0" "abcdef1234567890abcdef1234567890abcdef12"
 create_archive_content "$TMPDIR/perm-b" "1.0.0" "abcdef1234567890abcdef1234567890abcdef12"
-chmod 0644 "$TMPDIR/perm-b/run.sh"
+chmod 0644 "$TMPDIR/perm-b/bin/pantoken-server"
 make_archive "$TMPDIR/perm-a" "$TMPDIR/perm-a.tar.gz"
 make_archive "$TMPDIR/perm-b" "$TMPDIR/perm-b.tar.gz"
 

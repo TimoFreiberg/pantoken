@@ -5,7 +5,7 @@
 # Does NOT install the daemon unless --setup (without --skip-daemon) is passed.
 #
 # Usage:
-#   bash deploy/bazel-remote-preflight.sh [--setup] [--version <ver>]
+#   bash scripts/remote-cache/bazel-remote-preflight.sh [--setup] [--version <ver>]
 #       [--cache-dir <path>] [--max-size <GiB>] [--grpc-port <port>]
 #       [--http-port <port>] [--instance-name <name>] [--skip-daemon]
 #

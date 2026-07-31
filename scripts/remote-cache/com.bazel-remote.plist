@@ -10,7 +10,7 @@
   @@@PLACEHOLDER@@@ tokens with absolute paths for this host, then installs
   the rendered plist via sudo launchctl bootstrap.
 
-  See deploy/DEPLOY.md and deploy/bazel-remote-preflight.sh.
+  See docs/remote-cache-setup.md and scripts/remote-cache/bazel-remote-preflight.sh.
 
   Required placeholders:
     @@@BAZEL_REMOTE_BIN@@@ — absolute path to the bazel-remote binary

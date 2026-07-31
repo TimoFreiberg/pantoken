@@ -37,10 +37,7 @@ echo "Safety validation passed: $ARCHIVE" >&2
 # ── Content validation ───────────────────────────────────────────────────────
 # Based on the content checks in scripts/headless/validate-artifact.ts:
 # gzip magic bytes, VERSION format, BUILD_SHA format, and executable
-# permissions. The reference validator checks 2 executables (bin/pantoken-server
-# and run.sh); this script checks all 4 staged executables since
-# stage-payload.sh sets 0755 on all of them. Runs only after the safety
-# validator passes.
+# permissions. Runs only after the safety validator passes.
 
 # Check gzip magic bytes (0x1f 0x8b).
 magic=$(head -c 2 "$ARCHIVE" | od -An -tx1 | tr -d ' ')
@@ -81,28 +78,27 @@ if ! echo "$build_sha" | grep -qE '^[0-9a-f]{40}$'; then
 fi
 echo "BUILD_SHA format: OK" >&2
 
-# Check executable permissions on all 4 staged executables.
-# stage-payload.sh sets 0755 on all of them. Uses the portable -x test.
-for exec_path in bin/pantoken-server bin/pantoken-tar-validate run.sh update.sh; do
-    full_path="$EXTRACT_DIR/$exec_path"
-    if [ ! -f "$full_path" ]; then
-        echo "Error: $exec_path not found in archive" >&2
-        exit 1
-    fi
-    # Portable octal mode: probe -c (GNU) first, then -f (BSD).
-    if ! mode=$(stat -c '%a' "$full_path" 2>/dev/null); then
-        mode=$(stat -f '%Lp' "$full_path" 2>/dev/null)
-    fi
-    if [ -z "$mode" ]; then
-        echo "Error: could not stat $exec_path" >&2
-        exit 1
-    fi
-    # Check if any execute bit is set using the portable -x test.
-    if [ ! -x "$full_path" ]; then
-        printf 'Error: %s is not executable (mode: %s)\n' "$exec_path" "$mode" >&2
-        exit 1
-    fi
-    echo "Executable permission: OK ($exec_path mode $mode)" >&2
-done
+# Check executable permission on bin/pantoken-server.
+# stage-payload.sh sets 0755 on it. Uses the portable -x test.
+exec_path="bin/pantoken-server"
+full_path="$EXTRACT_DIR/$exec_path"
+if [ ! -f "$full_path" ]; then
+    echo "Error: $exec_path not found in archive" >&2
+    exit 1
+fi
+# Portable octal mode: probe -c (GNU) first, then -f (BSD).
+if ! mode=$(stat -c '%a' "$full_path" 2>/dev/null); then
+    mode=$(stat -f '%Lp' "$full_path" 2>/dev/null)
+fi
+if [ -z "$mode" ]; then
+    echo "Error: could not stat $exec_path" >&2
+    exit 1
+fi
+# Check if any execute bit is set using the portable -x test.
+if [ ! -x "$full_path" ]; then
+    printf 'Error: %s is not executable (mode: %s)\n' "$exec_path" "$mode" >&2
+    exit 1
+fi
+echo "Executable permission: OK ($exec_path mode $mode)" >&2
 
 echo "Content validation passed: $ARCHIVE" >&2

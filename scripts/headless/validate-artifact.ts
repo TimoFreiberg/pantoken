@@ -16,7 +16,7 @@
 //   4. Validate VERSION format and optional tag match
 //   5. Validate BUILD_SHA is 40-char lowercase hex
 //   6. Validate required files exist
-//   7. Validate executable permissions on bin/pantoken-server and run.sh
+//   7. Validate executable permissions on bin/pantoken-server
 //
 // Exit 0 on success, 1 on validation failure.
 
@@ -36,14 +36,12 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isMain } from "../lib/node-compat.js";
 
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+
 const REQUIRED_FILES = [
   "VERSION",
   "BUILD_SHA",
   "bin/pantoken-server",
-  "bin/pantoken-tar-validate",
-  "run.sh",
-  "update.sh",
-  "client-dist/index.html",
 ];
 
 function fail(msg: string): never {
@@ -86,9 +84,9 @@ async function main(): Promise<void> {
     // schema, required members, and mode/owner checks.
     const validator = process.env.PANTOKEN_UPDATE_TEST_MODE === "1"
       ? process.env.PANTOKEN_TAR_VALIDATOR ?? ""
-      : `${process.env.HOME ?? ""}/.local/libexec/pantoken-tar-validate`;
+      : process.env.PANTOKEN_TAR_VALIDATOR ?? join(repoRoot, "target", "release", "pantoken-tar-validate");
     if (!validator || !existsSync(validator))
-      fail(`trusted tar validator missing: ${validator}`);
+      fail(`trusted tar validator missing: ${validator} (build it with: cargo build --release -p pantoken-tar-validate)`);
     const trusted = spawnSync(validator, [archivePath], { encoding: "utf8" });
     if (trusted.status !== 0)
       fail(`trusted tar validator rejected archive (exit ${trusted.status}): ${trusted.stderr || trusted.stdout}`);
@@ -153,7 +151,6 @@ async function main(): Promise<void> {
     console.log("Checking executable permissions...");
     const execChecks = [
       { path: join(extractDir, "bin", "pantoken-server"), desc: "bin/pantoken-server" },
-      { path: join(extractDir, "run.sh"), desc: "run.sh" },
     ];
     for (const { path: p, desc } of execChecks) {
       if (!existsSync(p))

@@ -492,10 +492,6 @@ jobs:
           tar -xzf target/release/headless/pantoken-headless-macos-aarch64.tar.gz \
             -C target/release/headless/payload
           pnpm exec tsx scripts/headless/smoke-test.ts target/release/headless/payload
-      - name: Mandatory macOS launchd platform gate
-        run: |
-          set -e
-          bash deploy/launchd-platform-gate.sh --evidence "$RUNNER_TEMP/launchd-gate-evidence"
       - name: Assemble retained release bundle
         run: |
           set -e

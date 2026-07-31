@@ -196,7 +196,7 @@ kind = "filegroup"
 test = false
 package = "server-rs-tests"
 
-# Archive assembly (requires client/dist)
+# Archive assembly
 [[targets]]
 label = "//:pantoken_headless_unsigned"
 kind = "genrule"

@@ -7,10 +7,10 @@ from a desktop GUI/browser/phone over Tailscale. Default look/feel mirrors Codex
 ## Architecture
 
 ```
-   Mac Mini (server: Rust + axum)
+   macOS desktop app (.app, Tauri)
    ┌─────────────────────────────────────────────────────────────┐
+   │  Internal hub (bundled pantoken-server, Rust + axum)         │
    │  PolytokenDriver ── HTTP+SSE ──┐   polytoken daemon(s)      │
-   │    per-session daemon proc      │   (one per session/port)  │
    │    · open/new/resume/abort      │                           │
    │    · event-map (fold)           ▼                           │
    │                          ┌───────────────────┐              │
@@ -22,15 +22,22 @@ from a desktop GUI/browser/phone over Tailscale. Default look/feel mirrors Codex
    │              │                                               │
    │  WebSocket server  +  /debug/state  +  auth-token            │
    └──────────────┼──────────────────────────────────────────────┘
-                  │  Tailscale (tailscale serve, TLS)
-   ┌──────────────┴──────────────┐
-   ▼                             ▼
- MacBook browser             Phone (PWA)
- THIN CLIENT (Svelte 5)      THIN CLIENT (Svelte 5)
- · folds same events locally · same; per-client view state
- · renders transcript+deltas   (selection, composer draft,
- · taps approvals              sidebar) stays LOCAL
+                  │  SSH (system ssh or native mobile lib)
+   ┌──────────────┴──────────────────────────────────────────────┐
+   │  Remote host (Mac or Linux)                                  │
+   │  pantoken-server (provisioned by the desktop app)            │
+   │  stdio-proxy to persistent remote runtime (Unix socket)      │
+   │  PolytokenDriver to polytoken daemon(s)                      │
+   └──────────────────────────────────────────────────────────────┘
 ```
+
+The desktop app is the single entry point. It runs an internal hub that
+serves the Svelte client to a local browser window and manages polytoken
+daemons on the local machine. For remote development, it SSHes into a
+remote host, provisions a `pantoken-server` binary there (from a signed
+release archive), and bridges the local browser to the remote runtime over
+a framed stdio transport. There is no standalone server deployment — the
+remote binary is always provisioned and managed by the desktop app.
 
 **Load-bearing principle:** split **durable shared state** (sessions,
 transcripts, statuses, pending approvals — server-owned, broadcast) from

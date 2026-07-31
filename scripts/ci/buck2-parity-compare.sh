@@ -6,13 +6,11 @@
 # timestamps; Buck2 uses a Python assembler with epoch-0 timestamps). This
 # script performs a structural comparison:
 #   1. File listing (sorted paths) — must match exactly.
-#   2. Executable permissions on bin/pantoken-server, bin/pantoken-tar-validate,
-#      run.sh, update.sh.
+#   2. Executable permissions on bin/pantoken-server.
 #   3. VERSION file content — must match.
 #   4. BUILD_SHA file content — must match.
-#   5. client-dist/index.html content — must match (same Vite build).
-#   6. Gzip magic bytes — both must be valid gzip.
-#   7. Binary sizes within tolerance (should be identical: same source/toolchain).
+#   5. Gzip magic bytes — both must be valid gzip.
+#   6. Binary sizes within tolerance (should be identical: same source/toolchain).
 #
 # Usage: bash scripts/ci/buck2-parity-compare.sh <buck2_archive> <cargo_archive>
 #
@@ -33,9 +31,6 @@ CARGO_ARCHIVE="$2"
 # Files that must have executable mode (0755)
 EXEC_FILES=(
   "bin/pantoken-server"
-  "bin/pantoken-tar-validate"
-  "run.sh"
-  "update.sh"
 )
 
 # Size tolerance in bytes (allow minor differences from build metadata)
@@ -143,21 +138,8 @@ else
   check_fail "BUILD_SHA file missing" "buck2 exists=$([[ -f "$BUCK2_DIR/BUILD_SHA" ]] && echo yes || echo no) cargo exists=$([[ -f "$CARGO_DIR/BUILD_SHA" ]] && echo yes || echo no)"
 fi
 
-# ── 5. index.html content ───────────────────────────────────────────────────
-echo "5. client-dist/index.html content"
-if [[ -f "$BUCK2_DIR/client-dist/index.html" && -f "$CARGO_DIR/client-dist/index.html" ]]; then
-  if diff -q "$BUCK2_DIR/client-dist/index.html" "$CARGO_DIR/client-dist/index.html" >/dev/null 2>&1; then
-    check_pass "index.html content matches"
-  else
-    check_fail "index.html content differs" "see diff for details"
-    diff "$BUCK2_DIR/client-dist/index.html" "$CARGO_DIR/client-dist/index.html" | head -20 | sed 's/^/      /' >&2
-  fi
-else
-  check_fail "index.html missing" "buck2 exists=$([[ -f "$BUCK2_DIR/client-dist/index.html" ]] && echo yes || echo no) cargo exists=$([[ -f "$CARGO_DIR/client-dist/index.html" ]] && echo yes || echo no)"
-fi
-
-# ── 6. Gzip magic bytes ─────────────────────────────────────────────────────
-echo "6. Gzip magic bytes"
+# ── 5. Gzip magic bytes ─────────────────────────────────────────────────────
+echo "5. Gzip magic bytes"
 for label in "buck2:$BUCK2_ARCHIVE" "cargo:$CARGO_ARCHIVE"; do
   name="${label%%:*}"
   path="${label#*:}"
@@ -169,8 +151,8 @@ for label in "buck2:$BUCK2_ARCHIVE" "cargo:$CARGO_ARCHIVE"; do
   fi
 done
 
-# ── 7. Binary sizes ─────────────────────────────────────────────────────────
-echo "7. Binary sizes"
+# ── 6. Binary sizes ─────────────────────────────────────────────────────────
+echo "6. Binary sizes"
 for f in "${EXEC_FILES[@]}"; do
   if [[ -f "$BUCK2_DIR/$f" && -f "$CARGO_DIR/$f" ]]; then
     BUCK2_SIZE=$(stat -f '%z' "$BUCK2_DIR/$f" 2>/dev/null || stat -c '%s' "$BUCK2_DIR/$f" 2>/dev/null)

@@ -129,7 +129,6 @@ migration, not to pre-existing drift.
 - `tsx scripts/headless/build.ts --tag <tag>`
 - `tsx scripts/headless/validate-artifact.ts <archive>`
 - `tsx scripts/headless/smoke-test.ts <payload-dir>`
-- `bash deploy/launchd-platform-gate.sh --evidence <path>`
 
 ## Dependency release-age protection
 

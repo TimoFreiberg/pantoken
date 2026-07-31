@@ -5,11 +5,6 @@
 //! VERSION
 //! BUILD_SHA
 //! bin/pantoken-server
-//! bin/pantoken-tar-validate
-//! run.sh
-//! update.sh
-//! client-dist/index.html
-//! client-dist/assets/<hashed>          (zero or more)
 //! ```
 //!
 //! Exit codes (CLI):
@@ -64,29 +59,10 @@ mod errors {
 
 mod schema {
     /// Canonical member paths that must exist in the archive.
-    pub const REQUIRED: &[&str] = &[
-        "VERSION",
-        "BUILD_SHA",
-        "bin/pantoken-server",
-        "bin/pantoken-tar-validate",
-        "run.sh",
-        "update.sh",
-        "client-dist/index.html",
-    ];
+    pub const REQUIRED: &[&str] = &["VERSION", "BUILD_SHA", "bin/pantoken-server"];
 
     /// Prefixes allowed in the archive (must be checked before REQUIRED).
-    pub const CANONICAL_PREFIXES: &[&str] = &[
-        "VERSION",
-        "BUILD_SHA",
-        "run.sh",
-        "update.sh",
-        "bin/pantoken-server",
-        "bin/pantoken-tar-validate",
-        "client-dist/index.html",
-    ];
-
-    /// Allowed asset filename pattern under client-dist/assets/.
-    pub const ASSET_PREFIX: &str = "client-dist/assets/";
+    pub const CANONICAL_PREFIXES: &[&str] = &["VERSION", "BUILD_SHA", "bin/pantoken-server"];
 }
 
 /// Normalise a path component sequence.
@@ -168,25 +144,8 @@ fn prefix_allowed(path: &str) -> bool {
             return true;
         }
     }
-    if matches!(path, "bin" | "client-dist" | "client-dist/assets") {
-        return true;
-    }
-    // Assets are allowed under client-dist/assets/.
-    if path.starts_with(schema::ASSET_PREFIX) {
-        return true;
-    }
-    // PWA static files at client-dist/ root level (icons, manifest, etc.)
-    // Must match the build script's copyDirRecursive allowlist.
-    if let Some(name) = path.strip_prefix("client-dist/")
-        && !name.contains('/')
-        && (name == "index.html"
-            || name.starts_with("apple-touch-icon")
-            || name.starts_with("icon")
-            || name.starts_with("favicon")
-            || name.starts_with("manifest")
-            || name.starts_with("sw")
-            || name.starts_with("registerSW"))
-    {
+    // The bin/ directory prefix is allowed (contains pantoken-server).
+    if matches!(path, "bin") {
         return true;
     }
     false
@@ -370,18 +329,15 @@ mod tests {
     fn prefix_allowed_exact() {
         assert!(prefix_allowed("VERSION"));
         assert!(prefix_allowed("BUILD_SHA"));
-        assert!(prefix_allowed("run.sh"));
         assert!(prefix_allowed("bin/pantoken-server"));
-    }
-
-    #[test]
-    fn prefix_allowed_assets() {
-        assert!(prefix_allowed("client-dist/assets/abc123.js"));
-        assert!(prefix_allowed("client-dist/assets/a.b-c_d.e"));
+        assert!(prefix_allowed("bin"));
     }
 
     #[test]
     fn prefix_allowed_rejects_extra() {
+        assert!(!prefix_allowed("run.sh"));
+        assert!(!prefix_allowed("client-dist/index.html"));
+        assert!(!prefix_allowed("bin/pantoken-tar-validate"));
         assert!(!prefix_allowed("unexpected/file"));
         assert!(!prefix_allowed("Cargo.toml"));
         assert!(!prefix_allowed("src/main.rs"));
@@ -437,11 +393,6 @@ mod tests {
             ("VERSION", b"1.0.0"),
             ("BUILD_SHA", b"abcd1234abcd1234abcd1234abcd1234abcd1234"),
             ("bin/pantoken-server", b"#!/bin/sh\necho hi"),
-            ("bin/pantoken-tar-validate", b"#!/bin/sh\necho validate"),
-            ("run.sh", b"#!/bin/sh\necho run"),
-            ("update.sh", b"#!/bin/sh\necho update"),
-            ("client-dist/index.html", b"<!DOCTYPE html><html></html>"),
-            ("client-dist/assets/abc123.js", b"console.log(1);"),
         ]);
 
         let result = validate_tar(Cursor::new(tar_bytes));
@@ -454,10 +405,6 @@ mod tests {
             ("VERSION", b"1.0.0"),
             // BUILD_SHA missing
             ("bin/pantoken-server", b"binary"),
-            ("bin/pantoken-tar-validate", b"validator"),
-            ("run.sh", b"run"),
-            ("update.sh", b"update"),
-            ("client-dist/index.html", b"<html></html>"),
         ]);
 
         let result = validate_tar(Cursor::new(tar_bytes));
@@ -479,10 +426,6 @@ mod tests {
             ("VERSION", b"1.0.0"),
             ("BUILD_SHA", b"abcd1234abcd1234abcd1234abcd1234abcd1234"),
             ("bin/pantoken-server", b"binary"),
-            ("bin/pantoken-tar-validate", b"validator"),
-            ("run.sh", b"run"),
-            ("update.sh", b"update"),
-            ("client-dist/index.html", b"<html></html>"),
             ("Cargo.toml", b"[package]\n"), // not allowed
         ]);
 
@@ -505,10 +448,6 @@ mod tests {
             ("VERSION", b"1.0.0"),
             ("BUILD_SHA", b"abcd1234abcd1234abcd1234abcd1234abcd1234"),
             ("bin/pantoken-server", b"binary"),
-            ("bin/pantoken-tar-validate", b"validator"),
-            ("run.sh", b"run"),
-            ("update.sh", b"update"),
-            ("client-dist/index.html", b"<html></html>"),
             ("node_modules/foo.js", b"require('evil')"),
         ]);
 
@@ -626,14 +565,7 @@ mod tests {
                 .unwrap();
 
             // Add required members stubbed.
-            for name in &[
-                "BUILD_SHA",
-                "bin/pantoken-server",
-                "bin/pantoken-tar-validate",
-                "run.sh",
-                "update.sh",
-                "client-dist/index.html",
-            ] {
+            for name in &["BUILD_SHA", "bin/pantoken-server"] {
                 let mut h = tar::Header::new_gnu();
                 h.set_entry_type(tar::EntryType::Regular);
                 h.set_size(4);
@@ -694,52 +626,6 @@ mod tests {
     }
 
     #[test]
-    fn valid_assets_multiple() {
-        let tar_bytes = build_test_tar(&[
-            ("VERSION", b"2.0.0"),
-            ("BUILD_SHA", b"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"),
-            ("bin/pantoken-server", b"#!rust"),
-            ("bin/pantoken-tar-validate", b"#!rust"),
-            ("run.sh", b"#!/bin/sh"),
-            ("update.sh", b"#!/bin/sh"),
-            ("client-dist/index.html", b"<!DOCTYPE html>"),
-            ("client-dist/assets/abc123.js", b"// js"),
-            ("client-dist/assets/vendor_456.css", b"/* css */"),
-            ("client-dist/assets/icon.svg", b"<svg></svg>"),
-        ]);
-
-        let result = validate_tar(Cursor::new(tar_bytes));
-        assert!(result.is_ok(), "expected valid archive: {:?}", result);
-    }
-
-    #[test]
-    fn valid_pwa_root_files() {
-        let tar_bytes = build_test_tar(&[
-            ("VERSION", b"1.0.0"),
-            ("BUILD_SHA", b"abcd1234abcd1234abcd1234abcd1234abcd1234"),
-            ("bin/pantoken-server", b"#!rust"),
-            ("bin/pantoken-tar-validate", b"#!rust"),
-            ("run.sh", b"#!/bin/sh"),
-            ("update.sh", b"#!/bin/sh"),
-            ("client-dist/index.html", b"<!DOCTYPE html>"),
-            ("client-dist/apple-touch-icon.png", b"PNG"),
-            ("client-dist/icon-192.png", b"PNG"),
-            ("client-dist/icon-512.png", b"PNG"),
-            ("client-dist/icon-maskable-512.png", b"PNG"),
-            ("client-dist/icon.svg", b"<svg></svg>"),
-            ("client-dist/manifest.webmanifest", b"{}"),
-            ("client-dist/sw.js", b"// sw"),
-        ]);
-
-        let result = validate_tar(Cursor::new(tar_bytes));
-        assert!(
-            result.is_ok(),
-            "expected valid archive with PWA files: {:?}",
-            result
-        );
-    }
-
-    #[test]
     fn extra_unexpected_member_rejected() {
         // An unexpected file that is NOT in any allowed prefix.
         let mut tar_buf = Vec::new();
@@ -754,18 +640,6 @@ mod tests {
                     .append_data(&mut h, *name, Cursor::new(b"test"))
                     .unwrap();
             }
-
-            // Add a valid asset too.
-            let mut h = tar::Header::new_gnu();
-            h.set_entry_type(tar::EntryType::Regular);
-            h.set_size(10);
-            builder
-                .append_data(
-                    &mut h,
-                    "client-dist/assets/main.js",
-                    Cursor::new(b"console.log"),
-                )
-                .unwrap();
 
             // Add an unexpected file.
             let mut h = tar::Header::new_gnu();

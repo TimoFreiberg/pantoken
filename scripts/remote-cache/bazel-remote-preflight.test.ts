@@ -17,8 +17,8 @@ import { spawnAsync } from "../lib/node-compat.js";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
-const PREFLIGHT = join(SCRIPT_DIR, "../../deploy/bazel-remote-preflight.sh");
-const PLIST_TEMPLATE = join(SCRIPT_DIR, "../../deploy/com.bazel-remote.plist");
+const PREFLIGHT = join(SCRIPT_DIR, "bazel-remote-preflight.sh");
+const PLIST_TEMPLATE = join(SCRIPT_DIR, "com.bazel-remote.plist");
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

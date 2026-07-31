@@ -92,14 +92,10 @@ async function main(): Promise<void> {
 
   // Validate the staging directory has required files
   const binaryPath = join(extractedDir, "bin", "pantoken-server");
-  const envFile = join(extractedDir, "run.sh");
   const buildShaPath = join(extractedDir, "BUILD_SHA");
 
   if (!existsSync(binaryPath))
     fail(`staged binary not found: ${binaryPath}`);
-
-  if (!existsSync(envFile))
-    fail(`run.sh not found: ${envFile}`);
 
   if (!existsSync(buildShaPath))
     fail(`BUILD_SHA not found: ${buildShaPath}`);
@@ -158,14 +154,20 @@ async function main(): Promise<void> {
       fail(`Server did not become healthy within 9 seconds. stderr: ${stderr || "(none)"}`);
     }
 
-    // ── Check / serves HTML ──
-    console.log("Checking / serves HTML...");
+    // ── Check / responds (no client-dist in the slim archive, so the server
+    // returns a hint page or non-200 — we just verify it doesn't hang/crash) ──
+    console.log("Checking / responds...");
     const rootResp = await fetchText(`http://127.0.0.1:${port}/`);
-    if (rootResp.status !== 200)
-      fail(`/ returned status ${rootResp.status}: ${rootResp.text.slice(0, 200)}`);
-    if (!rootResp.text.includes("<!doctype") && !rootResp.text.includes("<html"))
-      fail(`/ did not serve HTML (first 100 chars: ${rootResp.text.slice(0, 100)})`);
-    console.log(`  / served ${rootResp.text.length} bytes of HTML`);
+    // Without client-dist, the server returns a hint (not 200). That's fine —
+    // the archive no longer ships static assets. We just verify the server
+    // responds without crashing.
+    if (rootResp.status === 200) {
+      if (!rootResp.text.includes("<!doctype") && !rootResp.text.includes("<html"))
+        fail(`/ returned 200 but not HTML (first 100 chars: ${rootResp.text.slice(0, 100)})`);
+      console.log(`  / served ${rootResp.text.length} bytes of HTML`);
+    } else {
+      console.log(`  / returned status ${rootResp.status} (expected — no client-dist in slim archive)`);
+    }
 
     // ── WebSocket hello with build_sha ──
     // The Rust server requires a client hello message (with type:"hello")

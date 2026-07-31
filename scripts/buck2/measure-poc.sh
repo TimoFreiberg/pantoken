@@ -97,14 +97,10 @@ echo -n "| Test run | "
 TEST_TIME=$(timer "$BUCK2" test "${TEST_TARGETS[@]}" 2>/dev/null)
 echo "${TEST_TIME}s | 5 test targets |"
 
-# Archive build (if client/dist exists)
-if [ -d "client/dist" ] && [ -f "client/dist/index.html" ]; then
-  echo -n "| Archive build | "
-  ARCHIVE_TIME=$(timer "$BUCK2" build '//:pantoken_headless_unsigned' 2>/dev/null)
-  echo "${ARCHIVE_TIME}s | Unsigned headless archive |"
-else
-  echo "| Archive build | skipped | client/dist not built (run \`just build-client\` first) |"
-fi
+# Archive build
+echo -n "| Archive build | "
+ARCHIVE_TIME=$(timer "$BUCK2" build '//:pantoken_headless_unsigned' 2>/dev/null)
+echo "${ARCHIVE_TIME}s | Unsigned headless archive |"
 
 # Cross-workspace cache reuse
 echo -n "| Cross-workspace (cache) | "

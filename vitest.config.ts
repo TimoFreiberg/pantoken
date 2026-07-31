@@ -12,9 +12,7 @@ export default defineConfig({
       "client/src/**/*.test.ts",
       "scripts/**/*.test.ts",
     ],
-    // 3 update-headless.sh integration tests require a real macOS launchd
-    // service environment and fail outside it — pre-existing, unrelated to
-    // the Vitest migration. See docs/toolchain-baseline.md.
+    // Scripts tests may spawn subprocesses; allow generous timeout.
     testTimeout: 30_000,
     // Use forks pool for more stable teardown (avoids EnvironmentTeardownError
     // race conditions with async console.log in worker threads).
