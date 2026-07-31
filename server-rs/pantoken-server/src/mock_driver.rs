@@ -1006,12 +1006,7 @@ fn mock_session_seed(path: &str) -> Vec<SessionDriverEvent> {
     }
     match path {
         "/sessions/demo-session.jsonl" => greeting_seed(),
-        "/sessions/older-session.jsonl" => session_seed(
-            "older-session",
-            "Explore the fold reducer",
-            "How does foldEvent assemble the transcript?",
-            "It folds each driver event into render-ready items — assistant deltas accumulate into one bubble, tool cards key off callId, and ambient UI lives in keyed maps.",
-        ),
+        "/sessions/older-session.jsonl" => older_session_seed(),
         "/sessions/scratch-session.jsonl" => session_seed(
             "scratch-session",
             "scratch",
@@ -1026,6 +1021,218 @@ fn mock_session_seed(path: &str) -> Vec<SessionDriverEvent> {
             "No fixture for this session.",
         ),
     }
+}
+
+/// The `older-session` fixture: a 5-turn session (matching its session-list
+/// `user_message_count: 5`) about the fold reducer, with realistic tool spans
+/// and a settled `RunCompleted` per turn. It must stay TALL enough to scroll at
+/// the small viewports the polish scroll-position specs use — the old 1-turn
+/// seed was shorter than the transcript fold once the dev bar and sidebars
+/// squeezed the layout, which broke "switching sessions restores the saved
+/// reading position". Turn 1 (the "How does foldEvent assemble the transcript?"
+/// Q&A) is preserved verbatim — `cross-session-attention.e2e.ts` and
+/// `lease-conflict.e2e.ts` assert on it, and `reconnect-focus.e2e.ts` asserts
+/// the assistant reply.
+fn older_session_seed() -> Vec<SessionDriverEvent> {
+    let ref_id = session_ref_for("older-session");
+    let b = || SessionEventBase {
+        session_ref: ref_id.clone(),
+        timestamp: ts(),
+        run_id: None,
+        subagent_handle: None,
+    };
+    let snap = |status: SessionStatus| SessionSnapshot {
+        r#ref: ref_id.clone(),
+        workspace: mock_workspace(),
+        title: "Explore the fold reducer".into(),
+        status,
+        updated_at: ts(),
+        archived_at: None,
+        preview: None,
+        config: Some(mock_default_config()),
+        usage: None,
+        running_run_id: None,
+        queued_messages: None,
+        facet: None,
+        permission_monitor: None,
+        adventurous_handoff: None,
+        notification_autodrain: None,
+        active_plan: None,
+        goal: None,
+        flags: None,
+        todos: None,
+        mcp_servers: None,
+        cwd: None,
+        cwd_stack_depth: None,
+    };
+    let user = |id: &str, text: &str| SessionDriverEvent::UserMessage {
+        base: b(),
+        id: id.into(),
+        text: text.into(),
+        images: None,
+        entry_id: Some(format!("e-{id}")),
+        references: None,
+    };
+    let reply = |text: &str| SessionDriverEvent::AssistantDelta {
+        base: b(),
+        text: text.into(),
+        channel: Some(AssistantDeltaChannel::Text),
+        entry_id: None,
+    };
+    let tool = |call_id: &str,
+                name: &str,
+                label: &str,
+                input: serde_json::Value,
+                output: serde_json::Value,
+                dur_ms: u64| {
+        let started = SessionDriverEvent::ToolStarted {
+            base: b(),
+            call_id: call_id.into(),
+            tool_name: name.into(),
+            label: Some(label.into()),
+            description: None,
+            input: Some(input),
+        };
+        advance_ts(dur_ms);
+        let finished = SessionDriverEvent::ToolFinished {
+            base: b(),
+            call_id: call_id.into(),
+            success: true,
+            output: Some(output),
+            images: None,
+            interrupted: None,
+        };
+        (started, finished)
+    };
+
+    let mut events = vec![SessionDriverEvent::SessionOpened {
+        base: b(),
+        snapshot: snap(SessionStatus::Idle),
+    }];
+
+    // Turn 1 — preserved verbatim from the original single-turn seed.
+    advance_ts(5 * 60_000);
+    events.push(user(
+        "u-older-1",
+        "How does foldEvent assemble the transcript?",
+    ));
+    events.push(reply("It folds each driver event into render-ready items — assistant deltas accumulate into one bubble, tool cards key off callId, and ambient UI lives in keyed maps."));
+    advance_ts(2 * 60_000);
+    events.push(SessionDriverEvent::RunCompleted {
+        base: b(),
+        snapshot: snap(SessionStatus::Idle),
+        user_entry_id: Some("e-u-older-1".into()),
+        assistant_entry_id: Some("e-a-older-1".into()),
+    });
+
+    // Turn 2 — where the WS singleton lives and how messages enter the fold.
+    advance_ts(20 * 60_000);
+    events.push(user(
+        "u-older-2",
+        "Where does the reconnecting WebSocket singleton live and how do inbound events enter the fold?",
+    ));
+    events.push(reply("The singleton lives in `client/src/lib/ws.ts` — one socket per app, auto-reconnecting with backoff. Each inbound message runs through the same `foldEvent` reducer the server uses, so client state stays a pure derivation of the event log."));
+    let (s, f) = tool(
+        "o2-bash",
+        "bash",
+        "Run shell command",
+        serde_json::json!({"command": "rg -n \"foldEvent\" client/src/lib"}),
+        serde_json::json!(
+            "client/src/lib/ws.ts:88:  const next = foldEvent(state, msg)\nclient/src/lib/store.svelte.ts:301:  applyEvent(foldEvent(state, evt))"
+        ),
+        1400,
+    );
+    events.push(s);
+    events.push(f);
+    events.push(reply("Reconnect and re-subscribe happen in the same file: the socket swap folds a synthetic `Reconnected` event so the reducer stays the single source of truth for ordering."));
+    advance_ts(30 * 60_000);
+    events.push(SessionDriverEvent::RunCompleted {
+        base: b(),
+        snapshot: snap(SessionStatus::Idle),
+        user_entry_id: Some("e-u-older-2".into()),
+        assistant_entry_id: Some("e-a-older-2".into()),
+    });
+
+    // Turn 3 — how the phone context panel reuses the desktop transcript.
+    advance_ts(25 * 60_000);
+    events.push(user(
+        "u-older-3",
+        "How does the mobile context panel reuse the desktop transcript component?",
+    ));
+    events.push(reply("It's the same `Transcript` component — the phone's full-screen context view swaps the wrapping layout via viewport-driven CSS, not a second implementation. Toggle state and scroll position are per-view so switching never resets your place."));
+    let (s, f) = tool(
+        "o3-read",
+        "read",
+        "Read file",
+        serde_json::json!({"path": "client/src/components/Transcript.svelte"}),
+        serde_json::json!("@media (max-width: 600px) { .transcript-wrap { padding: 0 12px; } }"),
+        900,
+    );
+    events.push(s);
+    events.push(f);
+    events.push(reply("The shared fold reducer is what makes this cheap: both surfaces render the same item shapes, so the only mobile-specific work is chrome, not data plumbing."));
+    advance_ts(35 * 60_000);
+    events.push(SessionDriverEvent::RunCompleted {
+        base: b(),
+        snapshot: snap(SessionStatus::Idle),
+        user_entry_id: Some("e-u-older-3".into()),
+        assistant_entry_id: Some("e-a-older-3".into()),
+    });
+
+    // Turn 4 — flagged files across archive.
+    advance_ts(40 * 60_000);
+    events.push(user(
+        "u-older-4",
+        "What happens to flagged files when a session is archived?",
+    ));
+    events.push(reply("Flagged files live in the session snapshot, so archiving persists them — reopening the session restores the flags exactly. The sidebar just stops listing archived sessions; nothing about the transcript or context is dropped."));
+    let (s, f) = tool(
+        "o4-grep",
+        "grep",
+        "Search files",
+        serde_json::json!({"pattern": "archived", "path": "protocol"}),
+        serde_json::json!("protocol/src/state.ts:112:  archivedAt: string | null"),
+        800,
+    );
+    events.push(s);
+    events.push(f);
+    advance_ts(45 * 60_000);
+    events.push(SessionDriverEvent::RunCompleted {
+        base: b(),
+        snapshot: snap(SessionStatus::Idle),
+        user_entry_id: Some("e-u-older-4".into()),
+        assistant_entry_id: Some("e-a-older-4".into()),
+    });
+
+    // Turn 5 — the parity harness.
+    advance_ts(15 * 60_000);
+    events.push(user(
+        "u-older-5",
+        "Is there a parity harness for the TUI, and how does it stay isolated?",
+    ));
+    events.push(reply("Yes — `parity/` drives the GUI and the TUI against one shared isolated test project on fresh ports, so it can never touch a real daemon or the production registry."));
+    let (s, f) = tool(
+        "o5-read",
+        "read",
+        "Read file",
+        serde_json::json!({"path": "parity/README.md"}),
+        serde_json::json!(
+            "# Parity harness\nSpins both surfaces on FRESH ports with an isolated sessions registry."
+        ),
+        1100,
+    );
+    events.push(s);
+    events.push(f);
+    events.push(reply("The harness asserts GUI⇄TUI parity by replaying the same scripted session on both and diffing the resulting transcripts."));
+    advance_ts(50 * 60_000);
+    events.push(SessionDriverEvent::RunCompleted {
+        base: b(),
+        snapshot: snap(SessionStatus::Idle),
+        user_entry_id: Some("e-u-older-5".into()),
+        assistant_entry_id: Some("e-a-older-5".into()),
+    });
+
+    events
 }
 
 /// Build the greeting fixture: sessionOpened + userMessage + assistant deltas + tool spans + runCompleted.

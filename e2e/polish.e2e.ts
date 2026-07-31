@@ -876,7 +876,7 @@ test("switching sessions restores the saved reading position", async ({
   // Shrink the viewport so the short mock fixtures exceed the fold — only then is
   // "opened at the top" distinguishable from "opened at the bottom". Both the greeting
   // source and the target session scroll at this height.
-  await page.setViewportSize({ width: 1100, height: 380 });
+  await page.setViewportSize({ width: 1100, height: 560 });
 
   const scroller = page.locator(".scroller");
   const top = () => scroller.evaluate((el) => (el as HTMLElement).scrollTop);
@@ -897,6 +897,7 @@ test("switching sessions restores the saved reading position", async ({
     "Explore the fold reducer",
   );
   await expect.poll(gap).toBeLessThan(80); // landed at the live bottom (no saved pos)
+  await page.waitForTimeout(550); // let the open's settle/save-suppression window lapse
   // Scroll part-way up (not the very top, so the saved ratio is unambiguously mid-transcript)
   // via real wheel input so the input-gated pin un-pins (programmatic scrollTop can't un-pin).
   // Then let the debounced save fire. Target 25% of the scrollable area (not 50%) so the
@@ -912,6 +913,8 @@ test("switching sessions restores the saved reading position", async ({
   // Wait for the debounced persist (200ms) to land in localStorage.
   await page.waitForTimeout(350);
   const savedTop = await top();
+  const savedHeight = await scroller.evaluate((el) => (el as HTMLElement).scrollHeight);
+  const savedRatio = savedTop / savedHeight;
 
   // Switch to the greeting (a DIFFERENT session), then back. The restored session should
   // land near where we left it, NOT at the live bottom. (We don't assert the greeting's
@@ -927,11 +930,19 @@ test("switching sessions restores the saved reading position", async ({
     .getByTestId("sidebar")
     .getByText("Explore the fold reducer")
     .click();
-  // Restored to the saved reading position (within a tolerance — the ratio is re-derived
-  // against the current scrollHeight, which may differ slightly from the saved height).
+  // Restored to the saved reading position. The ratio is re-derived against the CURRENT
+  // scrollHeight (content-visibility virtualization can render the same turns at different
+  // heights between visits), so compare RATIOS rather than pixels: the transcript
+  // virtualizes turns to ~500px intrinsic height when off-screen, which swings
+  // scrollHeight (and with it any fixed-pixel target) between the save and restore visits
+  // even though the saved proportional spot is honored exactly.
   await expect.poll(top).toBeGreaterThan(0); // not at the very top (restored, not blank)
-  const restoredTop = await top();
-  expect(Math.abs(restoredTop - savedTop)).toBeLessThan(30);
+  await page.waitForTimeout(600); // let settleScroll's 500ms chase window finish
+  const restoredRatio = await scroller.evaluate((el) => {
+    const s = el as HTMLElement;
+    return s.scrollHeight > 0 ? s.scrollTop / s.scrollHeight : 0;
+  });
+  expect(Math.abs(restoredRatio - savedRatio)).toBeLessThan(0.02);
   // …and NOT at the live bottom (gap is meaningfully large, no pill).
   await expect.poll(gap).toBeGreaterThan(40);
   await expect(page.getByTestId("new-messages-pill")).toHaveCount(0);

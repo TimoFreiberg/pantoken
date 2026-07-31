@@ -189,8 +189,8 @@ test("background jobs section renders fixture jobs", async ({ page }) => {
   await expect(jobs).toContainText("researcher");
 });
 
-// Clicking a job opens a detail view with the output tail.
-test("clicking a job opens a detail view with output tail", async ({
+// Clicking a job opens a detail view with the job's identity and context.
+test("clicking a job opens a detail view with the job's details", async ({
   page,
 }) => {
   await openPanel(page);
@@ -200,13 +200,26 @@ test("clicking a job opens a detail view with output tail", async ({
   const jobs = page.getByTestId("background-jobs");
   await expect(jobs).toContainText("general-purpose");
 
-  // Click the first job (the running subagent).
+  // Click the first job (the running subagent). Subagent jobs render their
+  // captured-transcript section instead of the output tail; the mock provides
+  // no transcript for this job, so the placeholder shows, alongside the job's
+  // meta rows (handle, model).
   await jobs.getByText("general-purpose").first().click();
-
-  // The detail view should appear with the output tail.
   const detail = page.getByTestId("job-detail");
   await expect(detail).toBeVisible();
-  await expect(detail).toContainText("Reviewing src/store.svelte.ts");
+  await expect(detail).toContainText("general-purpose:code-reviewer");
+  await expect(detail).toContainText("anthropic/claude-sonnet-4-20250514");
+  await expect(detail).toContainText("Loading subagent transcript");
+  await page.keyboard.press("Escape");
+  await expect(detail).toHaveCount(0);
+
+  // The completed shell job's detail renders its output tail (shell jobs show
+  // outputTail, not a transcript).
+  await jobs.getByText("shell_exec").click();
+  const shellDetail = page.getByTestId("job-detail");
+  await expect(shellDetail).toBeVisible();
+  await expect(shellDetail).toContainText("cargo clippy");
+  await expect(shellDetail).toContainText("0 warnings, 0 errors");
 });
 
 // Q5 guard: an open detail sheet (now z=100/101, above agent-driven overlays
