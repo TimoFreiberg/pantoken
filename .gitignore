@@ -5,7 +5,6 @@ dist/
 .env
 .env.*
 client/dev-dist/
-desktop-tauri/binaries/
 .pantoken-data/
 test-results/
 playwright-report/
