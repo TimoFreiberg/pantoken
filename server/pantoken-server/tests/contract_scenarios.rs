@@ -819,17 +819,41 @@ fn heartbeat_call_count(fake: &fake_daemon::FakeDaemon) -> usize {
 // 4. Queue drain + queue error behavior (AC.6)
 // ---------------------------------------------------------------------------
 
-fn queue_item(id: &str, content: &str) -> Value {
-    json!({"id": id, "content": content, "admission_prompt_id": "PROMPT_0"})
+/// A `pending_turn_input_queued` SSE event for populating the local queue state.
+fn queue_sse_frame(seq: i64, item_id: &str, content: &str) -> corpus::SseFrame {
+    sse_frame(
+        seq,
+        json!({
+            "type": "pending_turn_input_queued",
+            "admission_prompt_id": "PROMPT_0",
+            "content": content,
+            "item_id": item_id,
+            "queue_revision": seq
+        }),
+    )
+}
+
+/// Wait for a `QueueUpdated` event (emitted by the `QueueAdd` effect when the
+/// SSE consumer processes `pending_turn_input_queued`). Only after the local
+/// queue is populated can `clear_queue` return the expected texts.
+async fn wait_for_queue_updated(rx: &mut tokio::sync::mpsc::Receiver<SessionDriverEvent>) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while let Ok(Some(ev)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+        if matches!(ev, SessionDriverEvent::QueueUpdated { .. }) {
+            return;
+        }
+    }
+    panic!("no QueueUpdated emitted after pending_turn_input_queued");
 }
 
 /// A 3-item queue drains fully (all texts returned, exactly one DELETE per
-/// item). Error variants are pinned AS THE CODE BEHAVES (driver.rs:1739-1775
-/// returns `ClearQueueResult`, not `Result`):
-///   * `/turn/input` 500 → an EMPTY result (snapshot failures are not
-///     surfaced);
+/// item). The local queue is populated from `pending_turn_input_queued` SSE
+/// events (no `GET /turn/input` — the live daemon 0.5.8+ doesn't expose it).
+/// Error variants are pinned AS THE CODE BEHAVES (driver.rs returns
+/// `ClearQueueResult`, not `Result`):
+///   * empty queue → an EMPTY result (no SSE events → no local queue items);
 ///   * `DELETE` 500 on the second dequeue → the DELETE drain stops while the
-///     result still carries the snapshot's texts (partial drain, no error
+///     result still carries the local queue's texts (partial drain, no error
 ///     propagation);
 ///   * `POST /prompt` 409 → `prompt` returns Err carrying the daemon's public
 ///     code/message (this one IS propagated).
@@ -839,39 +863,38 @@ async fn multi_item_queue_drain_and_queue_errors() {
 
     // (a) Happy full drain.
     {
-        let scenario = synthetic_scenario(
+        let mut scenario = synthetic_scenario(
             "queue-drain",
             vec![
                 http_entry("GET", "/events", 200, Value::Null),
                 http_entry("GET", "/state", 200, state_body("main")),
                 http_entry("GET", "/history", 200, history_body(vec![], 0)),
-                http_entry(
-                    "GET",
-                    "/turn/input",
-                    200,
-                    json!({
-                        "items": [
-                            queue_item("q1", "first text"),
-                            queue_item("q2", "second text"),
-                            queue_item("q3", "third text")
-                        ],
-                        "queue_revision": 2
-                    }),
-                ),
                 http_entry("DELETE", "/turn/input/newest", 200, json!({"ok": true})),
                 http_entry("DELETE", "/turn/input/newest", 200, json!({"ok": true})),
                 http_entry("DELETE", "/turn/input/newest", 200, json!({"ok": true})),
             ],
         );
+        // Populate the local queue via SSE events (no GET /turn/input).
+        scenario.sse = vec![
+            queue_sse_frame(0, "q1", "first text"),
+            queue_sse_frame(1, "q2", "second text"),
+            queue_sse_frame(2, "q3", "third text"),
+        ];
         let fake = Arc::new(
             fake_daemon::spawn_strict_with_bootstrap(scenario, "queue-drain".into(), 0).await,
         );
         let _ovr = OverrideGuard::install(fake.clone());
         let (driver, _dir) = make_driver().await;
+        let (_sub_id, mut rx) = collect_events(&driver, 256);
         driver
             .new_session(NewSessionOptsData::default())
             .await
             .expect("warm session");
+        // Wait for the local queue to be populated by the QueueAdd effects.
+        wait_for_queue_updated(&mut rx).await;
+        // Drain any remaining QueueUpdated events (one per QueueAdd).
+        wait_for_queue_updated(&mut rx).await;
+        wait_for_queue_updated(&mut rx).await;
         let result = driver.clear_queue(Some("queue-drain".into())).await;
         assert_eq!(
             result.steering,
@@ -895,25 +918,19 @@ async fn multi_item_queue_drain_and_queue_errors() {
             .expect("queue-drain contract consumed");
     }
 
-    // (b) Snapshot failure → empty result, no deletes, NO error surfaced.
+    // (b) Empty queue → empty result, no deletes (no SSE events populated
+    // the local queue, so clear_queue has nothing to return or drain).
     {
         let scenario = synthetic_scenario(
-            "queue-snapshot-error",
+            "queue-empty",
             vec![
                 http_entry("GET", "/events", 200, Value::Null),
                 http_entry("GET", "/state", 200, state_body("main")),
                 http_entry("GET", "/history", 200, history_body(vec![], 0)),
-                http_entry(
-                    "GET",
-                    "/turn/input",
-                    500,
-                    json!({"code": "queue_unavailable", "message": "queue snapshot failed"}),
-                ),
             ],
         );
         let fake = Arc::new(
-            fake_daemon::spawn_strict_with_bootstrap(scenario, "queue-snapshot-error".into(), 0)
-                .await,
+            fake_daemon::spawn_strict_with_bootstrap(scenario, "queue-empty".into(), 0).await,
         );
         let _ovr = OverrideGuard::install(fake.clone());
         let (driver, _dir) = make_driver().await;
@@ -921,12 +938,10 @@ async fn multi_item_queue_drain_and_queue_errors() {
             .new_session(NewSessionOptsData::default())
             .await
             .expect("warm session");
-        let result = driver
-            .clear_queue(Some("queue-snapshot-error".into()))
-            .await;
+        let result = driver.clear_queue(Some("queue-empty".into())).await;
         assert!(
             result.steering.is_empty(),
-            "snapshot failure must yield an empty ClearQueueResult (driver.rs:1754-1760 pins the swallow): {:?}",
+            "empty local queue must yield an empty ClearQueueResult: {:?}",
             result
         );
         assert_eq!(
@@ -935,33 +950,20 @@ async fn multi_item_queue_drain_and_queue_errors() {
                 .filter(|(m, p)| m == "DELETE" && p == "/turn/input/newest")
                 .count(),
             0,
-            "no deletes without a snapshot"
+            "no deletes without local queue items"
         );
         fake.assert_expectations_consumed()
-            .expect("queue-snapshot-error contract consumed");
+            .expect("queue-empty contract consumed");
     }
 
     // (c) Dequeue failure on the 2nd item → drain stops, texts still returned.
     {
-        let scenario = synthetic_scenario(
+        let mut scenario = synthetic_scenario(
             "queue-dequeue-error",
             vec![
                 http_entry("GET", "/events", 200, Value::Null),
                 http_entry("GET", "/state", 200, state_body("main")),
                 http_entry("GET", "/history", 200, history_body(vec![], 0)),
-                http_entry(
-                    "GET",
-                    "/turn/input",
-                    200,
-                    json!({
-                        "items": [
-                            queue_item("q1", "first text"),
-                            queue_item("q2", "second text"),
-                            queue_item("q3", "third text")
-                        ],
-                        "queue_revision": 2
-                    }),
-                ),
                 http_entry("DELETE", "/turn/input/newest", 200, json!({"ok": true})),
                 http_entry(
                     "DELETE",
@@ -971,24 +973,35 @@ async fn multi_item_queue_drain_and_queue_errors() {
                 ),
             ],
         );
+        // Populate the local queue via SSE events.
+        scenario.sse = vec![
+            queue_sse_frame(0, "q1", "first text"),
+            queue_sse_frame(1, "q2", "second text"),
+            queue_sse_frame(2, "q3", "third text"),
+        ];
         let fake = Arc::new(
             fake_daemon::spawn_strict_with_bootstrap(scenario, "queue-dequeue-error".into(), 0)
                 .await,
         );
         let _ovr = OverrideGuard::install(fake.clone());
         let (driver, _dir) = make_driver().await;
+        let (_sub_id, mut rx) = collect_events(&driver, 256);
         driver
             .new_session(NewSessionOptsData::default())
             .await
             .expect("warm session");
+        // Wait for the local queue to be populated by the QueueAdd effects.
+        wait_for_queue_updated(&mut rx).await;
+        wait_for_queue_updated(&mut rx).await;
+        wait_for_queue_updated(&mut rx).await;
         let result = driver.clear_queue(Some("queue-dequeue-error".into())).await;
-        // The returned texts come from the SNAPSHOT, not the deletes
-        // (driver.rs:1768-1774), so all 3 are returned despite the failed
-        // dequeue; the DELETE drain itself stops at the failure.
+        // The returned texts come from the LOCAL QUEUE, not the deletes, so
+        // all 3 are returned despite the failed dequeue; the DELETE drain
+        // itself stops at the failure.
         assert_eq!(
             result.steering.len(),
             3,
-            "clear_queue returns the snapshot's texts even when the drain stops early: {:?}",
+            "clear_queue returns the local queue's texts even when the drain stops early: {:?}",
             result
         );
         assert_eq!(

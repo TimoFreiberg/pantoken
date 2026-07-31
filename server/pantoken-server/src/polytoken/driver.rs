@@ -58,8 +58,8 @@ use pantoken_protocol::session_driver::{
     AtRefs, BackgroundJob, CommandInfo, DirListing, FileInfo, HostUiRequest, HostUiResponse,
     ImageContent, JobKind, JobStatusKind, ModelDefaults, ModelOption, NotifyLevel, PathStat,
     PermissionMonitorMode, SessionClosedReason, SessionDriverEvent, SessionEventBase, SessionId,
-    SessionListEntry, SessionRef, SessionSnapshot, SessionStatus, SessionUsage, WorkspaceId,
-    WorkspaceRef,
+    SessionListEntry, SessionQueuedMessage, SessionRef, SessionSnapshot, SessionStatus,
+    SessionUsage, WorkspaceId, WorkspaceRef,
 };
 use pantoken_protocol::wire::{DeliveryMode, LoginEnvStatus, McpAction, SessionAction};
 use parking_lot::{Mutex, RwLock};
@@ -106,6 +106,13 @@ struct WarmSession {
     sse_subscription: Mutex<Option<SseSubscription>>,
     monitor_mode: Mutex<Option<PermissionMonitorMode>>,
     autodrain_enabled: Mutex<Option<bool>>,
+    /// Local queue state, reconstructed from SSE events
+    /// (`PendingTurnInputQueued`/`Dequeued`/`Drained`/`Discarded`) and the
+    /// `PromptAccepted.queued_item` response. Replaces all `GET /turn/input`
+    /// calls — the live daemon (0.5.8+) doesn't expose that endpoint. Uses
+    /// `parking_lot::Mutex` (never `tokio::Mutex` — Q17): no async work is done
+    /// while the lock is held.
+    queue: Mutex<Vec<SessionQueuedMessage>>,
     /// Owned daemon child for real spawned sessions. Retained so dispose can kill
     /// and reap the out-of-process daemon, mirroring TS `WarmSession.child`.
     owned_process: Mutex<Option<tokio::process::Child>>,
@@ -490,6 +497,27 @@ impl PolytokenInner {
 
     fn get_warm(&self, session_id: &SessionId) -> Option<Arc<WarmSession>> {
         self.warm.read().get(session_id).cloned()
+    }
+
+    /// Read the current local queue as `Vec<SessionQueuedMessage>` (clone under
+    /// lock, release, return). The local queue is the source of truth for the
+    /// queue tray and `clear_queue` — no `GET /turn/input` fetch.
+    fn queue_snapshot(ws: &WarmSession) -> Vec<SessionQueuedMessage> {
+        ws.queue.lock().clone()
+    }
+
+    /// Emit a `QueueUpdated` event from the local queue state. Used by the
+    /// `QueueAdd`/`QueueRemove` effect handlers and the `prompt()` queued-item
+    /// path. Built from the warm session's cached state + sessionRef.
+    fn emit_queue_updated(self: &Arc<Self>, ws: &WarmSession) {
+        let messages = Self::queue_snapshot(ws);
+        let base = SessionEventBase {
+            session_ref: ws.session_ref.clone(),
+            timestamp: DriverMapCtx::now_ts(),
+            run_id: None,
+            subagent_handle: None,
+        };
+        self.emit(SessionDriverEvent::QueueUpdated { base, messages });
     }
 
     /// Move `session_id` to the back of the warm recency order (most-recently
@@ -1099,6 +1127,7 @@ impl PolytokenInner {
             sse_subscription: Mutex::new(Some(sub)),
             monitor_mode: Mutex::new(monitor_mode),
             autodrain_enabled: Mutex::new(autodrain_enabled),
+            queue: Mutex::new(Vec::new()),
             owned_process: Mutex::new(owned_process),
             sse_tx: Mutex::new(Some(sse_tx)),
             sse_consumer_handle: Mutex::new(None),
@@ -1502,6 +1531,24 @@ impl PolytokenInner {
                 //    same class of bug build_branch_seed's trailing re-assert fixes on the
                 //    open path). A genuinely running session carries status:running here,
                 //    correctly keeping the turn live.
+                //
+                // Also clear the local queue: the daemon's queue is independent of
+                // transcript history, but a missed SSE event during reconnect could leave
+                // the local queue permanently stale. Any still-present queued items will
+                // re-announce via `PendingTurnInputQueued` SSE events after the reseed.
+                {
+                    ws.queue.lock().clear();
+                    let base = SessionEventBase {
+                        session_ref: ws.session_ref.clone(),
+                        timestamp: DriverMapCtx::now_ts(),
+                        run_id: None,
+                        subagent_handle: None,
+                    };
+                    self.emit(SessionDriverEvent::QueueUpdated {
+                        base,
+                        messages: vec![],
+                    });
+                }
                 {
                     let mut accumulators = ws.accumulators.lock();
                     for acc in accumulators.values_mut() {
@@ -1535,28 +1582,30 @@ impl PolytokenInner {
                     }
                 }
             }
-            DaemonEffect::RefetchQueue => {
-                // The queue events carry one item + revision, not the full
-                // queue. pantoken's queueUpdated REPLACES the full queue, so fetch
-                // GET /turn/input and emit the full queue. Mirrors TS
-                // refetchQueue (polytoken-driver.ts:460-476).
-                let res = ws.client.turn_input_snapshot().await;
-                if let Some(snapshot) = res.data {
-                    // One ctx for both the per-message ts and the base timestamp
-                    // (built from the same cached fields) so they're consistent
-                    // by construction, not coincidence.
-                    let ctx = DriverMapCtx {
-                        session_ref: ws.session_ref.clone(),
-                        workspace: ws.workspace.clone(),
-                        last_state: ws.last_state.read().clone(),
-                        monitor_mode: *ws.monitor_mode.lock(),
-                        autodrain_enabled: *ws.autodrain_enabled.lock(),
-                    };
-                    let now = ctx.now();
-                    let messages = event_map::queue_messages_from_snapshot(&snapshot, &now);
-                    let base = event_map::event_base(&ctx);
-                    self.emit(SessionDriverEvent::QueueUpdated { base, messages });
+            DaemonEffect::QueueAdd { item_id, content } => {
+                // A queued steer/follow-up was added (PendingTurnInputQueued SSE
+                // event). Push onto the local queue and emit QueueUpdated with
+                // the full local queue — no daemon fetch needed.
+                let now = DriverMapCtx::now_ts();
+                ws.queue.lock().push(SessionQueuedMessage {
+                    id: item_id,
+                    mode: pantoken_protocol::session_driver::SessionMessageDeliveryMode::Steer,
+                    text: content,
+                    created_at: now.clone(),
+                    updated_at: now,
+                    references: None,
+                });
+                self.emit_queue_updated(ws);
+            }
+            DaemonEffect::QueueRemove { item_ids } => {
+                // One or more queued items were removed (dequeued, drained, or
+                // discarded). Remove matching items from the local queue and emit
+                // QueueUpdated with the full local queue.
+                {
+                    let mut queue = ws.queue.lock();
+                    queue.retain(|msg| !item_ids.contains(&msg.id));
                 }
+                self.emit_queue_updated(ws);
             }
             DaemonEffect::SetMonitorMode { mode } => {
                 *ws.monitor_mode.lock() = Some(mode);
@@ -1647,17 +1696,19 @@ impl PantokenDriver for PolytokenDriver {
             subagent_handle: None,
         };
         if accepted.queued_item.is_some() {
-            let res = ws.client.turn_input_snapshot().await;
-            let messages = res
-                .data
-                .map(|snapshot| event_map::queue_messages_from_snapshot(&snapshot, &now))
-                .unwrap_or_else(|| {
-                    accepted
-                        .queued_item
-                        .as_ref()
-                        .map(|item| vec![event_map::queue_message_from_item(item, &now)])
-                        .unwrap_or_default()
-                });
+            // The daemon accepted the prompt into the pending-turn queue. Emit a
+            // QueueUpdated with the single queued item for immediate UI feedback.
+            // Do NOT mutate ws.queue here — the authoritative queue mutation happens
+            // when the PendingTurnInputQueued SSE event arrives via the QueueAdd
+            // effect. Both PromptAccepted.queued_item (HTTP) and
+            // PendingTurnInputQueued (SSE) fire for the same item_id, so mutating in
+            // both places would duplicate the item. This eager emit provides
+            // immediate UI feedback; the later QueueAdd effect reconciles local state.
+            let messages = accepted
+                .queued_item
+                .as_ref()
+                .map(|item| vec![event_map::queue_message_from_item(item, &now)])
+                .unwrap_or_default();
             self.inner.emit(SessionDriverEvent::QueueUpdated {
                 base: base.clone(),
                 messages,
@@ -1740,25 +1791,26 @@ impl PantokenDriver for PolytokenDriver {
         // Contract (see the mock): return EVERY queued text and leave the queue
         // empty — the hub hands the texts back to the requesting composer. The
         // daemon's only removal primitive is DELETE /turn/input/newest, so:
-        // snapshot for the texts (items[] is queue order), then delete once per
-        // item. Not atomic — a turn finishing mid-drain can pull remaining items
-        // into the model; the daemon offers nothing stronger. Convergence of the
-        // shared queueUpdated state rides the dequeue SSE events (each triggers
-        // a RefetchQueue effect).
+        // read texts from the local queue state (no GET /turn/input — the live
+        // daemon 0.5.8+ doesn't expose it), clear the local queue optimistically,
+        // then delete once per item. Not atomic — a turn finishing mid-drain can
+        // pull remaining items into the model; the daemon offers nothing stronger.
+        // Convergence of the shared queueUpdated state rides the dequeue SSE events
+        // (each triggers a QueueRemove effect).
         let Some(sid) = session_id else {
             return ClearQueueResult::default();
         };
         let Some(ws) = self.inner.get_warm(&sid) else {
             return ClearQueueResult::default();
         };
-        let items = ws
-            .client
-            .turn_input_snapshot()
-            .await
-            .data
-            .map(|s| s.items)
-            .unwrap_or_default();
-        for _ in &items {
+        // Read texts from local state and clear optimistically.
+        let texts: Vec<String> = {
+            let mut queue = ws.queue.lock();
+            let texts = queue.iter().map(|msg| msg.text.clone()).collect();
+            queue.clear();
+            texts
+        };
+        for _ in &texts {
             // 409 (queue already empty) is an Ok no-op; stop only on real failures
             // rather than hammering a daemon that just refused us.
             if ws.client.dequeue_newest_input().await.is_err() {
@@ -1769,7 +1821,7 @@ impl PantokenDriver for PolytokenDriver {
             // Queue items surface in pantoken as mode:Steer (the daemon has no
             // steer/follow-up discriminator) — hand the texts back on that side;
             // the client joins steering ++ follow_up, so order is preserved.
-            steering: items.into_iter().map(|i| i.content).collect(),
+            steering: texts,
             follow_up: Vec::new(),
         }
     }
@@ -3702,6 +3754,7 @@ mod tests {
             sse_subscription: Mutex::new(None),
             monitor_mode: Mutex::new(None),
             autodrain_enabled: Mutex::new(None),
+            queue: Mutex::new(Vec::new()),
             owned_process: Mutex::new(None),
             sse_tx: Mutex::new(None),
             sse_consumer_handle: Mutex::new(None),

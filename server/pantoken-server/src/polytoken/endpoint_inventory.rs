@@ -91,24 +91,6 @@ pub const ENDPOINTS: &[EndpointContract] = &[
         "401, 409, 422, 500"
     ),
     endpoint!(
-        "queue_turn_input",
-        "POST",
-        "/turn/input",
-        "202",
-        "PendingTurnInputRequest { content }",
-        "empty",
-        "401, 409, 422, 429"
-    ),
-    endpoint!(
-        "turn_input_snapshot",
-        "GET",
-        "/turn/input",
-        "200 + PendingTurnInputSnapshot",
-        "none",
-        "PendingTurnInputSnapshot",
-        "401, 404, 500"
-    ),
-    endpoint!(
         "dequeue_newest_input",
         "DELETE",
         "/turn/input/newest",
@@ -372,8 +354,6 @@ pub const INVENTORIED_METHOD_NAMES: &[&str] = &[
     "heartbeat",
     "release_lease",
     "prompt",
-    "queue_turn_input",
-    "turn_input_snapshot",
     "dequeue_newest_input",
     "toggle_adventurous_handoff",
     "cancel_turn",

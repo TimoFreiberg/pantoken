@@ -56,11 +56,11 @@ discussion before becoming a gate (or being rejected).
       empirically against polytoken 0.5.3. See
       `rewind_experiment_results.md` in the session dir for full evidence.
 - [ ] **clear_queue + SessionAction live-driver test gaps** (found 2026-07-10):
-      the `clear_queue_drains_daemon_queue` test uses a 1-item fake `/turn/input`
-      fixture, so its `deletes == 1` assertion can't tell "one DELETE per item" from
-      "exactly one dequeue" (the historical bug shape) — needs a 2+ item fixture,
-      which needs a fake-daemon knob (canned `/turn/input` + always-200 DELETE win
-      over `scenario.http`). And 8/9 `SessionAction` arms + `report_action_error`
+      `clear_queue` now reads from local SSE-derived queue state (no `GET /turn/input` —
+      the live daemon 0.5.8+ doesn't expose it). The `clear_queue_drains_daemon_queue` test
+      uses the `queue-while-in-flight` corpus and a 1-item local queue, so its
+      `deletes == 1` assertion can't tell "one DELETE per item" from "exactly one dequeue"
+      (the historical bug shape). And 8/9 `SessionAction` arms + `report_action_error`
       have no live-driver test (mock e2e covers wire agreement, not the polytoken
       PermissionMonitorMode/McpAction mappings or the error-surfacing notice).
 

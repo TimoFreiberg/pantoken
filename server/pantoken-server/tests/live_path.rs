@@ -424,18 +424,18 @@ async fn streaming_turn_produces_fetch_state_effect() {
     );
 }
 
-/// queue-while-in-flight carries `pending_turn_input_queued` → a `RefetchQueue`
-/// effect (per event-map.test.ts:416). Confirms the scenario the Phase-D
-/// RefetchQueue integration test targets actually produces that effect.
+/// queue-while-in-flight carries `pending_turn_input_queued` → a `QueueAdd`
+/// effect (per the event_map mapping). Confirms the scenario the Phase-D
+/// QueueAdd integration test targets actually produces that effect.
 #[tokio::test]
-async fn queue_while_in_flight_produces_refetch_queue_effect() {
+async fn queue_while_in_flight_produces_queue_add_effect() {
     let scenario = corpus_loader::load_named(VERSION, "queue-while-in-flight");
     let effects = effects_for_scenario(&scenario);
     assert!(
         effects
             .iter()
-            .any(|e| matches!(e, DaemonEffect::RefetchQueue)),
-        "queue-while-in-flight should produce a RefetchQueue effect; got: {:?}",
+            .any(|e| matches!(e, DaemonEffect::QueueAdd { .. })),
+        "queue-while-in-flight should produce a QueueAdd effect; got: {:?}",
         effects.iter().map(|e| format!("{e:?}")).collect::<Vec<_>>()
     );
 }
@@ -591,9 +591,11 @@ async fn queued_prompt_updates_queue_without_user_echo() {
         "prompt POST not sent: {:?}",
         fake.recorded_calls()
     );
+    // The queued prompt's QueueUpdated comes from the PromptAccepted.queued_item
+    // response (no GET /turn/input — the live daemon 0.5.8+ doesn't expose it).
     assert!(
-        fake.called("GET", "/turn/input"),
-        "queued prompt should refetch the full queue: {:?}",
+        !fake.called("GET", "/turn/input"),
+        "queued prompt should NOT fetch GET /turn/input: {:?}",
         fake.recorded_calls()
     );
 
@@ -605,7 +607,7 @@ async fn queued_prompt_updates_queue_without_user_echo() {
                 panic!("queued prompt must not emit an immediate userMessage echo");
             }
             SessionDriverEvent::QueueUpdated { messages, .. }
-                if messages.iter().any(|m| m.text == "queued-turn-text") =>
+                if messages.iter().any(|m| m.text == "queued from prompt") =>
             {
                 saw_queue = true;
                 break;
@@ -1750,7 +1752,7 @@ async fn sse_burst_folds_in_order() {
 }
 
 // ===========================================================================
-// FetchState emit + RefetchQueue → queueUpdated
+// FetchState emit + QueueAdd → queueUpdated
 // ===========================================================================
 
 #[tokio::test]
@@ -1816,7 +1818,7 @@ async fn fetch_state_emits_run_completed_with_prompt_id() {
 }
 
 #[tokio::test]
-async fn refetch_queue_emits_queue_updated() {
+async fn queue_add_emits_queue_updated() {
     let _guard = OVERRIDE_MUTEX.lock().await;
 
     let scenario = corpus_loader::load_named(VERSION, "queue-while-in-flight");
@@ -1831,8 +1833,9 @@ async fn refetch_queue_emits_queue_updated() {
         .await
         .expect("new_session");
 
-    // Wait for the QueueUpdated (the pending_turn_input_queued → RefetchQueue →
-    // GET /turn/input → emit). Timeout so a missing emit fails fast.
+    // Wait for the QueueUpdated (the pending_turn_input_queued SSE event →
+    // QueueAdd effect → driver pushes onto local queue → emits QueueUpdated).
+    // Timeout so a missing emit fails fast.
     let mut got = None;
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(8);
     while let Ok(Some(ev)) = tokio::time::timeout_at(deadline, rx.recv()).await {
@@ -1844,54 +1847,71 @@ async fn refetch_queue_emits_queue_updated() {
     let ev = got.expect("no QueueUpdated emitted after pending_turn_input_queued");
     match ev {
         SessionDriverEvent::QueueUpdated { messages, .. } => {
-            // The canned /turn/input serves one item (q1, "queued-turn-text").
+            // The QueueAdd effect pushed the queued item from the SSE event
+            // (item_id 019f348b…, content "Then reply with exactly: QUEUE-DONE").
             assert_eq!(
                 messages.len(),
                 1,
-                "QueueUpdated should carry the full queue (1 item)"
+                "QueueUpdated should carry the full local queue (1 item)"
             );
-            assert_eq!(messages[0].id, "q1");
-            assert_eq!(messages[0].text, "queued-turn-text");
+            assert_eq!(messages[0].id, "019f348b-03c6-7f01-ac6c-6ac27ae79395");
+            assert_eq!(messages[0].text, "Then reply with exactly: QUEUE-DONE");
         }
         _ => unreachable!(),
     }
 
-    // The RefetchQueue effect fetched GET /turn/input.
+    // The QueueAdd effect does NOT fetch GET /turn/input (the local queue is
+    // the source of truth). Verify no GET /turn/input call was made.
     assert!(
-        fake.called("GET", "/turn/input"),
-        "RefetchQueue should have fetched GET /turn/input; calls: {:?}",
+        !fake.called("GET", "/turn/input"),
+        "QueueAdd should NOT fetch GET /turn/input; calls: {:?}",
         fake.recorded_calls()
     );
 }
 
 /// clear_queue (the client's ⌥↑ "Edit all" restore) must return EVERY queued
-/// text and drain the daemon's queue — the daemon's only removal primitive is
-/// DELETE /turn/input/newest, so the driver snapshots first and deletes once
-/// per item.
+/// text and drain the daemon's queue. Reads from the local queue state (no
+/// GET /turn/input — the live daemon 0.5.8+ doesn't expose it), then issues
+/// DELETE /turn/input/newest once per item.
 #[tokio::test]
 async fn clear_queue_drains_daemon_queue_and_returns_texts() {
     let _guard = OVERRIDE_MUTEX.lock().await;
 
-    let scenario = corpus_loader::load_named(VERSION, "streaming-turn");
-    let fake = Arc::new(fake_daemon::spawn(scenario, "clear-queue-1".into(), 0).await);
+    let scenario = corpus_loader::load_named(VERSION, "queue-while-in-flight");
+    let fake = Arc::new(fake_daemon::spawn(scenario, "clear-queue-1".into(), 5).await);
     let _ovr = OverrideGuard::install(fake.clone());
 
     let (driver, _dir) = make_driver().await;
+    let (_sub_id, mut rx) = collect_events(&driver, 256);
 
     let _seed = driver
         .new_session(NewSessionOptsData::default())
         .await
         .expect("new_session");
 
+    // Wait for the QueueUpdated (the pending_turn_input_queued SSE event →
+    // QueueAdd effect → driver pushes onto local queue → emits QueueUpdated).
+    // Only after ws.queue is populated can clear_queue() return the expected text.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(8);
+    while let Ok(Some(ev)) = tokio::time::timeout_at(deadline, rx.recv()).await {
+        if matches!(ev, SessionDriverEvent::QueueUpdated { .. }) {
+            break;
+        }
+    }
+
     let restored = driver.clear_queue(Some(fake.session_id.clone())).await;
 
-    // The canned GET /turn/input serves one item ("queued-turn-text") — its text
-    // must come back for the composer, on the steering side (queue items surface
-    // as mode:Steer; there is no daemon-side steer/follow-up split).
-    assert_eq!(restored.steering, vec!["queued-turn-text".to_string()]);
+    // The local queue had one item ("Then reply with exactly: QUEUE-DONE" —
+    // from the PendingTurnInputQueued SSE event). Its text must come back for
+    // the composer, on the steering side (queue items surface as mode:Steer;
+    // there is no daemon-side steer/follow-up split).
+    assert_eq!(
+        restored.steering,
+        vec!["Then reply with exactly: QUEUE-DONE".to_string()]
+    );
     assert!(restored.follow_up.is_empty());
 
-    // One DELETE per snapshotted item — the queue is actually drained.
+    // One DELETE per local-queue item — the queue is actually drained.
     let deletes = fake
         .recorded_calls()
         .iter()
@@ -1900,7 +1920,7 @@ async fn clear_queue_drains_daemon_queue_and_returns_texts() {
     assert_eq!(
         deletes,
         1,
-        "expected one dequeue per snapshotted item; calls: {:?}",
+        "expected one dequeue per local-queue item; calls: {:?}",
         fake.recorded_calls()
     );
 }

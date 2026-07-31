@@ -1085,13 +1085,6 @@
         }
       },
       {
-        "kind": "queueUpdated",
-        "count": 1,
-        "essential": {
-          "type": "queueUpdated"
-        }
-      },
-      {
         "kind": "sessionUpdated",
         "count": 1,
         "essential": {
@@ -1115,12 +1108,15 @@
         "kind": "setAutodrainEnabled"
       },
       {
-        "kind": "refetchQueue"
+        "kind": "queueAdd"
       },
       {
         "emit": "RunCompleted",
         "kind": "fetchState",
         "prompt_id": "PROMPT_0"
+      },
+      {
+        "kind": "queueRemove"
       },
       {
         "emit": "RunCompleted",
@@ -1129,7 +1125,7 @@
       }
     ],
     "final_session": {
-      "mapped_event_count": 52,
+      "mapped_event_count": 51,
       "assistant_delta_count": 46,
       "open_block_count": 0,
       "tool_input_buffer_empty": true,

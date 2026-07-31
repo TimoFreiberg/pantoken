@@ -132,13 +132,4 @@ test("queue tray steer and edit buttons meet the 44px touch target and have tool
   await expectTall(restore);
   await expect(restore).toHaveAttribute("title", /.+/);
   await expect(restore).toHaveAttribute("aria-label", /.+/);
-
-  const edits = tray.getByTestId("edit-queued");
-  await expect(edits).toHaveCount(2);
-  for (let i = 0; i < 2; i++) {
-    const edit = edits.nth(i);
-    await expectTall(edit);
-    await expect(edit).toHaveAttribute("title", /.+/);
-    await expect(edit).toHaveAttribute("aria-label", /.+/);
-  }
 });

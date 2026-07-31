@@ -393,8 +393,13 @@ fn effect_expectation(effect: &DaemonEffect) -> DriverEffectExpectation {
             emit: None,
             prompt_id: None,
         },
-        DaemonEffect::RefetchQueue => DriverEffectExpectation {
-            kind: "refetchQueue".into(),
+        DaemonEffect::QueueAdd { .. } => DriverEffectExpectation {
+            kind: "queueAdd".into(),
+            emit: None,
+            prompt_id: None,
+        },
+        DaemonEffect::QueueRemove { .. } => DriverEffectExpectation {
+            kind: "queueRemove".into(),
             emit: None,
             prompt_id: None,
         },
@@ -620,8 +625,9 @@ fn corpus_provenance_is_complete() {
                             && raw
                                 .iter()
                                 .any(|e| e["type"] == "pending_turn_input_drained")
-                            && kinds.contains("queueUpdated")
-                            && effects.iter().any(|e| e.kind == "refetchQueue")
+                            && effects
+                                .iter()
+                                .any(|e| e.kind == "queueAdd" || e.kind == "queueRemove")
                     }
                     "interrogative" => {
                         raw.iter().any(|e| {

@@ -117,26 +117,6 @@ const EXPECTED_EXECUTABLE_CONTRACTS: &[ExecutableContract] = &[
         rejected_status: StatusCode::UNPROCESSABLE_ENTITY,
     },
     ExecutableContract {
-        name: "queue_turn_input",
-        method: "POST",
-        path: "/turn/input",
-        request_body: Some(r#"{"content":"queued"}"#),
-        inventory_request_body: "PendingTurnInputRequest { content }",
-        response_schema: "empty",
-        accepted_statuses: &[StatusCode::ACCEPTED],
-        rejected_status: StatusCode::TOO_MANY_REQUESTS,
-    },
-    ExecutableContract {
-        name: "turn_input_snapshot",
-        method: "GET",
-        path: "/turn/input",
-        request_body: None,
-        inventory_request_body: "none",
-        response_schema: "PendingTurnInputSnapshot",
-        accepted_statuses: &[StatusCode::OK],
-        rejected_status: StatusCode::INTERNAL_SERVER_ERROR,
-    },
-    ExecutableContract {
         name: "dequeue_newest_input",
         method: "DELETE",
         path: "/turn/input/newest",
@@ -804,35 +784,6 @@ async fn daemon_client_endpoint_contract_matrix() {
     assert_eq!(references[0].name, "README.md");
     executed.insert("prompt");
 
-    let (seen, result) = call(StatusCode::ACCEPTED, json!({}), |c| async move {
-        c.queue_turn_input("queued").await
-    })
-    .await;
-    assert_request(
-        &seen,
-        "POST",
-        "/turn/input",
-        Some(json!({"content":"queued"})),
-    );
-    assert!(result.is_ok());
-    executed.insert("queue_turn_input");
-
-    let snapshot_body = json!({"queue_revision":7,"items":[
-        {"id":"q1","content":"first","admission_prompt_id":"p1"},
-        {"id":"q2","content":"second","admission_prompt_id":"p2"}
-    ]});
-    let (seen, result) = call(StatusCode::OK, snapshot_body, |c| async move {
-        c.turn_input_snapshot().await
-    })
-    .await;
-    assert_request(&seen, "GET", "/turn/input", None);
-    let snapshot = result.data.expect("typed queue snapshot");
-    assert_eq!(snapshot.queue_revision, 7);
-    assert_eq!(snapshot.items.len(), 2);
-    assert_eq!(snapshot.items[1].id, "q2");
-    assert_eq!(snapshot.items[1].content, "second");
-    executed.insert("turn_input_snapshot");
-
     let (seen, result) = call(StatusCode::OK, json!({}), |c| async move {
         c.dequeue_newest_input().await
     })
@@ -1446,44 +1397,6 @@ async fn daemon_client_endpoint_contract_matrix() {
     .await;
     assert_request(&seen, "POST", "/prompt", Some(json!({"content":"denied"})));
     assert!(prompt_rejected.unwrap_err().contains("public message"));
-    let (seen, queue_rejected) = call(
-        StatusCode::TOO_MANY_REQUESTS,
-        rejected.clone(),
-        |c| async move { c.queue_turn_input("full").await },
-    )
-    .await;
-    assert_request(
-        &seen,
-        "POST",
-        "/turn/input",
-        Some(json!({"content":"full"})),
-    );
-    assert!(queue_rejected.unwrap_err().contains("public message"));
-    let (seen, malformed) = call_raw(StatusCode::OK, "not-json".into(), |c| async move {
-        c.turn_input_snapshot().await
-    })
-    .await;
-    assert_request(&seen, "GET", "/turn/input", None);
-    assert!(
-        malformed.data.is_none(),
-        "malformed queue snapshot must fail decoding"
-    );
-    let (seen, snapshot_500) = call(
-        StatusCode::INTERNAL_SERVER_ERROR,
-        rejected.clone(),
-        |c| async move { c.turn_input_snapshot().await },
-    )
-    .await;
-    assert_request(&seen, "GET", "/turn/input", None);
-    assert_eq!(snapshot_500.status, 500);
-    assert!(snapshot_500.data.is_none());
-    assert!(
-        snapshot_500
-            .error
-            .as_deref()
-            .unwrap_or_default()
-            .contains("public message")
-    );
     let (seen, dequeue_rejected) = call(
         StatusCode::CONFLICT,
         json!({"code":"real_conflict","message":"queue changed"}),

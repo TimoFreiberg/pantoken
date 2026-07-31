@@ -1863,32 +1863,6 @@ impl DaemonClient {
         Ok(res.data.unwrap())
     }
 
-    /// `POST /turn/input` — queue steering/follow-up input for the active turn.
-    /// PendingTurnInputRequest is just {content} — no steer/followUp discriminator
-    /// (that distinction is pantoken-side UX only).
-    pub async fn queue_turn_input(&self, content: &str) -> Result<(), String> {
-        let body = PendingTurnInputRequest {
-            content: content.to_string(),
-        };
-        let body_str = serde_json::to_string(&body).unwrap_or_default();
-        let res = self
-            .post::<serde_json::Value>("/turn/input", Some(&body_str))
-            .await;
-        if res.status != 202 {
-            return Err(format!(
-                "POST /turn/input failed ({}): {}",
-                res.status,
-                res.error.as_deref().unwrap_or("")
-            ));
-        }
-        Ok(())
-    }
-
-    /// `GET /turn/input` — the pending queue snapshot.
-    pub async fn turn_input_snapshot(&self) -> DaemonResponse<PendingTurnInputSnapshot> {
-        self.get::<PendingTurnInputSnapshot>("/turn/input").await
-    }
-
     /// `DELETE /turn/input/newest` — dequeue the newest pending input.
     /// 200 = dequeued; 409 is an acceptable no-op only when its public error
     /// code is `no_input`.

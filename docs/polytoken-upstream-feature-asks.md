@@ -54,9 +54,12 @@ comment: can we know for sure from the api description that it works like that? 
 |       |                                      | messages queued into an idle session. |                |
 comment: hmm i'll take your word for it
 +-------+--------------------------------------+------------------------------------------------+----------------+
-| 7     | Bulk queue drain                     | GET /turn/input exists; only atomic drain      | small          |
-|       | (DELETE /turn/input returning items) | is missing. Unblocks queue-clear/restore-to-   |                |
-|       |                                      | composer. |                |
+| 7     | Bulk queue drain                     | `GET /turn/input` was never available on       | small          |
+|       | (DELETE /turn/input returning items) | the live daemon (0.5.8+). Pantoken now        |                |
+|       |                                      | reconstructs queue state from SSE events       |                |
+|       |                                      | locally. An atomic bulk drain (DELETE          |                |
+|       |                                      | returning items) would still remove the        |                |
+|       |                                      | N-DELETE clear_queue round-trip.               |                |
 comment: hmm i'll take your word for it
 +-------+--------------------------------------+------------------------------------------------+----------------+
 | 8     | Per-turn token usage on              | The internal TurnChunk.usage variant has the   | small–medium   |

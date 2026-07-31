@@ -47,17 +47,6 @@
             >{message.mode === "steer" ? "Steer" : "Follow-up"}</span
           >
           <span class="text">{message.text}</span>
-          <button
-            type="button"
-            class="edit"
-            data-testid="edit-queued"
-            onclick={() => store.restoreQueue()}
-            disabled={store.connection !== "connected"}
-            aria-label="Edit queued prompts"
-            title="Edit queued prompts (↑)"
-          >
-            ✎
-          </button>
         </div>
       {/each}
     </div>
@@ -145,7 +134,7 @@
   }
   .item {
     display: grid;
-    grid-template-columns: 62px minmax(0, 1fr) auto;
+    grid-template-columns: 62px minmax(0, 1fr);
     align-items: baseline;
     gap: 7px;
     border-radius: var(--radius-xs);
@@ -175,34 +164,9 @@
     line-clamp: 2;
     -webkit-box-orient: vertical;
   }
-  .edit {
-    border: 0;
-    padding: 2px 4px;
-    background: transparent;
-    color: var(--text-muted);
-    font-size: 13px;
-    line-height: 1;
-    cursor: pointer;
-    flex-shrink: 0;
-    align-self: center;
-  }
-  .edit:hover:not(:disabled) {
-    color: var(--accent);
-  }
-  .edit:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
   @media (pointer: coarse) {
     .steer {
       min-height: 44px;
-    }
-    .edit {
-      min-width: 44px;
-      min-height: 44px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
     }
   }
 </style>

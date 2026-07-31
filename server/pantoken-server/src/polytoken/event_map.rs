@@ -178,10 +178,15 @@ pub enum DaemonEffect {
     /// events; session_rewound truncates history). Emits a sessionUpdated
     /// from the refreshed state, then the full re-broadcast.
     Reseed,
-    /// GET /turn/input → queueUpdated with the refreshed queue. The queue events
-    /// (queued/dequeued/discarded) don't carry the FULL queue, only one item +
-    /// revision; pantoken's queueUpdated REPLACES the full queue, so we must fetch.
-    RefetchQueue,
+    /// Add an item to the local queue state (from `PendingTurnInputQueued`).
+    /// The driver pushes onto `WarmSession.queue` then emits `QueueUpdated`
+    /// with the full local queue — no daemon fetch needed.
+    QueueAdd { item_id: String, content: String },
+    /// Remove items from the local queue state (from `PendingTurnInputDequeued`,
+    /// `PendingTurnInputDrained`, `PendingTurnInputDiscarded`). The driver
+    /// removes matching items from `WarmSession.queue` then emits
+    /// `QueueUpdated` with the full local queue.
+    QueueRemove { item_ids: Vec<String> },
     /// Update the cached permission-monitor mode (the permission_monitor_switch
     /// event carries the authoritative new mode; the cache must track it so
     /// subsequent ctx.snapshot() calls reflect it). Emitted alongside a
@@ -230,7 +235,7 @@ fn meta(ctx: &dyn MapCtx) -> SessionEventBase {
 /// Public wrapper around `meta` so the driver (and other callers outside
 /// event_map) can build a `SessionEventBase` from a `MapCtx` without
 /// duplicating the sessionRef + timestamp convention. Used by the
-/// `RefetchQueue` effect's `QueueUpdated` emit.
+/// `QueueAdd`/`QueueRemove` effect's `QueueUpdated` emit.
 pub fn event_base(ctx: &dyn MapCtx) -> SessionEventBase {
     meta(ctx)
 }
@@ -709,10 +714,10 @@ pub fn format_missing_references_message<'a>(
 /// Build the pantoken `queueUpdated` event's `messages` from a daemon
 /// `PendingTurnInputSnapshot` — a pure mapping (no I/O), unit-tested in isolation.
 ///
-/// Mirrors TS `polytoken-driver.ts` `queueMsg(item, ts)` (the `refetchQueue`
-/// effect at :467-476): each `PendingTurnInputItem` → a `SessionQueuedMessage`
-/// with `mode: steer` (the daemon doesn't distinguish steer/followUp), `text`
-/// from `content`, and the fetch-time `ts` for both `created_at`/`updated_at`.
+/// Mirrors TS `polytoken-driver.ts` `queueMsg(item, ts)`: each
+/// `PendingTurnInputItem` → a `SessionQueuedMessage` with `mode: steer` (the
+/// daemon doesn't distinguish steer/followUp), `text` from `content`, and the
+/// ts for both `created_at`/`updated_at`.
 ///
 /// `PendingTurnInputItem` carries no
 /// timestamp (only id + content), so the timestamps are fetch-time, not
@@ -1848,23 +1853,44 @@ fn map_daemon_event_inner(
         }
 
         // ===== Queue (steering / follow-up) =====
-        DaemonEvent::PendingTurnInputQueued { .. }
-        | DaemonEvent::PendingTurnInputDequeued { .. } => {
-            // These events carry one item + revision, NOT the full queue. pantoken's
-            // queueUpdated REPLACES the full queue, so we must fetch GET /turn/input.
-            fold_result(vec![], vec![DaemonEffect::RefetchQueue])
+        DaemonEvent::PendingTurnInputQueued {
+            item_id, content, ..
+        } => {
+            // The daemon queued a new steer/follow-up. The local queue state
+            // is the source of truth (the live daemon 0.5.8+ doesn't expose
+            // GET /turn/input). QueueAdd pushes onto the local queue and emits
+            // QueueUpdated from the driver's execute_effect handler.
+            fold_result(
+                vec![],
+                vec![DaemonEffect::QueueAdd {
+                    item_id: item_id.clone(),
+                    content: content.clone(),
+                }],
+            )
+        }
+
+        DaemonEvent::PendingTurnInputDequeued { item_id, .. } => {
+            // A queued item was removed (e.g. by a DELETE /turn/input/newest
+            // from clear_queue). Remove it from the local queue.
+            fold_result(
+                vec![],
+                vec![DaemonEffect::QueueRemove {
+                    item_ids: vec![item_id.clone()],
+                }],
+            )
         }
 
         DaemonEvent::PendingTurnInputDiscarded {
-            missing_references, ..
+            item_ids,
+            missing_references,
+            ..
         } => {
-            // Same "refetch the authoritative queue" need as Queued/Dequeued above
-            // (this event carries one item + revision, not the full queue), plus: when
-            // the daemon names WHY (missing_references — an `@`-reference it couldn't
-            // resolve), surface a visible warning so the operator knows their queued
-            // steer/follow-up never made it into the turn. Other discard reasons
-            // (cancelled, superseded, …) carry no missing_references and stay silent,
-            // matching prior behavior.
+            // Remove the discarded items from the local queue, plus: when
+            // the daemon names WHY (missing_references — an `@`-reference it
+            // couldn't resolve), surface a visible warning so the operator knows
+            // their queued steer/follow-up never made it into the turn. Other
+            // discard reasons (cancelled, superseded, …) carry no
+            // missing_references and stay silent, matching prior behavior.
             let mut evs = vec![];
             if let Some(refs) = missing_references {
                 if !refs.is_empty() {
@@ -1880,7 +1906,12 @@ fn map_daemon_event_inner(
                     ));
                 }
             }
-            fold_result(evs, vec![DaemonEffect::RefetchQueue])
+            fold_result(
+                evs,
+                vec![DaemonEffect::QueueRemove {
+                    item_ids: item_ids.clone(),
+                }],
+            )
         }
 
         DaemonEvent::PendingTurnInputDrained {
@@ -1892,12 +1923,9 @@ fn map_daemon_event_inner(
             // A queued message is being delivered (admitted into the active turn).
             // Emit queuedMessageStarted (with the content + the daemon's now-resolved
             // `@`-refs — PendingTurnInputDrained.resolved_references — so the fold shows
-            // the same resolution chips a live send gets). The spike (§3) only observed
-            // single-item drains (item_ids.length === 1), so we declare the queue empty
-            // in that case. If the daemon ever batches multiple drains in one event,
-            // we can't know from item_ids[0] alone whether the queue is now empty — so
-            // conservatively emit a refetchQueue effect to get the authoritative queue
-            // state when more than one item was drained.
+            // the same resolution chips a live send gets). Then remove the drained
+            // items from the local queue via a QueueRemove effect (the driver emits
+            // QueueUpdated with the updated local queue).
             let now = ctx.now();
             let msg = drained_queue_message(
                 content,
@@ -1905,20 +1933,15 @@ fn map_daemon_event_inner(
                 &now,
                 resolved_references.as_deref(),
             );
-            let single_item = item_ids.len() <= 1;
-            let mut evs = vec![SessionDriverEvent::QueuedMessageStarted {
-                base: base.clone(),
-                message: msg,
-            }];
-            if single_item {
-                evs.push(SessionDriverEvent::QueueUpdated {
-                    base,
-                    messages: vec![],
-                });
-                return fold_result(evs, vec![]);
-            }
-            // Multi-item drain: emit the started message, then fetch the real queue.
-            fold_result(evs, vec![DaemonEffect::RefetchQueue])
+            fold_result(
+                vec![SessionDriverEvent::QueuedMessageStarted {
+                    base: base.clone(),
+                    message: msg,
+                }],
+                vec![DaemonEffect::QueueRemove {
+                    item_ids: item_ids.clone(),
+                }],
+            )
         }
 
         // ===== Errors + retries =====
@@ -2855,7 +2878,15 @@ mod tests {
                 "promptId": prompt_id,
             }),
             DaemonEffect::Reseed => json!({ "type": "reseed" }),
-            DaemonEffect::RefetchQueue => json!({ "type": "refetchQueue" }),
+            DaemonEffect::QueueAdd { item_id, content } => json!({
+                "type": "queueAdd",
+                "item_id": item_id,
+                "content": content,
+            }),
+            DaemonEffect::QueueRemove { item_ids } => json!({
+                "type": "queueRemove",
+                "item_ids": item_ids,
+            }),
             DaemonEffect::SetMonitorMode { mode } => json!({
                 "type": "setMonitorMode",
                 "mode": match mode {
@@ -3396,31 +3427,40 @@ mod tests {
     }
 
     #[test]
-    fn pending_turn_input_queued_refetch_queue_effect_no_events() {
+    fn pending_turn_input_queued_queue_add_effect_no_events() {
         let out = fold_fresh(
             json!({ "type": "pending_turn_input_queued", "admission_prompt_id": "p1", "content": "steer this", "item_id": "item1", "queue_revision": 1 }),
         );
         assert!(out.events.is_empty());
-        assert_eq!(effects_json(&out), vec![json!({ "type": "refetchQueue" })]);
+        assert_eq!(
+            effects_json(&out),
+            vec![json!({ "type": "queueAdd", "item_id": "item1", "content": "steer this" })]
+        );
     }
 
     #[test]
-    fn pending_turn_input_dequeued_refetch_queue_effect() {
+    fn pending_turn_input_dequeued_queue_remove_effect() {
         let out = fold_fresh(
             json!({ "type": "pending_turn_input_dequeued", "item_id": "item1", "queue_revision": 2 }),
         );
-        assert_eq!(effects_json(&out), vec![json!({ "type": "refetchQueue" })]);
+        assert_eq!(
+            effects_json(&out),
+            vec![json!({ "type": "queueRemove", "item_ids": ["item1"] })]
+        );
     }
 
     #[test]
-    fn pending_turn_input_discarded_refetch_queue_effect() {
+    fn pending_turn_input_discarded_queue_remove_effect() {
         // No missing_references on this discard (e.g. superseded/cancelled) — must
-        // stay silent (no notify), matching prior behavior; only the refetch fires.
+        // stay silent (no notify), matching prior behavior; only the remove fires.
         let out = fold_fresh(
             json!({ "type": "pending_turn_input_discarded", "item_ids": ["item1"], "queue_revision": 3, "reason": "superseded" }),
         );
         assert!(out.events.is_empty());
-        assert_eq!(effects_json(&out), vec![json!({ "type": "refetchQueue" })]);
+        assert_eq!(
+            effects_json(&out),
+            vec![json!({ "type": "queueRemove", "item_ids": ["item1"] })]
+        );
     }
 
     #[test]
@@ -3444,8 +3484,11 @@ mod tests {
             ev["request"]["message"],
             "Queued message dropped — missing references: skill \"foo\", file \"bar.md\""
         );
-        // Still refetches the authoritative queue, same as every other discard.
-        assert_eq!(effects_json(&out), vec![json!({ "type": "refetchQueue" })]);
+        // Still removes from the local queue, same as every other discard.
+        assert_eq!(
+            effects_json(&out),
+            vec![json!({ "type": "queueRemove", "item_ids": ["item1"] })]
+        );
     }
 
     #[test]
@@ -3461,24 +3504,31 @@ mod tests {
             "missing_references": []
         }));
         assert!(out.events.is_empty());
-        assert_eq!(effects_json(&out), vec![json!({ "type": "refetchQueue" })]);
+        assert_eq!(
+            effects_json(&out),
+            vec![json!({ "type": "queueRemove", "item_ids": ["item1"] })]
+        );
     }
 
     #[test]
-    fn pending_turn_input_drained_queued_message_started_and_queue_updated_empty() {
+    fn pending_turn_input_drained_queued_message_started_and_queue_remove_effect() {
         let out = fold_fresh(
             json!({ "type": "pending_turn_input_drained", "admission_prompt_ids": ["p1"], "content": "steer this", "final_prompt_id": "p2", "item_ids": ["item1"], "queue_revision": 0, "raw_history_index": 5 }),
         );
-        assert_eq!(out.events.len(), 2);
+        // Single-item drain: 1 event (QueuedMessageStarted) + 1 effect (QueueRemove).
+        // The QueueUpdated event is emitted by the driver's execute_effect handler,
+        // not by the event_map.
+        assert_eq!(out.events.len(), 1);
         let ev0 = event_json(&out.events[0]);
         assert_eq!(ev0["type"], "queuedMessageStarted");
         assert_eq!(ev0["message"]["mode"], "steer");
         assert_eq!(ev0["message"]["text"], "steer this");
         // No resolved_references on this drain — the promoted message carries none.
         assert!(ev0["message"].get("references").is_none());
-        let ev1 = event_json(&out.events[1]);
-        assert_eq!(ev1["type"], "queueUpdated");
-        assert_eq!(ev1["messages"], json!([]));
+        assert_eq!(
+            effects_json(&out),
+            vec![json!({ "type": "queueRemove", "item_ids": ["item1"] })]
+        );
     }
 
     #[test]
@@ -3505,13 +3555,16 @@ mod tests {
     }
 
     #[test]
-    fn pending_turn_input_drained_multi_item_queued_message_started_and_refetch_queue_effect() {
+    fn pending_turn_input_drained_multi_item_queued_message_started_and_queue_remove_effect() {
         let out = fold_fresh(
             json!({ "type": "pending_turn_input_drained", "admission_prompt_ids": ["p1", "p2"], "content": "steer this", "final_prompt_id": "p3", "item_ids": ["item1", "item2"], "queue_revision": 0, "raw_history_index": 5 }),
         );
         assert_eq!(out.events.len(), 1);
         assert_eq!(event_json(&out.events[0])["type"], "queuedMessageStarted");
-        assert_eq!(effects_json(&out), vec![json!({ "type": "refetchQueue" })]);
+        assert_eq!(
+            effects_json(&out),
+            vec![json!({ "type": "queueRemove", "item_ids": ["item1", "item2"] })]
+        );
     }
 
     // ===== Chunk 2a: errors/retries, session metadata, compaction =====

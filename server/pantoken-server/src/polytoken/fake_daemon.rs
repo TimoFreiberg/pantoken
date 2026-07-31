@@ -16,7 +16,7 @@
 //! other undeclared request and enforce expectation consumption on drop.
 //!
 //! `recorded_calls()` exposes every `(method, path)` the driver made, so tests
-//! can assert e.g. `GET /state` / `GET /turn/input` fired after an effect.
+//! can assert e.g. `GET /state` fired after an effect.
 //
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -129,23 +129,6 @@ fn canned(method: &str, path: &str) -> Option<(StatusCode, Value)> {
             serde_json::json!({"enabled": true, "config_default": true}),
         ));
     }
-    // GET /turn/input — the RefetchQueue effect's snapshot fetch. The corpus
-    // doesn't record /turn/input (the queue-while-in-flight scenario triggers
-    // a RefetchQueue but the capture didn't snapshot it), so serve a canned
-    // PendingTurnInputSnapshot with one queued item so the driver can build a
-    // QueueUpdated. (Tests that assert on the real queue contents use a
-    // synthetic scenario instead.)
-    if m == "GET" && p == "/turn/input" {
-        return Some((
-            StatusCode::OK,
-            serde_json::json!({
-                "items": [
-                    {"id": "q1", "content": "queued-turn-text", "admission_prompt_id": "PROMPT_0"}
-                ],
-                "queue_revision": 2
-            }),
-        ));
-    }
     // DELETE /turn/input/newest — clear_queue's drain primitive. Tests count the
     // recorded calls (one per snapshotted item) to verify the full drain.
     if m == "DELETE" && p == "/turn/input/newest" {
@@ -220,8 +203,8 @@ struct FakeState {
     /// The active HTTP-replay scenario. In controlled (fake-mode) use this
     /// starts as the idle bootstrap scenario, then `run_script` swaps in the
     /// chosen flow's recordings (and resets cursors) so that flow's in-turn
-    /// `FetchState`/`RefetchQueue` calls serve its own recorded responses
-    /// (post-turn usage/title, the queue snapshot, etc.) rather than the
+    /// `FetchState`/`Reseed` calls serve its own recorded responses
+    /// (post-turn usage/title, etc.) rather than the
     /// bootstrap's idle body. `None` on the one-shot `spawn` path, which keeps
     /// reading the spawn-time `AppState.scenario`.
     scenario_override: Option<Arc<ScenarioFile>>,
@@ -296,7 +279,7 @@ impl FakeDaemon {
 
     /// Swap the HTTP-replay scenario to `scenario` and reset the replay
     /// cursors + call log, so the chosen flow's in-turn HTTP fetches
-    /// (`FetchState`→`/state`, `RefetchQueue`→`/turn/input`, a `Reseed`→
+    /// (`FetchState`→`/state`, a `Reseed`→
     /// `/history`) serve that flow's recorded responses. Used by
     /// `FakeControlHub::run_script` to arm a flow before pushing its SSE
     /// frames. Controlled-mode only (one-shot `spawn` does not swap).
@@ -757,7 +740,7 @@ impl FakeControlHub {
             .cloned()
             .ok_or_else(|| "no fake session spawned".to_string())?;
         // Arm this flow's HTTP recordings before pushing its SSE frames, so the
-        // in-turn `FetchState`/`RefetchQueue`/`Reseed` effects the frames will
+        // in-turn `FetchState`/`Reseed` effects the frames will
         // trigger serve the flow's own recorded responses (post-turn usage, the
         // queue snapshot, etc.) — not the bootstrap's idle body. Without this
         // the second `GET /state` (on `message_complete`) would 500 on cursor
