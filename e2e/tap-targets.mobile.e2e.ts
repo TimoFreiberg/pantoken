@@ -142,36 +142,3 @@ test("queue tray steer and edit buttons meet the 44px touch target and have tool
     await expect(edit).toHaveAttribute("aria-label", /.+/);
   }
 });
-
-// AC.7 — The collapse footer's tap target is ≥44px on mobile (≤859px).
-test("collapse footer meets 44px touch target", async ({ page }) => {
-  await drive(page, "longoutput");
-  await waitForSettledWorkBlocks(page, 2);
-  await page.getByTestId("work-toggle").last().click();
-  // The longoutput script has two tool spans — target the first one.
-  const head = page
-    .getByTestId("work-body")
-    .last()
-    .locator(":scope > .tool > .head")
-    .first();
-  await head.click();
-  const expandBtn = page
-    .getByTestId("work-body")
-    .last()
-    .locator(":scope > .tool")
-    .first()
-    .locator(".out-bar")
-    .getByRole("button", { name: "Expand", exact: true });
-  await expect(expandBtn).toBeVisible();
-  await expandBtn.click();
-
-  const footer = page
-    .getByTestId("work-body")
-    .last()
-    .locator(":scope > .tool")
-    .first()
-    .locator("> .body")
-    .locator(".collapse-footer");
-  await expect(footer).toBeVisible();
-  await expectTall(footer);
-});

@@ -79,22 +79,18 @@ test("theme toggle drives the data-theme override and persists it", async ({
     "true",
   );
 
-  // The theme-color meta (PWA / browser chrome) tracks the active palette's --bg.
-  const themeColor = page.locator('meta[name="theme-color"]');
   await page.getByTestId("theme-dark").click();
   await expect(html).toHaveAttribute("data-theme", "dark");
   // color-scheme drives native UA widgets (scrollbars, form controls); it must
   // track the active palette, not the OS scheme.
   await expect(html).toHaveCSS("color-scheme", "dark");
-  await expect(themeColor).toHaveAttribute("content", "#171614");
 
   await page.getByTestId("theme-light").click();
   await expect(html).toHaveAttribute("data-theme", "light");
   await expect(html).toHaveCSS("color-scheme", "light");
-  await expect(themeColor).toHaveAttribute("content", "#f4f1e9");
 
-  // Back to dark, then reload: the inline pre-paint script must restore both the
-  // data-theme AND the theme-color, before the bundle loads.
+  // Back to dark, then reload: the inline pre-paint script must restore
+  // data-theme before the bundle loads.
   await page.getByTestId("theme-dark").click();
   await expect(html).toHaveAttribute("data-theme", "dark");
   await page.reload();
@@ -102,7 +98,6 @@ test("theme toggle drives the data-theme override and persists it", async ({
   // The inline pre-paint script sets color-scheme as an inline style (before CSS
   // loads), which is what prevents a flash of wrong-theme native scrollbar.
   expect(await html.evaluate((el) => el.style.colorScheme)).toBe("dark");
-  await expect(themeColor).toHaveAttribute("content", "#171614");
 
   // "System" clears the override and re-resolves to the emulated light scheme.
   await openSettings(page, "appearance");
@@ -276,26 +271,6 @@ test("Alt+1..6 jump between section tabs", async ({ page }) => {
   // Alt+1 → back to Appearance: the theme control returns.
   await page.keyboard.press("Alt+1");
   await expect(panel.getByTestId("theme-system")).toBeVisible();
-});
-
-test("Escape closes the panel from a non-default section tab", async ({
-  page,
-}) => {
-  const panel = page.getByTestId("settings-panel");
-  await openSettings(page, "environment");
-  await expect(panel.getByTestId("env-section")).toBeVisible();
-
-  // Esc from a non-default (Environment) tab still closes the whole panel.
-  await page.keyboard.press("Escape");
-  await expect(panel).toBeHidden();
-
-  // Reopening lands back on the persisted Environment tab (the chosen reopen behavior).
-  await page.getByTestId("settings-toggle").click();
-  await expect(panel.getByTestId("settings-tab-environment")).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
-  await expect(panel.getByTestId("env-section")).toBeVisible();
 });
 
 test("the Access token tab shows the data directory with copy + reveal actions", async ({

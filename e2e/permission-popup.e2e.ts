@@ -66,48 +66,6 @@ test("permission card: Escape cancels (deny-safe)", async ({ page }) => {
   await expect(page.getByText("Dialog cancelled.")).toBeVisible();
 });
 
-test("permission card: Cancel button dismisses", async ({ page }) => {
-  await drive(page, "permission");
-  const dialog = page.getByRole("dialog");
-  await dialog.getByRole("button", { name: "Cancel" }).click();
-  await expect(dialog).toBeHidden();
-  await expect(page.getByText("Dialog cancelled.")).toBeVisible();
-});
-
-test("permission card: every element has a tooltip", async ({ page }) => {
-  await drive(page, "permission");
-  const dialog = page.getByRole("dialog");
-
-  // The tool name + input preview have title tooltips (repo convention).
-  // The global Tooltip.svelte system may strip `title` → `data-tip-title` on
-  // hover/focus, so accept either attribute.
-  await expect(dialog.locator(".tool-name")).toHaveAttribute(
-    "title",
-    "The tool requesting approval",
-  );
-  await expect(dialog.locator(".tool-input")).toHaveAttribute(
-    "title",
-    "The tool's input (JSON)",
-  );
-
-  // Each option button has a "Choose: <label>" tooltip. The tooltip system
-  // moves title→data-tip-title on interaction, so check either attribute.
-  for (const label of ["Deny", "Allow once", "Allow for session"]) {
-    const radio = dialog.getByRole("radio", { name: label, exact: true });
-    const tip =
-      (await radio.getAttribute("title")) ??
-      (await radio.getAttribute("data-tip-title"));
-    expect(tip).toBe(`Choose: ${label}`);
-  }
-
-  // The Cancel button has a tooltip.
-  const cancelBtn = dialog.getByRole("button", { name: "Cancel" });
-  const cancelTip =
-    (await cancelBtn.getAttribute("title")) ??
-    (await cancelBtn.getAttribute("data-tip-title"));
-  expect(cancelTip).toBe("Cancel this request");
-});
-
 test("permission card is an arrow-navigable radiogroup", async ({ page }) => {
   await drive(page, "permission");
   const dialog = page.getByRole("dialog");

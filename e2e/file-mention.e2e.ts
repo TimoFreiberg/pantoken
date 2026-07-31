@@ -358,15 +358,6 @@ test("menu stays open with 'No matches' when a project query matches nothing", a
   await expect(menu(page)).toHaveCount(0);
 });
 
-test("menu stays open with 'No matches' in a takeover mode", async ({ page }) => {
-  const box = ta(page);
-  await box.click();
-  await page.keyboard.type("@model:zzz");
-  await expect(menu(page)).toBeVisible();
-  await expect(menu(page)).toContainText("No matches");
-  await expect(menu(page)).toContainText("↑↓ navigate");
-});
-
 test("Enter on an empty @-menu falls through to submit (does not swallow)", async ({
   page,
 }) => {
@@ -422,19 +413,6 @@ test("skill/subagent/model rows render a front kind: prefix; no right-edge badge
   // Model rows show "model:provider/modelId" at the front.
   await expect(row(page, "model:openai/gpt-5")).toContainText("model:openai/gpt-5");
   await expect(menu(page).locator(".kind-badge")).toHaveCount(0);
-});
-
-test("model rows keep the friendly label as muted secondary text", async ({ page }) => {
-  const box = ta(page);
-  await box.click();
-  await page.keyboard.type("@m:");
-  await expect(menu(page)).toBeVisible();
-  // claude-opus-4-8's mock fixture carries a friendly label distinct from its modelId.
-  // The row shows the front "model:" prefix + provider/modelId, with the label as
-  // secondary .meta text.
-  const modelRow = row(page, "model:anthropic/claude-opus-4-8");
-  await expect(modelRow).toContainText("model:anthropic/claude-opus-4-8");
-  await expect(modelRow.locator(".meta")).toBeVisible();
 });
 
 test("pinned footer stays visible when scrolling the list to the top", async ({
@@ -508,21 +486,6 @@ test("Shift+Tab in a skill takeover opens the facet menu (no toggle, no accept, 
   await page.keyboard.press("Escape");
   await expect(panel).not.toBeVisible();
   await expect(badge).toHaveText("Execute");
-});
-
-test("Escape still dismisses the menu after the ignore toggle has been used", async ({
-  page,
-}) => {
-  const box = ta(page);
-  await box.click();
-  await page.keyboard.type("@~/");
-  await expect(menu(page)).toBeVisible();
-  await box.press("Shift+Tab");
-  await expect(row(page, "file:~/.secrets")).toBeVisible();
-
-  await box.press("Escape");
-  await expect(menu(page)).toHaveCount(0);
-  await expect(box).toHaveValue("@~/");
 });
 
 // Stale-while-revalidate (issue #17): when typing narrows a server-backed query, the

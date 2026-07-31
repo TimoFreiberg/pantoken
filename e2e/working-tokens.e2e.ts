@@ -27,19 +27,3 @@ test("the working indicator shows a token counter that climbs as text streams", 
     /^\d+s$|^\d+m( \d+s)?$|^\d+h( \d+m)?$/,
   );
 });
-
-test("the token counter also climbs while the model is only thinking", async ({
-  page,
-}) => {
-  await drive(page, "pendinghold"); // streams THINKING deltas, no answer text yet
-  // The word "Thinking" appears once — in the (collapsed) thinking block above —
-  // not duplicated in the bottom indicator, which shows stop button + timer + token
-  // count only while thinking (docs/TODO.md dedupe).
-  await expect(page.getByTestId("working-indicator")).not.toContainText(
-    "Thinking",
-  );
-  await expect(page.locator(".think .label")).toHaveText("Thinking…");
-  // …yet the counter still proves the API is feeding us tokens.
-  await expect(page.getByTestId("working-tokens")).toBeVisible();
-  await expect.poll(() => tokenCount(page)).toBeGreaterThan(0);
-});

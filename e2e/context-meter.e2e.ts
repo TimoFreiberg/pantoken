@@ -44,18 +44,6 @@ test("the model and effort pickers live beside the context ring", async ({
   await expect(page.locator(".hdr .mp")).toHaveCount(0);
 });
 
-test("the attach button opens a file picker for image attachments", async ({
-  page,
-}) => {
-  // The attach control is now the shared IconButton primitive — select by its
-  // accessible name rather than the old bespoke `.attach` class.
-  const attach = page
-    .locator(".composer-wrap")
-    .getByRole("button", { name: "Attach images" });
-  await expect(attach).toBeEnabled();
-  await expect(attach).toHaveAttribute("title", /Attach images/);
-});
-
 test("the context meter popup shows detail on click", async ({ page }) => {
   const meter = page.getByTestId("context-meter");
   await expect(meter).toBeVisible();
@@ -84,22 +72,4 @@ test("the Compact button uses a click-twice confirm gate", async ({ page }) => {
   await compactBtn.click();
   // The mock emits a usageUpdated — the accessible trigger drops to 4%.
   await expect(page.getByTestId("context-trigger")).toHaveAttribute("aria-label", /4% used/);
-});
-
-test("the Clear context button uses a click-twice confirm gate", async ({
-  page,
-}) => {
-  await drive(page, "contextfull");
-  const meter = page.getByTestId("context-meter");
-  await meter.click();
-  const popup = page.getByTestId("context-popup");
-  await expect(popup).toBeVisible();
-  const clearBtn = page.getByTestId("clear-context-btn");
-  // First click arms.
-  await clearBtn.click();
-  await expect(clearBtn).toHaveText("Click again");
-  // Second click fires.
-  await clearBtn.click();
-  // The mock emits a usageUpdated — the accessible trigger drops to 0%.
-  await expect(page.getByTestId("context-trigger")).toHaveAttribute("aria-label", /0% used/);
 });

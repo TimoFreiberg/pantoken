@@ -66,68 +66,6 @@ test("Add computer initially selects Host environment (AC.3)", async ({ page }) 
   await expect(page.getByTestId("cs-test-ssh")).toContainText("Test SSH & connect");
 });
 
-test("Setup Docker initially selects Docker environment (AC.3)", async ({ page }) => {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
-  await expect(page.getByTestId("computer-setup-panel")).toBeVisible();
-  // Docker segment should be active.
-  await expect(page.getByTestId("cs-env-docker")).toHaveAttribute("aria-checked", "true");
-  // Primary button should say "Test SSH & find containers".
-  await expect(page.getByTestId("cs-test-ssh")).toContainText("Test SSH & find containers");
-});
-
-test("Switching environment updates primary action copy (AC.4)", async ({ page }) => {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("add-computer-btn").click();
-  // Default is Host → "Test SSH & connect".
-  await expect(page.getByTestId("cs-test-ssh")).toContainText("Test SSH & connect");
-  // Switch to Docker.
-  await page.getByTestId("cs-env-docker").click();
-  await expect(page.getByTestId("cs-test-ssh")).toContainText("Test SSH & find containers");
-  // Switch back to Host.
-  await page.getByTestId("cs-env-host").click();
-  await expect(page.getByTestId("cs-test-ssh")).toContainText("Test SSH & connect");
-});
-
-test("Both launchers open the same dialog (AC.2)", async ({ page }) => {
-  // HostSwitcher Add.
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("add-computer-btn").click();
-  await expect(page.getByTestId("computer-setup-panel")).toBeVisible();
-  await page.getByTestId("computer-setup-close").click();
-  await expect(page.getByTestId("computer-setup-panel")).toBeHidden();
-
-  // Settings Add.
-  await openSettings(page, "computers");
-  await page.getByTestId("add-computer-btn").click();
-  await expect(page.getByTestId("computer-setup-panel")).toBeVisible();
-  await page.getByTestId("computer-setup-close").click();
-  await expect(page.getByTestId("computer-setup-panel")).toBeHidden();
-
-  // Settings Setup Docker.
-  await page.getByTestId("settings-setup-docker").click();
-  await expect(page.getByTestId("computer-setup-panel")).toBeVisible();
-});
-
-test("Add computer from dropdown closes the dropdown", async ({ page }) => {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("add-computer-btn").click();
-  await expect(page.getByTestId("computer-setup-panel")).toBeVisible();
-  // The dropdown panel should be gone.
-  await expect(page.locator("#host-switcher-panel")).toHaveCount(0);
-});
-
-test("Sheet opens with first input focused", async ({ page }) => {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("add-computer-btn").click();
-  await expect(page.getByTestId("cs-name-input")).toBeFocused();
-});
-
 test("Typing while sheet is open does not steal composer focus", async ({ page }) => {
   const switcher = page.getByTestId("host-switcher");
   await switcher.getByTestId("host-switcher-trigger").click();

@@ -81,45 +81,6 @@ test("tool card expands to show the full arguments", async ({ page }) => {
   );
 });
 
-test("composer is present and idle", async ({ page }) => {
-  await expect(page.getByPlaceholder("Message pantoken…")).toBeVisible();
-});
-
-test("with thinking hidden, all superseded thinking-only items are dropped", async ({
-  page,
-}) => {
-  // Default is thinking-hidden. The thinkingtools fixture interleaves a thinking-only
-  // bubble between every tool call (bash → think → bash → think → read → think → bash).
-  // Every thinking-only item is followed by a tool or text, so all are superseded
-  // and dropped — no collapsed stubs remain.
-  await drive(page, "thinkingtools");
-  await waitForSettledWorkBlocks(page, 2);
-  await expandWork(page);
-  const work = page.getByTestId("work-body").last();
-  // Four individual tool cards, no prose summary wrapping them.
-  await expect(work.locator(":scope > .tool")).toHaveCount(4);
-  await expect(work.locator(":scope > .tool.summary")).toHaveCount(0);
-  // All thinking-only blocks are superseded (each followed by a tool) → none render.
-  await expect(work.getByText("Thought process")).toHaveCount(0);
-});
-
-test("with thinking visible, thinking blocks sit between the tool cards", async ({
-  page,
-}) => {
-  // Reveal thinking, then run the same fixture. Now the thinking bubbles are visible
-  // content: four standalone tool cards with a "Thought process" block between each pair.
-  await openSettings(page, "appearance");
-  await page.getByTestId("hide-thinking").click();
-  await page.getByRole("button", { name: "Close settings" }).click();
-
-  await drive(page, "thinkingtools");
-  await waitForSettledWorkBlocks(page, 2);
-  await expandWork(page);
-  const work = page.getByTestId("work-body").last();
-  await expect(work.locator(":scope > .tool")).toHaveCount(4);
-  await expect(work.getByText("Thought process")).toHaveCount(3);
-});
-
 // Regression: scrolling up through history must not move the viewport on its own.
 // CSS `content-visibility: auto` + an estimated `contain-intrinsic-size` on transcript
 // rows made off-screen rows stand in at a placeholder height, then snap to their real

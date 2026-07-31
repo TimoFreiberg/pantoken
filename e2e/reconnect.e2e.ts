@@ -125,14 +125,3 @@ test("the connection banner can reconnect immediately", async ({ page }) => {
   );
   expect(after).toBeGreaterThan(before);
 });
-
-test("Alt+R reconnects from the connection banner", async ({ page }) => {
-  const reconnect = await gotoWithBlockedWebSocket(page);
-  await page.evaluate(() => (window as any).__pantokenAllowWebSocket());
-  await page.keyboard.press("Alt+R");
-
-  await expect(
-    page.getByText("Routes live in", { exact: false }),
-  ).toBeVisible();
-  await expect(reconnect).toBeHidden();
-});

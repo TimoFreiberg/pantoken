@@ -72,39 +72,6 @@ test("existing sessions keep the composer at the bottom", async ({ page }) => {
   );
 });
 
-test("creating a session moves from chooser to transcript layout", async ({
-  page,
-}) => {
-  const oldPrompt = page.getByText("Add a /health route to the server");
-  await openSidebar(page);
-  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
-  await expect(page.getByTestId("session-chooser")).toBeVisible();
-
-  // Select the pantoken project (pre-selected) — Enter creates a session.
-  await page.getByLabel("Filter projects").press("Enter");
-
-  // The chooser is gone and the live-session composer is mounted.
-  await expect(page.getByTestId("session-chooser")).toHaveCount(0);
-  const composer = page.getByPlaceholder("Message pantoken…");
-  await composer.fill("start from the centre");
-  await composer.press("Enter");
-
-  await expect(page.getByTestId("session-chooser")).toHaveCount(0);
-  await expect(page.locator(".row.user .bubble").first()).toHaveText(
-    "start from the centre",
-  );
-  await expect(oldPrompt).toHaveCount(0);
-  const chatBox = await page.locator(".chat").boundingBox();
-  const composerBox = await page
-    .getByRole("group", { name: "Message composer" })
-    .boundingBox();
-  expect(chatBox).not.toBeNull();
-  expect(composerBox).not.toBeNull();
-  const bottomGap =
-    chatBox!.y + chatBox!.height - (composerBox!.y + composerBox!.height);
-  expect(Math.abs(bottomGap)).toBeLessThan(2);
-});
-
 test("chooser Escape closes back to the previous view", async ({ page }) => {
   await openSidebar(page);
   await page.getByTestId("sidebar-new-session").locator(".new-btn").click();

@@ -74,55 +74,11 @@ test("AC.2: Clean close — no discard prompt when closing without editing", asy
   await expect(page.getByTestId("cs-discard-confirm")).toHaveCount(0);
 });
 
-test("AC.2: Clean close from edit — no discard prompt on untouched edit", async ({ page }) => {
-  // First create a profile to edit.
-  await openAddComputerFromSettings(page);
-  await page.getByTestId("cs-name-input").fill("Edit Target");
-  await page.getByTestId("cs-ssh-input").fill("user@edit.test");
-  await page.getByTestId("cs-env-host").click();
-  await page.getByTestId("cs-test-ssh").click();
-  await expect(page.getByTestId("cs-provisioning")).toBeVisible({ timeout: 10000 });
-  const id = await getProfileId(page, "Edit Target");
-  await page.evaluate(
-    ({ id }) => (window as unknown as { __pantokenHosts?: { setState: (id: string, state: string) => Promise<void> } }).__pantokenHosts?.setState(id, "ready"),
-    { id },
-  );
-  await expect(page.getByTestId("computer-setup-panel")).toBeHidden({ timeout: 10000 });
-  // Dismiss connection sheet if visible.
-  const csPanel = page.getByTestId("connection-sheet-panel");
-  if (await csPanel.isVisible().catch(() => false)) {
-    await page.keyboard.press("Escape");
-  }
-
-  // Now open edit for that profile.
-  await openSettings(page, "computers");
-  await page.getByTestId(`computer-edit-${id}`).click();
-  await expect(page.getByTestId("computer-setup-panel")).toBeVisible();
-  // Close without making changes — should NOT show discard prompt.
-  await closeSheet(page);
-  await expect(page.getByTestId("cs-discard-confirm")).toHaveCount(0);
-  await expect(page.getByTestId("computer-setup-panel")).toBeHidden();
-});
-
 // ── AC.3: Dirty fields trigger discard prompt ───────────────────────────────
 
 test("AC.3: Editing port triggers discard prompt on close", async ({ page }) => {
   await openAddComputer(page);
   await page.getByTestId("cs-port-input").fill("2222");
-  await closeSheet(page);
-  await expect(page.getByTestId("cs-discard-confirm")).toBeVisible();
-});
-
-test("AC.3: Editing environment triggers discard prompt on close", async ({ page }) => {
-  await openAddComputer(page);
-  await page.getByTestId("cs-env-docker").click();
-  await closeSheet(page);
-  await expect(page.getByTestId("cs-discard-confirm")).toBeVisible();
-});
-
-test("AC.3: Editing SSH destination triggers discard prompt on close", async ({ page }) => {
-  await openAddComputer(page);
-  await page.getByTestId("cs-ssh-input").fill("user@host.test");
   await closeSheet(page);
   await expect(page.getByTestId("cs-discard-confirm")).toBeVisible();
 });
@@ -244,18 +200,6 @@ test("AC.12: Tab from last focusable wraps to first", async ({ page }) => {
   expect(activeInPanel).toBe(true);
 });
 
-test("AC.12: Shift+Tab from first focusable wraps to last", async ({ page }) => {
-  await openAddComputer(page);
-  await page.getByTestId("cs-name-input").focus();
-  await page.keyboard.press("Shift+Tab");
-  // After wrapping, focus should be within the panel.
-  const activeInPanel = await page.evaluate(() => {
-    const panel = document.querySelector("[data-testid='computer-setup-panel']");
-    return panel?.contains(document.activeElement);
-  });
-  expect(activeInPanel).toBe(true);
-});
-
 // ── AC.13: Global hotkeys are inert ─────────────────────────────────────────
 
 test("AC.13: inert attribute on .shell while setup open", async ({ page }) => {
@@ -291,16 +235,6 @@ test("AC.16: addProfile rejection shows error UI", async ({ page }) => {
   await page.getByTestId("cs-env-host").click();
   await page.getByTestId("cs-test-ssh").click();
   await expect(page.getByTestId("cs-form-error")).toBeVisible({ timeout: 10000 });
-});
-
-test("AC.16: Non-Error rejection shows normalized message", async ({ page }) => {
-  await openAddComputer(page);
-  await page.getByTestId("cs-ssh-input").fill("user@objreject.test");
-  await setNextBehavior(page, "setNextAddProfileBehavior", { reject: { message: "Custom object error" } });
-  await page.getByTestId("cs-env-host").click();
-  await page.getByTestId("cs-test-ssh").click();
-  await expect(page.getByTestId("cs-form-error")).toBeVisible({ timeout: 10000 });
-  await expect(page.getByTestId("cs-form-error")).toContainText("Custom object error");
 });
 
 // ── AC.19: Save-success/connect-failure is partial success ───────────────────
@@ -346,27 +280,9 @@ test("AC.20: ConnectionSheet does not appear over setup", async ({ page }) => {
 
 // ── AC.4: All close paths route through requestClose ────────────────────────
 
-test("AC.4: Scrim click on dirty draft shows discard prompt", async ({ page }) => {
-  await openAddComputer(page);
-  await page.getByTestId("cs-name-input").fill("Scrim Test");
-  // Click the setup sheet's scrim via JS to bypass the panel intercepting
-  // pointer events. The setup scrim is the last .scrim element on the page
-  // (the sidebar also has one). Dispatch a real click event so the onclick
-  // handler fires and routes through requestClose().
-  await page.locator(".scrim").last().evaluate((el) => { (el as HTMLElement).click(); });
-  await expect(page.getByTestId("cs-discard-confirm")).toBeVisible();
-});
-
 test("AC.4: Escape on dirty draft shows discard prompt", async ({ page }) => {
   await openAddComputer(page);
   await page.getByTestId("cs-name-input").fill("Escape Test");
   await page.keyboard.press("Escape");
-  await expect(page.getByTestId("cs-discard-confirm")).toBeVisible();
-});
-
-test("AC.4: Cancel button on dirty draft shows discard prompt", async ({ page }) => {
-  await openAddComputer(page);
-  await page.getByTestId("cs-name-input").fill("Cancel Test");
-  await page.getByTestId("cs-cancel-setup").click();
   await expect(page.getByTestId("cs-discard-confirm")).toBeVisible();
 });

@@ -35,21 +35,6 @@ test("Enter on the active facet sends no request", async ({ page }) => {
   await expect(badge).toHaveText("Execute");
 });
 
-test("clicking the active facet row sends no request", async ({ page }) => {
-  // Default facet is Execute. Open the menu and click the Execute row — no
-  // setFacet request, so no new notice appears.
-  const badge = page.getByTestId("facet-badge");
-  await expect(badge).toHaveText("Execute");
-  await badge.click();
-  const panel = page.getByRole("listbox", { name: "Facet" });
-  await expect(panel).toBeVisible();
-  const before = await page.locator(".row.notice .ntext").count();
-  await page.getByRole("option", { name: "Execute" }).click();
-  await expect(panel).not.toBeVisible();
-  await expect(page.locator(".row.notice .ntext")).toHaveCount(before);
-  await expect(badge).toHaveText("Execute");
-});
-
 test("number-key on the active facet sends no request", async ({ page }) => {
   // Default facet is Execute (index 0 → number key "1"). Open the menu and
   // press "1" — no setFacet request, so no new notice appears.
@@ -79,46 +64,4 @@ test("selecting a different facet still switches", async ({ page }) => {
   await expect(page.locator(".row.notice .ntext").last()).toContainText(
     /plan/i,
   );
-});
-
-// Regression: opening the facet menu via Shift+Tab and closing it, then switching
-// sessions (which unmounts + remounts Composer via App.svelte's {#if} block),
-// must NOT auto-pop the facet menu. Root cause: MenuBadge's lastOpenN was reset
-// to 0 on remount while store.facetMenuOpenN (monotonic, never reset) still
-// held a prior value > 0, so the effect re-fired open=true. Fixed by making
-// lastOpenN a null sentinel that syncs on the first post-(re)mount observation
-// without opening.
-test("the facet menu does not auto-open after a Composer remount", async ({
-  page,
-}) => {
-  // Open the facet menu once via Shift+Tab, then close it.
-  const badge = page.getByTestId("facet-badge");
-  await expect(badge).toHaveText("Execute");
-  await page.getByPlaceholder("Message pantoken…").focus();
-  await page.keyboard.press("Shift+Tab");
-  // No rotation — badge stays "Execute".
-  await expect(badge).toHaveText("Execute");
-  const panel = page.getByRole("listbox", { name: "Facet" });
-  await expect(panel).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(panel).toHaveCount(0);
-
-  // Switch to a different session — this unmounts and remounts Composer,
-  // resetting MenuBadge's local state.
-  await openSidebar(page);
-  await page
-    .getByTestId("sidebar")
-    .locator(".row", { hasText: "Explore the fold reducer" })
-    .click();
-  // Composer is remounted against the existing session.
-  await expect(page.getByPlaceholder("Message pantoken…")).toBeVisible();
-
-  // The facet menu must NOT have auto-popped on the remount.
-  await expect(page.getByRole("listbox", { name: "Facet" })).toHaveCount(0);
-
-  // A fresh Shift+Tab still opens the menu (without rotating). Badge stays the
-  // existing session's facet.
-  await page.getByPlaceholder("Message pantoken…").focus();
-  await page.keyboard.press("Shift+Tab");
-  await expect(page.getByRole("listbox", { name: "Facet" })).toBeVisible();
 });

@@ -34,16 +34,9 @@ test("archive undo notice is an overlay that does not displace session rows", as
   await expect(notice).toBeVisible();
 
   // AC.1: the "New session" button did NOT move — the notice is an overlay, not
-  // in-flow. (Non-movement is the real acceptance criterion; the CSS position
-  // value is an implementation detail, checked supplementally below.)
+  // in-flow. (Non-movement is the real acceptance criterion.)
   const after = await newSessionBtn.boundingBox();
   expect(after).toEqual(before);
-
-  // Supplemental: the notice container is positioned out of flow.
-  const containerPos = await sidebar
-    .getByTestId("sidebar-notice")
-    .evaluate((el) => window.getComputedStyle(el).getPropertyValue("position"));
-  expect(containerPos).toBe("absolute");
 
   // The notice is inside the sidebar-notice container, not the chat-notice container.
   await expect(

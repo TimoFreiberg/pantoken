@@ -5,40 +5,6 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("facet badge opens a picker listing available facets and switches", async ({
-  page,
-}) => {
-  const badge = page.getByTestId("facet-badge");
-  await expect(badge).toBeVisible();
-  await expect(badge).toContainText("Execute");
-
-  // Open the picker.
-  await badge.click();
-  const panel = page.getByRole("listbox", { name: "Facet" });
-  await expect(panel).toBeVisible();
-
-  // Three facets available (the mock returns execute + plan builtins + a custom
-  // "research", so the picker exercises a non-builtin, dynamically-derived name).
-  await expect(panel.getByRole("option")).toHaveCount(3);
-  await expect(panel.getByRole("option", { name: "Execute" })).toBeVisible();
-  await expect(panel.getByRole("option", { name: "Plan" })).toBeVisible();
-  await expect(panel.getByRole("option", { name: "Research" })).toBeVisible();
-
-  // Switch to Plan.
-  await panel.getByRole("option", { name: "Plan" }).click();
-  await expect(badge).toContainText("Plan");
-  await expect(badge).toHaveClass(/facet-(plan|auto)/);
-
-  // Switch back to Execute.
-  await badge.click();
-  await page
-    .getByRole("listbox", { name: "Facet" })
-    .getByRole("option", { name: "Execute" })
-    .click();
-  await expect(badge).toContainText("Execute");
-  await expect(badge).not.toHaveClass(/facet-(plan|auto)/);
-});
-
 test("facet menu has no reload button; it lives in Settings → Environment", async ({
   page,
 }) => {

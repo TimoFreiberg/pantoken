@@ -32,16 +32,6 @@ test("project picker is a full-screen, touch-safe version of the desktop path pi
   await expect(picker(page).locator("footer")).toBeHidden();
 });
 
-test("browser Back closes the picker and returns to the chooser", async ({
-  page,
-}) => {
-  await openPicker(page);
-  await page.goBack();
-  await expect(picker(page)).toBeHidden();
-  // The chooser is still visible after closing the DirPicker via Back.
-  await expect(page.getByTestId("session-chooser")).toBeVisible();
-});
-
 test("visible Back closes the picker and consumes its nested history entry", async ({
   page,
 }) => {

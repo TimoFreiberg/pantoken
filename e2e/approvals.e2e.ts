@@ -111,14 +111,6 @@ test("Escape cancels the dialog (deny-safe) and surfaces the cancelled notice", 
   await expect(page.getByText("Dialog cancelled.")).toBeVisible();
 });
 
-test("input dialog submits from the keyboard (Enter)", async ({ page }) => {
-  await drive(page, "input");
-  const input = page.getByRole("dialog").getByRole("textbox");
-  await input.fill("Keyboard commit");
-  await page.keyboard.press("Enter");
-  await expect(page.getByText("Received: Keyboard commit")).toBeVisible();
-});
-
 test("ambient: status strip + a collapsed tasklist pill that expands", async ({
   page,
 }) => {

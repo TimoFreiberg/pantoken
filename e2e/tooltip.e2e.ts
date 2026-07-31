@@ -166,11 +166,12 @@ test("new-session button has no title, but shows a ⌘N kbd hint on hover", asyn
   await expect(hint).toHaveCSS("opacity", "1");
 });
 
-// AC.4: The search toggle and input have no tooltips.
-test("sidebar search toggle and input have no title attribute", async ({
-  page,
-}) => {
-  // The search toggle IconButton (visible when search is closed).
+// AC.4/AC.6/AC.8/AC.12 — controls that are self-explanatory from their visible
+// label/icon carry no `title` tooltip (deliberate absence, issue #20). One
+// consolidated test guards the shared absence; the group-toggle additionally
+// pins that it KEEPS its project-path tooltip.
+test("self-explanatory controls have no title attribute", async ({ page }) => {
+  // AC.4: The search toggle IconButton (visible when search is closed).
   const toggle = page.getByTestId("sidebar-search-toggle");
   await expect(toggle).not.toHaveAttribute("title", /.+/);
 
@@ -179,49 +180,32 @@ test("sidebar search toggle and input have no title attribute", async ({
   const input = page.getByTestId("sidebar-search-input");
   await expect(input).toBeVisible();
   await expect(input).not.toHaveAttribute("title", /.+/);
-});
 
-// AC.6: Todos and jobs in the right sidebar have no tooltips.
-test("todo and job buttons in the right sidebar have no title attribute", async ({
-  page,
-}) => {
-  // Drive the context fixture which populates todos + jobs.
+  // AC.6: Todos and jobs in the right sidebar.
   await drive(page, "context");
-
   const todoBtn = page.locator(".todo-btn").first();
   await expect(todoBtn).toBeVisible();
   await expect(todoBtn).not.toHaveAttribute("title", /.+/);
-
   const jobBtn = page.locator(".job-btn").first();
   await expect(jobBtn).toBeVisible();
   await expect(jobBtn).not.toHaveAttribute("title", /.+/);
-});
 
-// AC.8: Connection status indicator and working-indicator elapsed time have
-// no tooltips.
-test("connection status span and working elapsed have no title attribute", async ({
-  page,
-}) => {
-  // The connection span only renders when NOT connected — drive offline.
-  // The default fixture is connected, so the .conn span won't be present.
-  // Instead, assert on the working-indicator elapsed-time span (visible while
-  // a turn is streaming).
+  // AC.8: The working-indicator elapsed-time span (visible while a turn is
+  // streaming).
   await drive(page, "streamhold");
   const elapsed = page.getByTestId("working-elapsed");
   await expect(elapsed).toBeVisible();
   await expect(elapsed).not.toHaveAttribute("title", /.+/);
-});
 
-// AC.12: The group-toggle retains its project-path tooltip, but the project-new
-// (+) button loses its tooltip.
-test("group-toggle keeps title, project-new has no title", async ({ page }) => {
+  // AC.12: The group-toggle retains its project-path tooltip, but the
+  // project-new (+) button loses its tooltip.
   await openSidebar(page);
   // The greeting session's project group is "pantoken".
   const group = page.getByTestId("sidebar").locator(".group", {
     hasText: "pantoken",
   });
-  const toggle = group.locator(".group-toggle").first();
-  await expect(toggle).toHaveAttribute("title", /.+/);
+  const groupToggle = group.locator(".group-toggle").first();
+  await expect(groupToggle).toHaveAttribute("title", /.+/);
 
   const newBtn = group.locator(".project-new").first();
   await expect(newBtn).not.toHaveAttribute("title", /.+/);

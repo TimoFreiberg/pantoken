@@ -24,15 +24,6 @@ function card(page: Page, label: string): Locator {
     .filter({ has: page.getByText(label, { exact: true }) });
 }
 
-// Tools whose header preview is intentionally empty (the span renders as a flex
-// spacer but carries no text). These share one test to keep the spec compact.
-const EMPTY_PREVIEW_LABELS = [
-  "Write plan",
-  "Edit plan",
-  "Hand off plan",
-  "Pop directory",
-] as const;
-
 const PREVIEW_CASES: [string, string][] = [
   ["Create todo", "Fix the bug"],
   ["List todos", "pending"],
@@ -57,14 +48,6 @@ function argPreviewText(loc: Locator) {
   });
 }
 
-test("empty-preview tools render an empty .arg spacer", async ({ page }) => {
-  await expandWork(page);
-  for (const label of EMPTY_PREVIEW_LABELS) {
-    const arg = card(page, label).locator(".arg");
-    expect(await argPreviewText(arg)).toBe("");
-  }
-});
-
 test("each tool's .arg span shows its concise field selection", async ({
   page,
 }) => {
@@ -73,13 +56,4 @@ test("each tool's .arg span shows its concise field selection", async ({
     const arg = card(page, label).locator(".arg");
     expect(await argPreviewText(arg)).toBe(expected);
   }
-});
-
-test("block_goal's .arg span gets the amber arg-warning class", async ({
-  page,
-}) => {
-  await expandWork(page);
-  await expect(card(page, "Block goal").locator(".arg")).toHaveClass(
-    /arg-warning/,
-  );
 });

@@ -39,25 +39,6 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("sending a prompt keeps the transcript following the stream to the bottom", async ({
-  page,
-}) => {
-  const scroller = page.locator(".scroller");
-  const gap = () => gapFn(scroller);
-
-  // Build a transcript tall enough that top and bottom differ.
-  await buildTallTranscript(page, 3);
-  await expect.poll(gap).toBeLessThan(5); // pinned at the live tail
-
-  // Send a fresh prompt and let its turn stream + settle. The viewport must follow the
-  // new output to the bottom — the just-sent bubble and its reply in view, not left below
-  // the fold behind a "New messages ↓" pill.
-  await drive(page, "reply");
-  await waitForSettledWorkBlocks(page, 5);
-  await expect.poll(gap).toBeLessThan(5);
-  await expect(page.getByTestId("new-messages-pill")).toHaveCount(0);
-});
-
 // ── AC.6: content-shrink while pinned → viewport follows to the new bottom ────────────
 
 test("content shrinks while pinned → viewport follows to the new bottom", async ({

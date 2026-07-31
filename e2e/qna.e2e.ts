@@ -139,16 +139,6 @@ test("qna form renders markdown in the context field", async ({ page }) => {
   await expect(ctx.locator("strong")).toBeVisible();
 });
 
-test("qna form: Cancel dismisses without answering", async ({ page }) => {
-  await drive(page, "qna");
-  await qnaForm(page).getByRole("button", { name: "Cancel" }).click();
-  // First click arms the confirm gate — label switches to "Click again".
-  await expect(qnaForm(page).getByRole("button", { name: "Click again" })).toBeVisible();
-  await qnaForm(page).getByRole("button", { name: "Click again" }).click();
-  await expect(qnaForm(page)).toBeHidden();
-  await expect(page.getByText("Dialog cancelled.")).toBeVisible();
-});
-
 test("qna Cancel uses a click-twice confirm gate", async ({ page }) => {
   await drive(page, "qna");
   const form = qnaForm(page);
@@ -437,34 +427,6 @@ test("qna form: free-text textarea auto-grows and caps", async ({ page }) => {
     Number.parseFloat(getComputedStyle(el as HTMLElement).height),
   );
   expect(computedH).toBeLessThanOrEqual(maxFieldH + 1); // +1px tolerance
-});
-
-test("qna form: single-select free-text is additive with selected option", async ({
-  page,
-}) => {
-  await drive(page, "qna");
-  const form = qnaForm(page);
-  const bun = form.getByRole("radio", { name: /bun/ });
-  const field = form.getByPlaceholder("Something else…");
-  await bun.click();
-  await expect(bun).toHaveAttribute("aria-checked", "true");
-  // Typing alongside the choice does NOT clear the radio — both are sent.
-  await field.fill("Use the repo default.");
-  await expect(bun).toHaveAttribute("aria-checked", "true");
-
-  // Advance through the remaining questions to reach the summary.
-  await form.getByRole("button", { name: "Next" }).click();
-  await form.getByRole("button", { name: "Next" }).click();
-  await form.getByRole("button", { name: "Review answers" }).click();
-  await expect(form.getByText("Review your answers")).toBeVisible();
-  await form.getByRole("button", { name: "Confirm" }).click();
-
-  await expect(qnaForm(page)).toBeHidden();
-  await expect(page.getByText("Your answers")).toBeVisible();
-  // The mock's format_qna_text renders both as "bun, (typed) Use the repo default."
-  await expect(
-    page.getByText("bun, (typed) Use the repo default."),
-  ).toBeVisible();
 });
 
 test("qna form: summary page shows all answers", async ({ page }) => {

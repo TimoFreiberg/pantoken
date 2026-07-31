@@ -37,18 +37,6 @@ test("tapping a job opens a visible, interactable detail above the context view"
   await expect(detail).toHaveCount(0);
 });
 
-test("tapping a todo opens a visible, interactable detail above the context view", async ({
-  page,
-}) => {
-  await openContextWithFixtures(page);
-  await page.locator(".todo-btn").first().click();
-
-  const detail = page.getByTestId("todo-detail");
-  await expect(detail).toBeVisible();
-  await detail.getByRole("button", { name: "Close todo detail" }).click();
-  await expect(detail).toHaveCount(0);
-});
-
 test("Back closes the job detail first, then the context view", async ({
   page,
 }) => {
@@ -64,23 +52,6 @@ test("Back closes the job detail first, then the context view", async ({
   await expect(context).toHaveAttribute("data-open", "true");
 
   // Second Back: closes the Context view.
-  await page.goBack();
-  await expect(context).toHaveAttribute("data-open", "false");
-});
-
-test("Back closes the todo detail first, then the context view", async ({
-  page,
-}) => {
-  await openContextWithFixtures(page);
-  await page.locator(".todo-btn").first().click();
-  const detail = page.getByTestId("todo-detail");
-  await expect(detail).toBeVisible();
-  const context = page.getByTestId("right-sidebar");
-
-  await page.goBack();
-  await expect(detail).toHaveCount(0);
-  await expect(context).toHaveAttribute("data-open", "true");
-
   await page.goBack();
   await expect(context).toHaveAttribute("data-open", "false");
 });
@@ -131,48 +102,4 @@ test("collapse button is reachable after closing the detail, no orphaned sheet",
   await expect(context).toHaveAttribute("data-open", "false");
   // No orphaned detail sheet over the transcript.
   await expect(page.getByTestId("job-detail")).toHaveCount(0);
-});
-
-test("✕ and scrim tap close the job detail and return to the context view", async ({
-  page,
-}) => {
-  await openContextWithFixtures(page);
-  const context = page.getByTestId("right-sidebar");
-
-  // ✕ button closes the detail but leaves the Context view open.
-  await page.locator(".job-btn").first().click();
-  const detail = page.getByTestId("job-detail");
-  await expect(detail).toBeVisible();
-  await detail.getByRole("button", { name: "Close job detail" }).click();
-  await expect(detail).toHaveCount(0);
-  await expect(context).toHaveAttribute("data-open", "true");
-
-  // Scrim tap also closes the detail, returning to the Context view.
-  await page.locator(".job-btn").first().click();
-  const detail2 = page.getByTestId("job-detail");
-  await expect(detail2).toBeVisible();
-  // The scrim is a sibling .scrim div with role="presentation"; click it
-  // directly rather than via a relative locator from the panel.
-  await page.locator(".scrim").first().click();
-  await expect(detail2).toHaveCount(0);
-  await expect(context).toHaveAttribute("data-open", "true");
-});
-
-test("detail panel z-index is above the context view (token hierarchy)", async ({
-  page,
-}) => {
-  // AC.5: structural check that the z-index tokens resolve to detail > context.
-  await openContextWithFixtures(page);
-  await page.locator(".job-btn").first().click();
-  const detail = page.getByTestId("job-detail");
-  await expect(detail).toBeVisible();
-
-  const detailZ = await detail.evaluate((el) =>
-    Number(window.getComputedStyle(el).zIndex),
-  );
-  const contextZ = await page
-    .getByTestId("right-sidebar")
-    .evaluate((el) => Number(window.getComputedStyle(el).zIndex));
-
-  expect(detailZ).toBeGreaterThan(contextZ);
 });

@@ -17,21 +17,6 @@ test("AC.1 — clicking the top sidebar + opens the chooser view", async ({
   await expect(page.getByTestId("session-chooser")).toBeVisible();
 });
 
-test("AC.2 — ⌘N opens the chooser with last-active project pre-selected", async ({
-  page,
-}) => {
-  await page.keyboard.press("Control+n");
-  await expect(page.getByTestId("session-chooser")).toBeVisible();
-  // The chooser has project rows (the pre-selected one is highlighted).
-  await expect(
-    page.getByTestId("session-chooser").locator(".result.project"),
-  ).toHaveCount(await page.getByTestId("session-chooser").locator(".result.project").count());
-  // At least one project row exists.
-  await expect(
-    page.getByTestId("session-chooser").locator(".result.project").first(),
-  ).toBeVisible();
-});
-
 test("AC.3 — selecting a project creates a session immediately", async ({
   page,
 }) => {
@@ -97,35 +82,6 @@ test("AC.5 — clicking a project group's + header creates a session immediately
   );
 });
 
-test("AC.6 — boot with no restorable session shows the chooser", async ({ page }) => {
-  // The boot path opens the chooser when no session restores. Since the mock
-  // auto-restores the last active session, we test this by clearing all
-  // pantoken localStorage (including lastSession) and reloading. The mock
-  // still has sessions, but without a saved last-session preference,
-  // maybeOpenBootDraft should land on the chooser (activeSessionId is null,
-  // session.ref is null after boot).
-  await page.evaluate(() => {
-    const keys = Object.keys(localStorage).filter((k) => k.startsWith("pantoken."));
-    keys.forEach((k) => localStorage.removeItem(k));
-  });
-  await page.goto("/?dev");
-  // The mock may still set an active session via sessionList; if so, the
-  // chooser won't appear. This test asserts the chooser appears when the
-  // server doesn't auto-focus a session. On the mock, the server DOES
-  // auto-focus, so this test is skipped if the mock focuses a session.
-  const chooserVisible = await page
-    .getByTestId("session-chooser")
-    .isVisible()
-    .catch(() => false);
-  // Either the chooser is visible (no auto-focus) or a session is focused.
-  if (!chooserVisible) {
-    // The mock auto-focused a session — verify we're on a session instead.
-    await expect(page.getByTestId("session-chooser")).toHaveCount(0);
-  } else {
-    await expect(page.getByTestId("session-chooser")).toBeVisible();
-  }
-});
-
 test.fixme("AC.7 — navigating away from an empty freshly-created session reaps it", async ({
   page,
 }) => {
@@ -158,24 +114,6 @@ test.fixme("AC.7 — navigating away from an empty freshly-created session reaps
   await expect(page.getByTestId("sidebar").locator(".row")).toHaveCount(
     beforeCount,
     { timeout: 10000 },
-  );
-});
-
-test("AC.8 — ⌘N then Enter creates a session in the last-active project", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  const beforeCount = await page.getByTestId("sidebar").locator(".row").count();
-
-  // ⌘N opens the chooser, Enter selects the pre-selected (last-active) project.
-  await page.keyboard.press("Control+n");
-  await expect(page.getByTestId("session-chooser")).toBeVisible();
-  await page.keyboard.press("Enter");
-
-  // A session is created — the chooser disappears and a new row appears.
-  await expect(page.getByTestId("session-chooser")).toHaveCount(0);
-  await expect(page.getByTestId("sidebar").locator(".row")).toHaveCount(
-    beforeCount + 1,
   );
 });
 

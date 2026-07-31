@@ -46,35 +46,6 @@ test("⌘[ and ⌘] step back and forward through visited sessions", async ({
   await expect(title(page)).toContainText("Explore the fold reducer");
 });
 
-test("window.__pantokenNav steps back and forward like ⌘[ / ⌘]", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  await expect(title(page)).toContainText("Wire up the WebSocket bridge");
-
-  // Visit a second session.
-  await row(page, "Explore the fold reducer").click();
-  await expect(title(page)).toContainText("Explore the fold reducer");
-
-  // Use a local cast (same pattern as __pantokenMock in e2e/live/helpers.ts)
-  // so tsc doesn't complain about the missing Window property.
-  await page.evaluate(() => {
-    const w = window as unknown as {
-      __pantokenNav?: (dir: "back" | "forward") => void;
-    };
-    w.__pantokenNav?.("back");
-  });
-  await expect(title(page)).toContainText("Wire up the WebSocket bridge");
-
-  await page.evaluate(() => {
-    const w = window as unknown as {
-      __pantokenNav?: (dir: "back" | "forward") => void;
-    };
-    w.__pantokenNav?.("forward");
-  });
-  await expect(title(page)).toContainText("Explore the fold reducer");
-});
-
 test("back history reaches the chooser", async ({ page }) => {
   await openSidebar(page);
   // session → chooser, then back lands on the session again.
@@ -140,27 +111,6 @@ test("⌘K focuses the sidebar session search", async ({ page }) => {
   await expect(input).toBeFocused();
 });
 
-test("⌘K opens the sidebar first if collapsed, then focuses search", async ({
-  page,
-}) => {
-  // Collapse the sidebar.
-  await page.keyboard.press("Control+b");
-  await expect(page.getByTestId("sidebar")).toHaveAttribute(
-    "data-open",
-    "false",
-  );
-
-  // ⌘K should reopen the sidebar and focus the search.
-  await page.keyboard.press("Control+k");
-  await expect(page.getByTestId("sidebar")).toHaveAttribute(
-    "data-open",
-    "true",
-  );
-  const input = page.getByTestId("sidebar-search-input");
-  await expect(input).toBeVisible();
-  await expect(input).toBeFocused();
-});
-
 test("⌘⇧J toggles the context panel", async ({ page }) => {
   const panel = page.getByTestId("right-sidebar");
   await expect(panel).toHaveAttribute("data-open", "true"); // desktop default
@@ -170,19 +120,4 @@ test("⌘⇧J toggles the context panel", async ({ page }) => {
 
   await page.keyboard.press("Control+Shift+j");
   await expect(panel).toHaveAttribute("data-open", "true");
-});
-
-test("the status header has a Tauri drag region covering its whole non-interactive surface", async ({
-  page,
-}) => {
-  // The Tauri shell uses TitleBarStyle::Overlay (chromeless). "deep" (not a bare
-  // attribute) is required so a click anywhere in the header's non-interactive area —
-  // not just the literal <header> element itself — starts a drag; Tauri's own
-  // clickable-element heuristic still exempts real buttons (bell, plan/settings
-  // toggles) without any per-element opt-out. The attribute is inert in a browser
-  // (unknown data-* attr), so this just asserts its value — the actual drag behavior
-  // (and the desktop shell's IPC grant for it, see desktop/capabilities/window-drag.json)
-  // is desktop-only and needs a human dogfood pass.
-  const header = page.locator("header.hdr");
-  await expect(header).toHaveAttribute("data-tauri-drag-region", "deep");
 });

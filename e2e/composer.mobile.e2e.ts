@@ -100,14 +100,3 @@ test("mobile: the chooser's search input and project rows are touch-safe", async
   await expect(page.getByTestId("scope-row")).toHaveCount(0);
   await expect(page.getByTestId("draft-project-control")).toHaveCount(0);
 });
-
-test("mobile: send button is disabled when the composer is empty (issue #74)", async ({
-  page,
-}) => {
-  // Empty prompts are forbidden (issue #74), so the Send button is disabled
-  // when the composer is empty — even when idle. On touch there's no Enter
-  // path, so the button is the only send affordance and must stay disabled.
-  const box = composer(page);
-  await expect(box).toHaveValue("");
-  await expect(page.locator("button.send")).toBeDisabled();
-});

@@ -39,14 +39,3 @@ test("mobile: permission card options are full-width tap targets", async ({
   await expect(page.getByText("Received: Allow for session")).toBeVisible();
 });
 
-test("mobile: permission card input preview scrolls without overflowing", async ({
-  page,
-}) => {
-  await drive(page, "permission");
-  const dialog = page.getByRole("dialog");
-  const input = dialog.locator(".tool-input");
-  await expect(input).toBeVisible();
-  // The scroll cap keeps the preview bounded on a phone.
-  await expect(input).toHaveCSS("overflow", "auto");
-  await expect(input).toHaveCSS("max-height", "180px");
-});

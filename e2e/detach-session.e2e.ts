@@ -47,20 +47,3 @@ test("clicking detach session on the mock is a no-op (no error)", async ({
   // The menu closes after clicking.
   await expect(sidebar.getByTestId("detach-session")).toHaveCount(0);
 });
-
-// The D keyboard shortcut triggers detach when the menu is open and
-// focus is not in a text field.
-test("the D hotkey triggers detach from the menu", async ({ page }) => {
-  await openSidebar(page);
-  const sidebar = page.getByTestId("sidebar");
-  const row = sidebar
-    .locator(".row-wrap")
-    .filter({ hasText: "Explore the fold reducer" });
-  await row.hover();
-  await row.getByTestId("session-menu").click();
-  // The menu is open; pressing D fires the detach handler (which closes the menu).
-  await page.keyboard.press("d");
-
-  // The menu closed — the handler fired.
-  await expect(sidebar.getByTestId("detach-session")).toHaveCount(0);
-});

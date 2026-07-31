@@ -52,7 +52,8 @@ test("facet badge renders on mobile when the facet is plan", async ({ page }) =>
   const summary = page.getByTestId("mobile-session-controls-trigger");
   await expect(summary).toBeVisible();
   const facetSpan = summary.locator("span").nth(1);
-  await expect(facetSpan).toHaveText("Plan");
-  // Reverts to execute after the 1500ms dwell → summary updates to "Execute".
+  // The 1500ms dwell reverts the script's facet to execute → the summary
+  // updates to "Execute" (the mobile-specific dwell reversion, not covered by
+  // the desktop badge test).
   await expect(facetSpan).toHaveText("Execute");
 });

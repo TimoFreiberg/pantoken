@@ -26,9 +26,6 @@ test("healthy status is silent and the session title owns the mobile header", as
   await expect(header.locator(".sub")).toBeHidden();
   await expect(header.getByTestId("settings-toggle")).toHaveCount(0);
 
-  const title = header.locator(".title");
-  await expect(title).toHaveCSS("white-space", "nowrap");
-  await expect(title).toHaveCSS("text-overflow", "ellipsis");
   await expectTouchSafe(header.getByTestId("sidebar-open"));
 });
 

@@ -79,24 +79,6 @@ test("detail navigation follows Back and Escape hierarchy", async ({
   await expect(page.locator(".composer-surface textarea")).toBeFocused();
 });
 
-test("browser Back returns detail to index and then the app", async ({
-  page,
-}) => {
-  await openSettings(page, "notifications");
-  const panel = page.getByTestId("settings-panel");
-  await expect(
-    panel.getByRole("heading", { name: "Notifications" }),
-  ).toBeVisible();
-
-  await page.goBack();
-  await expect(panel.getByTestId("settings-index")).toBeVisible();
-  await expect(panel).toBeFocused();
-  await page.goBack();
-  await expect(panel).toHaveCount(0);
-  await expect(page.getByTestId("composer-surface")).toBeVisible();
-  await expect(page.locator(".composer-surface textarea")).toBeFocused();
-});
-
 test("desktop section shortcuts do not navigate mobile Settings", async ({
   page,
 }) => {

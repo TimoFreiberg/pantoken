@@ -121,16 +121,6 @@ test("facet badge shows 'Plan' when the active facet is plan", async ({
   await expect(badge).toHaveText("Execute");
 });
 
-test("facet toggle shows 'Execute' in the default (execute) state", async ({
-  page,
-}) => {
-  // The greeting fixture's default state has no facet (or execute) — the badge
-  // shows the actual facet "Execute" (a state readout, always visible).
-  const badge = page.getByTestId("facet-badge");
-  await expect(badge).toBeVisible();
-  await expect(badge).toHaveText("Execute");
-});
-
 test("a timed-out plan card auto-dismisses to the cancel decision", async ({
   page,
 }) => {

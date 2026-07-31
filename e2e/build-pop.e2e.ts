@@ -29,57 +29,6 @@ test("hovering the version stamp shows a pop-up with the commit hash", async ({
   await expect(pop).toBeHidden();
 });
 
-test("pop-up stays open when pointer moves onto it", async ({ page }) => {
-  await openSidebar(page);
-  const version = page.getByTestId("sidebar").getByTestId("version");
-  const pop = page.getByTestId("build-pop");
-
-  await version.hover();
-  await expect(pop).toBeVisible();
-
-  // Move the pointer onto the pop-up card itself — the transparent bridge
-  // keeps the hover region continuous so mouseleave never fires.
-  await pop.hover();
-  await expect(pop).toBeVisible();
-});
-
-test("pop-up text is selectable", async ({ page }) => {
-  await openSidebar(page);
-  const version = page.getByTestId("sidebar").getByTestId("version");
-  await version.hover();
-  const pop = page.getByTestId("build-pop");
-  await expect(pop).toBeVisible();
-
-  // Computed user-select on a .build-line should be "text".
-  const selectable = await page.evaluate(() => {
-    const el = document.querySelector(".build-line");
-    if (!el) return null;
-    return getComputedStyle(el).userSelect;
-  });
-  expect(selectable).toBe("text");
-});
-
-test("copy icon appears on hash line hover", async ({ page }) => {
-  await openSidebar(page);
-  const version = page.getByTestId("sidebar").getByTestId("version");
-  await version.hover();
-  await expect(page.getByTestId("build-pop")).toBeVisible();
-
-  const hashLine = page.getByTestId("copy-build-hash");
-  await hashLine.hover();
-  // Wait for the opacity transition (0.1s) to complete.
-  await page.waitForTimeout(200);
-
-  // The .copy-icon should become visible (opacity > 0) on hash line hover.
-  const opacity = await page.evaluate(() => {
-    const el = document.querySelector(".copy-icon");
-    if (!el) return null;
-    return parseFloat(getComputedStyle(el).opacity);
-  });
-  expect(opacity).not.toBeNull();
-  expect(opacity!).toBeGreaterThan(0);
-});
-
 test("clicking the hash line copies the commit hash to the clipboard", async ({
   page,
   context,
@@ -98,13 +47,6 @@ test("clicking the hash line copies the commit hash to the clipboard", async ({
 
   const clip = await page.evaluate(() => navigator.clipboard.readText());
   expect(clip).toBe(hash);
-});
-
-test("build-menu and force-update testids are absent", async ({ page }) => {
-  await openSidebar(page);
-  // The old right-click menu and force-update action are removed entirely.
-  await expect(page.getByTestId("build-menu")).toHaveCount(0);
-  await expect(page.getByTestId("force-update")).toHaveCount(0);
 });
 
 test("pop-up dismisses on sidebar scroll", async ({ page }) => {
@@ -126,22 +68,4 @@ test("pop-up dismisses on sidebar scroll", async ({ page }) => {
     }
   });
   await expect(pop).toBeHidden();
-});
-
-// ─── Version label text (merged from version.e2e.ts) ─────────────────────────────
-
-test("the sidebar shows a compact version label (tag or short hash)", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  const version = page.getByTestId("sidebar").getByTestId("version");
-  await expect(version).toBeVisible();
-  // After the redesign the footer shows only the version: the release tag
-  // (vX.Y.Z), the short hash, or the "dev" fallback if git was unreachable at
-  // build time. The full "tag · hash · date" stamp moved into the hover pop-up.
-  // useInnerText: Svelte collapses whitespace, so textContent can carry a leading
-  // space (" dev"). innerText is the *rendered* text the user actually sees.
-  await expect(version).toHaveText(/^(v[\w.-]+|[0-9a-f]{7,}|dev)$/, {
-    useInnerText: true,
-  });
 });

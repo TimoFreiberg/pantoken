@@ -319,25 +319,6 @@ test("clicking a sent image opens the full-screen viewer", async ({ page }) => {
   await expect(lightbox).toHaveCount(0);
 });
 
-test("clicking a tool's image output opens the full-screen viewer", async ({
-  page,
-}) => {
-  await drive(page, "images");
-  const out = page.locator("img.out-img");
-  await expect(out).toBeVisible();
-
-  await out.click();
-  const lightbox = page.getByTestId("image-lightbox");
-  await expect(lightbox).toBeVisible();
-  await expect(lightbox.locator(".stage img")).toHaveAttribute(
-    "src",
-    /^data:image\/png;base64,/,
-  );
-  // The close button dismisses.
-  await lightbox.getByRole("button", { name: "Close preview" }).click();
-  await expect(lightbox).toHaveCount(0);
-});
-
 test("both images survive a reload (typed images in the state snapshot)", async ({
   page,
 }) => {

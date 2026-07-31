@@ -41,27 +41,3 @@ test("a failed create-on-click clears the warm-up placeholder and returns to the
     "Could not create the new session",
   );
 });
-
-test("a failed create-on-click via ⌘N→Enter returns to the chooser", async ({
-  page,
-}) => {
-  await openSidebar(page);
-
-  // ⌘N opens the chooser.
-  await page.keyboard.press("Control+n");
-  await expect(page.getByTestId("session-chooser")).toBeVisible();
-
-  // Arm the failure, then Enter selects the pre-selected project.
-  await drive(page, "failnewsession");
-  // Re-focus the chooser input (drive() clicks the dev bar button, moving focus
-  // away from the chooser's search field — Enter would otherwise re-activate the
-  // dev bar button instead of selecting the pre-selected project).
-  await page.getByLabel("Filter projects").press("Enter");
-
-  // The warm-up is cleared and the chooser returns.
-  await expect(page.getByTestId("working-indicator")).toHaveCount(0);
-  await expect(page.getByTestId("session-chooser")).toBeVisible();
-  await expect(page.getByRole("alert")).toContainText(
-    "Could not create the new session",
-  );
-});

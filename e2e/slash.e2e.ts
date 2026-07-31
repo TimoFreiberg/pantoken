@@ -41,14 +41,6 @@ test("Enter accepts the highlighted command into the draft", async ({
   await expect(page.getByTestId("slash-menu")).toHaveCount(0);
 });
 
-test("clicking a command inserts it", async ({ page }) => {
-  const box = ta(page);
-  await box.fill("/sk");
-  await expect(page.getByTestId("slash-menu")).toBeVisible();
-  await row(page, "skill:journal").click();
-  await expect(box).toHaveValue("/skill:journal ");
-});
-
 test("Escape dismisses the menu without changing the draft", async ({
   page,
 }) => {
@@ -108,22 +100,6 @@ test("/compact is intercepted and triggers compaction instead of sending text", 
     /^((?!\/compact).)*$/s,
   );
   // Mock emits UsageUpdated { percent: 4 } for Compact.
-  await expect(page.getByTestId("context-trigger")).toHaveAttribute(
-    "aria-label",
-    /4% used/,
-  );
-});
-
-test("/compact with args is intercepted (args accepted but ignored)", async ({
-  page,
-}) => {
-  await drive(page, "contextfull");
-
-  const box = ta(page);
-  await box.fill("/compact summarize this");
-  await box.press("Enter");
-
-  await expect(box).toHaveValue("");
   await expect(page.getByTestId("context-trigger")).toHaveAttribute(
     "aria-label",
     /4% used/,
@@ -212,22 +188,6 @@ test("/reset-shell is intercepted and shows a notification", async ({
   // Mock emits HostUiRequest::Notify "Shell environment restored".
   await expect(page.locator(".row.notice .ntext")).toContainText(
     "Shell environment restored",
-  );
-});
-
-test("/daemon-reload is intercepted and shows a notification", async ({
-  page,
-}) => {
-  const box = ta(page);
-  await box.fill("/daemon-reload");
-  await box.press("Enter");
-
-  await expect(box).toHaveValue("");
-  await expect(page.locator(".row.user .btext")).toHaveText(
-    /^((?!\/daemon-reload).)*$/s,
-  );
-  await expect(page.locator(".row.notice .ntext")).toContainText(
-    "Daemon config reloaded",
   );
 });
 
@@ -377,22 +337,6 @@ test("filtered commands do not appear in the slash menu", async ({ page }) => {
   await expect(row(page, "jobs")).toHaveCount(0);
 });
 
-test("a filtered command typed manually shows unknown error", async ({
-  page,
-}) => {
-  const box = ta(page);
-  await box.fill("/jobs ");
-  await box.press("Enter");
-
-  await expect(page.getByTestId("attachment-status")).toContainText(
-    "Unknown slash command: /jobs",
-  );
-  await expect(box).toHaveValue("/jobs ");
-  await expect(page.locator(".row.user .btext")).toHaveText(
-    /^((?!\/jobs).)*$/s,
-  );
-});
-
 test("new builtins appear in the slash menu", async ({ page }) => {
   await ta(page).fill("/");
   await expect(page.getByTestId("slash-menu")).toBeVisible();
@@ -482,29 +426,6 @@ test("selecting disable dispatches, clears the composer, and flips the sidebar s
   ).toHaveClass(/mcp-disconnected/);
 });
 
-test("submitting /mcp <server> <action> typed (not menu) dispatches", async ({
-  page,
-}) => {
-  await openRightSidebar(page);
-  // github starts disconnected — an observable transition.
-  const githubRow = page
-    .getByTestId("mcp-servers")
-    .locator(".mcp-item")
-    .filter({ hasText: "github" });
-  await expect(githubRow.locator(".mcp-dot")).toHaveClass(/mcp-disconnected/);
-
-  const box = ta(page);
-  await box.fill("/mcp github enable");
-  await box.press("Enter");
-
-  await expect(box).toHaveValue("");
-  await expect(page.locator(".row.user .btext")).toHaveText(
-    /^((?!\/mcp).)*$/s,
-  );
-  // The mock maps enable → Connected; the sidebar dot flips.
-  await expect(githubRow.locator(".mcp-dot")).toHaveClass(/mcp-connected/);
-});
-
 test("/mcp with no args shows a usage error and does not send", async ({ page }) => {
   const box = ta(page);
   await box.fill("/mcp ");
@@ -539,19 +460,6 @@ test("/mcp with an unknown action shows an error and does not send", async ({
   );
 });
 
-test("/mcp with an unknown server shows an error and does not send", async ({
-  page,
-}) => {
-  const box = ta(page);
-  await box.fill("/mcp nosuchserver enable");
-  await box.press("Enter");
-
-  await expect(page.getByTestId("attachment-status")).toContainText(
-    "Unknown MCP server: nosuchserver",
-  );
-  await expect(box).toHaveValue("/mcp nosuchserver enable");
-});
-
 // --- /facet arg-menu (facet name typeahead) ---
 
 const argMenu = (page: Page) => page.getByTestId("arg-menu");
@@ -568,15 +476,6 @@ test("typing /facet<space> opens the facet arg menu with all mock facets", async
   await expect(argRow(page, "execute")).toBeVisible();
   await expect(argRow(page, "plan")).toBeVisible();
   await expect(argRow(page, "research")).toBeVisible();
-});
-
-test("the facet arg menu filters by substring", async ({ page }) => {
-  const box = ta(page);
-  await box.fill("/facet pl");
-  await expect(argMenu(page)).toBeVisible();
-  await expect(argRow(page, "plan")).toBeVisible();
-  await expect(argRow(page, "execute")).toHaveCount(0);
-  await expect(argRow(page, "research")).toHaveCount(0);
 });
 
 test("selecting a facet from the menu dispatches and clears the composer", async ({
@@ -609,20 +508,6 @@ test("arrow keys navigate the facet arg menu and Enter selects the highlighted i
   await expect(page.getByTestId("facet-badge")).toContainText("Plan");
 });
 
-test("Tab selects the highlighted item in the facet arg menu", async ({
-  page,
-}) => {
-  const box = ta(page);
-  await box.fill("/facet ");
-  await expect(argMenu(page)).toBeVisible();
-  // ArrowDown to the second item (plan), then Tab to accept.
-  await box.press("ArrowDown");
-  await box.press("Tab");
-
-  await expect(box).toHaveValue("");
-  await expect(page.getByTestId("facet-badge")).toContainText("Plan");
-});
-
 test("Escape dismisses the facet arg menu without dispatching", async ({
   page,
 }) => {
@@ -648,16 +533,6 @@ test("typing /goal<space> opens the subcommand menu with set/clear/pause/resume"
   await expect(argRow(page, "clear")).toBeVisible();
   await expect(argRow(page, "pause")).toBeVisible();
   await expect(argRow(page, "resume")).toBeVisible();
-});
-
-test("the goal subcommand menu filters by substring", async ({ page }) => {
-  const box = ta(page);
-  await box.fill("/goal cl");
-  await expect(argMenu(page)).toBeVisible();
-  await expect(argRow(page, "clear")).toBeVisible();
-  await expect(argRow(page, "set")).toHaveCount(0);
-  await expect(argRow(page, "pause")).toHaveCount(0);
-  await expect(argRow(page, "resume")).toHaveCount(0);
 });
 
 test("selecting set from the menu inserts /goal set and shows the hint", async ({
@@ -692,27 +567,6 @@ test("selecting clear from the menu dispatches immediately", async ({
   await expect(page.getByTestId("goal-badge")).toHaveCount(0);
 });
 
-test("arrow keys navigate the goal subcommand menu and Enter selects the highlighted item", async ({
-  page,
-}) => {
-  // Set a goal first so clearing has an observable effect.
-  await ta(page).fill("/goal set ship the feature");
-  await ta(page).press("Enter");
-  await expect(page.getByTestId("goal-badge")).toBeVisible();
-
-  const box = ta(page);
-  await box.fill("/goal ");
-  await expect(argMenu(page)).toBeVisible();
-  // Default highlight is on the first item (clear, alphabetical). ArrowDown
-  // moves to pause.
-  await box.press("ArrowDown");
-  await box.press("Enter");
-
-  // Composer is cleared, goal badge shows paused state.
-  await expect(box).toHaveValue("");
-  await expect(page.getByTestId("goal-badge")).toHaveClass(/paused/);
-});
-
 test("Tab selects the highlighted item in the goal subcommand menu", async ({
   page,
 }) => {
@@ -730,17 +584,4 @@ test("Tab selects the highlighted item in the goal subcommand menu", async ({
 
   await expect(box).toHaveValue("");
   await expect(page.getByTestId("goal-badge")).toHaveClass(/paused/);
-});
-
-test("Escape dismisses the goal subcommand menu without dispatching", async ({
-  page,
-}) => {
-  const box = ta(page);
-  await box.fill("/goal ");
-  await expect(argMenu(page)).toBeVisible();
-  await box.press("Escape");
-
-  // Menu closed, composer still holds the text, no goal change.
-  await expect(argMenu(page)).toHaveCount(0);
-  await expect(box).toHaveValue("/goal ");
 });

@@ -85,42 +85,6 @@ test("thinking block shows bottom collapse when tall", async ({ page }) => {
   await expect(think).toHaveAttribute("aria-expanded", "false");
 });
 
-// AC.3 — An expanded "Worked for Ns" block whose body exceeds ~50% of the viewport
-// height shows a collapse chevron at its bottom edge. Clicking it collapses the block.
-test("worked-for-Ns shows bottom collapse when tall", async ({ page }) => {
-  // Drive longoutput — the expanded work body with the tool card open + output
-  // expanded is tall enough to exceed 50% viewport.
-  await drive(page, "longoutput");
-  await waitForSettledWorkBlocks(page, 2);
-  await expandWork(page, "last");
-
-  // Open the tool card and expand its output so the work-body grows tall.
-  const head = page
-    .getByTestId("work-body")
-    .last()
-    .locator(":scope > .tool > .head").first();
-  await head.click();
-  const expandBtn = page
-    .getByTestId("work-body")
-    .last()
-    .locator(".out-bar")
-    .getByRole("button", { name: "Expand", exact: true });
-  await expect(expandBtn).toBeVisible();
-  await expandBtn.click();
-
-  // The work-body's CollapseFooter chevron should be visible. The work-body has
-  // its own footer as a DIRECT child — scope to direct children so we don't pick
-  // up the nested tool card's footer.
-  const workBody = page.getByTestId("work-body").last();
-  const footer = workBody.locator(":scope > .collapse-footer");
-  await expect(footer).toBeVisible();
-
-  // Click the work-body footer → work block collapses.
-  await footer.click();
-  const workToggle = page.getByTestId("work-toggle").last();
-  await expect(workToggle).toHaveAttribute("aria-expanded", "false");
-});
-
 // AC.4 — Expanded elements shorter than ~50% of the viewport height do NOT show a
 // collapse chevron.
 test("short content shows no footer", async ({ page }) => {

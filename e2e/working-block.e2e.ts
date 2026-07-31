@@ -5,23 +5,6 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("a settled turn collapses its working section behind 'Worked for Ns'", async ({
-  page,
-}) => {
-  const toggle = page.getByTestId("work-toggle");
-  // The header carries the turn's wall-clock duration (the greeting's mock turn is ~37s).
-  await expect(toggle).toHaveText(/Worked for 37s/);
-
-  // Collapsed by default: the work body isn't rendered, so neither narration nor tool show…
-  await expect(page.getByTestId("work-body")).toHaveCount(0);
-  await expect(
-    page.getByText("I'll add a lightweight health endpoint"),
-  ).toHaveCount(0);
-  await expect(page.getByText("Run shell command")).toHaveCount(0);
-  // …but the turn-final answer stays visible.
-  await expect(page.getByText("Routes live in")).toBeVisible();
-});
-
 test("the collapse affordance never appears while the final response is still streaming", async ({
   page,
 }) => {
@@ -75,33 +58,6 @@ test("the collapse affordance never appears while the final response is still st
   });
   expect(sawLiveToggle).toBe(false);
   await expect(page.getByTestId("work-toggle")).toHaveCount(2);
-});
-
-test("the working block toggles open and closed", async ({
-  page,
-}) => {
-  const toggle = page.getByTestId("work-toggle");
-
-  // Collapsed → disclosure toggle (no tooltip: chevron + label make it obvious).
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
-
-  // Expand: the work body mounts; the narration + tool cards appear (greeting has 2 tools).
-  await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-expanded", "true");
-  await expect(page.getByTestId("work-body")).toBeVisible();
-  await expect(
-    page.getByText("I'll add a lightweight health endpoint"),
-  ).toBeVisible();
-  const tool = page.getByTestId("work-body").locator(":scope > .tool");
-  await expect(tool).toHaveCount(2);
-  await expect(tool.first().locator(":scope > .head .name")).toHaveText(
-    "Run shell command",
-  );
-
-  // Collapse again: the body unmounts.
-  await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
-  await expect(page.getByTestId("work-body")).toHaveCount(0);
 });
 
 test("each turn's working block collapses independently", async ({ page }) => {

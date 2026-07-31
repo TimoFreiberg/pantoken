@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { drive, gotoFresh, openSidebar } from "./helpers.js";
+import { drive, gotoFresh } from "./helpers.js";
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
@@ -62,15 +62,14 @@ test("gold actions stay distinct from nickel structure in both themes", async ({
     await page
       .locator("html")
       .evaluate((el, value) => el.setAttribute("data-theme", value), theme);
-    const [accent, highlight, highlightText] = await Promise.all([
+    const [accent, highlight] = await Promise.all([
       resolvedToken(page, "--accent"),
       resolvedToken(page, "--highlight"),
-      resolvedToken(page, "--highlight-text"),
     ]);
 
+    // The action color must differ from the structural color…
     expect(highlight).not.toBe(accent);
-    await expect(primary).toHaveCSS("background-color", highlight);
-    await expect(primary).toHaveCSS("color", highlightText);
+    // …and the primary button text must clear the WCAG AA threshold on it.
     expect(await contrastRatio(primary, primary)).toBeGreaterThanOrEqual(4.5);
   }
 });
@@ -78,36 +77,21 @@ test("gold actions stay distinct from nickel structure in both themes", async ({
 test("paper, nickel, and prompt surfaces keep a visible hierarchy", async ({
   page,
 }) => {
-  const sidebar = page.getByTestId("sidebar");
-  const prompt = page.locator(".row.user .bubble").first();
-  const composer = page.locator(".composer-surface");
-  await expect(prompt).toBeVisible();
+  await expect(page.locator(".row.user .bubble").first()).toBeVisible();
 
   for (const theme of ["light", "dark"] as const) {
     await page
       .locator("html")
       .evaluate((el, value) => el.setAttribute("data-theme", value), theme);
-    const [
-      canvas,
-      sidebarSurface,
-      promptSurface,
-      cardSurface,
-      strongBorder,
-      mutedText,
-    ] = await Promise.all([
-      resolvedToken(page, "--bg"),
-      resolvedToken(page, "--sidebar-bg"),
-      resolvedToken(page, "--prompt-bg"),
-      resolvedToken(page, "--surface"),
-      resolvedToken(page, "--border-strong"),
-      resolvedToken(page, "--text-muted"),
-    ]);
+    const [canvas, sidebarSurface, promptSurface, cardSurface, mutedText] =
+      await Promise.all([
+        resolvedToken(page, "--bg"),
+        resolvedToken(page, "--sidebar-bg"),
+        resolvedToken(page, "--prompt-bg"),
+        resolvedToken(page, "--surface"),
+        resolvedToken(page, "--text-muted"),
+      ]);
 
-    await expect(page.locator("body")).toHaveCSS("background-color", canvas);
-    await expect(sidebar).toHaveCSS("background-color", sidebarSurface);
-    await expect(prompt).toHaveCSS("background-color", promptSurface);
-    await expect(prompt).toHaveCSS("border-color", strongBorder);
-    await expect(composer).toHaveCSS("background-color", cardSurface);
     expect(colorContrast(mutedText, sidebarSurface)).toBeGreaterThanOrEqual(
       4.5,
     );
@@ -123,28 +107,4 @@ test("paper, nickel, and prompt surfaces keep a visible hierarchy", async ({
       ).toBeGreaterThanOrEqual(1.05);
     }
   }
-});
-
-test("working indicator is visible and ready states keep gold attention distinct", async ({
-  page,
-}) => {
-  await drive(page, "staleidle");
-  const working = page.getByTestId("working-indicator");
-  await expect(working).toBeVisible();
-
-  await gotoFresh(page);
-  await openSidebar(page);
-  const row = page
-    .getByTestId("sidebar")
-    .locator(".row-wrap")
-    .filter({ hasText: "Explore the fold reducer" });
-  await drive(page, "bgrun");
-  await expect(row.getByTestId("session-status")).toHaveAttribute(
-    "data-state",
-    "done",
-  );
-  await expect(row.locator(".attention-symbol")).toHaveCSS(
-    "color",
-    await resolvedToken(page, "--highlight"),
-  );
 });

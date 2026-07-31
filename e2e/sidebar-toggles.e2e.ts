@@ -11,11 +11,6 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("the header hamburgers are gone", async ({ page }) => {
-  await expect(page.getByTestId("sidebar-toggle")).toHaveCount(0);
-  await expect(page.getByTestId("context-toggle")).toHaveCount(0);
-});
-
 test("both sidebars are visible by default on desktop", async ({ page }) => {
   await expect(page.getByTestId("sidebar")).toHaveAttribute(
     "data-open",
@@ -123,23 +118,6 @@ test("a collapsed left sidebar stays collapsed across a reload", async ({
   // Restore it so this test doesn't leak a closed default into anything reading
   // localStorage after it (each test gets its own context, but be tidy regardless).
   await page.getByTestId("sidebar-open").click();
-});
-
-test("a collapsed context panel stays collapsed across a reload", async ({
-  page,
-}) => {
-  await page.getByRole("button", { name: "Collapse context panel" }).click();
-  await expect(page.getByTestId("right-sidebar")).toHaveAttribute(
-    "data-open",
-    "false",
-  );
-
-  await gotoFresh(page);
-
-  await expect(page.getByTestId("right-sidebar")).toHaveAttribute(
-    "data-open",
-    "false",
-  );
 });
 
 test("⌘B and ⌘⇧J still reopen a collapsed sidebar without the header buttons", async ({

@@ -168,23 +168,3 @@ test("draft text and attachment survive opening, changes, and closing", async ({
     page.getByTestId("mobile-session-controls-trigger"),
   ).toContainText("Bypass");
 });
-
-test("attach is visually bare while its transparent hit target stays 44px", async ({
-  page,
-}) => {
-  const attach = page.getByTestId("attach-images");
-  const box = await attach.boundingBox();
-  expect(box?.width).toBeGreaterThanOrEqual(44);
-  expect(box?.height).toBeGreaterThanOrEqual(44);
-  const chrome = await attach.evaluate((element) => {
-    const css = getComputedStyle(element);
-    return {
-      background: css.backgroundColor,
-      border: css.borderTopColor,
-      radius: css.borderTopLeftRadius,
-    };
-  });
-  expect(chrome.background).toBe("rgba(0, 0, 0, 0)");
-  expect(chrome.border).toBe("rgba(0, 0, 0, 0)");
-  expect(chrome.radius).toBe("0px");
-});

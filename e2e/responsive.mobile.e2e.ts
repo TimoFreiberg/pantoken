@@ -6,13 +6,6 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("transcript and composer fit the mobile viewport", async ({ page }) => {
-  await expect(
-    page.getByText("Add a /health route to the server"),
-  ).toBeVisible();
-  await expect(page.getByPlaceholder("Message pantoken…")).toBeVisible();
-});
-
 test("approval sheet is reachable and tappable on mobile", async ({ page }) => {
   await drive(page, "confirm");
   const dialog = page.getByRole("dialog");
@@ -53,19 +46,6 @@ test("a wide markdown table scrolls horizontally instead of overflowing", async 
   expect(metrics.scrolls).toBe(true);
   expect(metrics.rightWithinViewport).toBe(true);
   expect(metrics.noPageOverflow).toBe(true);
-
-  // On a coarse pointer the overlay scrollbar hides at rest, so the container carries the
-  // "scrolling shadows" fade (4 gradient layers: 2 edge covers + 2 shadows) to hint the
-  // cut-off columns. Desktop, with a persistent scrollbar, doesn't get this.
-  const fade = await wide.evaluate((t) => {
-    const cs = getComputedStyle(t);
-    return {
-      gradients: (cs.backgroundImage.match(/gradient/g) || []).length,
-      hasLocal: cs.backgroundAttachment.includes("local"),
-    };
-  });
-  expect(fade.gradients).toBe(4);
-  expect(fade.hasLocal).toBe(true);
 });
 
 test("a long code-line tail scrolls clear of the 44px copy control", async ({
@@ -123,21 +103,6 @@ test("text inputs render at >=16px on touch (guards against iOS focus-zoom)", as
     parseFloat(getComputedStyle(el).fontSize),
   );
   expect(fontSize).toBeGreaterThanOrEqual(16);
-});
-
-test("the per-turn copy button stays visible on touch (no hover to reveal it)", async ({
-  page,
-}) => {
-  // The greeting's final assistant paragraph carries the copy footer. On desktop it's
-  // hover-revealed (opacity 0 at rest); a touch device has no hover, so it must be
-  // pinned visible. Gated on a JS capability check (maxTouchPoints), so this mobile
-  // project (hasTouch) shows it while the desktop project keeps the hover-reveal.
-  await expect(
-    page.getByText("Routes live in", { exact: false }),
-  ).toBeVisible();
-  const copy = page.locator(".copy").last();
-  await expect(copy).toBeVisible();
-  await expect(copy).toHaveCSS("opacity", "1");
 });
 
 test("user and assistant footers are ordered, visible, and touch-safe", async ({

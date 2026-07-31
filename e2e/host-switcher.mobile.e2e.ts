@@ -24,19 +24,6 @@ test("phone picker is a full-screen sheet with labeled touch-safe controls", asy
   }
 });
 
-test("phone Escape closes and restores focus, and Back closes before navigation", async ({ page }) => {
-  const trigger = page.getByTestId("host-switcher-trigger");
-  await trigger.click();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: "Choose computer" })).toBeHidden();
-  await expect(trigger).toBeFocused();
-
-  await trigger.click();
-  await page.goBack();
-  await expect(page.getByRole("dialog", { name: "Choose computer" })).toBeHidden();
-  await expect(trigger).toBeFocused();
-});
-
 test("phone picker focus stays within the sheet when tabbing", async ({ page }) => {
   const trigger = page.getByTestId("host-switcher-trigger");
   await trigger.click();

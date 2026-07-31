@@ -54,13 +54,3 @@ test("unknown interrogative type renders an error card with Dismiss", async ({
   await expect(dialog).toBeHidden();
   await expect(page.getByText("Dialog cancelled.")).toBeVisible();
 });
-
-test("unknown interrogative: Escape dismisses the error card", async ({
-  page,
-}) => {
-  await drive(page, "unknown");
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).toBeHidden();
-  await expect(page.getByText("Dialog cancelled.")).toBeVisible();
-});

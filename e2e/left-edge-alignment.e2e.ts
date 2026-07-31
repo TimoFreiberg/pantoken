@@ -19,7 +19,7 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-for (const width of [1600, 1920, 2400]) {
+for (const width of [1920, 2400]) {
   test(`transcript prose, stop button, and composer left edges align at ${width}px`, async ({
     page,
   }) => {

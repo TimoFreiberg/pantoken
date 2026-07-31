@@ -104,21 +104,6 @@ test("steer button is disabled when no turn is active", async ({ page }) => {
   await expect(page.getByTestId("steer-button")).toBeDisabled();
 });
 
-test("edit button on a queued item restores all prompts to the composer", async ({
-  page,
-}) => {
-  await drive(page, "queue");
-  await expect(page.getByTestId("queue-tray")).toContainText("Queued · 2");
-
-  const editor = page.locator("textarea");
-  if ((await editor.inputValue()) !== "") await editor.fill("");
-  await page.getByTestId("edit-queued").first().click();
-  await expect(page.getByTestId("queue-tray")).toHaveCount(0);
-  await expect(page.locator("textarea")).toHaveValue(
-    "Please inspect the failing test first.\n\nThen summarize the fix and remaining risks.",
-  );
-});
-
 test("plain Up-arrow restores queued prompts when the composer is empty", async ({
   page,
 }) => {

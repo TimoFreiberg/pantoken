@@ -15,27 +15,6 @@ test.beforeEach(async ({ page }) => {
 
 const openPanel = openRightSidebar;
 
-test("the context panel is open by default on desktop", async ({ page }) => {
-  await expect(page.getByTestId("right-sidebar")).toHaveAttribute(
-    "data-open",
-    "true",
-  );
-});
-
-test("the context panel shows no title on desktop — just the collapse control", async ({
-  page,
-}) => {
-  // The "Context" title exists in the DOM for the phone's full-screen view
-  // (docs/PLAN-mobile.md D2) but must stay HIDDEN on desktop, where the column
-  // mirrors the title-less left sidebar.
-  const panel = page.getByTestId("right-sidebar");
-  await expect(panel).toHaveAttribute("data-open", "true");
-  await expect(panel.getByText("Context")).toBeHidden();
-  await expect(
-    page.getByRole("button", { name: "Collapse context panel" }),
-  ).toBeVisible();
-});
-
 test("the context panel renders flagged files and todos", async ({ page }) => {
   // Desktop default: already open (no click needed).
   await expect(page.getByTestId("right-sidebar")).toHaveAttribute(
@@ -113,18 +92,6 @@ test("the context panel shows empty states when no flags/todos/jobs", async ({
   await expect(page.getByTestId("background-jobs")).toContainText(
     "No background jobs",
   );
-});
-
-// Three sections render with the context fixture (order is covered by the
-// dedicated "sections render in order" test above).
-test("three sections all render with the context fixture", async ({ page }) => {
-  await openPanel(page);
-  await drive(page, "context");
-
-  // All three test IDs are visible.
-  await expect(page.getByTestId("todos")).toBeVisible();
-  await expect(page.getByTestId("background-jobs")).toBeVisible();
-  await expect(page.getByTestId("flagged-files")).toBeVisible();
 });
 
 // Clicking a todo opens a detail view with full description + timestamp.

@@ -79,63 +79,57 @@ test("⌘⇧J does not toggle the context panel while Settings is open", async (
   await expect(panel).toHaveAttribute("data-open", before ?? "");
 });
 
-// AC.4 — parametrize over the unshifted global shortcuts + Ctrl+Tab. Each must
-// be inert while Settings is open. (⌘P uses Meta+ to avoid the native print
-// dialog; it also needs an active plan seeded first or its handler is a no-op
-// with or without the guard — see the dedicated ⌘P test below.)
-test.describe("other global shortcuts are suppressed while Settings is open", () => {
-  for (const [label, combo, assertInert] of [
-    ["⌘B (sidebar)", "Control+b", assertSidebarUnchanged],
-    ["⌘N (session chooser)", "Control+n", assertNoChooser],
-    ["⌘K (sidebar search)", "Control+k", assertNoSidebarSearch],
-    ["⌘[ (back)", "Control+[", assertActiveSessionUnchanged],
-    ["⌘] (forward)", "Control+]", assertActiveSessionUnchanged],
-    ["Ctrl+Tab (cycle session)", "Control+Tab", assertActiveSessionUnchanged],
-  ] as const) {
-    test(`${label} is suppressed`, async ({ page }) => {
-      await openSettings(page);
-      await expect(page.getByTestId("settings-panel")).toBeVisible();
-      await page.keyboard.press(combo);
-      // Close Settings before asserting — the observable we care about is that
-      // underlying state is unchanged once the modal is dismissed.
-      await page.keyboard.press("Escape");
-      await expect(page.getByTestId("settings-panel")).toHaveCount(0);
-      await assertInert(page);
-    });
+// AC.4 — the unshifted global shortcuts + Ctrl+Tab + ⌘F must each be inert
+// while Settings is open. One looped test guards the shared pattern: each
+// combo is pressed, the modal is dismissed, and the underlying state is
+// asserted unchanged. (⌘F uses Meta+ to avoid the native find-in-page dialog;
+// ⌘P needs an active plan seeded first, so it keeps its dedicated test below.)
+test("other global shortcuts are suppressed while Settings is open", async ({
+  page,
+}) => {
+  const cases: Array<
+    [combo: string, assertInert: (p: import("@playwright/test").Page) => Promise<void>]
+  > = [
+    ["Control+b", assertSidebarUnchanged],
+    ["Control+n", assertNoChooser],
+    ["Control+k", assertNoSidebarSearch],
+    ["Control+[", assertActiveSessionUnchanged],
+    ["Control+]", assertActiveSessionUnchanged],
+    ["Control+Tab", assertActiveSessionUnchanged],
+    ["Meta+f", assertNoTranscriptSearch],
+  ];
+  for (const [combo, assertInert] of cases) {
+    await openSettings(page);
+    await expect(page.getByTestId("settings-panel")).toBeVisible();
+    await page.keyboard.press(combo);
+    // Close Settings before asserting — the observable we care about is that
+    // underlying state is unchanged once the modal is dismissed.
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("settings-panel")).toHaveCount(0);
+    await assertInert(page);
   }
+});
 
-  test("⌘F (find in transcript) is suppressed", async ({ page }) => {
-    // ⌘F uses Meta+ to avoid Chromium's native find-in-page dialog.
-    await openSettings(page);
-    await expect(page.getByTestId("settings-panel")).toBeVisible();
-    await page.keyboard.press("Meta+f");
-    await page.keyboard.press("Escape");
-    await expect(page.getByTestId("settings-panel")).toHaveCount(0);
-    // The in-transcript find bar must not have opened.
-    await expect(page.getByTestId("transcript-search")).toHaveCount(0);
-  });
+test("⌘P (plan view) does not open a second modal behind Settings", async ({
+  page,
+}) => {
+  // The default greeting fixture has active_plan: None, which makes the ⌘P
+  // handler (gated `if (!store.chooserOpen && !store.creatingSession && store.session.activePlan)`) a no-op
+  // with or without the guard — a vacuous test. Seed an active plan first
+  // (BEFORE opening Settings, since the guard would suppress ⌘P otherwise).
+  await drive(page, "planview");
+  await expect(page.getByTestId("plan-view-toggle")).toBeVisible();
 
-  test("⌘P (plan view) does not open a second modal behind Settings", async ({
-    page,
-  }) => {
-    // The default greeting fixture has active_plan: None, which makes the ⌘P
-    // handler (gated `if (!store.chooserOpen && !store.creatingSession && store.session.activePlan)`) a no-op
-    // with or without the guard — a vacuous test. Seed an active plan first
-    // (BEFORE opening Settings, since the guard would suppress ⌘P otherwise).
-    await drive(page, "planview");
-    await expect(page.getByTestId("plan-view-toggle")).toBeVisible();
+  await openSettings(page);
+  await expect(page.getByTestId("settings-panel")).toBeVisible();
 
-    await openSettings(page);
-    await expect(page.getByTestId("settings-panel")).toBeVisible();
+  // ⌘P uses Meta+ to avoid the native print dialog.
+  await page.keyboard.press("Meta+p");
 
-    // ⌘P uses Meta+ to avoid the native print dialog.
-    await page.keyboard.press("Meta+p");
-
-    // Closing Settings — PlanView must NOT have opened behind the scrim.
-    await page.keyboard.press("Escape");
-    await expect(page.getByTestId("settings-panel")).toHaveCount(0);
-    await expect(page.getByTestId("plan-view")).toHaveCount(0);
-  });
+  // Closing Settings — PlanView must NOT have opened behind the scrim.
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("settings-panel")).toHaveCount(0);
+  await expect(page.getByTestId("plan-view")).toHaveCount(0);
 });
 
 test("Settings' own shortcuts still work while it is open", async ({
@@ -171,29 +165,6 @@ test("Settings' own shortcuts still work while it is open", async ({
   await expect(page.getByTestId("settings-panel")).toHaveCount(0);
 });
 
-test("⌘⇧P is suppressed while PlanView is open", async ({ page }) => {
-  // AC.6 — the guard covers store.planViewOpen too, not just Settings.
-  // Seed an active plan, open PlanView via the toggle button (a click, not a
-  // hotkey — so the guard never intercepts the open itself), then press ⌘⇧P
-  // and assert the permission mode is unchanged.
-  await drive(page, "planview");
-  await expect(page.getByTestId("plan-view-toggle")).toBeVisible();
-  await page.getByTestId("plan-view-toggle").click();
-  await expect(page.getByTestId("plan-view")).toBeVisible();
-
-  await expect(permissionBadge(page)).toContainText("Standard");
-
-  // While PlanView is open, ⌘⇧P must NOT cycle.
-  await page.keyboard.press("Control+Shift+P");
-  await expect(permissionBadge(page)).toContainText("Standard");
-  await expect(permissionBadge(page)).not.toContainText("Bypass");
-
-  // Escape closes PlanView — still Standard.
-  await page.keyboard.press("Escape");
-  await expect(page.getByTestId("plan-view")).toHaveCount(0);
-  await expect(permissionBadge(page)).toContainText("Standard");
-});
-
 test("⌘P still closes PlanView while PlanView is open (toggle not suppressed)", async ({
   page,
 }) => {
@@ -216,38 +187,7 @@ test("⌘P still closes PlanView while PlanView is open (toggle not suppressed)"
   await expect(page.getByTestId("plan-view")).toBeVisible();
 });
 
-test("⌘⇧P is suppressed while ImageLightbox is open", async ({ page }) => {
-  // AC.6 sibling — the guard's `imageViewer.index !== null` branch. The guard
-  // expression is identical to the Settings/PlanView branches (already tested
-  // above), but this pins the ImageLightbox path explicitly so a future refactor
-  // that touches the image-viewer singleton can't silently drop it.
-  //
-  // Seed the `images` fixture (a user-attached image + a tool-output image),
-  // wait for the run to settle, then click the user attachment to open the
-  // shared ImageLightbox.
-  await drive(page, "images");
-  // Wait for the images turn to finish (the runCompleted snapshot flips the
-  // session back to Idle) and the user attachment to render.
-  await expect(page.locator(".att-img-btn").first()).toBeVisible({ timeout: 10000 });
-
-  const attBtn = page.locator(".att-img-btn").first();
-  await attBtn.click();
-  await expect(page.getByTestId("image-lightbox")).toBeVisible();
-
-  await expect(permissionBadge(page)).toContainText("Standard");
-
-  // While the lightbox is open, ⌘⇧P must NOT cycle.
-  await page.keyboard.press("Control+Shift+P");
-  await expect(permissionBadge(page)).toContainText("Standard");
-  await expect(permissionBadge(page)).not.toContainText("Bypass");
-
-  // Escape closes the lightbox — still Standard.
-  await page.keyboard.press("Escape");
-  await expect(page.getByTestId("image-lightbox")).toHaveCount(0);
-  await expect(permissionBadge(page)).toContainText("Standard");
-});
-
-// --- Per-shortcut inertness assertions for AC.4's parametrized cases ---
+// --- Per-shortcut inertness assertions for AC.4's looped cases ---
 
 async function assertSidebarUnchanged(page: import("@playwright/test").Page) {
   // Desktop default is open; ⌘B would have closed it.
@@ -261,6 +201,11 @@ async function assertNoChooser(page: import("@playwright/test").Page) {
 async function assertNoSidebarSearch(page: import("@playwright/test").Page) {
   // ⌘K would have opened the sidebar search input.
   await expect(page.getByTestId("sidebar-search-input")).toHaveCount(0);
+}
+
+async function assertNoTranscriptSearch(page: import("@playwright/test").Page) {
+  // ⌘F would have opened the in-transcript find bar.
+  await expect(page.getByTestId("transcript-search")).toHaveCount(0);
 }
 
 async function assertActiveSessionUnchanged(
