@@ -1,16 +1,20 @@
 # CI — every PR and every push to main. Independent jobs:
 #   web-check:   typechecks (protocol/scripts/e2e/parity/svelte) + unit tests.
 #   web-e2e:     the Playwright e2e suite, sharded across isolated mock-driver
-#                runners. Each shard boots its own dev server on auto-assigned ports.
+#                runners. Each shard boots its own dev server on auto-assigned ports;
+#                Vite serves the client, so no production client build runs here.
 #   desktop:     fmt + clippy for the Tauri shell, on macOS because that's the only
 #                target the shell builds for. The hub sidecar must be compiled first —
 #                tauri-build stages `externalBin` at compile time and errors if missing.
+#                Also CI's production client-build gate: it builds client/dist once,
+#                which tauri-build stages as a bundle resource at compile time.
 #   rust-server: fmt + buck2 clippy + buck2 build+test for the Rust server, on Linux.
-#                Uses the remote cache for trusted PRs/pushes.
+#                Node-free — no client build. Uses the remote cache for trusted PRs/pushes.
 #   buck2:       macOS arm64 Buck2 gate — builds all server-rs crates, tests,
 #                builds + validates the unsigned headless archive in the RELEASE
 #                configuration (release_build=1, real version/SHA), and checks
-#                target/test manifests. Uses remote cache for trusted PRs/pushes.
+#                target/test manifests. Node-free — no client build. Uses remote
+#                cache for trusted PRs/pushes.
 #
 # The release pipeline (tag-triggered) hangs off these jobs via `needs`; the
 # release-prepare jobs build the signed headless artifacts via Buck2
@@ -91,8 +95,6 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
-      # Build client/dist (Buck2 consumes pre-built frontend output)
-      - run: pnpm run build
       # Pre-warm the Rust binary via Buck2 so dev.ts answers /health quickly
       - run: just build-server-rs
       - name: Cache Playwright browsers
@@ -139,8 +141,6 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
-      # Build client/dist (Buck2 consumes pre-built frontend output)
-      - run: pnpm run build
       # Pre-warm the Rust binary via Buck2 so dev.ts answers /health quickly.
       # The webServer timeout budgets a cold compile, but warming keeps it comfortable.
       - run: just build-server-rs
@@ -189,7 +189,9 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
-      # Build client/dist (Buck2 consumes pre-built frontend output)
+      # Build the production client — CI's production client-build gate. tauri-build
+      # stages client/dist as a bundle resource at compile time, so this must precede
+      # the cargo steps below.
       - run: pnpm run build
       - run: pnpm exec tsx scripts/desktop/build-hub.ts --debug
       # Run the full vitest suite — deploy-scripts.test.ts exercises macOS-only
@@ -223,23 +225,13 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
-      # pnpm + Node for building client/dist (Buck2 consumes pre-built frontend output)
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.17.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
       # Tailscale connection for remote cache (trusted PRs/pushes only).
       # Skips gracefully when TS_AUTH_KEY is not configured (local-only builds).
       - name: Connect to Tailscale
         if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.TS_AUTH_KEY != ''
         uses: tailscale/github-action@v4
         with:
-          auth-key: ${{ secrets.TS_AUTH_KEY }}
+          authkey: ${{ secrets.TS_AUTH_KEY }}
           version: latest
       # Generate remote cache config from secret (writes .buckconfig.local,
       # which buck2 auto-reads — no --config-file flag needed)
@@ -291,14 +283,6 @@ jobs:
       BUCK2_TEST_FORCE_CACHE_UPLOAD: "true"
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.17.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
       # Rust toolchain is pinned via rust-toolchain.toml; rustup auto-installs it.
       # Install pinned Buck2 + Reindeer
       - name: Install Buck2 + Reindeer
@@ -309,15 +293,13 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
-      # Build client/dist (Buck2 consumes pre-built frontend output)
-      - run: pnpm run build
       # Tailscale connection for remote cache (trusted PRs/pushes only).
       # Skips gracefully when TS_AUTH_KEY is not configured (local-only builds).
       - name: Connect to Tailscale
         if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.TS_AUTH_KEY != ''
         uses: tailscale/github-action@v4
         with:
-          auth-key: ${{ secrets.TS_AUTH_KEY }}
+          authkey: ${{ secrets.TS_AUTH_KEY }}
           version: latest
       # Generate remote cache config from secret (writes .buckconfig.local,
       # which buck2 auto-reads — no --config-file flag needed)

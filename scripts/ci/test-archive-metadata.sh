@@ -7,7 +7,7 @@
 #      Assert VERSION and BUILD_SHA files contain the expected values.
 #   2. Build WITHOUT a config file. Assert defaults (0.0.0 / 000...000).
 #
-# Prerequisites: buck2 must be installed and on PATH, client/dist must exist.
+# Prerequisites: buck2 must be installed and on PATH.
 # Usage: bash scripts/ci/test-archive-metadata.sh
 
 set -euo pipefail

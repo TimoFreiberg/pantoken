@@ -174,14 +174,13 @@ Clippy runs through Buck2's built-in `[clippy.json]` subtargets on every `rust_l
 ### What the `buck2` CI job does
 
 1. Installs pinned Buck2 + Reindeer via `scripts/ci/install-buck2-ci.sh`.
-2. Builds `client/dist` (Buck2 consumes pre-built frontend output).
-3. Connects to Tailscale and generates `.buckconfig.local` (trusted runs only).
-4. Runs clippy on all server-rs library crates via `just buck2-clippy`.
-5. Builds all server-rs crates + the `pantoken-server` binary via `just build-rs` / `just build-server-rs`.
-6. Runs all 13 Buck2 test targets via `just test-rs`.
-7. Builds the unsigned headless archive in the release configuration (via `.buckconfig.ci` with `release_build = 1` + `--config-file`).
-8. Validates the archive via `just validate-archive-rs-ci` (passes `--config-file .buckconfig.ci`, so the sh_test validates the release-config archive — plain `validate-archive-rs` would rebuild + validate a dev-config archive).
-9. Runs target manifest and test inventory checks.
+2. Connects to Tailscale and generates `.buckconfig.local` (trusted runs only).
+3. Runs clippy on all server-rs library crates via `just buck2-clippy`.
+4. Builds all server-rs crates + the `pantoken-server` binary via `just build-rs` / `just build-server-rs`.
+5. Runs all 13 Buck2 test targets via `just test-rs`.
+6. Builds the unsigned headless archive in the release configuration (via `.buckconfig.ci` with `release_build = 1` + `--config-file`).
+7. Validates the archive via `just validate-archive-rs-ci` (passes `--config-file .buckconfig.ci`, so the sh_test validates the release-config archive — plain `validate-archive-rs` would rebuild + validate a dev-config archive).
+8. Runs target manifest and test inventory checks.
 
 ### Remote cache in CI
 
