@@ -20,6 +20,7 @@
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnManaged, sleep, isMain } from "../scripts/lib/node-compat.js";
+import { resolveServerBinary } from "../scripts/lib/build-server.js";
 import {
   ensureEnv,
   freePort,
@@ -89,8 +90,11 @@ export async function launch(p: Paths = paths()): Promise<void> {
     PORT: undefined,
   };
 
-  const server = spawnManaged(["cargo", "run", "--bin", "pantoken-server"], {
-    cwd: join(REPO_ROOT, "server"),
+  // Build the server via Buck2 (same path as scripts/dev.ts) and spawn the
+  // binary directly — cargo is no longer used here (buck2 is the primary
+  // builder; cargo would leave target/ dirs behind without CARGO_TARGET_DIR).
+  const serverBin = await resolveServerBinary(REPO_ROOT);
+  const server = spawnManaged([serverBin], {
     env: backendEnv,
     stdout: "inherit",
     stderr: "inherit",
