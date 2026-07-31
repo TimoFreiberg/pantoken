@@ -1,6 +1,6 @@
 // Cross-language canon parity — TS side.
 //
-// The Rust test `canon_matches_ts_golden` (server-rs/pantoken-server/tests/corpus.rs)
+// The Rust test `canon_matches_ts_golden` (server/pantoken-server/tests/corpus.rs)
 // compares Rust's `canonicalize_scenario` output to a committed, frozen
 // TS-produced golden. That catches Rust drift, but it cannot see a TS-only edit
 // to `canonicalizeValue` that diverges from Rust until the golden is regenerated.
@@ -10,10 +10,10 @@
 // regenerating the golden then trips the Rust test unless Rust matches too).
 //
 // Regenerate the golden after an intentional canon change (BOTH files together):
-//   cp server-rs/tests/canon-parity/non-canonical.json \
-//      server-rs/tests/canon-parity/ts-canonical.golden.json
+//   cp server/tests/canon-parity/non-canonical.json \
+//      server/tests/canon-parity/ts-canonical.golden.json
 //   just capture-daemon-corpus --recanon \
-//      server-rs/tests/canon-parity/ts-canonical.golden.json
+//      server/tests/canon-parity/ts-canonical.golden.json
 
 import { expect, test } from "vitest";
 import { readFileSync } from "node:fs";
@@ -31,7 +31,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PARITY_DIR = join(
   SCRIPT_DIR,
   "..",
-  "server-rs",
+  "server",
   "tests",
   "canon-parity",
 );

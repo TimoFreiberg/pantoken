@@ -24,18 +24,18 @@ BUCK2_VER=$("${BUCK2:-buck2}" --version 2>/dev/null || echo "unknown")
 # Targets measured here (the four non-binary server crates; pantoken-server
 # itself builds via `just build-server-rs`).
 BUILD_TARGETS=(
-  '//server-rs/pantoken-protocol:pantoken_protocol'
-  '//server-rs/pantoken-daemon-types:pantoken_daemon_types'
-  '//server-rs/pantoken-remote-layout:pantoken_remote_layout'
-  '//server-rs/pantoken-tar-validate:pantoken_tar_validate'
+  '//server/pantoken-protocol:pantoken_protocol'
+  '//server/pantoken-daemon-types:pantoken_daemon_types'
+  '//server/pantoken-remote-layout:pantoken_remote_layout'
+  '//server/pantoken-tar-validate:pantoken_tar_validate'
 )
 
 TEST_TARGETS=(
-  '//server-rs/pantoken-protocol:fold_corpus_tests'
-  '//server-rs/pantoken-daemon-types:target_version_test'
-  '//server-rs/pantoken-daemon-types:daemon_types_roundtrip'
-  '//server-rs/pantoken-remote-layout:unit_tests'
-  '//server-rs/pantoken-tar-validate:unit_tests'
+  '//server/pantoken-protocol:fold_corpus_tests'
+  '//server/pantoken-daemon-types:target_version_test'
+  '//server/pantoken-daemon-types:daemon_types_roundtrip'
+  '//server/pantoken-remote-layout:unit_tests'
+  '//server/pantoken-tar-validate:unit_tests'
 )
 
 # Timer function — uses $EPOCHREALTIME (bash 5+) with date fallback.
@@ -79,7 +79,7 @@ echo "${WARM_TIME}s | No changes, action cache |"
 
 # Incremental (content-preserving edit to trigger a real rebuild)
 echo -n "| Incremental (1 file) | "
-TARGET_FILE="server-rs/pantoken-protocol/src/lib.rs"
+TARGET_FILE="server/pantoken-protocol/src/lib.rs"
 # Backup with cp to preserve exact bytes, append a comment to force rebuild,
 # then restore. Buck2 uses content hashing, so touch alone is a no-op.
 cp -p "$TARGET_FILE" "$TARGET_FILE.bak"

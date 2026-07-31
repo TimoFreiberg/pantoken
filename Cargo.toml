@@ -1,11 +1,11 @@
 [workspace]
 members = [
     "desktop",
-    "server-rs/pantoken-protocol",
-    "server-rs/pantoken-daemon-types",
-    "server-rs/pantoken-remote-layout",
-    "server-rs/pantoken-server",
-    "server-rs/pantoken-tar-validate",
+    "server/pantoken-protocol",
+    "server/pantoken-daemon-types",
+    "server/pantoken-remote-layout",
+    "server/pantoken-server",
+    "server/pantoken-tar-validate",
 ]
 resolver = "2"
 
@@ -14,9 +14,9 @@ edition = "2024"
 rust-version = "1.85"
 
 [workspace.dependencies]
-pantoken-protocol = { path = "server-rs/pantoken-protocol" }
-pantoken-daemon-types = { path = "server-rs/pantoken-daemon-types" }
-pantoken-remote-layout = { path = "server-rs/pantoken-remote-layout" }
+pantoken-protocol = { path = "server/pantoken-protocol" }
+pantoken-daemon-types = { path = "server/pantoken-daemon-types" }
+pantoken-remote-layout = { path = "server/pantoken-remote-layout" }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 serde_json = "1"

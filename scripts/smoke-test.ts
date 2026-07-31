@@ -16,7 +16,7 @@ const stageDir = process.argv[2] ?? resolve(dirname(fileURLToPath(import.meta.ur
 const port = Number(process.env.PANTOKEN_SMOKE_PORT ?? 8799);
 const base = `http://127.0.0.1:${port}`;
 
-const serverDir = join(stageDir, "server-rs");
+const serverDir = join(stageDir, "server");
 const clientDist = join(stageDir, "client", "dist");
 const dataDir = mkdtempSync(join(tmpdir(), "pantoken-smoke-"));
 

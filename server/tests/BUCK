@@ -1,4 +1,4 @@
-# Buck2 BUCK file for shared server-rs test data.
+# Buck2 BUCK file for shared server test data.
 # Exposes corpus test data as filegroups for cross-package reference from
 # pantoken-server's test targets.
 

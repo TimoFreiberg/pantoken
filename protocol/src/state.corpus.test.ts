@@ -7,7 +7,7 @@ import type { SessionDriverEvent } from "./session-driver.js";
 
 const corpusDir = join(
   dirname(fileURLToPath(import.meta.url)),
-  "..", "..", "server-rs", "pantoken-protocol", "tests", "fold-corpus",
+  "..", "..", "server", "pantoken-protocol", "tests", "fold-corpus",
 );
 
 for (const file of readdirSync(corpusDir).filter((f) => f.endsWith(".json"))) {

@@ -32,7 +32,7 @@ rust_test(
     env = {
         # CARGO_MANIFEST_DIR is needed at compile time by env!() in the test.
         # The runtime override PANTOKEN_FOLD_CORPUS_FILES takes precedence.
-        "CARGO_MANIFEST_DIR": "server-rs/pantoken-protocol",
+        "CARGO_MANIFEST_DIR": "server/pantoken-protocol",
     },
     run_env = {
         # Buck2's $(location) on a filegroup with multiple files doesn't produce
@@ -40,7 +40,7 @@ rust_test(
         # known Buck2 limitation. As a workaround, point directly at the source
         # directory. The files are checked in and don't change between builds.
         # See docs/buck2-poc-findings.md for details.
-        "PANTOKEN_FOLD_CORPUS_DIR": "server-rs/pantoken-protocol/tests/fold-corpus",
+        "PANTOKEN_FOLD_CORPUS_DIR": "server/pantoken-protocol/tests/fold-corpus",
     },
     visibility = ["PUBLIC"],
 )

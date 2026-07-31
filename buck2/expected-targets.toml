@@ -15,7 +15,7 @@
 #   deps      — list of first-party deps (not third-party)
 
 [[targets]]
-label = "//server-rs/pantoken-protocol:pantoken_protocol"
+label = "//server/pantoken-protocol:pantoken_protocol"
 cargo = "pantoken-protocol"
 kind = "library"
 crate = "pantoken_protocol"
@@ -23,7 +23,7 @@ test = false
 package = "pantoken-protocol"
 
 [[targets]]
-label = "//server-rs/pantoken-protocol:fold_corpus_tests"
+label = "//server/pantoken-protocol:fold_corpus_tests"
 cargo = "pantoken-protocol"
 kind = "integration_test"
 crate = "fold_corpus_tests"
@@ -31,19 +31,19 @@ test = true
 package = "pantoken-protocol"
 
 [[targets]]
-label = "//server-rs/pantoken-protocol:fold_corpus_data"
+label = "//server/pantoken-protocol:fold_corpus_data"
 kind = "filegroup"
 test = false
 package = "pantoken-protocol"
 
 [[targets]]
-label = "//server-rs/pantoken-daemon-types:openapi_fixture"
+label = "//server/pantoken-daemon-types:openapi_fixture"
 kind = "filegroup"
 test = false
 package = "pantoken-daemon-types"
 
 [[targets]]
-label = "//server-rs/pantoken-daemon-types:pantoken_daemon_types"
+label = "//server/pantoken-daemon-types:pantoken_daemon_types"
 cargo = "pantoken-daemon-types"
 kind = "library"
 crate = "pantoken_daemon_types"
@@ -51,28 +51,28 @@ test = false
 package = "pantoken-daemon-types"
 
 [[targets]]
-label = "//server-rs/pantoken-daemon-types:target_version_test"
+label = "//server/pantoken-daemon-types:target_version_test"
 cargo = "pantoken-daemon-types"
 kind = "integration_test"
 test = true
 package = "pantoken-daemon-types"
 
 [[targets]]
-label = "//server-rs/pantoken-daemon-types:daemon_types_roundtrip"
+label = "//server/pantoken-daemon-types:daemon_types_roundtrip"
 cargo = "pantoken-daemon-types"
 kind = "integration_test"
 test = true
 package = "pantoken-daemon-types"
 
 [[targets]]
-label = "//server-rs/pantoken-daemon-types:schema_inventory_test"
+label = "//server/pantoken-daemon-types:schema_inventory_test"
 cargo = "pantoken-daemon-types"
 kind = "integration_test"
 test = true
 package = "pantoken-daemon-types"
 
 [[targets]]
-label = "//server-rs/pantoken-remote-layout:pantoken_remote_layout"
+label = "//server/pantoken-remote-layout:pantoken_remote_layout"
 cargo = "pantoken-remote-layout"
 kind = "library"
 crate = "pantoken_remote_layout"
@@ -80,7 +80,7 @@ test = false
 package = "pantoken-remote-layout"
 
 [[targets]]
-label = "//server-rs/pantoken-remote-layout:unit_tests"
+label = "//server/pantoken-remote-layout:unit_tests"
 cargo = "pantoken-remote-layout"
 kind = "test"
 crate = "pantoken_remote_layout"
@@ -88,7 +88,7 @@ test = true
 package = "pantoken-remote-layout"
 
 [[targets]]
-label = "//server-rs/pantoken-tar-validate:pantoken_tar_validate_lib"
+label = "//server/pantoken-tar-validate:pantoken_tar_validate_lib"
 cargo = "pantoken-tar-validate"
 kind = "library"
 crate = "pantoken_tar_validate"
@@ -96,7 +96,7 @@ test = false
 package = "pantoken-tar-validate"
 
 [[targets]]
-label = "//server-rs/pantoken-tar-validate:pantoken_tar_validate"
+label = "//server/pantoken-tar-validate:pantoken_tar_validate"
 cargo = "pantoken-tar-validate"
 kind = "binary"
 crate = "pantoken_tar_validate"
@@ -104,7 +104,7 @@ test = false
 package = "pantoken-tar-validate"
 
 [[targets]]
-label = "//server-rs/pantoken-tar-validate:unit_tests"
+label = "//server/pantoken-tar-validate:unit_tests"
 cargo = "pantoken-tar-validate"
 kind = "test"
 crate = "pantoken_tar_validate"
@@ -112,20 +112,20 @@ test = true
 package = "pantoken-tar-validate"
 
 [[targets]]
-label = "//server-rs/pantoken-server:pantoken_server_lib"
+label = "//server/pantoken-server:pantoken_server_lib"
 cargo = "pantoken-server"
 kind = "library"
 crate = "pantoken_server"
 test = false
 package = "pantoken-server"
 deps = [
-  "//server-rs/pantoken-daemon-types:pantoken_daemon_types",
-  "//server-rs/pantoken-protocol:pantoken_protocol",
-  "//server-rs/pantoken-remote-layout:pantoken_remote_layout",
+  "//server/pantoken-daemon-types:pantoken_daemon_types",
+  "//server/pantoken-protocol:pantoken_protocol",
+  "//server/pantoken-remote-layout:pantoken_remote_layout",
 ]
 
 [[targets]]
-label = "//server-rs/pantoken-server:server_lib_unit_tests"
+label = "//server/pantoken-server:server_lib_unit_tests"
 cargo = "pantoken-server"
 kind = "test"
 crate = "pantoken_server"
@@ -133,51 +133,51 @@ test = true
 package = "pantoken-server"
 
 [[targets]]
-label = "//server-rs/pantoken-server:pantoken_server"
+label = "//server/pantoken-server:pantoken_server"
 cargo = "pantoken-server"
 kind = "binary"
 crate = "pantoken_server"
 test = false
 package = "pantoken-server"
-deps = ["//server-rs/pantoken-server:pantoken_server_lib"]
+deps = ["//server/pantoken-server:pantoken_server_lib"]
 
 [[targets]]
-label = "//server-rs/pantoken-server:corpus_tests"
+label = "//server/pantoken-server:corpus_tests"
 cargo = "pantoken-server"
 kind = "integration_test"
 test = true
 package = "pantoken-server"
 
 [[targets]]
-label = "//server-rs/pantoken-server:live_path_tests"
+label = "//server/pantoken-server:live_path_tests"
 cargo = "pantoken-server"
 kind = "integration_test"
 test = true
 package = "pantoken-server"
 
 [[targets]]
-label = "//server-rs/pantoken-server:websocket_adapter_tests"
+label = "//server/pantoken-server:websocket_adapter_tests"
 cargo = "pantoken-server"
 kind = "integration_test"
 test = true
 package = "pantoken-server"
 
 [[targets]]
-label = "//server-rs/pantoken-server:stdio_adapter_tests"
+label = "//server/pantoken-server:stdio_adapter_tests"
 cargo = "pantoken-server"
 kind = "integration_test"
 test = true
 package = "pantoken-server"
 
 [[targets]]
-label = "//server-rs/pantoken-server:resume_and_recovery_tests"
+label = "//server/pantoken-server:resume_and_recovery_tests"
 cargo = "pantoken-server"
 kind = "integration_test"
 test = true
 package = "pantoken-server"
 
 [[targets]]
-label = "//server-rs/pantoken-server:remote_runtime_tests"
+label = "//server/pantoken-server:remote_runtime_tests"
 cargo = "pantoken-server"
 kind = "integration_test"
 test = true
@@ -185,16 +185,16 @@ package = "pantoken-server"
 
 # Shared test data
 [[targets]]
-label = "//server-rs/tests:corpus_json"
+label = "//server/tests:corpus_json"
 kind = "filegroup"
 test = false
-package = "server-rs-tests"
+package = "server-tests"
 
 [[targets]]
-label = "//server-rs/tests:canon_parity_json"
+label = "//server/tests:canon_parity_json"
 kind = "filegroup"
 test = false
-package = "server-rs-tests"
+package = "server-tests"
 
 # Archive assembly
 [[targets]]

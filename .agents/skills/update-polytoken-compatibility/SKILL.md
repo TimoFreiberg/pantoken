@@ -57,8 +57,8 @@ Use the official changelog: <https://docs.polytoken.dev/changelog/>.
    change required**, **test/fixture change required**,
    **documentation/operational follow-up**, or **blocker**. Relevant seams
    include:
-   `server-rs/pantoken-server/src/polytoken/{daemon_client,event_map,ui_bridge,driver,history_seed,config_notify,config_watcher,commands,facets,models,sessions_registry,corpus}.rs`,
-   `server-rs/pantoken-server/tests/corpus.rs`, and, for install semantics,
+   `server/pantoken-server/src/polytoken/{daemon_client,event_map,ui_bridge,driver,history_seed,config_notify,config_watcher,commands,facets,models,sessions_registry,corpus}.rs`,
+   `server/pantoken-server/tests/corpus.rs`, and, for install semantics,
    `desktop/src/provisioning/{polytoken_compat,polytoken_install,reconcile}.rs`.
    Do not silently dismiss changelog behavior.
 
@@ -66,7 +66,7 @@ Use the official changelog: <https://docs.polytoken.dev/changelog/>.
 
 1. Run `just codegen-polytoken-rs` against the exact binary. This invokes
    `scripts/codegen-polytoken-rs.ts`, whose generated output is
-   `server-rs/pantoken-daemon-types/src/lib.rs`.
+   `server/pantoken-daemon-types/src/lib.rs`.
 2. Never hand-edit the generated Rust file. Review its diff for schema
    additions/removals, requiredness and type changes, enum/discriminator
    changes, event variants, endpoint response shapes, and the embedded
@@ -82,7 +82,7 @@ Use the official changelog: <https://docs.polytoken.dev/changelog/>.
 
 ## 4. Decide what to do with the golden corpus
 
-The corpus under `server-rs/tests/corpus/` is the deterministic spec-drift gate.
+The corpus under `server/tests/corpus/` is the deterministic spec-drift gate.
 It may remain pinned while codegen is evaluated.
 
 **Evaluate codegen only:** retain the existing corpus and state in the bump
@@ -100,7 +100,7 @@ provider cost; only `--write` writes captures. Run
 script canonicalization test and:
 
 ```bash
-cd server-rs && cargo test -p pantoken-server --test corpus
+cd server && cargo test -p pantoken-server --test corpus
 ```
 
 Require explicit operator approval before removing or replacing an older corpus.
@@ -112,7 +112,7 @@ After codegen or handwritten changes, run the applicable gates:
 ```bash
 just check
 just check-rs
-cd server-rs && cargo test -p pantoken-server --test corpus
+cd server && cargo test -p pantoken-server --test corpus
 ```
 
 When live behavior changed, also run `just e2e-live` (the corpus-backed live

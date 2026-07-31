@@ -26,7 +26,7 @@ url = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "process", "sync", "time", "macros"] }
 # tokio-util for CancellationToken used by the bridge's graceful shutdown.
 tokio-util = { version = "0.7", default-features = false }
-pantoken-protocol = { path = "../server-rs/pantoken-protocol" }
+pantoken-protocol = { path = "../server/pantoken-protocol" }
 pantoken-daemon-types = { workspace = true }
 pantoken-remote-layout = { workspace = true }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }

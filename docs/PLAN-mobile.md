@@ -28,7 +28,7 @@ fact-checked against 2025–2026 sources, all confirmed):
 4. **Web push from an installed home-screen PWA works on iOS without any Apple
    account** — Apple relays it through their push infrastructure using exactly
    the VAPID pipeline pantoken already ships (`client/src/lib/push.ts`,
-   `server-rs/pantoken-server/src/push.rs`). It demonstrably worked on this
+   `server/pantoken-server/src/push.rs`). It demonstrably worked on this
    very phone in the Pilot/pi era.
 5. **iOS 26 removed the install friction**: every Safari Add-to-Home-Screen now
    opens as a web app by default (no installability criteria). Installed
@@ -76,7 +76,7 @@ Rust with the desktop shell, so there's no synergy argument. Until then: PWA.
 | Keyboard insets (visualViewport) | `lib/keyboard-inset.ts` | working |
 | Pull-to-refresh | `lib/pull-to-refresh.ts` | working |
 | Wake lock while streaming | `lib/wake-lock.ts` | working |
-| Web push end-to-end (VAPID, subscribe, send) | `lib/push.ts` + `server-rs/…/push.rs` | ported to Rust server — **needs real-device revalidation** |
+| Web push end-to-end (VAPID, subscribe, send) | `lib/push.ts` + `server/…/push.rs` | ported to Rust server — **needs real-device revalidation** |
 | Notification deep-links | `public/sw.js` `notificationclick` → `url` from `PushNotification.url` | plumbing exists |
 | SW update flow | `lib/sw.ts` + `public/sw.js` | working |
 | PWA manifest + icons (incl. maskable) | `client/public/manifest.webmanifest` | good; description is "Remote control for your coding agent" |

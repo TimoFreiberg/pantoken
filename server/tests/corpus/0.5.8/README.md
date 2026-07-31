@@ -112,7 +112,7 @@ When the daemon version bumps and a fresh capture is needed:
    explicit `--force` approval is supplied. Captures are written to the selected
    version directory and canonicalized before review. Canonicalization-only work
    may use `just capture-daemon-corpus --recanon <file...>` without provider spend.
-4. Run `cd server-rs && cargo test corpus` — the loader and contract tests confirm
+4. Run `cd server && cargo test corpus` — the loader and contract tests confirm
    every seed event deserializes, maps to the declared Pantoken boundary, and
    remains canonical. If a public event shape changes, this fails loudly (no
    silent fallbacks).
@@ -132,7 +132,7 @@ When the daemon version bumps and a fresh capture is needed:
 ## Running the tests
 
 ```bash
-cd server-rs
+cd server
 cargo test corpus                              # both corpus tests
 cargo test corpus_loads_and_canonicalizes      # deserialization + idempotency
 cargo test capture_corpus_writes_required_sections

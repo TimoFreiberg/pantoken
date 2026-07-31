@@ -37,7 +37,7 @@ def validate_declarations(inventory):
     errors = []
     for entry in inventory.get("tests", []):
         label = entry["label"]
-        if not label.startswith("//server-rs/") or ":" not in label:
+        if not label.startswith("//server/") or ":" not in label:
             continue
         try:
             body = buck_declarations(label)

@@ -32,7 +32,7 @@ discussion before becoming a gate (or being rejected).
       structurally not textually. The rest of the suite still has no
       live-driver corroboration. (The old "see DECISIONS.md D21" pointer is
       dead — that entry was deleted in the docs cleanup; the tier summary
-      lives in `server-rs/PROGRESS.md` Phase 2.5.) **2026-07-10 note:** the
+      lives in `server/PROGRESS.md` Phase 2.5.) **2026-07-10 note:** the
       tier ran green locally 3× during the overnight session (5/5 each time,
       including after the sessionAction refactor) — one green
       `workflow_dispatch` run in CI is all that's left before promoting it to
@@ -82,7 +82,7 @@ discussion before becoming a gate (or being rejected).
 
 ## 🔵 Corpus capture follow-ups (from the 2026-07-06 live-capture session)
 
-Full detail in `server-rs/PROGRESS.md` → "Live corpus capture (2026-07-06)". The
+Full detail in `server/PROGRESS.md` → "Live corpus capture (2026-07-06)". The
 4 committed captures (streaming-turn, queue-while-in-flight, abort, ask-user-question)
 are REAL but **provisional** — they embed local `/Users/timo/...` paths from the
 `/state` body. Ordered by value:
@@ -91,7 +91,7 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
       (a) rewrite inner event `emitted_at` (not just `timestamp`) in
       `canonicalize_frame`; (b) DECIDE the `/state` redaction scope (recommend
       `env`→`{}`, `used_tokens`→`0`, absolute paths normalized) in `canonicalize_http`.
-      Mirror BOTH `server-rs/pantoken-server/tests/corpus.rs` AND
+      Mirror BOTH `server/pantoken-server/tests/corpus.rs` AND
       `scripts/capture-daemon-corpus.ts`, then re-canonicalize the committed captures
       and re-run `cargo test --test corpus`. THEN the captures are freezable.
 - [ ] **Capture `tool-call-approval`:** regenerate the isolated parity config with
@@ -123,7 +123,7 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
   exists precisely because "chunkier reveal vs token-smooth" was the feel
   question that got N1 deferred — now it's a live dial, not a rebuild.
   Buffering lives in `SessionHub.ingest` (wrapping the un-buffered
-  `ingestNow`); see `server-rs/pantoken-server/src/hub.rs` + the "assistantDelta coalescing (N1)"
+  `ingestNow`); see `server/pantoken-server/src/hub.rs` + the "assistantDelta coalescing (N1)"
   block in `hub.test.ts`.
 - [ ] **Client markdown re-parse is O(n²) per streamed message (C1) — measured
       2026-07-09, verdict: acceptable, revisit only for ≥50KB messages.**
@@ -145,7 +145,7 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
       the next step only once `?dev` transcript render timings show thousands of
       items causing perceptible paint cost.
 - [ ] **Re-enable WS compression (permessage-deflate) when safe.** Disabled
-      2026-07-03 (`perMessageDeflate: false`, `server-rs/pantoken-server/src/main.rs`) because it
+      2026-07-03 (`perMessageDeflate: false`, `server/pantoken-server/src/main.rs`) because it
       killed the desktop app: Bun's WS compressor emits a BFINAL-terminated
       deflate stream whenever a message's compressed output is small (observed
       ≤ ~1.6KB; bigger output gets the normal open-ended sync-flush form), and
@@ -203,7 +203,7 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
         `curl … | tar xz -C /Applications` — browser downloads of ad-hoc apps hit
         Gatekeeper's "damaged" refusal (see desktop/README.md "Installing a
         release").
-- [ ] **Decompose the hub (god object).** `server-rs/pantoken-server/src/hub.rs` owns the per-session
+- [ ] **Decompose the hub (god object).** `server/pantoken-server/src/hub.rs` owns the per-session
       journals, running/attention maps, clients map, live ticker, OAuth pending,
       prompt-results ledger; `handleClient` is one giant switch. Extract
       collaborators the hub delegates to. Deferred — touches the app's central

@@ -6,7 +6,7 @@
 //! machinery (the value/frame/http rewriters + the idempotency tests) stays in
 //! `corpus.rs`; only the structs + load/enum helpers live here.
 //!
-//! See `server-rs/tests/corpus/0.5.8/README.md` for the file format.
+//! See `server/tests/corpus/0.5.8/README.md` for the file format.
 //
 // `load_named`/`sole_version`/`envelope` are consumed by the fake-daemon harness
 // (`live_path.rs`), which lands in a later step of this same plan. Until then
@@ -20,7 +20,7 @@ use pantoken_daemon_types::SseEnvelope;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Resolve the corpus root: `<crate>/../tests/corpus` (i.e. `server-rs/tests/corpus`).
+/// Resolve the corpus root: `<crate>/../tests/corpus` (i.e. `server/tests/corpus`).
 /// Checks PANTOKEN_CORPUS_DIR at runtime (test runner env), falls back to
 /// env!("CARGO_MANIFEST_DIR") (Cargo).
 pub fn corpus_dir() -> std::path::PathBuf {

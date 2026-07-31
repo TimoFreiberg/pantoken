@@ -147,35 +147,35 @@ verify-rs:
 setup-sandbox-rustc:
     bash scripts/buck2/setup-sandbox-rustc.sh
 
-# Build all server-rs Rust crates via Buck2 (uses remote cache if .buckconfig.local present).
+# Build all server Rust crates via Buck2 (uses remote cache if .buckconfig.local present).
 build-rs:
-    bash scripts/buck2/check-version.sh && buck2 build '//server-rs/pantoken-protocol:pantoken_protocol' '//server-rs/pantoken-daemon-types:pantoken_daemon_types' '//server-rs/pantoken-remote-layout:pantoken_remote_layout' '//server-rs/pantoken-tar-validate:pantoken_tar_validate'
+    bash scripts/buck2/check-version.sh && buck2 build '//server/pantoken-protocol:pantoken_protocol' '//server/pantoken-daemon-types:pantoken_daemon_types' '//server/pantoken-remote-layout:pantoken_remote_layout' '//server/pantoken-tar-validate:pantoken_tar_validate'
 
-# Run clippy via Buck2 on all server-rs library crates (cacheable, uses remote cache).
+# Run clippy via Buck2 on all server library crates (cacheable, uses remote cache).
 # Equivalent to `cargo clippy -- -D warnings` but hermetic and cached.
 # The [clippy.json] subtarget fails the build on any clippy error (deny_lints
 # is set on the toolchain in toolchains/BUCK).
 buck2-clippy:
     bash scripts/buck2/check-version.sh && buck2 build \
-        '//server-rs/pantoken-protocol:pantoken_protocol[clippy.json]' \
-        '//server-rs/pantoken-daemon-types:pantoken_daemon_types[clippy.json]' \
-        '//server-rs/pantoken-remote-layout:pantoken_remote_layout[clippy.json]' \
-        '//server-rs/pantoken-tar-validate:pantoken_tar_validate_lib[clippy.json]' \
-        '//server-rs/pantoken-server:pantoken_server_lib[clippy.json]'
+        '//server/pantoken-protocol:pantoken_protocol[clippy.json]' \
+        '//server/pantoken-daemon-types:pantoken_daemon_types[clippy.json]' \
+        '//server/pantoken-remote-layout:pantoken_remote_layout[clippy.json]' \
+        '//server/pantoken-tar-validate:pantoken_tar_validate_lib[clippy.json]' \
+        '//server/pantoken-server:pantoken_server_lib[clippy.json]'
 
 # Build the pantoken-server binary via Buck2 (uses remote cache if .buckconfig.local present).
 build-server-rs:
-    bash scripts/buck2/check-version.sh && buck2 build '//server-rs/pantoken-server:pantoken_server'
+    bash scripts/buck2/check-version.sh && buck2 build '//server/pantoken-server:pantoken_server'
 
 # Build pantoken-server via Buck2 and print the binary path.
 # (Uses remote cache if .buckconfig.local present.)
 server-bin-rs:
-    @bash scripts/buck2/check-version.sh && buck2 build --show-output '//server-rs/pantoken-server:pantoken_server' | tail -1 | awk '{print $$2}'
+    @bash scripts/buck2/check-version.sh && buck2 build --show-output '//server/pantoken-server:pantoken_server' | tail -1 | awk '{print $$2}'
 
-# Run all server-rs Rust tests via Buck2 (13 targets — all build and test
+# Run all server Rust tests via Buck2 (13 targets — all build and test
 # after Issue #119 resolved the OpenSSL/ring compilation blocker).
 test-rs:
-    bash scripts/buck2/check-version.sh && buck2 test '//server-rs/pantoken-protocol:fold_corpus_tests' '//server-rs/pantoken-daemon-types:target_version_test' '//server-rs/pantoken-daemon-types:daemon_types_roundtrip' '//server-rs/pantoken-daemon-types:schema_inventory_test' '//server-rs/pantoken-remote-layout:unit_tests' '//server-rs/pantoken-tar-validate:unit_tests' '//server-rs/pantoken-server:server_lib_unit_tests' '//server-rs/pantoken-server:corpus_tests' '//server-rs/pantoken-server:live_path_tests' '//server-rs/pantoken-server:websocket_adapter_tests' '//server-rs/pantoken-server:stdio_adapter_tests' '//server-rs/pantoken-server:resume_and_recovery_tests' '//server-rs/pantoken-server:remote_runtime_tests'
+    bash scripts/buck2/check-version.sh && buck2 test '//server/pantoken-protocol:fold_corpus_tests' '//server/pantoken-daemon-types:target_version_test' '//server/pantoken-daemon-types:daemon_types_roundtrip' '//server/pantoken-daemon-types:schema_inventory_test' '//server/pantoken-remote-layout:unit_tests' '//server/pantoken-tar-validate:unit_tests' '//server/pantoken-server:server_lib_unit_tests' '//server/pantoken-server:corpus_tests' '//server/pantoken-server:live_path_tests' '//server/pantoken-server:websocket_adapter_tests' '//server/pantoken-server:stdio_adapter_tests' '//server/pantoken-server:resume_and_recovery_tests' '//server/pantoken-server:remote_runtime_tests'
 
 # Build the unsigned headless archive via Buck2 (uses remote cache if .buckconfig.local present).
 archive-rs:
@@ -201,9 +201,9 @@ validate-archive-rs-ci:
 # cache uploads to work.
 # See .buckconfig.local.example and docs/remote-cache-setup.md.
 
-# List all Buck2 targets in the server-rs tree.
+# List all Buck2 targets in the server tree.
 targets-rs:
-    bash scripts/buck2/check-version.sh && buck2 uquery 'kind(rust_library, //server-rs/...) + kind(rust_binary, //server-rs/...) + kind(rust_test, //server-rs/...)'
+    bash scripts/buck2/check-version.sh && buck2 uquery 'kind(rust_library, //server/...) + kind(rust_binary, //server/...) + kind(rust_test, //server/...)'
 
 # Regenerate the third-party/BUCK file (requires network for cargo metadata).
 # Generates http_archive rules — crates are downloaded at build time with

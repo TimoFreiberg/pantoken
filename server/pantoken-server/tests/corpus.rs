@@ -1,6 +1,6 @@
 //! Golden daemon corpus loader + canonicalization tests.
 //!
-//! See `server-rs/tests/corpus/0.5.8/README.md` for the format. The
+//! See `server/tests/corpus/0.5.8/README.md` for the format. The
 //! correctness bar: every seed event in every scenario's `sse[]` MUST deserialize
 //! into the real `pantoken_daemon_types::SseEnvelope` / `DaemonEvent` — the loader test
 //! enforces this, so a daemon event-shape drift fails loud (no silent fallbacks).

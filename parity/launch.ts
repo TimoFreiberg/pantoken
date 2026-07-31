@@ -90,7 +90,7 @@ export async function launch(p: Paths = paths()): Promise<void> {
   };
 
   const server = spawnManaged(["cargo", "run", "--bin", "pantoken-server"], {
-    cwd: join(REPO_ROOT, "server-rs"),
+    cwd: join(REPO_ROOT, "server"),
     env: backendEnv,
     stdout: "inherit",
     stderr: "inherit",

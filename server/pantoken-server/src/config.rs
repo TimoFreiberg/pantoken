@@ -142,10 +142,10 @@ pub fn load() -> Config {
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            // Default: ../../client/dist relative to the crate root (server-rs/pantoken-server)
+            // Default: ../../client/dist relative to the crate root (server/pantoken-server)
             // In dev, Vite serves the client and proxies here, so this path is only used
             // when the client has been built. The CARGO_MANIFEST_DIR points at
-            // server-rs/pantoken-server, so ../../client/dist = the repo's client/dist.
+            // server/pantoken-server, so ../../client/dist = the repo's client/dist.
             let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
             manifest_dir.join("../../client/dist")
         });

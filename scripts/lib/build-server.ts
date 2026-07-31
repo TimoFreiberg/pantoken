@@ -21,7 +21,7 @@ export function parseBuck2ShowOutput(stdout: string): string {
 /** Build the pantoken-server binary via Buck2 and return its path.
  *  .buckconfig.local is auto-read by buck2 (no --config-file needed). */
 export async function resolveServerBinary(root: string): Promise<string> {
-  const args = ["buck2", "build", "--show-output", "//server-rs/pantoken-server:pantoken_server"];
+  const args = ["buck2", "build", "--show-output", "//server/pantoken-server:pantoken_server"];
   const result = await spawnAsync(args, {
     cwd: resolve(root),
     stdout: "pipe",

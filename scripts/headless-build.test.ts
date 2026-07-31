@@ -89,7 +89,7 @@ case "$TARGET" in
     touch "$BUCK2_FAKE_OUT/archive.tar.gz"
     echo "$TARGET $BUCK2_FAKE_OUT/archive.tar.gz"
     ;;
-  "//server-rs/pantoken-tar-validate:pantoken_tar_validate")
+  "//server/pantoken-tar-validate:pantoken_tar_validate")
     touch "$BUCK2_FAKE_OUT/validator"
     echo "$TARGET $BUCK2_FAKE_OUT/validator"
     ;;

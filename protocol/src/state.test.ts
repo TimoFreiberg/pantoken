@@ -7,7 +7,7 @@ const base = (over: Partial<SessionDriverEvent> = {}) =>
   ({ sessionRef: ref, timestamp: "t", ...over }) as SessionDriverEvent;
 
 // Core folding cases that duplicate the shared fold corpus
-// (server-rs/pantoken-protocol/tests/fold-corpus/, run against BOTH TS and
+// (server/pantoken-protocol/tests/fold-corpus/, run against BOTH TS and
 // Rust folds via state.corpus.test.ts + fold_corpus.rs) were cut.
 // Deleted cases + their corpus coverage:
 // - assistant-delta accumulation/timestamp → assistant-delta-accumulation.json

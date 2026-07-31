@@ -89,5 +89,5 @@ Direct `pnpm`, `pnpm exec`, `cargo`, and Playwright commands remain supported fo
 debugging, individual typechecks, Rust package selection, CI-specific setup, browser
 installation, and other platform-specific workflows. For example, use `pnpm exec tsc ...`
 for one typecheck, `pnpm exec playwright test --project=desktop` for a focused E2E run, or
-`cd server-rs && cargo run` to run the Rust server directly. The recipes do not
+`cd server && cargo run` to run the Rust server directly. The recipes do not
 implicitly install dependencies, browsers, or other prerequisites.

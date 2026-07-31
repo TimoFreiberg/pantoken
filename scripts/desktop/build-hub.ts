@@ -60,7 +60,7 @@ if (isMain(import.meta.url)) {
   // .buckconfig.local is auto-read by buck2 (no --config-file flag needed).
   const triple = hostTriple();
 
-  const buck2Args = ["buck2", "build", "--show-output", "//server-rs/pantoken-server:pantoken_server"];
+  const buck2Args = ["buck2", "build", "--show-output", "//server/pantoken-server:pantoken_server"];
   const result = await spawnAsync(buck2Args, {
     cwd: repoRoot,
     stdout: "pipe",

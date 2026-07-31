@@ -6,7 +6,7 @@ Axum-based WS bridge + HTTP routes + static file serving.
 ## Crate structure
 
 ```
-server-rs/
+server/
 ├── Cargo.toml                # workspace
 ├── pantoken-protocol/           # WS protocol types + fold reducer (shared logic)
 │   └── src/
@@ -79,7 +79,7 @@ and its inventory test make this source-of-truth comparison deterministic.
 ## E2E integration
 
 The Rust server is the only server — `pnpm run dev` and `pnpm run test:e2e` spawn
-it directly via `cargo run` in `server-rs/`. No env var needed.
+it directly via `cargo run` in `server/`. No env var needed.
 
 Mock mode (`PANTOKEN_DRIVER=mock`) uses `mock_driver.rs` — a deterministic fixture
 driver serving `SessionDriverEvent`s, used for dev and the e2e suite.

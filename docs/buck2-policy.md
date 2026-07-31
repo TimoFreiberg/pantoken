@@ -34,9 +34,9 @@ missing. Targets that don't depend on ring (e.g. `pantoken-protocol`,
 
 ## Boundary and non-goals
 
-The initial boundary is the deterministic `server-rs` Rust libraries, binaries, tests, and unsigned headless archive inputs. Buck2 also builds the server binary consumed by the dev server (`scripts/dev.ts`) and the desktop hub (`scripts/desktop/build-hub.ts`). Buck2 consumes declared frontend outputs only; it does not run Vite, JavaScript tests, or Playwright. It does not package Tauri, sign artifacts, access credentials, deploy, or publish.
+The initial boundary is the deterministic `server` Rust libraries, binaries, tests, and unsigned headless archive inputs. Buck2 also builds the server binary consumed by the dev server (`scripts/dev.ts`) and the desktop hub (`scripts/desktop/build-hub.ts`). Buck2 consumes declared frontend outputs only; it does not run Vite, JavaScript tests, or Playwright. It does not package Tauri, sign artifacts, access credentials, deploy, or publish.
 
-All 5 server-rs crates build successfully under Buck2, including the `pantoken-server` binary (the OpenSSL gap was resolved in Issue #119 via the ece RustCrypto fork and reqwest rustls-tls switch). See the “No OpenSSL policy” decision in `docs/DECISIONS.md`. Cargo and pnpm direct workflows must remain usable.
+All 5 server crates build successfully under Buck2, including the `pantoken-server` binary (the OpenSSL gap was resolved in Issue #119 via the ece RustCrypto fork and reqwest rustls-tls switch). See the “No OpenSSL policy” decision in `docs/DECISIONS.md`. Cargo and pnpm direct workflows must remain usable.
 
 ## Target conventions
 
@@ -46,7 +46,7 @@ Buck2 `rust_test` has no `data` attribute; test data files are declared via `res
 
 ## Reindeer and dependency updates
 
-`Cargo.toml` and `Cargo.lock` are the Rust dependency source of truth. `third-party/Cargo.toml` is a dummy workspace crate representing the dependency closure of the five `server-rs` crates. After a Rust dependency change, run the normal Cargo update/check flow, then `just deps-regenerate-rs` (which runs `reindeer buckify`). Review the generated `third-party/BUCK` and `third-party/fixups/` diff before committing. `just deps-check-rs` verifies that regeneration produces no diff.
+`Cargo.toml` and `Cargo.lock` are the Rust dependency source of truth. `third-party/Cargo.toml` is a dummy workspace crate representing the dependency closure of the five `server` crates. After a Rust dependency change, run the normal Cargo update/check flow, then `just deps-regenerate-rs` (which runs `reindeer buckify`). Review the generated `third-party/BUCK` and `third-party/fixups/` diff before committing. `just deps-check-rs` verifies that regeneration produces no diff.
 
 Fixups live in `third-party/fixups/<crate>/fixups.toml`, Reindeer's default location. `reindeer.toml` sets `cargo_env = true` to provide `CARGO_PKG_*` environment variables. The generated BUCK file and fixups are checked in; vendored sources (`third-party/vendor/`) are gitignored and regenerated on demand by `reindeer vendor` for offline development only. Normal Buck2 builds download crate sources via `http_archive` rules (from crates.io, sha256-verified) or hit the remote REAPI cache. `Cargo.lock` and `pnpm-lock.yaml` remain authoritative and are not replaced by Reindeer output. Review generated BUCK files separately from application lockfile changes, but use one documented update workflow and a reversible diff.
 
@@ -153,7 +153,7 @@ Divergences from Cargo's release profile (both accepted and documented here):
   `BUILD_SHA` == running binary's reported `PANTOKEN_BUILD_SHA`) is the
   backstop — it stays mandatory in CI.
 - **Relative `CARGO_MANIFEST_DIR` at runtime (latent).** The BUCK env sets
-  `CARGO_MANIFEST_DIR` relative (`server-rs/pantoken-server`), while Cargo
+  `CARGO_MANIFEST_DIR` relative (`server/pantoken-server`), while Cargo
   sets an absolute path; `config.rs` resolves client-dist relative to CWD at
   runtime. The headless archive ships no client-dist and the smoke test runs
   from the repo root, so this is latent.
@@ -165,18 +165,18 @@ rollback selector; it builds with Cargo's release profile exactly as before.
 
 Buck2 runs in CI as the **primary build+test gate** for the Rust server. The `rust-server` job in `.github/workflows/ci.yml` runs on `ubuntu-latest` on every PR and push: `cargo fmt --check` + `just buck2-clippy` + `just build-rs` + `just build-server-rs` + `just test-rs` + target/test manifest checks. It uses the remote cache for trusted PRs/pushes.
 
-The `buck2` job runs on `macos-14` (arm64) as an additional gate: it runs clippy + builds + tests all server-rs crates, builds + validates the unsigned headless archive **in the release configuration** (`release_build=1`, real version/SHA — the same config the release-prepare jobs use), and checks target/test manifests. It **is** in the `release` job's `needs` list — it is a release gate, and its release-config archive actions warm the remote cache for the tag-triggered release-prepare jobs (first tag run compiles cold; later runs and retries hit the cache).
+The `buck2` job runs on `macos-14` (arm64) as an additional gate: it runs clippy + builds + tests all server crates, builds + validates the unsigned headless archive **in the release configuration** (`release_build=1`, real version/SHA — the same config the release-prepare jobs use), and checks target/test manifests. It **is** in the `release` job's `needs` list — it is a release gate, and its release-config archive actions warm the remote cache for the tag-triggered release-prepare jobs (first tag run compiles cold; later runs and retries hit the cache).
 
 ### Clippy via Buck2
 
-Clippy runs through Buck2's built-in `[clippy.json]` subtargets on every `rust_library` and `rust_binary` target. The Rust toolchain (`toolchains/BUCK`) sets `deny_lints = ["warnings"]`, matching `cargo clippy -- -D warnings`. Clippy results are cacheable — they participate in the remote action cache like regular builds. The `just buck2-clippy` recipe builds all `[clippy.json]` subtargets for the five server-rs library crates. `cargo fmt --check` remains a fast Cargo command (no cache benefit).
+Clippy runs through Buck2's built-in `[clippy.json]` subtargets on every `rust_library` and `rust_binary` target. The Rust toolchain (`toolchains/BUCK`) sets `deny_lints = ["warnings"]`, matching `cargo clippy -- -D warnings`. Clippy results are cacheable — they participate in the remote action cache like regular builds. The `just buck2-clippy` recipe builds all `[clippy.json]` subtargets for the five server library crates. `cargo fmt --check` remains a fast Cargo command (no cache benefit).
 
 ### What the `buck2` CI job does
 
 1. Installs pinned Buck2 + Reindeer via `scripts/ci/install-buck2-ci.sh`.
 2. Connects to Tailscale and generates `.buckconfig.local` (trusted runs only).
-3. Runs clippy on all server-rs library crates via `just buck2-clippy`.
-4. Builds all server-rs crates + the `pantoken-server` binary via `just build-rs` / `just build-server-rs`.
+3. Runs clippy on all server library crates via `just buck2-clippy`.
+4. Builds all server crates + the `pantoken-server` binary via `just build-rs` / `just build-server-rs`.
 5. Runs all 13 Buck2 test targets via `just test-rs`.
 6. Builds the unsigned headless archive in the release configuration (via `.buckconfig.ci` with `release_build = 1` + `--config-file`).
 7. Validates the archive via `just validate-archive-rs-ci` (passes `--config-file .buckconfig.ci`, so the sh_test validates the release-config archive — plain `validate-archive-rs` would rebuild + validate a dev-config archive).
@@ -208,7 +208,7 @@ The tag-triggered `release-prepare` (macOS arm64) and `release-prepare-linux`
 (plus `--target x86_64-unknown-linux-gnu` on Linux). `build.ts` writes
 `.buckconfig.ci` (version, build SHA, `release_build=1`), builds
 `//:pantoken_headless_unsigned` and
-`//server-rs/pantoken-tar-validate:pantoken_tar_validate`, copies them to the
+`//server/pantoken-tar-validate:pantoken_tar_validate`, copies them to the
 release asset paths (`target/release/headless/<asset>`,
 `target/release/pantoken-tar-validate`), then signs with minisign, verifies,
 and assembles metadata — signing secrets never enter cacheable Buck2 actions.
@@ -233,4 +233,4 @@ This proves the gate completes without the remote cache.
 
 ## Ownership
 
-Ownership is area-based and lightweight: Rust maintainers own `server-rs/*/BUCK`; release/tooling maintainers own the root `BUCK`, `.buckconfig`, `toolchains/BUCK`, `reindeer.toml`, and `third-party/`; documentation maintainers own this policy document. Root, toolchain, and Reindeer configuration changes require one owner review and one reviewer familiar with Cargo/pnpm boundaries. Keep Buck2 changes reversible and update this policy when a supported boundary changes.
+Ownership is area-based and lightweight: Rust maintainers own `server/*/BUCK`; release/tooling maintainers own the root `BUCK`, `.buckconfig`, `toolchains/BUCK`, `reindeer.toml`, and `third-party/`; documentation maintainers own this policy document. Root, toolchain, and Reindeer configuration changes require one owner review and one reviewer familiar with Cargo/pnpm boundaries. Keep Buck2 changes reversible and update this policy when a supported boundary changes.

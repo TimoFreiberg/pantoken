@@ -16,7 +16,7 @@
 #                which tauri-build stages as a bundle resource at compile time.
 #   rust-server: fmt + buck2 clippy + buck2 build+test for the Rust server, on Linux.
 #                Node-free — no client build. Uses the remote cache for trusted PRs/pushes.
-#   buck2:       macOS arm64 Buck2 gate — builds all server-rs crates, tests,
+#   buck2:       macOS arm64 Buck2 gate — builds all server crates, tests,
 #                builds + validates the unsigned headless archive in the RELEASE
 #                configuration (release_build=1, real version/SHA), and checks
 #                target/test manifests. Node-free — no client build. Uses remote
@@ -93,7 +93,7 @@ jobs:
           filters: |
             e2e-relevant:
               - 'client/**'
-              - 'server-rs/**'
+              - 'server/**'
               - 'protocol/**'
               - 'e2e/**'
               - 'scripts/**'
@@ -159,7 +159,7 @@ jobs:
     # dispatch until the specs have a confirmed green run — they were authored
     # against the corpus + existing DOM selectors but not yet executed in a browser.
     # Promote to the pull_request/push gate (drop this `if:`) once a dispatch run
-    # passes. This is the third leg of the cutover gate (see server-rs/PROGRESS.md).
+    # passes. This is the third leg of the cutover gate (see server/PROGRESS.md).
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -303,7 +303,7 @@ jobs:
       - name: Buck2 test inventory check
         run: just test-inventory-check-rs
 
-  # Buck2 gate on macOS arm64. Builds all server-rs crates + tests, builds +
+  # Buck2 gate on macOS arm64. Builds all server crates + tests, builds +
   # validates the unsigned headless archive in the RELEASE configuration
   # (release_build=1, real VERSION/BUILD_SHA — the same config the
   # release-prepare jobs use), and checks target/test manifests. Uses remote
@@ -358,7 +358,7 @@ jobs:
           [build]
           execution_platforms = toolchains//platforms:remote_cache
           EOF
-      # Clippy + build all server-rs crates + server binary
+      # Clippy + build all server crates + server binary
       - name: Buck2 clippy
         run: just buck2-clippy
       - name: Buck2 build

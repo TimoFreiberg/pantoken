@@ -5,7 +5,7 @@
 //! `ClientMessage` in → framed `ServerMessage` out, exit codes, stderr, and
 //! delays. It does NOT simulate the remote-runtime's internal identity probe
 //! (that happens inside the remote `pantoken-server` process — already tested
-//! in `server-rs`).
+//! in `server`).
 //!
 //! The fake is configurable to drive each connection phase deterministically:
 //! - Respond to `Hello` with a configurable `Hello` (success path).

@@ -27,7 +27,7 @@ def get_actual_targets():
     # .workspaces/ and other dirs are excluded via [project] ignore in .buckconfig.
     result = subprocess.run(
         [os.environ.get("BUCK2", "buck2"), "uquery",
-         "kind(rust_library, //...) + kind(rust_binary, //...) + kind(rust_test, //...) + kind(filegroup, //server-rs/...) + kind(genrule, //...) + kind(sh_test, //...)"],
+         "kind(rust_library, //...) + kind(rust_binary, //...) + kind(rust_test, //...) + kind(filegroup, //server/...) + kind(genrule, //...) + kind(sh_test, //...)"],
         capture_output=True, text=True, cwd=REPO_ROOT,
         env={**os.environ, "HOME": str(Path.home())},
     )
@@ -35,8 +35,8 @@ def get_actual_targets():
         print(f"ERROR: buck2 uquery failed: {result.stderr}", file=sys.stderr)
         sys.exit(1)
     # Parse output lines, stripping log lines and normalizing labels.
-    # Buck2 uquery returns labels with a cell prefix (e.g. "root//server-rs/...")
-    # but the manifest uses plain "//server-rs/..." labels. Strip the prefix.
+    # Buck2 uquery returns labels with a cell prefix (e.g. "root//server/...")
+    # but the manifest uses plain "//server/..." labels. Strip the prefix.
     targets = set()
     for line in result.stdout.strip().split("\n"):
         line = line.strip()

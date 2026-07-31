@@ -27,7 +27,7 @@ export interface SessionRef {
  *  - `failed`: the last run errored. */
 export type SessionStatus = "idle" | "initializing" | "running" | "failed";
 /** The daemon's per-session permission-monitor mode. Mirrors the daemon's
- *  OpenAPI-generated `PermissionMonitorMode` (server-rs/pantoken-daemon-types)
+ *  OpenAPI-generated `PermissionMonitorMode` (server/pantoken-daemon-types)
  *  — the single source of truth is the daemon spec; this copy is the shared
  *  client/server import. Keep in sync if the daemon adds a mode. */
 export type PermissionMonitorMode =

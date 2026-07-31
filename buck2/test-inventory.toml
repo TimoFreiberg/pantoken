@@ -15,8 +15,8 @@
 #   network      — "none" (no network) or description
 
 [[tests]]
-label = "//server-rs/pantoken-protocol:fold_corpus_tests"
-data = ["//server-rs/pantoken-protocol:fold_corpus_data"]
+label = "//server/pantoken-protocol:fold_corpus_tests"
+data = ["//server/pantoken-protocol:fold_corpus_data"]
 executables = []
 env_set = ["PANTOKEN_FOLD_CORPUS_DIR"]
 env_clear = []
@@ -25,7 +25,7 @@ temp_root = "none"
 network = "none"
 
 [[tests]]
-label = "//server-rs/pantoken-daemon-types:target_version_test"
+label = "//server/pantoken-daemon-types:target_version_test"
 data = []
 executables = []
 env_set = []
@@ -35,7 +35,7 @@ temp_root = "none"
 network = "none"
 
 [[tests]]
-label = "//server-rs/pantoken-daemon-types:daemon_types_roundtrip"
+label = "//server/pantoken-daemon-types:daemon_types_roundtrip"
 data = []
 executables = []
 env_set = []
@@ -45,8 +45,8 @@ temp_root = "none"
 network = "none"
 
 [[tests]]
-label = "//server-rs/pantoken-daemon-types:schema_inventory_test"
-data = ["//server-rs/pantoken-daemon-types:openapi_fixture"]
+label = "//server/pantoken-daemon-types:schema_inventory_test"
+data = ["//server/pantoken-daemon-types:openapi_fixture"]
 executables = []
 env_set = []
 env_clear = []
@@ -55,7 +55,7 @@ temp_root = "none"
 network = "none"
 
 [[tests]]
-label = "//server-rs/pantoken-remote-layout:unit_tests"
+label = "//server/pantoken-remote-layout:unit_tests"
 data = []
 executables = []
 env_set = []
@@ -65,7 +65,7 @@ temp_root = "none"
 network = "none"
 
 [[tests]]
-label = "//server-rs/pantoken-tar-validate:unit_tests"
+label = "//server/pantoken-tar-validate:unit_tests"
 data = []
 executables = []
 env_set = []
@@ -75,7 +75,7 @@ temp_root = "none"
 network = "none"
 
 [[tests]]
-label = "//server-rs/pantoken-server:server_lib_unit_tests"
+label = "//server/pantoken-server:server_lib_unit_tests"
 data = []
 executables = []
 env_set = ["HOME"]
@@ -85,8 +85,8 @@ temp_root = "tempfile (sandboxed)"
 network = "none"
 
 [[tests]]
-label = "//server-rs/pantoken-server:corpus_tests"
-data = ["//server-rs/tests:corpus_json", "//server-rs/tests:canon_parity_json"]
+label = "//server/pantoken-server:corpus_tests"
+data = ["//server/tests:corpus_json", "//server/tests:canon_parity_json"]
 executables = []
 env_set = ["PANTOKEN_CORPUS_DIR", "PANTOKEN_CANON_PARITY_DIR", "HOME"]
 env_clear = []
@@ -95,8 +95,8 @@ temp_root = "tempfile (sandboxed)"
 network = "none"
 
 [[tests]]
-label = "//server-rs/pantoken-server:live_path_tests"
-data = ["//server-rs/tests:corpus_json"]
+label = "//server/pantoken-server:live_path_tests"
+data = ["//server/tests:corpus_json"]
 executables = []
 env_set = ["PANTOKEN_CORPUS_DIR", "HOME"]
 env_clear = []
@@ -105,7 +105,7 @@ temp_root = "tempfile (sandboxed)"
 network = "none"
 
 [[tests]]
-label = "//server-rs/pantoken-server:websocket_adapter_tests"
+label = "//server/pantoken-server:websocket_adapter_tests"
 data = []
 executables = []
 env_set = ["HOME"]
@@ -115,9 +115,9 @@ temp_root = "tempfile (sandboxed)"
 network = "loopback"
 
 [[tests]]
-label = "//server-rs/pantoken-server:stdio_adapter_tests"
-data = ["//server-rs/pantoken-server:pantoken_server"]
-executables = ["//server-rs/pantoken-server:pantoken_server"]
+label = "//server/pantoken-server:stdio_adapter_tests"
+data = ["//server/pantoken-server:pantoken_server"]
+executables = ["//server/pantoken-server:pantoken_server"]
 env_set = ["PANTOKEN_SERVER_BIN", "HOME"]
 env_clear = []
 socket = "Unix socket (temp-root, test-managed)"
@@ -125,9 +125,9 @@ temp_root = "tempfile (sandboxed)"
 network = "none"
 
 [[tests]]
-label = "//server-rs/pantoken-server:resume_and_recovery_tests"
-data = ["//server-rs/pantoken-server:pantoken_server"]
-executables = ["//server-rs/pantoken-server:pantoken_server"]
+label = "//server/pantoken-server:resume_and_recovery_tests"
+data = ["//server/pantoken-server:pantoken_server"]
+executables = ["//server/pantoken-server:pantoken_server"]
 env_set = ["PANTOKEN_SERVER_BIN", "HOME"]
 env_clear = []
 socket = "localhost (loopback only, test-managed)"
@@ -135,9 +135,9 @@ temp_root = "tempfile (sandboxed)"
 network = "loopback"
 
 [[tests]]
-label = "//server-rs/pantoken-server:remote_runtime_tests"
-data = ["//server-rs/pantoken-server:pantoken_server"]
-executables = ["//server-rs/pantoken-server:pantoken_server"]
+label = "//server/pantoken-server:remote_runtime_tests"
+data = ["//server/pantoken-server:pantoken_server"]
+executables = ["//server/pantoken-server:pantoken_server"]
 env_set = ["PANTOKEN_SERVER_BIN", "HOME"]
 env_clear = []
 socket = "localhost (loopback only, test-managed)"
@@ -146,8 +146,8 @@ network = "loopback"
 
 [[tests]]
 label = "//:validate_headless_archive"
-data = [":pantoken_headless_unsigned", "//server-rs/pantoken-tar-validate:pantoken_tar_validate"]
-executables = ["//server-rs/pantoken-tar-validate:pantoken_tar_validate"]
+data = [":pantoken_headless_unsigned", "//server/pantoken-tar-validate:pantoken_tar_validate"]
+executables = ["//server/pantoken-tar-validate:pantoken_tar_validate"]
 env_set = []
 env_clear = ["HOME", "PANTOKEN_TAR_VALIDATOR"]
 socket = "none"

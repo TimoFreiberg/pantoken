@@ -654,7 +654,7 @@ export function buildAtItems(params: BuildAtItemsParams): AtItem[] {
   }
   if (cls.mode === "external") {
     // The server is the only source for external paths — it lists the immediate
-    // children of the directory being browsed (`server-rs/.../file_search.rs::list_external`
+    // children of the directory being browsed (`server/.../file_search.rs::list_external`
     // for a real session, the mock's synthetic external tree for dev/e2e). No local
     // index involvement (there isn't one outside the project), no badged kind
     // matches, no sigils — just the as-typed file/dir rows the server returned for

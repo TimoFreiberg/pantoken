@@ -8,7 +8,7 @@ rust_library(
     crate_root = "src/lib.rs",
     edition = "2024",
     deps = [
-        "//server-rs/pantoken-protocol:pantoken_protocol",
+        "//server/pantoken-protocol:pantoken_protocol",
         "//third-party:serde",
     ],
     visibility = ["PUBLIC"],
@@ -25,7 +25,7 @@ rust_test(
     crate = "pantoken_remote_layout",
     edition = "2024",
     deps = [
-        "//server-rs/pantoken-protocol:pantoken_protocol",
+        "//server/pantoken-protocol:pantoken_protocol",
         "//third-party:serde",
     ],
     visibility = ["PUBLIC"],

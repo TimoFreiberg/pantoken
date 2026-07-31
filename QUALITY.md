@@ -10,7 +10,7 @@ Each criterion has an **applicability tag** so reviewers only check what
 matters for the change at hand:
 
 - `[UI]` — client-side UI / Svelte / CSS / DOM
-- `[server]` — Rust server (`server-rs/`)
+- `[server]` — Rust server (`server/`)
 - `[proto]` — protocol / wire types (`protocol/`)
 - `[cross]` — applies regardless of layer
 

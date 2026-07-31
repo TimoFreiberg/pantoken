@@ -96,7 +96,7 @@ time_cmd "Rust build (clean)" cargo build -p pantoken-server
 # --- Rust incremental build -------------------------------------------------
 # Touch a source file (mtime-only change; jj content-hashing is unaffected).
 echo "Timing Rust incremental build..." >&2
-touch server-rs/pantoken-server/src/lib.rs
+touch server/pantoken-server/src/lib.rs
 time_cmd "Rust build (incremental)" cargo build -p pantoken-server
 
 # --- Client warm build ------------------------------------------------------

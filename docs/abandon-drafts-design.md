@@ -353,7 +353,7 @@ decision). Each implementation phase goes through the repo's normal review
 - This document is the design record; it lands ahead of the code.
 - `docs/DECISIONS.md:47` revision and the `docs/TODO.md` cross-reference land
   in phase 7 (with the code they describe), not here.
-- Phase 1 updates `server-rs/PROGRESS.md` where it credits the ported
+- Phase 1 updates `server/PROGRESS.md` where it credits the ported
   worktree modules (lines 70–72,159) and sweeps `docs/` for worktree
   references that become stale.
 

@@ -9,7 +9,7 @@
 //
 // Default --builder: cargo (the local fallback). CI passes --builder buck2 —
 // the release-authoritative builder for headless artifacts. Buck2 mode builds
-// //:pantoken_headless_unsigned + //server-rs/pantoken-tar-validate via
+// //:pantoken_headless_unsigned + //server/pantoken-tar-validate via
 // .buckconfig.ci (release_build=1, real version/build SHA), copies the outputs
 // to the release asset paths, and continues with the unchanged signing,
 // verification, and metadata steps.

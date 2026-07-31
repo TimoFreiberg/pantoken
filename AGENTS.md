@@ -35,7 +35,7 @@ See `docs/DESIGN.md` for architecture, `docs/DECISIONS.md` for settled calls, `d
   baseline (versions, checks, timings, and how to reproduce).
 - **Buck2 is the primary build/test system and the release-authoritative builder for
   headless artifacts — Cargo is the local fallback.**
-  Buck2 builds all 5 server-rs Rust crates (including the `pantoken-server`
+  Buck2 builds all 5 server Rust crates (including the `pantoken-server`
   binary) with affected-target execution and a checked-in Reindeer dependency
   graph. `just check-rs` uses buck2 for clippy+build+test (remote cache auto-read
   from `.buckconfig.local` when present). The dev server (`scripts/dev.ts`) and desktop hub
@@ -60,7 +60,7 @@ See `docs/DESIGN.md` for architecture, `docs/DECISIONS.md` for settled calls, `d
 Monorepo, pnpm workspaces.
 - `protocol/` — shared, JSON-serializable WS contract + the `foldEvent` reducer that
   runs identically on server & client.
-- `server-rs/` — the Rust server. Axum-based WS bridge + HTTP routes + static file
+- `server/` — the Rust server. Axum-based WS bridge + HTTP routes + static file
   serving. Six workspace members: `pantoken-protocol` (WS types + fold),
   `pantoken-daemon-types` (auto-generated from OpenAPI), `pantoken-remote-layout`
   (remote provisioning path-safety), `pantoken-server` (the binary),
@@ -68,8 +68,8 @@ Monorepo, pnpm workspaces.
   (Tauri desktop app) at the workspace root. The `PantokenDriver` seam has two
   implementors: `mock` (deterministic, for dev/e2e) and `polytoken` (the live
   daemon). **The installed daemon is `0.5.8`** (bearer-token auth). See
-  `server-rs/PROGRESS.md` for the live-path validation status before building on
-  it. Archived TS tests are in `server-rs/ts-test-reference/` for reference when
+  `server/PROGRESS.md` for the live-path validation status before building on
+  it. Archived TS tests are in `server/ts-test-reference/` for reference when
   porting cases to Rust.
 - `client/` — Svelte 5 + Vite PWA. Reconnecting WS singleton, the same fold reducer,
   Claude-app theming in `src/app.css` (warm paper, light + dark).
@@ -106,11 +106,11 @@ wrappers around the authoritative package scripts and Rust commands. Direct `pnp
 `pnpm exec`, `cargo`, and Playwright commands remain supported for targeted debugging,
 individual typechecks, Rust package selection, CI-specific setup, browser installation,
 and platform-specific workflows; for example, use `pnpm exec tsc ...` for one typecheck or
-`cd server-rs && cargo run` to run the Rust server directly.
+`cd server && cargo run` to run the Rust server directly.
 
 `pnpm run check` runs protocol + scripts + e2e + client typechecks end to end.
 `tsconfig.scripts.json` and `tsconfig.e2e.json` close the typecheck gap for the
-dev-tooling and Playwright trees. Keep it green. **server-rs has its own CI
+dev-tooling and Playwright trees. Keep it green. **server has its own CI
 gate** (`rust-server` job in `.github/workflows/ci.yml`: `cargo fmt --check` +
 `just buck2-clippy` + buck2 build+test);
 run `just check-rs` locally for the same gate.
@@ -141,7 +141,7 @@ error (the driver was removed on this branch).
 A third mode, **`PANTOKEN_DRIVER=fake`**, runs the real `PolytokenDriver` over an
 *in-process, corpus-backed fake daemon*: deterministic like the mock, but it
 exercises the live driver stack (`daemon_client → event_map → driver`)
-end-to-end. It reads the frozen corpus (`server-rs/tests/corpus`) and fails loud
+end-to-end. It reads the frozen corpus (`server/tests/corpus`) and fails loud
 if it's absent, so it's dev/e2e-only (never shipped). The corpus-backed **live e2e
 tier** drives it: `pnpm run test:e2e:live` (separate `playwright.live.config.ts`
 over `e2e/live/`; the default `pnpm run test:e2e` mock tier — `desktop`/`mobile` —

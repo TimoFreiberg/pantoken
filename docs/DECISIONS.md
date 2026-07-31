@@ -5,7 +5,7 @@ for cross-reference with git history.
 
 ## Monorepo: GUI + remote infra in one repo
 
-`protocol/` (shared types + fold reducer, no runtime deps) · `server-rs/` (Rust
+`protocol/` (shared types + fold reducer, no runtime deps) · `server/` (Rust
 WS hub + drivers) · `client/` (Svelte 5 PWA) · `desktop/` (Tauri app). The
 server _is_ the
 protocol contract — WS schema, server-side fold, and client reducer must evolve
@@ -104,7 +104,7 @@ which is decisive now that mobile is the next build target after desktop.
 The live path runs against the ambient `polytoken` binary (daemon head, upgraded
 ~daily); there is no pin mechanism. Deterministic tests instead replay a committed
 golden SSE corpus captured from a tagged version
-(`server-rs/tests/corpus/<version>/`), canonicalized for stable ids/timestamps. A
+(`server/tests/corpus/<version>/`), canonicalized for stable ids/timestamps. A
 daily daemon bump that breaks behavior turns a corpus test red with a precise diff
 instead of silently corrupting the GUI. Re-capturing the corpus
 (`scripts/capture-daemon-corpus.ts`) is a deliberate, separate step taken on
@@ -590,7 +590,7 @@ this migration.
 ### Current state (as of this decision)
 
 Per `docs/buck2-poc-findings.md` (verdict: CONDITIONAL — not ready for broad adoption): Buck2 builds
-all 5 server-rs crates including the `pantoken-server` binary, with affected-target
+all 5 server crates including the `pantoken-server` binary, with affected-target
 execution and a checked-in Reindeer dependency graph. The OpenSSL/ring native
 compilation blocker is resolved (Issue #119). Archive assembly and validation pass
 end-to-end. All test targets pass (3 pre-existing Cargo failures are unrelated to

@@ -5,7 +5,7 @@ sidecar and hosts the server-served web client in a chromeless window. It replac
 hand-rolled Swift/AppKit shell (now deleted — see `docs/ADR-desktop-shell.md` for the
 decision and the spike results).
 
-The hub is a **compiled Rust binary** (`pantoken-server`, built from `server-rs/`),
+The hub is a **compiled Rust binary** (`pantoken-server`, built from `server/`),
 shipped as `Contents/MacOS/pantoken-server` in the packaged .app. It serves the bundled
 client (`Contents/Resources/client-dist`). The updater swaps shell + server + client
 **atomically**. No external package manager, no clone, no external checkout needed on the machine.

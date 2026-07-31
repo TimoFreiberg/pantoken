@@ -1336,9 +1336,9 @@ fn greeting_seed() -> Vec<SessionDriverEvent> {
     events
 }
 
-/// A COLD-RESTORED session's seed: the shape `history_to_seed_events` (server-rs/
+/// A COLD-RESTORED session's seed: the shape `history_to_seed_events` (server/
 /// pantoken-server/src/polytoken/history_seed.rs) + the `build_branch_seed` wrapper
-/// (server-rs/pantoken-server/src/polytoken/driver.rs:755-795) produce when the
+/// (server/pantoken-server/src/polytoken/driver.rs:755-795) produce when the
 /// polytoken driver reopens a session with real tool work from `GET /history` —
 /// deliberately NOT what a live-settled turn looks like (contrast `greeting_seed`/
 /// `session_seed` above, which end on a proper `RunCompleted`). The defining trait:

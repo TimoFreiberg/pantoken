@@ -2,8 +2,8 @@
 // capture-daemon-corpus.ts — record a golden SSE corpus from a REAL polytoken daemon.
 //
 // This is the deliberate, separate "live capture" step behind the golden corpus
-// (server-rs/tests/corpus/<version>/). The committed seed fixtures ship
-// pre-canonicalized and the Rust loader (server-rs/pantoken-server/tests/corpus.rs)
+// (server/tests/corpus/<version>/). The committed seed fixtures ship
+// pre-canonicalized and the Rust loader (server/pantoken-server/tests/corpus.rs)
 // validates their shape; THIS script is how you (re-)ground them against what the
 // daemon actually emits — on first capture and on every daemon bump (the drift
 // canary: re-capture, diff, adopt).
@@ -38,7 +38,7 @@
 // ─── DETERMINISM ─────────────────────────────────────────────────────────────
 // Real output carries non-deterministic session/prompt ids and wall-clock
 // timestamps, and /state machine-specific data. `canonicalizeScenario` rewrites
-// them to stable placeholders, MIRRORING server-rs/pantoken-server/tests/corpus.rs
+// them to stable placeholders, MIRRORING server/pantoken-server/tests/corpus.rs
 // EXACTLY (session_id→SESSION, UUID prompt ids→PROMPT_N in first-seen order with
 // HTTP walked before SSE, emitted_at/timestamp→monotonic epoch, /state leak fields
 // → type-preserving placeholders). KNOWN LIMITATION (shared with the Rust loader):
@@ -88,13 +88,13 @@ const DEFAULT_CORPUS_VERSION = "0.5.8";
 const DEFAULT_CORPUS_DIR = join(
   SCRIPT_DIR,
   "..",
-  "server-rs",
+  "server",
   "tests",
   "corpus",
   DEFAULT_CORPUS_VERSION,
 );
 
-// ─── Canonicalization (mirrors server-rs/pantoken-server/tests/corpus.rs) ────────
+// ─── Canonicalization (mirrors server/pantoken-server/tests/corpus.rs) ────────
 
 const isPromptPlaceholder = (s: string) => /^PROMPT_\d+$/.test(s);
 const isSessionPlaceholder = (s: string) => s === "SESSION";
@@ -647,7 +647,7 @@ const SCENARIOS: Record<string, Scenario> = {
             "default_permission_matcher: standard, so either the model didn't call the " +
             "tool (transient — re-run) or `standard` did not gate execution (escalate: " +
             "check the daemon permission-matcher docs for the correct gating value — do " +
-            "NOT loop on money-spending retries). See server-rs/PROGRESS.md.",
+            "NOT loop on money-spending retries). See server/PROGRESS.md.",
         );
       }
       const id = (interro.event as { interrogative_id?: string })
@@ -813,7 +813,7 @@ export function validateCaptureVersion(version: string): string {
 
 export function captureTarget(version: string, scenario: string, force: boolean): string {
   const safeVersion = validateCaptureVersion(version);
-  const dir = join(SCRIPT_DIR, "..", "server-rs", "tests", "corpus", safeVersion);
+  const dir = join(SCRIPT_DIR, "..", "server", "tests", "corpus", safeVersion);
   const target = join(dir, `${scenario}.json`);
   if (existsSync(target) && !force) {
     throw new Error(

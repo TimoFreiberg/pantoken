@@ -27,12 +27,12 @@ rust_library(
         # CARGO_MANIFEST_DIR is used by env!() in config.rs and corpus.rs to
         # locate client/dist and tests/corpus. Cargo sets this automatically;
         # Buck2 doesn't, so we set it to the crate's source directory.
-        "CARGO_MANIFEST_DIR": "server-rs/pantoken-server",
+        "CARGO_MANIFEST_DIR": "server/pantoken-server",
     },
     deps = [
-        "//server-rs/pantoken-daemon-types:pantoken_daemon_types",
-        "//server-rs/pantoken-protocol:pantoken_protocol",
-        "//server-rs/pantoken-remote-layout:pantoken_remote_layout",
+        "//server/pantoken-daemon-types:pantoken_daemon_types",
+        "//server/pantoken-protocol:pantoken_protocol",
+        "//server/pantoken-remote-layout:pantoken_remote_layout",
         "//third-party:axum",
         "//third-party:chrono",
         "//third-party:ct-codecs",
@@ -75,15 +75,15 @@ rust_test(
     env = {
         "PANTOKEN_BUILD_SHA": read_config("pantoken", "build_sha", "dev-buck2"),
         "PANTOKEN_RELEASE_BUILD": "1" if read_config("pantoken", "release_build", "0") == "1" else "0",
-        "CARGO_MANIFEST_DIR": "server-rs/pantoken-server",
+        "CARGO_MANIFEST_DIR": "server/pantoken-server",
     },
     run_env = {
         "HOME": ".",
     },
     deps = [
-        "//server-rs/pantoken-daemon-types:pantoken_daemon_types",
-        "//server-rs/pantoken-protocol:pantoken_protocol",
-        "//server-rs/pantoken-remote-layout:pantoken_remote_layout",
+        "//server/pantoken-daemon-types:pantoken_daemon_types",
+        "//server/pantoken-protocol:pantoken_protocol",
+        "//server/pantoken-remote-layout:pantoken_remote_layout",
         "//third-party:axum",
         "//third-party:chrono",
         "//third-party:ct-codecs",
@@ -125,12 +125,12 @@ rust_binary(
     env = {
         "PANTOKEN_BUILD_SHA": read_config("pantoken", "build_sha", "dev-buck2"),
         "PANTOKEN_RELEASE_BUILD": "1" if read_config("pantoken", "release_build", "0") == "1" else "0",
-        "CARGO_MANIFEST_DIR": "server-rs/pantoken-server",
+        "CARGO_MANIFEST_DIR": "server/pantoken-server",
     },
     deps = [
         ":pantoken_server_lib",
-        "//server-rs/pantoken-daemon-types:pantoken_daemon_types",
-        "//server-rs/pantoken-protocol:pantoken_protocol",
+        "//server/pantoken-daemon-types:pantoken_daemon_types",
+        "//server/pantoken-protocol:pantoken_protocol",
         "//third-party:axum",
         "//third-party:parking_lot",
         "//third-party:serde",
@@ -159,8 +159,8 @@ _TEST_SUPPORT = [
 # Dev-dependencies used by test targets (not the library).
 _TEST_DEPS = [
     ":pantoken_server_lib",
-    "//server-rs/pantoken-daemon-types:pantoken_daemon_types",
-    "//server-rs/pantoken-protocol:pantoken_protocol",
+    "//server/pantoken-daemon-types:pantoken_daemon_types",
+    "//server/pantoken-protocol:pantoken_protocol",
     "//third-party:serde_json",
     "//third-party:tempfile",
     "//third-party:tokio",
@@ -173,17 +173,17 @@ rust_test(
     srcs = ["tests/corpus.rs"] + _TEST_SUPPORT,
     crate_root = "tests/corpus.rs",
     deps = _TEST_DEPS,
-    env = {"CARGO_MANIFEST_DIR": "server-rs/pantoken-server"},
+    env = {"CARGO_MANIFEST_DIR": "server/pantoken-server"},
     resources = [
-        "//server-rs/tests:corpus_json",
-        "//server-rs/tests:canon_parity_json",
+        "//server/tests:corpus_json",
+        "//server/tests:canon_parity_json",
     ],
     run_env = {
         # $(location <filegroup>) expands to the filegroup's output DIRECTORY
         # (containing srcs at their package-relative paths), so point the
         # *_DIR vars at the subtree root the tests expect.
-        "PANTOKEN_CORPUS_DIR": "$(location //server-rs/tests:corpus_json)/corpus",
-        "PANTOKEN_CANON_PARITY_DIR": "$(location //server-rs/tests:canon_parity_json)/canon-parity",
+        "PANTOKEN_CORPUS_DIR": "$(location //server/tests:corpus_json)/corpus",
+        "PANTOKEN_CANON_PARITY_DIR": "$(location //server/tests:canon_parity_json)/canon-parity",
         "HOME": ".",
     },
     visibility = ["PUBLIC"],
@@ -195,10 +195,10 @@ rust_test(
     srcs = ["tests/live_path.rs"] + _TEST_SUPPORT,
     crate_root = "tests/live_path.rs",
     deps = _TEST_DEPS,
-    env = {"CARGO_MANIFEST_DIR": "server-rs/pantoken-server"},
-    resources = ["//server-rs/tests:corpus_json"],
+    env = {"CARGO_MANIFEST_DIR": "server/pantoken-server"},
+    resources = ["//server/tests:corpus_json"],
     run_env = {
-        "PANTOKEN_CORPUS_DIR": "$(location //server-rs/tests:corpus_json)/corpus",
+        "PANTOKEN_CORPUS_DIR": "$(location //server/tests:corpus_json)/corpus",
         "HOME": ".",
     },
     visibility = ["PUBLIC"],
@@ -214,7 +214,7 @@ rust_test(
         "//third-party:futures-util",
         "//third-party:tokio-tungstenite",
     ],
-    env = {"CARGO_MANIFEST_DIR": "server-rs/pantoken-server"},
+    env = {"CARGO_MANIFEST_DIR": "server/pantoken-server"},
     run_env = {"HOME": "."},
     visibility = ["PUBLIC"],
 )
@@ -225,7 +225,7 @@ rust_test(
     srcs = ["tests/stdio_adapter_contract_tests.rs"] + _TEST_SUPPORT,
     crate_root = "tests/stdio_adapter_contract_tests.rs",
     deps = _TEST_DEPS,
-    env = {"CARGO_MANIFEST_DIR": "server-rs/pantoken-server"},
+    env = {"CARGO_MANIFEST_DIR": "server/pantoken-server"},
     resources = [":pantoken_server"],
     run_env = {
         "HOME": ".",
@@ -240,7 +240,7 @@ rust_test(
     srcs = ["tests/resume_and_recovery_tests.rs"] + _TEST_SUPPORT,
     crate_root = "tests/resume_and_recovery_tests.rs",
     deps = _TEST_DEPS,
-    env = {"CARGO_MANIFEST_DIR": "server-rs/pantoken-server"},
+    env = {"CARGO_MANIFEST_DIR": "server/pantoken-server"},
     resources = [":pantoken_server"],
     run_env = {
         "HOME": ".",
@@ -255,7 +255,7 @@ rust_test(
     srcs = ["tests/remote_runtime_integration_tests.rs"] + _TEST_SUPPORT,
     crate_root = "tests/remote_runtime_integration_tests.rs",
     deps = _TEST_DEPS,
-    env = {"CARGO_MANIFEST_DIR": "server-rs/pantoken-server"},
+    env = {"CARGO_MANIFEST_DIR": "server/pantoken-server"},
     resources = [":pantoken_server"],
     run_env = {
         "HOME": ".",

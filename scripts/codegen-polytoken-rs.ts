@@ -1,4 +1,4 @@
-// Regenerates server-rs/pantoken-daemon-types/src/lib.rs from the polytoken
+// Regenerates server/pantoken-daemon-types/src/lib.rs from the polytoken
 // binary's own self-describing OpenAPI spec (`polytoken openapi`).
 //
 // The generated file contains serde types for every OpenAPI component schema,
@@ -21,7 +21,7 @@ import { spawnAsync } from "./lib/node-compat.js";
 
 const BIN_ENV = "PANTOKEN_POLYTOKEN_BIN";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const OUT_PATH = resolve(SCRIPT_DIR, "../server-rs/pantoken-daemon-types/src/lib.rs");
+const OUT_PATH = resolve(SCRIPT_DIR, "../server/pantoken-daemon-types/src/lib.rs");
 
 function resolveBin(): string {
   if (process.env[BIN_ENV]) return process.env[BIN_ENV];

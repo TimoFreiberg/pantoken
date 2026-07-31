@@ -7,17 +7,17 @@ import { parseBuck2ShowOutput } from "./lib/build-server.js";
 describe("parseBuck2ShowOutput", () => {
   it("parses a single-line output", () => {
     const stdout =
-      "//server-rs/pantoken-server:pantoken_server buck-out/v2/gen/server-rs/pantoken-server/pantoken_server";
+      "//server/pantoken-server:pantoken_server buck-out/v2/gen/server/pantoken-server/pantoken_server";
     expect(parseBuck2ShowOutput(stdout)).toBe(
-      "buck-out/v2/gen/server-rs/pantoken-server/pantoken_server",
+      "buck-out/v2/gen/server/pantoken-server/pantoken_server",
     );
   });
 
   it("parses the last line of multi-line output", () => {
     const stdout = `some warning text
-//server-rs/pantoken-server:pantoken_server buck-out/v2/gen/server-rs/pantoken-server/pantoken_server`;
+//server/pantoken-server:pantoken_server buck-out/v2/gen/server/pantoken-server/pantoken_server`;
     expect(parseBuck2ShowOutput(stdout)).toBe(
-      "buck-out/v2/gen/server-rs/pantoken-server/pantoken_server",
+      "buck-out/v2/gen/server/pantoken-server/pantoken_server",
     );
   });
 
@@ -31,7 +31,7 @@ describe("parseBuck2ShowOutput", () => {
 
   it("throws on single-field output (missing path)", () => {
     expect(() =>
-      parseBuck2ShowOutput("//server-rs/pantoken-server:pantoken_server"),
+      parseBuck2ShowOutput("//server/pantoken-server:pantoken_server"),
     ).toThrow("unexpected buck2 --show-output format");
   });
 });

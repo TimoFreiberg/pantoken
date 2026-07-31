@@ -85,7 +85,7 @@ export async function buildViaBuck2(opts: {
 
   const validatorOut = await runBuck2Build(
     root,
-    "//server-rs/pantoken-tar-validate:pantoken_tar_validate",
+    "//server/pantoken-tar-validate:pantoken_tar_validate",
   );
   const validatorPath = join(root, "target", "release", "pantoken-tar-validate");
   copyFileSync(validatorOut, validatorPath);

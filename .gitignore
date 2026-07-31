@@ -11,7 +11,7 @@ playwright-report/
 blob-report/
 .playwright/
 tmp/
-server-rs/target/
+server/target/
 **/target
 .workspaces
 .pantoken-issue-context/

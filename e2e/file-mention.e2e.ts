@@ -115,7 +115,7 @@ test("[ ] adjust a selected model row's reasoning level; accepting appends (leve
   const box = ta(page);
   await box.click();
   // Narrow to the single leveled model claude-sonnet-4-6 (mock fixture:
-  // thinkingLevels off/low/medium/high — server-rs/pantoken-server/src/mock_driver.rs).
+  // thinkingLevels off/low/medium/high — server/pantoken-server/src/mock_driver.rs).
   await page.keyboard.type("@m:sonnet");
   await expect(menu(page)).toBeVisible();
   await expect(row(page, "model:anthropic/claude-sonnet-4-6")).toBeVisible();
@@ -208,7 +208,7 @@ test("[ and ] on a non-model row type the character into the draft instead of be
 });
 
 // External paths (`@~/`, `@/`, `@../`) browse the server's filesystem OUTSIDE the
-// project — the mock's synthetic external tree (server-rs/pantoken-server/src/mock_driver.rs
+// project — the mock's synthetic external tree (server/pantoken-server/src/mock_driver.rs
 // `mock_external_tree()`), not the local file index. Every case here always round-trips
 // through the debounced server query (Composer.svelte's always-fire-for-external effect),
 // so assertions rely on Playwright's auto-retrying `expect` rather than a fixed wait.
@@ -286,7 +286,7 @@ test("@/etc/ lists the root-anchored fixture", async ({ page }) => {
 // reveals hidden dotfiles and gitignored entries in BOTH project and external modes.
 // The mock's `.env`/`dist/bundle.js` (project) and `~/.secrets` (external) fixtures are
 // deliberately absent from the always-visible lists so the toggle has something of its
-// own to reveal (server-rs/pantoken-server/src/mock_driver.rs `mock_ignored_files()` /
+// own to reveal (server/pantoken-server/src/mock_driver.rs `mock_ignored_files()` /
 // `mock_external_tree()`).
 
 test("project mode: a query matching only a hidden fixture shows nothing until Shift+Tab reveals it, and again to hide it", async ({

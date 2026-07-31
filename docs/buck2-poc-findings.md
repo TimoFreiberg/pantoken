@@ -14,7 +14,7 @@
 ## Overview
 
 This evaluation assessed Buck2 as the **primary** build system alongside the Cargo/pnpm
-workflows. It covers all 5 `server-rs` Rust crates (all 5 build successfully),
+workflows. It covers all 5 `server` Rust crates (all 5 build successfully),
 Reindeer-generated third-party dependencies, and unsigned headless archive assembly.
 Cargo and pnpm remain the source of truth; Buck2 builds the same artifacts from the same sources.
 
@@ -40,7 +40,7 @@ Cargo and pnpm remain the source of truth; Buck2 builds the same artifacts from 
 
 ```bash
 just verify-rs           # verify Buck2/Reindeer/Rust versions
-just build-rs            # build all server-rs crates
+just build-rs            # build all server crates
 just test-rs             # run selected tests
 just archive-rs          # build unsigned headless archive
 just measure-rs          # run measurement script
@@ -130,7 +130,7 @@ client/dist, it does not invoke pnpm/Vite).
 
 Buck2 is now the primary build+test system. The `rust-server` CI job runs on
 `ubuntu-latest` and uses buck2 for build+test (with remote cache for trusted
-runs). The `buck2` CI job runs on `macos-14`, builds all 5 server-rs crates,
+runs). The `buck2` CI job runs on `macos-14`, builds all 5 server crates,
 runs all 13 test targets, builds + validates the unsigned headless archive in
 the release configuration, and checks target/test manifests. `just check-rs`
 uses buck2 locally; the dev server and desktop hub build via buck2 by default.
@@ -205,7 +205,7 @@ unchanged crates.
 
 ## Cargo⇄Buck2 test parity mapping
 
-Every Cargo test binary for the 5 server-rs crates has a Buck2 `rust_test` counterpart:
+Every Cargo test binary for the 5 server crates has a Buck2 `rust_test` counterpart:
 
 | Crate | Cargo test binary(s) | Buck2 target | Notes |
 |-------|---------------------|--------------|-------|
@@ -231,7 +231,7 @@ Pre-existing Cargo test failures unrelated to Buck2 (also fail under `cargo next
 Buck2 is fully additive — removing it requires only:
 1. Delete `buck-out/`, `.buckconfig`, `.buckroot`, `BUCK`, `toolchains/`, `buck2/`, `scripts/buck2/`
 2. Delete `third-party/BUCK`, `third-party/fixups/`, `third-party/ece-2.3.1-rustcrypto/`, `reindeer.toml`
-3. Delete `server-rs/*/BUCK` files
+3. Delete `server/*/BUCK` files
 4. Revert the `reqwest` feature change in `Cargo.toml` (optional — it's an improvement)
 5. Revert the `[patch.crates-io]` ece path in `Cargo.toml` if the ece fork was deleted
 6. Run `cargo update` to regenerate `Cargo.lock`

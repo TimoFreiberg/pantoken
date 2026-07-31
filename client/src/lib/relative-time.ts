@@ -4,7 +4,7 @@
 // A floor below which a timestamp is implausible rather than genuinely ancient — pantoken
 // itself didn't exist yet, so nothing real predates it. Guards against the epoch-ish
 // "1970-01-01" fallback the server uses for a cold session with an empty/missing
-// created_at (server-rs/pantoken-server/src/polytoken/sessions_registry.rs), which would
+// created_at (server/pantoken-server/src/polytoken/sessions_registry.rs), which would
 // otherwise render as a literal "56y ago" in the sidebar. A fixed calendar date rather than
 // an age relative to `now`: it never starts swallowing genuinely old-but-real sessions as
 // the app (and its data) age past whatever "N years" a relative floor would pick.

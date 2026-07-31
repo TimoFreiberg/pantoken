@@ -218,7 +218,7 @@ curl -fsS http://localhost:8080/status | python3 -m json.tool
 ```
 
 If the cache is consistently full, increase `--max_size` and restart the
-daemon. The default 50 GiB is sufficient for the server-rs crate set.
+daemon. The default 50 GiB is sufficient for the server crate set.
 
 ### Version mismatch
 
@@ -240,7 +240,7 @@ To bypass the remote cache (for debugging or benchmarking):
 mv .buckconfig.local .buckconfig.local.disabled
 
 # Or use buck2's --local-only flag
-buck2 build --local-only //server-rs/...
+buck2 build --local-only //server/...
 ```
 
 ### CI not using cache

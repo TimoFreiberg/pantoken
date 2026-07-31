@@ -1,4 +1,4 @@
-# Dummy Cargo manifest representing the dependency closure of the five server-rs
+# Dummy Cargo manifest representing the dependency closure of the five server
 # crates (pantoken-protocol, pantoken-daemon-types, pantoken-remote-layout,
 # pantoken-server, pantoken-tar-validate). Reindeer uses this to resolve the
 # transitive dependency closure and generate Buck2 third-party BUCK files.

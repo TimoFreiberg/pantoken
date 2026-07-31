@@ -36,7 +36,7 @@ genrule(
     name = "pantoken_headless_unsigned",
     out = "pantoken-headless-unsigned.tar.gz",
     srcs = [
-        "//server-rs/pantoken-server:pantoken_server",
+        "//server/pantoken-server:pantoken_server",
         ":version_file",
         ":build_sha_file",
         "//scripts/buck2:stage_payload_sh",
@@ -44,7 +44,7 @@ genrule(
     ],
     cmd = "bash $(location //scripts/buck2:stage_payload_sh) $TMP/staging && python3 $(location //scripts/buck2:assemble_archive_py) $OUT $TMP/staging",
     env = {
-        "PANTOKEN_SERVER_BIN": "$(location //server-rs/pantoken-server:pantoken_server)",
+        "PANTOKEN_SERVER_BIN": "$(location //server/pantoken-server:pantoken_server)",
         "VERSION_FILE": "$(location :version_file)",
         "BUILD_SHA_FILE": "$(location :build_sha_file)",
     },
@@ -60,12 +60,12 @@ sh_test(
     name = "validate_headless_archive",
     test = "//scripts/buck2:validate_archive_sh",
     args = [
-        "$(location //server-rs/pantoken-tar-validate:pantoken_tar_validate)",
+        "$(location //server/pantoken-tar-validate:pantoken_tar_validate)",
         "$(location :pantoken_headless_unsigned)",
     ],
     resources = [
         ":pantoken_headless_unsigned",
-        "//server-rs/pantoken-tar-validate:pantoken_tar_validate",
+        "//server/pantoken-tar-validate:pantoken_tar_validate",
     ],
     env = {
         "HOME": "",

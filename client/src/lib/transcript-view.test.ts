@@ -330,7 +330,7 @@ describe("groupTurns", () => {
 
 // Regression for docs/TODO.md: "The feature that collapses the early working part
 // of a turn ... seems to not be triggered when a cold session is restored in the
-// GUI." A cold restore replays the daemon's raw history (server-rs/pantoken-server/
+// GUI." A cold restore replays the daemon's raw history (server/pantoken-server/
 // src/polytoken/history_seed.rs), which never emits a runCompleted-equivalent
 // completion — the trailing assistant bubble is instead closed by a later,
 // out-of-band re-assert (the polytoken driver's `build_branch_seed` trailing

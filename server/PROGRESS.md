@@ -9,7 +9,7 @@ complete (Phase 1); live-path validation parts 1–2 complete (Phases 2, 2.5, 5)
 6 live-path `BUG:` markers resolved (Phase A). Phase 3 `/health` real counts +
 `build_sha` env + web push delivery (VAPID keygen + `/push/*` + hub `notify`)
 done; `sessions-registry` (15) + `lease-retry` (11) tests ported. The TS test
-files are archived in `server-rs/ts-test-reference/` for reference when porting
+files are archived in `server/ts-test-reference/` for reference when porting
 remaining cases. Remaining: port `daemon-client.test.ts` subset (needs an HTTP
 mock seam for setModel/subscribe; the spawn-seam + pure-helper +
 waitForDaemonStartup parts are tractable now); live smoke test against a real
@@ -25,7 +25,7 @@ Replace the Bun/TS server with a Rust server implementing the same WS protocol,
 HTTP endpoints, and driver behavior — validated against the e2e suite AND the
 ported unit-test suite. ✅ **Done (2026-07-08):** the TS server is deleted; the
 Rust server is the only server. The TS test files are archived in
-`server-rs/ts-test-reference/` for reference.
+`server/ts-test-reference/` for reference.
 
 ## Where the port actually stands
 
@@ -36,7 +36,7 @@ Rust server is the only server. The TS test files are archived in
 - `cargo clippy --all-targets -- -D warnings`: 0 warnings.
 - e2e (Rust server, mock driver): 298/0 (3.0 min, `--project=desktop`). 2 known
   load-induced flakes (dir-picker, sidebar-drafts) pass in isolation.
-- server-rs is in CI: `rust-server` job runs fmt + clippy (`-D warnings`) +
+- server is in CI: `rust-server` job runs fmt + clippy (`-D warnings`) +
   test. `just check-rs` runs the same locally.
 
 **Phase 1 (mock-e2e cluster burn-down) — COMPLETE:** failures 33 → 0
@@ -183,7 +183,7 @@ daemons.
    order (stricter than the original TS server, which fired concurrently and
    applied in completion order) — accepted for this single-user tool but noted.
 
-5. **CI enforcement — resolved.** server-rs is in CI (Phase 0.2).
+5. **CI enforcement — resolved.** server is in CI (Phase 0.2).
 
 ## Resumption plan
 
@@ -192,11 +192,11 @@ Three standing invariants while you work:
 1. **jj discipline**: review with `jj diff --git`, commit per completed task,
    imperative subject ≤72 chars, only the files you touched.
 2. **Pin the corpus, not the daemon** (D20). Determinism comes from the
-   committed golden SSE corpus (`server-rs/tests/corpus/<version>/`). On a bump:
+   committed golden SSE corpus (`server/tests/corpus/<version>/`). On a bump:
    re-run codegen, replay the corpus as the drift canary, adopt newly
    daemon-owned fields, re-capture only on conscious adoption.
 3. **Port remaining TS tests.** The archived tests in
-   `server-rs/ts-test-reference/` are the reference for cases the Rust suite
+   `server/ts-test-reference/` are the reference for cases the Rust suite
    doesn't yet cover. Port them incrementally.
 
 The cutover is **done** — all four legs passed (ported unit tests, mock e2e,
@@ -231,7 +231,7 @@ faithfully.
 
 - [x] Deleted as-built mock-mode remnants (`Passthrough` variant,
       `fake_daemon_url` plumbing); codegen re-run clean.
-- [x] Added server-rs to CI (`rust-server` job: fmt + clippy `-D warnings` +
+- [x] Added server to CI (`rust-server` job: fmt + clippy `-D warnings` +
       test); `just check-rs`; `Cargo.lock` tracked.
 - [x] Removed blanket `#![allow(dead_code)]` / `#![allow(unused_variables)]`;
       survivors converted to item-level `#[expect]`.
@@ -338,8 +338,8 @@ faithfully.
 ## How to verify current state
 
 ```bash
-cd server-rs && cargo test                      # 993 tests, green
-cd server-rs && cargo clippy --all-targets -- -D warnings   # 0 warnings
+cd server && cargo test                      # 993 tests, green
+cd server && cargo clippy --all-targets -- -D warnings   # 0 warnings
 just check-rs                                     # fmt + clippy + buck2 build+test locally (CI gate)
 pnpm run test:e2e                               # mock-driver e2e (298/0; 2 load-induced flakes)
 pnpm run test:e2e:live                          # corpus-subset live tier vs fake daemon (5 specs)
