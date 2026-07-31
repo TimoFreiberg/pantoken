@@ -465,7 +465,7 @@ jobs:
         if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.TS_AUTH_KEY != ''
         uses: tailscale/github-action@v4
         with:
-          auth-key: ${{ secrets.TS_AUTH_KEY }}
+          authkey: ${{ secrets.TS_AUTH_KEY }}
           version: latest
       # Generate remote cache config from secret (writes .buckconfig.local,
       # which buck2 auto-reads — no --config-file flag needed)
@@ -584,7 +584,7 @@ jobs:
         if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.TS_AUTH_KEY != ''
         uses: tailscale/github-action@v4
         with:
-          auth-key: ${{ secrets.TS_AUTH_KEY }}
+          authkey: ${{ secrets.TS_AUTH_KEY }}
           version: latest
       # Generate remote cache config from secret (writes .buckconfig.local,
       # which buck2 auto-reads — no --config-file flag needed)

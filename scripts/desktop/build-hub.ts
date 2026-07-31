@@ -70,7 +70,10 @@ if (isMain(import.meta.url)) {
     console.error(`buck2 build failed with exit code ${result.code}`);
     process.exit(result.code ?? 1);
   }
-  const built = parseBuck2ShowOutput(result.stdout);
+  // buck2 prints the output path relative to the project root; resolve it
+  // against repoRoot so the exists/copy below work even when this script runs
+  // from a different cwd (tauri runs beforeBuildCommand from desktop/).
+  const built = resolve(repoRoot, parseBuck2ShowOutput(result.stdout));
   const outfile = join(outDir, `pantoken-server-${triple}`);
   if (!existsSync(built)) {
     console.error(`buck2 build succeeded but ${built} is missing`);
