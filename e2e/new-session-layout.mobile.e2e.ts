@@ -50,12 +50,17 @@ test("mobile keyboard inset keeps the chooser bounded above the keyboard", async
   await expect
     .poll(() => shell.evaluate((el) => el.clientHeight))
     .toBeLessThan(600);
-  const shellBox = await shell.boundingBox();
-  const viewBox = await view.boundingBox();
-  expect(shellBox).not.toBeNull();
-  expect(viewBox).not.toBeNull();
-  expect(viewBox!.y).toBeGreaterThanOrEqual(shellBox!.y - 0.5);
-  expect(viewBox!.y + viewBox!.height).toBeLessThanOrEqual(
-    shellBox!.y + shellBox!.height + 0.5,
-  );
+  // Wait for the view to settle within the shell bounds — the layout lags
+  // the shell's clientHeight by a frame after the CSS-variable change.
+  await expect
+    .poll(async () => {
+      const shellBox = await shell.boundingBox();
+      const viewBox = await view.boundingBox();
+      if (!shellBox || !viewBox) return false;
+      return (
+        viewBox.y >= shellBox.y - 0.5 &&
+        viewBox.y + viewBox.height <= shellBox.y + shellBox.height + 0.5
+      );
+    })
+    .toBe(true);
 });

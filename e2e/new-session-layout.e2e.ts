@@ -24,17 +24,32 @@ test("the chooser centres its composition without the old hero", async ({
   );
 
   // The composition is vertically centred-ish (top-aligned with generous padding,
-  // not pinned to the bottom like a live-session composer).
-  const viewBox = await view.boundingBox();
-  const headingBox = await view
-    .getByRole("heading", { name: "What would you like to work on?" })
-    .boundingBox();
-  expect(viewBox).not.toBeNull();
-  expect(headingBox).not.toBeNull();
-  const headingCentre = headingBox!.y + headingBox!.height / 2;
-  const relativeCentre = (headingCentre - viewBox!.y) / viewBox!.height;
-  expect(relativeCentre).toBeGreaterThan(0.05);
-  expect(relativeCentre).toBeLessThan(0.4);
+  // not pinned to the bottom like a live-session composer). Poll the layout
+  // until it settles — the heading's position can lag the view's by a frame.
+  // Both bounds are checked from the same poll callback so the ratio is
+  // computed from a single consistent snapshot, not two independent reads.
+  await expect
+    .poll(async () => {
+      const viewBox = await view.boundingBox();
+      const headingBox = await view
+        .getByRole("heading", { name: "What would you like to work on?" })
+        .boundingBox();
+      if (!viewBox || !headingBox) return null;
+      const headingCentre = headingBox.y + headingBox.height / 2;
+      return (headingCentre - viewBox.y) / viewBox.height;
+    })
+    .toBeGreaterThan(0.05);
+  await expect
+    .poll(async () => {
+      const viewBox = await view.boundingBox();
+      const headingBox = await view
+        .getByRole("heading", { name: "What would you like to work on?" })
+        .boundingBox();
+      if (!viewBox || !headingBox) return 1;
+      const headingCentre = headingBox.y + headingBox.height / 2;
+      return (headingCentre - viewBox.y) / viewBox.height;
+    })
+    .toBeLessThan(0.4);
 });
 
 test("the chooser shows project rows and a Browse entry", async ({ page }) => {

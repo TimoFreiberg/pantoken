@@ -40,8 +40,10 @@ per-test `PANTOKEN_HUB_IDLE_MS` set/restore dance raced with concurrent
 `std::env::var` reads in the multithreaded test binary, intermittently leaving
 the runtime with the `2 × idle_reap_ms` hub-exit default and killing the
 accept loop mid-test (`idle_gc_disposes_warm_session_real` connection-refused
-on reconnect). They now set the variable once per process
-(`disable_hub_idle_exit`) and never mutate it again.
+on reconnect). `hub_idle_ms` is now a first-class `Config` field (read from
+`PANTOKEN_HUB_IDLE_MS` in `config::load`); the `_real` tests set
+`hub_idle_ms: 0` directly in their `Config` literals, eliminating the env-var
+mutation entirely.
 
 ## Phase 2 session lifecycle
 

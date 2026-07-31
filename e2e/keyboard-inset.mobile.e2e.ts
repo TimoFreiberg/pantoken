@@ -32,13 +32,12 @@ test("--keyboard-inset shrinks the app and lifts the composer above the keyboard
   await expect
     .poll(() => shell.evaluate((el) => el.clientHeight))
     .toBeLessThanOrEqual(shellBefore - 255);
-  // …and the composer rode up with it (its bottom is no longer behind the keyboard).
-  const composerBottomAfter = await composer.evaluate(
-    (el) => el.getBoundingClientRect().bottom,
-  );
-  expect(composerBottomBefore - composerBottomAfter).toBeGreaterThanOrEqual(
-    255,
-  );
+  // …and the composer rode up with it (its bottom is no longer behind the
+  // keyboard). The composer's layout lags the shell's clientHeight by a frame,
+  // so poll its bottom edge instead of reading it synchronously.
+  await expect
+    .poll(() => composer.evaluate((el) => el.getBoundingClientRect().bottom))
+    .toBeLessThanOrEqual(composerBottomBefore - 255);
 
   // Keyboard dismissed → var cleared → layout restores.
   await page.evaluate(() =>

@@ -114,6 +114,10 @@ pub struct Config {
     pub warm_cap: i64,
     /// Idle-reap timeout (ms). ≤0 disables reaping.
     pub idle_reap_ms: i64,
+    /// Hub-idle exit timeout (ms). When the hub has no connections, no active
+    /// turns, and no warm work for this long, it may exit. ≤0 disables exit.
+    /// Defaults to `idle_reap_ms * 2` when not set via env.
+    pub hub_idle_ms: i64,
     /// Cadence (ms) of the hub's live-refresh ticker.
     pub live_refresh_ms: u64,
     /// Flush window (ms) for server-side coalescing of streamed assistantDeltas.
@@ -151,6 +155,7 @@ pub fn load() -> Config {
         });
     let warm_cap = env_parse("PANTOKEN_WARM_CAP", 8);
     let idle_reap_ms = env_parse("PANTOKEN_IDLE_REAP_MS", 10 * 60 * 1000);
+    let hub_idle_ms = env_parse("PANTOKEN_HUB_IDLE_MS", idle_reap_ms * 2);
     let live_refresh_ms = env_parse("PANTOKEN_LIVE_REFRESH_MS", 1000);
     let delta_flush_ms = env_parse("PANTOKEN_DELTA_FLUSH_MS", 50);
     let journal_idle_evict_ms = env_parse("PANTOKEN_JOURNAL_IDLE_EVICT_MS", 5 * 60 * 1000);
@@ -165,6 +170,7 @@ pub fn load() -> Config {
         client_dist,
         warm_cap,
         idle_reap_ms,
+        hub_idle_ms,
         live_refresh_ms,
         delta_flush_ms,
         journal_idle_evict_ms,
@@ -212,6 +218,7 @@ mod tests {
             client_dist: PathBuf::from("/tmp"),
             warm_cap: 8,
             idle_reap_ms: 600000,
+            hub_idle_ms: 0,
             live_refresh_ms: 1000,
             delta_flush_ms: 50,
             journal_idle_evict_ms: 0,
@@ -280,6 +287,7 @@ mod tests {
             client_dist: PathBuf::from("/tmp"),
             warm_cap: 8,
             idle_reap_ms: 600000,
+            hub_idle_ms: 0,
             live_refresh_ms: 1000,
             delta_flush_ms: 50,
             journal_idle_evict_ms: 0,

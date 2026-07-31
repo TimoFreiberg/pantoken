@@ -43,6 +43,7 @@ async fn test_env() -> SessionEnv {
         client_dist: dir.path().join("dist"),
         warm_cap: 8,
         idle_reap_ms: 0,
+        hub_idle_ms: 0,
         live_refresh_ms: 1000,
         delta_flush_ms: 0,
         journal_idle_evict_ms: 0,

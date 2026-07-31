@@ -390,7 +390,10 @@ pub async fn run_remote_runtime(
     };
 
     // Start the lifecycle manager (Phase 1.4): idle reaping + hub-idle exit.
-    let lifecycle_config = crate::remote::lifecycle::LifecycleConfig::from_env(config.idle_reap_ms);
+    let lifecycle_config = crate::remote::lifecycle::LifecycleConfig {
+        idle_reap_ms: config.idle_reap_ms,
+        hub_idle_ms: config.hub_idle_ms,
+    };
     let lifecycle = crate::remote::lifecycle::LifecycleManager::start(
         hub.clone(),
         driver.clone(),

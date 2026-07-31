@@ -657,6 +657,14 @@ async fn run_remote_runtime_mode() {
 
     // Build a Config for the remote runtime (no HTTP routes needed, but
     // SessionEnv requires it for auth token checks).
+    let idle_reap_ms = std::env::var("PANTOKEN_IDLE_REAP_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(600000);
+    let hub_idle_ms = std::env::var("PANTOKEN_HUB_IDLE_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(idle_reap_ms * 2);
     let cfg = Arc::new(config::Config {
         port: 0,
         data_dir: run_dir.clone(),
@@ -670,10 +678,8 @@ async fn run_remote_runtime_mode() {
             .unwrap_or(false),
         client_dist: run_dir.join("client-dist"),
         warm_cap: 8,
-        idle_reap_ms: std::env::var("PANTOKEN_IDLE_REAP_MS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(600000),
+        idle_reap_ms,
+        hub_idle_ms,
         live_refresh_ms: 1000,
         delta_flush_ms: 50,
         journal_idle_evict_ms: std::env::var("PANTOKEN_JOURNAL_IDLE_EVICT_MS")
@@ -726,6 +732,7 @@ mod tests {
             client_dist: dir.path().join("dist"),
             warm_cap: 8,
             idle_reap_ms: 0,
+            hub_idle_ms: 0,
             live_refresh_ms: 1000,
             delta_flush_ms: 0,
             journal_idle_evict_ms: 0,

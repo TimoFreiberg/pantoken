@@ -41,20 +41,6 @@ pub struct LifecycleConfig {
     pub hub_idle_ms: i64,
 }
 
-impl LifecycleConfig {
-    /// Read lifecycle config from env vars.
-    pub fn from_env(idle_reap_ms: i64) -> Self {
-        let hub_idle_ms = std::env::var("PANTOKEN_HUB_IDLE_MS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(idle_reap_ms * 2);
-        Self {
-            idle_reap_ms,
-            hub_idle_ms,
-        }
-    }
-}
-
 /// The lifecycle manager.
 ///
 /// Runs a periodic timer that checks whether the hub is idle and, if so,
