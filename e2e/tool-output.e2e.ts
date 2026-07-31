@@ -10,6 +10,7 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
+// Journey: a long tool output offers copy + an inline expand past the scrollbox cap
 test("a long tool output offers copy + an inline expand past the scrollbox cap", async ({
   context,
   page,

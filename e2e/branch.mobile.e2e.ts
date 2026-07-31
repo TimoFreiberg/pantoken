@@ -13,8 +13,9 @@ test.beforeEach(async ({ page }) => {
   ).toBeVisible();
 });
 
-// On a phone there's no hover, so the rewind affordance must be reachable without one
-// (the desktop reveal-on-hover would otherwise leave it tappable-but-invisible).
+// Journey: on a phone there's no hover, so the rewind affordance must be
+// reachable without one (the desktop reveal-on-hover would otherwise leave it
+// tappable-but-invisible).
 test("rewind button is reachable on touch and rewinds the transcript", async ({
   page,
 }) => {

@@ -49,6 +49,7 @@ function nameOf(page: Page, title: string) {
     .locator(".name");
 }
 
+// Journey: a background session shows running, then done, then clears on open
 test("a background session shows running, then done, then clears on open", async ({
   page,
 }) => {

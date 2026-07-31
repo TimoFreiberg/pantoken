@@ -13,6 +13,7 @@ async function tokenCount(
   return Number(text.replace(/[^\d]/g, ""));
 }
 
+// Journey: the working indicator shows a token counter that climbs as text streams
 test("the working indicator shows a token counter that climbs as text streams", async ({
   page,
 }) => {

@@ -8,6 +8,7 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
+// Journey: shows when an update is staged and reflects applying on click
 test("shows when an update is staged and reflects applying on click", async ({
   page,
 }) => {
@@ -29,6 +30,7 @@ test("shows when an update is staged and reflects applying on click", async ({
   await expect(card.getByRole("button", { name: "Updating…" })).toBeVisible();
 });
 
+// Journey: clears when the update is no longer available
 test("clears when the update is no longer available", async ({ page }) => {
   await openSidebar(page);
   await page.request.post("/update/state", {

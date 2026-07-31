@@ -5,6 +5,8 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
+// Journey: the active-only filter hides archived + stale sessions by default,
+// with its tooltip carrying the hidden count; toggling reveals everything.
 test("active-only filter hides archived + stale sessions; show-all reveals them", async ({
   page,
 }) => {
@@ -32,6 +34,8 @@ test("active-only filter hides archived + stale sessions; show-all reveals them"
   await expect(sidebar.getByTestId("hidden-count")).toHaveCount(0);
 });
 
+// Journey: the filter replaces the standalone hidden-count control and exposes
+// its mode via aria-label as it toggles.
 test("the filter replaces the standalone hidden-count control", async ({
   page,
 }) => {
@@ -54,7 +58,10 @@ test("the filter replaces the standalone hidden-count control", async ({
   );
 });
 
-test("archiving offers an Undo toast that restores the session", async ({
+// Journey: right-clicking a session row opens its overflow menu; archiving
+// offers an Undo toast that restores the session, and the menu drives the same
+// archive action as the ⋯ trigger.
+test("right-click archive offers an Undo toast that restores the session", async ({
   page,
 }) => {
   await openSidebar(page);
@@ -79,18 +86,6 @@ test("archiving offers an Undo toast that restores the session", async ({
   // Undo restores it (un-archives), and the toast clears.
   await toast.getByRole("button", { name: "Undo", exact: true }).click();
   await expect(sidebar.getByText("Explore the fold reducer")).toBeVisible();
-});
-
-test("right-clicking a session row opens its overflow menu", async ({
-  page,
-}) => {
-  await openSidebar(page);
-  const sidebar = page.getByTestId("sidebar");
-
-  const row = sidebar
-    .locator(".row-wrap")
-    .filter({ hasText: "Explore the fold reducer" });
-  await expect(row).toBeVisible();
 
   // The menu is closed to start with — no hover, no ⋯ click. The menu renders once at
   // the sidebar level (lifted out of the per-row {#each}), so check there for absence.
@@ -99,9 +94,6 @@ test("right-clicking a session row opens its overflow menu", async ({
   ).toHaveCount(0);
 
   // Right-click the row itself opens the same menu the ⋯ trigger would.
-  // The menu renders once at the sidebar level (lifted out of the per-row {#each} so
-  // session-list pushes don't tear it down mid-click), so the menuitem lives under
-  // `sidebar`, not `row`.
   await row.locator(".row").click({ button: "right" });
   await expect(
     sidebar.getByRole("menuitem", { name: "Archive", exact: true }),
@@ -116,6 +108,7 @@ test("right-clicking a session row opens its overflow menu", async ({
   ).toHaveCount(0);
 });
 
+// Journey: the overflow menu copies the session id to the clipboard.
 test("the overflow menu copies the session id to the clipboard", async ({
   page,
   context,
@@ -140,6 +133,7 @@ test("the overflow menu copies the session id to the clipboard", async ({
   await expect(sidebar.getByTestId("copy-session-id")).toHaveCount(0);
 });
 
+// Journey: pressing 'a' while the menu is open archives the targeted session.
 test("pressing 'a' while the menu is open archives the targeted session", async ({
   page,
 }) => {
@@ -170,6 +164,8 @@ test("pressing 'a' while the menu is open archives the targeted session", async 
   ).toHaveCount(0);
 });
 
+// Journey: archiving the focused session drops its row and opens the chooser;
+// Undo restores both the session and the transcript view.
 test("archiving the focused session drops its row and opens the chooser", async ({
   page,
 }) => {
@@ -209,6 +205,8 @@ test("archiving the focused session drops its row and opens the chooser", async 
   await expect(page.getByTestId("session-chooser")).toHaveCount(0);
 });
 
+// Journey: the overflow menu archives a session, hiding it from the active
+// list; under show-all it's marked archived and Unarchive clears the flag.
 test("the overflow menu archives a session, hiding it from the active list", async ({
   page,
 }) => {

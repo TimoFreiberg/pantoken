@@ -26,7 +26,9 @@ const EPHEMERAL_RISK = {
   continueLabel: "Accept risk",
 };
 
-test("Setup sheet is full-screen on phone", async ({ page }) => {
+// Setup sheet is full-screen on phone, SSH test reveals container picker, and
+// back button returns to SSH fields
+test("Setup sheet full-screen, SSH test, and back button on phone", async ({ page }) => {
   // Open the sidebar (phone: it's a drawer).
   await page.getByTestId("sidebar-open").click();
   const switcher = page.getByTestId("host-switcher");
@@ -44,22 +46,28 @@ test("Setup sheet is full-screen on phone", async ({ page }) => {
     expect(Math.round(box.width)).toBeGreaterThanOrEqual(370);
     expect(Math.round(box.height)).toBeGreaterThanOrEqual(700);
   }
-});
 
-test("SSH test and container picker work at 375px", async ({ page }) => {
-  await page.getByTestId("sidebar-open").click();
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
-
+  // SSH test and container picker work at 375px
   await page.getByTestId("cs-ssh-input").fill("user@dev.example.com");
   await page.getByTestId("cs-test-ssh").click();
 
   await expect(page.getByTestId("cs-ssh-summary")).toBeVisible({ timeout: 10000 });
   // Container rows should be visible and tappable.
   await expect(page.getByTestId("cs-container-work-api-dev")).toBeVisible();
+
+  // Re-asserted: shared SSH-summary visibility from the back-button sub-flow.
+  await expect(page.getByTestId("cs-ssh-summary")).toBeVisible({ timeout: 10000 });
+
+  // Phone back button should be visible.
+  const backButton = page.locator(".mobile-back");
+  await expect(backButton).toBeVisible();
+  await backButton.click();
+
+  // Should go back to SSH fields.
+  await expect(page.getByTestId("cs-ssh-input")).toBeVisible();
 });
 
+// Risk panel renders on phone with both buttons (ephemeral-only variant)
 test("Risk panel renders on phone", async ({ page }) => {
   await setPendingRisksForNextDocker(page, [EPHEMERAL_RISK]);
 
@@ -82,26 +90,9 @@ test("Risk panel renders on phone", async ({ page }) => {
   await expect(page.getByTestId("cs-accept-risks")).toBeVisible();
 });
 
-test("Back button navigates from container picker to SSH fields", async ({ page }) => {
-  await page.getByTestId("sidebar-open").click();
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
-
-  await page.getByTestId("cs-ssh-input").fill("user@dev.example.com");
-  await page.getByTestId("cs-test-ssh").click();
-  await expect(page.getByTestId("cs-ssh-summary")).toBeVisible({ timeout: 10000 });
-
-  // Phone back button should be visible.
-  const backButton = page.locator(".mobile-back");
-  await expect(backButton).toBeVisible();
-  await backButton.click();
-
-  // Should go back to SSH fields.
-  await expect(page.getByTestId("cs-ssh-input")).toBeVisible();
-});
-
-test("Interactive elements meet 44px touch target minimum", async ({ page }) => {
+// Interactive elements meet 44px touch target minimum and no horizontal
+// scrolling occurs at 375px
+test("Touch targets meet 44px minimum and no horizontal scrolling on phone", async ({ page }) => {
   await page.getByTestId("sidebar-open").click();
   const switcher = page.getByTestId("host-switcher");
   await switcher.getByTestId("host-switcher-trigger").click();
@@ -122,13 +113,6 @@ test("Interactive elements meet 44px touch target minimum", async ({ page }) => 
   if (testBox) {
     expect(Math.round(testBox.height)).toBeGreaterThanOrEqual(44);
   }
-});
-
-test("No horizontal page scrolling on phone", async ({ page }) => {
-  await page.getByTestId("sidebar-open").click();
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
 
   // Fill the SSH input with a long value to stress the layout.
   // Note: input elements have fixed CSS width, so this is a structural check

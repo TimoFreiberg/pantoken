@@ -9,6 +9,7 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
+// Journey: sidebar notice shows an unread badge when the sidebar is closed
 test("sidebar notice shows an unread badge when the sidebar is closed", async ({
   page,
 }) => {
@@ -51,6 +52,7 @@ test("sidebar notice shows an unread badge when the sidebar is closed", async ({
   ).toBeVisible();
 });
 
+// Journey: sidebar notices stay in the sidebar (no duplication to chat area)
 test("sidebar notices stay in the sidebar (no duplication to chat area)", async ({
   page,
 }) => {

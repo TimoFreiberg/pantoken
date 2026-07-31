@@ -14,6 +14,7 @@ function row(page: Page, name: string) {
   return page.getByTestId("sidebar").locator(".row", { hasText: name });
 }
 
+// ⌘N opens the session chooser and pre-selects the last-active project
 test("⌘N opens the session chooser", async ({ page }) => {
   // Boot lands on the bridge session (project "pantoken"); no chooser yet.
   await expect(chooser(page)).toHaveCount(0);
@@ -27,6 +28,7 @@ test("⌘N opens the session chooser", async ({ page }) => {
   ).toHaveAttribute("aria-current", "true");
 });
 
+// ⌘[ and ⌘] step back and forward through visited sessions
 test("⌘[ and ⌘] step back and forward through visited sessions", async ({
   page,
 }) => {
@@ -46,6 +48,7 @@ test("⌘[ and ⌘] step back and forward through visited sessions", async ({
   await expect(title(page)).toContainText("Explore the fold reducer");
 });
 
+// Back history reaches the chooser from a visited session
 test("back history reaches the chooser", async ({ page }) => {
   await openSidebar(page);
   // session → chooser, then back lands on the session again.
@@ -60,6 +63,7 @@ test("back history reaches the chooser", async ({ page }) => {
   await expect(chooser(page)).toBeVisible();
 });
 
+// Ctrl+Tab / Ctrl+Shift+Tab cycle through sessions in sidebar order
 test("Ctrl+Tab / Ctrl+Shift+Tab cycle through sessions in sidebar order", async ({
   page,
 }) => {
@@ -90,7 +94,11 @@ test("Ctrl+Tab / Ctrl+Shift+Tab cycle through sessions in sidebar order", async 
   await expect(title(page)).toContainText("Cold-restore regression check");
 });
 
-test("⌘B toggles the sidebar", async ({ page }) => {
+// ⌘B toggles the sidebar, ⌘K focuses search, ⌘⇧J toggles the context panel
+test("⌘B, ⌘K, and ⌘⇧J toggle sidebar, search, and context panel", async ({
+  page,
+}) => {
+  // --- ⌘B toggles the sidebar ---
   const sidebar = page.getByTestId("sidebar");
   await expect(sidebar).toHaveAttribute("data-open", "true"); // desktop default
 
@@ -99,9 +107,8 @@ test("⌘B toggles the sidebar", async ({ page }) => {
 
   await page.keyboard.press("Control+b");
   await expect(sidebar).toHaveAttribute("data-open", "true");
-});
 
-test("⌘K focuses the sidebar session search", async ({ page }) => {
+  // --- ⌘K focuses the sidebar session search ---
   // The sidebar is open by default on desktop. ⌘K should open the search
   // overlay and focus the input.
   await page.keyboard.press("Control+k");
@@ -109,9 +116,11 @@ test("⌘K focuses the sidebar session search", async ({ page }) => {
   const input = page.getByTestId("sidebar-search-input");
   await expect(input).toBeVisible();
   await expect(input).toBeFocused();
-});
 
-test("⌘⇧J toggles the context panel", async ({ page }) => {
+  // Close the search overlay before testing the context panel hotkey.
+  await page.keyboard.press("Escape");
+
+  // --- ⌘⇧J toggles the context panel ---
   const panel = page.getByTestId("right-sidebar");
   await expect(panel).toHaveAttribute("data-open", "true"); // desktop default
 

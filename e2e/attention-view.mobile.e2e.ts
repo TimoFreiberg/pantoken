@@ -8,6 +8,7 @@ const qna = (page: import("@playwright/test").Page) =>
 const shelf = (page: import("@playwright/test").Page) =>
   page.getByRole("button", { name: /open (question pending|approval required)/i });
 
+// Journey: an incoming question auto-presents as a full-screen phone view
 test("an incoming question auto-presents as a full-screen phone view", async ({
   page,
 }) => {
@@ -22,6 +23,7 @@ test("an incoming question auto-presents as a full-screen phone view", async ({
   );
 });
 
+// Journey: an incoming approval fills the phone chat viewport
 test("an incoming approval fills the phone chat viewport", async ({ page }) => {
   await drive(page, "confirm");
   const box = await page.getByRole("dialog", { name: "Run destructive command?" }).boundingBox();
@@ -32,6 +34,7 @@ test("an incoming approval fills the phone chat viewport", async ({ page }) => {
   );
 });
 
+// Journey: minimize shows a persistent shelf above the composer and restores
 test("minimize shows a persistent shelf above the composer and restores", async ({
   page,
 }) => {
@@ -46,6 +49,7 @@ test("minimize shows a persistent shelf above the composer and restores", async 
   await expect(shelf(page)).toBeHidden();
 });
 
+// Journey: browser Back minimizes the attention view
 test("browser Back minimizes the attention view", async ({ page }) => {
   await drive(page, "confirm");
   await expect(page.getByRole("dialog", { name: "Run destructive command?" })).toBeVisible();
@@ -54,6 +58,7 @@ test("browser Back minimizes the attention view", async ({ page }) => {
   await expect(shelf(page)).toBeVisible();
 });
 
+// Journey: incoming attention replaces an open phone navigation view cleanly
 test("incoming attention replaces an open phone navigation view cleanly", async ({ page }) => {
   await openSidebar(page);
   const sidebar = page.getByTestId("sidebar");
@@ -70,6 +75,7 @@ test("incoming attention replaces an open phone navigation view cleanly", async 
   await expect(sidebar).toHaveAttribute("data-open", "false");
 });
 
+// Journey: opening phone navigation minimizes attention without stranding history
 test("opening phone navigation minimizes attention without stranding history", async ({
   page,
 }) => {
@@ -96,6 +102,7 @@ test("opening phone navigation minimizes attention without stranding history", a
   await expect(shelf(page)).toBeVisible();
 });
 
+// Journey: a deliberate minimize stays sticky when another request arrives
 test("a deliberate minimize stays sticky when another request arrives", async ({
   page,
 }) => {
@@ -107,6 +114,7 @@ test("a deliberate minimize stays sticky when another request arrives", async ({
   await expect(page.getByRole("dialog")).toBeHidden();
 });
 
+// Journey: switching sessions clears the active session's minimized presentation state
 test("switching sessions clears the active session's minimized presentation state", async ({
   page,
 }) => {
@@ -121,6 +129,7 @@ test("switching sessions clears the active session's minimized presentation stat
   await expect(qna(page)).toBeVisible();
 });
 
+// Journey: multiple requests navigate and resolution advances to the oldest remaining
 test("multiple requests navigate and resolution advances to the oldest remaining", async ({
   page,
 }) => {
@@ -142,6 +151,7 @@ test("multiple requests navigate and resolution advances to the oldest remaining
   await expect(page.getByText("1 of 2")).toBeHidden();
 });
 
+// Journey: approval input drafts survive minimize and pending-request navigation
 test("approval input drafts survive minimize and pending-request navigation", async ({
   page,
 }) => {
@@ -158,6 +168,7 @@ test("approval input drafts survive minimize and pending-request navigation", as
   await expect(input).toHaveValue("Keep this draft");
 });
 
+// Journey: approval input drafts survive reload and clear after resolution
 test("approval input drafts survive reload and clear after resolution", async ({ page }) => {
   await drive(page, "input");
   const dialog = page.getByRole("dialog", { name: "Commit message" });
@@ -174,6 +185,7 @@ test("approval input drafts survive reload and clear after resolution", async ({
     .toBe("[]");
 });
 
+// Journey: a timed approval resolves while another request remains selected
 test("a timed approval resolves while another request remains selected", async ({ page }) => {
   await drive(page, "timeout");
   await page.getByRole("button", { name: "Minimize approval" }).click();
@@ -185,6 +197,7 @@ test("a timed approval resolves while another request remains selected", async (
   await expect(qna(page)).toBeVisible();
 });
 
+// Journey: resolving the final request removes the overlay and shelf
 test("resolving the final request removes the overlay and shelf", async ({ page }) => {
   await drive(page, "confirm");
   const approval = page.getByRole("dialog", { name: "Run destructive command?" });
@@ -194,6 +207,7 @@ test("resolving the final request removes the overlay and shelf", async ({ page 
   await expect(page.getByPlaceholder("Message pantoken…")).toBeVisible();
 });
 
+// Journey: qna mobile: whole card scrolls, .ctx does not scroll independently
 test("qna mobile: whole card scrolls, .ctx does not scroll independently", async ({
   page,
 }) => {

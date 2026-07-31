@@ -46,6 +46,7 @@ async function waitForMarkdownSettled(page: Page): Promise<void> {
 
 // ─── Spacing (issue #38) ───────────────────────────────────────────────────────
 
+// Markdown block margins are tightened per issue #38 (p, li, ul/ol spacing)
 test("markdown block margins are tightened", async ({ page }) => {
   await drive(page, "markdown");
   await waitForMarkdownSettled(page);
@@ -121,6 +122,7 @@ test("markdown block margins are tightened", async ({ page }) => {
 
 // ─── Link tooltip (merged from markdown-link.e2e.ts) ─────────────────────────────
 
+// Markdown links route through pantoken's tooltip, not markstream's stuck one
 test("markdown links route through pantoken's tooltip, not markstream's stuck one", async ({
   page,
 }) => {

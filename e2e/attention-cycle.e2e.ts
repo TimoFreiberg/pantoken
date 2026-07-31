@@ -9,6 +9,7 @@ test.beforeEach(async ({ page }) => {
 const qnaForm = (page: import("@playwright/test").Page) =>
   page.getByRole("group", { name: "Questions" });
 
+// Journey: ⌘\\ cycles through qna + approval: transcript → qna → approval → transcript
 test("⌘\\ cycles through qna + approval: transcript → qna → approval → transcript", async ({
   page,
 }) => {
@@ -49,6 +50,7 @@ test("⌘\\ cycles through qna + approval: transcript → qna → approval → t
   await expect(qnaForm(page)).toBeVisible();
 });
 
+// Journey: clicking a pill restores its surface
 test("clicking a pill restores its surface", async ({ page }) => {
   await drive(page, "confirm");
   await expect(page.getByRole("dialog")).toBeVisible();
@@ -69,6 +71,7 @@ test("clicking a pill restores its surface", async ({ page }) => {
   await expect(pill).toBeHidden();
 });
 
+// Journey: ⌘\\ is a no-op when no agent-driven surfaces are active
 test("⌘\\ is a no-op when no agent-driven surfaces are active", async ({ page }) => {
   // Clean transcript — no pending approvals/qna. ⌘\ should do nothing.
   await expect(page.locator(".attention-pill")).toHaveCount(0);
@@ -77,6 +80,7 @@ test("⌘\\ is a no-op when no agent-driven surfaces are active", async ({ page 
   await expect(page.getByRole("dialog")).toBeHidden();
 });
 
+// Journey: ⌘\\ does not fire when a user-driven modal (Settings) is open
 test("⌘\\ does not fire when a user-driven modal (Settings) is open", async ({
   page,
 }) => {
@@ -93,6 +97,7 @@ test("⌘\\ does not fire when a user-driven modal (Settings) is open", async ({
   await expect(page.locator(".attention-pill")).toHaveCount(0);
 });
 
+// Journey: approval pill has a title attribute naming the action + hotkey
 test("approval pill has a title attribute naming the action + hotkey", async ({
   page,
 }) => {
@@ -105,6 +110,7 @@ test("approval pill has a title attribute naming the action + hotkey", async ({
   await expect(pill).toHaveAttribute("title", /restore/);
 });
 
+// Journey: Esc still cancels a visible (non-minimized) approval dialog (regression)
 test("Esc still cancels a visible (non-minimized) approval dialog (regression)", async ({
   page,
 }) => {
@@ -115,6 +121,7 @@ test("Esc still cancels a visible (non-minimized) approval dialog (regression)",
   await expect(page.getByText("Dialog cancelled.")).toBeVisible();
 });
 
+// Journey: the minimize button in the approval sheet has title + aria-expanded
 test("the minimize button in the approval sheet has title + aria-expanded", async ({
   page,
 }) => {

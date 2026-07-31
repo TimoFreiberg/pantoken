@@ -15,6 +15,7 @@ test.beforeEach(async ({ page }) => {
 
 const openPanel = openRightSidebar;
 
+// Journey: the context panel renders flagged files and todos
 test("the context panel renders flagged files and todos", async ({ page }) => {
   // Desktop default: already open (no click needed).
   await expect(page.getByTestId("right-sidebar")).toHaveAttribute(
@@ -38,6 +39,7 @@ test("the context panel renders flagged files and todos", async ({ page }) => {
   await expect(todos).toContainText("Add e2e tests");
 });
 
+// Journey: sections render in order: flagged files, background jobs, todos
 test("sections render in order: flagged files, background jobs, todos", async ({
   page,
 }) => {
@@ -62,6 +64,7 @@ test("sections render in order: flagged files, background jobs, todos", async ({
   expect(testids).toEqual(["flagged-files", "background-jobs", "todos"]);
 });
 
+// Journey: the context panel closes via its own control and reopens via the header arrow
 test("the context panel closes via its own control and reopens via the header arrow", async ({
   page,
 }) => {
@@ -285,6 +288,7 @@ test("the session footer shows the cwd and stack-depth badge", async ({
   await expect(badge).toContainText("Stack · 2");
 });
 
+// Journey: clicking the cwd path copies the full path to clipboard
 test("clicking the cwd path copies the full path to clipboard", async ({
   page,
 }) => {
@@ -297,6 +301,7 @@ test("clicking the cwd path copies the full path to clipboard", async ({
   expect(clipboard).toBe("/Users/timo/src/pantoken/client");
 });
 
+// Journey: the footer shows the project root with no stack badge at depth 0
 test("the footer shows the project root with no stack badge at depth 0", async ({
   page,
 }) => {
@@ -316,6 +321,7 @@ test("the footer shows the project root with no stack badge at depth 0", async (
   await expect(page.getByTestId("cwd-stack-depth")).toHaveCount(0);
 });
 
+// Journey: the footer stays pinned when the sidebar content overflows
 test("the footer stays pinned when the sidebar content overflows", async ({
   page,
 }) => {

@@ -5,6 +5,7 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
+// Journey: the collapse affordance never appears while the final response is still streaming
 test("the collapse affordance never appears while the final response is still streaming", async ({
   page,
 }) => {
@@ -60,6 +61,7 @@ test("the collapse affordance never appears while the final response is still st
   await expect(page.getByTestId("work-toggle")).toHaveCount(2);
 });
 
+// Journey: each turn's working block collapses independently
 test("each turn's working block collapses independently", async ({ page }) => {
   // Drive a second turn (the reply script) on top of the greeting. Both settle, so both
   // collapse — two independent "Worked for Ns" headers.

@@ -48,6 +48,7 @@ function argPreviewText(loc: Locator) {
   });
 }
 
+// Journey: each tool's .arg span shows its concise field selection
 test("each tool's .arg span shows its concise field selection", async ({
   page,
 }) => {

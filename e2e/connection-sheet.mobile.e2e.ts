@@ -16,7 +16,11 @@ async function setState(page: import("@playwright/test").Page, state: string): P
   );
 }
 
-test("Connection sheet is full-screen with 44px targets", async ({ page }) => {
+// On mobile the connection sheet is full-screen with ≥44px tap targets, and the
+// Back button (full-screen overlay) cancels the connection and closes the sheet.
+test("mobile connection sheet is full-screen with 44px targets and Back cancels", async ({
+  page,
+}) => {
   const switcher = page.getByTestId("host-switcher");
   await switcher.getByTestId("host-switcher-trigger").click();
   await page.getByTestId("host-option-dev-remote").click();
@@ -33,15 +37,12 @@ test("Connection sheet is full-screen with 44px targets", async ({ page }) => {
   const cancelBox = await cancelBtn.boundingBox();
   expect(cancelBox).not.toBeNull();
   expect(cancelBox!.height).toBeGreaterThanOrEqual(44);
-});
 
-test("Back gesture closes the sheet (cancels connection)", async ({ page }) => {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await page.getByTestId("host-option-dev-remote").click();
+  // The sheet is still visible before the Back gesture (re-asserted from the
+  // back-gesture test's own panel-visible check).
   await expect(page.getByTestId("connection-sheet-panel")).toBeVisible();
 
-  // Use the Back button (phone full-screen overlay).
+  // Use the Back button (phone full-screen overlay) to close and cancel.
   await page.getByTestId("connection-sheet-panel").getByText("Back").click();
   await expect(page.getByTestId("connection-sheet-panel")).toBeHidden();
 });

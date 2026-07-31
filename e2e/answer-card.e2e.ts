@@ -19,6 +19,7 @@ test.beforeEach(async ({ page }) => {
   await waitForSettledWorkBlocks(page, 3);
 });
 
+// Journey: the answer card shows the submitted Q&A
 test("the answer card shows the submitted Q&A", async ({ page }) => {
   const card = page.locator(".qna-result");
   await expect(card).toBeVisible();
@@ -31,6 +32,7 @@ test("the answer card shows the submitted Q&A", async ({ page }) => {
   ).toBeVisible();
 });
 
+// Journey: the card stays pinned in chronological place, not floated to the bottom
 test("the card stays pinned in chronological place, not floated to the bottom", async ({
   page,
 }) => {
@@ -48,6 +50,7 @@ test("the card stays pinned in chronological place, not floated to the bottom", 
   expect(ys.some((y) => y > card!.y)).toBe(true); // post-answer run below
 });
 
+// Journey: the card is inline with the reading measure, not hugging the wide-track left
 test("the card is inline with the reading measure, not hugging the wide-track left", async ({
   page,
 }) => {

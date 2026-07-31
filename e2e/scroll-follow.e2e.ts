@@ -200,6 +200,7 @@ test("find-in-transcript jump to match un-pins the viewport so it stays at the m
   });
 });
 
+// Journey: prompt-nav ↑ un-pins so streaming content doesn't yank back to the bottom
 test("prompt-nav ↑ un-pins so streaming content doesn't yank back to the bottom", async ({
   page,
 }) => {
@@ -262,6 +263,7 @@ test.describe("composer scroll-jump (#64)", () => {
     await buildTallTranscript(page, 4);
   });
 
+  // Journey: AC.1 — typing a line-wrap in the composer keeps the transcript pinned to the bottom
   test("AC.1 — typing a line-wrap in the composer keeps the transcript pinned to the bottom", async ({
     page,
   }) => {
@@ -286,6 +288,7 @@ test.describe("composer scroll-jump (#64)", () => {
     await expect.poll(gap).toBeLessThan(5);
   });
 
+  // Journey: AC.2 — grow→shrink→grow cycle keeps the transcript pinned throughout
   test("AC.2 — grow→shrink→grow cycle keeps the transcript pinned throughout", async ({
     page,
   }) => {
@@ -314,6 +317,7 @@ test.describe("composer scroll-jump (#64)", () => {
     await expect.poll(gap).toBeLessThan(5);
   });
 
+  // Journey: AC.3 — proactive re-assert fired: composerResizeN incremented after typing a wrapping line
   test("AC.3 — proactive re-assert fired: composerResizeN incremented after typing a wrapping line", async ({
     page,
   }) => {
@@ -345,6 +349,7 @@ test.describe("composer scroll-jump (#64)", () => {
     await expect.poll(() => gapFn(scroller)).toBeLessThan(5);
   });
 
+  // Journey: AC.4 — a reader scrolled up is not yanked down when the composer grows
   test("AC.4 — a reader scrolled up is not yanked down when the composer grows", async ({
     page,
   }) => {
@@ -392,6 +397,7 @@ test.describe("composer scroll-jump (#64)", () => {
     expect(resizeNAfter).toBe(resizeNBefore);
   });
 
+  // Journey: AC.5 — a non-wrapping keystroke does not cause the transcript to jump
   test("AC.5 — a non-wrapping keystroke does not cause the transcript to jump", async ({
     page,
   }) => {

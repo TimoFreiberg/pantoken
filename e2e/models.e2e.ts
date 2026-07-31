@@ -10,7 +10,11 @@ test.beforeEach(async ({ page }) => {
   await page.waitForTimeout(300);
 });
 
-test("the combined badge shows model and effort", async ({ page }) => {
+// The combined badge shows both the model label and the effort level, and the
+// old separate thinking badge no longer exists.
+test("badge shows combined model + effort and no separate thinking badge", async ({
+  page,
+}) => {
   // AC.2 — one combined badge shows both model label and effort.
   const badge = page.getByTestId("model-badge");
   await expect(badge).toBeVisible();
@@ -20,7 +24,10 @@ test("the combined badge shows model and effort", async ({ page }) => {
   await expect(page.getByTestId("thinking-badge")).toHaveCount(0);
 });
 
-test("the picker lists models and switches the active one", async ({
+// Opening the picker via the badge click lists models, switching one updates the
+// badge and transcript, and every close path returns focus to the composer. Also
+// verifies that clicking the badge focuses the filter input on desktop.
+test("picker open via badge lists models, switches selection, and restores focus", async ({
   page,
 }) => {
   // Issue #54 — closing the model picker by any path (here: click-open →
@@ -33,6 +40,13 @@ test("the picker lists models and switches the active one", async ({
   await badge.click();
 
   const panel = page.locator(".mp .panel");
+  await expect(panel).toBeVisible();
+  // AC.1 — opening the picker by clicking the badge (not via hotkey) focuses
+  // the "Type to filter…" input, mirroring the hotkey-open behavior. The
+  // desktop project runs at a viewport wider than 859px, so isPhone is false
+  // and focus fires.
+  await expect(panel.getByPlaceholder("Type to filter…")).toBeFocused();
+  // AC.1 (re-asserted from the badge-focus test): opening via badge shows the panel.
   await expect(panel).toBeVisible();
   await expect(panel.getByText("DeepSeek V4 Flash")).toBeVisible();
   await panel.getByText("DeepSeek V4 Flash").click();
@@ -50,18 +64,8 @@ test("the picker lists models and switches the active one", async ({
   await expect(composer).toBeFocused();
 });
 
-test("clicking the badge focuses the filter on desktop", async ({ page }) => {
-  // AC.1 — opening the picker by clicking the badge (not via hotkey) focuses
-  // the "Type to filter…" input, mirroring the hotkey-open behavior. The
-  // desktop project runs at a viewport wider than 859px, so isPhone is false
-  // and focus fires.
-  await page.getByTestId("model-badge").click();
-  const panel = page.locator(".mp .panel");
-  await expect(panel).toBeVisible();
-  await expect(panel.getByPlaceholder("Type to filter…")).toBeFocused();
-});
-
-test("the filter fuzzy-matches models", async ({ page }) => {
+// The filter fuzzy-matches models and shows a no-match state for gibberish.
+test("filter fuzzy-matches models and shows no-match state", async ({ page }) => {
   // AC.4 — typing in the filter fuzzy-matches models.
   await page.getByTestId("model-badge").click();
   const panel = page.locator(".mp .panel");
@@ -78,7 +82,10 @@ test("the filter fuzzy-matches models", async ({ page }) => {
   await expect(panel.getByText("No models match")).toBeVisible();
 });
 
-test("⌘⇧M opens the picker and focuses the filter; ⌘⇧E does nothing", async ({
+// ⌘⇧M opens the picker and focuses the filter; the first Esc clears a populated
+// filter (keeping the panel open) and a second Esc closes the panel and refocuses
+// the composer. ⌘⇧E does nothing.
+test("⌘⇧M hotkey opens picker; Esc clears then closes; ⌘⇧E is a no-op", async ({
   page,
 }) => {
   // AC.3
@@ -99,6 +106,7 @@ test("⌘⇧M opens the picker and focuses the filter; ⌘⇧E does nothing", as
   await expect(page.locator(".mp .panel")).toHaveCount(0);
 });
 
+// Selecting a new model stages its default effort level.
 test("selecting a model stages its default effort", async ({ page }) => {
   // AC.5 — selecting a new model resets the staged effort to that model's default.
   await page.getByTestId("model-badge").click();
@@ -113,6 +121,7 @@ test("selecting a model stages its default effort", async ({ page }) => {
   await expect(sonnetRow.locator(".eff-val")).toContainText("medium");
 });
 
+// The arrow keys cycle effort with clamping at both ends (no wrap).
 test("←/→ and [/] cycle effort with clamping (no wrap)", async ({ page }) => {
   // AC.6
   await page.getByTestId("model-badge").click();
@@ -146,7 +155,12 @@ test("←/→ and [/] cycle effort with clamping (no wrap)", async ({ page }) =>
   await expect(opusRow.locator(".eff-val")).toContainText("off");
 });
 
-test("Enter applies the combined model + effort", async ({ page }) => {
+// Enter applies the combined model + effort in one action, and reopening the
+// picker afterward highlights the now-active model (preselect) so its effort
+// can be cycled immediately.
+test("Enter applies combined model + effort and picker preselects the active model", async ({
+  page,
+}) => {
   // AC.7 — Enter sends one combined setModel action with both modelId and thinkingLevel.
   await page.getByTestId("model-badge").click();
   const panel = page.locator(".mp .panel");
@@ -169,22 +183,13 @@ test("Enter applies the combined model + effort", async ({ page }) => {
   await expect(page.locator(".row.notice .ntext")).toContainText(
     "Model switched to anthropic/claude-sonnet-4-6 (thinking: high)",
   );
-});
 
-test("opening the picker preselects the active model", async ({ page }) => {
   // Issue #82 — the picker must highlight the current model on open, not the
   // first in the list, so the user can immediately cycle its effort level.
-
-  // Switch to a non-first model (Sonnet, index 1 in the mock catalog).
-  await page.getByTestId("model-badge").click();
-  const panel = page.locator(".mp .panel");
-  const filter = panel.getByPlaceholder("Type to filter…");
-  await filter.press("ArrowDown");
-  await filter.press("Enter");
+  // First confirm the switch took (badge re-asserted from the preselect test).
   await expect(page.getByTestId("model-badge")).toContainText(
     "Claude Sonnet 4.6",
   );
-
   // Reopen — the active model (Sonnet) should be highlighted, not Opus.
   await page.getByTestId("model-badge").click();
   const hlRow = page.locator(".mp .panel .item.hl");
@@ -199,6 +204,8 @@ test("opening the picker preselects the active model", async ({ page }) => {
   await expect(hlRow.locator(".eff-val")).toContainText("high");
 });
 
+// First Esc clears a populated filter (panel stays open), second Esc closes the
+// panel and refocuses the composer.
 test("first Esc clears the filter; second Esc closes and refocuses", async ({
   page,
 }) => {
@@ -224,6 +231,8 @@ test("first Esc clears the filter; second Esc closes and refocuses", async ({
   await expect(composer).toBeFocused();
 });
 
+// Models with a single "off" effort level show a "select" button instead of the
+// cycle control, and clicking it applies the model directly.
 test("no-effort models show a select button instead of the effort control", async ({
   page,
 }) => {

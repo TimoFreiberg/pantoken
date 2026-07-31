@@ -10,6 +10,7 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
+// Journey: dock badge shows unread count then clears when session is viewed
 test("dock badge shows unread count then clears when session is viewed", async ({
   page,
 }) => {

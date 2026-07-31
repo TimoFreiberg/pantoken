@@ -10,6 +10,7 @@ test.beforeEach(async ({ page }) => {
 const qnaForm = (page: import("@playwright/test").Page) =>
   page.getByRole("group", { name: "Questions" });
 
+// Journey: walk all three Q&A card types (single-select, multi-select, free-text) and submit.
 test("qna form walks all three card types and submits", async ({ page }) => {
   await drive(page, "qna");
   const form = qnaForm(page);
@@ -52,6 +53,7 @@ test("qna form walks all three card types and submits", async ({ page }) => {
   await expect(page.getByText("Please keep commits small.")).toBeVisible();
 });
 
+// Journey: minimize the Q&A form to its title bar, then restore it.
 test("qna form: minimize collapses to the title bar and restores", async ({
   page,
 }) => {
@@ -71,6 +73,7 @@ test("qna form: minimize collapses to the title bar and restores", async ({
   await expect(bun).toBeVisible();
 });
 
+// Journey: Back button returns to the previous Q&A card.
 test("qna form: Back returns to the previous card", async ({ page }) => {
   await drive(page, "qna");
   const form = qnaForm(page);
@@ -84,6 +87,7 @@ test("qna form: Back returns to the previous card", async ({ page }) => {
   ).toBeVisible();
 });
 
+// Journey: free-text answer is additive to a choice and preserves across navigation.
 test("qna form: free-text answer is additive and preserves its text across choices and questions", async ({
   page,
 }) => {
@@ -107,6 +111,7 @@ test("qna form: free-text answer is additive and preserves its text across choic
   await expect(bun).toHaveAttribute("aria-checked", "true");
 });
 
+// Journey: switching chats via the sidebar preserves the Q&A draft on return.
 test("qna form: sidebar can focus another chat and returning restores the draft", async ({
   page,
 }) => {
@@ -127,6 +132,7 @@ test("qna form: sidebar can focus another chat and returning restores the draft"
   );
 });
 
+// Journey: Q&A context field renders markdown (inline code, bold).
 test("qna form renders markdown in the context field", async ({ page }) => {
   await drive(page, "qna");
   const form = qnaForm(page);
@@ -139,6 +145,7 @@ test("qna form renders markdown in the context field", async ({ page }) => {
   await expect(ctx.locator("strong")).toBeVisible();
 });
 
+// Journey: Cancel uses a click-twice confirm gate to dismiss the Q&A form.
 test("qna Cancel uses a click-twice confirm gate", async ({ page }) => {
   await drive(page, "qna");
   const form = qnaForm(page);
@@ -166,6 +173,7 @@ test("qna Cancel uses a click-twice confirm gate", async ({ page }) => {
   await expect(page.getByText("Dialog cancelled.")).toBeVisible();
 });
 
+// Journey: Cancel armed state auto-disarms after 3s without dismissing.
 test("qna Cancel armed state auto-disarms after 3s", async ({ page }) => {
   await drive(page, "qna");
   const form = qnaForm(page);
@@ -186,6 +194,7 @@ test("qna Cancel armed state auto-disarms after 3s", async ({ page }) => {
   await expect(form).toBeVisible();
 });
 
+// Journey: navigating to the next question resets the Cancel armed state.
 test("qna Cancel armed state resets on question navigation", async ({ page }) => {
   await drive(page, "qna");
   const form = qnaForm(page);
@@ -200,6 +209,7 @@ test("qna Cancel armed state resets on question navigation", async ({ page }) =>
   await expect(form.getByRole("button", { name: "Click again" })).toBeHidden();
 });
 
+// Journey: Esc disarms the Cancel armed state without dismissing the form.
 test("qna Cancel Esc disarms when armed without cancelling", async ({ page }) => {
   await drive(page, "qna");
   const form = qnaForm(page);
@@ -215,6 +225,7 @@ test("qna Cancel Esc disarms when armed without cancelling", async ({ page }) =>
   await expect(form).toBeVisible();
 });
 
+// Journey: Q&A question text scales with --font-scale while action buttons do not.
 test("qna question text scales with --font-scale; action buttons do not", async ({
   page,
 }) => {
@@ -265,6 +276,7 @@ test("qna question text scales with --font-scale; action buttons do not", async 
   expect(grownBtn).toBeCloseTo(baseBtn, 0);
 });
 
+// Journey: Q&A context scrolls, options/actions stay in viewport, form caps at 70vh.
 test("qna form: context scrolls, options and actions stay in viewport, form caps at 70vh", async ({
   page,
 }) => {
@@ -334,6 +346,7 @@ test("qna form: context scrolls, options and actions stay in viewport, form caps
   expect(box!.height).toBeLessThanOrEqual(vh * 0.7 + 1); // +1px tolerance
 });
 
+// Journey: Enter advances through all Q&A questions to summary and confirms.
 test("qna form: Enter advances through questions to summary and confirms", async ({
   page,
 }) => {
@@ -364,6 +377,7 @@ test("qna form: Enter advances through questions to summary and confirms", async
   await expect(page.getByText("Keep commits small.")).toBeVisible();
 });
 
+// Journey: Enter advances after a mouse selection on the first Q&A card.
 test("qna form: Enter advances after a mouse selection", async ({ page }) => {
   // Clicking an option button focuses it in Chromium; the next Enter must
   // still advance (pickSingle returns focus to the container).
@@ -376,6 +390,7 @@ test("qna form: Enter advances after a mouse selection", async ({ page }) => {
   ).toBeVisible();
 });
 
+// Journey: Shift+Enter inserts a newline in the Q&A free-text field.
 test("qna form: Shift+Enter inserts a newline in free-text field", async ({
   page,
 }) => {
@@ -402,6 +417,7 @@ test("qna form: Shift+Enter inserts a newline in free-text field", async ({
   expect(afterH).toBeGreaterThan(beforeH);
 });
 
+// Journey: Q&A free-text textarea auto-grows up to a cap.
 test("qna form: free-text textarea auto-grows and caps", async ({ page }) => {
   await drive(page, "qna");
   const form = qnaForm(page);
@@ -429,6 +445,7 @@ test("qna form: free-text textarea auto-grows and caps", async ({ page }) => {
   expect(computedH).toBeLessThanOrEqual(maxFieldH + 1); // +1px tolerance
 });
 
+// Journey: Q&A summary page shows all answers; Back returns to editing; Confirm submits.
 test("qna form: summary page shows all answers", async ({ page }) => {
   await drive(page, "qna");
   const form = qnaForm(page);
@@ -488,6 +505,7 @@ test("qna form: summary page shows all answers", async ({ page }) => {
   await expect(page.getByText("Your answers")).toBeVisible();
 });
 
+// Journey: Q&A context scroll position is independent per question page.
 test("qna form: scroll position is independent per page", async ({ page }) => {
   await drive(page, "qnatall");
   const form = qnaForm(page);
@@ -496,9 +514,15 @@ test("qna form: scroll position is independent per page", async ({ page }) => {
   // Q1: scroll the context down.
   await expect(ctx).toBeVisible();
   await ctx.evaluate((el) => (el.scrollTop = el.scrollHeight));
-  // Verify it actually scrolled (context is tall enough to overflow).
-  const q1Scroll = await ctx.evaluate((el) => el.scrollTop);
-  expect(q1Scroll).toBeGreaterThan(100);
+  // Verify it actually scrolled (context is tall enough to overflow). The
+  // scroll may settle asynchronously under load, so poll instead of reading
+  // synchronously (the Q2/Q1 reset checks below do the same).
+  await expect
+    .poll(async () => await ctx.evaluate((el) => el.scrollTop), {
+      timeout: 2000,
+      message: "Q1 context should have scrolled down",
+    })
+    .toBeGreaterThan(100);
 
   // Advance to Q2 — its context should start at the top. The scroll reset
   // runs in a requestAnimationFrame inside QnaForm's $effect, so poll until
@@ -519,8 +543,12 @@ test("qna form: scroll position is independent per page", async ({ page }) => {
   // (Q2's scroll must not have leaked into Q1).
   await ctx.evaluate((el) => (el.scrollTop = el.scrollHeight));
   // Verify Q2 actually scrolled (same long context as Q1).
-  const q2Scroll = await ctx.evaluate((el) => el.scrollTop);
-  expect(q2Scroll).toBeGreaterThan(100);
+  await expect
+    .poll(async () => await ctx.evaluate((el) => el.scrollTop), {
+      timeout: 2000,
+      message: "Q2 context should have scrolled down",
+    })
+    .toBeGreaterThan(100);
 
   await form.getByRole("button", { name: "Back" }).click();
   await expect(

@@ -12,13 +12,21 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("permission badge shows Standard by default and switches mode", async ({
+// Journey: permission badge — default label, placement, and switching mode via the panel.
+test("permission badge shows Standard by default, sits on the status row left, and switches mode", async ({
   page,
 }) => {
   const badge = page.getByTestId("permission-badge");
   await expect(badge).toBeVisible();
   // Seeded "standard" by the mock's snapshot() base.
   await expect(badge).toContainText("Standard");
+
+  // The badge sits on the status row left, not the right side.
+  const left = page.locator("[data-testid='composer-status-row'] .status-left");
+  await expect(left.getByTestId("permission-badge")).toBeVisible();
+  await expect(
+    page.getByTestId("composer-status-right").getByTestId("permission-badge"),
+  ).toHaveCount(0);
 
   // Open the panel + pick Bypass (not Bypass+).
   await badge.click();
@@ -36,14 +44,7 @@ test("permission badge shows Standard by default and switches mode", async ({
   );
 });
 
-test("permission badge sits on the status row left", async ({ page }) => {
-  const left = page.locator("[data-testid='composer-status-row'] .status-left");
-  await expect(left.getByTestId("permission-badge")).toBeVisible();
-  await expect(
-    page.getByTestId("composer-status-right").getByTestId("permission-badge"),
-  ).toHaveCount(0);
-});
-
+// Journey: permission panel — keyboard navigation (Esc closes, arrows move, Enter picks).
 test("permission panel is keyboard-navigable (Esc closes, arrows move, Enter picks)", async ({
   page,
 }) => {
@@ -71,6 +72,7 @@ test("permission panel is keyboard-navigable (Esc closes, arrows move, Enter pic
   await expect(page.getByPlaceholder("Message pantoken…")).toBeFocused();
 });
 
+// Journey: permission mode — ⌘⇧P cycles through all four modes and wraps.
 test("⌘⇧P cycles permission mode", async ({ page }) => {
   const badge = page.getByTestId("permission-badge");
   await expect(badge).toContainText("Standard");

@@ -5,7 +5,10 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("the right sidebar shows an MCP servers section with both mock servers", async ({
+// The right sidebar's MCP servers section lists both mock servers with status
+// dots and tool counts, and a /mcp command round-trip flips a disconnected
+// server to connected.
+test("right sidebar shows MCP servers with status dots and /mcp updates the dot", async ({
   page,
 }) => {
   await openRightSidebar(page);
@@ -24,12 +27,7 @@ test("the right sidebar shows an MCP servers section with both mock servers", as
 
   // filesystem has 11 tools; github has 0.
   await expect(fsRow).toContainText("11 tools");
-});
 
-test("a /mcp round-trip updates the right-sidebar status dot", async ({ page }) => {
-  await openRightSidebar(page);
-  const section = page.getByTestId("mcp-servers");
-  const ghRow = section.locator(".mcp-item").filter({ hasText: "github" });
   // github starts disconnected.
   await expect(ghRow.locator(".mcp-dot")).toHaveClass(/mcp-disconnected/);
 
@@ -42,7 +40,12 @@ test("a /mcp round-trip updates the right-sidebar status dot", async ({ page }) 
   await expect(ghRow.locator(".mcp-dot")).toHaveClass(/mcp-connected/);
 });
 
-test("the MCP settings tab shows configured servers", async ({ page }) => {
+// The Settings → MCP tab lists configured servers with their status, and the
+// reconnect button drives a full client→wire→hub→driver round-trip that flips
+// a disconnected server to connected.
+test("settings MCP tab shows configured servers and reconnect updates status", async ({
+  page,
+}) => {
   // Open settings (⌘,).
   await page.keyboard.press("Meta+Comma");
   const panel = page.getByTestId("settings-panel");
@@ -58,11 +61,6 @@ test("the MCP settings tab shows configured servers", async ({ page }) => {
   await expect(section).toContainText("connected");
   await expect(section).toContainText("github");
   await expect(section).toContainText("disconnected");
-});
-
-test("the MCP reconnect button updates server status", async ({ page }) => {
-  await page.keyboard.press("Meta+Comma");
-  await page.getByTestId("settings-tab-mcp").click();
 
   // The github server starts disconnected. Assert the exact status span, not a
   // substring of the row — "disconnected" contains "connected", so a row-level

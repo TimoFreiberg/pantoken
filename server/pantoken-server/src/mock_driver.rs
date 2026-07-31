@@ -2472,7 +2472,16 @@ impl PantokenDriver for MockDriver {
         // fires after the abort's runCompleted and the turn re-activates.
         let delay_ms = self.abort_delay_ms.swap(0, Ordering::SeqCst);
         if delay_ms > 0 {
+            // Capture the generation before the delay and re-check after it: the
+            // slowabort path can outlive its own test (the delayed abort settles
+            // after the test's assertions already passed), and a late
+            // cancel_timers would land in the NEXT test and kill its in-flight
+            // script. Same generation guard as the settle path below.
+            let start_gen = self.generation.load(Ordering::Relaxed);
             tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            if self.generation.load(Ordering::Relaxed) != start_gen {
+                return Ok(());
+            }
         }
         self.cancel_timers();
 

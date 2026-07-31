@@ -11,7 +11,8 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("mobile: a bare Enter inserts a newline instead of sending", async ({
+// Mobile composer: bare Enter inserts a newline; the send button submits the prompt
+test("mobile composer: Enter inserts newline and send button submits", async ({
   page,
 }) => {
   const box = composer(page);
@@ -25,10 +26,9 @@ test("mobile: a bare Enter inserts a newline instead of sending", async ({
   await expect(page.locator(".row.user", { hasText: "line one" })).toHaveCount(
     0,
   );
-});
 
-test("mobile: the send button submits the prompt", async ({ page }) => {
-  const box = composer(page);
+  // The send button still sends: clear and type a new prompt.
+  await box.fill("");
   await box.click();
   await page.keyboard.type("sent from the button");
   await page.getByRole("button", { name: "Send", exact: true }).click();
@@ -39,6 +39,7 @@ test("mobile: the send button submits the prompt", async ({ page }) => {
   ).toBeVisible();
 });
 
+// Mobile: the session-controls summary never overflows the viewport
 test("mobile: the session-controls summary never overflows the viewport", async ({
   page,
 }) => {
@@ -59,6 +60,7 @@ test("mobile: the session-controls summary never overflows the viewport", async 
   await expect(page.getByTestId("model-badge")).toBeHidden();
 });
 
+// Mobile: the chooser's search input and project rows are touch-safe
 test("mobile: the chooser's search input and project rows are touch-safe", async ({
   page,
 }) => {

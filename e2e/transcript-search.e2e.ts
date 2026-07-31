@@ -21,17 +21,16 @@ function currentHighlighted(page: Page): Promise<boolean> {
   );
 }
 
-test("⌘F opens the find box and focuses it", async ({ page }) => {
+// Journey: ⌘F opens the find box focused; find-as-you-type counts and steps
+// matches; a no-match query shows 0/0; Esc closes and clears highlights.
+test("⌘F find: opens focused, counts and steps matches, Esc closes", async ({
+  page,
+}) => {
   await expect(box(page)).toBeHidden();
   await page.keyboard.press("Control+f");
   await expect(box(page)).toBeVisible();
   await expect(findInput(page)).toBeFocused();
-});
 
-test("find-as-you-type counts matches, highlights, and steps next/prev", async ({
-  page,
-}) => {
-  await page.keyboard.press("Control+f");
   // "health" appears in the user prompt and the final assistant line (≥2 visible).
   await findInput(page).fill("health");
 
@@ -47,28 +46,20 @@ test("find-as-you-type counts matches, highlights, and steps next/prev", async (
   // Enter also advances.
   await findInput(page).press("Enter");
   await expect(count(page)).toHaveText(/^2\/\d+$/);
-});
 
-test("a query with no matches shows 0/0 and no current highlight", async ({
-  page,
-}) => {
+  // Esc closes the box and clears highlights.
+  await findInput(page).press("Escape");
+  await expect(box(page)).toBeHidden();
+  await expect.poll(() => currentHighlighted(page)).toBe(false);
+
+  // Reopen: a query with no matches shows 0/0 and no current highlight.
   await page.keyboard.press("Control+f");
   await findInput(page).fill("zzznotinthetranscript");
   await expect(count(page)).toHaveText("0/0");
   await expect.poll(() => currentHighlighted(page)).toBe(false);
 });
 
-test("Esc closes the box and clears highlights", async ({ page }) => {
-  await page.keyboard.press("Control+f");
-  await findInput(page).fill("health");
-  await expect(count(page)).toHaveText(/^1\/\d+$/);
-  await expect.poll(() => currentHighlighted(page)).toBe(true);
-
-  await findInput(page).press("Escape");
-  await expect(box(page)).toBeHidden();
-  await expect.poll(() => currentHighlighted(page)).toBe(false);
-});
-
+// Journey: ⌘F does nothing while the chooser is open (no transcript).
 test("⌘F does nothing while the chooser is open (no transcript)", async ({
   page,
 }) => {
@@ -78,11 +69,8 @@ test("⌘F does nothing while the chooser is open (no transcript)", async ({
   await expect(box(page)).toBeHidden();
 });
 
-// Regression: runSearch TreeWalks only rendered DOM, so a match that lives entirely
-// inside a collapsed "Worked for Ns" run was invisible to it (the lane is unmounted via
-// {#if workShown(...)}, not just hidden). The "Cold-restore regression check" fixture
-// (restored_session_seed in mock_driver.rs) always opens with its one work run collapsed
-// by default (see reload-session.e2e.ts) — exactly the shape this needs.
+// Journey: search finds a match inside a collapsed work run and expands it
+// (regression: runSearch TreeWalks only rendered DOM).
 test("search finds a match inside a collapsed work run and expands it", async ({
   page,
 }) => {

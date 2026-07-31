@@ -16,7 +16,10 @@ async function openPicker(page: Page): Promise<void> {
   await expect(input(page)).toBeFocused();
 }
 
-test("project picker is a full-screen, touch-safe version of the desktop path picker", async ({
+// Journey: the project picker is a full-screen, touch-safe version of the
+// desktop path picker; the visible Back button closes it and consumes its
+// nested history entry.
+test("project picker is full-screen and touch-safe; Back closes it via history", async ({
   page,
 }) => {
   await openPicker(page);
@@ -30,12 +33,8 @@ test("project picker is a full-screen, touch-safe version of the desktop path pi
   await expect(row).toBeVisible();
   expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await expect(picker(page).locator("footer")).toBeHidden();
-});
 
-test("visible Back closes the picker and consumes its nested history entry", async ({
-  page,
-}) => {
-  await openPicker(page);
+  // The visible Back button closes the picker…
   await picker(page)
     .getByRole("button", { name: "Close project picker" })
     .first()
@@ -46,6 +45,7 @@ test("visible Back closes the picker and consumes its nested history entry", asy
   await page.getByTestId("chooser-browse").click();
   await expect(picker(page)).toBeVisible();
   await expect(input(page)).toBeFocused();
+  // …and browser Back consumes the nested history entry the same way.
   await page.goBack();
   await expect(picker(page)).toBeHidden();
   await expect(page.getByTestId("session-chooser")).toBeVisible();

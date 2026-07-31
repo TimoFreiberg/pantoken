@@ -102,7 +102,9 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("pasting a screenshot attaches it and image-only send stays visible", async ({
+// Flow: paste a screenshot, send it image-only, and confirm the outbox proxy-leak
+// regression banner stays absent.
+test("paste + send: a pasted screenshot attaches, image-only send works, and no prompt-outbox banner appears", async ({
   page,
 }) => {
   await dispatchFiles(page, "paste", [
@@ -121,7 +123,9 @@ test("pasting a screenshot attaches it and image-only send stays visible", async
   await expect(page.getByText("prompt outbox")).toHaveCount(0);
 });
 
-test("a thumbnail opens a full-screen preview that walks the batch and dismisses", async ({
+// Flow: paste two images, open the lightbox to walk the batch and dismiss it, then
+// remove one attachment via its × badge without sending.
+test("thumbnail chips: paste two images, preview the batch in the lightbox, then remove one via the × badge", async ({
   page,
 }) => {
   await dispatchFiles(page, "paste", [
@@ -144,17 +148,11 @@ test("a thumbnail opens a full-screen preview that walks the batch and dismisses
   await page.keyboard.press("Escape");
   await expect(lightbox).toHaveCount(0);
   await expect(page.locator("textarea")).toBeFocused();
-});
 
-test("the × badge removes a single attachment without sending", async ({
-  page,
-}) => {
-  await dispatchFiles(page, "paste", [
-    { name: "a.png", type: "image/png", base64: PNG },
-    { name: "b.png", type: "image/png", base64: PNG },
-  ]);
+  // The × badge removes a single attachment without sending. (Both images are still
+  // attached from the paste above; re-assert the count before removing to mirror the
+  // original separate test's post-dispatch assertion.)
   await expect(page.locator(".thumb-chip img")).toHaveCount(2);
-
   await page
     .locator(".thumb-chip")
     .first()
@@ -165,7 +163,9 @@ test("the × badge removes a single attachment without sending", async ({
   await expect(page.getByTestId("image-lightbox")).toHaveCount(0);
 });
 
-test("drag/drop shows a target and visibly rejects unsupported files", async ({
+// Flow: drag/drop shows a target overlay and visibly rejects unsupported files, then
+// accepts a supported image drop.
+test("drag/drop: shows a target overlay, rejects unsupported files, and accepts a supported image", async ({
   page,
 }) => {
   const text = btoa("not an image");
@@ -188,7 +188,8 @@ test("drag/drop shows a target and visibly rejects unsupported files", async ({
   await expect(page.getByTestId("attachment-status")).toHaveCount(0);
 });
 
-test("the attachment count limit is enforced before reading extra files", async ({
+// Flow: the attachment count limit is enforced before reading extra files.
+test("attachment limit: pasting more than 10 images caps at 10 and reports the limit", async ({
   page,
 }) => {
   await dispatchFiles(
@@ -207,7 +208,8 @@ test("the attachment count limit is enforced before reading extra files", async 
   );
 });
 
-test("an oversized camera-style image is compressed before attachment", async ({
+// Flow: an oversized camera-style image is compressed before attachment.
+test("compression: an oversized camera-style image is compressed before attachment", async ({
   page,
 }) => {
   await page.evaluate(async () => {
@@ -251,6 +253,7 @@ test("an oversized camera-style image is compressed before attachment", async ({
     "Compressed 1 oversized image",
   );
 });
+
 /** The image-output ToolCard for the settled image turn. The screenshot/mockup is now
  *  surfaced in the turn's always-visible slot (no work-block drill, no summary card), so
  *  we find the card by the <img> it renders unconditionally outside its collapsible body. */
@@ -258,7 +261,9 @@ function imageToolCard(page: Page) {
   return page.locator(".tool").filter({ has: page.locator("img.out-img") });
 }
 
-test("a user's image attachment is echoed back into the transcript", async ({
+// Flow: a user's image attachment is echoed back into the transcript as a decoded
+// thumbnail (previously write-only).
+test("image echo: a user's image attachment is echoed back into the transcript", async ({
   page,
 }) => {
   await drive(page, "images");
@@ -278,7 +283,9 @@ test("a user's image attachment is echoed back into the transcript", async ({
     .toBeGreaterThan(0);
 });
 
-test("a tool's image output is visible without drilling into the collapsed work", async ({
+// Flow: a tool's image output is visible without drilling into the collapsed work, and
+// the accompanying text note lives in the collapsible card body.
+test("tool image output: visible without drilling into the collapsed work; text note in the card body", async ({
   page,
 }) => {
   await drive(page, "images");
@@ -299,7 +306,10 @@ test("a tool's image output is visible without drilling into the collapsed work"
   await expect(card.getByText("Rendered mockup (160×100 PNG).")).toBeVisible();
 });
 
-test("clicking a sent image opens the full-screen viewer", async ({ page }) => {
+// Flow: clicking a sent image opens the full-screen viewer, and Escape dismisses it.
+test("sent image viewer: clicking a sent image opens the full-screen viewer; Escape dismisses", async ({
+  page,
+}) => {
   await drive(page, "images");
   const att = page.locator("img.att-img");
   await expect(att).toBeVisible();
@@ -319,7 +329,9 @@ test("clicking a sent image opens the full-screen viewer", async ({ page }) => {
   await expect(lightbox).toHaveCount(0);
 });
 
-test("both images survive a reload (typed images in the state snapshot)", async ({
+// Flow: both images (user attachment + tool output) survive a reload — the typed image
+// data lives in the server's authoritative SessionState and re-ships on reconnect.
+test("reload survival: both images survive a reload (typed images in the state snapshot)", async ({
   page,
 }) => {
   await drive(page, "images");
@@ -345,7 +357,9 @@ test("both images survive a reload (typed images in the state snapshot)", async 
     .toBeGreaterThan(0);
 });
 
-test("a pinned transcript stays at the live bottom as images decode and after reload", async ({
+// Flow: a pinned transcript stays at the live bottom as images decode and after a
+// reload, even when a late height change mimics a slow image decode.
+test("pin to bottom: transcript stays pinned at the live bottom as images decode and after reload", async ({
   page,
 }) => {
   await drive(page, "images");

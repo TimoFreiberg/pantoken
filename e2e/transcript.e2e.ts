@@ -3,7 +3,6 @@ import {
   drive,
   expandWork,
   gotoFresh,
-  openSettings,
   waitForSettledWorkBlocks,
 } from "./helpers.js";
 
@@ -11,7 +10,10 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("an extension compatibility issue folds into a warning notice", async ({
+// Journey: an extension compatibility issue folds into a warning notice, while
+// the composer footer keeps showing the model and healthy connection chrome
+// stays quiet.
+test("compat warnings fold into a notice; the composer footer shows the model", async ({
   page,
 }) => {
   await drive(page, "compat");
@@ -19,8 +21,16 @@ test("an extension compatibility issue folds into a warning notice", async ({
   await expect(notice).toBeVisible();
   await expect(notice).toContainText('Extension capability "custom"');
   await expect(notice).toContainText("terminal-only");
+
+  // The model label lives in the composer status row (moved out of the header).
+  await expect(
+    page.getByTestId("composer-status-right").getByTestId("model-badge"),
+  ).toContainText("Claude Opus 4.8");
+  await expect(page.locator(".hdr .conn")).toHaveCount(0);
 });
 
+// Journey: the greeting conversation renders with a collapsed working section,
+// and expanding reveals the narration + both tool cards.
 test("renders the greeting conversation: user, collapsed work, final answer", async ({
   page,
 }) => {
@@ -48,16 +58,7 @@ test("renders the greeting conversation: user, collapsed work, final answer", as
   );
 });
 
-test("the composer footer shows the model; healthy connection chrome stays quiet", async ({
-  page,
-}) => {
-  // The model label lives in the composer status row (moved out of the header).
-  await expect(
-    page.getByTestId("composer-status-right").getByTestId("model-badge"),
-  ).toContainText("Claude Opus 4.8");
-  await expect(page.locator(".hdr .conn")).toHaveCount(0);
-});
-
+// Journey: a tool card expands to show its output.
 test("tool card expands to show output", async ({ page }) => {
   await expandWork(page);
   const head = page.getByTestId("work-body").locator(":scope > .tool > .head").first();
@@ -67,6 +68,7 @@ test("tool card expands to show output", async ({ page }) => {
   await expect(page.getByText("server/src/index.ts:14")).toBeVisible();
 });
 
+// Journey: a tool card expands to show the full arguments.
 test("tool card expands to show the full arguments", async ({ page }) => {
   await expandWork(page);
   const head = page.getByTestId("work-body").locator(":scope > .tool > .head").first();
@@ -81,16 +83,8 @@ test("tool card expands to show the full arguments", async ({ page }) => {
   );
 });
 
-// Regression: scrolling up through history must not move the viewport on its own.
-// CSS `content-visibility: auto` + an estimated `contain-intrinsic-size` on transcript
-// rows made off-screen rows stand in at a placeholder height, then snap to their real
-// (taller) height as you scrolled up — injecting height above the viewport and drifting
-// it downward (the view "jumped" into a tall message). Render every row at true height
-// instead so scrollHeight is constant regardless of scroll position.
-//
-// This was fixed then reverted-by-readdition; guard the invariant so it can't silently
-// come back. Turns now deliberately use CV:auto, so guard both the intended containment
-// boundary and the user-visible invariant: realizing turns must not change scroll height.
+// Journey: turn virtualization must not change scroll height while scrolling
+// (regression guard for the content-visibility scroll-jump).
 test("turn virtualization does not change scroll height while scrolling", async ({ page }) => {
   const scroller = page.locator(".scroller");
 
@@ -140,7 +134,9 @@ test("turn virtualization does not change scroll height while scrolling", async 
   expect(hTop).toBe(hBottom);
 });
 
-test("a long user prompt renders clamped with an expand/collapse toggle", async ({
+// Journey: long user prompts render clamped with an expand/collapse toggle;
+// short prompts have no toggle.
+test("long prompts clamp with an expand toggle; short prompts have none", async ({
   page,
 }) => {
   // 14 lines — over the ~10-line clamp threshold. Sent through the composer so
@@ -165,14 +161,18 @@ test("a long user prompt renders clamped with an expand/collapse toggle", async 
   // Collapse back to the preview.
   await toggle.click();
   await expect(bubble).toHaveClass(/clamped/);
-});
 
-test("a short user prompt has no expand toggle", async ({ page }) => {
-  const box = page.locator(".composer-wrap textarea");
+  // A short prompt has no expand toggle.
   await box.fill("just a short question");
   await box.press("Enter");
   await expect(
     page.locator(".row.user .bubble", { hasText: "just a short question" }),
   ).toBeVisible();
-  await expect(page.getByTestId("prompt-expand")).toHaveCount(0);
+  // The short prompt's row has no expand toggle (the long prompt's toggle above
+  // belongs to its own row — scope to this row's bubble).
+  await expect(
+    page
+      .locator(".row.user", { hasText: "just a short question" })
+      .getByTestId("prompt-expand"),
+  ).toHaveCount(0);
 });

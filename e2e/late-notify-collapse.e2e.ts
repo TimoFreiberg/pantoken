@@ -17,6 +17,7 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
+// Journey: a late notification keeps the settled response visible and out of the work block.
 test("a late notification keeps the settled response visible and out of the work block", async ({
   page,
 }) => {

@@ -4,7 +4,6 @@ import {
   gotoFresh,
   openSettings,
   openSidebar,
-  waitForSettledWorkBlocks,
 } from "./helpers.js";
 
 const PNG = Buffer.from(
@@ -23,45 +22,49 @@ async function expectTall(loc: Locator, min = 44) {
   expect(box!.height).toBeGreaterThanOrEqual(min);
 }
 
-test("blocking dialog actions meet the 44px touch target", async ({ page }) => {
-  await drive(page, "confirm");
-  const dialog = page.getByRole("dialog");
-  await expectTall(dialog.getByRole("button", { name: "Allow" }));
-  await expectTall(dialog.getByRole("button", { name: "Deny" }));
-});
-
-test("non-binary select options meet the 44px touch target", async ({
+// Journey: drive a confirm dialog and verify Allow/Deny buttons meet the 44px
+// touch target, then drive a selectmany dialog and verify its radio options do.
+test("dialog actions and select options meet the 44px touch target", async ({
   page,
 }) => {
+  await drive(page, "confirm");
+  const confirmDialog = page.getByRole("dialog");
+  await expectTall(confirmDialog.getByRole("button", { name: "Allow" }));
+  await expectTall(confirmDialog.getByRole("button", { name: "Deny" }));
+
+  // Dismiss the confirm dialog before driving the next one.
+  await confirmDialog.getByRole("button", { name: "Deny" }).click();
+
   await drive(page, "selectmany");
   const options = page.getByRole("dialog").getByRole("radio");
   await expect(options).toHaveCount(3);
   for (let i = 0; i < 3; i++) await expectTall(options.nth(i));
 });
 
-test("settings navigation meets the 44px touch target", async ({
-  page,
-}) => {
-  await openSettings(page);
-  await expect(page.getByTestId("settings-panel")).toBeVisible();
-  for (const id of ["appearance", "models", "environment", "token"])
-    await expectTall(page.getByTestId(`settings-tab-${id}`));
-  await page.getByTestId("settings-tab-appearance").click();
-  await expectTall(page.getByRole("button", { name: "Back to Settings" }));
-});
-
-test("the mobile header and sidebar destinations meet the 44px touch target", async ({
-  page,
-}) => {
+// Journey: verify the mobile header and sidebar destinations, settings tabs,
+// and sidebar navigation rows all meet the 44px touch target.
+test("navigation UI meets the 44px touch target", async ({ page }) => {
   // Sessions is always the compact header entry. Context is a header entry,
   // always visible (the sidebar footer no longer carries a Context button).
   await expectTall(page.getByTestId("sidebar-open"));
   await expectTall(page.getByTestId("context-open"));
   await openSidebar(page);
   await expectTall(page.getByTestId("settings-toggle"));
-});
 
-test("sidebar navigation rows meet the 44px touch target", async ({ page }) => {
+  // Settings navigation tabs and the Back button.
+  await openSettings(page);
+  await expect(page.getByTestId("settings-panel")).toBeVisible();
+  for (const id of ["appearance", "models", "environment", "token"])
+    await expectTall(page.getByTestId(`settings-tab-${id}`));
+  await page.getByTestId("settings-tab-appearance").click();
+  await expectTall(page.getByRole("button", { name: "Back to Settings" }));
+
+  // Close settings and verify sidebar navigation rows.
+  // From the appearance subsection, Escape returns to the settings index,
+  // then a second Escape closes the panel entirely (mobile settings nav).
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("settings-panel")).toBeHidden();
   await openSidebar(page);
   const sidebar = page.getByTestId("sidebar");
 
@@ -75,7 +78,10 @@ test("sidebar navigation rows meet the 44px touch target", async ({ page }) => {
   );
 });
 
-test("the 2a composer controls are labeled and touch-safe", async ({
+// Journey: verify the composer controls (attach, send, controls trigger) are
+// labeled and touch-safe, attach an image to check preview/remove buttons, then
+// drive a streaming turn to check the stop button.
+test("composer controls are labeled and touch-safe, with a streaming stop", async ({
   page,
 }) => {
   const controls = [
@@ -114,6 +120,8 @@ test("the 2a composer controls are labeled and touch-safe", async ({
   await expect(stop).toHaveAttribute("title", /Stop/);
 });
 
+// Journey: drive a streaming turn plus a queue, then verify the queue tray
+// steer and restore buttons meet the 44px touch target and have tooltips.
 test("queue tray steer and edit buttons meet the 44px touch target and have tooltips", async ({
   page,
 }) => {

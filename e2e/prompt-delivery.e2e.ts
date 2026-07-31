@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { gotoFresh, waitForSettledWorkBlocks } from "./helpers.js";
 
+// Offline prompt survives page loss and sends once after reconnect
 test("an offline prompt survives page loss and sends once after reconnect", async ({
   context,
   page,
@@ -35,6 +36,7 @@ test("an offline prompt survives page loss and sends once after reconnect", asyn
   ).toHaveCount(0);
 });
 
+// A prompt sent mid-reconnect reads "Sending when reconnected…" not "Queued offline"
 test("a prompt sent mid-reconnect reads 'Sending when reconnected…', not 'Queued offline'", async ({
   page,
 }) => {
@@ -59,6 +61,7 @@ test("a prompt sent mid-reconnect reads 'Sending when reconnected…', not 'Queu
   );
 });
 
+// A rejected prompt stays visible and can be returned to the composer via Edit
 test("a rejected prompt stays visible and can be returned to the composer", async ({
   page,
 }) => {

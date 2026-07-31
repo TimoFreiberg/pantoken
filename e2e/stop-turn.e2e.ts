@@ -5,6 +5,9 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
+// A streaming turn shows the Stop pill + working indicator (no spinner), and the
+// stop affordance shares the composer's left edge. Enter while streaming queues a
+// follow-up and clears the box.
 test("the Stop pill + working indicator show while a normal turn streams", async ({
   page,
 }) => {
@@ -33,6 +36,8 @@ test("the Stop pill + working indicator show while a normal turn streams", async
   await expect(box).toHaveValue("");
 });
 
+// Dropping the socket mid-turn leaves the Stop pill visible but inert (disabled)
+// with an explanatory tooltip — a remote turn can't be stopped.
 test("the Stop pill disables while offline (a remote turn can't be stopped)", async ({
   page,
 }) => {
@@ -52,13 +57,12 @@ test("the Stop pill disables while offline (a remote turn can't be stopped)", as
   );
 });
 
+// A slow abort delays the entire abort() call by 1000ms, so the 500ms no-response
+// timer fires and the stop button shows a retryable "unconfirmed" state — on the stop
+// button only (no chat toast, no sidebar error). The delayed abort then settles.
 test("a slow stop becomes an explicit retry state, then reports late settlement", async ({
   page,
 }) => {
-  // The mock delays the entire abort() call by 1000ms, so no abortResult
-  // arrives within the 500ms no-response timeout. The timer fires and the
-  // stop button shows a retryable "unconfirmed" state — on the stop button
-  // only (no chat toast, no sidebar error).
   await drive(page, "slowabort");
   await drive(page, "streamhold");
   const stop = page.getByTestId("stop-button");
@@ -89,13 +93,12 @@ test("a slow stop becomes an explicit retry state, then reports late settlement"
   ).toHaveCount(0);
 });
 
+// The toolhold script arms a 1000ms delay on the terminal RunCompleted event
+// after an accepted abort. The abort itself returns Ok immediately, so no false
+// "unconfirmed" state appears.
 test("stopping during a tool call does not produce a false unconfirmed state", async ({
   page,
 }) => {
-  // The toolhold script arms a 1000ms delay on the terminal RunCompleted event
-  // after an accepted abort — simulating a tool call that takes time to
-  // interrupt. The abort itself returns Ok immediately, so abortResult
-  // { accepted: true } arrives well within the 500ms no-response timeout.
   await drive(page, "toolhold");
   await drive(page, "streamhold");
   const stop = page.getByTestId("stop-button");
@@ -121,7 +124,9 @@ test("stopping during a tool call does not produce a false unconfirmed state", a
   await expect(stop).toHaveCount(0);
 });
 
-test("the Stop pill survives a stray mid-turn idle snapshot (turn still in flight)", async ({
+// A stray mid-turn idle snapshot (turn still in flight) must not clear the Stop
+// pill — the robust turnActive signal keeps the affordance up. Stop then ends the turn.
+test("the Stop pill survives a stray mid-turn idle snapshot, then ends the turn", async ({
   page,
 }) => {
   // The regression: a turn goes running, starts a tool, then an out-of-band
@@ -167,6 +172,85 @@ test("the Stop pill survives a stray mid-turn idle snapshot (turn still in fligh
   await expect(page.getByTestId("working-indicator")).toHaveCount(0);
 });
 
+// The Stop button's tooltip names the Escape hotkey while a pending turn is in flight.
+test("the Stop button names the Escape hotkey", async ({ page }) => {
+  await drive(page, "pendinghold");
+  await expect(page.getByTestId("stop-button")).toHaveAttribute(
+    "title",
+    "Stop the agent (Esc)",
+  );
+});
+
+// Escape aborts a pending turn and restores the sent prompt to the composer (history
+// is left alone — the orphaned user message stays in the transcript). The restore is
+// deferred until the daemon accepts the stop.
+test("Escape aborts a pending turn and restores the sent prompt to the composer", async ({
+  page,
+}) => {
+  // A turn that's been sent but hasn't produced any output yet (thinking only) — the
+  // case where the just-sent prompt should come back so it can be edited/resent.
+  await drive(page, "pendinghold");
+  await expect(page.getByText("Refactor the auth middleware")).toBeVisible();
+
+  const stop = page.getByTestId("stop-button");
+  await expect(stop).toBeVisible();
+
+  const ta = page.locator(".composer-wrap textarea");
+  await expect(ta).toHaveValue("");
+  await ta.focus();
+  await page.keyboard.press("Escape");
+
+  // The turn aborts: the Stop pill clears…
+  await expect(stop).toHaveCount(0);
+  // …and the prompt is back in the composer (history is left alone — the orphaned
+  // user message stays in the transcript). The restore is deferred until the daemon
+  // accepts the stop (AbortResult { accepted: true }), so it arrives a WS tick after
+  // Escape — the timeout covers that async window.
+  await expect(ta).toHaveValue("Refactor the auth middleware", { timeout: 2_000 });
+  await expect(page.getByText("Refactor the auth middleware")).toBeVisible();
+});
+
+// A Stop button click aborts the turn but does NOT restore the prompt (only
+// Esc-from-composer restores, via the restoreOnAccepted option).
+test("Stop button click does not restore the prompt (only Esc does)", async ({
+  page,
+}) => {
+  await drive(page, "pendinghold");
+  const stop = page.getByTestId("stop-button");
+  await expect(stop).toBeVisible();
+
+  const ta = page.locator(".composer-wrap textarea");
+  await expect(ta).toHaveValue("");
+
+  await stop.click();
+
+  // The turn aborts (Stop pill clears)…
+  await expect(stop).toHaveCount(0);
+  // …but the prompt is NOT restored into the composer (only Esc-from-composer
+  // restores, via the restoreOnAccepted option).
+  await expect(ta).toHaveValue("");
+});
+
+// Escape while typing a follow-up aborts the turn but preserves the in-progress draft
+// (restore is skipped when the composer isn't empty).
+test("Escape while typing a follow-up aborts but does not clobber the draft", async ({
+  page,
+}) => {
+  await drive(page, "pendinghold");
+  const stop = page.getByTestId("stop-button");
+  await expect(stop).toBeVisible();
+
+  const ta = page.locator(".composer-wrap textarea");
+  await ta.fill("a different follow-up");
+  await page.keyboard.press("Escape");
+
+  // Still aborts the turn…
+  await expect(stop).toHaveCount(0);
+  // …but the in-progress text is preserved (restore is skipped when the box isn't empty).
+  await expect(ta).toHaveValue("a different follow-up");
+});
+
+// Escape while offline is a no-op — the stop stays disabled, no duplicate error surfaces.
 test("Escape while offline is a no-op — no duplicate error surfaces", async ({
   page,
 }) => {
@@ -203,25 +287,8 @@ test("Escape while offline is a no-op — no duplicate error surfaces", async ({
   await expect(stop).not.toHaveText("↻ Retry stop");
 });
 
-test("Stop button click does not restore the prompt (only Esc does)", async ({
-  page,
-}) => {
-  await drive(page, "pendinghold");
-  const stop = page.getByTestId("stop-button");
-  await expect(stop).toBeVisible();
-
-  const ta = page.locator(".composer-wrap textarea");
-  await expect(ta).toHaveValue("");
-
-  await stop.click();
-
-  // The turn aborts (Stop pill clears)…
-  await expect(stop).toHaveCount(0);
-  // …but the prompt is NOT restored into the composer (only Esc-from-composer
-  // restores, via the restoreOnAccepted option).
-  await expect(ta).toHaveValue("");
-});
-
+// A retried Esc-after-timeout restores the prompt via the second abort's requestId,
+// not the superseded first one.
 test("a retried Esc-after-timeout restores the prompt, not the superseded result", async ({
   page,
 }) => {

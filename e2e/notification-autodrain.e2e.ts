@@ -5,6 +5,7 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
+// Journey: notification auto-drain toggle flips on and off in Settings.
 test("notification autodrain toggle flips in Settings", async ({ page }) => {
   await openSettings(page, "notifications");
   const toggle = page.getByTestId("notification-autodrain");

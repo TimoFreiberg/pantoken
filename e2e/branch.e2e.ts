@@ -15,7 +15,10 @@ test.beforeEach(async ({ page }) => {
   ).toBeVisible();
 });
 
-test("the leaf answer hides 'Rewind from here'; the prompt still offers re-edit", async ({
+// Journey: while the greeting answer is the active-path tip, "Rewind from here"
+// is suppressed; once a later turn makes it non-leaf, exactly one "Rewind from
+// here" appears on the older turn.
+test("the tip suppresses 'Rewind from here'; it appears once the turn is non-leaf", async ({
   page,
 }) => {
   // The greeting prompt is re-editable…
@@ -27,11 +30,7 @@ test("the leaf answer hides 'Rewind from here'; the prompt still offers re-edit"
   await expect(
     page.getByRole("button", { name: "Rewind from here" }),
   ).toHaveCount(0);
-});
 
-test("an earlier turn's answer offers 'Rewind from here' once it's no longer the tip", async ({
-  page,
-}) => {
   // Send a second prompt so the greeting's answer stops being the active-path tip.
   const box = page.getByPlaceholder("Message pantoken…");
   await box.fill("now make it return JSON");
@@ -54,6 +53,8 @@ test("an earlier turn's answer offers 'Rewind from here' once it's no longer the
   expect(branchBox!.y).toBeLessThan(secondPromptBox!.y);
 });
 
+// Journey: rewinding from a user prompt rewinds the transcript and prefills the
+// composer, dropping the old turn's answer.
 test("rewinding from a user prompt rewinds the transcript and prefills the composer", async ({
   page,
 }) => {

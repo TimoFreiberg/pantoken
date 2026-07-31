@@ -12,10 +12,14 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("ArrowUp in an empty composer recalls the previous prompt", async ({
+// ArrowUp recalls the previous prompt, swaps work-in-progress drafts, and respects
+// caret position in multi-line and soft-wrapped drafts before recalling
+test("ArrowUp recalls prompts, swaps drafts, and respects caret position", async ({
   page,
 }) => {
   const ta = composer(page);
+
+  // --- Recall from an empty composer ---
   await expect(ta).toHaveValue("");
   await ta.focus();
   await page.keyboard.press("ArrowUp");
@@ -24,12 +28,8 @@ test("ArrowUp in an empty composer recalls the previous prompt", async ({
   // ArrowDown walks back past the newest entry to the (empty) live draft.
   await page.keyboard.press("ArrowDown");
   await expect(ta).toHaveValue("");
-});
 
-test("ArrowUp swaps a work-in-progress draft; ArrowDown restores it exactly", async ({
-  page,
-}) => {
-  const ta = composer(page);
+  // --- Swap a work-in-progress draft ---
   await ta.fill("a half-typed thought");
   // Caret sits at the end (single line = first AND last line), so ArrowUp recalls…
   await page.keyboard.press("ArrowUp");
@@ -37,8 +37,64 @@ test("ArrowUp swaps a work-in-progress draft; ArrowDown restores it exactly", as
   // …and ArrowDown brings back the exact work-in-progress text.
   await page.keyboard.press("ArrowDown");
   await expect(ta).toHaveValue("a half-typed thought");
+
+  // --- ArrowUp moves the caret within a multi-line draft before recalling ---
+  // Clear the recalled draft before testing caret-aware recall.
+  await ta.fill("");
+  // A real newline (Shift+Enter inserts one without sending).
+  await ta.focus();
+  await page.keyboard.type("line one");
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.type("line two");
+  // Caret is on the last line — ArrowUp should move it up a line, NOT recall history.
+  await page.keyboard.press("ArrowUp");
+  await expect(ta).toHaveValue("line one\nline two");
+  // Now on the first line — a second ArrowUp recalls.
+  await page.keyboard.press("ArrowUp");
+  await expect(ta).toHaveValue(GREETING);
+
+  // --- ArrowUp walks visual rows of a soft-wrapped line before recalling ---
+  // One logical line (no newlines) long enough to soft-wrap into several visual rows.
+  const wrapped = "wrap ".repeat(60).trim();
+  await ta.fill(wrapped);
+  // Caret at the end sits on the LAST visual row. Under logical-line gating this string is
+  // first-AND-last line, so ArrowUp would recall immediately (the jank). Visual gating
+  // moves the caret up a row instead — the draft must stay put.
+  await page.keyboard.press("ArrowUp");
+  await expect(ta).toHaveValue(wrapped);
+  // Jump to the very start (first visual row); now ArrowUp recalls.
+  await ta.evaluate((el: HTMLTextAreaElement) => {
+    el.selectionStart = el.selectionEnd = 0;
+  });
+  await page.keyboard.press("ArrowUp");
+  await expect(ta).toHaveValue(GREETING);
 });
 
+// Slash menu owns ArrowUp/ArrowDown; Alt+Enter inserts a newline instead of sending
+test("slash menu owns arrow keys and Alt+Enter inserts a newline", async ({
+  page,
+}) => {
+  const ta = composer(page);
+
+  // --- History navigation does not hijack the slash-command menu arrows ---
+  await ta.fill("/");
+  await expect(page.getByTestId("slash-menu")).toBeVisible();
+  // The slash menu owns ArrowUp/ArrowDown while open — the draft text stays "/".
+  await page.keyboard.press("ArrowUp");
+  await expect(ta).toHaveValue("/");
+
+  // --- Alt+Enter inserts a newline instead of sending ---
+  // Clear the slash-command draft first.
+  await ta.fill("");
+  await ta.focus();
+  await page.keyboard.type("line one");
+  // Alt+Enter should insert a newline, not send (matching Shift+Enter behavior).
+  await page.keyboard.press("Alt+Enter");
+  await page.keyboard.type("line two");
+  await expect(ta).toHaveValue("line one\nline two");
+});
+
+// A just-sent prompt is recallable from the now-empty composer
 test("a just-sent prompt is recallable from the now-empty composer", async ({
   page,
 }) => {
@@ -56,6 +112,7 @@ test("a just-sent prompt is recallable from the now-empty composer", async ({
   await expect(ta).toHaveValue(GREETING);
 });
 
+// Recall survives a reload (persisted submit log)
 test("recall survives a reload (persisted submit log)", async ({ page }) => {
   const ta = composer(page);
   await ta.fill("durable across reload");
@@ -73,65 +130,7 @@ test("recall survives a reload (persisted submit log)", async ({ page }) => {
   await expect(reloaded).toHaveValue("durable across reload");
 });
 
-test("ArrowUp moves the caret within a multi-line draft before recalling", async ({
-  page,
-}) => {
-  const ta = composer(page);
-  // A real newline (Shift+Enter inserts one without sending).
-  await ta.focus();
-  await page.keyboard.type("line one");
-  await page.keyboard.press("Shift+Enter");
-  await page.keyboard.type("line two");
-  // Caret is on the last line — ArrowUp should move it up a line, NOT recall history.
-  await page.keyboard.press("ArrowUp");
-  await expect(ta).toHaveValue("line one\nline two");
-  // Now on the first line — a second ArrowUp recalls.
-  await page.keyboard.press("ArrowUp");
-  await expect(ta).toHaveValue(GREETING);
-});
-
-test("ArrowUp walks visual rows of a soft-wrapped line before recalling", async ({
-  page,
-}) => {
-  const ta = composer(page);
-  // One logical line (no newlines) long enough to soft-wrap into several visual rows.
-  const wrapped = "wrap ".repeat(60).trim();
-  await ta.focus();
-  await ta.fill(wrapped);
-  // Caret at the end sits on the LAST visual row. Under logical-line gating this string is
-  // first-AND-last line, so ArrowUp would recall immediately (the jank). Visual gating
-  // moves the caret up a row instead — the draft must stay put.
-  await page.keyboard.press("ArrowUp");
-  await expect(ta).toHaveValue(wrapped);
-  // Jump to the very start (first visual row); now ArrowUp recalls.
-  await ta.evaluate((el: HTMLTextAreaElement) => {
-    el.selectionStart = el.selectionEnd = 0;
-  });
-  await page.keyboard.press("ArrowUp");
-  await expect(ta).toHaveValue(GREETING);
-});
-
-test("history navigation does not hijack the slash-command menu arrows", async ({
-  page,
-}) => {
-  const ta = composer(page);
-  await ta.fill("/");
-  await expect(page.getByTestId("slash-menu")).toBeVisible();
-  // The slash menu owns ArrowUp/ArrowDown while open — the draft text stays "/".
-  await page.keyboard.press("ArrowUp");
-  await expect(ta).toHaveValue("/");
-});
-
-test("Alt+Enter inserts a newline instead of sending", async ({ page }) => {
-  const ta = composer(page);
-  await ta.focus();
-  await page.keyboard.type("line one");
-  // Alt+Enter should insert a newline, not send (matching Shift+Enter behavior).
-  await page.keyboard.press("Alt+Enter");
-  await page.keyboard.type("line two");
-  await expect(ta).toHaveValue("line one\nline two");
-});
-
+// Ctrl+R opens the prompt history popup and fills the composer on Enter
 test("Ctrl+R opens prompt history popup and fills the composer on Enter", async ({
   page,
 }) => {
@@ -163,6 +162,7 @@ test("Ctrl+R opens prompt history popup and fills the composer on Enter", async 
   await expect(popupComposer).not.toHaveValue("");
 });
 
+// Escape closes the prompt history popup without filling the composer
 test("Escape closes the prompt history popup without filling", async ({
   page,
 }) => {

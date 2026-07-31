@@ -1,10 +1,13 @@
 import { expect, test } from "@playwright/test";
 import { drive, gotoFresh } from "./helpers.js";
 
+// Shared boot: reset the mock to its initial fixture, load the app, and wait for
+// the greeting conversation to settle before each flow.
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
+// Journey: confirm dialog — Allow resolves and surfaces an approval notice.
 test("confirm dialog: Allow resolves and surfaces a notice", async ({
   page,
 }) => {
@@ -16,6 +19,7 @@ test("confirm dialog: Allow resolves and surfaces a notice", async ({
   await expect(page.getByText("Approved — continuing.")).toBeVisible();
 });
 
+// Journey: confirm dialog — Allow and Deny buttons share the row equally.
 test("confirm dialog action buttons share the row equally", async ({ page }) => {
   await drive(page, "confirm");
   const dialog = page.getByRole("dialog");
@@ -30,12 +34,14 @@ test("confirm dialog action buttons share the row equally", async ({ page }) => 
   }
 });
 
+// Journey: confirm dialog — Deny resolves with the deny notice.
 test("confirm dialog: Deny resolves with the deny notice", async ({ page }) => {
   await drive(page, "confirm");
   await page.getByRole("dialog").getByRole("button", { name: "Deny" }).click();
   await expect(page.getByText("Denied — skipping that step.")).toBeVisible();
 });
 
+// Journey: input dialog — type a value and submit it.
 test("input dialog submits a value", async ({ page }) => {
   await drive(page, "input");
   const dialog = page.getByRole("dialog");
@@ -45,6 +51,7 @@ test("input dialog submits a value", async ({ page }) => {
   await expect(page.getByText("Received: My commit")).toBeVisible();
 });
 
+// Journey: select dialog — a 3+ option select is an arrow-navigable radiogroup.
 test("a 3+ option select is an arrow-navigable radiogroup", async ({
   page,
 }) => {
@@ -70,6 +77,7 @@ test("a 3+ option select is an arrow-navigable radiogroup", async ({
   await expect(page.getByText("Received: staging")).toBeVisible();
 });
 
+// Journey: input dialog — a backdrop tap is ignored once the dialog is dirty.
 test("a backdrop tap is ignored once an input dialog is dirty", async ({
   page,
 }) => {
@@ -91,6 +99,7 @@ test("a backdrop tap is ignored once an input dialog is dirty", async ({
   await expect(page.getByRole("dialog")).toBeHidden();
 });
 
+// Journey: confirm dialog — the approval sheet is a labelled modal.
 test("the approval sheet is a labelled modal (aria-modal + accessible name)", async ({
   page,
 }) => {
@@ -100,6 +109,7 @@ test("the approval sheet is a labelled modal (aria-modal + accessible name)", as
   await expect(dialog).toHaveAttribute("aria-modal", "true");
 });
 
+// Journey: confirm dialog — Escape cancels (deny-safe) and surfaces the cancelled notice.
 test("Escape cancels the dialog (deny-safe) and surfaces the cancelled notice", async ({
   page,
 }) => {
@@ -111,6 +121,7 @@ test("Escape cancels the dialog (deny-safe) and surfaces the cancelled notice", 
   await expect(page.getByText("Dialog cancelled.")).toBeVisible();
 });
 
+// Journey: ambient status — status strip + a collapsed tasklist pill that expands.
 test("ambient: status strip + a collapsed tasklist pill that expands", async ({
   page,
 }) => {
@@ -144,4 +155,89 @@ test("ambient: status strip + a collapsed tasklist pill that expands", async ({
   await pill.click();
   await page.mouse.move(0, 0);
   await expect(task).toBeVisible();
+});
+
+// --- Permission card flows (absorbed from permission-popup.e2e.ts) ---
+// Exercises the `permission` HostUiRequest kind: the card surfaces the tool
+// name + a JSON preview of the tool's input, and renders only the pruned approval
+// options (keep_targets=[session] → Deny + Allow once + Allow for session).
+// The fixture (permissionDialog in fixtures.ts) uses the shared
+// pruneApprovalOptions helper so the pruning logic can't drift from the forward
+// mapping.
+
+// Journey: permission card — shows tool name + input preview + pruned options.
+test("permission card: shows tool name + input preview + pruned options", async ({
+  page,
+}) => {
+  await drive(page, "permission");
+  const dialog = page.getByRole("dialog", { name: "Run bash?" });
+  await expect(dialog).toBeVisible();
+
+  // The tool name renders (shell_exec).
+  await expect(dialog.getByText("shell_exec")).toBeVisible();
+
+  // The tool input preview renders — the recognizable command string is
+  // visible inside the scrollable <pre>.
+  const input = dialog.locator(".tool-input");
+  await expect(input).toBeVisible();
+  await expect(input).toContainText("rm -rf /tmp/test");
+
+  // Only 3 options render (Deny + Allow once + Allow for session), NOT
+  // the full 7 — keep_targets=[session] pruned project/user grants out.
+  const options = dialog.getByRole("radio");
+  await expect(options).toHaveCount(3);
+  for (const label of ["Deny", "Allow once", "Allow for session"]) {
+    await expect(
+      dialog.getByRole("radio", { name: label, exact: true }),
+    ).toBeVisible();
+  }
+  // The pruned-out options are absent.
+  for (const label of ["Allow for project", "Allow for user"]) {
+    await expect(
+      dialog.getByRole("radio", { name: label }),
+    ).toHaveCount(0);
+  }
+});
+
+// Journey: permission card — clicking Allow for session resolves the card.
+test("permission card: clicking Allow for session resolves the card", async ({
+  page,
+}) => {
+  await drive(page, "permission");
+  const dialog = page.getByRole("dialog");
+  await dialog
+    .getByRole("radio", { name: "Allow for session", exact: true })
+    .click();
+  // The mock acks a value response with "Received: <value>".
+  await expect(page.getByText("Received: Allow for session")).toBeVisible();
+  await expect(dialog).toBeHidden();
+});
+
+// Journey: permission card — Escape cancels (deny-safe).
+test("permission card: Escape cancels (deny-safe)", async ({ page }) => {
+  await drive(page, "permission");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(page.getByText("Dialog cancelled.")).toBeVisible();
+});
+
+// Journey: permission card — arrow-navigable radiogroup (roving tabindex + Enter).
+test("permission card is an arrow-navigable radiogroup", async ({ page }) => {
+  await drive(page, "permission");
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("radiogroup")).toBeVisible();
+  const options = dialog.getByRole("radio");
+  await expect(options).toHaveCount(3);
+
+  // ArrowDown moves focus + marks the option selected (roving tabindex).
+  await options.first().focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(options.nth(1)).toBeFocused();
+  await expect(options.nth(1)).toHaveAttribute("aria-checked", "true");
+
+  // Enter submits the focused radio.
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(page.getByText("Received: Allow once")).toBeVisible();
 });

@@ -8,6 +8,7 @@ test.beforeEach(async ({ page }) => {
 // Runs under the "mobile" project (Pixel 7 viewport, hasTouch). Verifies the
 // permission card's layout + tap targets are comfortable on a phone.
 
+// Journey: mobile permission card — options are full-width tap targets and resolve on tap.
 test("mobile: permission card options are full-width tap targets", async ({
   page,
 }) => {

@@ -11,7 +11,9 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("a streamed reply renders user text, a working block, and the final answer", async ({
+// Journey: a streamed reply renders user text, a working block, and the final
+// answer; sending a prompt clears the composer.
+test("a streamed reply renders fully; sending clears the composer", async ({
   page,
 }) => {
   await drive(page, "reply");
@@ -22,9 +24,8 @@ test("a streamed reply renders user text, a working block, and the final answer"
   // answer text. The reply script's deltas arrive over ~1s of scripted delays,
   // but under load the mock's tokio task + WS delivery can lag; a bare
   // toBeVisible("That confirms it") races the 5s window against streaming that
-  // hasn't begun yet (the error-context shows no reply assistant content at
-  // all when this trips). Waiting for the settled work block proves the turn
-  // ran end-to-end — the same gate gotoFresh and the thinking-hidden test use.
+  // hasn't begun yet. Waiting for the settled work block proves the turn ran
+  // end-to-end — the same gate gotoFresh and the thinking-hidden test use.
   await waitForSettledWorkBlocks(page, 2);
   await expect(
     page.getByText("That confirms it", { exact: false }),
@@ -45,8 +46,17 @@ test("a streamed reply renders user text, a working block, and the final answer"
   await expect(toolCard.first().locator(":scope > .head .name")).toHaveText(
     "Read file",
   );
+
+  // Typing a prompt then sending clears the composer.
+  const box = page.getByPlaceholder("Message pantoken…");
+  await box.fill("hello there");
+  await box.press("Enter");
+  await expect(page.getByText("hello there")).toBeVisible();
+  await expect(box).toHaveValue("");
 });
 
+// Journey: streaming text reveals with a fade wrapper; settled history stays
+// static.
 test("streaming text reveals with a fade wrapper; settled history stays static", async ({
   page,
 }) => {
@@ -69,6 +79,8 @@ test("streaming text reveals with a fade wrapper; settled history stays static",
   ).not.toHaveCount(0);
 });
 
+// Journey: with thinking hidden (default), no thinking block renders when the
+// item has answer text.
 test("with thinking hidden, no thinking block renders when the item has answer text", async ({
   page,
 }) => {
@@ -85,6 +97,7 @@ test("with thinking hidden, no thinking block renders when the item has answer t
   await expect(page.getByText("Thought process")).toHaveCount(0);
 });
 
+// Journey: disabling Hide thinking reveals the expandable thinking block.
 test("disabling Hide thinking reveals the expandable thinking block", async ({
   page,
 }) => {
@@ -122,15 +135,9 @@ test("disabling Hide thinking reveals the expandable thinking block", async ({
   ).toBeVisible();
 });
 
-test("typing a prompt then sending clears the composer", async ({ page }) => {
-  const box = page.getByPlaceholder("Message pantoken…");
-  await box.fill("hello there");
-  await box.press("Enter");
-  await expect(page.getByText("hello there")).toBeVisible();
-  await expect(box).toHaveValue("");
-});
-
-test("with thinking hidden, the active thinking tail renders while streaming (pendinghold)", async ({
+// Journey: with thinking hidden, the active thinking tail renders while a
+// pendinghold turn streams (thinking-only, never settling).
+test("with thinking hidden, the active thinking tail renders while streaming", async ({
   page,
 }) => {
   // The "pendinghold" fixture streams only thinking deltas (no answer text),
@@ -144,6 +151,7 @@ test("with thinking hidden, the active thinking tail renders while streaming (pe
   await expect(page.locator(".think .shimmer")).toHaveCount(0);
 });
 
+// Journey: a run-failed turn shows an error card whose Resume sends continue.
 test("run-failed shows an error card whose Resume sends continue", async ({
   page,
 }) => {

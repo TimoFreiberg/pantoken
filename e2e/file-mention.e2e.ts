@@ -1,11 +1,19 @@
 import { expect, test, type Page } from "@playwright/test";
-import { gotoFresh } from "./helpers.js";
+import { drive, gotoFresh } from "./helpers.js";
 
 // @-reference autocomplete: files (the original @-file mention), plus the kind-aware
 // picker added on top — skills (`@skill:`/`@s:`), subagents (`@subagent:`/`@a:`),
 // models (`@model:`/`@m:`), and the sigil rows that narrow a bare/partial query into
 // one of those kinds. Prompts stay plain text; the picker only ever inserts a
 // canonical `@…` token into the textarea.
+//
+// Also covers resolution feedback (Stage 6): the daemon reports which `@`-references
+// it resolved out of a sent prompt (PromptAccepted.resolved_references) or a drained
+// queue item (PendingTurnInputDrained.resolved_references), and warns when a queued
+// item is dropped for a reference it couldn't resolve (PendingTurnInputDiscarded.
+// missing_references). The mock driver fakes this deterministically: `mock_driver.rs`'s
+// `parse_at_references` scans the sent text for `@skill:`/`@subagent:`/`@model:`/known
+// file tokens.
 
 const ta = (page: Page) => page.locator(".composer-wrap textarea");
 const menu = (page: Page) => page.getByTestId("at-menu");
@@ -16,7 +24,9 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("@skill: lists the available skills; Enter inserts the canonical form", async ({
+// Flow: open the skill picker, accept a skill, then narrow via the @s: shorthand —
+// both the long and shorthand sigils canonicalize to `@skill:<name>` on Enter.
+test("skill picker: @skill: lists skills and @s: narrows; both insert the canonical long sigil", async ({
   page,
 }) => {
   const box = ta(page);
@@ -27,21 +37,23 @@ test("@skill: lists the available skills; Enter inserts the canonical form", asy
   await expect(row(page, "skill:journal")).toBeVisible();
   await box.press("Enter");
   await expect(box).toHaveValue("@skill:debug ");
-});
 
-test("@s:jou narrows the shorthand to journal only", async ({ page }) => {
-  const box = ta(page);
+  // The shorthand `@s:` narrows to journal only; the canonical form is always the long
+  // sigil, regardless of the shorthand typed.
+  await box.fill("");
   await box.click();
   await page.keyboard.type("@s:jou");
   await expect(menu(page)).toBeVisible();
   await expect(row(page, "skill:journal")).toBeVisible();
   await expect(row(page, "skill:debug")).toHaveCount(0);
   await box.press("Enter");
-  // Canonical form is always the long sigil, regardless of the shorthand typed.
   await expect(box).toHaveValue("@skill:journal ");
 });
 
-test("@a: lists the available subagents", async ({ page }) => {
+// Flow: open the subagent picker and accept an entry — inserts `@subagent:<name>`.
+test("subagent picker: @a: lists the available subagents and accepts the canonical form", async ({
+  page,
+}) => {
   const box = ta(page);
   await box.click();
   await page.keyboard.type("@a:");
@@ -52,7 +64,9 @@ test("@a: lists the available subagents", async ({ page }) => {
   await expect(box).toHaveValue("@subagent:reviewer ");
 });
 
-test("@m: lists the mock models; accepting inserts the canonical modelId + default effort", async ({
+// Flow: open the model picker, narrow with the shorthand's partial, and accept —
+// inserts the canonical `@model:<modelId>` plus the model's default effort level.
+test("model picker: @m: lists models, narrows by partial, and accepts canonical modelId + default effort", async ({
   page,
 }) => {
   const box = ta(page);
@@ -73,7 +87,9 @@ test("@m: lists the mock models; accepting inserts the canonical modelId + defau
   await expect(box).toHaveValue("@model:openai/gpt-5(medium) ");
 });
 
-test("@sk shows the skill: sigil row after file matches; accepting it narrows into the skill list", async ({
+// Flow: a bare query that matches files but also offers a kind sigil row — accepting
+// the sigil row narrows the menu into that kind's full list (keep-narrowing mechanic).
+test("sigil row: @sk offers the skill: sigil after file matches; accepting it narrows into the skill list", async ({
   page,
 }) => {
   const box = ta(page);
@@ -97,6 +113,7 @@ test("@sk shows the skill: sigil row after file matches; accepting it narrows in
   await expect(row(page, "skill:journal")).toBeVisible();
 });
 
+// Flow: Escape dismisses the @-reference menu without changing the draft.
 test("Escape dismisses the @-reference menu without changing the draft", async ({
   page,
 }) => {
@@ -109,13 +126,16 @@ test("Escape dismisses the @-reference menu without changing the draft", async (
   await expect(box).toHaveValue("@skill:");
 });
 
-test("[ ] adjust a selected model row's reasoning level; accepting appends (level)", async ({
+// Flow: [ and ] step a highlighted model row's reasoning level — a multi-level model
+// wraps and clamps, and a single-level model clamps at the top then unsets past the
+// only level; accepting appends (level) or nothing.
+test("model reasoning: [ and ] step the reasoning level — multi-level wraps, single-level clamps and unsets", async ({
   page,
 }) => {
-  const box = ta(page);
-  await box.click();
   // Narrow to the single leveled model claude-sonnet-4-6 (mock fixture:
   // thinkingLevels off/low/medium/high — server/pantoken-server/src/mock_driver.rs).
+  const box = ta(page);
+  await box.click();
   await page.keyboard.type("@m:sonnet");
   await expect(menu(page)).toBeVisible();
   await expect(row(page, "model:anthropic/claude-sonnet-4-6")).toBeVisible();
@@ -143,15 +163,11 @@ test("[ ] adjust a selected model row's reasoning level; accepting appends (leve
 
   await box.press("Enter");
   await expect(box).toHaveValue("@model:anthropic/claude-sonnet-4-6(medium) ");
-});
 
-test("] clamps at the top level of a single-level model instead of wrapping", async ({
-  page,
-}) => {
-  const box = ta(page);
-  await box.click();
   // deepseek-v4-flash's only thinking level is "off" (mock fixture), which is also
   // its defaultThinkingLevel — so the row seeds to "off" on highlight.
+  await box.fill("");
+  await box.click();
   await page.keyboard.type("@m:deepseek");
   await expect(menu(page)).toBeVisible();
   await expect(row(page, "model:deepseek/deepseek-v4-flash")).toBeVisible();
@@ -187,7 +203,9 @@ test("] clamps at the top level of a single-level model instead of wrapping", as
   ).toEqual({ selectionStart: 34, selectionEnd: 34 });
 });
 
-test("[ and ] on a non-model row type the character into the draft instead of being swallowed", async ({
+// Flow: [ and ] on a non-model row type the character into the draft instead of being
+// swallowed for reasoning-level stepping.
+test("key passthrough: [ and ] on a non-model row type into the draft instead of being swallowed", async ({
   page,
 }) => {
   const box = ta(page);
@@ -214,7 +232,9 @@ test("[ and ] on a non-model row type the character into the draft instead of be
 // so assertions rely on Playwright's auto-retrying `expect` rather than a fixed wait.
 // Keyboard accepts throughout — mouse accepts have a known cursor-resync quirk.
 
-test("@~/ lists the synthetic external home — dirs first, hidden dotfile absent", async ({
+// Flow: browse the synthetic external home — list dirs-first with the hidden dotfile
+// absent, narrow to projects/, then drill into projects/ and accept readme.md.
+test("external home: @~/ lists dirs-first, @~/proj narrows to projects/, and drilling in accepts readme.md", async ({
   page,
 }) => {
   const box = ta(page);
@@ -225,28 +245,17 @@ test("@~/ lists the synthetic external home — dirs first, hidden dotfile absen
   await expect(row(page, "file:~/notes.md")).toBeVisible();
   await expect(row(page, "file:~/todo.txt")).toBeVisible();
   await expect(row(page, "file:~/.secrets")).toHaveCount(0);
-});
 
-test("@~/proj narrows to the projects/ directory only", async ({ page }) => {
-  const box = ta(page);
-  await box.click();
-  await page.keyboard.type("@~/proj");
+  // Narrow to the projects/ directory only.
+  await page.keyboard.type("proj");
   await expect(menu(page)).toBeVisible();
   await expect(row(page, "file:~/projects")).toBeVisible();
   await expect(row(page, "file:~/notes.md")).toHaveCount(0);
   await expect(row(page, "file:~/todo.txt")).toHaveCount(0);
-});
-
-test("keyboard-accepting projects/ drills down; accepting readme.md completes the path", async ({
-  page,
-}) => {
-  const box = ta(page);
-  await box.click();
-  await page.keyboard.type("@~/proj");
-  await expect(menu(page)).toBeVisible();
-  await expect(row(page, "file:~/projects")).toBeVisible();
 
   // Only "~/projects" matches "proj" — it's the sole (and default-highlighted) row.
+  await expect(menu(page)).toBeVisible();
+  await expect(row(page, "file:~/projects")).toBeVisible();
   await box.press("Enter");
   await expect(box).toHaveValue("@~/projects/");
 
@@ -265,17 +274,19 @@ test("keyboard-accepting projects/ drills down; accepting readme.md completes th
   await expect(box).toHaveValue("@~/projects/readme.md ");
 });
 
-test("@../ lists the parent-relative fixtures", async ({ page }) => {
+// Flow: the parent-relative (@../) and root-anchored (@/etc/) external path fixtures
+// both list their entries through the server query.
+test("external anchors: @../ lists parent-relative fixtures and @/etc/ lists the root-anchored fixture", async ({
+  page,
+}) => {
   const box = ta(page);
   await box.click();
   await page.keyboard.type("@../");
   await expect(menu(page)).toBeVisible();
   await expect(row(page, "file:../sibling-project")).toBeVisible();
   await expect(row(page, "file:../NOTES.md")).toBeVisible();
-});
 
-test("@/etc/ lists the root-anchored fixture", async ({ page }) => {
-  const box = ta(page);
+  await box.fill("");
   await box.click();
   await page.keyboard.type("@/etc/");
   await expect(menu(page)).toBeVisible();
@@ -289,7 +300,10 @@ test("@/etc/ lists the root-anchored fixture", async ({ page }) => {
 // own to reveal (server/pantoken-server/src/mock_driver.rs `mock_ignored_files()` /
 // `mock_external_tree()`).
 
-test("project mode: a query matching only a hidden fixture shows nothing until Shift+Tab reveals it, and again to hide it", async ({
+// Flow: Shift+Tab reveals hidden fixtures in project mode and external mode, and a
+// second Shift+Tab hides them again — the ignore-toggle consumes the key so the facet
+// does not rotate.
+test("Shift+Tab ignore-toggle: reveals hidden fixtures in project and external modes, and toggles back off", async ({
   page,
 }) => {
   const box = ta(page);
@@ -316,12 +330,9 @@ test("project mode: a query matching only a hidden fixture shows nothing until S
   await box.press("Shift+Tab");
   await expect(menu(page)).toBeVisible();
   await expect(menu(page)).toContainText("No matches");
-});
 
-test("@~/ then Shift+Tab reveals the hidden ~/.secrets fixture; Shift+Tab again hides it", async ({
-  page,
-}) => {
-  const box = ta(page);
+  // External mode: @~/ then Shift+Tab reveals the hidden ~/.secrets fixture.
+  await box.fill("");
   await box.click();
   await page.keyboard.type("@~/");
   await expect(menu(page)).toBeVisible();
@@ -343,7 +354,9 @@ test("@~/ then Shift+Tab reveals the hidden ~/.secrets fixture; Shift+Tab again 
 // when the query matches nothing — showing a "No matches" body and the pinned hotkey
 // footer, so there's no "surprise Shift+Tab" from a hidden menu.
 
-test("menu stays open with 'No matches' when a project query matches nothing", async ({
+// Flow: an empty @-menu stays open showing "No matches", ignores arrow keys, and
+// Escape dismisses it without changing the draft.
+test("empty @-menu: stays open with 'No matches', ignores arrow keys, and Escape dismisses", async ({
   page,
 }) => {
   const box = ta(page);
@@ -353,12 +366,26 @@ test("menu stays open with 'No matches' when a project query matches nothing", a
   await expect(menu(page)).toContainText("No matches");
   // The footer/hotkeys stay visible below the empty body.
   await expect(menu(page)).toContainText("↑↓ navigate");
+
+  // ArrowUp/ArrowDown on an empty @-menu is a no-op (no crash, menu stays open).
+  // Re-assert the "No matches" body before the first arrow key — the arrow-key
+  // sub-flow's own initial precondition (preserved verbatim from its source test).
+  await expect(menu(page)).toContainText("No matches");
+  await box.press("ArrowDown");
+  await expect(menu(page)).toBeVisible();
+  await expect(menu(page)).toContainText("No matches");
+  await box.press("ArrowUp");
+  await expect(menu(page)).toBeVisible();
+  await expect(menu(page)).toContainText("No matches");
+
   // Escape dismisses the always-open empty menu.
   await box.press("Escape");
   await expect(menu(page)).toHaveCount(0);
 });
 
-test("Enter on an empty @-menu falls through to submit (does not swallow)", async ({
+// Flow: Enter on an empty @-menu falls through to submit (does not swallow) — the
+// draft with the literal @zzz is sent and appears in the transcript.
+test("empty @-menu: Enter falls through to submit (does not swallow)", async ({
   page,
 }) => {
   const box = ta(page);
@@ -374,22 +401,8 @@ test("Enter on an empty @-menu falls through to submit (does not swallow)", asyn
   await expect(menu(page)).toHaveCount(0);
 });
 
-test("ArrowUp/ArrowDown on an empty @-menu is a no-op (no crash, menu stays open)", async ({
-  page,
-}) => {
-  const box = ta(page);
-  await box.click();
-  await page.keyboard.type("@zzz");
-  await expect(menu(page)).toContainText("No matches");
-  await box.press("ArrowDown");
-  await expect(menu(page)).toBeVisible();
-  await expect(menu(page)).toContainText("No matches");
-  await box.press("ArrowUp");
-  await expect(menu(page)).toBeVisible();
-  await expect(menu(page)).toContainText("No matches");
-});
-
-test("skill/subagent/model rows render a front kind: prefix; no right-edge badge", async ({
+// Flow: skill/subagent/model rows render a front `kind:` prefix and no right-edge badge.
+test("row rendering: skill/subagent/model rows show a front kind: prefix and no right-edge badge", async ({
   page,
 }) => {
   const box = ta(page);
@@ -415,7 +428,9 @@ test("skill/subagent/model rows render a front kind: prefix; no right-edge badge
   await expect(menu(page).locator(".kind-badge")).toHaveCount(0);
 });
 
-test("pinned footer stays visible when scrolling the list to the top", async ({
+// Flow: the pinned footer stays visible when scrolling the list to both the bottom and
+// the top — it lives outside the scroll region.
+test("pinned footer: stays visible when scrolling the list to the bottom and back to the top", async ({
   page,
 }) => {
   const box = ta(page);
@@ -436,7 +451,9 @@ test("pinned footer stays visible when scrolling the list to the top", async ({
   await expect(menu(page).getByText("↑↓ navigate")).toBeVisible();
 });
 
-test("plain Tab still accepts the highlighted row after Shift+Tab has toggled ignored files on", async ({
+// Flow: after Shift+Tab toggles ignored files on, plain (unshifted) Tab still accepts
+// the highlighted row — the toggle does not break accept.
+test("Tab accept: plain Tab still accepts the highlighted row after Shift+Tab toggled ignored files on", async ({
   page,
 }) => {
   const box = ta(page);
@@ -457,6 +474,8 @@ test("plain Tab still accepts the highlighted row after Shift+Tab has toggled ig
   await expect(box).toHaveValue("@~/.secrets ");
 });
 
+// Flow: Shift+Tab in a skill takeover (no ignored-files notion) opens the facet menu —
+// no toggle, no accept, no facet rotation; Escape aborts without changing the facet.
 test("Shift+Tab in a skill takeover opens the facet menu (no toggle, no accept, no rotation)", async ({
   page,
 }) => {
@@ -493,6 +512,10 @@ test("Shift+Tab in a skill takeover opens the facet menu (no toggle, no accept, 
 // previous results, re-filtered against the new query, until fresh server results arrive.
 // The mock driver's list_files is synchronous, so we intercept the WS `fileList` frame
 // and hold it to make the in-flight window observable.
+//
+// Special boot: routeWebSocket must be installed BEFORE navigation, so this flow does a
+// second reset+reload inside the test body after installing the gate (the file-level
+// beforeEach already booted once without the gate).
 test("no flicker: narrowing @~/p keeps re-filtered rows visible during the in-flight window", async ({
   page,
 }) => {
@@ -548,4 +571,72 @@ test("no flicker: narrowing @~/p keeps re-filtered rows visible during the in-fl
   for (const send of pendingFileList.splice(0)) send();
   await expect(menu(page)).toBeVisible();
   await expect(row(page, "file:~/projects")).toBeVisible();
+});
+
+// ── Resolution feedback (absorbed from resolved-references.e2e.ts) ──
+
+// Flow: a sent prompt with recognized @-mentions shows resolved-reference chips, and a
+// plain prompt with no @-mentions shows none.
+test("resolved references: recognized @-mentions show chips on the sent row; a plain prompt shows none", async ({
+  page,
+}) => {
+  const composer = page.getByPlaceholder("Message pantoken…");
+  await composer.fill("Ask @skill:debug to review @README.md please.");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const sentRow = page.locator(".row.user", {
+    hasText: "Ask @skill:debug to review @README.md please.",
+  });
+  await expect(sentRow).toBeVisible();
+
+  const chips = sentRow.locator(".ref-chip");
+  await expect(chips).toHaveCount(2);
+  await expect(chips.nth(0)).toContainText("skill");
+  await expect(chips.nth(0)).toContainText("debug");
+  await expect(chips.nth(0)).toHaveAttribute(
+    "title",
+    "Resolved reference: skill debug",
+  );
+  await expect(chips.nth(1)).toContainText("file");
+  await expect(chips.nth(1)).toContainText("README.md");
+
+  // A prompt with no recognized @-mentions shows no chips.
+  await composer.fill("Just a plain message, nothing special.");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const plainRow = page.locator(".row.user", {
+    hasText: "Just a plain message, nothing special.",
+  });
+  await expect(plainRow).toBeVisible();
+  await expect(plainRow.locator(".ref-chip")).toHaveCount(0);
+});
+
+// Flow: discarding a queued item for a missing reference drops it (no promotion to a
+// user turn) and shows a visible warning naming the missing references.
+test("resolved references: discarding a queued item for a missing reference shows a visible warning", async ({
+  page,
+}) => {
+  await drive(page, "queue");
+  await expect(page.getByTestId("queue-tray")).toContainText("Queued · 2");
+
+  await drive(page, "discardqueue");
+
+  // The queue lost its head item…
+  await expect(page.getByTestId("queue-tray")).toContainText("Queued · 1");
+  await expect(page.getByTestId("queue-tray")).not.toContainText(
+    "Please inspect the failing test first.",
+  );
+  // …and it did NOT get promoted into a user turn (contrast "deliverqueue").
+  await expect(
+    page.locator(".row.user", {
+      hasText: "Please inspect the failing test first.",
+    }),
+  ).toHaveCount(0);
+
+  // A visible warning names the missing references.
+  const notice = page.locator(".notice.warning");
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText("Queued message dropped");
+  await expect(notice).toContainText('skill "ghost-skill"');
+  await expect(notice).toContainText('file "ghost-file.md"');
 });

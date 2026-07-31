@@ -15,6 +15,7 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
+// Journey: the header context entry shows a plain-total badge
 test("the header context entry shows a plain-total badge", async ({ page }) => {
   // Default fixture: no flags/jobs/todos → the header entry is still visible
   // (always reachable) but carries no badge.
@@ -33,6 +34,7 @@ test("the header context entry shows a plain-total badge", async ({ page }) => {
   await expect(page.getByTestId("context-badge")).toHaveText("9");
 });
 
+// Journey: the context view opens full-screen with a title and back arrow
 test("the context view opens full-screen with a title and back arrow", async ({
   page,
 }) => {
@@ -58,6 +60,7 @@ test("the context view opens full-screen with a title and back arrow", async ({
   ).toBeVisible();
 });
 
+// Journey: the browser back gesture closes the context view without leaving the app
 test("the browser back gesture closes the context view without leaving the app", async ({
   page,
 }) => {
@@ -73,6 +76,7 @@ test("the browser back gesture closes the context view without leaving the app",
   await expect(page.getByTestId("work-toggle")).toBeVisible();
 });
 
+// Journey: the browser back gesture closes the sessions drawer
 test("the browser back gesture closes the sessions drawer", async ({
   page,
 }) => {
@@ -85,6 +89,7 @@ test("the browser back gesture closes the sessions drawer", async ({
   await expect(page.getByTestId("work-toggle")).toBeVisible();
 });
 
+// Journey: a UI close consumes the history entry so back still works cleanly after
 test("a UI close consumes the history entry so back still works cleanly after", async ({
   page,
 }) => {
@@ -105,6 +110,7 @@ test("a UI close consumes the history entry so back still works cleanly after", 
   await expect(page.getByTestId("work-toggle")).toBeVisible();
 });
 
+// Journey: a phone cold load never restores a persisted-open panel
 test("a phone cold load never restores a persisted-open panel", async ({
   page,
 }) => {
@@ -125,6 +131,7 @@ test("a phone cold load never restores a persisted-open panel", async ({
   );
 });
 
+// Journey: phone navigation does not clobber the desktop context preference
 test("phone navigation does not clobber the desktop context preference", async ({
   page,
 }) => {
@@ -145,6 +152,7 @@ test("phone navigation does not clobber the desktop context preference", async (
   expect(stored).toBe("auto");
 });
 
+// Journey: sessions and context are mutually exclusive and Back returns to transcript
 test("sessions and context are mutually exclusive and Back returns to transcript", async ({
   page,
 }) => {
@@ -174,6 +182,7 @@ test("sessions and context are mutually exclusive and Back returns to transcript
   await expect(page.getByTestId("work-toggle")).toBeVisible();
 });
 
+// Journey: mobile focus survives a desktop breakpoint round trip
 test("mobile focus survives a desktop breakpoint round trip", async ({
   page,
 }) => {

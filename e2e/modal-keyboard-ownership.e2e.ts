@@ -23,6 +23,7 @@ test.beforeEach(async ({ page }) => {
 const permissionBadge = (page: import("@playwright/test").Page) =>
   page.getByTestId("permission-badge");
 
+// Journey: Settings modal — ⌘⇧P (permission cycle) is suppressed while the modal is open.
 test("⌘⇧P is suppressed while Settings is open", async ({ page }) => {
   // This is the exact repro from the issue body.
   await openSettings(page);
@@ -40,6 +41,7 @@ test("⌘⇧P is suppressed while Settings is open", async ({ page }) => {
   await expect(permissionBadge(page)).toContainText("Standard");
 });
 
+// Journey: Settings modal — ⌘⇧M (model picker) does not open a second modal behind the scrim.
 test("⌘⇧M does not open the model picker while Settings is open", async ({
   page,
 }) => {
@@ -61,6 +63,7 @@ test("⌘⇧M does not open the model picker while Settings is open", async ({
   await expect(page.locator(".mp .panel")).toBeVisible();
 });
 
+// Journey: Settings modal — ⌘⇧J (context panel) does not toggle underlying state.
 test("⌘⇧J does not toggle the context panel while Settings is open", async ({
   page,
 }) => {
@@ -84,6 +87,7 @@ test("⌘⇧J does not toggle the context panel while Settings is open", async (
 // combo is pressed, the modal is dismissed, and the underlying state is
 // asserted unchanged. (⌘F uses Meta+ to avoid the native find-in-page dialog;
 // ⌘P needs an active plan seeded first, so it keeps its dedicated test below.)
+// Journey: Settings modal — other global shortcuts (⌘B/⌘N/⌘K/⌘[/⌘]/Ctrl+Tab/⌘F) are each inert.
 test("other global shortcuts are suppressed while Settings is open", async ({
   page,
 }) => {
@@ -110,6 +114,7 @@ test("other global shortcuts are suppressed while Settings is open", async ({
   }
 });
 
+// Journey: Settings modal — ⌘P (plan view) does not open a second modal behind the scrim.
 test("⌘P (plan view) does not open a second modal behind Settings", async ({
   page,
 }) => {
@@ -132,6 +137,7 @@ test("⌘P (plan view) does not open a second modal behind Settings", async ({
   await expect(page.getByTestId("plan-view")).toHaveCount(0);
 });
 
+// Journey: Settings modal — the modal's own shortcuts (Alt+1..6 rail, Escape) still work.
 test("Settings' own shortcuts still work while it is open", async ({
   page,
 }) => {
@@ -165,6 +171,7 @@ test("Settings' own shortcuts still work while it is open", async ({
   await expect(page.getByTestId("settings-panel")).toHaveCount(0);
 });
 
+// Journey: PlanView modal — ⌘P still toggles (closes/reopens) PlanView while it is the open modal.
 test("⌘P still closes PlanView while PlanView is open (toggle not suppressed)", async ({
   page,
 }) => {

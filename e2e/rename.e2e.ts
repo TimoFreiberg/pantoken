@@ -5,18 +5,39 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("the overflow menu renames a session, updating the row in place", async ({
+// Journey: Escape cancels a rename without changing the name; saving a new name
+// updates the row in place (optimistic + server reconcile).
+test("rename: Escape cancels, saving updates the row in place", async ({
   page,
 }) => {
   await openSidebar(page);
   const sidebar = page.getByTestId("sidebar");
 
+  // Escape cancels a rename on a different session without changing the name.
+  const cancelRow = sidebar
+    .locator(".row-wrap")
+    .filter({ hasText: "Wire up the WebSocket bridge" });
+  await cancelRow.hover();
+  await cancelRow.getByTestId("session-menu").click();
+  await sidebar
+    .getByRole("menuitem", { name: "Rename", exact: true })
+    .click();
+
+  const cancelInput = sidebar.locator(".rename-input");
+  await cancelInput.fill("Discarded name");
+  await cancelInput.press("Escape");
+
+  // The editor closes and the original name is intact.
+  await expect(sidebar.locator(".rename-input")).toHaveCount(0);
+  await expect(sidebar.getByText("Wire up the WebSocket bridge")).toBeVisible();
+  await expect(sidebar.getByText("Discarded name")).toHaveCount(0);
+
+  // Now rename a different session via its overflow menu and save.
   const row = sidebar
     .locator(".row-wrap")
     .filter({ hasText: "Explore the fold reducer" });
   await expect(row).toBeVisible();
 
-  // Open the overflow menu and pick Rename.
   await row.hover();
   await row.getByTestId("session-menu").click();
   await sidebar.getByRole("menuitem", { name: "Rename", exact: true }).click();
@@ -36,27 +57,7 @@ test("the overflow menu renames a session, updating the row in place", async ({
   await expect(sidebar.getByText("Explore the fold reducer")).toHaveCount(0);
 });
 
-test("Escape cancels a rename without changing the name", async ({ page }) => {
-  await openSidebar(page);
-  const sidebar = page.getByTestId("sidebar");
-
-  const row = sidebar
-    .locator(".row-wrap")
-    .filter({ hasText: "Wire up the WebSocket bridge" });
-  await row.hover();
-  await row.getByTestId("session-menu").click();
-  await sidebar.getByRole("menuitem", { name: "Rename", exact: true }).click();
-
-  const input = sidebar.locator(".rename-input");
-  await input.fill("Discarded name");
-  await input.press("Escape");
-
-  // The editor closes and the original name is intact.
-  await expect(sidebar.locator(".rename-input")).toHaveCount(0);
-  await expect(sidebar.getByText("Wire up the WebSocket bridge")).toBeVisible();
-  await expect(sidebar.getByText("Discarded name")).toHaveCount(0);
-});
-
+// Journey: renaming a non-focused session doesn't switch the active session.
 test("renaming a non-focused session doesn't switch the active session", async ({
   page,
 }) => {

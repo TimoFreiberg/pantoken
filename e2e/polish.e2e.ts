@@ -43,6 +43,7 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
+// Journey: edit-tool card: collapsed +N/−M badge, expands to a @pierre/diffs render
 test("edit-tool card: collapsed +N/−M badge, expands to a @pierre/diffs render", async ({
   page,
 }) => {
@@ -76,6 +77,7 @@ test("edit-tool card: collapsed +N/−M badge, expands to a @pierre/diffs render
   await expect(card.locator(".diff-note")).toHaveCount(0);
 });
 
+// Journey: oversized edit preview is bounded while raw arguments and result copy exactly
 test("oversized edit preview is bounded while raw arguments and result copy exactly", async ({
   page,
 }) => {
@@ -144,6 +146,7 @@ test("oversized edit preview is bounded while raw arguments and result copy exac
   );
 });
 
+// Journey: ordinary rich edit patch renders instead of the input-derived sides
 test("ordinary rich edit patch renders instead of the input-derived sides", async ({
   page,
 }) => {
@@ -174,6 +177,7 @@ test("ordinary rich edit patch renders instead of the input-derived sides", asyn
   expect(shadowText).not.toContain("INPUT_SIDE_NEW");
 });
 
+// Journey: large line matrix omits counts and still renders its bounded preview promptly
 test("large line matrix omits counts and still renders its bounded preview promptly", async ({
   page,
 }) => {
@@ -206,6 +210,7 @@ test("large line matrix omits counts and still renders its bounded preview promp
     .toContain("GUARD_OLD_START");
 });
 
+// Journey: one-sided edits count safe creations exactly and guard pathological deletions
 test("one-sided edits count safe creations exactly and guard pathological deletions", async ({
   page,
 }) => {
@@ -254,6 +259,7 @@ test("one-sided edits count safe creations exactly and guard pathological deleti
     .toContain("DELETE_PREVIEW_START");
 });
 
+// Journey: message timestamps render with an exact-time tooltip
 test("message timestamps render with an exact-time tooltip", async ({
   page,
 }) => {
@@ -266,6 +272,7 @@ test("message timestamps render with an exact-time tooltip", async ({
   await expect(times.first()).toHaveAttribute("datetime", /.+/);
 });
 
+// Journey: desktop turn actions and timestamps reveal as one footer
 test("desktop turn actions and timestamps reveal as one footer", async ({
   page,
 }) => {
@@ -288,6 +295,7 @@ test("desktop turn actions and timestamps reveal as one footer", async ({
   }
 });
 
+// Journey: copy + timestamp show only on the turn-final paragraph
 test("copy + timestamp show only on the turn-final paragraph", async ({
   page,
 }) => {
@@ -309,6 +317,7 @@ test("copy + timestamp show only on the turn-final paragraph", async ({
   await expect(last.locator("time.ts")).toHaveCount(1);
 });
 
+// Journey: an active turn's paragraph followed by a running tool stays bare
 test("an active turn's paragraph followed by a running tool stays bare", async ({
   page,
 }) => {
@@ -335,6 +344,7 @@ test("an active turn's paragraph followed by a running tool stays bare", async (
   ).toBeVisible();
 });
 
+// Journey: copy button copies the whole turn's text and shows feedback
 test("copy button copies the whole turn's text and shows feedback", async ({
   page,
   context,
@@ -353,6 +363,7 @@ test("copy button copies the whole turn's text and shows feedback", async ({
   expect(copied).toContain("Routes live in");
 });
 
+// Journey: copy button fades back out once the pointer leaves the message
 test("copy button fades back out once the pointer leaves the message", async ({
   page,
   context,
@@ -385,6 +396,7 @@ test("copy button fades back out once the pointer leaves the message", async ({
     .toBe("0");
 });
 
+// Journey: user prompt footer offers a copy button next to rewind; it copies the prompt
 test("user prompt footer offers a copy button next to rewind; it copies the prompt", async ({
   page,
   context,
@@ -412,6 +424,7 @@ test("user prompt footer offers a copy button next to rewind; it copies the prom
   expect(copied).toBe(promptText);
 });
 
+// Journey: an armed rewind footer stays visible and interactive off-hover
 test("an armed rewind footer stays visible and interactive off-hover", async ({
   page,
 }) => {
@@ -428,6 +441,7 @@ test("an armed rewind footer stays visible and interactive off-hover", async ({
   ).toBeEnabled();
 });
 
+// Journey: no stray working indicator after a turn ends via sessionUpdated (not runCompleted)
 test("no stray working indicator after a turn ends via sessionUpdated (not runCompleted)", async ({
   page,
 }) => {
@@ -442,6 +456,7 @@ test("no stray working indicator after a turn ends via sessionUpdated (not runCo
     .toBe(0);
 });
 
+// Journey: tab title mirrors the active session title
 test("tab title mirrors the active session title", async ({ page }) => {
   // The greeting snapshot titles the session "Wire up the WebSocket bridge";
   // document.title should reflect it (suffixed with the app name) rather than
@@ -449,6 +464,7 @@ test("tab title mirrors the active session title", async ({ page }) => {
   await expect(page).toHaveTitle("Wire up the WebSocket bridge · pantoken");
 });
 
+// Journey: transcript: full markdown renders (headings, table, code, links)
 test("transcript: full markdown renders (headings, table, code, links)", async ({
   page,
 }) => {
@@ -472,6 +488,7 @@ test("transcript: full markdown renders (headings, table, code, links)", async (
   await expect(link).toHaveAttribute("rel", /noopener/);
 });
 
+// Journey: transcript: code blocks get a copy button that copies the code
 test("transcript: code blocks get a copy button that copies the code", async ({
   page,
   context,
@@ -511,6 +528,7 @@ test("transcript: code blocks get a copy button that copies the code", async ({
   expect(clip).not.toContain("Markdown showcase");
 });
 
+// Journey: transcript: long code blocks stay bounded with all content reachable
 test("transcript: long code blocks stay bounded with all content reachable", async ({
   page,
 }) => {
@@ -561,6 +579,7 @@ test("transcript: long code blocks stay bounded with all content reachable", asy
   await expect(pre.getByTestId("last-code-line")).toBeInViewport();
 });
 
+// Journey: shared IconButton normalizes a direct raw SVG to its medium 1em size
 test("shared IconButton normalizes a direct raw SVG to its medium 1em size", async ({
   page,
 }) => {
@@ -574,6 +593,7 @@ test("shared IconButton normalizes a direct raw SVG to its medium 1em size", asy
   await expect(icon).toHaveCSS("height", "16px");
 });
 
+// Journey: type-to-focus: a printable key focuses the composer
 test("type-to-focus: a printable key focuses the composer", async ({
   page,
 }) => {
@@ -584,6 +604,7 @@ test("type-to-focus: a printable key focuses the composer", async ({
   await expect(page.locator(".composer-wrap textarea")).toBeFocused();
 });
 
+// Journey: binary select renders a Yes/No card with the affirmative as primary
 test("binary select renders a Yes/No card with the affirmative as primary", async ({
   page,
 }) => {
@@ -597,6 +618,7 @@ test("binary select renders a Yes/No card with the affirmative as primary", asyn
   await expect(actions.nth(1)).toHaveClass(/primary/);
 });
 
+// Journey: timeout-bearing dialog shows a countdown and auto-resolves deny-safe
 test("timeout-bearing dialog shows a countdown and auto-resolves deny-safe", async ({
   page,
 }) => {
@@ -607,6 +629,7 @@ test("timeout-bearing dialog shows a countdown and auto-resolves deny-safe", asy
   await expect(page.getByText("Denied — skipping that step.")).toBeVisible();
 });
 
+// Journey: Ctrl/Cmd+Up anchors to the scroll position, not always the last prompt
 test("Ctrl/Cmd+Up anchors to the scroll position, not always the last prompt", async ({
   page,
 }) => {
@@ -671,6 +694,7 @@ test("Ctrl/Cmd+Up anchors to the scroll position, not always the last prompt", a
   expect(scrollTopAfter).toBe(scrollTopBefore);
 });
 
+// Journey: Ctrl/Cmd+Up/Down step through user prompts
 test("Ctrl/Cmd+Up/Down step through user prompts", async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 600 });
   await page.waitForTimeout(50);
@@ -713,6 +737,7 @@ test("Ctrl/Cmd+Up/Down step through user prompts", async ({ page }) => {
   await expect.poll(atBottom).toBe(true);
 });
 
+// Journey: prompt-nav re-anchors to viewport after manual scroll
 test("prompt-nav re-anchors to viewport after manual scroll", async ({
   page,
 }) => {
@@ -753,6 +778,7 @@ test("prompt-nav re-anchors to viewport after manual scroll", async ({
   await expect.poll(() => atPrompt(page, 3)).toBe(true);
 });
 
+// Journey: ⌘↑/⌘↓ scroll to top/bottom of transcript (not while typing)
 test("⌘↑/⌘↓ scroll to top/bottom of transcript (not while typing)", async ({
   page,
 }) => {
@@ -791,6 +817,7 @@ test("⌘↑/⌘↓ scroll to top/bottom of transcript (not while typing)", asyn
   expect(after).toBe(before);
 });
 
+// Journey: sending a prompt while scrolled up jumps the transcript to the bottom
 test("sending a prompt while scrolled up jumps the transcript to the bottom", async ({
   page,
 }) => {
@@ -829,6 +856,7 @@ test("sending a prompt while scrolled up jumps the transcript to the bottom", as
   await expect(page.getByTestId("new-messages-pill")).toHaveCount(0);
 });
 
+// Journey: prev/next prompt-nav buttons are visible on hover and step through prompts
 test("prev/next prompt-nav buttons are visible on hover and step through prompts", async ({
   page,
 }) => {
@@ -870,6 +898,7 @@ test("prev/next prompt-nav buttons are visible on hover and step through prompts
   }
 });
 
+// Journey: switching sessions restores the saved reading position
 test("switching sessions restores the saved reading position", async ({
   page,
 }) => {
@@ -948,6 +977,7 @@ test("switching sessions restores the saved reading position", async ({
   await expect(page.getByTestId("new-messages-pill")).toHaveCount(0);
 });
 
+// Journey: a session with no saved position still lands at the live bottom
 test("a session with no saved position still lands at the live bottom", async ({
   page,
 }) => {
@@ -985,6 +1015,7 @@ test("a session with no saved position still lands at the live bottom", async ({
   await expect(page.getByTestId("new-messages-pill")).toHaveCount(0);
 });
 
+// Journey: switching away does not corrupt the leaving session's saved position
 test("switching away does not corrupt the leaving session's saved position", async ({
   page,
 }) => {
@@ -1042,6 +1073,7 @@ test("switching away does not corrupt the leaving session's saved position", asy
   expect(Math.abs((after as number) - (before as number))).toBeLessThan(0.01);
 });
 
+// Journey: a session left at the live tail returns to the tail on focus
 test("a session left at the live tail returns to the tail on focus", async ({
   page,
 }) => {
@@ -1105,6 +1137,7 @@ test("a session left at the live tail returns to the tail on focus", async ({
   await expect(page.getByTestId("new-messages-pill")).toHaveCount(0);
 });
 
+// Journey: PWA update prompt appears and can be dismissed
 test("PWA update prompt appears and can be dismissed", async ({ page }) => {
   // The ?dev bar's "update" button stands in for a real service-worker update.
   await page.getByRole("button", { name: "update", exact: true }).click();

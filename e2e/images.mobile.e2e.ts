@@ -6,6 +6,7 @@ const PNG = Buffer.from(
   "base64",
 );
 
+// Flow: the mobile file picker accepts images and supports image-only send.
 test("the mobile picker accepts images and supports image-only send", async ({
   page,
 }) => {

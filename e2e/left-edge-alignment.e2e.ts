@@ -20,6 +20,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 for (const width of [1920, 2400]) {
+  // Journey: transcript prose, stop button, and composer left edges align at desktop widths.
   test(`transcript prose, stop button, and composer left edges align at ${width}px`, async ({
     page,
   }) => {

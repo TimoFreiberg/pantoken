@@ -5,9 +5,12 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("plan-handoff card: 3 buttons stack full-width and the body scrolls on mobile", async ({
+// Mobile plan-handoff: card stacks full-width with scrollable body, and the
+// facet badge renders in the mobile session-controls summary.
+test("plan-handoff card stacks full-width, body scrolls, and facet badge renders on mobile", async ({
   page,
 }) => {
+  // ── Plan-handoff card: 3 buttons stack full-width and the body scrolls ──
   await drive(page, "planhandoff");
   const dialog = page.getByRole("dialog", { name: "Plan handoff" });
   await expect(dialog).toBeVisible();
@@ -41,9 +44,8 @@ test("plan-handoff card: 3 buttons stack full-width and the body scrolls on mobi
   await dialog.getByRole("button", { name: "Click again" }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByText("Received: Cancel")).toBeVisible();
-});
 
-test("facet badge renders on mobile when the facet is plan", async ({ page }) => {
+  // ── Facet badge renders on mobile when the facet is plan ──────────────
   await drive(page, "planfacet");
   // On mobile, the desktop facet-badge is hidden (display:none inside
   // .desktop-config-left at max-width:859px). The facet surfaces in the

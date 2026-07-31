@@ -10,6 +10,7 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
+// Journey: a mixed run of tools each renders as its own card (no prose summary)
 test("a mixed run of tools each renders as its own card (no prose summary)", async ({
   page,
 }) => {
@@ -35,6 +36,7 @@ test("a mixed run of tools each renders as its own card (no prose summary)", asy
   await expect(work.locator(":scope > .tool.summary")).toHaveCount(0);
 });
 
+// Journey: a skill load (read of a SKILL.md) renders as its own card, not a prose label
 test("a skill load (read of a SKILL.md) renders as its own card, not a prose label", async ({
   page,
 }) => {
@@ -54,6 +56,7 @@ test("a skill load (read of a SKILL.md) renders as its own card, not a prose lab
   await expect(work.locator(":scope > .tool.summary")).toHaveCount(0);
 });
 
+// Journey: each tool card expands independently to show its output
 test("each tool card expands independently to show its output", async ({
   page,
 }) => {

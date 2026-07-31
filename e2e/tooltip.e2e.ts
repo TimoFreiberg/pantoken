@@ -8,6 +8,7 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
+// Hovering a titled control shows a themed tooltip, then restores the title on leave
 test("hovering a titled control shows a themed tooltip, then restores the title", async ({
   page,
 }) => {
@@ -43,6 +44,7 @@ test("hovering a titled control shows a themed tooltip, then restores the title"
   await expect(btn).toHaveAttribute("title", title);
 });
 
+// Tooltip survives a re-render of the element under a resting pointer (re-acquire)
 test("tooltip survives a re-render of the element under a resting pointer", async ({
   page,
 }) => {
@@ -113,6 +115,7 @@ test("tooltip survives a re-render of the element under a resting pointer", asyn
   expect(errors).toEqual([]);
 });
 
+// Keyboard tooltip closes cleanly when its focused control unmounts
 test("keyboard tooltip closes cleanly when its focused control unmounts", async ({
   page,
 }) => {
@@ -141,7 +144,7 @@ test("keyboard tooltip closes cleanly when its focused control unmounts", async 
 // function is obvious from their visible label/icon, while elements that carry
 // extra hover data (status spans, group paths) keep theirs.
 
-// AC.3: The New Session button has no tooltip but shows a fading ⌘N hint.
+// New-session button has no title, but shows a fading ⌘N kbd hint on hover (AC.3)
 test("new-session button has no title, but shows a ⌘N kbd hint on hover", async ({
   page,
 }) => {
@@ -166,10 +169,7 @@ test("new-session button has no title, but shows a ⌘N kbd hint on hover", asyn
   await expect(hint).toHaveCSS("opacity", "1");
 });
 
-// AC.4/AC.6/AC.8/AC.12 — controls that are self-explanatory from their visible
-// label/icon carry no `title` tooltip (deliberate absence, issue #20). One
-// consolidated test guards the shared absence; the group-toggle additionally
-// pins that it KEEPS its project-path tooltip.
+// Self-explanatory controls have no title attribute (AC.4/AC.6/AC.8/AC.12)
 test("self-explanatory controls have no title attribute", async ({ page }) => {
   // AC.4: The search toggle IconButton (visible when search is closed).
   const toggle = page.getByTestId("sidebar-search-toggle");
@@ -211,7 +211,7 @@ test("self-explanatory controls have no title attribute", async ({ page }) => {
   await expect(newBtn).not.toHaveAttribute("title", /.+/);
 });
 
-// AC.7: The ToolCard duration span has no title but retains aria-label.
+// Tool card duration span has no title but retains aria-label (AC.7)
 test("tool card duration span has no title but retains aria-label", async ({
   page,
 }) => {

@@ -5,7 +5,9 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("auto context panel collapses and reappears around the width budget", async ({
+// Journey: the auto context panel collapses and reappears around the width
+// budget, and an auto-hidden panel can be focused temporarily as an overlay.
+test("auto context panel: collapses/reappears at the width budget and focuses temporarily", async ({
   page,
 }) => {
   const panel = page.getByTestId("right-sidebar");
@@ -21,10 +23,8 @@ test("auto context panel collapses and reappears around the width budget", async
 
   await page.setViewportSize({ width: 1088, height: 850 });
   await expect(panel).toHaveAttribute("data-open", "true");
-});
 
-test("an auto-hidden context panel can be focused temporarily", async ({ page }) => {
-  const panel = page.getByTestId("right-sidebar");
+  // An auto-hidden panel can be focused temporarily (overlay, layout unchanged).
   await page.setViewportSize({ width: 1000, height: 850 });
   await expect(panel).toHaveAttribute("data-open", "false");
   const appBefore = await page.locator(".app").boundingBox();
@@ -60,6 +60,7 @@ test("an auto-hidden context panel can be focused temporarily", async ({ page })
   await expect(panel).toHaveAttribute("data-overlay", "false");
 });
 
+// Journey: manual close remains closed after widening and reload
 test("manual close remains closed after widening and reload", async ({
   page,
 }) => {
@@ -78,6 +79,7 @@ test("manual close remains closed after widening and reload", async ({
   await expect(panel).toHaveAttribute("data-open", "false");
 });
 
+// Journey: legacy right-sidebar booleans migrate to the new preference
 test("legacy right-sidebar booleans migrate to the new preference", async ({
   page,
 }) => {

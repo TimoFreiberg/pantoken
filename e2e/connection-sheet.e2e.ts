@@ -24,13 +24,20 @@ async function setFailure(page: import("@playwright/test").Page, label: string, 
   );
 }
 
-test("First-time connection shows four-step progress", async ({ page }) => {
-  // Open the host switcher and select the remote host.
+/** Open the host switcher and select the remote host (the sheet appears after). */
+async function openRemoteHost(page: import("@playwright/test").Page): Promise<void> {
   const switcher = page.getByTestId("host-switcher");
   await switcher.getByTestId("host-switcher-trigger").click();
   await page.getByTestId("host-option-dev-remote").click();
+}
 
-  // The connection sheet should appear (host is in testingSsh after connectHost).
+// First-time connection: opening the host switcher and selecting the remote host
+// shows the connection sheet, and driving to provisioning reveals four labeled
+// progress steps.
+test("first-time connection shows the sheet with four progress steps", async ({
+  page,
+}) => {
+  await openRemoteHost(page);
   // The dev provider's connectHost sets testingSsh and blocks until externally driven.
   await expect(page.getByTestId("connection-sheet-panel")).toBeVisible({ timeout: 10000 });
   // Drive to provisioning to advance past testingSsh.
@@ -46,20 +53,21 @@ test("First-time connection shows four-step progress", async ({ page }) => {
   await expect(page.getByTestId("connection-steps")).toContainText("Pantoken runtime");
 });
 
-test("Driving to ready closes the sheet", async ({ page }) => {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await page.getByTestId("host-option-dev-remote").click();
+// Driving the connection to ready closes the sheet.
+test("driving to ready closes the sheet", async ({ page }) => {
+  await openRemoteHost(page);
   await expect(page.getByTestId("connection-sheet-panel")).toBeVisible({ timeout: 10000 });
 
   await setState(page, "ready");
   await expect(page.getByTestId("connection-sheet-panel")).toBeHidden({ timeout: 10000 });
 });
 
-test("Driving to failed shows failure UI with Retry/Edit/Cancel", async ({ page }) => {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await page.getByTestId("host-option-dev-remote").click();
+// Driving the connection to a failure shows the failure UI with Retry/Edit/Cancel
+// buttons, and the failure detail is behind a disclosure that expands on click.
+test("driving to failed shows failure UI with Retry/Edit/Cancel and expandable detail", async ({
+  page,
+}) => {
+  await openRemoteHost(page);
   await expect(page.getByTestId("connection-sheet-panel")).toBeVisible({ timeout: 10000 });
 
   await setFailure(page, "SSH authentication failed", "Check your SSH key is loaded in the agent", "ssh: auth method none succeeded");
@@ -77,10 +85,12 @@ test("Driving to failed shows failure UI with Retry/Edit/Cancel", async ({ page 
   await expect(page.getByTestId("failure-detail")).toBeVisible();
 });
 
-test("Cancel during connecting cancels the connection and closes the sheet", async ({ page }) => {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await page.getByTestId("host-option-dev-remote").click();
+// Cancelling during the connecting phase cancels the connection and closes the
+// sheet.
+test("cancel during connecting cancels the connection and closes the sheet", async ({
+  page,
+}) => {
+  await openRemoteHost(page);
   await expect(page.getByTestId("connection-sheet-panel")).toBeVisible({ timeout: 10000 });
   await expect(page.getByTestId("connection-cancel")).toBeVisible();
 
@@ -88,11 +98,13 @@ test("Cancel during connecting cancels the connection and closes the sheet", asy
   await expect(page.getByTestId("connection-sheet-panel")).toBeHidden({ timeout: 10000 });
 });
 
-test("Reconnecting an already-connected host is non-modal (no sheet)", async ({ page }) => {
+// Reconnecting an already-connected host is non-modal (the sheet does NOT
+// reappear after the host reached ready).
+test("reconnecting an already-connected host is non-modal (no sheet)", async ({
+  page,
+}) => {
   // First, connect the host to ready (establishing everConnected).
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await page.getByTestId("host-option-dev-remote").click();
+  await openRemoteHost(page);
   await expect(page.getByTestId("connection-sheet-panel")).toBeVisible({ timeout: 10000 });
   await setState(page, "ready");
   await expect(page.getByTestId("connection-sheet-panel")).toBeHidden({ timeout: 10000 });

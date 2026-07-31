@@ -9,6 +9,27 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
+const composerTextarea = (page: import("@playwright/test").Page) =>
+  page.getByTestId("composer-box").locator("textarea");
+const sendButton = (page: import("@playwright/test").Page) =>
+  page.locator("button.send");
+
+const ta = ".composer-wrap textarea";
+
+/** Read the textarea's box metrics in one round-trip. */
+function metrics(page: import("@playwright/test").Page) {
+  return page.$eval(ta, (el) => {
+    const t = el as HTMLTextAreaElement;
+    return {
+      clientH: t.clientHeight,
+      scrollH: t.scrollHeight,
+      clientW: t.clientWidth,
+      scrollW: t.scrollWidth,
+    };
+  });
+}
+
+// Model picker opens and closes via Escape
 test("the model picker opens and closes", async ({ page }) => {
   const model = page.getByTestId("model-badge");
 
@@ -20,6 +41,7 @@ test("the model picker opens and closes", async ({ page }) => {
   await expect(page.locator(".mp .panel").first()).not.toBeVisible();
 });
 
+// New-session chooser shows a search input and project list, not a composer
 test("the chooser view shows a search input and project list, not a composer", async ({
   page,
 }) => {
@@ -43,32 +65,24 @@ test("the chooser view shows a search input and project list, not a composer", a
   await expect(page.getByTestId("chooser-browse")).toBeVisible();
 });
 
-// --- Empty prompts are forbidden (issue #74) ---
-// The polytoken daemon forbids empty prompts, so the frontend blocks sending
-// an empty prompt in ALL states — idle (previously a "continue" signal per
-// issue #21, now removed), mid-turn (empty steer), and on a live session.
-// An image-only prompt is still valid. Issue #74 supersedes #21.
-
-const composerTextarea = (page: import("@playwright/test").Page) =>
-  page.getByTestId("composer-box").locator("textarea");
-const sendButton = (page: import("@playwright/test").Page) =>
-  page.locator("button.send");
-
-test("send button is disabled when the composer is empty (issue #74)", async ({
+// Empty prompts are forbidden (issue #74): send button disabled and Enter does nothing
+test("empty prompts are blocked: send button disabled and Enter does nothing (issue #74)", async ({
   page,
 }) => {
-  // After gotoFresh the greeting has settled (idle). The composer is empty.
-  await expect(composerTextarea(page)).toHaveValue("");
-  await expect(sendButton(page)).toBeDisabled();
-});
+  // --- Empty prompts are forbidden (issue #74) ---
+  // The polytoken daemon forbids empty prompts, so the frontend blocks sending
+  // an empty prompt in ALL states — idle (previously a "continue" signal per
+  // issue #21, now removed), mid-turn (empty steer), and on a live session.
+  // An image-only prompt is still valid. Issue #74 supersedes #21.
 
-test("Enter on an empty idle composer does not send (issue #74)", async ({
-  page,
-}) => {
   const textarea = composerTextarea(page);
+  // After gotoFresh the greeting has settled (idle). The composer is empty.
   await expect(textarea).toHaveValue("");
+  await expect(sendButton(page)).toBeDisabled();
+
   // Before this turn there is one settled work block (the greeting).
   // Focus and press Enter on the empty composer.
+  await expect(textarea).toHaveValue("");
   await textarea.click();
   await page.keyboard.press("Enter");
   // No new turn starts: still one settled work block.
@@ -76,4 +90,38 @@ test("Enter on an empty idle composer does not send (issue #74)", async ({
   await waitForSettledWorkBlocks(page, 1);
   // The composer is still empty (nothing was sent).
   await expect(textarea).toHaveValue("");
+});
+
+// Composer textarea sizing: never scrolls horizontally, grows with lines, then caps with a scrollbar
+test("composer textarea sizing: no horizontal scroll, grows then caps", async ({
+  page,
+}) => {
+  const empty = await metrics(page);
+
+  // A long unbroken token wraps; horizontal scroll must never appear (overflow-x: hidden).
+  await page.fill(
+    ta,
+    "https://example.com/a/really/long/unbroken/path/" + "x".repeat(200),
+  );
+  const m = await metrics(page);
+  // Text wraps; horizontal scroll must never appear (overflow-x: hidden).
+  expect(m.scrollW).toBeLessThanOrEqual(m.clientW + 1);
+
+  // Three lines fit under the cap → grows, no vertical scrollbar yet.
+  await page.fill(ta, "one\ntwo\nthree");
+  const three = await metrics(page);
+  expect(three.clientH).toBeGreaterThan(empty.clientH);
+  expect(three.scrollH).toBeLessThanOrEqual(three.clientH + 1);
+
+  // Far past the cap → height stops growing and a vertical scrollbar appears.
+  await page.fill(
+    ta,
+    Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n"),
+  );
+  const many = await metrics(page);
+  expect(many.scrollH).toBeGreaterThan(many.clientH + 10);
+  // The cap on the 850px-tall desktop viewport is ~168px (≈6.5 lines),
+  // well under "eats the screen".
+  expect(many.clientH).toBeLessThanOrEqual(180);
+  expect(many.scrollW).toBeLessThanOrEqual(many.clientW + 1);
 });

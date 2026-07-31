@@ -5,6 +5,7 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
+// Journey: the composer status row shows a ring-only context trigger
 test("the composer status row shows a ring-only context trigger", async ({ page }) => {
   const ring = page.getByTestId("context-meter");
   const trigger = page.getByTestId("context-trigger");
@@ -15,6 +16,7 @@ test("the composer status row shows a ring-only context trigger", async ({ page 
   await expect(trigger).toHaveAttribute("title", /exact context window usage/);
 });
 
+// Journey: a context-pressure cue surfaces once the window is nearly full
 test("a context-pressure cue surfaces once the window is nearly full", async ({
   page,
 }) => {
@@ -34,6 +36,7 @@ test("a context-pressure cue surfaces once the window is nearly full", async ({
   await expect(page.getByTestId("context-trigger")).toHaveAttribute("aria-label", /91% used/);
 });
 
+// Journey: the model and effort pickers live beside the context ring
 test("the model and effort pickers live beside the context ring", async ({
   page,
 }) => {
@@ -44,6 +47,7 @@ test("the model and effort pickers live beside the context ring", async ({
   await expect(page.locator(".hdr .mp")).toHaveCount(0);
 });
 
+// Journey: the context meter popup shows detail on click
 test("the context meter popup shows detail on click", async ({ page }) => {
   const meter = page.getByTestId("context-meter");
   await expect(meter).toBeVisible();
@@ -58,6 +62,7 @@ test("the context meter popup shows detail on click", async ({ page }) => {
   await expect(page.getByTestId("clear-context-btn")).toBeVisible();
 });
 
+// Journey: the Compact button uses a click-twice confirm gate
 test("the Compact button uses a click-twice confirm gate", async ({ page }) => {
   await drive(page, "contextfull");
   const meter = page.getByTestId("context-meter");

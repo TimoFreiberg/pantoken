@@ -9,6 +9,7 @@ test.beforeEach(async ({ page }) => {
 // no user prompt. It remains in the same outer turn, but the injected pill and the prior
 // assistant response now fold INTO the collapsed "Worked for Ns" work block — only the
 // turn-final response stays visible without expanding.
+// Extension nudge folds the prior response into the work block; the final response stays visible
 test("an extension nudge folds the prior response into the work block and keeps the final response visible", async ({
   page,
 }) => {
@@ -37,6 +38,7 @@ test("an extension nudge folds the prior response into the work block and keeps 
   await expect(page.locator(".inject-body")).toHaveCount(0);
 });
 
+// Expanding the nudge pill reveals the de-wrapped note text (hidden until clicked)
 test("expanding the nudge pill reveals the de-wrapped note text", async ({
   page,
 }) => {

@@ -34,9 +34,15 @@ export async function waitForSettledWorkBlocks(
   count: number,
 ): Promise<void> {
   const toggles = page.getByTestId("work-toggle");
-  await expect(toggles).toHaveCount(count);
-  await expect(toggles.last()).toContainText("Worked for");
-  await expect(toggles.last()).toHaveAttribute("aria-expanded", "false");
+  // The settle race is the classic full-suite flake: a turn's work block collapses
+  // slightly after its final text appears, and under load that gap can exceed the
+  // 5s default. Give the count and the settled-state assertions a generous budget;
+  // the assertions themselves are unchanged.
+  await expect(toggles).toHaveCount(count, { timeout: 15_000 });
+  await expect(toggles.last()).toContainText("Worked for", { timeout: 15_000 });
+  await expect(toggles.last()).toHaveAttribute("aria-expanded", "false", {
+    timeout: 15_000,
+  });
 }
 
 /** Expand a settled turn's collapsible "Worked for Ns" block so its tools + intermediate

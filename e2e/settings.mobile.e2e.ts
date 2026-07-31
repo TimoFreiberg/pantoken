@@ -1,5 +1,11 @@
-import { expect, test } from "@playwright/test";
-import { gotoFresh, openSettings } from "./helpers.js";
+import { expect, type Page, test } from "@playwright/test";
+import { gotoFresh, openSettings, openSidebar } from "./helpers.js";
+
+// Flow tests for the mobile settings surface and adjacent phone UI: the
+// settings panel (index/detail navigation, token management, background model,
+// history/breakpoint, scrolling), the host switcher, and the session-chooser
+// project list. Absorbed files: host-switcher.mobile.e2e.ts,
+// project-menu.mobile.e2e.ts.
 
 test.use({ viewport: { width: 390, height: 600 } });
 
@@ -7,7 +13,17 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-test("Settings opens as a full-screen section index", async ({ page }) => {
+// ---------------------------------------------------------------------------
+// Settings panel flows
+// ---------------------------------------------------------------------------
+
+// Mobile Settings opens as a full-screen section index, detail navigation
+// follows Back and Escape hierarchy, and desktop section shortcuts do not
+// navigate mobile Settings.
+test("mobile Settings opens as full-screen index, navigates detail/index hierarchy, and ignores desktop shortcuts", async ({
+  page,
+}) => {
+  // --- Index view: full-screen, touch-safe, focus cycle ---
   await openSettings(page);
   const panel = page.getByTestId("settings-panel");
   await expect(panel).toBeVisible();
@@ -46,13 +62,13 @@ test("Settings opens as a full-screen section index", async ({ page }) => {
   await expect(
     panel.getByRole("button", { name: "Close settings" }),
   ).toBeFocused();
-});
 
-test("detail navigation follows Back and Escape hierarchy", async ({
-  page,
-}) => {
+  // Close the index, then reopen to a detail for the navigation hierarchy.
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+
+  // --- Detail navigation: Back and Escape hierarchy ---
   await openSettings(page, "appearance");
-  const panel = page.getByTestId("settings-panel");
   await expect(
     panel.getByRole("heading", { name: "Appearance" }),
   ).toBeVisible();
@@ -77,13 +93,9 @@ test("detail navigation follows Back and Escape hierarchy", async ({
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
   await expect(page.locator(".composer-surface textarea")).toBeFocused();
-});
 
-test("desktop section shortcuts do not navigate mobile Settings", async ({
-  page,
-}) => {
+  // --- Desktop shortcuts do not navigate mobile Settings ---
   await openSettings(page);
-  const panel = page.getByTestId("settings-panel");
   await page.keyboard.press("Alt+2");
   await expect(panel.getByTestId("settings-index")).toBeVisible();
   await expect(
@@ -100,6 +112,7 @@ test("desktop section shortcuts do not navigate mobile Settings", async ({
   ).toHaveCount(0);
 });
 
+// Saving an access token keeps the visible detail in history.
 test("saving an access token keeps the visible detail in history", async ({
   page,
 }) => {
@@ -117,6 +130,7 @@ test("saving an access token keeps the visible detail in history", async ({
   await expect(panel).toHaveCount(0);
 });
 
+// Forgetting a token consumes Settings history before showing the gate.
 test("forgetting a token consumes Settings history before showing the gate", async ({
   page,
 }) => {
@@ -140,6 +154,7 @@ test("forgetting a token consumes Settings history before showing the gate", asy
     .toBeNull();
 });
 
+// An invalid legacy background model remains visible without an editor.
 test("an invalid legacy background model remains visible without an editor", async ({
   page,
 }) => {
@@ -185,6 +200,7 @@ test("an invalid legacy background model remains visible without an editor", asy
   await expect(page.getByTestId("background-model-input")).toHaveCount(0);
 });
 
+// UI closes consume nested history before the next open.
 test("UI closes consume nested history before the next open", async ({
   page,
 }) => {
@@ -204,6 +220,7 @@ test("UI closes consume nested history before the next open", async ({
   await expect(page.getByTestId("composer-surface")).toBeVisible();
 });
 
+// A phone-detail breakpoint round trip leaves one balanced overlay.
 test("a phone-detail breakpoint round trip leaves one balanced overlay", async ({
   page,
 }) => {
@@ -242,6 +259,7 @@ test("a phone-detail breakpoint round trip leaves one balanced overlay", async (
   await expect(page.getByTestId("composer-surface")).toBeVisible();
 });
 
+// Narrowing open desktop Settings creates one phone history entry.
 test("narrowing open desktop Settings creates one phone history entry", async ({
   page,
 }) => {
@@ -269,6 +287,7 @@ test("narrowing open desktop Settings creates one phone history entry", async ({
   await expect(page.locator(".composer-surface textarea")).toBeFocused();
 });
 
+// Long detail content scrolls inside the safe full-screen surface.
 test("long detail content scrolls inside the safe full-screen surface", async ({
   page,
 }) => {
@@ -289,4 +308,108 @@ test("long detail content scrolls inside the safe full-screen surface", async ({
   expect(dimensions.overflowY).toBe("auto");
   expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight);
   expect(dimensions.scrollTop).toBeGreaterThan(0);
+});
+
+// ---------------------------------------------------------------------------
+// Host switcher flows
+// ---------------------------------------------------------------------------
+
+// The phone host picker is a full-screen sheet with labeled touch-safe
+// controls and focus stays within the sheet when tabbing.
+test("phone host picker is a full-screen sheet with touch-safe controls and traps focus", async ({
+  page,
+}) => {
+  await openSidebar(page);
+  const trigger = page.getByTestId("host-switcher-trigger");
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "Choose computer" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
+  const box = await dialog.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.x).toBe(0);
+  expect(box!.y).toBe(0);
+  await expect(dialog.getByRole("button", { name: "Close computer picker" })).toHaveCSS("min-height", "44px");
+  for (const option of await dialog.locator(".host-option").all()) {
+    const optionBox = await option.boundingBox();
+    expect(optionBox).not.toBeNull();
+    expect(optionBox!.height).toBeGreaterThanOrEqual(44);
+  }
+
+  // Focus stays within the sheet when tabbing.
+  const close = dialog.getByRole("button", { name: "Close computer picker" });
+  await close.focus();
+  await page.keyboard.press("Shift+Tab");
+  // The management buttons (Add computer, Manage computers) are now enabled
+  // and sit after the host options, so Shift+Tab from Close lands on the last
+  // management button.
+  await expect(dialog.getByTestId("manage-computers-btn")).toBeFocused();
+});
+
+// ---------------------------------------------------------------------------
+// Project menu (session chooser) flows
+// ---------------------------------------------------------------------------
+
+// Under create-on-click (phase 3), the project-selection UI lives in the
+// session chooser (SessionChooser.svelte). On mobile the chooser renders as a
+// full-screen overlay — the same shape the old draft project menu had.
+
+const chooser = (page: Page) => page.getByTestId("session-chooser");
+
+async function openChooser(page: Page): Promise<void> {
+  await openSidebar(page);
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
+  await expect(chooser(page)).toBeVisible();
+}
+
+// Mobile chooser is a full-screen overlay with touch targets, back gesture
+// closes it, and selecting a project creates a session.
+test("mobile chooser is a full-screen overlay with touch targets, back gesture, and creates a session on selection", async ({
+  page,
+}) => {
+  await openChooser(page);
+  // Wait for the reveal animation to settle before measuring bounding boxes.
+  await page.waitForTimeout(200);
+
+  // Full-screen overlay: covers the viewport.
+  const chooserBox = await chooser(page).boundingBox();
+  const vw = page.viewportSize()!.width;
+  const vh = page.viewportSize()!.height;
+  expect(chooserBox).not.toBeNull();
+  expect(chooserBox!.width).toBe(vw);
+  expect(chooserBox!.height).toBe(vh);
+
+  // Touch-safe targets: every result row is at least 44px tall.
+  const rows = chooser(page).locator(".result");
+  const count = await rows.count();
+  expect(count).toBeGreaterThan(0);
+  for (let i = 0; i < count; i++) {
+    const box = await rows.nth(i).boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+
+  // The search input is also touch-safe.
+  const input = chooser(page).getByRole("textbox", {
+    name: "Filter projects",
+  });
+  const inputBox = await input.boundingBox();
+  expect(inputBox).not.toBeNull();
+  expect(inputBox!.height).toBeGreaterThanOrEqual(44);
+
+  // Back gesture closes the chooser.
+  await page.goBack();
+  await expect(chooser(page)).toHaveCount(0);
+
+  // Selecting a project from the chooser creates a session.
+  await openSidebar(page);
+  const beforeCount = await page.getByTestId("sidebar").locator(".row").count();
+  await page.getByTestId("sidebar-new-session").locator(".new-btn").click();
+  await expect(chooser(page)).toBeVisible();
+  await chooser(page).getByTestId("chooser-project-scratch").click();
+  await expect(chooser(page)).toHaveCount(0);
+  // A new session row appears.
+  await expect(page.getByTestId("sidebar").locator(".row")).toHaveCount(
+    beforeCount + 1,
+  );
 });

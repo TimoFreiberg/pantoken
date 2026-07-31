@@ -34,6 +34,7 @@ test.describe("tool card bounds", () => {
     await expect(card.locator(":scope > .body")).toBeVisible();
   }
 
+  // Journey: header and detailed arguments stop at every configured boundary
   test("header and detailed arguments stop at every configured boundary", async ({
     page,
   }) => {
@@ -103,6 +104,7 @@ test.describe("tool card bounds", () => {
     expect(copiedArgs.z_field_38).toBe(38);
   });
 
+  // Journey: plain and multi-block output stay bounded while Copy retains every byte
   test("plain and multi-block output stay bounded while Copy retains every byte", async ({
     page,
   }) => {
@@ -132,6 +134,7 @@ test.describe("tool card bounds", () => {
     }
   });
 
+  // Journey: streamed tool text is bounded without changing the tool state
   test("streamed tool text is bounded without changing the tool state", async ({
     page,
   }) => {
@@ -152,6 +155,7 @@ test.describe("tool card bounds", () => {
     expect(state).toContain("STREAM_TAIL");
   });
 
+  // Journey: completed, running, failed, and interrupted statuses stay distinct
   test("completed, running, failed, and interrupted statuses stay distinct", async ({
     page,
   }) => {
@@ -198,6 +202,7 @@ test.describe("tool card bounds", () => {
     );
   });
 
+  // Journey: tool names align to the same left coordinate across all statuses
   test("tool names align to the same left coordinate across all statuses", async ({
     page,
   }) => {
@@ -210,6 +215,7 @@ test.describe("tool card bounds", () => {
     expect(max - min).toBeLessThanOrEqual(1);
   });
 
+  // Journey: duration is hidden at rest and revealed on hover/focus
   test("duration is hidden at rest and revealed on hover/focus", async ({
     page,
   }) => {
@@ -223,6 +229,7 @@ test.describe("tool card bounds", () => {
     await expect(duration).toHaveCSS("opacity", "0");
   });
 
+  // Journey: revealing duration does not change header width or name position
   test("revealing duration does not change header width or name position", async ({
     page,
   }) => {
@@ -242,6 +249,7 @@ test.describe("tool card bounds", () => {
     expect(after.nameX).toBe(before.nameX);
   });
 
+  // Journey: keyboard focus on header reveals duration
   test("keyboard focus on header reveals duration", async ({ page }) => {
     const completed = card(page, "Header exact");
     const duration = completed.locator(".duration");
@@ -249,6 +257,7 @@ test.describe("tool card bounds", () => {
     await expect(duration).toHaveCSS("opacity", "1");
   });
 
+  // Journey: duration contributes 'took' to the header accessible name
   test("duration contributes 'took' to the header accessible name", async ({
     page,
   }) => {
@@ -258,6 +267,7 @@ test.describe("tool card bounds", () => {
     );
   });
 
+  // Journey: mobile: duration hidden when collapsed, shown when expanded; header ≥44px
   test("mobile: duration hidden when collapsed, shown when expanded; header ≥44px", async ({
     page,
   }) => {
@@ -274,6 +284,7 @@ test.describe("tool card bounds", () => {
     await expect(duration).toHaveCSS("opacity", "1");
   });
 
+  // Journey: duration sits within the header row, not below it (#56)
   test("duration sits within the header row, not below it (#56)", async ({
     page,
   }) => {

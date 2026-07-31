@@ -22,6 +22,7 @@ async function openContextWithFixtures(page: import("@playwright/test").Page) {
   await openRightSidebar(page);
 }
 
+// Journey: tapping a job opens a visible, interactable detail above the context view
 test("tapping a job opens a visible, interactable detail above the context view", async ({
   page,
 }) => {
@@ -37,6 +38,7 @@ test("tapping a job opens a visible, interactable detail above the context view"
   await expect(detail).toHaveCount(0);
 });
 
+// Journey: Back closes the job detail first, then the context view
 test("Back closes the job detail first, then the context view", async ({
   page,
 }) => {
@@ -56,6 +58,7 @@ test("Back closes the job detail first, then the context view", async ({
   await expect(context).toHaveAttribute("data-open", "false");
 });
 
+// Journey: collapsing context via hotkey while a detail is open closes both
 test("collapsing context via hotkey while a detail is open closes both", async ({
   page,
 }) => {
@@ -78,6 +81,7 @@ test("collapsing context via hotkey while a detail is open closes both", async (
   );
 });
 
+// Journey: collapse button is reachable after closing the detail, no orphaned sheet
 test("collapse button is reachable after closing the detail, no orphaned sheet", async ({
   page,
 }) => {

@@ -8,6 +8,7 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
+// Journey: queued modes survive reconnect and session refocus.
 test("queued modes survive reconnect and session refocus", async ({ page }) => {
   await drive(page, "queue");
   const tray = page.getByTestId("queue-tray");
@@ -40,6 +41,7 @@ test("queued modes survive reconnect and session refocus", async ({ page }) => {
   await expect(page.getByTestId("queue-tray")).toContainText("Queued · 2");
 });
 
+// Journey: delivering one queued row removes it and starts its user turn.
 test("delivery removes one queued row and starts its user turn", async ({ page }) => {
   await drive(page, "queue");
   await drive(page, "deliverqueue");
@@ -54,6 +56,7 @@ test("delivery removes one queued row and starts its user turn", async ({ page }
   ).toBeVisible();
 });
 
+// Journey: Alt+Up restores all queued text to one editor and clears every client.
 test("Alt+Up restores all text to one editor and clears every client", async ({
   page,
   context,
@@ -75,6 +78,7 @@ test("Alt+Up restores all text to one editor and clears every client", async ({
   await expect(other.locator("textarea")).toHaveValue("");
 });
 
+// Journey: steer button aborts the current in-flight turn.
 test("steer button aborts the current turn", async ({ page }) => {
   await drive(page, "streamhold");
   await drive(page, "queue");
@@ -85,6 +89,7 @@ test("steer button aborts the current turn", async ({ page }) => {
   await expect(page.getByTestId("working-indicator")).toHaveCount(0);
 });
 
+// Journey: steer button is disabled while the connection is offline.
 test("steer button is disabled while offline", async ({ page }) => {
   await drive(page, "streamhold");
   await drive(page, "queue");
@@ -97,6 +102,7 @@ test("steer button is disabled while offline", async ({ page }) => {
   await expect(steer).toBeDisabled();
 });
 
+// Journey: steer button is disabled when no turn is active.
 test("steer button is disabled when no turn is active", async ({ page }) => {
   await drive(page, "queue");
   await expect(page.getByTestId("queue-tray")).toContainText("Queued · 2");
@@ -104,6 +110,7 @@ test("steer button is disabled when no turn is active", async ({ page }) => {
   await expect(page.getByTestId("steer-button")).toBeDisabled();
 });
 
+// Journey: plain Up-arrow restores queued prompts when the composer is empty.
 test("plain Up-arrow restores queued prompts when the composer is empty", async ({
   page,
 }) => {

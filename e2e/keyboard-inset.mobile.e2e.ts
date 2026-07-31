@@ -12,6 +12,7 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
+// Journey: --keyboard-inset shrinks the app and lifts the composer above the keyboard
 test("--keyboard-inset shrinks the app and lifts the composer above the keyboard", async ({
   page,
 }) => {
