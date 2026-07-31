@@ -51,8 +51,12 @@ describe("ci.yml release path (Buck2-authoritative)", () => {
     // buck2 freezes the RE client config at daemon startup, so a daemon
     // started before .buckconfig.local exists (publish.ts's tauri build runs
     // build-hub.ts, which invokes buck2) breaks the later headless build with
-    // "(No engine address)". The cache steps must precede publish.ts, and a
-    // `buck2 kill` guard restarts the daemon before the headless build.
+    // "(No engine address)". The cache steps must precede publish.ts — the
+    // daemon started during publish.ts already has the RE config, and the
+    // headless build reuses it as-is. No daemon restart is performed (a
+    // `buck2 kill` was removed: it forced a cold re-download of every
+    // third-party crate from crates.io for no benefit — a needless
+    // network-failure window; v0.2.94's release died in one).
     const block = jobBlock("release-prepare");
     const publishIdx = block.indexOf("Build signed desktop release artifacts");
     const tailscaleIdx = block.indexOf("Connect to Tailscale");
@@ -61,9 +65,7 @@ describe("ci.yml release path (Buck2-authoritative)", () => {
     expect(cacheIdx).toBeGreaterThan(-1);
     expect(tailscaleIdx).toBeLessThan(publishIdx);
     expect(cacheIdx).toBeLessThan(publishIdx);
-    expect(block).toMatch(
-      /Restart buck2 daemon[\s\S]*?run: buck2 kill[\s\S]*?Build headless release artifact/,
-    );
+    expect(block).not.toMatch(/buck2 kill/);
   });
 
   it("release-prepare-linux builds headless via build.ts --builder buck2", () => {

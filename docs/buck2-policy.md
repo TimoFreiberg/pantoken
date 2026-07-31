@@ -88,8 +88,9 @@ fails every action with `Internal error (stage: remote_action_cache):
 Remote Execution Error ... Error: (No engine address)`. Run `buck2 kill`
 after writing `.buckconfig.local` to start the daemon with the current
 config. CI's `release-prepare` job orders the Tailscale/cache steps
-before any buck2 invocation and restarts the daemon before the headless
-release build for this reason (see "Release builds in CI").
+before any buck2 invocation — the daemon starts (during publish.ts's
+Tauri build) only after `.buckconfig.local` exists, so no restart is
+needed (see "Release builds in CI").
 
 ### Cache uploads (BUCK2_TEST_FORCE_CACHE_UPLOAD)
 
@@ -240,9 +241,13 @@ release-config archive.
 *before* `publish.ts` runs its Tauri build: tauri's `beforeBuildCommand`
 invokes `build-hub.ts`, whose buck2 command starts the job's daemon, and a
 daemon started before the cache config exists would freeze an empty RE
-config (see "Configuration"). A `buck2 kill` step before the headless build
-restarts the daemon with the current config as a defense against step-order
-regressions.
+config (see "Configuration"). Because the config exists before the first
+daemon starts, the headless build reuses that daemon as-is — no `buck2
+kill` restart is performed. (A restart was removed: it forced a cold
+re-download of every third-party crate from crates.io, a needless
+network-failure window — v0.2.94's release died in one.) The ordering is
+pinned by `scripts/ci-release.test.ts`, so a step-order regression fails
+the test suite rather than the release.
 
 The old informational Buck2⇄Cargo parity comparison step was removed from CI
 with this cutover. `scripts/ci/buck2-parity-compare.sh` stays in-tree as a

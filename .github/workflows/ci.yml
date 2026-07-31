@@ -505,13 +505,6 @@ jobs:
           --dry-run
           --repo TimoFreiberg/pantoken
           --tag-must-match "${{ github.ref_name }}"
-      # Buck2 freezes the RE client config at daemon startup. The publish.ts
-      # step above may have started a daemon without .buckconfig.local (see the
-      # comment on "Connect to Tailscale"); restart it here so the headless
-      # release build always runs with the current cache config. `buck2 kill`
-      # is a no-op (exit 0) when no daemon is running.
-      - name: Restart buck2 daemon for current cache config
-        run: buck2 kill
       # Headless release artifact via Buck2: build.ts --builder buck2 writes
       # .buckconfig.ci (version/build_sha/release_build=1), builds the archive
       # + tar validator, and continues with signing + verification + metadata.
