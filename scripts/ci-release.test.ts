@@ -31,6 +31,25 @@ describe("ci.yml release path (Buck2-authoritative)", () => {
     expect(block).toContain('--tag "${{ github.ref_name }}"');
   });
 
+  it("release-prepare configures the remote cache before any buck2 daemon starts", () => {
+    // buck2 freezes the RE client config at daemon startup, so a daemon
+    // started before .buckconfig.local exists (publish.ts's tauri build runs
+    // build-hub.ts, which invokes buck2) breaks the later headless build with
+    // "(No engine address)". The cache steps must precede publish.ts, and a
+    // `buck2 kill` guard restarts the daemon before the headless build.
+    const block = jobBlock("release-prepare");
+    const publishIdx = block.indexOf("Build signed desktop release artifacts");
+    const tailscaleIdx = block.indexOf("Connect to Tailscale");
+    const cacheIdx = block.indexOf("Configure remote cache");
+    expect(tailscaleIdx).toBeGreaterThan(-1);
+    expect(cacheIdx).toBeGreaterThan(-1);
+    expect(tailscaleIdx).toBeLessThan(publishIdx);
+    expect(cacheIdx).toBeLessThan(publishIdx);
+    expect(block).toMatch(
+      /Restart buck2 daemon[\s\S]*?run: buck2 kill[\s\S]*?Build headless release artifact/,
+    );
+  });
+
   it("release-prepare-linux builds headless via build.ts --builder buck2", () => {
     const block = jobBlock("release-prepare-linux");
     expect(block).toContain("--builder buck2");

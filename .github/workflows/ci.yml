@@ -447,20 +447,19 @@ jobs:
         run: brew install minisign
       - name: Check minisign
         run: minisign -v
-      - name: Build signed desktop release artifacts
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-          PANTOKEN_BUILD_SHA: ${{ github.sha }}
-        run: >
-          pnpm exec tsx scripts/desktop/publish.ts
-          --dry-run
-          --repo TimoFreiberg/pantoken
-          --tag-must-match "${{ github.ref_name }}"
       # Tailscale connection for the Buck2 remote cache (tag pushes; trusted).
       # The buck2 gate job populates the release-config entries on every PR;
       # the release-config action keys are config+source, so they're reusable
       # across tags once populated. Skips gracefully without the secrets.
+      #
+      # MUST precede the publish.ts step below: tauri's beforeBuildCommand
+      # invokes build-hub.ts, whose buck2 command starts this job's buck2
+      # daemon. Buck2 freezes the RE client config (engine_address/CAS/AC) at
+      # daemon startup, so a daemon started before .buckconfig.local exists
+      # runs without the remote cache for the rest of the job, and the headless
+      # release build then fails every action with
+      # "Internal error (stage: remote_action_cache): ... (No engine address)".
+      # See docs/buck2-policy.md "Configuration".
       - name: Connect to Tailscale
         if: (github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push') && !inputs.buck2_no_cache && env.TS_AUTH_KEY != ''
         uses: tailscale/github-action@v4
@@ -484,6 +483,23 @@ jobs:
           [build]
           execution_platforms = toolchains//platforms:remote_cache
           EOF
+      - name: Build signed desktop release artifacts
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          PANTOKEN_BUILD_SHA: ${{ github.sha }}
+        run: >
+          pnpm exec tsx scripts/desktop/publish.ts
+          --dry-run
+          --repo TimoFreiberg/pantoken
+          --tag-must-match "${{ github.ref_name }}"
+      # Buck2 freezes the RE client config at daemon startup. The publish.ts
+      # step above may have started a daemon without .buckconfig.local (see the
+      # comment on "Connect to Tailscale"); restart it here so the headless
+      # release build always runs with the current cache config. `buck2 kill`
+      # is a no-op (exit 0) when no daemon is running.
+      - name: Restart buck2 daemon for current cache config
+        run: buck2 kill
       # Headless release artifact via Buck2: build.ts --builder buck2 writes
       # .buckconfig.ci (version/build_sha/release_build=1), builds the archive
       # + tar validator, and continues with signing + verification + metadata.

@@ -79,6 +79,18 @@ The local config sets:
   execution platform that sets `CommandExecutorConfig(local_enabled=True,
   remote_enabled=False, remote_cache_enabled=True, allow_cache_uploads=True)`.
 
+**Daemon startup snapshots the RE config.** Buck2 parses
+`[buck2_re_client]` when the daemon starts and freezes it for the
+daemon's lifetime — the per-command config re-parse covers execution
+platforms but not the RE client addresses. If `.buckconfig.local`
+appears or changes while a daemon is already running, the next build
+fails every action with `Internal error (stage: remote_action_cache):
+Remote Execution Error ... Error: (No engine address)`. Run `buck2 kill`
+after writing `.buckconfig.local` to start the daemon with the current
+config. CI's `release-prepare` job orders the Tailscale/cache steps
+before any buck2 invocation and restarts the daemon before the headless
+release build for this reason (see "Release builds in CI").
+
 ### Cache uploads (BUCK2_TEST_FORCE_CACHE_UPLOAD)
 
 Due to a buck2 bug where `allow_cache_uploads=True` doesn't trigger the
@@ -218,6 +230,14 @@ gracefully), so release-config actions cached by the `buck2` gate job are
 reused across tags once populated. `release-prepare` additionally runs
 `just validate-archive-rs-ci` after the build as a hermetic gate against the
 release-config archive.
+
+`release-prepare` connects to Tailscale and writes `.buckconfig.local`
+*before* `publish.ts` runs its Tauri build: tauri's `beforeBuildCommand`
+invokes `build-hub.ts`, whose buck2 command starts the job's daemon, and a
+daemon started before the cache config exists would freeze an empty RE
+config (see "Configuration"). A `buck2 kill` step before the headless build
+restarts the daemon with the current config as a defense against step-order
+regressions.
 
 The old informational Buck2⇄Cargo parity comparison step was removed from CI
 with this cutover. `scripts/ci/buck2-parity-compare.sh` stays in-tree as a
