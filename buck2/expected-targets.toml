@@ -156,6 +156,13 @@ test = true
 package = "pantoken-server"
 
 [[targets]]
+label = "//server/pantoken-server:contract_scenarios_tests"
+cargo = "pantoken-server"
+kind = "integration_test"
+test = true
+package = "pantoken-server"
+
+[[targets]]
 label = "//server/pantoken-server:websocket_adapter_tests"
 cargo = "pantoken-server"
 kind = "integration_test"

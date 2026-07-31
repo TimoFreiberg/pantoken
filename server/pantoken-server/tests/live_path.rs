@@ -2817,16 +2817,10 @@ async fn recv_framed_msg(
 /// `run_remote_runtime()` to exercise the full stack.
 #[tokio::test]
 async fn active_turn_survives_proxy_drop_real() {
-    // Disable hub-idle exit for this test (we need the runtime to stay alive
-    // across the disconnect/reconnect window).
-    // SAFETY: this test is serialized by OVERRIDE_MUTEX, and the env var is
-    // read once at runtime start. We set it before spawning the runtime.
-    // We restore it at the end.
-    let prev_hub_idle = std::env::var("PANTOKEN_HUB_IDLE_MS").ok();
-    // SAFETY: serialized by OVERRIDE_MUTEX; env var read once at runtime start.
-    unsafe {
-        std::env::set_var("PANTOKEN_HUB_IDLE_MS", "0");
-    }
+    // Disable hub-idle exit (see `disable_hub_idle_exit` — set once per
+    // process; the runtime must stay alive across the disconnect/reconnect
+    // window).
+    disable_hub_idle_exit();
 
     let fixture = make_remote_runtime(600000).await;
 
@@ -2948,17 +2942,26 @@ async fn active_turn_survives_proxy_drop_real() {
     );
 
     drop(stream2);
+}
 
-    // Restore env.
-    if let Some(v) = prev_hub_idle {
-        unsafe {
-            std::env::set_var("PANTOKEN_HUB_IDLE_MS", v);
-        }
-    } else {
-        unsafe {
-            std::env::remove_var("PANTOKEN_HUB_IDLE_MS");
-        }
-    }
+/// Disable the remote runtime's hub-idle exit for the `_real` lifecycle tests:
+/// all three need the in-process runtime to stay alive across their
+/// disconnect/reconnect windows. The value is set ONCE per process and never
+/// removed — repeatedly mutating `PANTOKEN_HUB_IDLE_MS` from test threads
+/// races with concurrent `std::env::var` reads elsewhere in the test binary
+/// (`std::env::set_var` is `unsafe` in edition 2024 precisely because of that
+/// race), and the resulting stale env intermittently left the runtime with
+/// the `2 × idle_reap_ms` default, which exits mid-test (observed flake:
+/// `idle_gc_disposes_warm_session_real` connection-refused on reconnect).
+/// Nothing else reads the variable, so a single early set is sufficient.
+fn disable_hub_idle_exit() {
+    use std::sync::OnceLock;
+    static SET: OnceLock<()> = OnceLock::new();
+    SET.get_or_init(|| {
+        // SAFETY: runs once, at the start of the first _real test, before any
+        // runtime spawn in this process; the value is never mutated again.
+        unsafe { std::env::set_var("PANTOKEN_HUB_IDLE_MS", "0") };
+    });
 }
 
 /// `idle_gc_disposes_warm_session_real` — AC.10: when there are no connections
@@ -2966,12 +2969,9 @@ async fn active_turn_survives_proxy_drop_real() {
 /// configured grace period while durable session state remains resumable.
 #[tokio::test]
 async fn idle_gc_disposes_warm_session_real() {
-    // Disable hub-idle exit (we need the runtime to stay alive after reaping).
-    let prev_hub_idle = std::env::var("PANTOKEN_HUB_IDLE_MS").ok();
-    // SAFETY: serialized by OVERRIDE_MUTEX; env var read once at runtime start.
-    unsafe {
-        std::env::set_var("PANTOKEN_HUB_IDLE_MS", "0");
-    }
+    // Disable hub-idle exit (see `disable_hub_idle_exit` — set once per
+    // process; the runtime must stay alive after reaping).
+    disable_hub_idle_exit();
 
     // Use a short idle_reap_ms for fast test timing. The lifecycle loop's
     // check interval has a 1000ms floor, so the reaper checks at most once
@@ -3047,17 +3047,6 @@ async fn idle_gc_disposes_warm_session_real() {
     );
 
     drop(stream2);
-
-    // Restore env.
-    if let Some(v) = prev_hub_idle {
-        unsafe {
-            std::env::set_var("PANTOKEN_HUB_IDLE_MS", v);
-        }
-    } else {
-        unsafe {
-            std::env::remove_var("PANTOKEN_HUB_IDLE_MS");
-        }
-    }
 }
 
 /// `active_turn_prevents_idle_gc_real` — AC.10: active turns are never reaped.
@@ -3069,11 +3058,9 @@ async fn idle_gc_disposes_warm_session_real() {
 /// manager's reap predicate checks `any_turn_in_flight()`).
 #[tokio::test]
 async fn active_turn_prevents_idle_gc_real() {
-    let prev_hub_idle = std::env::var("PANTOKEN_HUB_IDLE_MS").ok();
-    // SAFETY: serialized by OVERRIDE_MUTEX; env var read once at runtime start.
-    unsafe {
-        std::env::set_var("PANTOKEN_HUB_IDLE_MS", "0");
-    }
+    // Disable hub-idle exit (see `disable_hub_idle_exit` — set once per
+    // process).
+    disable_hub_idle_exit();
 
     let _guard = OVERRIDE_MUTEX.lock().await;
 
@@ -3209,15 +3196,4 @@ async fn active_turn_prevents_idle_gc_real() {
         driver.any_turn_in_flight(),
         "turn must still be in flight (not reaped)"
     );
-
-    // Restore env.
-    if let Some(v) = prev_hub_idle {
-        unsafe {
-            std::env::set_var("PANTOKEN_HUB_IDLE_MS", v);
-        }
-    } else {
-        unsafe {
-            std::env::remove_var("PANTOKEN_HUB_IDLE_MS");
-        }
-    }
 }

@@ -1,0 +1,158 @@
+{
+  "scenario": "attach-race",
+  "version": "0.5.8",
+  "provenance": {
+    "kind": "synthetic_pantoken_regression"
+  },
+  "description": "Deterministic attach race: the driver connects GET /events BEFORE hydrating GET /state, so a message_start buffered while the snapshot is in flight must be delivered exactly once after warm installation. The http[] is the attach chain in driver order (events, state, then the seed history); the SSE is a compact streaming turn that the corpus replay folds into the same mapped contract as streaming-turn.",
+  "canonicalization": {
+    "session_id": "SESSION",
+    "prompt_ids": {
+      "019f347b-60f1-7763-9398-21e4b6c00545": "PROMPT_0"
+    },
+    "timestamps": "monotonic-from-T0"
+  },
+  "http": [
+    {
+      "method": "GET",
+      "path": "/events",
+      "request_body": null,
+      "status": 200,
+      "response_body": null
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "request_body": null,
+      "status": 200,
+      "response_body": {
+        "session_title": "main",
+        "todos": [],
+        "flags": [],
+        "env": {},
+        "active_facet": "execute",
+        "plugin_config": {},
+        "project_cwd": "/PROJECT"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/history",
+      "request_body": null,
+      "status": 200,
+      "response_body": {
+        "items": [],
+        "offset": 0,
+        "total_projected_items": 0,
+        "history_revision": 0,
+        "session_id": "SESSION"
+      }
+    }
+  ],
+  "sse": [
+    {
+      "seq": 1,
+      "emitted_at": "1970-01-01T00:00:00.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "message_start",
+        "prompt_id": "PROMPT_0"
+      }
+    },
+    {
+      "seq": 2,
+      "emitted_at": "1970-01-01T00:00:01.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_start",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "block_type": {
+          "type": "text"
+        }
+      }
+    },
+    {
+      "seq": 3,
+      "emitted_at": "1970-01-01T00:00:02.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "text",
+          "text": "Hello"
+        }
+      }
+    },
+    {
+      "seq": 4,
+      "emitted_at": "1970-01-01T00:00:03.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_delta",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0,
+        "delta": {
+          "type": "text",
+          "text": "!"
+        }
+      }
+    },
+    {
+      "seq": 5,
+      "emitted_at": "1970-01-01T00:00:04.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "content_block_stop",
+        "prompt_id": "PROMPT_0",
+        "block_index": 0
+      }
+    },
+    {
+      "seq": 6,
+      "emitted_at": "1970-01-01T00:00:05.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "message_complete",
+        "prompt_id": "PROMPT_0"
+      }
+    }
+  ],
+  "expected_driver_events": {
+    "events": [
+      {
+        "kind": "sessionUpdated",
+        "count": 1,
+        "essential": {
+          "type": "sessionUpdated"
+        }
+      },
+      {
+        "kind": "assistantDelta",
+        "count": 2,
+        "essential": {
+          "type": "assistantDelta"
+        }
+      }
+    ],
+    "effects": [
+      {
+        "emit": "RunCompleted",
+        "kind": "fetchState",
+        "prompt_id": "PROMPT_0"
+      }
+    ],
+    "final_session": {
+      "mapped_event_count": 3,
+      "assistant_delta_count": 2,
+      "open_block_count": 0,
+      "tool_input_buffer_empty": true,
+      "turn_error_present": false
+    },
+    "capabilities": [
+      "streaming"
+    ]
+  }
+}

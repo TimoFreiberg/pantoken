@@ -15,6 +15,34 @@ mock seam for setModel/subscribe; the spawn-seam + pure-helper +
 waitForDaemonStartup parts are tractable now); live smoke test against a real
 daemon.
 
+**Status (2026-07-31, issue #135):** The 10 deterministic gap scenarios landed
+under `server/pantoken-server/tests/contract_scenarios.rs` (the
+`contract_scenarios_tests` buck2 target, registered in `just test-rs`):
+attach race (strict hydration-race fake), attach-chain auth/malformed failures,
+lease conflict + lease loss (heartbeat 409 → reconnect reseed), multi-item
+queue drain + error pinning, rewind→reseed, reconnect discontinuity → reseed
+(+ interrupted-tool-call clean-accumulator variant), full history-kind
+hydration, state invalidation + rewind domains, per-disposition observability,
+and command/action error propagation. Four new SSE-driven corpus scenarios
+(`attach-race`, `rewind-reseed`, `state-invalidation`, `event-dispositions`)
+pass the full corpus loader gate. The fake daemon gained two strict modes:
+`spawn_strict_hydration_race` (attach race under strict expectation
+consumption) and `spawn_strict_gated` (phased SSE injection after warm attach,
+so effect-triggering events never race the seed fetch under strict global
+ordering); the strict `/events` handler now also serves declared non-200
+statuses. Two pre-existing behaviors are pinned by tests, NOT fixed:
+the warm-time seed-path `/history` failure swallows into a bare `SessionOpened`
+seed (driver.rs:2437-2455), and `clear_queue` snapshot/dequeue failures return
+empty/partial `ClearQueueResult`s without surfacing the daemon error
+(driver.rs:1739-1775) — both candidate follow-ups. Also fixed a pre-existing
+flake in `live_path.rs`'s three `_real` remote-runtime tests: their
+per-test `PANTOKEN_HUB_IDLE_MS` set/restore dance raced with concurrent
+`std::env::var` reads in the multithreaded test binary, intermittently leaving
+the runtime with the `2 × idle_reap_ms` hub-exit default and killing the
+accept loop mid-test (`idle_gc_disposes_warm_session_real` connection-refused
+on reconnect). They now set the variable once per process
+(`disable_hub_idle_exit`) and never mutate it again.
+
 ## Phase 2 session lifecycle
 
 Destroy-session protocol and driver seams are implemented. Empty/default mock sessions can be reaped with lifecycle guards; live sessions use a pantoken-owned durable lifecycle/tombstone store and filter tombstoned rows. Prompt acceptance and successful live configuration actions are recorded authoritatively, and warm-cap eviction prefers eligible empty/default attachments. The daemon surface exposes process termination but no registry-delete endpoint, so tombstones remain the deletion fallback.

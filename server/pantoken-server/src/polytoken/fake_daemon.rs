@@ -354,7 +354,6 @@ impl HydrationRaceControl {
             .expect("hydration race semaphore remains open")
             .forget();
     }
-
     pub async fn wait_state_requested(&self) {
         Self::wait(&self.state_requested).await;
     }
@@ -372,12 +371,45 @@ impl HydrationRaceControl {
     }
 }
 
+/// Push handle for [`spawn_strict_gated`]: delivers frames onto the CURRENT
+/// SSE stream (the one established by the latest `GET /events`) and can end it
+/// to force the client's reconnect path. The shared slot is replaced on each
+/// connection, so a push after a reconnect targets the live stream.
+#[derive(Clone)]
+pub struct GatedSseControl {
+    tx: Arc<Mutex<Option<mpsc::Sender<Result<Event, std::convert::Infallible>>>>>,
+}
+
+impl GatedSseControl {
+    /// Push one SSE frame onto the connected stream. Fails if no stream is
+    /// currently connected or the client has dropped the receiver.
+    pub async fn push(&self, frame: corpus::SseFrame) -> Result<(), String> {
+        let tx = self
+            .tx
+            .lock()
+            .clone()
+            .ok_or("fake gated SSE stream not connected")?;
+        tx.send(Ok(frame_to_event(&frame)))
+            .await
+            .map_err(|_| "fake gated SSE stream disconnected".into())
+    }
+
+    /// End the current SSE stream by dropping its sender. The client's SSE
+    /// loop sees a normal stream end and reconnects with backoff.
+    pub fn close(&self) {
+        self.tx.lock().take();
+    }
+}
+
 #[derive(Clone)]
 enum SseMode {
     OneShot {
         inter_frame_delay_ms: u64,
     },
     Controlled,
+    Gated {
+        tx: Arc<Mutex<Option<mpsc::Sender<Result<Event, std::convert::Infallible>>>>>,
+    },
     HydrationRace {
         frame: corpus::SseFrame,
         control: HydrationRaceControl,
@@ -453,12 +485,7 @@ pub async fn spawn_hydration_race(
     session_id: String,
     frame: corpus::SseFrame,
 ) -> (FakeDaemon, HydrationRaceControl) {
-    let control = HydrationRaceControl {
-        state_requested: Arc::new(tokio::sync::Semaphore::new(0)),
-        event_sent: Arc::new(tokio::sync::Semaphore::new(0)),
-        release_state: Arc::new(tokio::sync::Semaphore::new(0)),
-        stream_closed: Arc::new(tokio::sync::Semaphore::new(0)),
-    };
+    let control = hydration_race_control();
     let fake = spawn_with_mode(
         scenario,
         session_id,
@@ -471,6 +498,71 @@ pub async fn spawn_hydration_race(
     )
     .await;
     (fake, control)
+}
+
+/// Spawn a STRICT attach-race daemon: the hydration-race `/state` gate PLUS
+/// strict expectation consumption wrapped by the lifecycle bootstrap
+/// allowlist. The attach chain (`GET /events`, `GET /state`, `GET /history`)
+/// must be declared in the driver's real call order; `/health`,
+/// `/tui-attachment/*`, `/permission-monitor`, `/notification-autodrain`
+/// stay canned. This is the contract engine for the attach-race scenario:
+/// the test proves `/events` connects before `/state`, the buffered
+/// `message_start` is delivered exactly once after hydration, and every
+/// declared expectation is consumed.
+pub async fn spawn_strict_hydration_race(
+    scenario: ScenarioFile,
+    session_id: String,
+    frame: corpus::SseFrame,
+) -> (FakeDaemon, HydrationRaceControl) {
+    let control = hydration_race_control();
+    let fake = spawn_with_mode(
+        scenario,
+        session_id,
+        SseMode::HydrationRace {
+            frame,
+            control: control.clone(),
+        },
+        true,
+        true,
+    )
+    .await;
+    (fake, control)
+}
+
+/// Spawn a strict gated-stream fake. The SSE stream stays open and the test
+/// pushes frames through [`GatedSseControl`] AFTER the warm attach completes,
+/// so effect-triggering events (`session_state_changed`, `stream_discontinuity`,
+/// `context_cleared`, …) fold at a deterministic time — never racing the
+/// seed-path `GET /history` that strict global ordering would otherwise make
+/// flaky. `http[]` is still consumed strictly, in arrival order, and every
+/// declared expectation must be consumed by test end.
+pub async fn spawn_strict_gated(
+    scenario: ScenarioFile,
+    session_id: String,
+) -> (FakeDaemon, GatedSseControl) {
+    let control = GatedSseControl {
+        tx: Arc::new(parking_lot::Mutex::new(None)),
+    };
+    let fake = spawn_with_mode(
+        scenario,
+        session_id,
+        SseMode::Gated {
+            tx: control.tx.clone(),
+        },
+        true,
+        true,
+    )
+    .await;
+    (fake, control)
+}
+
+fn hydration_race_control() -> HydrationRaceControl {
+    HydrationRaceControl {
+        state_requested: Arc::new(tokio::sync::Semaphore::new(0)),
+        event_sent: Arc::new(tokio::sync::Semaphore::new(0)),
+        release_state: Arc::new(tokio::sync::Semaphore::new(0)),
+        stream_closed: Arc::new(tokio::sync::Semaphore::new(0)),
+    }
 }
 
 async fn spawn_controlled(scenario: ScenarioFile, session_id: String) -> Arc<FakeDaemon> {
@@ -1046,21 +1138,41 @@ async fn sse_handler(State(app): State<AppState>) -> Response {
                 "/events",
                 "",
             ) {
-                Ok(Some(_)) => {
+                Ok(Some(entry)) => {
                     state.next_http_expectation += 1;
-                    None
+                    // A declared non-200 `/events` entry (auth-failure
+                    // contracts) is served as a plain error response instead of
+                    // a stream — the attach failure tests exercise exactly the
+                    // client's non-200 handling.
+                    if entry.status != 200 {
+                        Some((
+                            StatusCode::from_u16(entry.status as u16)
+                                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                            entry
+                                .response_body
+                                .map(|v| v.to_string())
+                                .unwrap_or_default(),
+                        ))
+                    } else {
+                        None
+                    }
                 }
                 Ok(None) if state.allow_bootstrap => None,
-                Ok(None) => Some("strict fake contract has no expectation for GET /events".into()),
-                Err(error) => Some(error),
+                Ok(None) => Some((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "strict fake contract has no expectation for GET /events".into(),
+                )),
+                Err(error) => Some((StatusCode::INTERNAL_SERVER_ERROR, error)),
             }
         } else {
             None
         }
     };
-    if let Some(error) = contract_error {
-        tracing::error!("fake daemon contract violation: {error}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response();
+    if let Some((status, body)) = contract_error {
+        if status == StatusCode::INTERNAL_SERVER_ERROR {
+            tracing::error!("fake daemon contract violation: {body}");
+        }
+        return (status, body).into_response();
     }
 
     let (tx, rx) = mpsc::channel::<Result<Event, std::convert::Infallible>>(64);
@@ -1083,6 +1195,9 @@ async fn sse_handler(State(app): State<AppState>) -> Response {
         }
         SseMode::Controlled => {
             app.state.lock().sse_tx = Some(tx);
+        }
+        SseMode::Gated { tx: slot } => {
+            *slot.lock() = Some(tx);
         }
         SseMode::HydrationRace { frame, control } => {
             tokio::spawn(async move {
@@ -1307,6 +1422,111 @@ mod tests {
         let error = fake.assert_expectations_consumed().unwrap_err();
         assert!(error.contains("1 unconsumed"), "{error}");
         reqwest::get(format!("{base}/history")).await.unwrap();
+        fake.assert_expectations_consumed().unwrap();
+    }
+
+    fn race_frame() -> corpus::SseFrame {
+        corpus::SseFrame {
+            seq: Some(1),
+            emitted_at: "1970-01-01T00:00:00.000Z".into(),
+            session_id: "S".into(),
+            event: serde_json::json!({"type": "message_start", "prompt_id": "PROMPT_0"}),
+        }
+    }
+
+    #[tokio::test]
+    async fn strict_hydration_race_rejects_undeclared_request() {
+        let (fake, _race) = spawn_strict_hydration_race(
+            scenario(serde_json::json!([
+                {"method":"GET","path":"/events","status":200}
+            ])),
+            "strict-race".into(),
+            race_frame(),
+        )
+        .await;
+        let base = format!("http://127.0.0.1:{}", fake.port);
+        // The declared /events expectation connects (the race gate then holds
+        // the frame until /state enters).
+        let response = reqwest::get(format!("{base}/events")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        // /history is neither declared nor canned → the strict race fake must
+        // reject it (500), exactly like the strict one-shot fake.
+        let response = reqwest::get(format!("{base}/history")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        // /health stays on the canned bootstrap allowlist.
+        let response = reqwest::get(format!("{base}/health")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        fake.assert_expectations_consumed().unwrap();
+    }
+
+    #[tokio::test]
+    async fn strict_sse_serves_declared_error_status() {
+        // A declared non-200 `/events` entry must be served as that error
+        // response (not a stream): the attach-failure contracts exercise the
+        // client's `GET /events failed (401)` path through this seam.
+        let fake = spawn_strict(
+            scenario(serde_json::json!([
+                {
+                    "method": "GET",
+                    "path": "/events",
+                    "status": 401,
+                    "response_body": {"code": "unauthorized", "message": "bad token"}
+                }
+            ])),
+            "strict-sse-401".into(),
+            0,
+        )
+        .await;
+        let response = reqwest::get(format!("http://127.0.0.1:{}/events", fake.port))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let body = response.text().await.unwrap();
+        assert!(body.contains("unauthorized"), "{body}");
+        fake.assert_expectations_consumed().unwrap();
+    }
+
+    #[tokio::test]
+    async fn gated_stream_delivers_pushed_frames_and_ends_on_close() {
+        use futures_util::StreamExt;
+        let (fake, gate) = spawn_strict_gated(
+            scenario(serde_json::json!([
+                {"method":"GET","path":"/events","status":200}
+            ])),
+            "gated".into(),
+        )
+        .await;
+        let response = reqwest::get(format!("http://127.0.0.1:{}/events", fake.port))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let mut stream = response.bytes_stream();
+
+        gate.push(corpus::SseFrame {
+            seq: Some(1),
+            emitted_at: "1970-01-01T00:00:00.000Z".into(),
+            session_id: "S".into(),
+            event: serde_json::json!({"type": "heartbeat"}),
+        })
+        .await
+        .expect("push onto the connected stream");
+
+        let first = tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
+            .await
+            .expect("pushed frame must arrive")
+            .expect("stream must not end early")
+            .expect("frame bytes");
+        let text = String::from_utf8_lossy(&first);
+        assert!(text.contains("heartbeat"), "{text}");
+
+        gate.close();
+        let ended = tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
+            .await
+            .expect("close must end the stream promptly");
+        assert!(ended.is_none(), "stream must end after close");
+
+        // Pushing after close fails loudly (no connected stream).
+        assert!(gate.push(race_frame()).await.is_err());
         fake.assert_expectations_consumed().unwrap();
     }
 

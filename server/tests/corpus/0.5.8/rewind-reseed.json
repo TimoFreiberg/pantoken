@@ -1,0 +1,165 @@
+{
+  "scenario": "rewind-reseed",
+  "version": "0.5.8",
+  "provenance": {
+    "kind": "synthetic_pantoken_regression"
+  },
+  "description": "Rewind contract: a session_rewound SSE event fires the driver's Reseed effect (GET /state then GET /history), and branch_from issues exactly the three rewind domains. The http[] is the live call order for new_session + branch_from: attach chain (events, state, seed history), the pre-rewind transcript lookup, the POST /rewind, then the post-rewind state + history refresh.",
+  "canonicalization": {
+    "session_id": "SESSION",
+    "prompt_ids": {
+      "019f347b-60f1-7763-9398-21e4b6c00545": "PROMPT_0"
+    },
+    "timestamps": "monotonic-from-T0"
+  },
+  "http": [
+    {
+      "method": "GET",
+      "path": "/events",
+      "request_body": null,
+      "status": 200,
+      "response_body": null
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "request_body": null,
+      "status": 200,
+      "response_body": {
+        "session_title": "before",
+        "todos": [],
+        "flags": [],
+        "env": {},
+        "active_facet": "execute",
+        "plugin_config": {},
+        "project_cwd": "/PROJECT"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/history",
+      "request_body": null,
+      "status": 200,
+      "response_body": {
+        "items": [],
+        "offset": 0,
+        "total_projected_items": 0,
+        "history_revision": 1,
+        "session_id": "SESSION"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/history",
+      "request_body": null,
+      "status": 200,
+      "response_body": {
+        "items": [
+          {
+            "type": "user",
+            "prompt_id": "PROMPT_0",
+            "content": "preserve this prompt"
+          }
+        ],
+        "offset": 0,
+        "total_projected_items": 1,
+        "history_revision": 1,
+        "session_id": "SESSION"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/rewind",
+      "request_body": {
+        "domains": [
+          "conversation",
+          "todos",
+          "flags"
+        ],
+        "to_prompt_id": "PROMPT_0"
+      },
+      "status": 202,
+      "response_body": {
+        "ok": true
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "request_body": null,
+      "status": 200,
+      "response_body": {
+        "session_title": "after-rewind",
+        "todos": [],
+        "flags": [],
+        "env": {},
+        "active_facet": "execute",
+        "plugin_config": {},
+        "project_cwd": "/PROJECT"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/history",
+      "request_body": null,
+      "status": 200,
+      "response_body": {
+        "items": [
+          {
+            "type": "user",
+            "prompt_id": "PROMPT_0",
+            "content": "preserve this prompt"
+          }
+        ],
+        "offset": 0,
+        "total_projected_items": 1,
+        "history_revision": 2,
+        "session_id": "SESSION"
+      }
+    }
+  ],
+  "sse": [
+    {
+      "seq": 1,
+      "emitted_at": "1970-01-01T00:00:00.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "message_start",
+        "prompt_id": "PROMPT_0"
+      }
+    },
+    {
+      "seq": 2,
+      "emitted_at": "1970-01-01T00:00:01.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "session_rewound",
+        "rewound_to_index": 0
+      }
+    }
+  ],
+  "expected_driver_events": {
+    "events": [
+      {
+        "kind": "sessionUpdated",
+        "count": 1,
+        "essential": {
+          "type": "sessionUpdated"
+        }
+      }
+    ],
+    "effects": [
+      {
+        "kind": "reseed"
+      }
+    ],
+    "final_session": {
+      "mapped_event_count": 1,
+      "assistant_delta_count": 0,
+      "open_block_count": 0,
+      "tool_input_buffer_empty": true,
+      "turn_error_present": false
+    },
+    "capabilities": []
+  }
+}

@@ -172,10 +172,10 @@ build-server-rs:
 server-bin-rs:
     @bash scripts/buck2/check-version.sh && buck2 build --show-output '//server/pantoken-server:pantoken_server' | tail -1 | awk '{print $$2}'
 
-# Run all server Rust tests via Buck2 (13 targets — all build and test
+# Run all server Rust tests via Buck2 (14 targets — all build and test
 # after Issue #119 resolved the OpenSSL/ring compilation blocker).
 test-rs:
-    bash scripts/buck2/check-version.sh && buck2 test '//server/pantoken-protocol:fold_corpus_tests' '//server/pantoken-daemon-types:target_version_test' '//server/pantoken-daemon-types:daemon_types_roundtrip' '//server/pantoken-daemon-types:schema_inventory_test' '//server/pantoken-remote-layout:unit_tests' '//server/pantoken-tar-validate:unit_tests' '//server/pantoken-server:server_lib_unit_tests' '//server/pantoken-server:corpus_tests' '//server/pantoken-server:live_path_tests' '//server/pantoken-server:websocket_adapter_tests' '//server/pantoken-server:stdio_adapter_tests' '//server/pantoken-server:resume_and_recovery_tests' '//server/pantoken-server:remote_runtime_tests'
+    bash scripts/buck2/check-version.sh && buck2 test '//server/pantoken-protocol:fold_corpus_tests' '//server/pantoken-daemon-types:target_version_test' '//server/pantoken-daemon-types:daemon_types_roundtrip' '//server/pantoken-daemon-types:schema_inventory_test' '//server/pantoken-remote-layout:unit_tests' '//server/pantoken-tar-validate:unit_tests' '//server/pantoken-server:server_lib_unit_tests' '//server/pantoken-server:corpus_tests' '//server/pantoken-server:live_path_tests' '//server/pantoken-server:contract_scenarios_tests' '//server/pantoken-server:websocket_adapter_tests' '//server/pantoken-server:stdio_adapter_tests' '//server/pantoken-server:resume_and_recovery_tests' '//server/pantoken-server:remote_runtime_tests'
 
 # Build the unsigned headless archive via Buck2 (uses remote cache if .buckconfig.local present).
 archive-rs:

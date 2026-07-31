@@ -204,6 +204,22 @@ rust_test(
     visibility = ["PUBLIC"],
 )
 
+# Deterministic gap-scenario contract tests (issue #135) — strict-fake
+# contracts over the frozen corpus + in-code synthetic scenarios.
+rust_test(
+    name = "contract_scenarios_tests",
+    srcs = ["tests/contract_scenarios.rs"] + _TEST_SUPPORT,
+    crate_root = "tests/contract_scenarios.rs",
+    deps = _TEST_DEPS,
+    env = {"CARGO_MANIFEST_DIR": "server/pantoken-server"},
+    resources = ["//server/tests:corpus_json"],
+    run_env = {
+        "PANTOKEN_CORPUS_DIR": "$(location //server/tests:corpus_json)/corpus",
+        "HOME": ".",
+    },
+    visibility = ["PUBLIC"],
+)
+
 # WebSocket adapter contract tests.
 rust_test(
     name = "websocket_adapter_tests",

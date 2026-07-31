@@ -1,0 +1,184 @@
+{
+  "scenario": "event-dispositions",
+  "version": "0.5.8",
+  "provenance": {
+    "kind": "synthetic_pantoken_regression"
+  },
+  "description": "Disposition contract: one event per observable group. heartbeat is an intentional no-op (no driver event, no fetch); message_start maps to a SessionUpdated; session_state_changed triggers an authoritative GET /state; model_error surfaces a warning notice carrying the daemon's message; stream_discontinuity triggers the Reseed recovery (GET /state then GET /history). The http[] is the live call order: attach chain plus the invalidation-driven fetches.",
+  "canonicalization": {
+    "session_id": "SESSION",
+    "prompt_ids": {
+      "019f347b-60f1-7763-9398-21e4b6c00545": "PROMPT_0"
+    },
+    "timestamps": "monotonic-from-T0"
+  },
+  "http": [
+    {
+      "method": "GET",
+      "path": "/events",
+      "request_body": null,
+      "status": 200,
+      "response_body": null
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "request_body": null,
+      "status": 200,
+      "response_body": {
+        "session_title": "main",
+        "todos": [],
+        "flags": [],
+        "env": {},
+        "active_facet": "execute",
+        "plugin_config": {},
+        "project_cwd": "/PROJECT"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/history",
+      "request_body": null,
+      "status": 200,
+      "response_body": {
+        "items": [],
+        "offset": 0,
+        "total_projected_items": 0,
+        "history_revision": 0,
+        "session_id": "SESSION"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "request_body": null,
+      "status": 200,
+      "response_body": {
+        "session_title": "main",
+        "todos": [],
+        "flags": [],
+        "env": {},
+        "active_facet": "execute",
+        "plugin_config": {},
+        "project_cwd": "/PROJECT"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/state",
+      "request_body": null,
+      "status": 200,
+      "response_body": {
+        "session_title": "main",
+        "todos": [],
+        "flags": [],
+        "env": {},
+        "active_facet": "execute",
+        "plugin_config": {},
+        "project_cwd": "/PROJECT"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/history",
+      "request_body": null,
+      "status": 200,
+      "response_body": {
+        "items": [],
+        "offset": 0,
+        "total_projected_items": 0,
+        "history_revision": 1,
+        "session_id": "SESSION"
+      }
+    }
+  ],
+  "sse": [
+    {
+      "seq": 1,
+      "emitted_at": "1970-01-01T00:00:00.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "heartbeat",
+        "timestamp": "1970-01-01T00:00:00.000Z"
+      }
+    },
+    {
+      "seq": 2,
+      "emitted_at": "1970-01-01T00:00:01.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "message_start",
+        "prompt_id": "PROMPT_0"
+      }
+    },
+    {
+      "seq": 3,
+      "emitted_at": "1970-01-01T00:00:02.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "session_state_changed",
+        "domains": [
+          "todos"
+        ]
+      }
+    },
+    {
+      "seq": 4,
+      "emitted_at": "1970-01-01T00:00:03.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "model_error",
+        "prompt_id": "PROMPT_0",
+        "error": {
+          "type": "other",
+          "code": "E500",
+          "message": "internal provider failure"
+        }
+      }
+    },
+    {
+      "seq": 5,
+      "emitted_at": "1970-01-01T00:00:04.000Z",
+      "session_id": "SESSION",
+      "event": {
+        "type": "stream_discontinuity",
+        "missed": 3
+      }
+    }
+  ],
+  "expected_driver_events": {
+    "events": [
+      {
+        "kind": "sessionUpdated",
+        "count": 1,
+        "essential": {
+          "type": "sessionUpdated"
+        }
+      },
+      {
+        "kind": "hostUiRequest",
+        "count": 1,
+        "essential": {
+          "type": "hostUiRequest"
+        }
+      }
+    ],
+    "effects": [
+      {
+        "emit": "SessionUpdated",
+        "kind": "fetchState"
+      },
+      {
+        "kind": "reseed"
+      }
+    ],
+    "final_session": {
+      "mapped_event_count": 2,
+      "assistant_delta_count": 0,
+      "open_block_count": 0,
+      "tool_input_buffer_empty": true,
+      "turn_error_present": true
+    },
+    "capabilities": []
+  }
+}

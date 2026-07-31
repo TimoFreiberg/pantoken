@@ -128,6 +128,10 @@ When the daemon version bumps and a fresh capture is needed:
 | `abort` | `POST /turn/cancel` mid-flight → `turn_cancelled` (`user_cancelled`). |
 | `queue-while-in-flight` | `.7` auto-queue: a `POST /prompt` while a turn is in flight is accepted (202, `PromptAccepted.queued_item` set) and later drained. NOT rejected. |
 | `reconnect-stream-discontinuity` | A `stream_discontinuity` event → the accumulator must RESEED (GET /history + GET /state), NOT attempt SSE resume replay (Last-Event-ID resume is a known upstream no-op). |
+| `attach-race` | The attach race contract (issue #135): `/events` connects before `/state`; a `message_start` buffered during hydration must be delivered exactly once after warm installation. |
+| `rewind-reseed` | The rewind contract (issue #135): `session_rewound` fires the Reseed effect; the http[] is the live `new_session` + `branch_from` call order including the three-domain `POST /rewind`. |
+| `state-invalidation` | The state-invalidation contract (issue #135): `session_state_changed` fires an authoritative `GET /state`; `context_cleared` fires the reseed fetches; the http[] includes the branch_from flow. |
+| `event-dispositions` | The disposition contract (issue #135): one event per observable group — `heartbeat` no-op, `message_start` mapped, `session_state_changed` refetch, `model_error` warning notice, `stream_discontinuity` reseed. |
 
 ## Running the tests
 

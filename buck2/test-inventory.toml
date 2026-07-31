@@ -105,6 +105,16 @@ temp_root = "tempfile (sandboxed)"
 network = "none"
 
 [[tests]]
+label = "//server/pantoken-server:contract_scenarios_tests"
+data = ["//server/tests:corpus_json"]
+executables = []
+env_set = ["PANTOKEN_CORPUS_DIR", "HOME"]
+env_clear = []
+socket = "none"
+temp_root = "tempfile (sandboxed)"
+network = "none"
+
+[[tests]]
 label = "//server/pantoken-server:websocket_adapter_tests"
 data = []
 executables = []
