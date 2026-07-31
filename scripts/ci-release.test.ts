@@ -142,4 +142,28 @@ describe("ci.yml release path (Buck2-authoritative)", () => {
     expect(jobBlock("release-prepare")).not.toContain(PR_GATING);
     expect(jobBlock("release-prepare-linux")).not.toContain(PR_GATING);
   });
+
+  it("wraps buck2 build steps in retry-transient.sh but never test steps", () => {
+    // Transient crates.io DNS/network failures get exactly one retry (see
+    // scripts/ci/retry-transient.sh), and only on build steps. Test steps are
+    // deliberately unwrapped: test failures must never be retried.
+    for (const job of ["rust-server", "buck2"]) {
+      const block = jobBlock(job);
+      expect(stepBlock(block, "Buck2 clippy")).toContain("retry-transient.sh");
+      expect(stepBlock(block, "Buck2 build")).toContain("retry-transient.sh");
+      expect(stepBlock(block, "Buck2 test")).not.toContain("retry-transient.sh");
+    }
+    expect(stepBlock(jobBlock("buck2"), "Buck2 archive build")).toContain(
+      "retry-transient.sh",
+    );
+    expect(
+      stepBlock(jobBlock("release-prepare"), "Build headless release artifact"),
+    ).toContain("retry-transient.sh");
+    expect(
+      stepBlock(
+        jobBlock("release-prepare"),
+        "Build signed desktop release artifacts",
+      ),
+    ).toContain("retry-transient.sh");
+  });
 });

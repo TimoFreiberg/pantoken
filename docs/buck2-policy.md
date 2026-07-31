@@ -254,6 +254,23 @@ with this cutover. `scripts/ci/buck2-parity-compare.sh` stays in-tree as a
 local dev tool for manual Cargo-vs-Buck2 spot checks (structural comparison of
 two archives; not a CI gate).
 
+### Transient network retry
+
+GitHub-hosted runners occasionally hit short-lived DNS/connection blips when
+Buck2 downloads third-party crates from crates.io (the failure class that
+killed v0.2.94's release). Every Buck2 **build** step in CI runs through
+`scripts/ci/retry-transient.sh`, which re-runs the command once — and only
+when the captured output matches a tight set of network/DNS error strings
+(`Temporary failure in name resolution`, `Could not resolve host`, connection
+reset/refused/timeout, `Failed to fetch`/`Failed to download`, curl DNS/conn
+codes, etc.). All other failures — compile errors, clippy lints, and above all
+**test failures** — exit with the command's original exit code, unchanged. The
+test steps (`just test-rs`, archive validation) are deliberately not wrapped.
+Two invariants are pinned by `scripts/ci-release.test.ts` and
+`scripts/ci/retry-transient.test.ts`: build steps are wrapped, test steps are
+not, and the wrapper never retries non-transient output. `ci.yml`'s header
+comment lists which steps are covered.
+
 ### Fallback exercise
 
 A `workflow_dispatch` input `buck2_no_cache` forces local execution (no remote

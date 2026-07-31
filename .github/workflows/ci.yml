@@ -28,6 +28,12 @@
 # release-prepare jobs build the signed headless artifacts via Buck2
 # (`build.ts --builder buck2`, release config) and the desktop bundle via
 # Tauri/Cargo; see desktop/README.md "Publishing a release".
+#
+# Transient network retry: every Buck2 *build* step below runs through
+# scripts/ci/retry-transient.sh, which re-runs the command once when its
+# output matches transient-looking network/DNS errors (crates.io fetches).
+# Test steps deliberately do NOT go through it — test failures are never
+# retried. See docs/buck2-policy.md "Transient network retry".
 
 name: CI
 
@@ -137,8 +143,9 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
-      # Pre-warm the Rust binary via Buck2 so dev.ts answers /health quickly
-      - run: just build-server-rs
+      # Pre-warm the Rust binary via Buck2 so dev.ts answers /health quickly.
+      # Retry once on transient network/DNS failures (crates.io fetches).
+      - run: bash scripts/ci/retry-transient.sh 'just build-server-rs'
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
@@ -185,7 +192,8 @@ jobs:
           tool: just
       # Pre-warm the Rust binary via Buck2 so dev.ts answers /health quickly.
       # The webServer timeout budgets a cold compile, but warming keeps it comfortable.
-      - run: just build-server-rs
+      # Retry once on transient network/DNS failures (crates.io fetches).
+      - run: bash scripts/ci/retry-transient.sh 'just build-server-rs'
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
@@ -235,7 +243,7 @@ jobs:
       # stages client/dist as a bundle resource at compile time, so this must precede
       # the cargo steps below.
       - run: pnpm run build
-      - run: pnpm exec tsx scripts/desktop/build-hub.ts --debug
+      - run: bash scripts/ci/retry-transient.sh 'pnpm exec tsx scripts/desktop/build-hub.ts --debug'
       # Run the full vitest suite — deploy-scripts.test.ts exercises macOS-only
       # deploy scripts (launchctl, plutil, shasum) that are skipped on Linux.
       - run: pnpm run test
@@ -292,11 +300,14 @@ jobs:
           [build]
           execution_platforms = toolchains//platforms:remote_cache
           EOF
-      # Buck2 clippy + build + test (uses remote cache via auto-read .buckconfig.local when available)
+      # Buck2 clippy + build + test (uses remote cache via auto-read .buckconfig.local when available).
+      # Clippy/build go through retry-transient.sh: one retry on transient
+      # network/DNS output only. The test step below is deliberately unwrapped —
+      # test failures are never retried.
       - name: Buck2 clippy
-        run: just buck2-clippy
+        run: bash scripts/ci/retry-transient.sh 'just buck2-clippy'
       - name: Buck2 build
-        run: just build-rs && just build-server-rs
+        run: bash scripts/ci/retry-transient.sh 'just build-rs && just build-server-rs'
       - name: Buck2 test
         run: just test-rs
       # Target + test inventory checks
@@ -363,11 +374,14 @@ jobs:
           [build]
           execution_platforms = toolchains//platforms:remote_cache
           EOF
-      # Clippy + build all server crates + server binary
+      # Clippy + build all server crates + server binary. Both go through
+      # retry-transient.sh: one retry on transient network/DNS output only.
+      # The test step below is deliberately unwrapped — test failures are
+      # never retried.
       - name: Buck2 clippy
-        run: just buck2-clippy
+        run: bash scripts/ci/retry-transient.sh 'just buck2-clippy'
       - name: Buck2 build
-        run: just build-rs && just build-server-rs
+        run: bash scripts/ci/retry-transient.sh 'just build-rs && just build-server-rs'
       # Run all Buck2 tests
       - name: Buck2 test
         run: just test-rs
@@ -391,14 +405,17 @@ jobs:
         if: github.event_name != 'pull_request'
         env:
           PANTOKEN_BUILD_SHA: ${{ github.sha }}
+        # On a cold cache this downloads every third-party crate from
+        # crates.io — wrapped in retry-transient.sh to retry once on transient
+        # network/DNS output (the failure class that killed v0.2.94).
         run: |
-          cat > .buckconfig.ci <<EOF
+          bash scripts/ci/retry-transient.sh 'cat > .buckconfig.ci <<EOF
           [pantoken]
           version = $PANTOKEN_VERSION
           build_sha = $PANTOKEN_BUILD_SHA
           release_build = 1
           EOF
-          buck2 build --config-file .buckconfig.ci //:pantoken_headless_unsigned
+          buck2 build --config-file .buckconfig.ci //:pantoken_headless_unsigned'
       # Validate the archive under the same release config. Plain
       # validate-archive-rs (no --config-file) would rebuild the sh_test's
       # :pantoken_headless_unsigned resource with the dev config and validate
@@ -500,11 +517,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
           PANTOKEN_BUILD_SHA: ${{ github.sha }}
-        run: >
-          pnpm exec tsx scripts/desktop/publish.ts
-          --dry-run
-          --repo TimoFreiberg/pantoken
-          --tag-must-match "${{ github.ref_name }}"
+        run: bash scripts/ci/retry-transient.sh 'pnpm exec tsx scripts/desktop/publish.ts --dry-run --repo TimoFreiberg/pantoken --tag-must-match "${{ github.ref_name }}"'
       # Headless release artifact via Buck2: build.ts --builder buck2 writes
       # .buckconfig.ci (version/build_sha/release_build=1), builds the archive
       # + tar validator, and continues with signing + verification + metadata.
@@ -516,7 +529,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_TEXT: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_TEXT }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-        run: pnpm exec tsx scripts/headless/build.ts --builder buck2 --tag "${{ github.ref_name }}"
+        run: bash scripts/ci/retry-transient.sh 'pnpm exec tsx scripts/headless/build.ts --builder buck2 --tag "${{ github.ref_name }}"'
       # Extra hermetic gate: run the archive sh_test against the release-config
       # Buck2 archive (validate-archive-rs-ci passes --config-file .buckconfig.ci,
       # so the test validates the archive built above, not a dev-config one).
@@ -631,11 +644,7 @@ jobs:
           PANTOKEN_RELEASE_BUILD: "1"
           TAURI_SIGNING_PRIVATE_KEY_TEXT: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_TEXT }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-        run: >
-          pnpm exec tsx scripts/headless/build.ts
-          --builder buck2
-          --target x86_64-unknown-linux-gnu
-          --tag "${{ github.ref_name }}"
+        run: bash scripts/ci/retry-transient.sh 'pnpm exec tsx scripts/headless/build.ts --builder buck2 --target x86_64-unknown-linux-gnu --tag "${{ github.ref_name }}"'
       - name: Install trusted tar validator for preparation
         run: test -x target/release/pantoken-tar-validate
       - name: Validate Linux headless artifact
