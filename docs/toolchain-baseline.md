@@ -82,7 +82,6 @@ These prerequisite tools are documented in `README.md` / `AGENTS.md` but are
 | Tool | Version | Notes |
 |------|---------|-------|
 | just | 1.57.0 | |
-| sccache | 0.16.0 | Required for Rust builds (`.cargo/config.toml`) |
 | cargo-nextest | 0.9.140 | Test runner for Rust |
 | direnv | 2.37.1 | Activates `.envrc` (sets `CARGO_TARGET_DIR`) |
 | jj | 0.43.0 | Version control system |
@@ -199,7 +198,7 @@ From a clean checkout:
 
 ```bash
 # 1. Install prerequisites: Node 22 (via nvm/fnm/volta or direct), pnpm,
-#    rust (via rustup), just, sccache, cargo-nextest, direnv, jj, and
+#    rust (via rustup), just, cargo-nextest, direnv, jj, and
 #    Playwright browsers.
 #    rustup reads rust-toolchain.toml automatically — the pinned 1.97.1
 #    (with rustfmt + clippy) is installed on first cargo command.

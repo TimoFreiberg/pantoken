@@ -19,15 +19,13 @@ See `docs/DESIGN.md` for architecture, `docs/DECISIONS.md` for settled calls, `d
   server.** Never `kill` or `lsof -ti:8787 | xargs kill` them — that nukes the
   harness you're talking through, and the session dies. If `EADDRINUSE` on 8787,
   something else is holding the port; find and stop it, not the harness's process.
-- **sccache is required for Rust builds.** `.cargo/config.toml` sets
-  `build.rustc-wrapper = "sccache"`. Install it with `brew install sccache`
-  (macOS). In CI, `mozilla-actions/sccache-action` installs it automatically.
-  A shared `CARGO_TARGET_DIR` is set in `.envrc` (direnv) so all jj worktrees
-  share compiled artifacts — switching worktrees goes from "recompile
-  everything" to instant. Requires direnv (`brew install direnv`, then
-  `direnv allow`). CI overrides this with
-  `CARGO_TARGET_DIR: ${{ github.workspace }}/target` since direnv isn't
-  active there.
+- **Cargo builds share a target dir across jj worktrees.** `CARGO_TARGET_DIR`
+  is set in `.envrc` (direnv) so all jj worktrees share compiled artifacts —
+  switching worktrees goes from "recompile everything" to instant. (Buck2 has
+  its own action cache and needs none of this.) Requires direnv
+  (`brew install direnv`, then `direnv allow`). CI sets
+  `CARGO_TARGET_DIR: ${{ github.workspace }}/target` in the cargo-compiling
+  jobs (desktop, release) since direnv isn't active there.
 - **Tool versions are pinned.** pnpm is pinned via `packageManager` in
   `package.json` (`pnpm@11.17.0`); Node via `.nvmrc` (Node 22 LTS);
   Rust via `rust-toolchain.toml` at the repo
@@ -80,7 +78,7 @@ Tool versions (pnpm, Node, Rust) are pinned; see
 ## Commands
 
 The normal contributor interface is `just`. Prerequisites are Node, pnpm, Rust, `just`,
-`sccache`, `cargo-nextest`, and Playwright browsers; recipes do not install or upgrade
+`cargo-nextest`, and Playwright browsers; recipes do not install or upgrade
 these tools. Run the explicit dependency install when needed, then use the mock driver
 for local UI work:
 

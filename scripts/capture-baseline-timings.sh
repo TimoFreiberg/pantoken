@@ -8,7 +8,7 @@
 # Requirements:
 #   - Run from the DEFAULT jj workspace (repo root). The script checks this
 #     because `just create-workspace` refuses to run from a non-default workspace.
-#   - All prerequisites installed: bun, cargo, just, sccache, Playwright browsers.
+#   - All prerequisites installed: bun, cargo, just, Playwright browsers.
 #
 # Cost:
 #   - cargo clean -p pantoken-server removes pantoken-server artifacts from the

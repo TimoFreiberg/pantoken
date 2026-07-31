@@ -4,7 +4,7 @@
 # comparable to docs/toolchain-baseline.md and docs/buck2-poc-findings.md.
 #
 # Usage: just measure-rs
-# Prerequisites: Buck2, Reindeer, Rust 1.97.1, sccache
+# Prerequisites: Buck2, Reindeer, Rust 1.97.1
 
 set -euo pipefail
 
@@ -122,5 +122,5 @@ echo "## Notes"
 echo "- Buck2 builds all 5 server crates (this script times the 4 non-binary crates)"
 echo "- Reindeer-generated dependency graph: 353 vendored crates, 335MB"
 echo "- All builds use the system Rust toolchain (1.97.1 via rustup)"
-echo "- Buck2 does not use sccache (independent cache mechanism)"
+echo "- Buck2 uses its own action cache (independent of Cargo)"
 echo "- x86_64-unknown-linux-gnu is excluded from Buck2 targets"

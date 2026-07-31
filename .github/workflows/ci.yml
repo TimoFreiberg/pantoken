@@ -65,9 +65,6 @@ jobs:
     if: github.ref_type == 'tag' || github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Release v')
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    env:
-      SCCACHE_GHA_ENABLED: "true"
-      CARGO_TARGET_DIR: ${{ github.workspace }}/target
     strategy:
       fail-fast: false
       matrix:
@@ -83,10 +80,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # Rust toolchain is pinned via rust-toolchain.toml; rustup auto-installs it.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: .
-      - uses: mozilla-actions/sccache-action@v0.0.10
       # Install Buck2 for dev.ts's buck2 build path
       - name: Install Buck2 + Reindeer
         run: bash scripts/ci/install-buck2-ci.sh
@@ -125,9 +118,6 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      SCCACHE_GHA_ENABLED: "true"
-      CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -137,10 +127,6 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: .
-      - uses: mozilla-actions/sccache-action@v0.0.10
       - run: pnpm install --frozen-lockfile
       # Install Buck2 for dev.ts's buck2 build path
       - name: Install Buck2 + Reindeer
@@ -176,7 +162,6 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 30
     env:
-      SCCACHE_GHA_ENABLED: "true"
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - uses: actions/checkout@v4
@@ -193,7 +178,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
-      - uses: mozilla-actions/sccache-action@v0.0.10
       # Install Buck2 for build-hub.ts's buck2 build path
       - name: Install Buck2 + Reindeer
         run: bash scripts/ci/install-buck2-ci.sh
@@ -221,18 +205,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      SCCACHE_GHA_ENABLED: "true"
-      CARGO_TARGET_DIR: ${{ github.workspace }}/target
       TS_AUTH_KEY: ${{ secrets.TS_AUTH_KEY }}
       BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
       BUCK2_TEST_FORCE_CACHE_UPLOAD: "true"
     steps:
       - uses: actions/checkout@v4
       # Rust toolchain is pinned via rust-toolchain.toml; rustup auto-installs it.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: .
-      - uses: mozilla-actions/sccache-action@v0.0.10
       - run: cargo fmt --all -- --check
       # Install Buck2 + Reindeer for buck2 clippy + build + test
       - name: Install Buck2 + Reindeer
@@ -302,7 +280,6 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 30
     env:
-      CARGO_TARGET_DIR: ${{ github.workspace }}/target
       TS_AUTH_KEY: ${{ secrets.TS_AUTH_KEY }}
       BUCK2_CACHE_HOST: ${{ secrets.BUCK2_CACHE_HOST }}
       BUCK2_TEST_FORCE_CACHE_UPLOAD: "true"
@@ -317,9 +294,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # Rust toolchain is pinned via rust-toolchain.toml; rustup auto-installs it.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: .
       # Install pinned Buck2 + Reindeer
       - name: Install Buck2 + Reindeer
         run: bash scripts/ci/install-buck2-ci.sh
@@ -403,7 +377,6 @@ jobs:
     runs-on: macos-14 # arm64 → the darwin-aarch64 artifact installed apps expect
     timeout-minutes: 40
     env:
-      SCCACHE_GHA_ENABLED: "true"
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - uses: actions/checkout@v4
@@ -419,7 +392,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
-      - uses: mozilla-actions/sccache-action@v0.0.10
       - name: Install minisign
         run: brew install minisign
       - name: Check minisign
@@ -519,7 +491,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      SCCACHE_GHA_ENABLED: "true"
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - uses: actions/checkout@v4
@@ -535,7 +506,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
-      - uses: mozilla-actions/sccache-action@v0.0.10
       - name: Install minisign
         run: |
           sudo apt-get update -qq
