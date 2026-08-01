@@ -48,14 +48,10 @@
   // screenshot harness can reach approval/ambient/error states deterministically.
   const dev = new URLSearchParams(location.search).has("dev");
 
-  // Dev-only test hook for the live (fake-daemon) e2e tier. The fake driver's
-  // run_script vocabulary (stream/queue/abort/ask/approve) differs from the mock's
-  // dev-bar buttons, and the bar's script list is the mock's. Rather than duplicate
-  // that list, expose the SAME capability the dev bar already offers (store.mock →
-  // {type:"mock", script}) as a named hook the live specs call by name via
-  // page.evaluate. Gated on ?dev, so it never attaches on a normal load. The Rust
-  // `run_script` match is the single source of truth for valid names; an unknown one
-  // just warns server-side and the flow never renders → the spec fails loud.
+  // Dev-only test hook for the live (fake-daemon) e2e tier. The Rust fake driver's
+  // run_script vocabulary is deliberately sent through the existing `{type:"mock"}`
+  // dev message so there is one server-side control seam. Gated on ?dev, so it never
+  // attaches on a normal load; unknown names fail loudly in the fake control.
   onMount(() => {
     if (!dev) return;
     (window as unknown as { __pantokenMock?: (script: string) => void }).__pantokenMock =

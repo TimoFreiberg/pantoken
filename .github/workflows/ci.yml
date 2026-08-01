@@ -171,13 +171,11 @@ jobs:
 
   web-live:
     name: web — live e2e (fake daemon)
-    # Corpus-backed live tier: the real Rust server (PANTOKEN_DRIVER=fake) over the
-    # in-process fake daemon. Gated to manual
-    # dispatch until the specs have a confirmed green run — they were authored
-    # against the corpus + existing DOM selectors but not yet executed in a browser.
-    # Promote to the pull_request/push gate (drop this `if:`) once a dispatch run
-    # passes. This is the third leg of the cutover gate (see server/PROGRESS.md).
-    if: github.event_name == 'workflow_dispatch'
+    needs: [detect-changes]
+    # The provider-free live tier is a blocking web gate on tags, normal pushes,
+    # relevant pull requests, and explicit manual dispatches. Release-commit push
+    # twins are skipped because the tag run is authoritative.
+    if: ${{ !cancelled() && (github.ref_type == 'tag' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'Release v')) || (github.event_name == 'pull_request' && needs.detect-changes.outputs.e2e-relevant == 'true') || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

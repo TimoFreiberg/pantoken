@@ -17,4 +17,8 @@ test("a tool-call approval raises a modal approval dialog", async ({ page }) => 
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await expect(dialog).toHaveAttribute("aria-modal", "true");
+  const options = dialog.getByRole("button");
+  await expect(options.first()).toBeVisible();
+  await options.first().click();
+  await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 10_000 });
 });

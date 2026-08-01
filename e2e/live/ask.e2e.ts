@@ -22,4 +22,14 @@ test("an ask_user_question interrogative renders the inline Q&A form", async ({
   await expect(
     form.getByRole("button", { name: /Next|Submit/ }).first(),
   ).toBeVisible();
+  const controls = form.getByRole("button", { name: /Next|Submit/ });
+  while ((await controls.count()) > 0) {
+    const button = controls.first();
+    await button.click();
+    await expect(button).toBeHidden({ timeout: 5_000 }).catch(() => undefined);
+    if ((await form.count()) === 0) break;
+  }
+  await expect(page.getByRole("group", { name: "Questions" })).toHaveCount(0, {
+    timeout: 10_000,
+  });
 });

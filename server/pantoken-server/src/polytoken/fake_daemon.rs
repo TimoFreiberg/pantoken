@@ -37,7 +37,7 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::polytoken::corpus::{self, ScenarioFile};
+use crate::polytoken::corpus::{self, HttpEntry, ScenarioFile};
 use crate::polytoken::daemon_client::{
     SpawnDaemonOpts, SpawnedDaemon, clear_spawn_override, set_spawn_override,
 };
@@ -290,6 +290,10 @@ impl FakeDaemon {
         st.scenario_override = Some(scenario);
         st.next_http_expectation = 0;
         st.calls.clear();
+    }
+
+    fn close_sse(&self) {
+        self.state.lock().sse_tx.take();
     }
 }
 
@@ -552,6 +556,28 @@ async fn spawn_controlled(scenario: ScenarioFile, session_id: String) -> Arc<Fak
     Arc::new(spawn_with_mode(scenario, session_id, SseMode::Controlled, false, false).await)
 }
 
+async fn wait_for_sse(
+    fake: &FakeDaemon,
+) -> Result<mpsc::Sender<Result<Event, std::convert::Infallible>>, String> {
+    for _ in 0..100 {
+        if let Some(sender) = fake.state.lock().sse_tx.clone() {
+            return Ok(sender);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    Err("fake SSE stream not connected".into())
+}
+
+async fn wait_for_sse_replacement(fake: &FakeDaemon) -> Result<(), String> {
+    for _ in 0..100 {
+        if fake.state.lock().sse_tx.is_some() {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    Err("fake SSE recovery stream did not reconnect".into())
+}
+
 /// The idle landing scenario for a fake-mode bootstrap session: an empty
 /// transcript with `turn_in_flight:false`, so the seeded `sessionOpened`
 /// snapshot is `Idle` and the composer renders its placeholder. No corpus
@@ -561,6 +587,110 @@ async fn spawn_controlled(scenario: ScenarioFile, session_id: String) -> Arc<Fak
 /// flow's frames. The version is threaded in only for the `ScenarioFile`
 /// field; the body must deserialize as a full `SessionStateSnapshot`
 /// (mirroring `synthetic_idle_scenario` in tests/live_path.rs).
+fn prompt_history(revision: i64) -> Value {
+    serde_json::json!({
+        "items": [{"type": "user", "prompt_id": "PROMPT_0", "content": "preserve this prompt"}],
+        "offset": 0,
+        "total_projected_items": 1,
+        "history_revision": revision,
+        "session_id": "SESSION"
+    })
+}
+
+fn rewind_ready_scenario(mut scenario: ScenarioFile) -> ScenarioFile {
+    scenario.scenario = "rewind-ready".into();
+    scenario.http.retain(|entry| entry.path != "/events");
+    let histories: Vec<_> = scenario
+        .http
+        .iter_mut()
+        .filter(|entry| entry.method == "GET" && entry.path == "/history")
+        .collect();
+    for (index, entry) in histories.into_iter().enumerate() {
+        entry.response_body = Some(prompt_history(if index == 0 { 1 } else { 2 }));
+    }
+    scenario.sse = vec![
+        corpus::SseFrame {
+            seq: Some(1),
+            emitted_at: "1970-01-01T00:00:00.000Z".into(),
+            session_id: "SESSION".into(),
+            event: serde_json::json!({"type": "message_start", "prompt_id": "PROMPT_0"}),
+        },
+        corpus::SseFrame {
+            seq: Some(2),
+            emitted_at: "1970-01-01T00:00:01.000Z".into(),
+            session_id: "SESSION".into(),
+            event: serde_json::json!({"type": "session_rewound", "rewound_to_index": 0}),
+        },
+    ];
+    scenario
+}
+
+fn reconnect_scenario(mut scenario: ScenarioFile) -> ScenarioFile {
+    scenario.scenario = "reconnect-stream-discontinuity".into();
+    scenario.http = recovery_http();
+    // Closing the held stream makes DaemonClient synthesize the one
+    // stream_discontinuity that starts reseed. Do not send a second daemon frame
+    // after the replacement stream is registered: that would trigger a second
+    // reseed and exhaust the deliberately bounded recovery HTTP contract.
+    scenario.sse = vec![];
+    scenario
+}
+
+fn recovery_http() -> Vec<corpus::HttpEntry> {
+    vec![
+        HttpEntry {
+            method: "GET".into(),
+            path: "/events".into(),
+            request_body: None,
+            status: 200,
+            response_body: None,
+        },
+        HttpEntry {
+            method: "GET".into(),
+            path: "/state".into(),
+            request_body: None,
+            status: 200,
+            response_body: Some(
+                serde_json::json!({"session_title":"recovered","todos":[],"flags":[],"env":{},"active_facet":"execute","plugin_config":{},"project_cwd":"/fake","turn_in_flight":false}),
+            ),
+        },
+        HttpEntry {
+            method: "GET".into(),
+            path: "/history".into(),
+            request_body: None,
+            status: 200,
+            response_body: Some(
+                serde_json::json!({"items":[],"offset":0,"total_projected_items":0,"history_revision":1,"session_id":"SESSION"}),
+            ),
+        },
+    ]
+}
+
+fn action_error_scenario(mut scenario: ScenarioFile) -> ScenarioFile {
+    scenario.scenario = "action-error-recovery".into();
+    scenario.http = recovery_http();
+    let error = serde_json::json!({"type":"model_error","prompt_id":"PROMPT_0","error":{"type":"other","code":"E500","message":"internal provider failure"}});
+    // The first error is pushed before the control closes the stream. The second
+    // copy is released on the replacement stream after DaemonClient's synthetic
+    // discontinuity has triggered reseed; it proves post-reseed re-emission rather
+    // than preservation of a transcript row cleared by reseed.
+    scenario.sse = vec![
+        corpus::SseFrame {
+            seq: Some(1),
+            emitted_at: "1970-01-01T00:00:00.000Z".into(),
+            session_id: "SESSION".into(),
+            event: error.clone(),
+        },
+        corpus::SseFrame {
+            seq: Some(2),
+            emitted_at: "1970-01-01T00:00:01.000Z".into(),
+            session_id: "SESSION".into(),
+            event: error,
+        },
+    ];
+    scenario
+}
+
 fn bootstrap_scenario(version: &str) -> ScenarioFile {
     let json_str = serde_json::json!({
         "scenario": "bootstrap-idle",
@@ -652,6 +782,49 @@ impl FakeControlHub {
             let scenario = corpus::load_scenario(&file);
             scenarios.insert(scenario.scenario.clone(), scenario);
         }
+        let rewind = scenarios
+            .get("rewind-reseed")
+            .cloned()
+            .expect("rewind-reseed corpus scenario");
+        scenarios.insert("rewind-ready".into(), rewind_ready_scenario(rewind));
+        let mut rewind_rejection = scenarios
+            .get("rewind-reseed")
+            .cloned()
+            .expect("rewind-reseed corpus scenario");
+        rewind_rejection.scenario = "rewind-rejection".into();
+        for entry in &mut rewind_rejection.http {
+            if entry.method == "GET" && entry.path == "/history" {
+                entry.response_body = Some(prompt_history(1));
+            }
+        }
+        if let Some(entry) = rewind_rejection
+            .http
+            .iter_mut()
+            .find(|entry| entry.method == "POST" && entry.path == "/rewind")
+        {
+            entry.status = 409;
+            entry.response_body = Some(serde_json::json!({
+                "code": "rewind_conflict",
+                "message": "rewind rejected: target is no longer available"
+            }));
+        }
+        scenarios.insert("rewind-rejection".into(), rewind_rejection);
+        let reconnect = scenarios
+            .get("reconnect-stream-discontinuity")
+            .cloned()
+            .expect("reconnect-stream-discontinuity corpus scenario");
+        scenarios.insert(
+            "reconnect-stream-discontinuity".into(),
+            reconnect_scenario(reconnect),
+        );
+        let event_dispositions = scenarios
+            .get("event-dispositions")
+            .cloned()
+            .expect("event-dispositions corpus scenario");
+        scenarios.insert(
+            "action-error-recovery".into(),
+            action_error_scenario(event_dispositions),
+        );
         Self {
             inner: Arc::new(FakeControlInner {
                 version,
@@ -717,12 +890,17 @@ impl FakeControlHub {
     }
 
     pub async fn run_script(&self, name: &str) -> Result<(), String> {
+        if matches!(name, "reconnect" | "reconnect-reseed" | "action-error") {
+            return self.run_recovery_script(name).await;
+        }
         let scenario_name = match name {
             "stream" | "reply" | "streaming-turn" => "streaming-turn",
             "queue" | "queue-while-in-flight" => "queue-while-in-flight",
             "abort" => "abort",
             "ask" | "ask-user-question" => "ask-user-question",
             "approve" | "tool" | "tool-call-approval" => "tool-call-approval",
+            "rewind" | "rewind-ready" => "rewind-ready",
+            "rewind-reject" | "rewind-rejection" => "rewind-rejection",
             other => return Err(format!("unknown fake script: {other}")),
         };
         let scenario = self
@@ -774,6 +952,76 @@ impl FakeControlHub {
             // dev surface (and a bounded `expect.poll` assertion) can observe
             // mid-flow DOM, and it exercises the live SSE fold path at a
             // realistic cadence rather than a zero-delay burst.
+            tokio::time::sleep(std::time::Duration::from_millis(
+                CONTROLLED_INTER_FRAME_DELAY_MS,
+            ))
+            .await;
+        }
+        Ok(())
+    }
+
+    async fn run_recovery_script(&self, name: &str) -> Result<(), String> {
+        let scenario_name = match name {
+            "reconnect" | "reconnect-reseed" => "reconnect-stream-discontinuity",
+            "action-error" => "action-error-recovery",
+            _ => return Err(format!("unknown recovery script: {name}")),
+        };
+        let scenario = self
+            .inner
+            .scenarios
+            .lock()
+            .get(scenario_name)
+            .ok_or_else(|| format!("fake scenario missing: {scenario_name}"))?
+            .clone();
+        let fake = self
+            .inner
+            .spawned
+            .lock()
+            .last()
+            .cloned()
+            .ok_or_else(|| "no fake session spawned".to_string())?;
+        fake.arm_scenario(Arc::new(scenario.clone()));
+        // Action-error recovery deliberately proves both sides of the reset: emit
+        // the first error on the original stream, then close that stream before
+        // releasing the second copy on the replacement stream. The sender clone
+        // is scoped so dropping the daemon's slot really closes the old stream.
+        if name == "action-error" {
+            if let Some(frame) = scenario.sse.first() {
+                let tx = wait_for_sse(&fake).await?;
+                tx.send(Ok(frame_to_event(frame)))
+                    .await
+                    .map_err(|_| "fake action-error SSE stream disconnected".to_string())?;
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    CONTROLLED_INTER_FRAME_DELAY_MS,
+                ))
+                .await;
+            }
+        } else {
+            wait_for_sse(&fake).await?;
+        }
+        fake.close_sse();
+        for _ in 0..100 {
+            if fake.state.lock().sse_tx.is_none() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        wait_for_sse_replacement(&fake).await?;
+        let tx = fake
+            .state
+            .lock()
+            .sse_tx
+            .clone()
+            .ok_or_else(|| "fake SSE recovery stream not connected".to_string())?;
+        let remaining = if name == "action-error" {
+            scenario.sse.iter().skip(1)
+        } else {
+            scenario.sse.iter().skip(0)
+        };
+        for frame in remaining {
+            tx.send(Ok(frame_to_event(frame)))
+                .await
+                .map_err(|_| "fake recovery SSE stream disconnected".to_string())?;
             tokio::time::sleep(std::time::Duration::from_millis(
                 CONTROLLED_INTER_FRAME_DELAY_MS,
             ))
@@ -1510,6 +1758,54 @@ mod tests {
 
         // Pushing after close fails loudly (no connected stream).
         assert!(gate.push(race_frame()).await.is_err());
+        fake.assert_expectations_consumed().unwrap();
+    }
+
+    #[tokio::test]
+    async fn controlled_reconnect_closes_old_stream_and_releases_to_new_stream() {
+        use futures_util::StreamExt;
+        let (fake, gate) = spawn_strict_gated(
+            scenario(serde_json::json!([
+                {"method":"GET","path":"/events","status":200},
+                {"method":"GET","path":"/events","status":200}
+            ])),
+            "reconnect-gated".into(),
+        )
+        .await;
+        let first_response = reqwest::get(format!("http://127.0.0.1:{}/events", fake.port))
+            .await
+            .unwrap();
+        let mut first_stream = first_response.bytes_stream();
+        gate.push(race_frame())
+            .await
+            .expect("first stream is connected");
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(2), first_stream.next())
+                .await
+                .expect("first frame must arrive")
+                .is_some()
+        );
+        gate.close();
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(2), first_stream.next())
+                .await
+                .expect("old stream must close")
+                .is_none()
+        );
+
+        let second_response = reqwest::get(format!("http://127.0.0.1:{}/events", fake.port))
+            .await
+            .unwrap();
+        let mut second_stream = second_response.bytes_stream();
+        gate.push(race_frame())
+            .await
+            .expect("replacement stream is connected");
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(2), second_stream.next())
+            .await
+            .expect("replacement frame must arrive")
+            .expect("replacement stream must remain open")
+            .expect("replacement frame bytes");
+        assert!(String::from_utf8_lossy(&frame).contains("message_start"));
         fake.assert_expectations_consumed().unwrap();
     }
 

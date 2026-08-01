@@ -1966,7 +1966,7 @@ fn map_daemon_event_inner(
                     base,
                     format!("model-error-{}", ts),
                     message,
-                    NotifyLevel::Warning,
+                    NotifyLevel::Error,
                 )],
                 vec![],
             )
@@ -3646,7 +3646,7 @@ mod tests {
     // ===== Chunk 2a: errors/retries, session metadata, compaction =====
 
     #[test]
-    fn model_error_rate_limited_sets_turn_error_and_notify_warning() {
+    fn model_error_rate_limited_sets_turn_error_and_notify_error() {
         let mut acc = create_accumulator();
         let out = fold(
             json!({ "type": "model_error", "error": { "type": "rate_limited", "retry_after_seconds": 30 }, "prompt_id": "p1" }),
@@ -3659,7 +3659,7 @@ mod tests {
         let ev = event_json(&out.events[0]);
         assert_eq!(ev["type"], "hostUiRequest");
         assert_eq!(ev["request"]["kind"], "notify");
-        assert_eq!(ev["request"]["level"], "warning");
+        assert_eq!(ev["request"]["level"], "error");
     }
 
     #[test]

@@ -40,3 +40,12 @@ export async function driveLive(page: Page, script: string): Promise<void> {
     w.__pantokenMock(s);
   }, script);
 }
+
+/** Drive a recovery control and wait for the stable post-recovery UI state. The
+ * Rust control closes the daemon SSE stream, waits for a replacement `/events`
+ * registration, then emits the recovery corpus; this helper intentionally does
+ * not add sleep-based timing assumptions. */
+export async function driveLiveRecovery(page: Page, script: string): Promise<void> {
+  await driveLive(page, script);
+  await expect(page.getByPlaceholder("Message pantoken…")).toBeVisible({ timeout: 15_000 });
+}

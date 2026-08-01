@@ -115,7 +115,7 @@ migration, not to pre-existing drift.
 |-----|-------------|
 | `web-check` | Typecheck + unit tests |
 | `web-e2e` | Playwright e2e (2 shards, mock driver) |
-| `web-live` | Corpus-backed live e2e (manual dispatch) |
+| `web-live` | Blocking corpus-backed live e2e (fake daemon, provider-free) |
 | `desktop` | Tauri shell fmt + clippy + nextest (macOS) |
 | `rust-server` | Rust server fmt + clippy + nextest |
 | `release-prepare` | Signed macOS desktop + headless artifacts |

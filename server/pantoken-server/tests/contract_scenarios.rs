@@ -1891,7 +1891,7 @@ async fn state_invalidation_domains_and_authoritative_refetch() {
 ///   * heartbeat → NO driver event and NO fetch (intentional no-op);
 ///   * message_start → SessionUpdated;
 ///   * session_state_changed → authoritative GET /state;
-///   * model_error → warning Notify carrying the daemon message;
+///   * model_error → error Notify carrying the daemon message;
 ///   * stream_discontinuity → reseed fetches (GET /state + GET /history).
 /// Strict expectation consumption proves the recorded-call sequence matches
 /// the declared http[] exactly (no extra, no missing).
@@ -1984,7 +1984,7 @@ async fn current_events_disposition_groups_observable() {
     )
     .await;
 
-    // 4. model_error → warning Notify with the daemon's message ("E500: internal provider failure").
+    // 4. model_error → error Notify with the daemon's message ("E500: internal provider failure").
     gate.push(sse_frame(
         4,
         json!({
@@ -2002,13 +2002,13 @@ async fn current_events_disposition_groups_observable() {
             matches!(ev, SessionDriverEvent::HostUiRequest {
                 request: HostUiRequest::Notify { message, level, .. }, ..
             } if message.contains("E500: internal provider failure")
-                && *level == Some(NotifyLevel::Warning))
+                && *level == Some(NotifyLevel::Error))
         },
     )
     .await;
     assert!(
         !notices.is_empty(),
-        "model_error must surface a warning Notify with the daemon message"
+        "model_error must surface an error Notify with the daemon message"
     );
 
     // 5. stream_discontinuity → reseed fetches (GET /state then GET /history).
