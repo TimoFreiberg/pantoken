@@ -200,6 +200,9 @@ struct FakeState {
     /// Controlled-mode SSE sender. Present after GET /events connects; reset
     /// replaces it so a reset mid-stream cannot corrupt a later producer.
     sse_tx: Option<mpsc::Sender<Result<Event, std::convert::Infallible>>>,
+    /// Set when the rewind fixture has accepted POST /rewind; the scripted
+    /// session_rewound frame waits for this causal signal.
+    rewind_requested: bool,
     /// The active HTTP-replay scenario. In controlled (fake-mode) use this
     /// starts as the idle bootstrap scenario, then `run_script` swaps in the
     /// chosen flow's recordings (and resets cursors) so that flow's in-turn
@@ -619,6 +622,12 @@ fn rewind_ready_scenario(mut scenario: ScenarioFile) -> ScenarioFile {
             seq: Some(2),
             emitted_at: "1970-01-01T00:00:01.000Z".into(),
             session_id: "SESSION".into(),
+            event: serde_json::json!({"type": "message_complete", "prompt_id": "PROMPT_0"}),
+        },
+        corpus::SseFrame {
+            seq: Some(3),
+            emitted_at: "1970-01-01T00:00:02.000Z".into(),
+            session_id: "SESSION".into(),
             event: serde_json::json!({"type": "session_rewound", "rewound_to_index": 0}),
         },
     ];
@@ -939,8 +948,15 @@ impl FakeControlHub {
             }
             tx.ok_or_else(|| "fake SSE stream not connected".to_string())?
         };
-        for frame in scenario.sse {
-            tx.send(Ok(frame_to_event(&frame)))
+        for frame in &scenario.sse {
+            // The rewind fixture's reset event is emitted only after POST /rewind
+            // is accepted; setup must expose the completed prompt first.
+            if scenario.scenario == "rewind-ready"
+                && frame.event.get("type").and_then(Value::as_str) == Some("session_rewound")
+            {
+                continue;
+            }
+            tx.send(Ok(frame_to_event(frame)))
                 .await
                 .map_err(|_| "fake SSE stream disconnected".to_string())?;
             // Pace the controlled push so intermediate states are observable:
@@ -1551,6 +1567,26 @@ async fn http_handler(
             }
         }
     };
+
+    if method == "POST" && path == "/rewind" && status == StatusCode::ACCEPTED {
+        let rewind_event = app
+            .state
+            .lock()
+            .scenario_override
+            .clone()
+            .unwrap_or_else(|| app.scenario.clone())
+            .sse
+            .iter()
+            .find(|frame| {
+                frame.event.get("type").and_then(Value::as_str) == Some("session_rewound")
+            })
+            .map(frame_to_event);
+        if let Some(event) = rewind_event {
+            if let Some(tx) = app.state.lock().sse_tx.clone() {
+                let _ = tx.send(Ok(event)).await;
+            }
+        }
+    }
 
     let mut resp = body
         .map(|v| serde_json::to_string(&v).unwrap_or_else(|_| "{}".into()))

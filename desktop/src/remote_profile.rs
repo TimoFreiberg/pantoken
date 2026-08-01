@@ -34,11 +34,7 @@ pub enum ExecutionTargetProfile {
         #[serde(rename = "containerName", alias = "container_name")]
         container_name: String,
         user: String,
-        #[serde(
-            rename = "workdir",
-            default,
-            skip_serializing_if = "Option::is_none"
-        )]
+        #[serde(rename = "workdir", default, skip_serializing_if = "Option::is_none")]
         workdir: Option<String>,
         #[serde(rename = "pantokenRoot", alias = "pantoken_root")]
         pantoken_root: String,
@@ -100,7 +96,11 @@ pub struct RemoteProfile {
     pub remote_root_override: Option<String>,
     /// Override for the remote `pantoken-server` binary path (default
     /// `pantoken-server`, expected on the remote PATH).
-    #[serde(alias = "server_path", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        alias = "server_path",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub server_path: Option<String>,
     /// XDG isolation mode for a Pantoken-managed polytoken. Defaults to
     /// `Isolated` — Pantoken-managed XDG roots under the remote root.
@@ -656,13 +656,19 @@ mod tests {
         let profile: RemoteProfile = serde_json::from_value(payload).expect("camelCase profile");
         assert_eq!(profile.ssh_destination, "dev@server");
         assert_eq!(profile.polytoken_policy, PolytokenPolicy::OfferInstall);
-        assert_eq!(profile.execution_target, ExecutionTargetProfile::DockerContainer {
-            container_name: "work-api".into(),
-            user: "1000:1000".into(),
-            workdir: Some("/workspace/api".into()),
-            pantoken_root: "/var/lib/pantoken".into(),
-        });
-        assert_eq!(profile.risk_acknowledgements.root_fingerprint.as_deref(), Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+        assert_eq!(
+            profile.execution_target,
+            ExecutionTargetProfile::DockerContainer {
+                container_name: "work-api".into(),
+                user: "1000:1000".into(),
+                workdir: Some("/workspace/api".into()),
+                pantoken_root: "/var/lib/pantoken".into(),
+            }
+        );
+        assert_eq!(
+            profile.risk_acknowledgements.root_fingerprint.as_deref(),
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        );
         assert!(profile.validate().is_ok());
     }
 
@@ -677,8 +683,14 @@ mod tests {
         };
         let value = serde_json::to_value(&profile).expect("serialize");
         let target = value.get("executionTarget").expect("target");
-        assert_eq!(target.get("containerName").and_then(|v| v.as_str()), Some("work-api"));
-        assert_eq!(target.get("pantokenRoot").and_then(|v| v.as_str()), Some("/var/lib/pantoken"));
+        assert_eq!(
+            target.get("containerName").and_then(|v| v.as_str()),
+            Some("work-api")
+        );
+        assert_eq!(
+            target.get("pantokenRoot").and_then(|v| v.as_str()),
+            Some("/var/lib/pantoken")
+        );
         assert!(target.get("container_name").is_none());
         let decoded: RemoteProfile = serde_json::from_value(value).expect("deserialize");
         assert_eq!(decoded.execution_target, profile.execution_target);
@@ -838,17 +850,40 @@ mod tests {
         std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).expect("write legacy");
         let store = RemoteProfileStore::load(&path).expect("load legacy");
         let profile = &store.profiles[0];
-        assert_eq!(profile.execution_target, ExecutionTargetProfile::DockerContainer {
-            container_name: "work-api".into(), user: "worker".into(),
-            workdir: Some("/workspace".into()), pantoken_root: "/var/lib/pantoken".into(),
-        });
-        assert_eq!(profile.risk_acknowledgements.ephemeral_fingerprint.as_deref(), Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+        assert_eq!(
+            profile.execution_target,
+            ExecutionTargetProfile::DockerContainer {
+                container_name: "work-api".into(),
+                user: "worker".into(),
+                workdir: Some("/workspace".into()),
+                pantoken_root: "/var/lib/pantoken".into(),
+            }
+        );
+        assert_eq!(
+            profile
+                .risk_acknowledgements
+                .ephemeral_fingerprint
+                .as_deref(),
+            Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        );
         store.save(&path).expect("save canonical");
         let saved = std::fs::read_to_string(&path).expect("read canonical");
-        for key in ["containerName", "pantokenRoot", "rootFingerprint", "ephemeralFingerprint", "dockerSocketFingerprint"] {
+        for key in [
+            "containerName",
+            "pantokenRoot",
+            "rootFingerprint",
+            "ephemeralFingerprint",
+            "dockerSocketFingerprint",
+        ] {
             assert!(saved.contains(key), "missing canonical key {key}");
         }
-        for key in ["container_name", "pantoken_root", "root_fingerprint", "ephemeral_fingerprint", "docker_socket_fingerprint"] {
+        for key in [
+            "container_name",
+            "pantoken_root",
+            "root_fingerprint",
+            "ephemeral_fingerprint",
+            "docker_socket_fingerprint",
+        ] {
             assert!(!saved.contains(key), "legacy key emitted: {key}");
         }
     }
