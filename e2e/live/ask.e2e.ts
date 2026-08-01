@@ -19,10 +19,13 @@ test("an ask_user_question interrogative renders the inline Q&A form", async ({
   // exposes an advance/submit control the operator can act on.
   const form = page.getByRole("group", { name: "Questions" });
   await expect(form).toBeVisible();
-  await expect(
-    form.getByRole("button", { name: /Next|Submit/ }).first(),
-  ).toBeVisible();
-  const controls = form.getByRole("button", { name: /Next|Submit/ });
+  // The corpus currently contains one question, so QnaForm renders its final-step
+  // label ("Review answers") rather than "Next" or "Submit". Keep the assertion
+  // structural across one- and multi-question corpus revisions.
+  const controls = form.getByRole("button", {
+    name: /Next|Review answers|Submit|Confirm/,
+  });
+  await expect(controls.first()).toBeVisible();
   while ((await controls.count()) > 0) {
     const button = controls.first();
     await button.click();

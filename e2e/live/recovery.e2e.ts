@@ -10,6 +10,12 @@ test("rewind restores the live prompt in the composer", async ({ page }) => {
   const rewind = page.getByRole("button", { name: "Rewind to this prompt" });
   await expect(rewind).toBeVisible({ timeout: 10_000 });
   await rewind.click();
+  // Wait for the click-twice gate to arm before confirming. The fake daemon emits
+  // session_rewound immediately after the confirmed request; without this wait the
+  // reactive transcript effect can disarm the button between back-to-back clicks.
+  await expect(
+    page.getByTitle(/Click again to rewind/),
+  ).toBeVisible();
   await rewind.click();
   await expect(page.getByPlaceholder("Message pantoken…")).toHaveValue(
     "preserve this prompt",
@@ -23,6 +29,7 @@ test("rewind rejection remains visible and preserves the editor state", async ({
   const rewind = page.getByRole("button", { name: "Rewind to this prompt" });
   await expect(rewind).toBeVisible({ timeout: 10_000 });
   await rewind.click();
+  await expect(page.getByTitle(/Click again to rewind/)).toBeVisible();
   await rewind.click();
   await expect(page.getByRole("alert")).toContainText(/rewind rejected|POST \/rewind failed/i, {
     timeout: 10_000,
