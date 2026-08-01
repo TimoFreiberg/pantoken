@@ -653,7 +653,7 @@
 <!-- The scrim stays hidden for the full-screen phone sessions view. -->
 {#if store.sidebarOpen}
   <button
-    class="scrim"
+    class="sidebar-scrim"
     aria-label="Close sidebar"
     onclick={() => store.closeSidebar()}
   ></button>
@@ -1235,7 +1235,7 @@
   .sidebar[data-open="false"] {
     display: none;
   }
-  .scrim {
+  .sidebar-scrim {
     display: none;
   }
 
@@ -2104,7 +2104,7 @@
     .rename :global(button) {
       min-height: 44px;
     }
-    .scrim { display: none; }
+    .sidebar-scrim { display: none; }
     /* No hover on touch — keep the ⋯ trigger in the flow (a reserved column rather than
        a hover overlay) and always visible, so the timestamp stays readable beside it. */
     :global(.row-menu) {
