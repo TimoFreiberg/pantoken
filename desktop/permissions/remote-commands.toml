@@ -1,6 +1,6 @@
 [[permission]]
 identifier = "allow-remote-commands"
-description = "Allow the hub-served web client to manage remote computer profiles and drive host connect/disconnect. Covers: list_remote_profiles, add_remote_profile, update_remote_profile, delete_remote_profile, ensure_remote_host, host_state, list_hosts, disconnect_host."
+description = "Allow the hub-served web client to manage remote computer profiles, discover containers, and drive host connect/disconnect. Covers all remote Tauri commands."
 commands.allow = [
   "list_remote_profiles",
   "add_remote_profile",
@@ -13,4 +13,6 @@ commands.allow = [
   "acknowledge_risk",
   "cancel_connection",
   "resume_connection",
+  "test_ssh_and_list_containers",
+  "inspect_container",
 ]
