@@ -13,9 +13,9 @@ export interface SessionGroup {
   items: SessionListEntry[];
 }
 
-/** Maximum sessions shown per project group before a "Show N more" button appears.
+/** Initial sessions shown per project group before a "Show N more" button appears.
  *  Mirrors Codex Desktop's per-project cap. The limit is display-only — the full
- *  list is still in `group.items`; clicking "Show N more" reveals the rest. */
+ *  list is still in `group.items`; the sidebar raises it in temporary batches. */
 export const SESSIONS_PER_GROUP = 5;
 
 export interface GroupSplit {

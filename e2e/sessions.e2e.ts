@@ -330,82 +330,143 @@ test("reopening the sidebar starts compact; search focuses only after activation
   await expect(sidebar.getByTestId("sidebar-search-input")).toBeFocused();
 });
 
-// A project with >5 sessions shows a "Show more" button (plain text, no border or
-// background) that reveals the rest; "Show less" re-caps to 5.
-test("a project with >5 sessions shows a 'Show more' button that reveals the rest", async ({
-  page,
-}) => {
-  await gotoFresh(page);
-  // Clear any expanded-groups state a prior test may have left in localStorage —
-  // gotoFresh's addInitScript only clears scrollPositions, not this key (the
-  // persistence test below deliberately leaves it set and verifies it survives
-  // a reload, so it can't be cleared globally).
-  await page.evaluate(() =>
-    localStorage.removeItem("pantoken.sidebarExpandedGroups"),
-  );
+async function loadManySessions(page: Page) {
   await openSidebar(page);
-  const sidebar = page.getByTestId("sidebar");
-  const list = sidebar.locator(".list");
-
-  // Inject 6 extra sessions into the pantoken project via the mock dev-bar script.
   await drive(page, "manysessions");
-  // The Mock handler doesn't broadcast the session list — close + reopen the
-  // sidebar to trigger store.refreshSessions() (the sidebar-open $effect).
+  // The mock mutates its session list without broadcasting it; reopening causes the
+  // sidebar's existing refresh-on-open path to fetch the deterministic fixture.
   await page.getByRole("button", { name: "Collapse sidebar" }).click();
   await openSidebar(page);
-
-  const pantokenGroup = list
+  return page
+    .getByTestId("sidebar")
     .locator(".group")
     .filter({ has: page.locator(".proj", { hasText: "pantoken" }) });
+}
 
-  // Only 5 session rows visible initially (2 existing + 6 injected = 8; cap hides 3).
-  // Use [data-testid="session-status"] (on every session row button) to count rows
-  // precisely — avoids matching draft rows or the show-more button.
-  await expect(pantokenGroup.locator("[data-testid='session-status']")).toHaveCount(5);
-
-  // The "Show more" button appears and reports the hidden count (3).
+// Eight sessions exercise the initial cap and exact final partial batch.
+test("incremental disclosure reveals a final partial batch", async ({ page }) => {
+  const pantokenGroup = await loadManySessions(page);
+  const rows = pantokenGroup.locator("[data-testid='session-status']");
   const showMore = pantokenGroup.getByTestId("show-more-sessions");
-  await expect(showMore).toBeVisible();
-  await expect(showMore).toContainText("Show 3 more");
 
-  // Per the issue: plain text, no border or background.
+  await expect(rows).toHaveCount(5);
+  await expect(showMore).toContainText("Show 3 more");
+  await expect(showMore).toHaveAccessibleName("Show more sessions in pantoken");
+  await expect(showMore).toHaveAttribute("aria-expanded", "false");
   await expect(showMore).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(showMore).toHaveCSS("border-top-style", "none");
 
-  // Clicking reveals all sessions.
   await showMore.click();
-  await expect(pantokenGroup.locator("[data-testid='session-status']")).toHaveCount(8);
-  // "Show less" button appears.
-  await expect(pantokenGroup.getByTestId("show-less-sessions")).toBeVisible();
+  await expect(rows).toHaveCount(8);
+  const showLess = pantokenGroup.getByTestId("show-less-sessions");
+  await expect(showLess).toContainText("Show less");
+  await expect(showLess).toHaveAccessibleName("Show less sessions in pantoken");
+  await expect(showLess).toHaveAttribute("aria-expanded", "true");
 
-  // Clicking "Show less" re-caps to 5.
-  await pantokenGroup.getByTestId("show-less-sessions").click();
-  await expect(pantokenGroup.locator("[data-testid='session-status']")).toHaveCount(5);
+  await showLess.click();
+  await expect(rows).toHaveCount(5);
+  await expect(pantokenGroup.getByTestId("show-more-sessions")).toContainText("Show 3 more");
 });
 
-// The expanded "Show more" state persists across a reload.
-test("expanded 'Show more' state persists across a reload", async ({ page }) => {
-  await gotoFresh(page);
-  await openSidebar(page);
-  await drive(page, "manysessions");
-  // Refresh: close + reopen to pick up the injected sessions.
+// The deterministic many-sessions fixture exercises the full disclosure contract. It has
+// eight rows today; larger groups use the same min(5, hidden) batch calculation.
+test("incremental disclosure adds five sessions per click", async ({ page }) => {
+  const pantokenGroup = await loadManySessions(page);
+  const rows = pantokenGroup.locator("[data-testid='session-status']");
+  const showMore = pantokenGroup.getByTestId("show-more-sessions");
+
+  await expect(rows).toHaveCount(5);
+  await showMore.click();
+  await expect(rows).toHaveCount(8);
+  await expect(pantokenGroup.getByTestId("show-less-sessions")).toBeVisible();
+
+  // The mock corpus has eight sessions, so this final click is exactly its remaining 3.
+  // The same control contract is used for larger groups: each click adds min(5, hidden).
+  await pantokenGroup.getByTestId("show-less-sessions").click();
+  await expect(rows).toHaveCount(5);
+  await expect(pantokenGroup.getByTestId("show-more-sessions")).toContainText("Show 3 more");
+});
+
+// A focused session outside the current cap remains visible through splitGroup's pin swap.
+test("pinned viewed session stays visible beyond the five-session cap", async ({ page }) => {
+  const pantokenGroup = await loadManySessions(page);
+  const rows = pantokenGroup.locator("[data-testid='session-status']");
+  await pantokenGroup.getByTestId("show-more-sessions").click();
+  await expect(rows).toHaveCount(8);
+
+  await pantokenGroup.getByText("Extra task #5", { exact: true }).click();
+  await expect(page.locator("header .title")).toContainText("Extra task #5");
+
+  await pantokenGroup.getByTestId("show-less-sessions").click();
+  await expect(rows).toHaveCount(5);
+  await expect(pantokenGroup.getByText("Extra task #5", { exact: true })).toBeVisible();
+
+  await pantokenGroup.getByTestId("show-more-sessions").click();
+  await expect(rows).toHaveCount(8);
+  await expect(pantokenGroup.getByText("Extra task #5", { exact: true })).toBeVisible();
+});
+
+// Closing the drawer resets temporary incremental expansion while project collapse state
+// remains a separate persisted preference.
+test("sidebar close/reopen resets incremental expansion", async ({ page }) => {
+  const pantokenGroup = await loadManySessions(page);
+  await pantokenGroup.getByTestId("show-more-sessions").click();
+  await expect(pantokenGroup.locator("[data-testid='session-status']")).toHaveCount(8);
+
   await page.getByRole("button", { name: "Collapse sidebar" }).click();
   await openSidebar(page);
-  const sidebar = page.getByTestId("sidebar");
-  const pantokenGroup = sidebar
+  const reopened = page
+    .getByTestId("sidebar")
     .locator(".group")
     .filter({ has: page.locator(".proj", { hasText: "pantoken" }) });
+  await expect(reopened.locator("[data-testid='session-status']")).toHaveCount(5);
+  await expect(reopened.getByTestId("show-more-sessions")).toContainText("Show 3 more");
+});
+
+// Reloading without a close must not restore a temporary expansion count.
+test("reload without close resets incremental expansion", async ({ page }) => {
+  const pantokenGroup = await loadManySessions(page);
   await pantokenGroup.getByTestId("show-more-sessions").click();
   await expect(pantokenGroup.locator("[data-testid='session-status']")).toHaveCount(8);
 
   await page.reload();
   await openSidebar(page);
-  // Still expanded after reload.
-  const reloadedGroup = sidebar
+  const reloaded = page
+    .getByTestId("sidebar")
     .locator(".group")
     .filter({ has: page.locator(".proj", { hasText: "pantoken" }) });
-  await expect(reloadedGroup.getByTestId("show-less-sessions")).toBeVisible();
-  await expect(reloadedGroup.locator("[data-testid='session-status']")).toHaveCount(8);
+  await expect(reloaded.locator("[data-testid='session-status']")).toHaveCount(5);
+  await expect(reloaded.getByTestId("show-more-sessions")).toContainText("Show 3 more");
+});
+
+// Legacy expansion data is ignored and never rewritten by the new in-memory state.
+test("legacy expanded-groups storage is ignored", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "pantoken.sidebarExpandedGroups",
+      '{"/Users/timo/src/pantoken":true,"sentinel":"keep-me"}',
+    );
+  });
+  await page.reload();
+  await openSidebar(page);
+  await drive(page, "manysessions");
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  await openSidebar(page);
+
+  const sidebar = page.getByTestId("sidebar");
+  const pantokenGroup = sidebar
+    .locator(".group")
+    .filter({ has: page.locator(".proj", { hasText: "pantoken" }) });
+  await expect(pantokenGroup.locator("[data-testid='session-status']")).toHaveCount(5);
+  const sentinel = '{"/Users/timo/src/pantoken":true,"sentinel":"keep-me"}';
+  expect(await page.evaluate(() => localStorage.getItem("pantoken.sidebarExpandedGroups"))).toBe(sentinel);
+
+  await page.reload();
+  await openSidebar(page);
+  await expect(
+    page.getByTestId("sidebar").locator(".group").filter({ has: page.locator(".proj", { hasText: "pantoken" }) }).locator("[data-testid='session-status']"),
+  ).toHaveCount(5);
+  expect(await page.evaluate(() => localStorage.getItem("pantoken.sidebarExpandedGroups"))).toBe(sentinel);
 });
 
 // sessionReset replaces the transcript instead of duplicating it — the fold is

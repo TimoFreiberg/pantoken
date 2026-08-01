@@ -66,6 +66,63 @@ test.describe("Sessions sidebar", () => {
     await expect(inactive).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   });
 
+  test("mobile disclosure is accessible and touch-safe", async ({ page }) => {
+    const sidebar = page.getByTestId("sidebar");
+    await page.evaluate(() =>
+      (window as unknown as { __pantokenMock?: (script: string) => void }).__pantokenMock?.(
+        "manysessions",
+      ),
+    );
+    await sidebar.getByRole("button", { name: "Close sessions" }).click();
+    await openSidebar(page);
+
+    const group = sidebar
+      .locator(".group")
+      .filter({ has: page.locator(".proj", { hasText: "pantoken" }) });
+    const disclosure = group.getByTestId("show-more-sessions");
+    await expect(disclosure).toBeVisible();
+    await expect(disclosure).toHaveAccessibleName("Show more sessions in pantoken");
+    await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    await expectTapTarget(disclosure);
+    await expect(disclosure).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(disclosure).toHaveCSS("border-top-style", "none");
+
+    await disclosure.tap();
+    await expect(group.locator("[data-testid='session-status']")).toHaveCount(8);
+    await expect(group.getByTestId("show-less-sessions")).toHaveAccessibleName(
+      "Show less sessions in pantoken",
+    );
+    await expect(group.getByTestId("show-less-sessions")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
+  test("mobile close/reopen resets incremental expansion", async ({ page }) => {
+    const sidebar = page.getByTestId("sidebar");
+    await page.evaluate(() =>
+      (window as unknown as { __pantokenMock?: (script: string) => void }).__pantokenMock?.(
+        "manysessions",
+      ),
+    );
+    await sidebar.getByRole("button", { name: "Close sessions" }).click();
+    await openSidebar(page);
+
+    const group = sidebar
+      .locator(".group")
+      .filter({ has: page.locator(".proj", { hasText: "pantoken" }) });
+    await group.getByTestId("show-more-sessions").tap();
+    await expect(group.locator("[data-testid='session-status']")).toHaveCount(8);
+
+    // Phone close path uses the actual drawer control and is also history-backed.
+    await sidebar.getByRole("button", { name: "Close sessions" }).click();
+    await expect(sidebar).toHaveAttribute("data-open", "false");
+    await openSidebar(page);
+
+    await expect(group.locator("[data-testid='session-status']")).toHaveCount(5);
+    await expect(group.getByTestId("show-more-sessions")).toContainText("Show 3 more");
+  });
+
   // Journey: open sessions search, verify it fills the top bar, filter results,
   // then use Back to close search before closing Sessions.
   test("search uses the full top bar and Back closes search before Sessions", async ({

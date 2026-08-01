@@ -162,7 +162,12 @@
   let suppressSearchResetOnOpen = false;
   $effect(() => {
     const open = store.sidebarOpen;
-    if (!open && prevSidebarOpen) closeSearch();
+    if (!open && prevSidebarOpen) {
+      closeSearch();
+      // Session-list expansion is deliberately temporary: closing the drawer makes the
+      // next open compact again on both desktop and phone.
+      visibleCounts = {};
+    }
     if (open && !prevSidebarOpen && !suppressSearchResetOnOpen) searchOpen = false;
     if (open && !prevSidebarOpen) suppressSearchResetOnOpen = false;
     prevSidebarOpen = open;
@@ -528,60 +533,31 @@
     }
   });
 
-  // Per-project "Show more" expansion state, keyed by cwd. Empty = all collapsed
-  // (showing only the per-group cap). Only `true` entries are stored; toggling
-  // back removes the key. Persisted per-device in localStorage (Q6), mirroring the
-  // collapse map above. The cap is display-only — the full list stays in
-  // `group.items`; this just controls whether the "Show N more" rows render.
-  const EXPANDED_GROUPS_KEY = "pantoken.sidebarExpandedGroups";
-  function loadExpandedGroups(): Record<string, boolean> {
-    if (typeof window === "undefined") return {};
-    try {
-      const raw = localStorage.getItem(EXPANDED_GROUPS_KEY);
-      if (!raw) return {};
-      const parsed: unknown = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object") return {};
-      const out: Record<string, boolean> = {};
-      for (const [cwd, v] of Object.entries(parsed as Record<string, unknown>))
-        if (v === true) out[cwd] = true;
-      return out;
-    } catch {
-      return {};
-    }
+  // Per-project incremental disclosure counts. This is intentionally in-memory only:
+  // the sidebar starts compact after a reload or after its drawer closes. Counts are
+  // keyed by cwd and clamped against the current filtered group in the render below.
+  let visibleCounts = $state<Record<string, number>>({});
+  function showMore(cwd: string, amount: number): void {
+    const current = visibleCounts[cwd] ?? SESSIONS_PER_GROUP;
+    visibleCounts = { ...visibleCounts, [cwd]: current + amount };
   }
-  function persistExpandedGroups(map: Record<string, boolean>): void {
-    if (typeof window === "undefined") return;
-    try {
-      localStorage.setItem(EXPANDED_GROUPS_KEY, JSON.stringify(map));
-    } catch {
-      // Storage full / unavailable (private mode) — expansion stays in-memory
-      // this session only.
-    }
-  }
-  let expandedGroups = $state<Record<string, boolean>>(loadExpandedGroups());
-  function toggleExpanded(cwd: string): void {
-    const next = { ...expandedGroups };
-    if (next[cwd]) delete next[cwd];
-    else next[cwd] = true;
-    expandedGroups = next;
-    persistExpandedGroups(expandedGroups);
+  function showLess(cwd: string): void {
+    const next = { ...visibleCounts };
+    next[cwd] = SESSIONS_PER_GROUP;
+    visibleCounts = next;
   }
 
-  // Prune expansion entries for projects that no longer have any session on disk
-  // — same rationale as the collapse-prune above.
+  // Keep temporary disclosure state bounded while sessions are refreshed.
   $effect(() => {
     if (store.sessions.length === 0) return;
     const known = new Set(store.sessions.map((s) => s.cwd));
+    const next: Record<string, number> = {};
     let changed = false;
-    const next: Record<string, boolean> = {};
-    for (const cwd of Object.keys(expandedGroups)) {
-      if (known.has(cwd)) next[cwd] = true;
+    for (const [cwd, count] of Object.entries(visibleCounts)) {
+      if (known.has(cwd)) next[cwd] = count;
       else changed = true;
     }
-    if (changed) {
-      expandedGroups = next;
-      persistExpandedGroups(expandedGroups);
-    }
+    if (changed) visibleCounts = next;
   });
 
   // Re-scan disk whenever the sidebar opens, so a session another client created
@@ -845,8 +821,16 @@
     {:else}
       {#each filteredGroups as g (g.cwd)}
         {@const groupState = store.groupAttention(g.items.map((i) => i.sessionId))}
-        {@const split = splitGroup(g.items, query.trim() ? 0 : SESSIONS_PER_GROUP, store.pinnedSidebarIds)}
-        {@const isExpanded = !!expandedGroups[g.cwd] || !split.hidden.length}
+        {@const rawVisibleCount = visibleCounts[g.cwd] ?? SESSIONS_PER_GROUP}
+        {@const storedCount = Math.min(
+          rawVisibleCount,
+          Math.max(SESSIONS_PER_GROUP, g.items.length),
+        )}
+        {@const visibleLimit = query.trim()
+          ? 0
+          : Math.min(storedCount, g.items.length)}
+        {@const split = splitGroup(g.items, visibleLimit, store.pinnedSidebarIds)}
+        {@const moreCount = Math.min(SESSIONS_PER_GROUP, split.hidden.length)}
         <section class="group">
           <div class="group-head">
             <button
@@ -880,7 +864,7 @@
               {#if store.draft}{#each groupDraftsFor(g.cwd) as d (d.key)}
                 <li class="row-wrap">{@render draftRow(d, false)}</li>
               {/each}{/if}
-              {#each (isExpanded ? g.items : split.visible) as s (s.path)}
+              {#each split.visible as s (s.path)}
                 {@const st = store.sessionStatus(s.sessionId)}
                 {@const activity = store.sessionActivity(s.sessionId)}
                 {@const rel = compactTime(s.updatedAt, now)}
@@ -1013,23 +997,26 @@
                   {/if}
                 </li>
               {/each}
-              {#if split.hidden.length && !isExpanded}
+              {#if split.hidden.length}
                 <li class="row-wrap">
                   <button
                     class="show-more"
                     data-testid="show-more-sessions"
-                    onclick={() => toggleExpanded(g.cwd)}
+                    aria-expanded={split.hidden.length === 0}
+                    aria-label={`Show more sessions in ${basename(g.cwd)}`}
+                    onclick={() => showMore(g.cwd, moreCount)}
                   >
-                    Show {split.hidden.length} more
+                    Show {moreCount} more
                   </button>
                 </li>
-              {/if}
-              {#if isExpanded && split.hidden.length}
+              {:else if !query.trim() && storedCount > SESSIONS_PER_GROUP}
                 <li class="row-wrap">
                   <button
                     class="show-more"
                     data-testid="show-less-sessions"
-                    onclick={() => toggleExpanded(g.cwd)}
+                    aria-expanded={split.hidden.length === 0}
+                    aria-label={`Show less sessions in ${basename(g.cwd)}`}
+                    onclick={() => showLess(g.cwd)}
                   >
                     Show less
                   </button>
