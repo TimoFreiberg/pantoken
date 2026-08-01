@@ -18,6 +18,23 @@ import type {
   TestSshResult,
 } from "./types.js";
 
+/** True when a Tauri invoke rejection means the requested command is not
+ *  registered — the desktop build predates it. Tauri v2 rejects unknown
+ *  commands with a message shaped like `command test_ssh_and_list_containers
+ *  not found`; the exact wording varies by version, so we match the common
+ *  "missing command" phrasings. Any other rejection (e.g. the command ran and
+ *  returned `Err("SSH connection failed: …")`) is a REAL failure and must not
+ *  be degraded to "not available". */
+function isMissingCommandError(rejection: unknown): boolean {
+  const message = rejection instanceof Error ? rejection.message : String(rejection);
+  return /not found|unknown command|not registered/i.test(message);
+}
+
+/** Extract a stable error message from an invoke rejection. */
+function rejectionMessage(rejection: unknown): string {
+  return rejection instanceof Error ? rejection.message : String(rejection);
+}
+
 /** The native HostStateSnapshot, mirroring the Rust struct (camelCase fields).
  *  Returned by list_hosts / host_state / ensure_remote_host. */
 interface HostStateSnapshot {
@@ -274,10 +291,15 @@ export function createTauriHostProvider(
           sshDestination,
           port: port ?? 22,
         });
-      } catch {
-        // Gap (a) degradation: the command is not available. The UI shows the
-        // degradation hint and the Docker option is effectively unusable.
-        throw new Error("Container commands are not available in this build");
+      } catch (rejection) {
+        // Gap (a) degradation: only a genuinely-missing command (a build that
+        // predates registration) degrades to "not available". Real failures —
+        // the command ran and returned Err("SSH connection failed: …") — must
+        // propagate so the setup sheet can surface the actual cause.
+        if (isMissingCommandError(rejection)) {
+          throw new Error("Container commands are not available in this build");
+        }
+        throw new Error(rejectionMessage(rejection));
       }
     },
 
@@ -292,10 +314,13 @@ export function createTauriHostProvider(
           port: port ?? 22,
           containerName,
         });
-      } catch {
-        // Gap (b) degradation: the Customize target disclosure shows an
-        // inspection-unavailable state.
-        throw new Error("Container inspection is not available in this build");
+      } catch (rejection) {
+        // Gap (b) degradation: only a genuinely-missing command degrades.
+        // Real inspection failures propagate to the Customize disclosure.
+        if (isMissingCommandError(rejection)) {
+          throw new Error("Container inspection is not available in this build");
+        }
+        throw new Error(rejectionMessage(rejection));
       }
     },
   };

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { gotoFresh, openSettings, openSidebar } from "./helpers.js";
+import { gotoFresh, openDockerSetupFromSwitcher, openSettings, openSidebar } from "./helpers.js";
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
@@ -49,9 +49,7 @@ async function setInspection(page: import("@playwright/test").Page, containerNam
 /** Open the host switcher, choose "Setup Docker", fill SSH, test, select the
  *  work-api-dev container, and click "Use this container". */
 async function openSetupAndSelectContainer(page: import("@playwright/test").Page): Promise<void> {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
+  await openDockerSetupFromSwitcher(page);
   await page.getByTestId("cs-ssh-input").fill("user@dev.example.com");
   await page.getByTestId("cs-test-ssh").click();
   await expect(page.getByTestId("cs-ssh-summary")).toBeVisible({ timeout: 10000 });
@@ -62,9 +60,7 @@ async function openSetupAndSelectContainer(page: import("@playwright/test").Page
 /** Create a Docker profile, drive it to ready, and return the profile id.
  *  Dismisses the auto-showing connection sheet so it won't intercept later clicks. */
 async function createDockerProfile(page: import("@playwright/test").Page): Promise<string> {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
+  await openDockerSetupFromSwitcher(page);
   await page.getByTestId("cs-ssh-input").fill("user@dev.example.com");
   await page.getByTestId("cs-test-ssh").click();
   await expect(page.getByTestId("cs-ssh-summary")).toBeVisible({ timeout: 10000 });
@@ -95,9 +91,7 @@ async function createDockerProfile(page: import("@playwright/test").Page): Promi
  *  Unlike createDockerProfile, does not dismiss the connection sheet (the caller
  *  handles any sheet dismissal). */
 async function createAndProvisionDockerProfile(page: import("@playwright/test").Page): Promise<string> {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
+  await openDockerSetupFromSwitcher(page);
   await page.getByTestId("cs-ssh-input").fill("user@dev.example.com");
   await page.getByTestId("cs-test-ssh").click();
   await expect(page.getByTestId("cs-ssh-summary")).toBeVisible({ timeout: 10000 });
@@ -177,9 +171,7 @@ const INSPECTION_WITH_SOCKET = {
 
 // Open the Setup Docker sheet and test SSH to reveal the container picker
 test("Setup Docker sheet opens and SSH test reveals the container picker", async ({ page }) => {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
+  await openDockerSetupFromSwitcher(page);
   await expect(page.getByTestId("computer-setup-panel")).toBeVisible();
   await expect(page.getByTestId("cs-ssh-input")).toBeVisible();
 
@@ -194,9 +186,7 @@ test("Setup Docker sheet opens and SSH test reveals the container picker", async
 
 // Select a container and start provisioning
 test("Selecting a container and clicking Use starts provisioning", async ({ page }) => {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
+  await openDockerSetupFromSwitcher(page);
 
   await page.getByTestId("cs-ssh-input").fill("user@dev.example.com");
   await page.getByTestId("cs-test-ssh").click();
@@ -213,9 +203,7 @@ test("Selecting a container and clicking Use starts provisioning", async ({ page
 
 // Provisioning reaches ready and the sheet closes
 test("Provisioning reaches ready and closes the sheet", async ({ page }) => {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
+  await openDockerSetupFromSwitcher(page);
 
   await page.getByTestId("cs-ssh-input").fill("user@dev.example.com");
   await page.getByTestId("cs-test-ssh").click();
@@ -240,9 +228,7 @@ test("Provisioning reaches ready and closes the sheet", async ({ page }) => {
 
 // Exact-name fallback saves a stopped container without provisioning
 test("Exact-name fallback saves without provisioning", async ({ page }) => {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
+  await openDockerSetupFromSwitcher(page);
 
   await page.getByTestId("cs-ssh-input").fill("user@dev.example.com");
   await page.getByTestId("cs-test-ssh").click();
@@ -263,9 +249,7 @@ test("Exact-name fallback saves without provisioning", async ({ page }) => {
 
 // Customize target shows inspection details
 test("Customize target shows inspection details", async ({ page }) => {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
+  await openDockerSetupFromSwitcher(page);
 
   await page.getByTestId("cs-ssh-input").fill("user@dev.example.com");
   await page.getByTestId("cs-test-ssh").click();
@@ -285,9 +269,7 @@ test("Customize target shows inspection details", async ({ page }) => {
 // SSH and name fields remain visible after discovery; editing SSH invalidates
 // stale results (AC.7, AC.8)
 test("SSH and name fields after discovery; editing SSH invalidates picker (AC.7, AC.8)", async ({ page }) => {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
+  await openDockerSetupFromSwitcher(page);
 
   await page.getByTestId("cs-ssh-input").fill("user@dev.example.com");
   await page.getByTestId("cs-test-ssh").click();
@@ -311,9 +293,7 @@ test("SSH and name fields after discovery; editing SSH invalidates picker (AC.7,
 
 // Name suggestion appears when selecting a container (AC.9)
 test("Name suggestion appears when selecting a container (AC.9)", async ({ page }) => {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
+  await openDockerSetupFromSwitcher(page);
 
   await page.getByTestId("cs-ssh-input").fill("user@dev.example.com");
   await page.getByTestId("cs-test-ssh").click();
@@ -326,9 +306,7 @@ test("Name suggestion appears when selecting a container (AC.9)", async ({ page 
 
 // User-entered name is never overwritten by suggestion (AC.9)
 test("User-entered name is never overwritten by suggestion (AC.9)", async ({ page }) => {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
+  await openDockerSetupFromSwitcher(page);
 
   await page.getByTestId("cs-name-input").fill("My Custom Name");
   await page.getByTestId("cs-ssh-input").fill("user@dev.example.com");
@@ -343,9 +321,7 @@ test("User-entered name is never overwritten by suggestion (AC.9)", async ({ pag
 // Desktop SSH row layout: input widths, port accessible label, action button
 // intrinsic height
 test("Desktop SSH row layout: input widths, port label, action button height", async ({ page }) => {
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
+  await openDockerSetupFromSwitcher(page);
 
   const sshInput = page.getByTestId("cs-ssh-input");
   const portInput = page.getByTestId("cs-port-input");
@@ -491,20 +467,24 @@ test("Edit dialog shows exec env, docker target, and reconnect buttons", async (
   await expect(page.getByTestId("cs-reconnect-later")).toBeVisible();
 });
 
-// Settings has Setup Docker container button
-test("Settings has Setup Docker container button", async ({ page }) => {
+// Settings shows a single add button; Docker setup reachable via the sheet toggle
+test("Settings shows a single add button; Docker setup reachable via the sheet toggle", async ({ page }) => {
   await openSettings(page, "computers");
-  await page.getByTestId("settings-setup-docker").click();
+  // Exactly one add entry — no separate "Setup Docker container" launcher.
+  const section = page.getByTestId("computers-section");
+  await expect(section.getByTestId("add-computer-btn")).toBeVisible();
+  await expect(section.getByTestId("settings-setup-docker")).toHaveCount(0);
+  // Docker setup is reachable by opening the sheet and selecting the segment.
+  await section.getByTestId("add-computer-btn").click();
   await expect(page.getByTestId("computer-setup-panel")).toBeVisible();
+  await page.getByTestId("cs-env-docker").click();
   await expect(page.getByTestId("cs-ssh-input")).toBeVisible();
 });
 
 // Container not running state shows in Computers section
 test("Container not running state shows in Computers section", async ({ page }) => {
   // Create a profile via exact-name fallback (no provisioning).
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
+  await openDockerSetupFromSwitcher(page);
   await page.getByTestId("cs-ssh-input").fill("user@dev.example.com");
   await page.getByTestId("cs-test-ssh").click();
   await expect(page.getByTestId("cs-ssh-summary")).toBeVisible({ timeout: 10000 });

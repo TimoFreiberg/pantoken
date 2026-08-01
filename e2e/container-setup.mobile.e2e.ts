@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { gotoFresh } from "./helpers.js";
+import { gotoFresh, openDockerSetupFromSwitcher } from "./helpers.js";
 
 // Mobile project — these tests run at 375px (Pixel 7) viewport.
 // Playwright's mobile project config handles the viewport; we just use the helpers.
@@ -31,9 +31,7 @@ const EPHEMERAL_RISK = {
 test("Setup sheet full-screen, SSH test, and back button on phone", async ({ page }) => {
   // Open the sidebar (phone: it's a drawer).
   await page.getByTestId("sidebar-open").click();
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
+  await openDockerSetupFromSwitcher(page);
 
   const panel = page.getByTestId("computer-setup-panel");
   await expect(panel).toBeVisible();
@@ -72,9 +70,7 @@ test("Risk panel renders on phone", async ({ page }) => {
   await setPendingRisksForNextDocker(page, [EPHEMERAL_RISK]);
 
   await page.getByTestId("sidebar-open").click();
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
+  await openDockerSetupFromSwitcher(page);
 
   await page.getByTestId("cs-ssh-input").fill("user@dev.example.com");
   await page.getByTestId("cs-test-ssh").click();
@@ -94,9 +90,7 @@ test("Risk panel renders on phone", async ({ page }) => {
 // scrolling occurs at 375px
 test("Touch targets meet 44px minimum and no horizontal scrolling on phone", async ({ page }) => {
   await page.getByTestId("sidebar-open").click();
-  const switcher = page.getByTestId("host-switcher");
-  await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
+  await openDockerSetupFromSwitcher(page);
 
   // The close button should be at least 44px.
   const closeBtn = page.getByTestId("computer-setup-close");

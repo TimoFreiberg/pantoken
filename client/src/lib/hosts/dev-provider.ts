@@ -45,7 +45,9 @@ export interface DevHostControls {
   /** Control the next connectHost call. */
   setNextConnectHostBehavior(behavior: { delay?: number; reject?: unknown } | null): void;
   /** Control the next testSshAndListContainers call. */
-  setNextTestSshBehavior(behavior: { delay?: number; reject?: unknown } | null): void;
+  setNextTestSshBehavior(
+    behavior: { delay?: number; reject?: unknown; result?: TestSshResult } | null,
+  ): void;
   /** Control the next inspectContainer call. */
   setNextInspectContainerBehavior(behavior: { delay?: number; reject?: unknown } | null): void;
   /** Control the next acknowledgeRisk call. */
@@ -137,7 +139,9 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
   // ── Deterministic async hooks for testing ─────────────────────────────────
   // Each hook is a one-shot: the next call to the corresponding method applies
   // the behavior (delay, reject, or resolve normally), then clears it.
-  type NextBehavior = { delay?: number; reject?: unknown } | null;
+  // `result` lets tests drive a specific return value — e.g. an `sshOk: false`
+  // TestSshResult with sshErrorDetail — without touching the resolve path.
+  type NextBehavior = { delay?: number; reject?: unknown; result?: TestSshResult } | null;
   let nextAddProfile: NextBehavior = null;
   let nextUpdateProfile: NextBehavior = null;
   let nextConnectHost: NextBehavior = null;
@@ -421,6 +425,7 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
       const behavior = nextTestSsh;
       nextTestSsh = null;
       return applyBehavior(behavior, () => {
+        if (behavior?.result) return behavior.result;
         const containers = containerPickerMap.get("__default__") ?? DEV_CONTAINERS;
         return {
           sshOk: true,

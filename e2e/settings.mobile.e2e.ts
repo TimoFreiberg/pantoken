@@ -340,7 +340,7 @@ test("phone host picker is a full-screen sheet with touch-safe controls and trap
   const close = dialog.getByRole("button", { name: "Close computer picker" });
   await close.focus();
   await page.keyboard.press("Shift+Tab");
-  // The management buttons (Add computer, Manage computers) are now enabled
+  // The management buttons (Add remote host, Manage computers) are now enabled
   // and sit after the host options, so Shift+Tab from Close lands on the last
   // management button.
   await expect(dialog.getByTestId("manage-computers-btn")).toBeFocused();

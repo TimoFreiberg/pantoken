@@ -354,11 +354,6 @@
     profileEditor.setLaunchOrigin("settings");
     profileEditor.openNew();
   }
-
-  function setupDocker(): void {
-    profileEditor.setLaunchOrigin("settings");
-    profileEditor.openNewDocker();
-  }
 </script>
 
 <svelte:window onkeydown={onKey} />
@@ -807,7 +802,6 @@
 
         <div class="add-computer">
           <Button variant="primary" title="Add a new computer" onclick={() => addComputer()} data-testid="add-computer-btn">Add computer</Button>
-          <Button title="Setup a Docker container" onclick={() => setupDocker()} data-testid="settings-setup-docker">Setup Docker container</Button>
         </div>
       </section>
       {/if}

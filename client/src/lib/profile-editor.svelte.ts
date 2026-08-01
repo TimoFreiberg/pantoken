@@ -71,17 +71,6 @@ class ProfileEditorState {
     this.open = true;
   }
 
-  openNewDocker(): void {
-    this.launcher = document.activeElement as HTMLElement | null;
-    this.editing = null;
-    this.intent = { kind: "new", initialTarget: "dockerContainer" };
-    // Try restoring from localStorage first.
-    this.draft = this.loadDraftFromStorage() ?? defaultDraft(this.intent);
-    this.baseline = cloneDraft(this.draft);
-    this.loadingProfile = false;
-    this.open = true;
-  }
-
   openEdit(profile: RemoteProfile): void {
     this.launcher = document.activeElement as HTMLElement | null;
     this.editing = profile;

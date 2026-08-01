@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import type { TestSshResult } from "../client/src/lib/hosts/types.js";
 import { gotoFresh, openSettings, openSidebar } from "./helpers.js";
 
 test.beforeEach(async ({ page }) => {
@@ -33,7 +34,7 @@ async function closeSheet(page: Page): Promise<void> {
 async function setNextBehavior(
   page: Page,
   method: string,
-  behavior: { delay?: number; reject?: unknown } | null,
+  behavior: { delay?: number; reject?: unknown; result?: TestSshResult } | null,
 ): Promise<void> {
   await page.evaluate(
     ({ method, behavior }) => {
@@ -152,18 +153,30 @@ test("PWA degradation: Docker segment disabled when unsupported (AC.14)", async 
   await page.evaluate(
     () => (window as unknown as { __pantokenHosts?: { setSupportsContainerTargets: (e: boolean) => void } }).__pantokenHosts?.setSupportsContainerTargets(false),
   );
-  // Use the "Setup Docker" launcher — it starts with Docker selected, so the
-  // degraded hint will show.
+  // Open via the single add launcher — Docker is disabled when unsupported, so
+  // the sheet can no longer start with it selected.
   const switcher = page.getByTestId("host-switcher");
   await switcher.getByTestId("host-switcher-trigger").click();
-  await switcher.getByTestId("host-switcher-setup-docker").click();
+  await switcher.getByTestId("add-computer-btn").click();
   await expect(page.getByTestId("computer-setup-panel")).toBeVisible();
-  // Docker segment should be disabled.
+  // Docker segment should be disabled; Host remains enabled.
   await expect(page.getByTestId("cs-env-docker")).toBeDisabled();
-  // Host segment should remain enabled.
   await expect(page.getByTestId("cs-env-host")).toBeEnabled();
-  // Degraded hint should be visible (execEnv is docker but unsupported).
-  await expect(page.getByTestId("cs-docker-degraded")).toBeVisible();
+  // The degradation explanation lives in the segment's title tooltip.
+  await expect(page.getByTestId("cs-env-docker")).toHaveAttribute("title", /Docker targets require the Pantoken desktop app/);
+});
+
+// Host switcher dropdown shows a single add entry labeled Add remote host
+test("Host switcher dropdown shows a single add entry labeled Add remote host", async ({ page }) => {
+  const switcher = page.getByTestId("host-switcher");
+  await switcher.getByTestId("host-switcher-trigger").click();
+  await expect(page.locator("#host-switcher-panel")).toBeVisible();
+  // Exactly one add entry, renamed from "Add computer" → "Add remote host".
+  await expect(switcher.getByTestId("add-computer-btn")).toHaveText("Add remote host");
+  // The old "Setup Docker container" launcher is gone.
+  await expect(switcher.getByTestId("host-switcher-setup-docker")).toHaveCount(0);
+  // "Manage computers" remains.
+  await expect(switcher.getByTestId("manage-computers-btn")).toBeVisible();
 });
 
 // Host profile creation and listing (AC.4 Host)
@@ -456,4 +469,35 @@ test("ConnectionSheet does not appear over setup (AC.20)", async ({ page }) => {
   // After setup closes, ConnectionSheet may appear for the pending host.
   // (It may or may not appear depending on host state transitions, but the
   // key assertion is that it did NOT appear while setup was open.)
+});
+
+// ── #142: Real SSH errors surface in the setup sheet ────────────────────────
+
+test("#142: SSH test rejection surfaces the real error, not the degradation message", async ({ page }) => {
+  await openAddComputer(page);
+  await page.getByTestId("cs-ssh-input").fill("user@unreachable.test");
+  await setNextBehavior(page, "setNextTestSshBehavior", {
+    reject: new Error("SSH connection failed: Connection refused"),
+  });
+  await page.getByTestId("cs-test-ssh").click();
+  await expect(page.getByTestId("cs-ssh-error")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByTestId("cs-ssh-error")).toContainText("Connection refused");
+  await expect(page.getByTestId("cs-ssh-error")).not.toContainText("Container commands");
+});
+
+test("#142: sshOk false with stderr detail shows the real ssh message", async ({ page }) => {
+  await openAddComputer(page);
+  await page.getByTestId("cs-ssh-input").fill("user@key.test");
+  await setNextBehavior(page, "setNextTestSshBehavior", {
+    result: {
+      sshOk: false,
+      dockerPermission: "unknown",
+      containers: [],
+      sshErrorDetail: "Permission denied (publickey).",
+    },
+  });
+  await page.getByTestId("cs-test-ssh").click();
+  await expect(page.getByTestId("cs-ssh-error")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByTestId("cs-ssh-error")).toContainText("Permission denied (publickey).");
+  await expect(page.getByTestId("cs-ssh-error")).not.toContainText("Check the SSH destination");
 });

@@ -19,6 +19,18 @@ function installInvoke(responses: Record<string, (() => unknown)[]>) {
   } as unknown as typeof globalThis.window;
 }
 
+/** Install an invoke that rejects with `message` for the given command. */
+function installRejectingInvoke(command: string, message: string) {
+  globalThis.window = {
+    __TAURI_INTERNALS__: {
+      invoke: (cmd: string): Promise<unknown> => {
+        if (cmd === command) return Promise.reject(new Error(message));
+        return Promise.resolve(undefined);
+      },
+    },
+  } as unknown as typeof globalThis.window;
+}
+
 function snapshot(overrides: Record<string, unknown> = {}) {
   return {
     id: "remote-1",
@@ -89,5 +101,37 @@ describe("TauriHostProvider", () => {
     const dockerHost = hosts.find((h) => h.id === "docker-1");
     expect(dockerHost?.pendingRisks?.[0].kind).toBe("dockerSocket");
     expect(dockerHost?.isDockerTarget).toBe(true);
+  });
+
+  test("testSshAndListContainers degrades only for missing-command rejections", async () => {
+    const provider = createTauriHostProvider(() => "");
+
+    // Genuinely missing command (build predates registration) → degraded message.
+    installRejectingInvoke("test_ssh_and_list_containers", "command test_ssh_and_list_containers not found");
+    await expect(provider.testSshAndListContainers("user@host")).rejects.toThrow(
+      "Container commands are not available in this build",
+    );
+
+    // Real failure (command ran, returned Err) → the actual message propagates.
+    installRejectingInvoke("test_ssh_and_list_containers", "SSH connection failed: Connection refused");
+    await expect(provider.testSshAndListContainers("user@host")).rejects.toThrow(
+      "SSH connection failed: Connection refused",
+    );
+  });
+
+  test("inspectContainer degrades only for missing-command rejections", async () => {
+    const provider = createTauriHostProvider(() => "");
+
+    // Genuinely missing command → degraded message.
+    installRejectingInvoke("inspect_container", "command inspect_container not found");
+    await expect(provider.inspectContainer("user@host", 22, "work-api")).rejects.toThrow(
+      "Container inspection is not available in this build",
+    );
+
+    // Real failure → the actual message propagates.
+    installRejectingInvoke("inspect_container", "SSH connection failed: Connection refused");
+    await expect(provider.inspectContainer("user@host", 22, "work-api")).rejects.toThrow(
+      "SSH connection failed: Connection refused",
+    );
   });
 });

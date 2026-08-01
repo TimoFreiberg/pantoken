@@ -149,6 +149,10 @@ pub struct TestSshResult {
     pub ssh_ok: bool,
     pub docker_permission: String,
     pub containers: Vec<ContainerSummary>,
+    /// First line of ssh stderr when the SSH command itself failed (exit 255):
+    /// auth, host-key, or unreachable errors. `None` otherwise.
+    #[serde(rename = "sshErrorDetail")]
+    pub ssh_error_detail: Option<String>,
 }
 
 /// A mount on a container, from `inspect_container`. Mirrors `MountSummary`.
@@ -639,6 +643,18 @@ pub fn cancel_connection_impl(state: &AppState, id: &str) -> Result<(), String> 
 
 // ── Container discovery (pre-profile probes) ───────────────────────────────
 
+/// First line of a command's stderr, trimmed and bounded for display in the
+/// setup sheet's error box. Returns `None` when stderr is empty/whitespace.
+fn ssh_error_detail(stderr: &str) -> Option<String> {
+    let first = stderr.lines().map(str::trim).find(|l| !l.is_empty())?;
+    const MAX: usize = 300;
+    let mut detail: String = first.chars().take(MAX).collect();
+    if first.chars().count() > MAX {
+        detail.push('…');
+    }
+    Some(detail)
+}
+
 /// Test SSH connectivity and list Docker containers on the remote host.
 /// Runs before a profile is saved, so it builds a minimal `SshCommand` from
 /// just destination + port.
@@ -667,6 +683,7 @@ pub async fn test_ssh_and_list_containers_impl(
                 ssh_ok: false,
                 docker_permission: "unknown".into(),
                 containers: Vec::new(),
+                ssh_error_detail: ssh_error_detail(&docker_version.stderr),
             });
         }
         // Non-255 failure = Docker CLI issue or permission denied.
@@ -674,6 +691,7 @@ pub async fn test_ssh_and_list_containers_impl(
             ssh_ok: true,
             docker_permission: "denied".into(),
             containers: Vec::new(),
+            ssh_error_detail: None,
         });
     }
 
@@ -696,6 +714,7 @@ pub async fn test_ssh_and_list_containers_impl(
             ssh_ok: true,
             docker_permission: "denied".into(),
             containers: Vec::new(),
+            ssh_error_detail: None,
         });
     }
 
@@ -725,6 +744,7 @@ pub async fn test_ssh_and_list_containers_impl(
         ssh_ok: true,
         docker_permission: "granted".into(),
         containers,
+        ssh_error_detail: None,
     })
 }
 
@@ -1991,6 +2011,7 @@ mod tests {
         assert_eq!(result.containers[0].compose_service.as_deref(), Some("api"));
         assert_eq!(result.containers[1].name, "postgres-dev");
         assert_eq!(result.containers[1].compose_project, None);
+        assert_eq!(result.ssh_error_detail, None);
     }
 
     #[tokio::test]
@@ -2013,6 +2034,7 @@ mod tests {
         assert!(result.ssh_ok);
         assert_eq!(result.docker_permission, "denied");
         assert!(result.containers.is_empty());
+        assert_eq!(result.ssh_error_detail, None);
     }
 
     #[tokio::test]
@@ -2035,6 +2057,11 @@ mod tests {
         assert!(!result.ssh_ok);
         assert_eq!(result.docker_permission, "unknown");
         assert!(result.containers.is_empty());
+        // The ssh stderr detail surfaces so the setup sheet can show the real cause.
+        assert_eq!(
+            result.ssh_error_detail.as_deref(),
+            Some("Permission denied (publickey)")
+        );
     }
 
     #[tokio::test]

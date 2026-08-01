@@ -366,6 +366,9 @@ export interface TestSshResult {
   sshOk: boolean;
   dockerPermission: "granted" | "denied" | "unknown";
   containers: ContainerSummary[];
+  /** First line of ssh stderr when the SSH command itself failed (exit 255):
+   *  auth, host-key, or unreachable errors. Absent otherwise. */
+  sshErrorDetail?: string;
 }
 
 // ── Failure families ────────────────────────────────────────────────────────

@@ -229,3 +229,16 @@ export async function keyboardScrollToPosition(
   }, targetTop);
   await page.waitForTimeout(100);
 }
+
+/** Open the setup sheet in Docker mode via the single launcher + toggle.
+ *  The HostSwitcher trigger is a toggle (HostSwitcher.svelte:128), so this
+ *  helper is self-sufficient: it opens the dropdown itself and replaces the
+ *  old two-line trigger-click + "Setup Docker container" sequence. */
+export async function openDockerSetupFromSwitcher(page: Page): Promise<void> {
+  const switcher = page.getByTestId("host-switcher");
+  await switcher.getByTestId("host-switcher-trigger").click();
+  await expect(page.locator("#host-switcher-panel")).toBeVisible();
+  await switcher.getByTestId("add-computer-btn").click();
+  await expect(page.getByTestId("computer-setup-panel")).toBeVisible();
+  await page.getByTestId("cs-env-docker").click();
+}

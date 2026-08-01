@@ -221,7 +221,7 @@
       // Derive initial execEnv from the launch intent.
       const intent = profileEditor.intent;
       if (intent?.kind === "new" && profileEditor.draft) {
-        // The draft was already set by openNew/openNewDocker.
+        // The draft was already set by openNew.
         // execEnv is derived from draft.executionTarget.
       }
       if (editing) {
@@ -445,6 +445,18 @@
   }
 
   // ── SSH test ──────────────────────────────────────────────────────────────
+  /** Build the "can't reach the host" error for an `sshOk: false` result. When
+   *  the provider surfaced ssh stderr detail (Rust exit 255), show that real
+   *  message instead of the generic hint. */
+  function sshFailureError(result: TestSshResult): { title: string; message: string } {
+    return {
+      title: "Can't reach the host",
+      message: result.sshErrorDetail
+        ? result.sshErrorDetail
+        : "Check the SSH destination and try again.",
+    };
+  }
+
   async function runTest(): Promise<void> {
     if (!sshDestination.trim()) return;
     operation = { kind: "testingSsh" };
@@ -463,10 +475,7 @@
         clearInterval(stepTimer);
         if (!result.sshOk) {
           stage = "sshFailed";
-          testError = {
-            title: "Can't reach the host",
-            message: "Check the SSH destination and try again.",
-          };
+          testError = sshFailureError(result);
           operation = { kind: "idle" };
           return;
         }
@@ -483,10 +492,7 @@
       testResult = result;
       if (!result.sshOk) {
         stage = "sshFailed";
-        testError = {
-          title: "Can't reach the host",
-          message: "Check the SSH destination and try again.",
-        };
+        testError = sshFailureError(result);
         operation = { kind: "idle" };
         return;
       }
@@ -500,7 +506,7 @@
       testError = {
         title: e.message.includes("not available")
           ? "Container commands unavailable"
-          : "SSH authentication failed",
+          : "SSH connection failed",
         message: e.message,
       };
       operation = { kind: "idle" };
