@@ -103,6 +103,7 @@ test("arrow keys and Right-Arrow completion navigate the directory list", async 
     "pi",
   );
   await input.press("ArrowDown");
+  await expect(input).toHaveAttribute("aria-activedescendant", "dir-option-1");
   await input.press("Enter");
   await expect(input).toHaveValue("/Users/timo/src/pi-gui/");
 
@@ -112,6 +113,7 @@ test("arrow keys and Right-Arrow completion navigate the directory list", async 
     "pi",
   );
   await input.press("Control+n");
+  await expect(input).toHaveAttribute("aria-activedescendant", "dir-option-1");
   await input.press("Enter");
   await expect(input).toHaveValue("/Users/timo/src/pi-gui/");
 
@@ -122,6 +124,7 @@ test("arrow keys and Right-Arrow completion navigate the directory list", async 
   );
   await input.press("ArrowDown");
   await input.press("Control+p");
+  await expect(input).toHaveAttribute("aria-activedescendant", "dir-option-0");
   await input.press("Enter");
   await expect(input).toHaveValue("/Users/timo/src/pi/");
 });

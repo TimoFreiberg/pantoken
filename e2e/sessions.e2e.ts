@@ -490,9 +490,10 @@ test("Browse… opens DirPicker; picking a dir creates a session", async ({
   // The picker and chooser both disappear.
   await expect(picker).toHaveCount(0);
   await expect(page.getByTestId("session-chooser")).toHaveCount(0);
-  // A new session row appears.
+  // A new session row appears after the server broadcasts the updated session list.
   await expect(page.getByTestId("sidebar").locator(".row")).toHaveCount(
     beforeCount + 1,
+    { timeout: 10000 },
   );
 });
 

@@ -348,7 +348,8 @@
   @media (max-width: 859px) {
     .chooser {
       position: fixed;
-      inset: 0;
+      inset: 0 0 auto;
+      height: calc(100dvh - var(--keyboard-inset, 0px));
       z-index: 10;
       padding-block: 12px clamp(20px, 10vh, 72px);
     }
