@@ -36,6 +36,7 @@
     | "environment"
     | "mcp"
     | "token"
+    | "phone"
     | "computers";
   const SECTIONS: { id: SectionId; label: string }[] = [
     { id: "appearance", label: "Appearance" },
@@ -44,6 +45,7 @@
     { id: "environment", label: "Environment" },
     { id: "mcp", label: "MCP" },
     { id: "token", label: "Access token" },
+    { id: "phone", label: "Phone access" },
     { id: "computers", label: "Computers" },
   ];
   const ACTIVE_SECTION_KEY = "pantoken.settingsSection";
@@ -198,6 +200,22 @@
   });
 
   let tokenDraft = $state("");
+  let phoneOrigin = $state("");
+  let phoneEnabled = $state(false);
+  let phoneStatus = $state("Phone access is controlled from the desktop app.");
+  function isDesktopShell(): boolean {
+    return typeof window !== "undefined" && Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
+  }
+  async function phoneCommand(command: string, args?: Record<string, unknown>): Promise<void> {
+    if (!isDesktopShell()) return;
+    const invoke = (window as unknown as { __TAURI_INTERNALS__: { invoke: (name: string, args?: Record<string, unknown>) => Promise<unknown> } }).__TAURI_INTERNALS__.invoke;
+    try {
+      await invoke(command, args);
+      phoneStatus = "Updated. Verify the private HTTPS endpoint before opening a phone link.";
+    } catch {
+      phoneStatus = "Could not update phone access. Check Keychain and the local hub, then retry.";
+    }
+  }
 
   function consumeSettingsHistory(): void {
     if (phone && mobileDetail && settingsHistoryTracked)
@@ -742,6 +760,40 @@
                 onclick={() => store.openDataDir()}
               >Reveal</Button
               >
+            </div>
+          {/if}
+        </div>
+      </section>
+      {/if}
+
+      <!-- Phone access -->
+      {#if activeSection === "phone"}
+      <section class="group" data-testid="phone-access-section">
+        <div class="row">
+          <div class="rinfo">
+            <div class="rlabel">Private phone access</div>
+            <div class="rdesc">Use a manually configured private Tailscale Serve HTTPS origin. Pantoken stays bound to loopback; it never configures Tailscale or opens a public port.</div>
+          </div>
+          {#if isDesktopShell()}
+            <Button variant={phoneEnabled ? "danger" : "primary"} onclick={() => { phoneEnabled = !phoneEnabled; void phoneCommand(phoneEnabled ? "enable_phone_access" : "disable_phone_access"); }}>
+              {phoneEnabled ? "Disable" : "Enable"}
+            </Button>
+          {:else}
+            <span class="computer-state">Read-only</span>
+          {/if}
+        </div>
+        <div class="row">
+          <div class="rinfo"><div class="rlabel">HTTPS origin</div><div class="rdesc">Enter the exact HTTPS Tailscale Serve origin, including its hostname.</div></div>
+          <input bind:value={phoneOrigin} placeholder="https://mini.example.ts.net/" autocomplete="off" disabled={!isDesktopShell()} />
+        </div>
+        <div class="row">
+          <div class="rinfo"><div class="rlabel">Status</div><div class="rdesc" role="status">{phoneStatus} Port: 8787.</div></div>
+          {#if isDesktopShell()}
+            <div class="actions">
+              <Button onclick={() => void phoneCommand("save_phone_origin", { origin: phoneOrigin })} disabled={!phoneOrigin.trim()}>Save</Button>
+              <Button onclick={() => void phoneCommand("verify_phone_endpoint")}>Verify</Button>
+              <Button onclick={() => void phoneCommand("generate_phone_bootstrap_link")}>Generate link</Button>
+              <Button variant="danger" onclick={() => void phoneCommand("revoke_phone_access")}>Revoke/regenerate</Button>
             </div>
           {/if}
         </div>

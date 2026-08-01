@@ -10,7 +10,7 @@ use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{any, get, post};
 use axum::{Json, Router};
 use parking_lot::Mutex as ParkingMutex;
 use serde::Deserialize;
@@ -26,12 +26,14 @@ pub struct AppState {
     pub hub: Arc<ParkingMutex<SessionHub>>,
     pub push: Arc<AsyncMutex<PushService>>,
     pub is_debug_driver: bool,
+    pub bootstrap: crate::bootstrap::BootstrapState,
 }
 
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/ws", get(ws_handler))
         .route("/health", get(health))
+        .route("/bootstrap", any(bootstrap_method))
         .route("/push/vapid", get(push_vapid))
         .route("/push/subscribe", post(push_subscribe))
         .route("/push/unsubscribe", post(push_unsubscribe))
@@ -41,6 +43,104 @@ pub fn build_router(state: AppState) -> Router {
         .route("/debug/reset", get(debug_reset).post(debug_reset))
         .fallback(static_fallback)
         .with_state(state)
+}
+
+// ── /bootstrap ──────────────────────────────────────────────────────────
+
+fn bootstrap_unauthorized() -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        Json(json!({ "error": "unauthorized" })),
+    )
+        .into_response()
+}
+
+fn bootstrap_headers() -> axum::http::HeaderMap {
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store, no-cache, must-revalidate"),
+    );
+    headers.insert(
+        axum::http::header::REFERRER_POLICY,
+        axum::http::HeaderValue::from_static("no-referrer"),
+    );
+    headers
+}
+
+async fn bootstrap_method(
+    method: axum::http::Method,
+    State(state): State<AppState>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+    headers: HeaderMap,
+    body: String,
+) -> Response {
+    match method {
+        axum::http::Method::GET => {
+            let Some(credential) = query.get("credential") else {
+                return bootstrap_unauthorized();
+            };
+            if !state.bootstrap.valid(credential).await {
+                return bootstrap_unauthorized();
+            }
+            let page = r#"<!doctype html><meta name="referrer" content="no-referrer"><title>Pantoken setup</title><p>Connecting…</p><script>(()=>{const u=new URL(location.href),c=u.searchParams.get("credential");history.replaceState(null,"",u.pathname+u.hash);fetch("/bootstrap",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({credential:c})}).then(r=>r.ok?r.json():Promise.reject()).then(({token})=>{if(token)location.replace("/")}).catch(()=>{document.body.textContent="This setup link is invalid or expired."})})()</script>"#;
+            let mut response = (StatusCode::OK, page).into_response();
+            *response.headers_mut() = bootstrap_headers();
+            response.headers_mut().insert(
+                axum::http::header::CONTENT_TYPE,
+                axum::http::HeaderValue::from_static("text/html; charset=utf-8"),
+            );
+            response
+        }
+        axum::http::Method::POST => {
+            bootstrap_post_inner(State(state), headers, Query(query), body).await
+        }
+        _ => {
+            let mut response = (
+                StatusCode::METHOD_NOT_ALLOWED,
+                Json(json!({ "error": "method_not_allowed" })),
+            )
+                .into_response();
+            response.headers_mut().insert(
+                axum::http::header::ALLOW,
+                axum::http::HeaderValue::from_static("GET, POST"),
+            );
+            response
+        }
+    }
+}
+
+async fn bootstrap_post_inner(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+    body: String,
+) -> Response {
+    if !query.is_empty()
+        || headers
+            .get(axum::http::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            != Some("application/json")
+    {
+        return bootstrap_unauthorized();
+    }
+    let Ok(request) = serde_json::from_str::<crate::bootstrap::ExchangeRequest>(&body) else {
+        return bootstrap_unauthorized();
+    };
+    let Some(credential) = request.credential.filter(|value| !value.is_empty()) else {
+        return bootstrap_unauthorized();
+    };
+    if !state.bootstrap.consume(&credential).await {
+        return bootstrap_unauthorized();
+    }
+    let Some(token) = state.config.token.as_ref() else {
+        return bootstrap_unauthorized();
+    };
+    let mut response = (StatusCode::OK, Json(json!({ "token": token }))).into_response();
+    let headers = bootstrap_headers();
+    response.headers_mut().extend(headers);
+    response
 }
 
 // ── /health ─────────────────────────────────────────────────────────────

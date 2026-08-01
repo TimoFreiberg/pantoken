@@ -250,6 +250,7 @@ async fn main() {
         hub: state.hub.clone(),
         push: state.push.clone(),
         is_debug_driver: state.is_debug_driver,
+        bootstrap: pantoken_server::bootstrap::BootstrapState::new(),
     });
 
     // Wire the driver's event stream to the hub's on_event. The hub subscribes

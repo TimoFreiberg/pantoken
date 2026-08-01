@@ -410,12 +410,28 @@ fn validate_origin(origin: &str) -> Result<(), String> {
         url::Url::parse(origin).map_err(|_| "origin must be a valid HTTPS URL".to_owned())?;
     if parsed.scheme() != "https"
         || parsed.host_str().is_none()
+        || parsed.username() != ""
+        || parsed.password().is_some()
         || parsed.query().is_some()
         || parsed.fragment().is_some()
+        || parsed.path() != "" && parsed.path() != "/"
     {
-        return Err("origin must be a valid HTTPS URL without query or fragment".into());
+        return Err(
+            "origin must be an HTTPS host URL without credentials, path, query, or fragment".into(),
+        );
     }
     Ok(())
+}
+
+pub fn canonical_origin(origin: &str) -> Result<String, String> {
+    validate_origin(origin)?;
+    let mut parsed = url::Url::parse(origin).map_err(|_| "origin must be a valid HTTPS URL")?;
+    let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
+    parsed
+        .set_host(Some(&host))
+        .map_err(|_| "origin host is invalid")?;
+    parsed.set_path("/");
+    Ok(parsed.to_string())
 }
 
 struct HubResolution {

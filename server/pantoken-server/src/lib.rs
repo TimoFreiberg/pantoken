@@ -12,6 +12,7 @@
 
 pub mod archive_store;
 pub mod background_model;
+pub mod bootstrap;
 pub mod config;
 pub mod connection;
 pub mod driver;

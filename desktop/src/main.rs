@@ -14,6 +14,7 @@ mod docker_target;
 mod mouse_nav;
 mod proc;
 mod provisioning;
+mod remote_access;
 mod remote_commands;
 mod remote_connection;
 mod remote_executor;
