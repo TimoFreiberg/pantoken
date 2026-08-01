@@ -241,4 +241,49 @@ describe("remote access contract documentation (AC.1–AC.4)", () => {
       "Issue 06 handoff",
     );
   });
+
+  test("remote_contract_docs_cover_issue_147", () => {
+    const desktop = read("desktop/README.md");
+    const contract = read("docs/issues/mobile-access/01-remote-contract.md");
+    requireTerms(
+      desktop,
+      [
+        "local/remote mode",
+        "persisted `hub_port` (8787",
+        "never randomizes",
+        "127.0.0.1",
+        "remote-access.json` (schema 1)",
+        "dev.pantoken.app.remote-access",
+        "bearer-token",
+        "omits `PANTOKEN_TOKEN`",
+        "authenticated internal `/health` and `/update/state` calls",
+        "HTTP `401` with body",
+        "`unauthorized`",
+        "HTTP `405` precedence",
+        "`?token=` with `401`",
+        "first Hello message",
+        "issue #148/03",
+        "no loopback/static auth exemption",
+      ],
+      "desktop issue-147 contract",
+    );
+    requireTerms(
+      contract,
+      [
+        "stable hub port, default `8787`",
+        "random loopback-port behavior for local-only mode",
+        "Remote mode is deterministic",
+        "127.0.0.1",
+        "macOS Keychain",
+        "fails closed",
+        "Authorization: Bearer",
+        "query-token authentication on ordinary static, API, and WebSocket routes",
+        "PWA service-worker updates",
+        "signed `.app` updates",
+      ],
+      "remote contract issue-147 boundary",
+    );
+    expect(desktop).not.toContain("Everything else in the environment passes through");
+    expect(desktop).not.toContain("Picks a free loopback port.\n");
+  });
 });

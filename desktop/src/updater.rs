@@ -245,28 +245,36 @@ fn run_cycle_locked(app: &AppHandle, port: u16, endpoint: &str) -> Duration {
             // Up to date. Tell the hub so a stale card clears (e.g. an update we
             // reported was published-then-yanked). Any pending force click is
             // meaningless with nothing to install — reading it here consumes it.
-            report_update_state(port, None, false);
+            let _ = report_update_state(port, state.config.token.as_deref(), None, false);
             return check_interval();
         }
         Ok(Some(u)) => u,
     };
     let version = update.version.clone();
+    let state = app.state::<AppState>();
 
-    // Restart unattended only when
-    // there's no open UI (not even a half-typed prompt) and no turn in flight.
-    // /health unreachable → unattended-and-idle (nothing to interrupt), same as TS.
-    let (clients, busy) = hub_activity(port);
-    let unattended = clients == 0 && !busy;
+    // Restart unattended only when the authenticated hub confirms no UI and no turn.
+    // Unavailable/unauthorized activity is deliberately fail-closed.
+    let activity = hub_activity(port, state.config.token.as_deref());
+    let unattended = matches!(
+        activity,
+        Activity::Known {
+            clients: 0,
+            busy: false
+        }
+    );
 
     if !unattended {
         // Defer: raise/refresh the sidebar card and learn whether the user clicked.
-        let (applying, force) = report_update_state(port, Some(&version), false);
-        if !(applying || force) {
+        // Reporting with no token is retained for local mode; remote callers pass it
+        // through the same seam once config exposes the resolved Keychain token.
+        let report =
+            report_update_state(port, state.config.token.as_deref(), Some(&version), false);
+        if !report.allows_install() {
             return PENDING_POLL;
         }
     }
 
-    let state = app.state::<AppState>();
     if state.updater_stop.load(Ordering::SeqCst) {
         return PENDING_POLL;
     }
@@ -290,7 +298,7 @@ fn run_cycle_locked(app: &AppHandle, port: u16, endpoint: &str) -> Duration {
             eprintln!("pantoken: shell update install failed: {e}");
             state.overlay.hide(app);
             // applyFailed un-sticks the card's "Updating…" state so it offers retry.
-            report_update_state(port, Some(&version), true);
+            let _ = report_update_state(port, state.config.token.as_deref(), Some(&version), true);
             check_interval()
         }
     }
@@ -312,69 +320,180 @@ fn check_endpoint(
     tauri::async_runtime::block_on(updater.check()).map_err(|e| e.to_string())
 }
 
-/// POST /update/state — the hub relays it to clients as the sidebar update card.
-/// `version` Some → card up (sha field carries the version string); None → card
-/// cleared. Returns (applying, force): did the user click the card / force-update?
-/// Any transport error → (false, false): a flaky report must never trigger an install.
-fn report_update_state(port: u16, version: Option<&str>, apply_failed: bool) -> (bool, bool) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Activity {
+    Known { clients: u64, busy: bool },
+    Unavailable,
+    Unauthorized,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReportState {
+    Approved { applying: bool, force: bool },
+    Unavailable,
+    Unauthorized,
+    Malformed,
+}
+
+impl ReportState {
+    fn allows_install(self) -> bool {
+        matches!(
+            self,
+            Self::Approved { applying: true, .. } | Self::Approved { force: true, .. }
+        )
+    }
+}
+
+/// POST /update/state. Transport and auth failures are explicit and never approve install.
+fn report_update_state(
+    port: u16,
+    token: Option<&str>,
+    version: Option<&str>,
+    apply_failed: bool,
+) -> ReportState {
     let body = serde_json::json!({
         "available": version.is_some(),
         "sha": version,
         "applyFailed": apply_failed,
     })
     .to_string();
-    let Some(resp) = http_loopback(port, "POST", "/update/state", Some(&body)) else {
-        return (false, false);
+    let response = match http_loopback(port, token, "POST", "/update/state", Some(&body)) {
+        HttpResponse::Ok(body) => body,
+        HttpResponse::Unauthorized => return ReportState::Unauthorized,
+        HttpResponse::Unavailable => return ReportState::Unavailable,
     };
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(&resp) else {
-        return (false, false);
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&response) else {
+        return ReportState::Malformed;
     };
-    (
-        v.get("applying").and_then(|b| b.as_bool()).unwrap_or(false),
-        v.get("force").and_then(|b| b.as_bool()).unwrap_or(false),
-    )
+    ReportState::Approved {
+        applying: v.get("applying").and_then(|b| b.as_bool()).unwrap_or(false),
+        force: v.get("force").and_then(|b| b.as_bool()).unwrap_or(false),
+    }
 }
 
-/// GET /health → (clients, busy). Unreachable/garbled → (0, false): if the hub isn't
-/// answering there's no UI to interrupt and no turn to protect (the supervisor is
-/// already respawning it).
-fn hub_activity(port: u16) -> (u64, bool) {
-    let Some(body) = http_loopback(port, "GET", "/health", None) else {
-        return (0, false);
+/// GET /health. Unknown/auth-failed activity is never interpreted as idle.
+fn hub_activity(port: u16, token: Option<&str>) -> Activity {
+    let response = match http_loopback(port, token, "GET", "/health", None) {
+        HttpResponse::Ok(body) => body,
+        HttpResponse::Unauthorized => return Activity::Unauthorized,
+        HttpResponse::Unavailable => return Activity::Unavailable,
     };
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) else {
-        return (0, false);
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&response) else {
+        return Activity::Unavailable;
     };
-    (
-        v.get("clients").and_then(|c| c.as_u64()).unwrap_or(0),
-        v.get("busy").and_then(|b| b.as_bool()).unwrap_or(false),
-    )
+    match (
+        v.get("clients").and_then(|c| c.as_u64()),
+        v.get("busy").and_then(|b| b.as_bool()),
+    ) {
+        (Some(clients), Some(busy)) => Activity::Known { clients, busy },
+        _ => Activity::Unavailable,
+    }
 }
 
-/// Minimal loopback HTTP/1.1 over a raw TcpStream — same std-only posture as the
-/// supervisor's health probe (no async runtime, no TLS: the hub is plain http on
-/// 127.0.0.1). Connection: close + read-to-EOF keeps the parsing trivial. Returns the
-/// body on a 200, None on anything else.
-fn http_loopback(port: u16, method: &str, path: &str, json_body: Option<&str>) -> Option<String> {
+enum HttpResponse {
+    Ok(String),
+    Unauthorized,
+    Unavailable,
+}
+
+/// Minimal loopback HTTP/1.1 over a raw TcpStream. The optional token is sent only
+/// as an Authorization header; it is never put in a URL or diagnostic.
+fn http_loopback(
+    port: u16,
+    token: Option<&str>,
+    method: &str,
+    path: &str,
+    json_body: Option<&str>,
+) -> HttpResponse {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    let mut s = TcpStream::connect_timeout(&addr, Duration::from_secs(3)).ok()?;
-    s.set_read_timeout(Some(Duration::from_secs(3))).ok()?;
-    s.set_write_timeout(Some(Duration::from_secs(3))).ok()?;
+    let Ok(mut s) = TcpStream::connect_timeout(&addr, Duration::from_secs(3)) else {
+        return HttpResponse::Unavailable;
+    };
+    if s.set_read_timeout(Some(Duration::from_secs(3))).is_err()
+        || s.set_write_timeout(Some(Duration::from_secs(3))).is_err()
+    {
+        return HttpResponse::Unavailable;
+    }
     let body = json_body.unwrap_or("");
     let content_type = if json_body.is_some() {
         "Content-Type: application/json\r\n"
     } else {
         ""
     };
+    let authorization = token
+        .filter(|token| !token.is_empty())
+        .map(|token| format!("Authorization: Bearer {token}\r\n"))
+        .unwrap_or_default();
     let req = format!(
-        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\
-         {content_type}Content-Length: {}\r\n\r\n{body}",
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n{authorization}{content_type}Content-Length: {}\r\n\r\n{body}",
         body.len(),
     );
-    s.write_all(req.as_bytes()).ok()?;
+    if s.write_all(req.as_bytes()).is_err() {
+        return HttpResponse::Unavailable;
+    }
     let mut buf = Vec::new();
-    s.read_to_end(&mut buf).ok()?;
+    if s.read_to_end(&mut buf).is_err() {
+        return HttpResponse::Unavailable;
+    }
     let text = String::from_utf8_lossy(&buf);
-    let (head, rest) = text.split_once("\r\n\r\n")?;
-    head.starts_with("HTTP/1.1 200").then(|| rest.to_string())
+    let Some((head, rest)) = text.split_once("\r\n\r\n") else {
+        return HttpResponse::Unavailable;
+    };
+    if head.starts_with("HTTP/1.1 401") {
+        HttpResponse::Unauthorized
+    } else if head.starts_with("HTTP/1.1 200") {
+        HttpResponse::Ok(rest.to_string())
+    } else {
+        HttpResponse::Unavailable
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Activity, ReportState};
+
+    #[test]
+    fn updater_report_auth_contract() {
+        assert!(!ReportState::Unavailable.allows_install());
+        assert!(!ReportState::Unauthorized.allows_install());
+        assert!(!ReportState::Malformed.allows_install());
+        assert!(ReportState::Approved {
+            applying: true,
+            force: false
+        }
+        .allows_install());
+        assert!(ReportState::Approved {
+            applying: false,
+            force: true
+        }
+        .allows_install());
+    }
+
+    #[test]
+    fn updater_does_not_apply_while_busy() {
+        assert!(!matches!(
+            Activity::Known {
+                clients: 1,
+                busy: true
+            },
+            Activity::Known {
+                clients: 0,
+                busy: false
+            }
+        ));
+        assert!(!matches!(
+            Activity::Unavailable,
+            Activity::Known {
+                clients: 0,
+                busy: false
+            }
+        ));
+        assert!(!matches!(
+            Activity::Unauthorized,
+            Activity::Known {
+                clients: 0,
+                busy: false
+            }
+        ));
+    }
 }

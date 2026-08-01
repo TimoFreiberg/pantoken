@@ -42,7 +42,7 @@ CURL_BIN="${CURL_BIN:-curl}"
 DF_BIN="${DF_BIN:-df}"
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-HOME_DIR="${HOME}"
+HOME_DIR="${HOME:-$PWD}"
 CACHE_DIR="/usr/local/var/bazel-remote"
 MAX_SIZE="50"
 GRPC_PORT="9092"

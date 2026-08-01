@@ -84,6 +84,10 @@ async fn main() {
     }
 
     let cfg = config::load();
+    if cfg.token.is_some() && cfg.host != "127.0.0.1" {
+        eprintln!("pantoken: remote authenticated mode requires PANTOKEN_HOST=127.0.0.1");
+        std::process::exit(78);
+    }
 
     // One-time migration: move a legacy `~/.local/state/pantoken` to the new
     // `~/.local/share/pantoken` if the old dir exists and the new doesn't.
@@ -240,7 +244,13 @@ async fn main() {
         is_debug_driver,
     };
 
-    let app = build_router(state.clone());
+    let app = pantoken_server::http::build_router(pantoken_server::http::AppState {
+        config: state.config.clone(),
+        static_server: state.static_server.clone(),
+        hub: state.hub.clone(),
+        push: state.push.clone(),
+        is_debug_driver: state.is_debug_driver,
+    });
 
     // Wire the driver's event stream to the hub's on_event. The hub subscribes
     // to the driver; each emitted SessionDriverEvent is folded + broadcast to WS clients.
@@ -276,14 +286,17 @@ async fn main() {
     // frames (deltas, status) and Nagle would batch them behind unacked data —
     // imperceptible on localhost, but adds up to an RTT of lag per burst for a
     // phone/remote client. Nothing this server sends benefits from batching.
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .unwrap_or_else(|e| panic!("failed to bind {addr}: {e}"))
-        .tap_io(|tcp_stream| {
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(listener) => listener.tap_io(|tcp_stream| {
             if let Err(err) = tcp_stream.set_nodelay(true) {
                 warn!("failed to set TCP_NODELAY on incoming connection: {err}");
             }
-        });
+        }),
+        Err(error) => {
+            eprintln!("pantoken: failed to bind configured loopback address {addr}: {error}");
+            std::process::exit(78);
+        }
+    };
 
     // Live-refresh ticker: polls running sessions' usage every PANTOKEN_LIVE_REFRESH_MS,
     // mirroring the TS hub's syncLiveRefresh interval. Also rebroadcasts the
@@ -308,6 +321,7 @@ async fn main() {
         .expect("server error");
 }
 
+#[allow(dead_code)]
 fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/ws", get(ws_handler))
@@ -325,6 +339,7 @@ fn build_router(state: AppState) -> Router {
 
 // ── /health ─────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
     let hub = state.hub.lock();
     let activity = hub.activity();
@@ -339,10 +354,12 @@ async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
 
 // ── /ws ─────────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     ws.on_upgrade(move |socket| handle_ws_connection(socket, state))
 }
 
+#[allow(dead_code)]
 async fn handle_ws_connection(ws: WebSocket, state: AppState) {
     use pantoken_server::connection::{ConnectionSession, SessionEnv, ws::WsAdapter};
 
@@ -356,6 +373,7 @@ async fn handle_ws_connection(ws: WebSocket, state: AppState) {
 
 // ── /push/* ─────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 fn check_token(state: &AppState, headers: &HeaderMap, query: &PushQuery) -> bool {
     let auth_header = headers
         .get(header::AUTHORIZATION)
@@ -365,6 +383,7 @@ fn check_token(state: &AppState, headers: &HeaderMap, query: &PushQuery) -> bool
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct PushQuery {
     token: Option<String>,
     bootstrap: Option<String>,
@@ -372,10 +391,12 @@ struct PushQuery {
 
 /// Body of POST /push/unsubscribe — just the endpoint to drop.
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct UnsubscribeBody {
     endpoint: Option<String>,
 }
 
+#[allow(dead_code)]
 async fn push_vapid(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -388,6 +409,7 @@ async fn push_vapid(
     Json(json!({ "publicKey": push.public_key() })).into_response()
 }
 
+#[allow(dead_code)]
 async fn push_subscribe(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -408,6 +430,7 @@ async fn push_subscribe(
     Json(json!({ "ok": true })).into_response()
 }
 
+#[allow(dead_code)]
 async fn push_unsubscribe(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -429,6 +452,7 @@ async fn push_unsubscribe(
     Json(json!({ "ok": true })).into_response()
 }
 
+#[allow(dead_code)]
 async fn push_test(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -464,6 +488,7 @@ async fn push_test(
 /// Mirrors the TS handler (server/src/index.ts:303): `available` gates whether
 /// `sha` is honored; `applyFailed` resets a stuck "applying" card.
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct UpdateStateBody {
     available: Option<bool>,
     sha: Option<String>,
@@ -471,6 +496,7 @@ struct UpdateStateBody {
     apply_failed: Option<bool>,
 }
 
+#[allow(dead_code)]
 async fn update_state(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -493,6 +519,7 @@ async fn update_state(
 
 // ── /debug/* ────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 async fn debug_state(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -508,6 +535,7 @@ async fn debug_state(
     Json(hub.snapshot()).into_response()
 }
 
+#[allow(dead_code)]
 async fn debug_reset(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -530,6 +558,7 @@ async fn debug_reset(
 
 // ── static fallback ─────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 async fn static_fallback(
     State(state): State<AppState>,
     uri: axum::http::Uri,

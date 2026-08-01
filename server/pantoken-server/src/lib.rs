@@ -15,6 +15,7 @@ pub mod background_model;
 pub mod config;
 pub mod connection;
 pub mod driver;
+pub mod http;
 pub mod hub;
 pub mod journal;
 pub mod mock_driver;

@@ -25,7 +25,7 @@ mod updater;
 
 use tauri::{AppHandle, Manager, RunEvent};
 
-use crate::config::{free_port, PantokenConfig};
+use crate::config::PantokenConfig;
 use std::sync::OnceLock;
 
 use crate::state::AppState;
@@ -70,15 +70,14 @@ fn main() {
             dock_attention::set_dock_badge,
         ])
         .setup(|app| {
-            let port = free_port()?;
             let resource_dir = app.path().resource_dir()?;
             let handle = app.handle().clone();
-            let (config, fatal) = match PantokenConfig::resolve(port, &resource_dir) {
+            let (config, fatal) = match PantokenConfig::resolve_launch(&resource_dir) {
                 Ok(c) => (c, None),
                 // A resolve failure still wants the window + tray up so the fatal
                 // dialog has an app to hang off — park a harmless fallback config
                 // (nothing gets started; the dialog exits on dismiss).
-                Err(message) => (PantokenConfig::fallback(port), Some(message)),
+                Err(message) => (PantokenConfig::fallback(8787), Some(message)),
             };
             app.manage(AppState::new(config));
 
@@ -157,6 +156,16 @@ fn on_supervisor_event(app: &AppHandle, event: SupervisorEvent) {
                         t0.elapsed().as_millis()
                     );
                 }
+            }
+            if state.config.mode == crate::config::LaunchMode::Remote {
+                // The current Tauri shell has no request-header interception seam;
+                // never navigate the webview to authenticated static content.
+                state.overlay.hide(app);
+                shell::present_fatal(
+                    app,
+                    "Remote backend is healthy, but authenticated desktop document delivery is deferred to issue #148/03.",
+                );
+                return;
             }
             state.overlay.navigated();
             shell::navigate_main(app, &state.config.app_url());

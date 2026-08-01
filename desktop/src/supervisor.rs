@@ -92,6 +92,9 @@ fn run_loop(
         // updates).
         let mut cmd = Command::new(&config.hub_bin);
         cmd.current_dir(&config.data_dir);
+        // Prevent an inherited desktop-process token from turning local mode into
+        // authenticated mode. `server_env` adds it back only for remote mode.
+        cmd.env_remove("PANTOKEN_TOKEN");
         cmd.envs(config.server_env()).stdin(Stdio::null());
         let log_file = match open_log_file(config) {
             Ok(f) => f,
@@ -199,7 +202,7 @@ fn supervise_one(
         }
 
         if Instant::now() >= next_probe {
-            if health_ok(port) {
+            if health_ok_with_token(port, config.token.as_deref()) {
                 liveness_failures = 0;
                 if !healthy {
                     healthy = true;
@@ -235,15 +238,19 @@ fn supervise_one(
 }
 
 /// GET /health over a raw loopback socket — std-only, tight timeouts, no async runtime.
-fn health_ok(port: u16) -> bool {
+/// `token` is intentionally optional: local mode keeps the historical no-auth probe;
+/// remote mode passes the resolved Keychain token here from the parent config work.
+fn health_ok_with_token(port: u16, token: Option<&str>) -> bool {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let Ok(mut s) = TcpStream::connect_timeout(&addr, Duration::from_secs(2)) else {
         return false;
     };
     let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
     let _ = s.set_write_timeout(Some(Duration::from_secs(2)));
-    let req =
-        format!("GET /health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    let authorization = authorization_header(token);
+    let req = format!(
+        "GET /health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n{authorization}\r\n"
+    );
     if s.write_all(req.as_bytes()).is_err() {
         return false;
     }
@@ -252,6 +259,28 @@ fn health_ok(port: u16) -> bool {
     match s.read(&mut buf) {
         Ok(n) if n > 0 => String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/1.1 200"),
         _ => false,
+    }
+}
+
+fn authorization_header(token: Option<&str>) -> String {
+    token
+        .filter(|token| !token.is_empty())
+        .map(|token| format!("Authorization: Bearer {token}\r\n"))
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::authorization_header;
+
+    #[test]
+    fn supervisor_health_auth_contract() {
+        assert_eq!(authorization_header(None), "");
+        assert_eq!(
+            authorization_header(Some("test-token")),
+            "Authorization: Bearer test-token\\r\\n"
+        );
+        assert_eq!(authorization_header(Some("")), "");
     }
 }
 

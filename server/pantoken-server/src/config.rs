@@ -191,15 +191,35 @@ pub fn token_ok(provided: Option<&str>, config: &Config) -> bool {
     config.token.is_none() || provided == config.token.as_deref()
 }
 
-/// Extract the app token from a request. Prefers `Authorization: Bearer <token>`,
-/// falls back to a `?token=` query param.
-pub fn token_from_request(auth_header: Option<&str>, query_token: Option<&str>) -> Option<String> {
-    if let Some(auth) = auth_header {
-        if let Some(rest) = auth.strip_prefix("Bearer ") {
-            return Some(rest.trim().to_string());
-        }
+/// Parse the one supported HTTP credential format.
+///
+/// The parser is deliberately strict: exactly one valid UTF-8 Authorization
+/// value, with the case-sensitive `Bearer` scheme, exactly one ASCII space,
+/// and a non-empty credential containing no ASCII whitespace. Query strings
+/// are never considered credentials for ordinary routes.
+pub fn bearer_from_headers(headers: &axum::http::HeaderMap) -> Option<&str> {
+    let mut values = headers.get_all(axum::http::header::AUTHORIZATION).iter();
+    let value = values.next()?;
+    if values.next().is_some() {
+        return None;
     }
-    query_token.map(|s| s.to_string())
+    let text = value.to_str().ok()?;
+    let token = text.strip_prefix("Bearer ")?;
+    if token.is_empty() || token.bytes().any(|b| b.is_ascii_whitespace()) {
+        return None;
+    }
+    Some(token)
+}
+
+/// Compatibility helper retained for non-HTTP callers. Query tokens are not
+/// accepted by production HTTP routes.
+pub fn token_from_request(auth_header: Option<&str>, _query_token: Option<&str>) -> Option<String> {
+    let auth = auth_header?;
+    let token = auth.strip_prefix("Bearer ")?;
+    if token.is_empty() || token.bytes().any(|b| b.is_ascii_whitespace()) {
+        return None;
+    }
+    Some(token.to_owned())
 }
 
 #[cfg(test)]
@@ -245,9 +265,9 @@ mod tests {
     }
 
     #[test]
-    fn token_from_request_falls_back_to_query() {
+    fn token_from_request_rejects_query_tokens() {
         let token = token_from_request(None, Some("query456"));
-        assert_eq!(token, Some("query456".into()));
+        assert_eq!(token, None);
     }
 
     #[test]
@@ -271,9 +291,29 @@ mod tests {
     }
 
     #[test]
-    fn trims_whitespace_around_bearer_token() {
-        let token = token_from_request(Some("Bearer   spaced   "), None);
-        assert_eq!(token, Some("spaced".into()));
+    fn bearer_parser_rejects_whitespace_and_accepts_exact_format() {
+        use axum::http::{HeaderMap, HeaderValue, header};
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer exact"),
+        );
+        assert_eq!(bearer_from_headers(&headers), Some("exact"));
+        for value in [
+            "Bearer",
+            "Bearer ",
+            "Bearer  exact",
+            "Bearer exact ",
+            "bearer exact",
+        ] {
+            headers.insert(header::AUTHORIZATION, HeaderValue::from_static(value));
+            assert_eq!(bearer_from_headers(&headers), None, "{value}");
+        }
+        headers.append(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer second"),
+        );
+        assert_eq!(bearer_from_headers(&headers), None);
     }
 
     fn test_config() -> Config {

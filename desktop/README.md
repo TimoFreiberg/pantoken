@@ -26,16 +26,36 @@ dialog, never a silent fallback. What's new over Swift:
 
 ## How it works
 
-On launch:
+On launch, the shell resolves its explicit local/remote mode before starting the sidecar:
 
-1. Picks a free loopback port.
-2. Resolves config: data dir, hub binary path, client-dist path
-   (`src/config.rs`).
+1. Local mode picks a free loopback port; remote mode uses the persisted `hub_port` (8787 by
+   default) and never randomizes on invalid or occupied configuration.
+2. Resolves config: data dir, hub binary path, client-dist path, and (remote mode only) the
+   Keychain bearer token (`src/config.rs`). Remote mode always forces `127.0.0.1`.
 3. Shows the bundled "Starting Pantoken…" page, spawns the `pantoken-server` sidecar
-   with `PANTOKEN_CLIENT_DIST` pointing at the bundled client, and gates on
-   `GET /health`.
-4. Navigates the webview to `http://127.0.0.1:<port>/`, then starts the shell's
-   periodic update loop.
+   with `PANTOKEN_CLIENT_DIST` pointing at the bundled client, and gates on authenticated
+   `GET /health` when remote mode is enabled.
+4. Local mode navigates the webview to `http://127.0.0.1:<port>/`; authenticated desktop
+   static/document delivery is deferred to issue #148/03 because this Tauri shell has no
+   request-header interception seam. The shell then starts its periodic update loop.
+
+Remote mode is an opt-in, loopback-only backend-preparation path for the phone contract. It
+persists `~/Library/Application Support/Pantoken/remote-access.json` (schema 1) and keeps the
+secret only in macOS Keychain, service `dev.pantoken.app.remote-access`, account
+`bearer-token`. Local mode retains random loopback ports and omits `PANTOKEN_TOKEN`; remote
+mode supplies a non-empty Keychain token and authenticated internal `/health` and `/update/state` calls
+(authenticated internal health/update calls). Token values are never logged, persisted in ordinary URLs, or included
+in diagnostics. A missing/unavailable Keychain item, malformed settings, invalid origin, or
+port collision fails closed with an actionable error.
+
+The server's remote contract requires `Authorization: Bearer <token>` on `/health`,
+`/push/*`, `/update/state`, `/debug/*`, and ordinary static/document requests. Missing,
+malformed, duplicate, wrong, or query-token credentials return HTTP `401` with body
+`unauthorized`; unsupported methods retain HTTP `405` precedence. The `/ws` upgrade rejects
+`?token=` with `401`, then authenticates the first Hello message before registration. Local
+mode keeps existing no-token development compatibility. The one-time `/bootstrap` exchange,
+authenticated desktop document delivery, and Settings/tray bootstrap UX are explicitly owned
+by issue #148/03; no loopback/static auth exemption is used here.
 
 The supervisor loop respawns the server on exit (a crash) and re-navigates the webview so
 fresh client assets show. Rapid exits (<5s uptime) count toward a 6-strike crash-loop
@@ -97,8 +117,9 @@ pantoken-spawned agent shell can't be hijacked by inherited config):
 - `PANTOKEN_HUB_MODE` — `bundled`, forcing the bundled path on a non-.app binary
 - `PANTOKEN_APP_DATA_DIR` — the data dir (default `~/Library/Application Support/Pantoken`)
 
-Everything else in the environment passes through to the spawned server, so
-`PANTOKEN_DRIVER=mock PANTOKEN_UPDATE_DRY_RUN=1` gives a fully hermetic instance:
+The documented development overrides are passed to the spawned server, so
+`PANTOKEN_DRIVER=mock PANTOKEN_UPDATE_DRY_RUN=1` gives a fully hermetic instance; auth
+and unrelated configuration variables are explicitly filtered:
 
 ```bash
 PANTOKEN_APP_DATA_DIR=$(mktemp -d) \
