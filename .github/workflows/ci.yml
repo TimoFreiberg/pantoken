@@ -160,7 +160,7 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm run test:e2e -- --shard=${{ matrix.shard }}/4
+      - run: pnpm run test:e2e --shard=${{ matrix.shard }}/4
       - name: Upload traces on e2e failure
         if: failure()
         uses: actions/upload-artifact@v4
