@@ -31,6 +31,8 @@
     planRestore,
   } from "../lib/scroll-position.js";
   import { nextPinned } from "../lib/scroll-follow.js";
+  import PromptMap from "./PromptMap.svelte";
+  import type { PromptMapEntry } from "../lib/prompt-map.js";
 
   const items = $derived(store.transcriptItems);
 
@@ -85,6 +87,23 @@
   // lifecycle says it settled, then expose the collapse affordance.
   const groupTurnsMemo = createTurnGrouper();
   const turns = $derived(groupTurnsMemo(displayItems, store.turnActive));
+  const promptMapEntries = $derived.by<PromptMapEntry[]>(() =>
+    turns.flatMap((turn) => {
+      if (!turn.user || turn.user.kind !== "user") return [];
+      const assistantItems = [...turn.response, ...turn.postResponse].filter(
+        (item) => item.kind === "assistant" && item.text.trim(),
+      );
+      const response = assistantItems.map((item) => item.text).join("\n\n");
+      const done = turnDone(turn);
+      const inProgress = !done;
+      return [{
+        id: turn.user.id,
+        prompt: turn.user.text,
+        response,
+        responseState: response ? (done ? "final" : "in-progress") : inProgress ? "in-progress" : "none",
+      }];
+    }),
+  );
   const lastTurnId = $derived(turns[turns.length - 1]?.id);
   function turnDone(turn: TurnGroup): boolean {
     return turn.id !== lastTurnId || !store.turnActive;
@@ -696,50 +715,46 @@
     return null; // nothing below the fold → live bottom
   }
 
-  /** Scroll the target prompt to the top of the viewport, anchoring every press to
-   *  the current viewport rather than a persistent cursor. ↑ (dir -1) finds the
-   *  most recent prompt above the viewport; ↓ (dir +1) finds the first prompt below
-   *  the viewport and returns to the live bottom when there is none. */
-  function stepPrompt(dir: -1 | 1): void {
-    if (!scroller) return;
-    const prompts = scroller.querySelectorAll<HTMLElement>(".row.user");
-    const last = prompts.length - 1;
-    if (last < 0) return;
-
-    let target: HTMLElement | null;
-    if (dir === -1) {
-      const idx = firstUpAnchor(prompts);
-      target = prompts[idx] ?? null;
-    } else {
-      const idx = firstDownAnchor(prompts);
-      if (idx === null) {
-        navStepping = false;
-        scrollToBottom();
-        return;
-      }
-      target = prompts[idx] ?? null;
-    }
+  /** Jump to a prompt by the stable user-item index shared with PromptMap. */
+  function jumpToPrompt(index: number): void {
+    if (!scroller || index < 0) return;
+    const entry = promptMapEntries[index];
+    if (!entry) return;
+    const target = scroller.querySelector<HTMLElement>(
+      `.row.user[data-prompt-id="${CSS.escape(entry.id)}"]`,
+    );
     if (!target) return;
-
-    // INSTANT jump (no smooth animation) so the prompt is visible + settled within a
-    // frame — well under the ≤300ms target. scrollIntoView({block:"start"}) clamps at
-    // the max scroll offset (a prompt near the tail can't reach the top), so we
-    // replicate that with Math.min. A brief flash on the row confirms the landing
-    // (see flashPromptRow) so the instant jump isn't disorienting.
     const scTop = scroller.getBoundingClientRect().top;
-    const max = scroller.scrollHeight - scroller.clientHeight;
+    const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
     const top = Math.min(
-      target.getBoundingClientRect().top - scTop + scroller.scrollTop,
+      Math.max(0, target.getBoundingClientRect().top - scTop + scroller.scrollTop),
       max,
     );
     markProgScroll();
-    // The ↑ button scrolls away from the live tail — explicitly un-pin so the
-    // streaming-pin effect doesn't yank back to the bottom. markProgScroll sets
-    // progScrollUntil which makes onScroll's early-return guard hold this state.
     pinned = false;
     navStepping = true;
     scroller.scrollTo({ top });
     flashPromptRow(target);
+  }
+
+  /** Scroll the target prompt to the top of the viewport, anchoring every press to
+   *  the current viewport rather than a persistent cursor. */
+  function stepPrompt(dir: -1 | 1): void {
+    if (!scroller) return;
+    const prompts = scroller.querySelectorAll<HTMLElement>(".row.user[data-prompt-id]");
+    const last = prompts.length - 1;
+    if (last < 0) return;
+    if (dir === -1) {
+      jumpToPrompt(firstUpAnchor(prompts));
+      return;
+    }
+    const idx = firstDownAnchor(prompts);
+    if (idx === null) {
+      navStepping = false;
+      scrollToBottom();
+      return;
+    }
+    jumpToPrompt(idx);
   }
 
   // Brief highlight flash on a prompt row the user just jumped to, so an instant scroll
@@ -886,6 +901,12 @@
   }}
 >
 <TranscriptSearch {scroller} />
+<PromptMap
+  entries={promptMapEntries}
+  {scroller}
+  sessionKey={store.session.ref?.sessionId ?? ""}
+  onjump={jumpToPrompt}
+/>
 <PullIndicator snap={pull.snap} refreshing={pull.refreshing} testid="ptr-transcript" />
 <div
   class="scroller"
@@ -965,7 +986,7 @@
          work block or as the visible final response. -->
     {#snippet itemView(item: TranscriptItem)}
       {#if item.kind === "user"}
-        <div class="row user" class:pending={item.delivery && item.delivery !== "rejected"} class:rejected={item.delivery === "rejected"}>
+        <div class="row user" data-prompt-id={item.id} class:pending={item.delivery && item.delivery !== "rejected"} class:rejected={item.delivery === "rejected"}>
           {#if item.images && item.images.length > 0}
             <div class="user-images">
               {#each item.images as image, index (index)}
@@ -1217,7 +1238,7 @@
       <!-- Keep a whole turn as the browser's virtualization unit. `content-visibility`
            leaves every text node in the DOM (so browser find and runSearch still work),
            but skips style/layout/paint for off-screen Markdown and tool trees. -->
-      <div class="transcript-turn">
+      <div class="transcript-turn" data-prompt-id={turn.user?.kind === "user" ? turn.user.id : undefined}>
         {#if turn.user}
           {@render itemView(turn.user)}
         {/if}
@@ -1298,6 +1319,7 @@
     New messages ↓
   </button>
 {/if}
+{#if !isTouch && !store.phoneLayout}
 <div
   class="prompt-nav"
   class:visible={navHovered || navStepping}
@@ -1347,6 +1369,7 @@
     </svg>
   </button>
 </div>
+{/if}
 </div>
 
 <style>
@@ -1354,6 +1377,15 @@
     /* --maxw / --maxw-wide are inherited from .chat (App.svelte). */
     position: relative;
     isolation: isolate;
+  }
+  /* PromptMap's phone sheet is fixed, but this wrapper is intentionally isolated so
+     transcript chrome cannot leak into the app header. Raise the whole context only while
+     the sheet scrim exists so the fixed sheet can sit above the header/composer too. */
+  :global(.transcript-wrap:has(.sheet-scrim)) {
+    z-index: 120;
+    isolation: initial;
+  }
+  .transcript-wrap {
     flex: 1;
     min-height: 0;
     display: flex;
@@ -1463,6 +1495,10 @@
     opacity: 1;
     color: var(--accent-text);
     background: var(--accent);
+  }
+  /* Touch devices use PromptMap's outline sheet instead of two floating arrows. */
+  @media (pointer: coarse), (max-width: 859px) {
+    .prompt-nav { display: none; }
   }
   /* Touch devices: always visible (no hover state) + 44px touch targets. */
   @media (pointer: coarse) {

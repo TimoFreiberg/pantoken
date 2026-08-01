@@ -2397,6 +2397,123 @@ fn fire_step(
     }
 }
 
+fn prompt_map_long_script() -> Vec<ScriptStep> {
+    let user_id = "u-promptmap-long";
+    let mut steps = vec![
+        ScriptStep {
+            wait_ms: 0,
+            event: SessionDriverEvent::UserMessage {
+                base: base(),
+                id: user_id.into(),
+                text: "Show a long response so the prompt map can track the whole turn.".into(),
+                images: None,
+                entry_id: Some(format!("e-{user_id}")),
+                references: None,
+            },
+        },
+        ScriptStep {
+            wait_ms: 0,
+            event: SessionDriverEvent::SessionUpdated {
+                base: base(),
+                snapshot: mock_snapshot(SessionStatus::Running),
+            },
+        },
+    ];
+    let response = (1..=26)
+        .map(|i| format!("Paragraph {i}: This deliberately long assistant response keeps the turn visible while its prompt scrolls away.",))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    for chunk in deltas(&response, 4) {
+        steps.push(ScriptStep {
+            wait_ms: 12,
+            event: SessionDriverEvent::AssistantDelta {
+                base: base(),
+                text: chunk,
+                channel: Some(AssistantDeltaChannel::Text),
+                entry_id: None,
+            },
+        });
+    }
+    steps.push(ScriptStep {
+        wait_ms: 40,
+        event: SessionDriverEvent::RunCompleted {
+            base: base(),
+            snapshot: mock_snapshot(SessionStatus::Idle),
+            user_entry_id: Some(format!("e-{user_id}")),
+            assistant_entry_id: Some(format!("e-a-{user_id}")),
+        },
+    });
+    steps
+}
+
+fn prompt_map_hold_script() -> Vec<ScriptStep> {
+    let user_id = "u-promptmap-hold";
+    vec![
+        ScriptStep {
+            wait_ms: 0,
+            event: SessionDriverEvent::UserMessage {
+                base: base(),
+                id: user_id.into(),
+                text: "Pause this prompt while the response is still in progress.".into(),
+                images: None,
+                entry_id: Some(format!("e-{user_id}")),
+                references: None,
+            },
+        },
+        ScriptStep {
+            wait_ms: 0,
+            event: SessionDriverEvent::SessionUpdated {
+                base: base(),
+                snapshot: mock_snapshot(SessionStatus::Running),
+            },
+        },
+    ]
+}
+
+fn prompt_map_tool_only_script() -> Vec<ScriptStep> {
+    let user_id = "u-promptmap-tool-only";
+    let mut steps = vec![
+        ScriptStep {
+            wait_ms: 0,
+            event: SessionDriverEvent::UserMessage {
+                base: base(),
+                id: user_id.into(),
+                text: "Run a tool without producing a final response.".into(),
+                images: None,
+                entry_id: Some(format!("e-{user_id}")),
+                references: None,
+            },
+        },
+        ScriptStep {
+            wait_ms: 0,
+            event: SessionDriverEvent::SessionUpdated {
+                base: base(),
+                snapshot: mock_snapshot(SessionStatus::Running),
+            },
+        },
+    ];
+    steps.extend(tool_span(
+        "promptmap-tool-only",
+        "read",
+        "Read file",
+        Some("Read a fixture file"),
+        serde_json::json!({"path": "README.md"}),
+        true,
+        serde_json::json!("fixture contents"),
+        20,
+        20,
+        120,
+    ));
+    steps.push(ScriptStep {
+        wait_ms: 20,
+        event: SessionDriverEvent::SessionUpdated {
+            base: base(),
+            snapshot: mock_snapshot(SessionStatus::Idle),
+        },
+    });
+    steps
+}
+
 impl Default for MockDriver {
     fn default() -> Self {
         Self::new()
@@ -3857,6 +3974,9 @@ impl PantokenDriver for MockDriver {
                 s
             }
             "reply" => prompt_reply_script("Show me the streamed reply script.", None, &[]),
+            "promptmaplong" => prompt_map_long_script(),
+            "promptmaphold" => prompt_map_hold_script(),
+            "promptmaptoolonly" => prompt_map_tool_only_script(),
             // Reproduces #78: a delayed background-agent notification collapses the
             // preceding final assistant response. Emits: userMessage → narration →
             // tool span → finalA (settled response, RunCompleted stamps completedAt) →
