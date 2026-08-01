@@ -115,6 +115,13 @@ const backendEnv = {
   ...process.env,
   PANTOKEN_PORT: backendPort,
   PANTOKEN_DATA_DIR: dataDir,
+  // The fake driver replays checked-in fixtures, but the Buck2 binary is built in
+  // buck-out and cannot resolve its source-tree-relative fallback at runtime. Keep
+  // the explicit caller override authoritative, otherwise point fake mode at the
+  // repository fixture directory. Production/mock modes do not need test data.
+  ...(process.env.PANTOKEN_DRIVER === "fake" && !process.env.PANTOKEN_CORPUS_DIR
+    ? { PANTOKEN_CORPUS_DIR: join(repoRoot, "server", "tests", "corpus") }
+    : {}),
   // In auto-port mode the instance must be tokenless (auth disabled), like every other
   // dev/preview/e2e instance. The live desktop app exports its own PANTOKEN_TOKEN into the
   // shell it spawns (same leak as PANTOKEN_PORT/PANTOKEN_DATA_DIR above); inheriting it would
