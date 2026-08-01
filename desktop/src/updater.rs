@@ -234,6 +234,7 @@ fn run_cycle(app: &AppHandle) -> Duration {
 }
 
 fn run_cycle_locked(app: &AppHandle, port: u16, endpoint: &str) -> Duration {
+    let state = app.state::<AppState>();
     let update = match check_endpoint(app, endpoint) {
         Err(e) => {
             // Transient (offline, host down): keep the last reported card state and
@@ -251,7 +252,6 @@ fn run_cycle_locked(app: &AppHandle, port: u16, endpoint: &str) -> Duration {
         Ok(Some(u)) => u,
     };
     let version = update.version.clone();
-    let state = app.state::<AppState>();
 
     // Restart unattended only when the authenticated hub confirms no UI and no turn.
     // Unavailable/unauthorized activity is deliberately fail-closed.
