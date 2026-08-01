@@ -209,6 +209,13 @@ export function toolPreview(
     case "propose_goal":
       return inlineBound(strField(o, "summary") ?? "", HEADER_PREVIEW_LIMIT);
 
+    case "grep":
+    case "glob":
+      return inlineBound(
+        joinFields(strField(o, "path"), strField(o, "pattern")),
+        HEADER_PREVIEW_LIMIT,
+      );
+
     default:
       return defaultPreview(input);
   }

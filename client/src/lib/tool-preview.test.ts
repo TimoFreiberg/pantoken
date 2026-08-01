@@ -40,6 +40,28 @@ describe("toolPreview: block_goal struct terminal_reason", () => {
 
 // ── webSearchResultTitle: output shape parsing ───────────────────────────────
 
+describe("toolPreview: grep and glob arguments", () => {
+  test("grep shows both path and pattern", () => {
+    expect(
+      toolPreview(
+        "grep",
+        { path: "client/src", pattern: "ToolCard" },
+        undefined,
+      ),
+    ).toBe("client/src ToolCard");
+  });
+
+  test("glob shows both path and pattern", () => {
+    expect(
+      toolPreview(
+        "glob",
+        { path: "server", pattern: "**/*.rs" },
+        undefined,
+      ),
+    ).toBe("server **/*.rs");
+  });
+});
+
 describe("webSearchResultTitle", () => {
   test("plain string with JSON array returns first title + ellipsis", () => {
     const output = JSON.stringify([
