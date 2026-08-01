@@ -119,10 +119,11 @@ pub async fn run_hub_op_applier(hub: Arc<Mutex<SessionHub>>, mut receiver: HubOp
 }
 
 /// A boxed, pinned, Send future — the return type of swap closures. `Err(message)`
-/// surfaces a swap failure (e.g. the mock's one-shot `failsession` 409 lease
-/// conflict) so `switch_to` can classify + send a client-visible `Error` rather
-/// than an empty-seed "no session" — ports the TS `switchTo` try/catch +
-/// `classifySwitchError` (hub.ts:1333).
+/// normally surfaces a swap failure so `switch_to` can classify + send a client-visible
+/// `Error` rather than an empty-seed "no session" — ports the TS `switchTo` try/catch +
+/// `classifySwitchError` (hub.ts:1333). Atomic new-session requests carrying their
+/// first prompt suppress that generic error because their correlated rejected
+/// `PromptResult` is the sole user-facing failure signal.
 type SwapFuture =
     Pin<Box<dyn Future<Output = Result<Vec<SessionDriverEvent>, String>> + Send + 'static>>;
 
@@ -177,6 +178,9 @@ struct PendingSwitch {
     reseed: bool,
     /// Whether to retry on raced events (idempotent swaps only).
     retry_on_raced_events: bool,
+    /// Whether to suppress the classified swap `Error` because the atomic
+    /// first-prompt caller will emit a correlated rejected `PromptResult`.
+    suppress_error: bool,
     /// Resolve the awaiting caller with the eventual session id (or None).
     resolve: tokio::sync::oneshot::Sender<Option<SessionId>>,
 }
@@ -1540,7 +1544,7 @@ impl SessionHub {
                                 Box::pin(async move { driver.open_session(path).await })
                                     as SwapFuture
                             });
-                            switch_to(hub, client_key, swap, false, true).await;
+                            switch_to(hub, client_key, swap, false, true, false).await;
                         })
                     }),
                 );
@@ -1558,7 +1562,7 @@ impl SessionHub {
                                 Box::pin(async move { driver.reload_session(path).await })
                                     as SwapFuture
                             });
-                            switch_to(hub, client_key, swap, true, true).await;
+                            switch_to(hub, client_key, swap, true, true, false).await;
                         })
                     }),
                 );
@@ -1659,7 +1663,8 @@ impl SessionHub {
                                     Ok(result.seed)
                                 }) as SwapFuture
                             });
-                            let sid = switch_to(hub.clone(), client_key, swap, true, false).await;
+                            let sid =
+                                switch_to(hub.clone(), client_key, swap, true, false, false).await;
                             if sid.is_some() {
                                 if let Some(text) = prefill.lock().take() {
                                     let h = hub.lock();
@@ -1716,7 +1721,15 @@ impl SessionHub {
                                 Box::pin(async move { driver.new_session(opts).await })
                                     as SwapFuture
                             });
-                            let sid = switch_to(hub.clone(), client_key, swap, false, false).await;
+                            let sid = switch_to(
+                                hub.clone(),
+                                client_key,
+                                swap,
+                                false,
+                                false,
+                                has_first_prompt,
+                            )
+                            .await;
                             if let Some(sid) = sid {
                                 if has_first_prompt {
                                     let pid = prompt_id_clone.clone();
@@ -2739,12 +2752,15 @@ fn classify_switch_error(raw: &str) -> (String, Option<String>) {
 /// `swap`: a closure that fetches the seed events (driver call).
 /// `reseed`: restart the journal even if the session is already live.
 /// `retry_on_raced_events`: re-run the swap if live events raced the seed fetch.
+/// `suppress_error`: omit the classified swap `Error` when an atomic first-prompt
+/// caller will report the same failure through its correlated `PromptResult`.
 fn switch_to(
     hub: Arc<Mutex<SessionHub>>,
     client_key: u64,
     swap: Box<dyn FnOnce(Arc<Mutex<SessionHub>>) -> SwapFuture + Send>,
     reseed: bool,
     retry_on_raced_events: bool,
+    suppress_error: bool,
 ) -> SwitchFuture {
     Box::pin(async move {
         // ── Single-flight check: if a swap is already in-flight on this connection,
@@ -2767,6 +2783,7 @@ fn switch_to(
                         swap: swap.take().unwrap(),
                         reseed,
                         retry_on_raced_events,
+                        suppress_error,
                         resolve: tx,
                     });
                     Some(rx)
@@ -2793,10 +2810,13 @@ fn switch_to(
         }
 
         // A swap failure (e.g. the mock's one-shot `failsession` 409 lease
-        // conflict) surfaces as a client-visible `Error` — ports TS `switchTo`'s
-        // catch → `classifySwitchError` (hub.ts:1333-1341). A newer switch queued
-        // while this one was warming suppresses the error (the operator already
-        // moved on) — mirrors TS `if (!conn.pendingSwitch)`.
+        // conflict) normally surfaces as a client-visible `Error` — ports TS
+        // `switchTo`'s catch → `classifySwitchError` (hub.ts:1333-1341). A newer
+        // switch queued while this one was warming suppresses the error (the
+        // operator already moved on), and an atomic first-prompt request also
+        // suppresses it because its rejected `PromptResult` is the sole failure
+        // signal — mirrors TS `if (!conn.pendingSwitch)` plus the Rust prompt ACK
+        // contract.
         let seed: Option<Vec<SessionDriverEvent>> = match seed_result {
             Ok(seed) => Some(seed),
             Err(raw) => {
@@ -2807,7 +2827,7 @@ fn switch_to(
                         .map(|c| c.pending_switch.is_some())
                         .unwrap_or(false)
                 };
-                if !pending {
+                if !pending && !suppress_error {
                     let (message, kind) = classify_switch_error(&raw);
                     let h = hub.lock();
                     h.send_to_client(client_key, ServerMessage::Error { message, kind });
@@ -2841,9 +2861,18 @@ fn switch_to(
                 swap,
                 reseed,
                 retry_on_raced_events,
+                suppress_error,
                 resolve,
             } = next;
-            let sid = switch_to(hub.clone(), client_key, swap, reseed, retry_on_raced_events).await;
+            let sid = switch_to(
+                hub.clone(),
+                client_key,
+                swap,
+                reseed,
+                retry_on_raced_events,
+                suppress_error,
+            )
+            .await;
             let _ = resolve.send(sid);
         }
 
@@ -3761,6 +3790,35 @@ mod hub_models_tests {
         op(hub).await;
     }
 
+    async fn drain_connect_messages(rx: &mut mpsc::Receiver<ServerMessage>) {
+        // `add_client` synchronously queues exactly these five messages. Consume
+        // them explicitly so later assertions cover the complete post-request queue.
+        assert!(matches!(drain_one(rx).await, ServerMessage::Hello { .. }));
+        assert!(matches!(drain_one(rx).await, ServerMessage::Seed { .. }));
+        assert!(matches!(
+            drain_one(rx).await,
+            ServerMessage::SessionStatus { .. }
+        ));
+        assert!(matches!(
+            drain_one(rx).await,
+            ServerMessage::UpdateStatus { .. }
+        ));
+        assert!(matches!(
+            drain_one(rx).await,
+            ServerMessage::PantokenSettings { .. }
+        ));
+    }
+
+    async fn collect_queue(rx: &mut mpsc::Receiver<ServerMessage>) -> Vec<ServerMessage> {
+        let mut messages = Vec::new();
+        loop {
+            match timeout(Duration::from_millis(100), rx.recv()).await {
+                Ok(Some(message)) => messages.push(message),
+                Ok(None) | Err(_) => return messages,
+            }
+        }
+    }
+
     /// A coalesced assistantDelta run must reach viewers once delta_flush_ms
     /// elapses, with no non-delta event required to force it out.
     #[tokio::test]
@@ -3858,6 +3916,7 @@ mod hub_models_tests {
         driver.run_script("failnewsession".into());
 
         let (client_key, _tx, mut rx) = hub.lock().add_client(None);
+        drain_connect_messages(&mut rx).await;
         hub.lock().handle_client(
             client_key,
             ClientMessage::NewSession {
@@ -3873,19 +3932,13 @@ mod hub_models_tests {
         );
         apply_one(hub.clone(), &mut hub_ops).await;
 
-        let result = drain_until(&mut rx, |msg| {
-            matches!(
-                msg,
-                ServerMessage::PromptResult {
-                    prompt_id,
-                    accepted: false,
-                    session_id: None,
-                    ..
-                } if prompt_id == "client-new-fails"
-            )
-        })
-        .await;
-        match result {
+        let messages = collect_queue(&mut rx).await;
+        assert_eq!(
+            messages.len(),
+            1,
+            "unexpected post-request messages: {messages:?}"
+        );
+        match &messages[0] {
             ServerMessage::PromptResult {
                 prompt_id,
                 accepted,
@@ -3894,11 +3947,72 @@ mod hub_models_tests {
             } => {
                 assert_eq!(prompt_id, "client-new-fails");
                 assert!(!accepted);
-                assert_eq!(session_id, None);
+                assert_eq!(session_id, &None);
                 assert_eq!(error.as_deref(), Some("Could not create the new session"));
             }
             other => panic!("expected rejected promptResult, got {other:?}"),
         }
+        assert!(
+            !messages
+                .iter()
+                .any(|message| matches!(message, ServerMessage::Error { .. })),
+            "atomic first-prompt failure must not emit a generic Error: {messages:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_new_session_with_image_only_prompt_sends_rejected_prompt_result() {
+        let (driver, hub, mut hub_ops) = test_hub();
+        driver.run_script("failnewsession".into());
+
+        let (client_key, _tx, mut rx) = hub.lock().add_client(None);
+        drain_connect_messages(&mut rx).await;
+        hub.lock().handle_client(
+            client_key,
+            ClientMessage::NewSession {
+                cwd: Some("/workspace".into()),
+                model: None,
+                thinking: None,
+                facet: None,
+                permission_monitor: None,
+                prompt: None,
+                images: Some(vec![
+                    pantoken_protocol::session_driver::ImageContent::Image {
+                        data: "aGVsbG8=".into(),
+                        mime_type: "image/png".into(),
+                    },
+                ]),
+                prompt_id: Some("client-image-fails".into()),
+            },
+        );
+        apply_one(hub.clone(), &mut hub_ops).await;
+
+        let messages = collect_queue(&mut rx).await;
+        assert_eq!(
+            messages.len(),
+            1,
+            "unexpected post-request messages: {messages:?}"
+        );
+        match &messages[0] {
+            ServerMessage::PromptResult {
+                prompt_id,
+                accepted,
+                session_id,
+                error,
+            } => {
+                assert_eq!(prompt_id, "client-image-fails");
+                assert!(!accepted);
+                assert_eq!(session_id, &None);
+                assert_eq!(error.as_deref(), Some("Could not create the new session"));
+            }
+            other => panic!("expected rejected image promptResult, got {other:?}"),
+        }
+        assert!(
+            !messages
+                .iter()
+                .any(|message| matches!(message, ServerMessage::Error { .. })),
+            "image-only first-prompt failure must not emit a generic Error: {messages:?}"
+        );
     }
 
     #[tokio::test]
@@ -3913,6 +4027,7 @@ mod hub_models_tests {
         driver.run_script("failnewsession".into());
 
         let (client_key, _tx, mut rx) = hub.lock().add_client(None);
+        drain_connect_messages(&mut rx).await;
         hub.lock().handle_client(
             client_key,
             ClientMessage::NewSession {
@@ -3928,21 +4043,182 @@ mod hub_models_tests {
         );
         apply_one(hub.clone(), &mut hub_ops).await;
 
-        let result = drain_until(&mut rx, |msg| matches!(msg, ServerMessage::Error { .. })).await;
-        match result {
-            ServerMessage::Error { message, kind } => {
-                // The first `Error` delivered comes from `switch_to`'s Err arm
-                // (classify_switch_error's fallback): it wraps the raw driver
-                // error. The mock's `failnewsession` script yields
-                // "new session failed (failnewsession)".
-                assert!(
-                    message.contains("session switch failed") && message.contains("failnewsession"),
-                    "expected switch-failure message, got: {message}"
-                );
-                assert_eq!(kind, None);
-            }
-            other => panic!("expected ServerMessage::Error, got {other:?}"),
+        let messages = collect_queue(&mut rx).await;
+        assert_eq!(
+            messages.len(),
+            2,
+            "unexpected post-request messages: {messages:?}"
+        );
+        assert!(
+            messages.iter().any(|message| {
+                matches!(
+                    message,
+                    ServerMessage::Error { message, kind }
+                        if message.contains("session switch failed")
+                            && message.contains("failnewsession")
+                            && kind.is_none()
+                )
+            }),
+            "prompt-less creation must retain the classified generic Error: {messages:?}"
+        );
+        assert!(
+            messages.iter().any(|message| {
+                matches!(
+                    message,
+                    ServerMessage::Error { message, kind }
+                        if message == "Could not create the new session" && kind.is_none()
+                )
+            }),
+            "prompt-less creation must retain its explicit fallback Error: {messages:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn queued_switch_preserves_atomic_prompt_suppression_and_generic_errors() {
+        async fn wait_for_pending(hub: &Arc<Mutex<SessionHub>>, client_key: u64) {
+            let observed = timeout(Duration::from_secs(1), async {
+                loop {
+                    if hub
+                        .lock()
+                        .clients
+                        .get(&client_key)
+                        .and_then(|conn| conn.pending_switch.as_ref())
+                        .is_some()
+                    {
+                        return;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await;
+            assert!(
+                observed.is_ok(),
+                "second switch was not stored in pending_switch"
+            );
         }
+
+        // First prove that a queued atomic first-prompt request retains its
+        // suppression flag through recursive dispatch. The explicit pending
+        // assertion makes the overlap deterministic rather than scheduler-based.
+        let (driver, hub, mut hub_ops) = test_hub();
+        let (client_key, _tx, mut rx) = hub.lock().add_client(None);
+        drain_connect_messages(&mut rx).await;
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let first = Box::new(move |_hub: Arc<Mutex<SessionHub>>| {
+            Box::pin(async move {
+                let _ = entered_tx.send(());
+                let _ = release_rx.await;
+                Err("first switch failed".into())
+            }) as SwapFuture
+        });
+        let first_task = tokio::spawn(switch_to(
+            hub.clone(),
+            client_key,
+            first,
+            false,
+            false,
+            false,
+        ));
+        entered_rx.await.expect("first swap did not start");
+        driver.run_script("failnewsession".into());
+        hub.lock().handle_client(
+            client_key,
+            ClientMessage::NewSession {
+                cwd: Some("/workspace".into()),
+                model: None,
+                thinking: None,
+                facet: None,
+                permission_monitor: None,
+                prompt: Some("queued doomed session".into()),
+                images: None,
+                prompt_id: Some("queued-client-new-fails".into()),
+            },
+        );
+        let queued_op = timeout(Duration::from_secs(1), hub_ops.rx.recv())
+            .await
+            .expect("timed out waiting for queued new-session op")
+            .expect("hub op channel closed");
+        let queued_task = tokio::spawn(queued_op(hub.clone()));
+        wait_for_pending(&hub, client_key).await;
+        let _ = release_tx.send(());
+        let _ = first_task.await.expect("first switch task panicked");
+        queued_task.await.expect("queued new-session op panicked");
+        let messages = collect_queue(&mut rx).await;
+        assert_eq!(
+            messages.len(),
+            1,
+            "unexpected queued atomic messages: {messages:?}"
+        );
+        match &messages[0] {
+            ServerMessage::PromptResult {
+                prompt_id,
+                accepted,
+                session_id,
+                error,
+            } => {
+                assert_eq!(prompt_id, "queued-client-new-fails");
+                assert!(!accepted);
+                assert_eq!(session_id, &None);
+                assert_eq!(error.as_deref(), Some("Could not create the new session"));
+            }
+            other => panic!("expected queued rejected promptResult, got {other:?}"),
+        }
+        assert!(
+            !messages
+                .iter()
+                .any(|message| matches!(message, ServerMessage::Error { .. })),
+            "queued atomic failure must not emit a generic Error: {messages:?}"
+        );
+
+        // Repeat with a queued ordinary switch. Its classified generic Error
+        // remains visible after the same deterministic overlap choreography.
+        let (_driver, hub, _hub_ops) = test_hub();
+        let (client_key, _tx, mut rx) = hub.lock().add_client(None);
+        drain_connect_messages(&mut rx).await;
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let first = Box::new(move |_hub: Arc<Mutex<SessionHub>>| {
+            Box::pin(async move {
+                let _ = entered_tx.send(());
+                let _ = release_rx.await;
+                Err("first switch failed".into())
+            }) as SwapFuture
+        });
+        let first_task = tokio::spawn(switch_to(
+            hub.clone(),
+            client_key,
+            first,
+            false,
+            false,
+            false,
+        ));
+        entered_rx.await.expect("first swap did not start");
+        let queued_generic = Box::new(move |_hub: Arc<Mutex<SessionHub>>| {
+            Box::pin(async { Err("queued ordinary switch failed".into()) }) as SwapFuture
+        });
+        let queued_task = tokio::spawn(switch_to(
+            hub.clone(),
+            client_key,
+            queued_generic,
+            false,
+            false,
+            false,
+        ));
+        wait_for_pending(&hub, client_key).await;
+        let _ = release_tx.send(());
+        let _ = first_task.await.expect("first switch task panicked");
+        let _ = queued_task.await.expect("queued switch task panicked");
+        let messages = collect_queue(&mut rx).await;
+        assert_eq!(
+            messages.len(),
+            1,
+            "unexpected queued generic messages: {messages:?}"
+        );
+        assert!(
+            matches!(&messages[0], ServerMessage::Error { message, .. } if message.contains("queued ordinary switch failed")),
+            "expected queued generic Error, got {messages:?}"
+        );
     }
 
     #[tokio::test]
