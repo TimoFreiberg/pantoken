@@ -4,6 +4,7 @@
 
 import { afterEach, describe, expect, test } from "vitest";
 import { createTauriHostProvider, HostConnectionError } from "./tauri-provider.js";
+import type { RemoteProfile } from "./types.js";
 
 afterEach(() => {
   // @ts-expect-error — deleting a possibly-absent global is fine at runtime.
@@ -31,6 +32,19 @@ function installRejectingInvoke(command: string, message: string) {
   } as unknown as typeof globalThis.window;
 }
 
+function profile(overrides: Partial<RemoteProfile> = {}): RemoteProfile {
+  return {
+    id: "remote-1",
+    label: "My Remote",
+    sshDestination: "user@example.com",
+    polytokenPolicy: "requireExisting",
+    xdgMode: "isolated",
+    executionTarget: { kind: "host" },
+    riskAcknowledgements: {},
+    ...overrides,
+  };
+}
+
 function snapshot(overrides: Record<string, unknown> = {}) {
   return {
     id: "remote-1",
@@ -44,6 +58,45 @@ function snapshot(overrides: Record<string, unknown> = {}) {
 }
 
 describe("TauriHostProvider", () => {
+  test("addProfile sends the nested camelCase command shape and maps native defaults", async () => {
+    const calls: Array<{ cmd: string; args?: Record<string, unknown> }> = [];
+    const nativeProfile = {
+      id: "remote-1",
+      label: "My Remote",
+      sshDestination: "user@example.com",
+      polytokenPolicy: "requireExisting",
+      xdgMode: "isolated",
+    };
+    globalThis.window = {
+      __TAURI_INTERNALS__: {
+        invoke: (cmd: string, args?: Record<string, unknown>): Promise<unknown> => {
+          calls.push({ cmd, args });
+          return Promise.resolve(nativeProfile);
+        },
+      },
+    } as unknown as typeof globalThis.window;
+
+    const saved = await createTauriHostProvider(() => "").addProfile(profile({ port: 2222 }));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.cmd).toBe("add_remote_profile");
+    const sent = calls[0]?.args?.profile as Record<string, unknown>;
+    expect(sent).toMatchObject({
+      id: "remote-1",
+      label: "My Remote",
+      sshDestination: "user@example.com",
+      port: 2222,
+      polytokenPolicy: "requireExisting",
+      xdgMode: "isolated",
+      executionTarget: { kind: "host" },
+      riskAcknowledgements: {},
+    });
+    expect(sent).not.toHaveProperty("ssh_destination");
+    expect(sent).toHaveProperty("remoteRootOverride", undefined);
+    expect(sent).toHaveProperty("serverPath", undefined);
+    expect(saved.executionTarget).toEqual({ kind: "host" });
+    expect(saved.riskAcknowledgements).toEqual({});
+  });
+
   test("listHosts maps snapshots to descriptors (local overlay, Docker subtitle, empty-label fallback)", async () => {
     installInvoke({
       list_hosts: [

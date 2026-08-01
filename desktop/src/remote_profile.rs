@@ -31,10 +31,16 @@ pub enum ExecutionTargetProfile {
     Host,
     #[serde(rename = "dockerContainer")]
     DockerContainer {
+        #[serde(rename = "containerName", alias = "container_name")]
         container_name: String,
         user: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            rename = "workdir",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
         workdir: Option<String>,
+        #[serde(rename = "pantokenRoot", alias = "pantoken_root")]
         pantoken_root: String,
     },
 }
@@ -42,16 +48,32 @@ pub enum ExecutionTargetProfile {
 /// Persisted hashes of explicitly acknowledged execution risks.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RiskAcknowledgements {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "rootFingerprint",
+        alias = "root_fingerprint",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub root_fingerprint: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "ephemeralFingerprint",
+        alias = "ephemeral_fingerprint",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub ephemeral_fingerprint: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "dockerSocketFingerprint",
+        alias = "docker_socket_fingerprint",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub docker_socket_fingerprint: Option<String>,
 }
 
 /// A persisted remote-host profile.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RemoteProfile {
     /// Stable identity (UUID or slug). Not displayed.
     pub id: String,
@@ -59,29 +81,34 @@ pub struct RemoteProfile {
     pub label: String,
     /// `user@host` or an SSH config alias. Relies on the system SSH agent /
     /// keychain / `~/.ssh/config` for credentials.
+    #[serde(alias = "ssh_destination")]
     pub ssh_destination: String,
     /// SSH port; defaults to 22 when `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
     /// Whether the remote runtime must already exist, or the desktop should
     /// offer to install it. Phase 2 only wires `RequireExisting`.
-    #[serde(default)]
+    #[serde(alias = "polytoken_policy", default)]
     pub polytoken_policy: PolytokenPolicy,
     /// Override for the remote runtime's data root (default
     /// `~/.local/share/pantoken`). Stored verbatim.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        alias = "remote_root_override",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub remote_root_override: Option<String>,
     /// Override for the remote `pantoken-server` binary path (default
     /// `pantoken-server`, expected on the remote PATH).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "server_path", default, skip_serializing_if = "Option::is_none")]
     pub server_path: Option<String>,
     /// XDG isolation mode for a Pantoken-managed polytoken. Defaults to
     /// `Isolated` — Pantoken-managed XDG roots under the remote root.
-    #[serde(default)]
+    #[serde(alias = "xdg_mode", default)]
     pub xdg_mode: XdgMode,
-    #[serde(default)]
+    #[serde(alias = "execution_target", default)]
     pub execution_target: ExecutionTargetProfile,
-    #[serde(default)]
+    #[serde(alias = "risk_acknowledgements", default)]
     pub risk_acknowledgements: RiskAcknowledgements,
 }
 
@@ -489,10 +516,34 @@ mod tests {
         assert_eq!(back.remote_root_override, profile.remote_root_override);
         assert_eq!(back.server_path, profile.server_path);
 
-        // Also round-trips through a serde_json::Value (canonical form check).
+        // Also round-trips through a serde_json::Value and verify the canonical
+        // command shape. Legacy snake_case names are accepted on input but are
+        // never emitted when profiles are persisted or returned to Tauri.
         let as_value = serde_json::to_value(&profile).expect("to value");
-        let from_value: RemoteProfile =
-            serde_json::from_value(as_value.clone()).expect("from value");
+        let object = as_value.as_object().expect("profile object");
+        for key in [
+            "sshDestination",
+            "polytokenPolicy",
+            "remoteRootOverride",
+            "serverPath",
+            "xdgMode",
+            "executionTarget",
+            "riskAcknowledgements",
+        ] {
+            assert!(object.contains_key(key), "missing canonical key {key}");
+        }
+        for key in [
+            "ssh_destination",
+            "polytoken_policy",
+            "remote_root_override",
+            "server_path",
+            "xdg_mode",
+            "execution_target",
+            "risk_acknowledgements",
+        ] {
+            assert!(!object.contains_key(key), "legacy key emitted: {key}");
+        }
+        let from_value: RemoteProfile = serde_json::from_value(as_value).expect("from value");
         assert_eq!(from_value.id, profile.id);
         assert_eq!(from_value.label, profile.label);
     }
@@ -579,6 +630,43 @@ mod tests {
     }
 
     #[test]
+    fn remote_profile_camel_case_command_payload() {
+        let payload = serde_json::json!({
+            "id": "docker-1",
+            "label": "Work API",
+            "sshDestination": "dev@server",
+            "port": 2222,
+            "polytokenPolicy": "offerInstall",
+            "remoteRootOverride": "/srv/pantoken",
+            "serverPath": "/opt/pantoken-server",
+            "xdgMode": "shared",
+            "executionTarget": {
+                "kind": "dockerContainer",
+                "containerName": "work-api",
+                "user": "1000:1000",
+                "workdir": "/workspace/api",
+                "pantokenRoot": "/var/lib/pantoken"
+            },
+            "riskAcknowledgements": {
+                "rootFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "ephemeralFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "dockerSocketFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            }
+        });
+        let profile: RemoteProfile = serde_json::from_value(payload).expect("camelCase profile");
+        assert_eq!(profile.ssh_destination, "dev@server");
+        assert_eq!(profile.polytoken_policy, PolytokenPolicy::OfferInstall);
+        assert_eq!(profile.execution_target, ExecutionTargetProfile::DockerContainer {
+            container_name: "work-api".into(),
+            user: "1000:1000".into(),
+            workdir: Some("/workspace/api".into()),
+            pantoken_root: "/var/lib/pantoken".into(),
+        });
+        assert_eq!(profile.risk_acknowledgements.root_fingerprint.as_deref(), Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+        assert!(profile.validate().is_ok());
+    }
+
+    #[test]
     fn remote_profile_execution_target_roundtrip() {
         let mut profile = sample_profile();
         profile.execution_target = ExecutionTargetProfile::DockerContainer {
@@ -587,8 +675,12 @@ mod tests {
             workdir: Some("/workspace/api".into()),
             pantoken_root: "/var/lib/pantoken".into(),
         };
-        let json = serde_json::to_string(&profile).expect("serialize");
-        let decoded: RemoteProfile = serde_json::from_str(&json).expect("deserialize");
+        let value = serde_json::to_value(&profile).expect("serialize");
+        let target = value.get("executionTarget").expect("target");
+        assert_eq!(target.get("containerName").and_then(|v| v.as_str()), Some("work-api"));
+        assert_eq!(target.get("pantokenRoot").and_then(|v| v.as_str()), Some("/var/lib/pantoken"));
+        assert!(target.get("container_name").is_none());
+        let decoded: RemoteProfile = serde_json::from_value(value).expect("deserialize");
         assert_eq!(decoded.execution_target, profile.execution_target);
         assert!(decoded.validate().is_ok());
     }
@@ -717,6 +809,48 @@ mod tests {
             .expect("load empty")
             .profiles
             .is_empty());
+    }
+
+    #[test]
+    fn remote_profile_store_legacy_docker_roundtrip_writes_camel_case() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("remote-profiles.json");
+        let legacy = serde_json::json!({
+            "profiles": [{
+                "id": "legacy-docker",
+                "label": "Legacy Docker",
+                "ssh_destination": "dev@server",
+                "polytoken_policy": "requireExisting",
+                "execution_target": {
+                    "kind": "dockerContainer",
+                    "container_name": "work-api",
+                    "user": "worker",
+                    "workdir": "/workspace",
+                    "pantoken_root": "/var/lib/pantoken"
+                },
+                "risk_acknowledgements": {
+                    "root_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "ephemeral_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "docker_socket_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                }
+            }]
+        });
+        std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).expect("write legacy");
+        let store = RemoteProfileStore::load(&path).expect("load legacy");
+        let profile = &store.profiles[0];
+        assert_eq!(profile.execution_target, ExecutionTargetProfile::DockerContainer {
+            container_name: "work-api".into(), user: "worker".into(),
+            workdir: Some("/workspace".into()), pantoken_root: "/var/lib/pantoken".into(),
+        });
+        assert_eq!(profile.risk_acknowledgements.ephemeral_fingerprint.as_deref(), Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+        store.save(&path).expect("save canonical");
+        let saved = std::fs::read_to_string(&path).expect("read canonical");
+        for key in ["containerName", "pantokenRoot", "rootFingerprint", "ephemeralFingerprint", "dockerSocketFingerprint"] {
+            assert!(saved.contains(key), "missing canonical key {key}");
+        }
+        for key in ["container_name", "pantoken_root", "root_fingerprint", "ephemeral_fingerprint", "docker_socket_fingerprint"] {
+            assert!(!saved.contains(key), "legacy key emitted: {key}");
+        }
     }
 
     #[test]
