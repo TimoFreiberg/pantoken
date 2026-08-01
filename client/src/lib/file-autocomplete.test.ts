@@ -494,6 +494,27 @@ describe("filterNames", () => {
     expect(filterNames(NAMES, "REV")).toEqual(["reviewer"]);
   });
 
+  test("case-insensitive fuzzy subsequence match", () => {
+    expect(filterNames(["jj-workspaces", "journal"], "JW")).toEqual([
+      "jj-workspaces",
+    ]);
+  });
+
+  test("contiguous matches rank before fuzzy-only matches", () => {
+    expect(filterNames(["a-b-c-fuzzy", "xabc-interior"], "abc")).toEqual([
+      "xabc-interior",
+      "a-b-c-fuzzy",
+    ]);
+  });
+
+  test("exact and name-prefix matches share the first alphabetical tier", () => {
+    expect(filterNames(["debugger", "debug", "debug-tools"], "debug")).toEqual([
+      "debug",
+      "debug-tools",
+      "debugger",
+    ]);
+  });
+
   test("name-start match ranks before an interior match", () => {
     // "explorer" starts with "exp"; "reviewer" doesn't contain it at all — pick a
     // query that's an interior match for one name and a start match for another.
@@ -510,6 +531,11 @@ describe("filterNames", () => {
   test("respects the limit", () => {
     const many = ["x1", "x2", "x3", "x4", "x5", "x6", "x7"];
     expect(filterNames(many, "x", 5)).toEqual(["x1", "x2", "x3", "x4", "x5"]);
+  });
+
+  test("caps fuzzy-only matches after ranking", () => {
+    const many = ["s-a-5", "s-a-2", "s-a-4", "s-a-1", "s-a-3", "s-a-6"];
+    expect(filterNames(many, "sa", 3)).toEqual(["s-a-1", "s-a-2", "s-a-3"]);
   });
 
   test("no match returns empty", () => {
@@ -538,7 +564,7 @@ describe("filterModels", () => {
   });
 
   test("matches label (case-insensitive)", () => {
-    expect(ids(filterModels(MODELS, "opus"))).toEqual([
+    expect(ids(filterModels([MODELS[0]!], "opus"))).toEqual([
       "anthropic/claude-opus-4-8",
     ]);
   });
@@ -546,6 +572,59 @@ describe("filterModels", () => {
   test("matches full-registry modelId substring", () => {
     expect(ids(filterModels(MODELS, "anthropic/claude-sonnet"))).toEqual([
       "anthropic/claude-sonnet-4-6",
+    ]);
+  });
+
+  test("matches a mixed-case fuzzy subsequence in the modelId", () => {
+    expect(ids(filterModels([m("Acme/Orion-5", "Orion")], "aO5"))).toEqual([
+      "Acme/Orion-5",
+    ]);
+  });
+
+  test("matches a mixed-case fuzzy subsequence in the label", () => {
+    expect(ids(filterModels([m("acme/model", "Open Interface 5")], "oI5"))).toEqual([
+      "acme/model",
+    ]);
+  });
+
+  test("contiguous matches rank before fuzzy-only matches", () => {
+    const models = [
+      m("z/m-x-o-d", "Fuzzy"),
+      m("z/interior-model", "Model Interior"),
+    ];
+    expect(ids(filterModels(models, "mod"))).toEqual([
+      "z/interior-model",
+      "z/m-x-o-d",
+    ]);
+  });
+
+  test("label-prefix does not outrank a modelId interior substring", () => {
+    const models = [
+      m("z/label-match", "Model Prefix"),
+      m("a/interior-model", "Unrelated"),
+    ];
+    expect(ids(filterModels(models, "model"))).toEqual([
+      "a/interior-model",
+      "z/label-match",
+    ]);
+  });
+
+  test("fuzzy ties are deterministic by modelId", () => {
+    const models = [
+      m("z/a-x-b", "Unrelated"),
+      m("a/a-y-b", "Unrelated"),
+    ];
+    expect(ids(filterModels(models, "ab"))).toEqual(["a/a-y-b", "z/a-x-b"]);
+  });
+
+  test("modelId-prefix matches rank before contiguous interior matches", () => {
+    const models = [
+      m("model-prefix", "Prefix"),
+      m("x/model-interior", "Interior"),
+    ];
+    expect(ids(filterModels(models, "model"))).toEqual([
+      "model-prefix",
+      "x/model-interior",
     ]);
   });
 
@@ -559,6 +638,16 @@ describe("filterModels", () => {
 
   test("respects the limit", () => {
     expect(filterModels(MODELS, "", 1)).toHaveLength(1);
+  });
+
+  test("caps fuzzy-only matches after ranking", () => {
+    const many = [
+      m("x/s-a-5", "Unrelated"),
+      m("x/s-a-2", "Unrelated"),
+      m("x/s-a-4", "Unrelated"),
+      m("x/s-a-1", "Unrelated"),
+    ];
+    expect(ids(filterModels(many, "sa", 2))).toEqual(["x/s-a-1", "x/s-a-2"]);
   });
 
   test("no match returns empty", () => {
@@ -662,14 +751,69 @@ describe("buildAtItems", () => {
       expected: [{ kind: "skill", name: "journal" }],
     },
     {
+      name: "skill shorthand uses fuzzy matching",
+      params: { ...base, query: "s:jw", skills: ["jj-workspaces"] },
+      expected: [{ kind: "skill", name: "jj-workspaces" }],
+    },
+    {
+      name: "skill long alias uses fuzzy matching",
+      params: { ...base, query: "skill:jw", skills: ["jj-workspaces"] },
+      expected: [{ kind: "skill", name: "jj-workspaces" }],
+    },
+    {
       name: "subagent mode via shorthand is a full takeover",
       params: { ...base, query: "a:rev" },
+      expected: [{ kind: "subagent", name: "reviewer" }],
+    },
+    {
+      name: "long subagent mode uses fuzzy matching",
+      params: { ...base, query: "subagent:RvR", subagents: ["reviewer"] },
+      expected: [{ kind: "subagent", name: "reviewer" }],
+    },
+    {
+      name: "subagent shorthand uses fuzzy matching",
+      params: { ...base, query: "a:RvR", subagents: ["reviewer"] },
       expected: [{ kind: "subagent", name: "reviewer" }],
     },
     {
       name: "model mode is a full takeover",
       params: { ...base, query: "m:sonnet" },
       expected: [{ kind: "model", model: MODELS[1]! }],
+    },
+    {
+      name: "model shorthand uses fuzzy matching",
+      params: { ...base, query: "m:OI5", models: [m("openai/gpt-5", "GPT-5")] },
+      expected: [{ kind: "model", model: m("openai/gpt-5", "GPT-5") }],
+    },
+    {
+      name: "model long alias uses fuzzy matching",
+      params: { ...base, query: "model:OI5", models: [m("openai/gpt-5", "GPT-5")] },
+      expected: [{ kind: "model", model: m("openai/gpt-5", "GPT-5") }],
+    },
+    {
+      name: "bare project query caps fuzzy badges and keeps sigils last",
+      params: {
+        ...base,
+        query: "sk",
+        files: [f("sk-file.txt")],
+        skills: ["s-a-k-1", "s-a-k-2", "s-a-k-3", "s-a-k-4", "s-a-k-5", "s-a-k-6"],
+        subagents: ["s-b-k-1", "s-b-k-2", "s-b-k-3", "s-b-k-4", "s-b-k-5", "s-b-k-6"],
+        models: [
+          m("x/s-c-k-1", "Unrelated"),
+          m("x/s-c-k-2", "Unrelated"),
+          m("x/s-c-k-3", "Unrelated"),
+          m("x/s-c-k-4", "Unrelated"),
+          m("x/s-c-k-5", "Unrelated"),
+          m("x/s-c-k-6", "Unrelated"),
+        ],
+      },
+      expected: [
+        { kind: "file", file: f("sk-file.txt") },
+        ...[1, 2, 3, 4, 5].map((n) => ({ kind: "skill", name: `s-a-k-${n}` as string })),
+        ...[1, 2, 3, 4, 5].map((n) => ({ kind: "subagent", name: `s-b-k-${n}` as string })),
+        ...[1, 2, 3, 4, 5].map((n) => ({ kind: "model", model: m(`x/s-c-k-${n}`, "Unrelated") })),
+        { kind: "sigil", prefix: "skill:", label: "browse skills…" },
+      ],
     },
     {
       name: "takeover mode with an empty partial returns the whole kind list",

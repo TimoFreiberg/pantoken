@@ -87,6 +87,34 @@ test("model picker: @m: lists models, narrows by partial, and accepts canonical 
   await expect(box).toHaveValue("@model:openai/gpt-5(medium) ");
 });
 
+// Each query below is a case-varied, non-contiguous subsequence. Acceptance still
+// uses the same canonical long sigils and model effort suffix as contiguous matches.
+test("fuzzy shorthand picks canonical skill, subagent, and model references", async ({
+  page,
+}) => {
+  const box = ta(page);
+
+  await box.click();
+  await page.keyboard.type("@s:Dg");
+  await expect(row(page, "skill:debug")).toBeVisible();
+  await box.press("Enter");
+  await expect(box).toHaveValue("@skill:debug ");
+
+  await box.fill("");
+  await box.click();
+  await page.keyboard.type("@a:RvR");
+  await expect(row(page, "subagent:reviewer")).toBeVisible();
+  await box.press("Enter");
+  await expect(box).toHaveValue("@subagent:reviewer ");
+
+  await box.fill("");
+  await box.click();
+  await page.keyboard.type("@m:OI5");
+  await expect(row(page, "model:openai/gpt-5")).toBeVisible();
+  await box.press("Enter");
+  await expect(box).toHaveValue("@model:openai/gpt-5(medium) ");
+});
+
 // Flow: a bare query that matches files but also offers a kind sigil row — accepting
 // the sigil row narrows the menu into that kind's full list (keep-narrowing mechanic).
 test("sigil row: @sk offers the skill: sigil after file matches; accepting it narrows into the skill list", async ({

@@ -474,12 +474,26 @@ export type AtItem =
   | { kind: "model"; model: ModelOption }
   | { kind: "sigil"; prefix: "skill:" | "subagent:" | "model:"; label: string };
 
+/** Return whether lowercase `partial` is a subsequence of lowercase `value`.
+ * Callers normalize both strings first so this predicate stays allocation-free. */
+function isSubsequence(value: string, partial: string): boolean {
+  let valueIndex = 0;
+  for (const char of partial) {
+    valueIndex = value.indexOf(char, valueIndex);
+    if (valueIndex === -1) return false;
+    valueIndex++;
+  }
+  return true;
+}
+
 /**
  * Rank a flat name list (skills, subagents) against a partial query, for the
  * kind-takeover (`@skill:`) and appended-badged-match (bare `@foo`) cases.
- * Case-insensitive substring match; name-start matches rank before interior
- * matches, ties break alphabetically. An empty partial returns the head of the
- * list as-given (mirrors `filterFiles`'s bare-`@` behavior).
+ * Matching is case-insensitive and accepts contiguous substrings or ordered
+ * subsequences. Name-prefix matches rank first, contiguous interior matches
+ * second, and fuzzy-only subsequences third; ties break alphabetically. An
+ * empty partial returns the head of the list as-given (mirrors `filterFiles`'s
+ * bare-`@` behavior).
  */
 export function filterNames(
   names: readonly string[],
@@ -493,8 +507,8 @@ export function filterNames(
   for (const name of names) {
     const lower = name.toLowerCase();
     const at = lower.indexOf(q);
-    if (at === -1) continue;
-    scored.push({ name, rank: at === 0 ? 0 : 1 });
+    const rank = at === 0 ? 0 : at > 0 ? 1 : isSubsequence(lower, q) ? 2 : null;
+    if (rank !== null) scored.push({ name, rank });
   }
 
   scored.sort((a, b) => {
@@ -507,10 +521,12 @@ export function filterNames(
 
 /**
  * Rank the available models against a partial query, for `@model:`/`@m:` takeover
- * and appended badged matches. Matches against `label` and `modelId` (the full
- * registry name, so "sonnet", "claude-sonnet-4-6", and "anthropic/claude" all
- * hit); ranks a `modelId`-start match first, then alphabetical by `modelId`.
- * An empty partial returns the head of the list as-given.
+ * and appended badged matches. Matching is case-insensitive against both the
+ * full registry `modelId` and the display `label`, using contiguous substrings
+ * or ordered subsequences. A model-id prefix (including an exact id) ranks first;
+ * otherwise any contiguous match in either field ranks second, and fuzzy-only
+ * matches rank third. Ties break by `modelId`; an empty partial returns the head
+ * of the list as-given.
  */
 export function filterModels(
   models: readonly ModelOption[],
@@ -524,8 +540,16 @@ export function filterModels(
   for (const m of models) {
     const modelId = m.modelId.toLowerCase();
     const label = m.label.toLowerCase();
-    if (!modelId.includes(q) && !label.includes(q)) continue;
-    scored.push({ m, rank: modelId.startsWith(q) ? 0 : 1 });
+    const modelIdAt = modelId.indexOf(q);
+    const labelAt = label.indexOf(q);
+    const rank = modelId.startsWith(q)
+      ? 0
+      : modelIdAt !== -1 || labelAt !== -1
+        ? 1
+        : isSubsequence(modelId, q) || isSubsequence(label, q)
+          ? 2
+          : null;
+    if (rank !== null) scored.push({ m, rank });
   }
 
   scored.sort((a, b) => {
