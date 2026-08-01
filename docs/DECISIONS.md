@@ -3,6 +3,12 @@
 Settled architectural calls. Each is reversible unless noted. Numbers kept
 for cross-reference with git history.
 
+## Mac Mini phone/PWA remote access (v1)
+
+The authoritative contract is [`ADR-mac-mini-remote-access.md`](ADR-mac-mini-remote-access.md). The supported path is an installed iPhone PWA over a private HTTPS Tailscale Serve origin, with Serve proxying only to the bundled server supervised by Pantoken.app on `127.0.0.1:<stable-port>`. Remote mode is opt-in, uses an explicit origin and persisted port, and keeps the bearer token in macOS Keychain. It does not discover or mutate Tailscale, expose a LAN/Tailscale bind, use Funnel/direct forwarding, or run a second mobile backend. PWA service-worker updates remain separate from signed `.app` updates, which atomically update shell + server + client.
+
+The SSH/provisioning architecture and “no standalone server deployment” decisions below describe a separate desktop-initiated remote-target mode. They remain valid in that scope but do not override the Mac Mini phone/PWA topology or its private loopback boundary.
+
 ## Monorepo: GUI + remote infra in one repo
 
 `protocol/` (shared types + fold reducer, no runtime deps) · `server/` (Rust

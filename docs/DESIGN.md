@@ -31,13 +31,13 @@ from a desktop GUI/browser/phone over Tailscale. Default look/feel mirrors Codex
    └──────────────────────────────────────────────────────────────┘
 ```
 
-The desktop app is the single entry point. It runs an internal hub that
-serves the Svelte client to a local browser window and manages polytoken
-daemons on the local machine. For remote development, it SSHes into a
-remote host, provisions a `pantoken-server` binary there (from a signed
-release archive), and bridges the local browser to the remote runtime over
-a framed stdio transport. There is no standalone server deployment — the
-remote binary is always provisioned and managed by the desktop app.
+The desktop app is the single entry point for its **desktop-initiated remote-target mode**. It runs an internal hub that serves the Svelte client to a local browser window and manages polytoken daemons on the local machine. For remote development, it SSHes into a remote host, provisions a `pantoken-server` binary there (from a signed release archive), and bridges the local browser to the remote runtime over a framed stdio transport. There is no standalone server deployment in that desktop-target mode — the remote binary is always provisioned and managed by the desktop app. This historical desktop-target statement does not describe the supported Mac Mini phone/PWA topology.
+
+### Supported Mac Mini phone/PWA topology
+
+The authoritative v1 contract is [`ADR-mac-mini-remote-access.md`](ADR-mac-mini-remote-access.md). An installed iPhone PWA reaches the Mac Mini over a user-configured private HTTPS Tailscale Serve origin; Serve proxies only to `127.0.0.1:<stable-port>`, where Pantoken.app supervises the bundled `pantoken-server`. Pantoken does not discover or mutate Tailscale, and this path has no direct port forwarding, Funnel, LAN/Tailscale bind, public exposure, or second mobile backend. The signed `.app` update remains distinct from a PWA service-worker/client update and atomically updates shell + bundled server + client.
+
+The SSH/provisioning diagram above remains a separate desktop-initiated remote-target mode. It must not be read as a replacement for, or permission to broaden, the private Mac Mini Serve boundary.
 
 **Load-bearing principle:** split **durable shared state** (sessions,
 transcripts, statuses, pending approvals — server-owned, broadcast) from
