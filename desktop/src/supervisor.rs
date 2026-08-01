@@ -6,8 +6,8 @@ use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::config::PantokenConfig;
@@ -269,21 +269,6 @@ fn authorization_header(token: Option<&str>) -> String {
         .unwrap_or_default()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::authorization_header;
-
-    #[test]
-    fn supervisor_health_auth_contract() {
-        assert_eq!(authorization_header(None), "");
-        assert_eq!(
-            authorization_header(Some("test-token")),
-            "Authorization: Bearer test-token\\r\\n"
-        );
-        assert_eq!(authorization_header(Some("")), "");
-    }
-}
-
 /// SIGTERM, wait up to 5s, then SIGKILL. The server exits cleanly on SIGTERM (releases
 /// its pidlock, shuts daemons down); the KILL is a last resort so quit can't hang.
 fn terminate(child: &mut Child) {
@@ -313,4 +298,19 @@ fn sleep_unless_stopped(stop: &AtomicBool, total: Duration) -> bool {
         std::thread::sleep(Duration::from_millis(50));
     }
     !stop.load(Ordering::SeqCst)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::authorization_header;
+
+    #[test]
+    fn supervisor_health_auth_contract() {
+        assert_eq!(authorization_header(None), "");
+        assert_eq!(
+            authorization_header(Some("test-token")),
+            "Authorization: Bearer test-token\\r\\n"
+        );
+        assert_eq!(authorization_header(Some("")), "");
+    }
 }

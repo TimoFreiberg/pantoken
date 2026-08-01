@@ -53,14 +53,6 @@ struct KeychainTokenReference {
 pub trait TokenStore {
     fn read(&self) -> Result<Option<String>, String>;
     fn write(&self, token: &str) -> Result<(), String>;
-    fn delete(&self) -> Result<(), String>;
-}
-
-#[cfg(not(target_os = "macos"))]
-fn default_token_store() -> Box<dyn TokenStore> {
-    // Non-macOS builds are dev/test-only. Keep the process-independent fake seam
-    // rather than silently introducing a file-backed secret store.
-    Box::new(FakeTokenStore::new())
 }
 
 #[cfg(target_os = "macos")]
@@ -68,19 +60,27 @@ fn default_token_store() -> Box<dyn TokenStore> {
     Box::new(MacOsKeychain)
 }
 
+#[cfg(test)]
 #[derive(Default)]
-pub struct FakeTokenStore {
+struct FakeTokenStore {
     token: std::sync::Mutex<Option<String>>,
-    pub fail_reads: std::sync::atomic::AtomicBool,
-    pub fail_writes: std::sync::atomic::AtomicBool,
+    fail_reads: std::sync::atomic::AtomicBool,
+    fail_writes: std::sync::atomic::AtomicBool,
 }
 
+#[cfg(test)]
 impl FakeTokenStore {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self::default()
+    }
+
+    fn delete(&self) -> Result<(), String> {
+        *self.token.lock().unwrap() = None;
+        Ok(())
     }
 }
 
+#[cfg(test)]
 impl TokenStore for FakeTokenStore {
     fn read(&self) -> Result<Option<String>, String> {
         if self.fail_reads.load(std::sync::atomic::Ordering::SeqCst) {
@@ -93,10 +93,6 @@ impl TokenStore for FakeTokenStore {
             return Err("keychain write failed".into());
         }
         *self.token.lock().unwrap() = Some(token.to_owned());
-        Ok(())
-    }
-    fn delete(&self) -> Result<(), String> {
-        *self.token.lock().unwrap() = None;
         Ok(())
     }
 }
@@ -143,21 +139,6 @@ impl TokenStore for MacOsKeychain {
             .then_some(())
             .ok_or_else(|| "keychain write failed".into())
     }
-    fn delete(&self) -> Result<(), String> {
-        let status = std::process::Command::new("security")
-            .args([
-                "delete-generic-password",
-                "-s",
-                KEYCHAIN_SERVICE,
-                "-a",
-                KEYCHAIN_ACCOUNT,
-            ])
-            .status()
-            .map_err(|e| format!("keychain delete failed: {e}"))?;
-        (status.success() || status.code() == Some(44))
-            .then_some(())
-            .ok_or_else(|| "keychain delete failed".into())
-    }
 }
 
 pub struct PantokenConfig {
@@ -180,14 +161,6 @@ pub struct PantokenConfig {
 }
 
 impl PantokenConfig {
-    /// `resource_dir`: the app's resource dir from Tauri's path resolver (bundle:
-    /// Contents/Resources; dev: the staging dir next to the target binary). Passed in
-    /// rather than resolved here so this stays a dumb, testable struct.
-    /// Err = misconfiguration that must be presented fatally (never fall back silent).
-    pub fn resolve(server_port: u16, resource_dir: &Path) -> Result<Self, String> {
-        Ok(Self::build(server_port, resolve_hub_mode(resource_dir)?))
-    }
-
     /// Resolve the startup mode before selecting a port. Local mode preserves the
     /// historical random-port behavior; enabled remote mode is deterministic and
     /// fails closed if its persisted configuration or Keychain item is invalid.
@@ -365,6 +338,7 @@ impl PantokenConfig {
         })
     }
 
+    #[cfg(test)]
     pub fn save_remote(path: &Path, remote: &RemoteConfig) -> Result<(), String> {
         Self::validate_remote_port(remote.hub_port)?;
         if let Some(origin) = &remote.origin {
@@ -434,7 +408,7 @@ pub fn canonical_origin(origin: &str) -> Result<String, String> {
     Ok(parsed.to_string())
 }
 
-struct HubResolution {
+pub(crate) struct HubResolution {
     hub_bin: PathBuf,
     client_dist: PathBuf,
 }
@@ -451,7 +425,7 @@ fn resolve_hub_mode(resource_dir: &Path) -> Result<HubResolution, String> {
         Ok(other) => {
             return Err(format!(
                 "PANTOKEN_HUB_MODE must be 'bundled' (got '{other}'); clone mode was removed when the TS server was deleted"
-            ))
+            ));
         }
         Err(_) => {
             // Auto-detect: are we inside a .app bundle?
@@ -561,9 +535,10 @@ mod tests {
         );
         let env = cfg.server_env();
         assert!(env.iter().any(|(k, v)| k == "PANTOKEN_PORT" && v == "9999"));
-        assert!(env
-            .iter()
-            .any(|(k, v)| k == "PANTOKEN_HOST" && v == "127.0.0.1"));
+        assert!(
+            env.iter()
+                .any(|(k, v)| k == "PANTOKEN_HOST" && v == "127.0.0.1")
+        );
         assert!(!env.iter().any(|(k, _)| k == "PANTOKEN_TOKEN"));
     }
 
@@ -579,14 +554,16 @@ mod tests {
         )
         .unwrap();
         assert_eq!(cfg.mode, LaunchMode::Remote);
-        assert!(cfg
-            .server_env()
-            .iter()
-            .any(|(k, v)| k == "PANTOKEN_TOKEN" && v == "test-token"));
-        assert!(cfg
-            .server_env()
-            .iter()
-            .any(|(k, v)| k == "PANTOKEN_HOST" && v == "127.0.0.1"));
+        assert!(
+            cfg.server_env()
+                .iter()
+                .any(|(k, v)| k == "PANTOKEN_TOKEN" && v == "test-token")
+        );
+        assert!(
+            cfg.server_env()
+                .iter()
+                .any(|(k, v)| k == "PANTOKEN_HOST" && v == "127.0.0.1")
+        );
     }
 
     #[test]
