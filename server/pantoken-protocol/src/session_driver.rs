@@ -559,6 +559,10 @@ pub enum HostUiResponse {
         #[serde(rename = "requestId")]
         request_id: String,
         value: String,
+        /// Present only when a plan-handoff refusal is intentionally submitting
+        /// feedback. `Some("")` is meaningful and must not be omitted.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        feedback: Option<String>,
     },
     Confirmed {
         #[serde(rename = "requestId")]
@@ -676,6 +680,12 @@ pub enum HostUiRequest {
         target_facet: Option<String>,
         #[serde(rename = "actionLabels")]
         action_labels: [String; 3],
+        #[serde(
+            skip_serializing_if = "Option::is_none",
+            default,
+            rename = "refuseLabel"
+        )]
+        refuse_label: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default, rename = "timeoutMs")]
         timeout_ms: Option<i64>,
     },
@@ -1388,10 +1398,12 @@ mod tests {
                 HostUiRequest::Plan {
                     plan_text,
                     action_labels,
+                    refuse_label,
                     ..
                 } => {
                     assert_eq!(plan_text, "Do stuff");
                     assert_eq!(action_labels[0], "New context");
+                    assert_eq!(refuse_label, None);
                 }
                 _ => panic!("expected Plan"),
             },
@@ -1407,6 +1419,57 @@ mod tests {
             HostUiResponse::Value { value, .. } => assert_eq!(value, "yes"),
             _ => panic!("expected Value"),
         }
+    }
+
+    #[test]
+    fn session_driver_modern_plan_request_round_trip() {
+        let request = HostUiRequest::Plan {
+            request_id: "r4".into(),
+            title: "Plan".into(),
+            plan_text: "Do stuff".into(),
+            display_path: None,
+            target_facet: None,
+            action_labels: ["New".into(), "Current".into(), "Cancel".into()],
+            refuse_label: Some("Reject with feedback".into()),
+            timeout_ms: None,
+        };
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["refuseLabel"], "Reject with feedback");
+        let decoded: HostUiRequest = serde_json::from_value(json).unwrap();
+        assert!(
+            matches!(decoded, HostUiRequest::Plan { refuse_label: Some(label), .. } if label == "Reject with feedback")
+        );
+    }
+
+    #[test]
+    fn session_driver_value_feedback_round_trip() {
+        let response = HostUiResponse::Value {
+            request_id: "r1".into(),
+            value: "Reject with feedback".into(),
+            feedback: Some("Please address the tests".into()),
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["feedback"], "Please address the tests");
+        let decoded: HostUiResponse = serde_json::from_value(json).unwrap();
+        assert!(
+            matches!(decoded, HostUiResponse::Value { feedback: Some(text), .. } if text == "Please address the tests")
+        );
+    }
+
+    #[test]
+    fn session_driver_empty_feedback_round_trip() {
+        let response = HostUiResponse::Value {
+            request_id: "r1".into(),
+            value: "Reject with feedback".into(),
+            feedback: Some(String::new()),
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["feedback"], "");
+        assert!(json.as_object().unwrap().contains_key("feedback"));
+        let decoded: HostUiResponse = serde_json::from_value(json).unwrap();
+        assert!(
+            matches!(decoded, HostUiResponse::Value { feedback: Some(text), .. } if text.is_empty())
+        );
     }
 
     #[test]

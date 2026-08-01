@@ -26,7 +26,15 @@
 
   let inputValue = $state("");
   let selectedOption = $state<string | null>(null);
-  type ApprovalDraft = { inputValue: string; selectedOption: string | null };
+  let refusalFeedback = $state("");
+  let refusalRevealed = $state(false);
+  let refusalField = $state<HTMLTextAreaElement | null>(null);
+  type ApprovalDraft = {
+    inputValue: string;
+    selectedOption: string | null;
+    refusalFeedback?: string;
+    refusalRevealed?: boolean;
+  };
   const APPROVAL_DRAFTS_KEY = "pantoken.approvalDrafts";
   function loadApprovalDrafts(): Map<string, ApprovalDraft> {
     if (typeof localStorage === "undefined") return new Map();
@@ -40,7 +48,11 @@
             typeof entry[0] === "string" &&
             typeof entry[1]?.inputValue === "string" &&
             (entry[1]?.selectedOption === null ||
-              typeof entry[1]?.selectedOption === "string"),
+              typeof entry[1]?.selectedOption === "string") &&
+            (entry[1]?.refusalFeedback === undefined ||
+              typeof entry[1]?.refusalFeedback === "string") &&
+            (entry[1]?.refusalRevealed === undefined ||
+              typeof entry[1]?.refusalRevealed === "boolean"),
         ),
       );
     } catch {
@@ -68,6 +80,8 @@
     approvalDrafts.set(draftKey(current.requestId), {
       inputValue,
       selectedOption,
+      refusalFeedback,
+      refusalRevealed,
     });
     if (approvalDrafts.size > 20) {
       const oldest = approvalDrafts.keys().next().value;
@@ -103,6 +117,13 @@
       inputValue = "";
     }
     selectedOption = saved?.selectedOption ?? null;
+    if (c?.kind === "plan") {
+      refusalFeedback = saved?.refusalFeedback ?? "";
+      refusalRevealed = saved?.refusalRevealed ?? false;
+    } else {
+      refusalFeedback = "";
+      refusalRevealed = false;
+    }
   });
 
   function cancel() {
@@ -110,19 +131,26 @@
     approvalDrafts.delete(draftKey(current.requestId));
     persistApprovalDrafts();
     approvalDeadlines.delete(draftKey(current.requestId));
+    refusalFeedback = "";
+    refusalRevealed = false;
     attention.clear("approval");
     store.respondUi({ requestId: current.requestId, cancelled: true });
   }
   // An input/editor with unsaved edits — a stray backdrop tap shouldn't nuke typed text.
   const isDirty = $derived.by(() => {
     const c = current;
-    if (!c || (c.kind !== "input" && c.kind !== "editor")) return false;
+    if (!c) return false;
+    if (c.kind === "plan") return refusalRevealed;
+    if (c.kind !== "input" && c.kind !== "editor") return false;
     return inputValue !== (c.initialValue ?? "");
   });
   // These dialogs are cheap to reopen, so a backdrop tap dismisses — EXCEPT a dirty
   // input/editor, where a stray tap (common on a phone) would lose what you typed; there
   // the buttons are the deliberate dismissal.
   function scrimClick() {
+    // A revealed refusal editor is intentionally modal: scrim taps must not submit or
+    // discard its request-scoped draft. Untouched plan dialogs retain their old dismiss
+    // behavior, as do clean dialogs of the other kinds.
     if (isDirty) return;
     cancel();
   }
@@ -158,15 +186,16 @@
     approvalDrafts.delete(draftKey(current.requestId));
     persistApprovalDrafts();
     approvalDeadlines.delete(draftKey(current.requestId));
+    refusalFeedback = "";
+    refusalRevealed = false;
     attention.clear("approval");
     store.respondUi({ requestId: current.requestId, value: v });
   }
 
-  // Click-twice confirm gate for the plan-kind Cancel button (mirrors
-  // ContextMeter.svelte). First click arms (label → "Click again",
-  // danger-red); second click fires submitValue(cancelLabel). A 3s timer
-  // auto-disarms. Only the plan kind's Cancel is gated — other approval kinds
-  // stay single-click per the issue.
+  // Plan refusal uses an explicit two-step affordance: the first click reveals an
+  // optional feedback field, while the second click submits the dedicated refusal
+  // response (including an intentional empty string). A distinct cancel action keeps
+  // the existing click-twice safety gate for the no-feedback cancel path.
   const ARM_TIMEOUT = 3000;
   let planCancelArmed = $state(false);
   let planCancelTimer: ReturnType<typeof setTimeout> | null = null;
@@ -187,12 +216,68 @@
       planCancelTimer = setTimeout(disarmPlanCancel, ARM_TIMEOUT);
     }
   }
+  function normalizePlanLabel(label: string): string {
+    return label.replace(/\s*\(Tab for feedback\)\s*$/i, "").trim();
+  }
+  const planRefusal = $derived.by(() => {
+    if (current?.kind !== "plan") {
+      return {
+        cancelLabel: "",
+        refusalWireLabel: "",
+        refusalLabel: "",
+        available: false,
+        distinct: false,
+      };
+    }
+    const explicit =
+      "refuseLabel" in current && typeof current.refuseLabel === "string"
+        ? current.refuseLabel
+        : undefined;
+    const collidesWithImplementation =
+      explicit === current.actionLabels[0] || explicit === current.actionLabels[1];
+    const available = explicit === undefined ? true : !collidesWithImplementation;
+    const refusalWireLabel = available ? (explicit ?? current.actionLabels[2]) : "";
+    return {
+      cancelLabel: current.actionLabels[2],
+      refusalWireLabel,
+      refusalLabel: normalizePlanLabel(refusalWireLabel),
+      available,
+      distinct: available && refusalWireLabel !== current.actionLabels[2],
+    };
+  });
+  function focusRefusalField(): void {
+    queueMicrotask(() => refusalField?.focus());
+  }
+  function revealRefusal(): void {
+    if (!current || current.kind !== "plan" || !planRefusal.available) return;
+    refusalRevealed = true;
+    rememberDraft();
+    focusRefusalField();
+  }
+  function submitRefusal(): void {
+    if (!current || current.kind !== "plan" || !planRefusal.available) return;
+    const requestId = current.requestId;
+    const value = planRefusal.refusalWireLabel;
+    const feedback = refusalFeedback;
+    approvalDrafts.delete(draftKey(requestId));
+    persistApprovalDrafts();
+    approvalDeadlines.delete(draftKey(requestId));
+    refusalFeedback = "";
+    refusalRevealed = false;
+    disarmPlanCancel();
+    attention.clear("approval");
+    store.respondUi({ requestId, value, feedback });
+  }
+  function attemptPlanRefusal(): void {
+    if (refusalRevealed) submitRefusal();
+    else revealRefusal();
+  }
   onDestroy(() => disarmPlanCancel());
   const planCancelLabel = $derived(
     planCancelArmed
       ? "Click again"
       : current?.kind === "plan"
-        ? current.actionLabels[2]
+        ? normalizePlanLabel(current.actionLabels[2])
         : "",
   );
 
@@ -240,19 +325,21 @@
   const remainingSec = $derived(Math.max(0, Math.ceil(remainingMs / 1000)));
   const progress = $derived(timeoutMs ? Math.max(0, Math.min(1, remainingMs / timeoutMs)) : 0);
 
-  // Deny-safe auto-resolution: confirm → confirm(false); plan → the cancel label
-  // (a typed plan_handoff_answer, matching the visible Cancel button's wire shape —
-  // not the universal {cancelled} that other kinds use); everything else → cancel().
+  // Deny-safe auto-resolution: confirm → confirm(false); plans and every other
+  // non-confirm kind → the generic {cancelled: true} response. Only an explicit
+  // plan value response may produce a typed plan_handoff_answer decision.
   function autoResolve(c: HostUiRequest): void {
     const key = draftKey(c.requestId);
     approvalDrafts.delete(key);
     persistApprovalDrafts();
     approvalDeadlines.delete(key);
+    if (c.kind === "plan" && current?.requestId === c.requestId) {
+      refusalFeedback = "";
+      refusalRevealed = false;
+    }
     attention.clear("approval");
     if (c.kind === "confirm")
       store.respondUi({ requestId: c.requestId, confirmed: false });
-    else if (c.kind === "plan")
-      store.respondUi({ requestId: c.requestId, value: c.actionLabels[2] });
     else store.respondUi({ requestId: c.requestId, cancelled: true });
   }
 
@@ -358,6 +445,7 @@
     if (id !== lastApprovalId) {
       if (lastApprovalId !== undefined) attention.clear("approval");
       disarmPlanCancel();
+      refusalField = null;
       lastApprovalId = id;
     }
   });
@@ -416,7 +504,8 @@
       const bareInputSubmit = current?.kind === "input" && !e.shiftKey;
       if (e.metaKey || e.ctrlKey || bareInputSubmit) {
         e.preventDefault();
-        primaryAction();
+        if (current?.kind === "plan" && refusalRevealed) submitRefusal();
+        else primaryAction();
       }
       return;
     }
@@ -519,10 +608,56 @@
       <div class="plan-body">
         <Markdown content={current.planText} final />
       </div>
-      <div class="actions three">
-        <Button variant="secondary" size="lg" block class={planCancelArmed ? "armed" : ""} title={planCancelArmed ? "Click again to cancel" : current.actionLabels[2]} onclick={attemptPlanCancel}>{planCancelLabel}</Button>
-        <Button variant="secondary" size="lg" block title={current.actionLabels[1]} onclick={() => submitValue(current.actionLabels[1])}>{current.actionLabels[1]}</Button>
-        <Button variant="primary" size="lg" block title={current.actionLabels[0]} onclick={() => submitValue(current.actionLabels[0])}>{current.actionLabels[0]}</Button>
+      {#if refusalRevealed}
+        <div class="refusal-editor">
+          <label for="plan-refusal-feedback">Optional feedback</label>
+          <textarea
+            id="plan-refusal-feedback"
+            class="refusal-feedback"
+            bind:this={refusalField}
+            value={refusalFeedback}
+            oninput={(e) => { refusalFeedback = e.currentTarget.value; rememberDraft(); }}
+            placeholder="Add optional feedback for the plan author"
+            aria-label="Optional feedback for refusing this plan"
+            rows="3"
+          ></textarea>
+        </div>
+      {/if}
+      <div class="actions plan-actions">
+        {#if planRefusal.distinct}
+          <Button
+            variant="secondary"
+            size="lg"
+            block
+            class="refusal-action"
+            title="Explain why this plan should not be implemented"
+            aria-label={planRefusal.refusalLabel}
+            onclick={attemptPlanRefusal}
+          >{planRefusal.refusalLabel}</Button>
+        {/if}
+        {#if planRefusal.distinct || planRefusal.refusalWireLabel !== planRefusal.cancelLabel}
+          <Button
+            variant="secondary"
+            size="lg"
+            block
+            class={planCancelArmed ? "armed" : ""}
+            title={planCancelArmed ? "Click again to cancel" : planCancelLabel}
+            aria-label={planCancelLabel}
+            onclick={attemptPlanCancel}
+          >{planCancelLabel}</Button>
+        {:else if planRefusal.available}
+          <Button
+            variant="secondary"
+            size="lg"
+            block
+            class="refusal-action"
+            title="Click once to add optional feedback; click again to refuse"
+            aria-label={planCancelLabel}
+            onclick={attemptPlanRefusal}
+          >{planCancelLabel}</Button>
+        {/if}
+        <Button variant="secondary" size="lg" block title={current.actionLabels[1]} aria-label={current.actionLabels[1]} onclick={() => submitValue(current.actionLabels[1])}>{current.actionLabels[1]}</Button>
+        <Button variant="primary" size="lg" block title={current.actionLabels[0]} aria-label={current.actionLabels[0]} onclick={() => submitValue(current.actionLabels[0])}>{current.actionLabels[0]}</Button>
       </div>
     {:else if current.kind === "input"}
       <h2 id="approval-title">{current.title}</h2>
@@ -725,14 +860,31 @@
   .actions.two {
     flex-direction: row;
   }
-  /* Plan handoff: 3 actions (Cancel | Implement here | Implement new). Stacks to
-     a single column on narrow (phone) widths so each button is a full-width tap
-     target rather than a cramped third. */
-  .actions.three {
+  .refusal-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 12px;
+  }
+  .refusal-editor label {
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 550;
+  }
+  .refusal-feedback {
+    min-height: 80px;
+    resize: vertical;
+    font-family: inherit;
+    font-size: 15px;
+    line-height: 1.45;
+  }
+  /* Plan actions stack on phone so every labeled control remains a comfortable,
+     full-width touch target; desktop preserves the established reverse visual order. */
+  .plan-actions {
     flex-direction: column;
   }
   @media (min-width: 600px) {
-    .actions.three {
+    .plan-actions {
       flex-direction: row;
       flex-wrap: wrap;
     }

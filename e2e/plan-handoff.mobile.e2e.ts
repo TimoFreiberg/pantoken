@@ -5,57 +5,77 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-// Mobile plan-handoff: card stacks full-width with scrollable body, and the
-// facet badge renders in the mobile session-controls summary.
-test("plan-handoff card stacks full-width, body scrolls, and facet badge renders on mobile", async ({
-  page,
-}) => {
-  // ── Plan-handoff card: 3 buttons stack full-width and the body scrolls ──
+// Mobile plan-handoff keeps the body independently scrollable and stacks every
+// refusal/cancel/implementation control into usable touch targets.
+test("plan-handoff.mobile feedback editor is focused and controls remain usable", async ({ page }) => {
   await drive(page, "planhandoff");
   const dialog = page.getByRole("dialog", { name: "Plan handoff" });
   await expect(dialog).toBeVisible();
-
-  // The plan body is a scrollable container (layout sanity on a phone viewport).
   const body = dialog.locator(".plan-body");
-  await expect(body).toBeVisible();
-  // The scroll cap keeps the sheet bounded even with a long plan.
   await expect(body).toHaveCSS("overflow-y", "auto");
+  await expect.poll(() => body.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+  await body.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  await expect.poll(() => body.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
 
-  // The 3-up action layout stacks to a single column on narrow widths so each
-  // button is a full-width tap target rather than a cramped third.
-  const actions = dialog.locator(".actions.three");
-  await expect(actions).toHaveCSS("flex-direction", "column");
-  const buttons = actions.getByRole("button");
-  await expect(buttons).toHaveCount(3);
-  // Each button is full-width (block) — a comfortable tap target.
-  for (const btn of await buttons.all()) {
-    const box = await btn.boundingBox();
+  await dialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
+  const feedback = dialog.getByRole("textbox", { name: /feedback/i });
+  await expect(feedback).toBeFocused();
+  const fieldBox = await feedback.boundingBox();
+  expect(fieldBox).not.toBeNull();
+  expect(fieldBox!.height).toBeGreaterThanOrEqual(44);
+
+  const buttons = dialog.getByRole("button").filter({ hasText: /Reject with feedback|Cancel|Implement/ });
+  for (const button of await buttons.all()) {
+    const box = await button.boundingBox();
     expect(box).not.toBeNull();
-    // Pixel 7 viewport width is 412px; full-width buttons should span most of it.
-    expect(box!.width).toBeGreaterThan(280);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual((await page.evaluate(() => innerWidth)) + 1);
   }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    await page.evaluate(() => innerWidth),
+  );
+});
 
-  // Cancel dismisses the card. The button sends {value:"Cancel"} (not {cancelled}),
-  // so the mock acks it as "Received: Cancel" — distinct from the Esc path.
-  // The click-twice confirm gate means the first click arms the button
-  // (label → "Click again"), and the second click fires.
-  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-  await expect(dialog.getByRole("button", { name: "Click again" })).toBeVisible();
-  await dialog.getByRole("button", { name: "Click again" }).click();
-  await expect(dialog).toBeHidden();
-  await expect(page.getByText("Received: Cancel")).toBeVisible();
+test("plan-handoff preserves refusal draft across pending-dialog navigation", async ({ page }) => {
+  await drive(page, "planhandoffpending");
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
+  await dialog.getByRole("textbox", { name: /feedback/i }).fill("mobile pending sentinel");
+  await dialog.getByTitle("Next pending request").click();
+  await dialog.getByTitle("Previous pending request").click();
+  await expect(dialog.getByRole("textbox", { name: /feedback/i })).toHaveValue("mobile pending sentinel");
+});
 
-  // ── Facet badge renders on mobile when the facet is plan ──────────────
+// The original request is then remotely resolved and replaced. Its request-scoped
+// refusal draft must be removed rather than appearing on the replacement request.
+test("plan-handoff refusal draft is cleared after request replacement", async ({ page }) => {
+  await drive(page, "planhandoffpending");
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
+  await dialog.getByRole("textbox", { name: /feedback/i }).fill("stale replacement sentinel");
+  await expect(dialog.getByTitle("Next pending request")).toBeVisible();
+  await expect(dialog.getByRole("textbox", { name: /feedback/i })).toHaveValue("stale replacement sentinel");
+
+  // The mock resolves request A at 5s and emits a distinct replacement request.
+  const replacement = page.getByRole("dialog", { name: "Plan handoff (replacement)" });
+  await expect(replacement).toBeVisible({ timeout: 9000 });
+  await expect(replacement.getByRole("textbox", { name: /feedback/i })).toHaveCount(0);
+  await expect(replacement.getByText("stale replacement sentinel")).toHaveCount(0);
+  await expect(replacement.getByRole("button", { name: "Reject with feedback", exact: true })).toBeVisible();
+});
+
+test("plan-handoff mobile has no horizontal overflow", async ({ page }) => {
+  await drive(page, "planhandoff");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    await page.evaluate(() => innerWidth),
+  );
+});
+
+// Facet badge renders on mobile when the facet is plan.
+test("facet badge renders on mobile plan facet", async ({ page }) => {
   await drive(page, "planfacet");
-  // On mobile, the desktop facet-badge is hidden (display:none inside
-  // .desktop-config-left at max-width:859px). The facet surfaces in the
-  // mobile session-controls summary button — its second span is the
-  // facetSummary (capitalized facet name).
   const summary = page.getByTestId("mobile-session-controls-trigger");
   await expect(summary).toBeVisible();
-  const facetSpan = summary.locator("span").nth(1);
-  // The 1500ms dwell reverts the script's facet to execute → the summary
-  // updates to "Execute" (the mobile-specific dwell reversion, not covered by
-  // the desktop badge test).
-  await expect(facetSpan).toHaveText("Execute");
+  await expect(summary.locator("span").nth(1)).toHaveText("Execute");
 });

@@ -558,6 +558,56 @@ fn assert_request(seen: &[Seen], method: &str, path: &str, body: Option<Value>) 
 }
 
 #[tokio::test]
+async fn test_respond_interrogative_serializes_plan_handoff_refusal_with_feedback() {
+    let (seen, result) = call(StatusCode::NO_CONTENT, json!(null), |client| async move {
+        client
+            .respond_interrogative(
+                "plan refusal",
+                &InterrogativeResponse::PlanHandoffAnswer {
+                    decision: json!({"refuse": {"feedback": "Please split this into smaller steps."}}),
+                },
+            )
+            .await
+    })
+    .await;
+    assert_request(
+        &seen,
+        "POST",
+        "/interrogative/plan%20refusal/respond",
+        Some(json!({
+            "kind": "plan_handoff_answer",
+            "decision": {"refuse": {"feedback": "Please split this into smaller steps."}}
+        })),
+    );
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_respond_interrogative_serializes_plan_handoff_refusal_with_empty_feedback() {
+    let (seen, result) = call(StatusCode::NO_CONTENT, json!(null), |client| async move {
+        client
+            .respond_interrogative(
+                "plan refusal empty",
+                &InterrogativeResponse::PlanHandoffAnswer {
+                    decision: json!({"refuse": {"feedback": ""}}),
+                },
+            )
+            .await
+    })
+    .await;
+    assert_request(
+        &seen,
+        "POST",
+        "/interrogative/plan%20refusal%20empty/respond",
+        Some(json!({
+            "kind": "plan_handoff_answer",
+            "decision": {"refuse": {"feedback": ""}}
+        })),
+    );
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
 async fn daemon_client_endpoint_contract_matrix() {
     let expected: std::collections::BTreeSet<_> = EXPECTED_EXECUTABLE_CONTRACTS
         .iter()

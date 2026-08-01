@@ -59,7 +59,7 @@ const NEW_SESSION_TITLE: &str = "New session";
 const MARKDOWN_SAMPLE: &str = "## Markdown showcase\n\nHere's **bold**, *italic*, ~~struck~~, and `inline code`, plus a [link](https://example.com).\n\n### A table\n\n| Feature     | Status |\n| ----------- | ------ |\n| Headers     | done   |\n| Tables      | done   |\n| Code blocks | done   |\n\n### A wide table\n\nA many-columned table is wider than a phone screen; it must scroll\nhorizontally instead of overflowing the viewport.\n\n| Country | Capital  | Population | Currency | Language   | Continent     | CallingCode |\n| ------- | -------- | ---------- | -------- | ---------- | ------------- | ----------- |\n| Japan   | Tokyo    | 125.7M     | JPY      | Japanese   | Asia          | +81         |\n| Brazil  | Brasília | 214.3M     | BRL      | Portuguese | South America | +55         |\n\n### A list\n\n1. First item\n2. Second item\n   - nested bullet\n   - another\n\n> A blockquote, for good measure.\n\n```ts\nfunction greet(name: string) {\n  return `hello, ${name}`;\n}\n```";
 
 /// Plan handoff text (ported from fixtures.ts planHandoff()).
-const PLAN_HANDOFF_TEXT: &str = "# Plan: Add facet indicator + plan-handoff card\n\n## Goal\nStop discarding plan-mode data the daemon already streams. Render the plan\nmarkdown in the handoff card and show a facet badge in the header.\n\n## Steps\n1. Add a `plan` variant to `HostUiRequest` in the protocol.\n2. Thread `plan_text` through the server event-map.\n3. Render markdown + 3 buttons in `ApprovalLayer.svelte`.\n4. Add a facet badge to `StatusHeader.svelte`.\n\n## Code\n```ts\ncase \"plan_handoff\": {\n  const ph = ev.plan_handoff;\n  const labels = ph\n    ? [ph.action_labels.implement_new_context,\n       ph.action_labels.implement_current_context,\n       ph.action_labels.cancel]\n    : [\"Implement (new context)\", \"Implement (current context)\", \"Cancel\"];\n  pending.planHandoffLabels = labels;\n}\n```\n\n## Risks\n- `plan_text` can be several KB; the card caps height at ~50vh and scrolls.\n- The default-facet sentinel is `\"execute\"`; a different default would show the\n  badge spuriously.\n\nOnce approved, the chosen label round-trips to a `plan_handoff_answer` decision\nvia the reverse mapping in `ui-bridge.ts` (no change needed there).";
+const PLAN_HANDOFF_TEXT: &str = "# Plan: Add facet indicator + plan-handoff card\n\n## Goal\nStop discarding plan-mode data the daemon already streams. Render the plan\nmarkdown in the handoff card and show a facet badge in the header.\n\n## Steps\n1. Add a `plan` variant to `HostUiRequest` in the protocol.\n2. Thread `plan_text` through the server event-map.\n3. Render markdown + refusal feedback in `ApprovalLayer.svelte`.\n4. Add a facet badge to `StatusHeader.svelte`.\n\n## Code\n```ts\ncase \"plan_handoff\": {\n  const ph = ev.plan_handoff;\n  const labels = ph\n    ? [ph.action_labels.implement_new_context,\n       ph.action_labels.implement_current_context,\n       ph.action_labels.cancel]\n    : [\"Implement (new context)\", \"Implement (current context)\", \"Cancel\"];\n  pending.planHandoffLabels = labels;\n}\n```\n\n## Risks\n- `plan_text` can be several KB; the card caps height at ~50vh and scrolls.\n- The default-facet sentinel is `\"execute\"`; a different default would show the\n  badge spuriously.\n\n## Verification\nThe handoff must preserve the daemon action order, keep implementation actions\nunchanged, and let an operator reject the plan with optional written feedback.\nThe refusal explanation is submitted through the dedicated plan-handoff decision,\nnot as a follow-up prompt.\n\n## Rollout\nAfter approval, the chosen implementation label round-trips through the existing\ninterrogative response endpoint. Older daemons may omit the refusal label, in which\ncase the legacy cancel label remains the explicit feedback affordance.\n\nOnce approved, the chosen label round-trips to a `plan_handoff_answer` decision\nvia the reverse mapping in `ui-bridge.ts` (no change needed there).";
 
 /// Long context for the `qnatall` script — enough paragraphs to overflow the
 /// QnA form's `.ctx` scroll region at the desktop viewport so scroll position
@@ -1556,6 +1556,38 @@ struct ScriptStep {
     event: SessionDriverEvent,
 }
 
+/// Build a plan-handoff request with the shared daemon action order. The optional
+/// refusal label deliberately stays separate from the legacy three labels so the
+/// legacy fixture exercises omission rather than a synthetic fourth action.
+fn plan_request(
+    request_id: &str,
+    title: &str,
+    plan_text: &str,
+    refuse_label: Option<&str>,
+    timeout_ms: Option<i64>,
+) -> ScriptStep {
+    ScriptStep {
+        wait_ms: 0,
+        event: SessionDriverEvent::HostUiRequest {
+            base: base(),
+            request: HostUiRequest::Plan {
+                request_id: request_id.into(),
+                title: title.into(),
+                plan_text: plan_text.into(),
+                display_path: Some("plan.md".into()),
+                target_facet: Some("execute".into()),
+                action_labels: [
+                    "Implement (new context)".into(),
+                    "Implement (current context)".into(),
+                    "Cancel".into(),
+                ],
+                refuse_label: refuse_label.map(str::to_owned),
+                timeout_ms,
+            },
+        },
+    }
+}
+
 /// A matched toolStarted → toolFinished pair with a deterministic duration.
 /// Bumps the clock by `duration_ms` between stamping the two events so the
 /// card's elapsed badge reads realistically.
@@ -2070,6 +2102,9 @@ pub struct MockDriver {
     /// original request (e.g. a Q&A's questions) when forming the tool result.
     /// Mirrors the TS MockDriver's `pendingDialogs`.
     pending_dialogs: Arc<Mutex<std::collections::HashMap<String, PendingDialog>>>,
+    /// Number of responses observed since reset, used by plan-handoff fixtures to
+    /// expose deterministic wire-like response summaries to browser tests.
+    response_count: Arc<AtomicU64>,
     /// The adventurous-handoff flag, toggled by `toggle_adventurous_handoff`.
     /// Mirrors the TS MockDriver's `adventurousHandoff` private field.
     adventurous_handoff: Arc<std::sync::Mutex<bool>>,
@@ -2166,6 +2201,7 @@ impl MockDriver {
             new_session_seed_delay_ms: AtomicU64::new(0),
             abort_settle_delay_ms: AtomicU64::new(0),
             pending_dialogs: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            response_count: Arc::new(AtomicU64::new(0)),
             adventurous_handoff: Arc::new(std::sync::Mutex::new(false)),
             goal: Arc::new(std::sync::Mutex::new(None)),
             in_flight: Arc::new(Mutex::new(None)),
@@ -2211,6 +2247,7 @@ impl MockDriver {
         self.generation.fetch_add(1, Ordering::Relaxed);
         *self.in_flight.lock() = None;
         self.pending_dialogs.lock().clear();
+        self.response_count.store(0, Ordering::Relaxed);
     }
 
     /// Mark a session as "warm" (has a live daemon attachment) for testing
@@ -2379,9 +2416,11 @@ fn fire_step(
     pending: &Arc<Mutex<std::collections::HashMap<String, PendingDialog>>>,
 ) {
     // Track dialog requests so respondUi can look them up later
-    // (mirrors TS fireStep's pendingDialogs.set for hostUiRequest).
-    if let SessionDriverEvent::HostUiRequest { base, request } = &step.event {
-        if is_dialog_request(request) {
+    // (mirrors TS fireStep's pendingDialogs.set for hostUiRequest). A scripted
+    // HostUiResolved also clears bookkeeping, which lets the pending fixture
+    // model remote resolution before a replacement request arrives.
+    match &step.event {
+        SessionDriverEvent::HostUiRequest { base, request } if is_dialog_request(request) => {
             pending.lock().insert(
                 request_id_of(request).to_string(),
                 PendingDialog {
@@ -2390,6 +2429,10 @@ fn fire_step(
                 },
             );
         }
+        SessionDriverEvent::HostUiResolved { request_id, .. } => {
+            pending.lock().remove(request_id);
+        }
+        _ => {}
     }
     let listeners = listeners.lock();
     for (_, tx) in listeners.iter() {
@@ -2699,6 +2742,7 @@ impl PantokenDriver for MockDriver {
             request_id: request_id.clone(),
         });
 
+        let response_number = self.response_count.fetch_add(1, Ordering::Relaxed) + 1;
         match &response {
             HostUiResponse::Answers { answers, .. } => {
                 // Q&A: mirror the real driver, where the `answer` tool records the
@@ -2734,16 +2778,80 @@ impl PantokenDriver for MockDriver {
             }
             _ => {
                 // Confirm/input/cancelled: emit a notify with the summary message.
-                let summary = match &response {
-                    HostUiResponse::Cancelled { .. } => "Dialog cancelled.".to_string(),
+                // Plan refusals use the same UI response endpoint but carry an
+                // explicit feedback marker, including Some("") for an intentional
+                // empty explanation. Keep the wire-like summary separate from the
+                // human notice so E2E can assert the exact cancellation shape.
+                let (summary, wire_summary) = match &response {
+                    HostUiResponse::Cancelled { .. } => (
+                        "Dialog cancelled.".to_string(),
+                        serde_json::json!({
+                            "requestId": request_id.clone(),
+                            "cancelled": true,
+                            "responseCount": response_number,
+                        }),
+                    ),
                     HostUiResponse::Confirmed { confirmed, .. } => {
-                        if *confirmed {
-                            "Approved — continuing.".to_string()
+                        let summary = if *confirmed {
+                            "Approved — continuing."
                         } else {
-                            "Denied — skipping that step.".to_string()
+                            "Denied — skipping that step."
+                        };
+                        (
+                            summary.to_string(),
+                            serde_json::json!({
+                                "requestId": request_id.clone(),
+                                "confirmed": confirmed,
+                                "responseCount": response_number,
+                            }),
+                        )
+                    }
+                    HostUiResponse::Value {
+                        value, feedback, ..
+                    } => {
+                        let is_plan = pending
+                            .as_ref()
+                            .is_some_and(|d| matches!(&d.request, HostUiRequest::Plan { .. }));
+                        if is_plan {
+                            if let Some(feedback) = feedback {
+                                let supplied = !feedback.is_empty();
+                                (
+                                    format!(
+                                        "Plan refusal submitted{}.",
+                                        if supplied {
+                                            " with feedback"
+                                        } else {
+                                            " without feedback"
+                                        }
+                                    ),
+                                    serde_json::json!({
+                                        "requestId": request_id.clone(),
+                                        "value": value,
+                                        "decision": { "refuse": { "feedback": feedback } },
+                                        "responseCount": response_number,
+                                    }),
+                                )
+                            } else {
+                                (
+                                    format!("Received: {value}"),
+                                    serde_json::json!({
+                                        "requestId": request_id.clone(),
+                                        "value": value,
+                                        "responseCount": response_number,
+                                    }),
+                                )
+                            }
+                        } else {
+                            (
+                                format!("Received: {value}"),
+                                serde_json::json!({
+                                    "requestId": request_id.clone(),
+                                    "value": value,
+                                    "responseCount": response_number,
+                                }),
+                            )
                         }
                     }
-                    HostUiResponse::Value { value, .. } => format!("Received: {value}"),
                     HostUiResponse::Answers { .. } => unreachable!(),
                 };
                 self.emit(SessionDriverEvent::HostUiRequest {
@@ -2751,6 +2859,14 @@ impl PantokenDriver for MockDriver {
                     request: HostUiRequest::Notify {
                         request_id: format!("resolved-{request_id}"),
                         message: summary,
+                        level: Some(NotifyLevel::Info),
+                    },
+                });
+                self.emit(SessionDriverEvent::HostUiRequest {
+                    base: base_with_ref(session_ref),
+                    request: HostUiRequest::Notify {
+                        request_id: format!("response-summary-{request_id}"),
+                        message: format!("respondUi: {}", wire_summary),
                         level: Some(NotifyLevel::Info),
                     },
                 });
@@ -4424,26 +4540,86 @@ impl PantokenDriver for MockDriver {
                 } } },
             ],
             "planhandoff" => vec![
-                ScriptStep { wait_ms: 0, event: SessionDriverEvent::HostUiRequest { base: base(), request: HostUiRequest::Plan {
-                    request_id: "req-plan-handoff-1".into(),
-                    title: "Plan handoff".into(),
-                    plan_text: PLAN_HANDOFF_TEXT.into(),
-                    display_path: Some("plan.md".into()),
-                    target_facet: Some("execute".into()),
-                    action_labels: ["Implement (new context)".into(), "Implement (current context)".into(), "Cancel".into()],
-                    timeout_ms: None,
-                } } },
+                plan_request(
+                    "req-plan-handoff-1",
+                    "Plan handoff",
+                    PLAN_HANDOFF_TEXT,
+                    Some("Reject with feedback (Tab for feedback)"),
+                    None,
+                ),
             ],
             "planhandofftimeout" => vec![
-                ScriptStep { wait_ms: 0, event: SessionDriverEvent::HostUiRequest { base: base(), request: HostUiRequest::Plan {
-                    request_id: "req-plan-handoff-timeout-1".into(),
-                    title: "Plan handoff (timed)".into(),
-                    plan_text: "A short plan that will auto-dismiss on timeout.".into(),
-                    display_path: Some("plan.md".into()),
+                plan_request(
+                    "req-plan-handoff-timeout-1",
+                    "Plan handoff (timed)",
+                    "# Timed plan\n\nThis short plan auto-dismisses after a drafted refusal.",
+                    Some("Reject with feedback (Tab for feedback)"),
+                    Some(1200),
+                ),
+            ],
+            "planhandofflegacy" => vec![
+                plan_request(
+                    "req-plan-handoff-legacy-1",
+                    "Plan handoff (legacy daemon)",
+                    PLAN_HANDOFF_TEXT,
+                    None,
+                    None,
+                ),
+            ],
+            "planhandoffequal" => vec![
+                plan_request(
+                    "req-plan-handoff-equal-1",
+                    "Plan handoff (equal labels)",
+                    "# Equal-label plan\n\nThe refusal label intentionally equals Cancel.",
+                    Some("Cancel"),
+                    Some(1800),
+                ),
+            ],
+            "planhandoffcollision" => vec![
+                plan_request(
+                    "req-plan-handoff-collision-1",
+                    "Plan handoff (collision)",
+                    "# Collision plan\n\nThe refusal label intentionally collides with an implementation label.",
+                    Some("Implement (current context)"),
+                    None,
+                ),
+            ],
+            "planhandoffpending" => vec![
+                plan_request(
+                    "req-plan-handoff-pending-a",
+                    "Plan handoff (pending A)",
+                    PLAN_HANDOFF_TEXT,
+                    Some("Reject with feedback (Tab for feedback)"),
+                    None,
+                ),
+                ScriptStep { wait_ms: 80, event: SessionDriverEvent::HostUiRequest { base: base(), request: HostUiRequest::Plan {
+                    request_id: "req-plan-handoff-pending-b".into(),
+                    title: "Plan handoff (pending B)".into(),
+                    plan_text: "# Pending plan B\n\nA second request remains pending while the first is navigated away from.".into(),
+                    display_path: Some("plan-b.md".into()),
                     target_facet: Some("execute".into()),
                     action_labels: ["Implement (new context)".into(), "Implement (current context)".into(), "Cancel".into()],
-                    timeout_ms: Some(1200),
+                    refuse_label: Some("Reject with feedback (Tab for feedback)".into()),
+                    timeout_ms: None,
                 } } },
+                ScriptStep { wait_ms: 5000, event: SessionDriverEvent::HostUiResolved {
+                    base: base(),
+                    request_id: "req-plan-handoff-pending-a".into(),
+                } },
+                // Resolve B in the same deterministic replacement tick so the new
+                // request becomes the visible current card rather than remaining
+                // behind another still-pending request.
+                ScriptStep { wait_ms: 0, event: SessionDriverEvent::HostUiResolved {
+                    base: base(),
+                    request_id: "req-plan-handoff-pending-b".into(),
+                } },
+                plan_request(
+                    "req-plan-handoff-pending-replacement",
+                    "Plan handoff (replacement)",
+                    "# Replacement plan\n\nThe original pending request was resolved remotely.",
+                    Some("Reject with feedback (Tab for feedback)"),
+                    None,
+                ),
             ],
             "planfacet" => vec![
                 ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated { base: base(), snapshot: snap(SessionStatus::Idle, Some("plan".into()), None, None, None, None) } },

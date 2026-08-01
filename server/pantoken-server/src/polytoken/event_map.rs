@@ -812,6 +812,7 @@ fn build_interrogative_mapping(
         clarification_labels: None,
         clarification_option_keys: None,
         plan_handoff_labels: None,
+        plan_handoff_refuse_label: None,
         questions: None,
         permission_choices: None,
     };
@@ -886,6 +887,8 @@ fn build_interrogative_mapping(
                 ]
             };
             pending.plan_handoff_labels = Some(labels.to_vec());
+            pending.plan_handoff_refuse_label =
+                plan_handoff.and_then(|ph| ph.action_labels.refuse.clone());
             let ph = plan_handoff;
             let event = SessionDriverEvent::HostUiRequest {
                 base,
@@ -898,6 +901,7 @@ fn build_interrogative_mapping(
                     display_path: ph.map(|p| p.display_path.clone()),
                     target_facet: ph.map(|p| p.target_facet.clone()),
                     action_labels: labels,
+                    refuse_label: ph.and_then(|p| p.action_labels.refuse.clone()),
                     timeout_ms: None,
                 },
             };
@@ -1058,6 +1062,7 @@ fn build_ask_user_question_mapping(
         clarification_labels: None,
         clarification_option_keys: None,
         plan_handoff_labels: None,
+        plan_handoff_refuse_label: None,
         questions: Some(pending_questions),
         permission_choices: None,
     };
@@ -3006,6 +3011,9 @@ mod tests {
                 if let Some(v) = &pending.plan_handoff_labels {
                     p.insert("planHandoffLabels".into(), json!(v));
                 }
+                if let Some(v) = &pending.plan_handoff_refuse_label {
+                    p.insert("refuseLabel".into(), json!(v));
+                }
                 if let Some(qs) = &pending.questions {
                     // TS pending.questions is the full array of
                     // {questionId, optionIds, optionLabels} the reverse builder
@@ -4121,9 +4129,9 @@ mod tests {
     }
 
     #[test]
-    fn interrogative_plan_handoff_plan_card_with_markdown_and_action_labels() {
+    fn event_map_plan_refuse_label_present() {
         let out = fold_fresh(
-            json!({ "type": "interrogative", "interrogative_id": "i4", "interrogative_type": "plan_handoff", "plan_handoff": { "action_labels": { "cancel": "Cancel", "implement_current_context": "Implement here", "implement_new_context": "Implement fresh" }, "display_path": "/plan.md", "plan_path": "/plan.md", "plan_text": "the plan", "target_facet": "execute", "title": "Review plan" }, "prompt_id": "p1", "question": "Approve plan?" }),
+            json!({ "type": "interrogative", "interrogative_id": "i4", "interrogative_type": "plan_handoff", "plan_handoff": { "action_labels": { "cancel": "Cancel", "implement_current_context": "Implement here", "implement_new_context": "Implement fresh", "refuse": "Reject with feedback" }, "display_path": "/plan.md", "plan_path": "/plan.md", "plan_text": "the plan", "target_facet": "execute", "title": "Review plan" }, "prompt_id": "p1", "question": "Approve plan?" }),
         );
         let ev = event_json(&out.events[0]);
         assert_eq!(ev["type"], "hostUiRequest");
@@ -4138,16 +4146,45 @@ mod tests {
             req["actionLabels"],
             json!(["Implement fresh", "Implement here", "Cancel"])
         );
+        assert_eq!(req["refuseLabel"], "Reject with feedback");
+        let effect = &effects_json(&out)[0];
+        assert_eq!(effect["type"], "registerInterrogative");
+        assert_eq!(
+            effect["pending"]["planHandoffLabels"],
+            json!(["Implement fresh", "Implement here", "Cancel"])
+        );
+        assert_eq!(effect["pending"]["refuseLabel"], "Reject with feedback");
     }
 
     #[test]
-    fn interrogative_plan_handoff_null_fallback_labels_and_empty_body() {
+    fn event_map_register_interrogative_refuse_label_projection() {
         let out = fold_fresh(
-            json!({ "type": "interrogative", "interrogative_id": "i4", "interrogative_type": "plan_handoff", "plan_handoff": null, "prompt_id": "p1", "question": "Approve plan?" }),
+            json!({ "type": "interrogative", "interrogative_id": "i4", "interrogative_type": "plan_handoff", "plan_handoff": { "action_labels": { "cancel": "Cancel", "implement_current_context": "Implement here", "implement_new_context": "Implement fresh", "refuse": "Reject with feedback" }, "display_path": "/plan.md", "plan_path": "/plan.md", "plan_text": "the plan", "target_facet": "execute", "title": "Review plan" }, "prompt_id": "p1", "question": "Approve plan?" }),
+        );
+        let effect = &effects_json(&out)[0];
+        assert_eq!(effect["type"], "registerInterrogative");
+        assert_eq!(effect["pending"]["refuseLabel"], "Reject with feedback");
+    }
+
+    #[test]
+    fn event_map_plan_refuse_label_omitted() {
+        let out = fold_fresh(
+            json!({ "type": "interrogative", "interrogative_id": "i4", "interrogative_type": "plan_handoff", "plan_handoff": { "action_labels": { "cancel": "Cancel", "implement_current_context": "Implement (current context)", "implement_new_context": "Implement (new context)" }, "display_path": "/plan.md", "plan_path": "/plan.md", "plan_text": "the plan", "target_facet": "execute", "title": "Review plan" }, "prompt_id": "p1", "question": "Approve plan?" }),
         );
         let req = &event_json(&out.events[0])["request"];
         assert_eq!(req["kind"], "plan");
-        assert_eq!(req["planText"], "");
+        assert_eq!(req["planText"], "the plan");
+        assert!(req.get("refuseLabel").is_none());
+        let effect = &effects_json(&out)[0];
+        assert!(effect["pending"].get("refuseLabel").is_none());
+        assert_eq!(
+            effect["pending"]["planHandoffLabels"],
+            json!([
+                "Implement (new context)",
+                "Implement (current context)",
+                "Cancel"
+            ])
+        );
         assert_eq!(
             req["actionLabels"],
             json!([

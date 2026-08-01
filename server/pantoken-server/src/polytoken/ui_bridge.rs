@@ -91,6 +91,9 @@ pub struct PendingInterrogative {
     /// to the daemon's `PlanHandoffDecision` order. The reverse builder maps a
     /// response label → its index → the decision.
     pub plan_handoff_labels: Option<Vec<String>>,
+    /// Optional daemon-provided refusal label for plan-handoff feedback. Absent
+    /// on older daemons, where the legacy cancel label is the fallback.
+    pub plan_handoff_refuse_label: Option<String>,
     /// For `ask_user_question` interrogatives: the per-question id + option ids
     /// plus rendered labels, in pantoken's qna render order. A `QnaAnswer`'s
     /// `selectedOptionIndices` index into `optionLabels`; the builder maps them
@@ -270,7 +273,14 @@ pub fn build_interrogative_response(
             // pantoken renders both as needed; the response shape tells us which
             // path fired.
             match response {
-                HostUiResponse::Value { value, .. } => {
+                HostUiResponse::Value {
+                    value, feedback, ..
+                } => {
+                    // Feedback is a plan-only extension; reject it on all other
+                    // value response paths rather than silently discarding it.
+                    if feedback.is_some() {
+                        return None;
+                    }
                     let labels = pending.clarification_labels.as_deref();
                     let keys = pending.clarification_option_keys.as_deref();
                     if let (Some(labels), Some(keys)) = (labels, keys) {
@@ -319,15 +329,51 @@ pub fn build_interrogative_response(
         }
 
         PendingInterrogativeType::PlanHandoff => {
-            // pantoken plan-handoff card → a select whose value is the chosen LABEL
-            // string. Map label → index → the decision (the labels are parallel
-            // to PLAN_HANDOFF_DECISIONS, captured by the forward mapping).
-            if let HostUiResponse::Value { value, .. } = response {
+            // Plan values carry the selected daemon label. A feedback-bearing
+            // value is the dedicated refusal decision, while a plain value keeps
+            // the legacy three-string decision mapping.
+            if let HostUiResponse::Value {
+                value, feedback, ..
+            } = response
+            {
                 let labels = pending.plan_handoff_labels.as_deref()?;
-                let idx = labels.iter().position(|l| l == value)?;
-                if idx >= PLAN_HANDOFF_DECISIONS.len() {
+                if labels.len() != PLAN_HANDOFF_DECISIONS.len() {
                     return None;
                 }
+
+                let implementation_collision = pending
+                    .plan_handoff_refuse_label
+                    .as_deref()
+                    .is_some_and(|refuse| labels[..2].iter().any(|label| label == refuse));
+
+                if let Some(feedback) = feedback {
+                    // New daemons provide a distinct refusal label. Older daemons
+                    // fall back to the legacy cancel label for explicit feedback.
+                    let refusal_label = pending
+                        .plan_handoff_refuse_label
+                        .as_deref()
+                        .unwrap_or(&labels[2]);
+                    if implementation_collision || value != refusal_label {
+                        return None;
+                    }
+                    let decision: PlanHandoffDecision = serde_json::json!({
+                        "refuse": { "feedback": feedback }
+                    });
+                    return Some(InterrogativeResponse::PlanHandoffAnswer { decision });
+                }
+
+                // A refusal label is an explicit feedback affordance, not a
+                // legacy no-feedback decision. The cancel-label collision is the
+                // intentional exception: plain Cancel must remain `"cancel"`.
+                if pending
+                    .plan_handoff_refuse_label
+                    .as_deref()
+                    .is_some_and(|refuse| refuse != labels[2] && refuse == value)
+                {
+                    return None;
+                }
+
+                let idx = labels.iter().position(|label| label == value)?;
                 let decision: PlanHandoffDecision =
                     serde_json::Value::String(PLAN_HANDOFF_DECISIONS[idx].to_string());
                 Some(InterrogativeResponse::PlanHandoffAnswer { decision })
@@ -347,7 +393,13 @@ pub fn build_interrogative_response(
             // permissionChoices) accepts any known label (backward compat — the
             // existing ui-bridge tests call pending("permission") with no
             // choices).
-            if let HostUiResponse::Value { value, .. } = response {
+            if let HostUiResponse::Value {
+                value, feedback, ..
+            } = response
+            {
+                if feedback.is_some() {
+                    return None;
+                }
                 let idx = PERMISSION_APPROVAL_LABELS
                     .iter()
                     .position(|l| *l == value.as_str())?;
@@ -460,15 +512,21 @@ mod tests {
             clarification_labels: None,
             clarification_option_keys: None,
             plan_handoff_labels: None,
+            plan_handoff_refuse_label: None,
             questions: None,
             permission_choices: None,
         }
     }
 
     fn value(value: &str) -> HostUiResponse {
+        value_with_feedback(value, None)
+    }
+
+    fn value_with_feedback(value: &str, feedback: Option<&str>) -> HostUiResponse {
         HostUiResponse::Value {
             request_id: "i1".to_string(),
             value: value.to_string(),
+            feedback: feedback.map(str::to_string),
         }
     }
 
@@ -515,6 +573,14 @@ mod tests {
         labels: Vec<&str>,
     ) -> PendingInterrogative {
         pending.plan_handoff_labels = Some(labels.into_iter().map(str::to_string).collect());
+        pending
+    }
+
+    fn with_plan_handoff_refuse_label(
+        mut pending: PendingInterrogative,
+        label: &str,
+    ) -> PendingInterrogative {
+        pending.plan_handoff_refuse_label = Some(label.to_string());
         pending
     }
 
@@ -727,7 +793,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_handoff_label_implement_fresh_implement_new_context() {
+    fn plan_handoff_implementation_decision_unchanged() {
         let out = build(
             with_plan_handoff_labels(
                 pending(PendingInterrogativeType::PlanHandoff),
@@ -761,7 +827,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_handoff_label_cancel_cancel() {
+    fn plan_handoff_plain_cancel_decision_unchanged() {
         let out = build(
             with_plan_handoff_labels(
                 pending(PendingInterrogativeType::PlanHandoff),
@@ -787,6 +853,159 @@ mod tests {
             value("Something else"),
         );
         assert!(out.is_none());
+    }
+
+    #[test]
+    fn plan_handoff_refusal_with_feedback() {
+        let out = build(
+            with_plan_handoff_refuse_label(
+                with_plan_handoff_labels(
+                    pending(PendingInterrogativeType::PlanHandoff),
+                    vec!["Implement fresh", "Implement here", "Cancel"],
+                ),
+                "Reject with feedback",
+            ),
+            value_with_feedback("Reject with feedback", Some("Needs more detail")),
+        );
+        assert!(
+            matches!(out, Some(InterrogativeResponse::PlanHandoffAnswer { decision }) if decision == serde_json::json!({"refuse": {"feedback": "Needs more detail"}}))
+        );
+    }
+
+    #[test]
+    fn plan_handoff_refusal_with_empty_feedback() {
+        let out = build(
+            with_plan_handoff_refuse_label(
+                with_plan_handoff_labels(
+                    pending(PendingInterrogativeType::PlanHandoff),
+                    vec!["Implement fresh", "Implement here", "Cancel"],
+                ),
+                "Reject with feedback",
+            ),
+            value_with_feedback("Reject with feedback", Some("")),
+        );
+        assert!(
+            matches!(out, Some(InterrogativeResponse::PlanHandoffAnswer { decision }) if decision == serde_json::json!({"refuse": {"feedback": ""}}))
+        );
+    }
+
+    #[test]
+    fn plan_handoff_modern_refusal_label_match() {
+        let pending = with_plan_handoff_refuse_label(
+            with_plan_handoff_labels(
+                pending(PendingInterrogativeType::PlanHandoff),
+                vec!["New", "Current", "Cancel"],
+            ),
+            "Refuse",
+        );
+        assert!(build(pending, value_with_feedback("Refuse", Some("why"))).is_some());
+    }
+
+    #[test]
+    fn plan_handoff_legacy_cancel_label_feedback_fallback() {
+        let pending = with_plan_handoff_labels(
+            pending(PendingInterrogativeType::PlanHandoff),
+            vec!["New", "Current", "Cancel"],
+        );
+        assert!(
+            matches!(build(pending, value_with_feedback("Cancel", Some("why"))), Some(InterrogativeResponse::PlanHandoffAnswer { decision }) if decision == serde_json::json!({"refuse": {"feedback": "why"}}))
+        );
+    }
+
+    #[test]
+    fn plan_handoff_feedback_on_implementation_label_rejected() {
+        let pending = with_plan_handoff_refuse_label(
+            with_plan_handoff_labels(
+                pending(PendingInterrogativeType::PlanHandoff),
+                vec!["New", "Current", "Cancel"],
+            ),
+            "Refuse",
+        );
+        assert!(build(pending, value_with_feedback("New", Some("why"))).is_none());
+    }
+
+    #[test]
+    fn plan_handoff_feedback_on_unknown_label_rejected() {
+        let pending = with_plan_handoff_refuse_label(
+            with_plan_handoff_labels(
+                pending(PendingInterrogativeType::PlanHandoff),
+                vec!["New", "Current", "Cancel"],
+            ),
+            "Refuse",
+        );
+        assert!(build(pending, value_with_feedback("Other", Some("why"))).is_none());
+    }
+
+    #[test]
+    fn plan_handoff_refusal_label_without_feedback_rejected() {
+        let pending = with_plan_handoff_refuse_label(
+            with_plan_handoff_labels(
+                pending(PendingInterrogativeType::PlanHandoff),
+                vec!["New", "Current", "Cancel"],
+            ),
+            "Refuse",
+        );
+        assert!(build(pending, value("Refuse")).is_none());
+    }
+
+    #[test]
+    fn plan_handoff_refusal_label_collision_rejected() {
+        let pending = with_plan_handoff_refuse_label(
+            with_plan_handoff_labels(
+                pending(PendingInterrogativeType::PlanHandoff),
+                vec!["New", "Current", "Cancel"],
+            ),
+            "New",
+        );
+        assert!(build(pending, value_with_feedback("New", Some("why"))).is_none());
+    }
+
+    #[test]
+    fn plan_handoff_refusal_response_label_equals_cancel_label() {
+        let pending = with_plan_handoff_refuse_label(
+            with_plan_handoff_labels(
+                pending(PendingInterrogativeType::PlanHandoff),
+                vec!["New", "Current", "Cancel"],
+            ),
+            "Cancel",
+        );
+        assert!(
+            matches!(build(pending.clone(), value("Cancel")), Some(InterrogativeResponse::PlanHandoffAnswer { decision }) if decision == serde_json::json!("cancel"))
+        );
+        assert!(
+            matches!(build(pending, value_with_feedback("Cancel", Some("why"))), Some(InterrogativeResponse::PlanHandoffAnswer { decision }) if decision == serde_json::json!({"refuse": {"feedback": "why"}}))
+        );
+    }
+
+    #[test]
+    fn plan_handoff_optional_refusal_label_absent() {
+        let pending = with_plan_handoff_labels(
+            pending(PendingInterrogativeType::PlanHandoff),
+            vec!["New", "Current", "Cancel"],
+        );
+        assert!(build(pending, value_with_feedback("Cancel", Some("why"))).is_some());
+    }
+
+    #[test]
+    fn non_plan_feedback_value_rejected() {
+        assert!(
+            build(
+                with_clarification_options(
+                    pending(PendingInterrogativeType::Clarification),
+                    vec!["Yes"],
+                    vec!["yes"],
+                ),
+                value_with_feedback("Yes", Some("unexpected")),
+            )
+            .is_none()
+        );
+        assert!(
+            build(
+                pending(PendingInterrogativeType::Permission),
+                value_with_feedback("Deny", Some("unexpected")),
+            )
+            .is_none()
+        );
     }
 
     #[test]

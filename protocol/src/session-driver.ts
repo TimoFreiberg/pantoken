@@ -375,7 +375,8 @@ export interface QnaAnswer {
 }
 
 export type HostUiResponse =
-  | { readonly requestId: string; readonly value: string }
+  /** `feedback` is only used by plan-handoff refusal; omit it for all other values. */
+  | { readonly requestId: string; readonly value: string; readonly feedback?: string }
   | { readonly requestId: string; readonly confirmed: boolean }
   | { readonly requestId: string; readonly answers: readonly QnaAnswer[] }
   | { readonly requestId: string; readonly cancelled: true };
@@ -436,6 +437,9 @@ export type HostUiRequest =
        *  [implement_new_context, implement_current_context, cancel]. The card
        *  responds with `{value: chosenLabel}` — same shape as `select`. */
       readonly actionLabels: readonly [string, string, string];
+      /** Optional refusal action label from newer daemons. Older daemons omit it;
+       *  when present, this is the wire label for plan refusal with feedback. */
+      readonly refuseLabel?: string;
       readonly timeoutMs?: number;
     }
   | {
