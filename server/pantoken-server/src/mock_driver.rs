@@ -2123,6 +2123,13 @@ pub struct MockDriver {
     /// only for its own handle (TOCTOU: an old task finishing concurrently with a
     /// new `play_script` must not null out the newer handle).
     next_script_id: AtomicU64,
+    /// Number of `play_script` invocations since the last reset. Runs after the
+    /// first get their dialog request ids suffixed (`-run{N}`) so a second drive
+    /// of the same fixture (e.g. `planhandoff`) cannot emit notice ids that
+    /// duplicate the first drive's (the client derives transcript notice ids
+    /// `resolved-{requestId}`/`response-summary-{requestId}` from them, and the
+    /// keyed transcript drops items with duplicate ids).
+    script_run: AtomicU64,
     /// Mutable session list — `mock_session_list()` at construction + reset, with a
     /// synthetic "new" row PREPENDED by `new_session` (mirrors TS `this.sessions`).
     /// `list_sessions` returns this. The TS
@@ -2206,6 +2213,7 @@ impl MockDriver {
             goal: Arc::new(std::sync::Mutex::new(None)),
             in_flight: Arc::new(Mutex::new(None)),
             next_script_id: AtomicU64::new(0),
+            script_run: AtomicU64::new(0),
             sessions: Arc::new(Mutex::new(mock_session_list())),
             queues: Arc::new(Mutex::new(HashMap::new())),
             config: Arc::new(Mutex::new(mock_default_config())),
@@ -2271,6 +2279,20 @@ impl MockDriver {
         // greeting's tail text into the reply. Flushing keeps the mock's
         // one-turn-at-a-time semantics, matching the real driver.
         self.flush_scheduled();
+
+        // Replays after the first get their dialog request ids rewritten (see
+        // rewrite_script_request_ids) so re-driving the same fixture cannot
+        // collide with an earlier drive's ids. The first run keeps its stable
+        // ids, so single-drive scripts and existing assertions are unaffected.
+        let run = self.script_run.fetch_add(1, Ordering::Relaxed);
+        let steps = if run == 0 {
+            steps
+        } else {
+            steps
+                .into_iter()
+                .map(|step| rewrite_script_request_ids(step, run))
+                .collect()
+        };
 
         let remaining: Arc<Mutex<VecDeque<ScriptStep>>> =
             Arc::new(Mutex::new(steps.into_iter().collect()));
@@ -2408,6 +2430,150 @@ impl MockDriver {
 }
 
 /// Emit one step's event plus its side bookkeeping. Shared by the timer path and
+/// Rewrite the dialog request ids of a script step for a replay run after the
+/// first, so re-driving the same fixture (e.g. `planhandoff`) cannot emit ids
+/// that duplicate an earlier drive's. The client derives transcript notice ids
+/// (`resolved-{requestId}`/`response-summary-{requestId}`) from dialog request
+/// ids, and the keyed transcript drops items with duplicate ids — so a second
+/// drive's acknowledgement notices silently vanished. Scoped to dialog
+/// `HostUiRequest`s and scripted `HostUiResolved` steps: the client echoes the
+/// request id back in `respondUi`, so `respond_ui`'s derived notice ids and
+/// `fire_step`'s pending-dialog bookkeeping stay consistent automatically.
+/// Ambient (status/widget/notify) ids are not involved in the collision and
+/// are left alone.
+fn rewrite_script_request_ids(step: ScriptStep, run: u64) -> ScriptStep {
+    let event = match step.event {
+        SessionDriverEvent::HostUiRequest { base, request } if is_dialog_request(&request) => {
+            SessionDriverEvent::HostUiRequest {
+                base,
+                request: rewrite_dialog_request_id(request, run),
+            }
+        }
+        SessionDriverEvent::HostUiResolved { base, request_id } => {
+            SessionDriverEvent::HostUiResolved {
+                base,
+                request_id: format!("{request_id}-run{run}"),
+            }
+        }
+        other => other,
+    };
+    ScriptStep {
+        wait_ms: step.wait_ms,
+        event,
+    }
+}
+
+fn rewrite_dialog_request_id(request: HostUiRequest, run: u64) -> HostUiRequest {
+    let suffix = format!("-run{run}");
+    let rewrite = |id: String| format!("{id}{suffix}");
+    use HostUiRequest as H;
+    match request {
+        H::Confirm {
+            request_id,
+            title,
+            message,
+            default_value,
+            timeout_ms,
+        } => H::Confirm {
+            request_id: rewrite(request_id),
+            title,
+            message,
+            default_value,
+            timeout_ms,
+        },
+        H::Unknown {
+            request_id,
+            title,
+            message,
+        } => H::Unknown {
+            request_id: rewrite(request_id),
+            title,
+            message,
+        },
+        H::Input {
+            request_id,
+            title,
+            placeholder,
+            initial_value,
+            timeout_ms,
+        } => H::Input {
+            request_id: rewrite(request_id),
+            title,
+            placeholder,
+            initial_value,
+            timeout_ms,
+        },
+        H::Select {
+            request_id,
+            title,
+            options,
+            allow_multiple,
+            timeout_ms,
+        } => H::Select {
+            request_id: rewrite(request_id),
+            title,
+            options,
+            allow_multiple,
+            timeout_ms,
+        },
+        H::Editor {
+            request_id,
+            title,
+            initial_value,
+        } => H::Editor {
+            request_id: rewrite(request_id),
+            title,
+            initial_value,
+        },
+        H::Qna {
+            request_id,
+            title,
+            questions,
+            timeout_ms,
+        } => H::Qna {
+            request_id: rewrite(request_id),
+            title,
+            questions,
+            timeout_ms,
+        },
+        H::Plan {
+            request_id,
+            title,
+            plan_text,
+            display_path,
+            target_facet,
+            action_labels,
+            refuse_label,
+            timeout_ms,
+        } => H::Plan {
+            request_id: rewrite(request_id),
+            title,
+            plan_text,
+            display_path,
+            target_facet,
+            action_labels,
+            refuse_label,
+            timeout_ms,
+        },
+        H::Permission {
+            request_id,
+            title,
+            tool_name,
+            tool_input,
+            options,
+            timeout_ms,
+        } => H::Permission {
+            request_id: rewrite(request_id),
+            title,
+            tool_name,
+            tool_input,
+            options,
+            timeout_ms,
+        },
+        other => other,
+    }
+}
+
 /// `flush_scheduled` so a flushed event behaves exactly like a fired one — faithful
 /// port of TS `fireStep()`.
 fn fire_step(
@@ -4952,6 +5118,8 @@ impl PantokenDriver for MockDriver {
         self.abort_delay_ms.store(0, Ordering::SeqCst);
         self.new_session_seed_delay_ms.store(0, Ordering::SeqCst);
         self.abort_settle_delay_ms.store(0, Ordering::SeqCst);
+        // Each test's first drive keeps the fixture's stable request ids.
+        self.script_run.store(0, Ordering::SeqCst);
         *self.adventurous_handoff.lock().unwrap() = false;
         *self.goal.lock().unwrap() = None;
         // Restore the mutable session state to the fixture baseline —
@@ -4971,5 +5139,109 @@ impl PantokenDriver for MockDriver {
 
     fn has_warm_session(&self, sid: &SessionId) -> bool {
         self.warm_sessions.lock().contains(sid)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plan_step(id: &str) -> ScriptStep {
+        ScriptStep {
+            wait_ms: 0,
+            event: SessionDriverEvent::HostUiRequest {
+                base: base(),
+                request: HostUiRequest::Plan {
+                    request_id: id.into(),
+                    title: "Plan handoff".into(),
+                    plan_text: "# Plan".into(),
+                    display_path: None,
+                    target_facet: None,
+                    action_labels: [
+                        "Implement (new context)".into(),
+                        "Implement (current context)".into(),
+                        "Cancel".into(),
+                    ],
+                    refuse_label: None,
+                    timeout_ms: None,
+                },
+            },
+        }
+    }
+
+    async fn next_dialog_id(rx: &mut mpsc::Receiver<SessionDriverEvent>) -> Option<String> {
+        while let Some(ev) = rx.recv().await {
+            if let SessionDriverEvent::HostUiRequest { request, .. } = ev {
+                if is_dialog_request(&request) {
+                    return Some(request_id_of(&request).to_string());
+                }
+            }
+        }
+        None
+    }
+
+    /// Re-driving the same fixture must produce disjoint dialog request ids —
+    /// the client derives transcript notice ids (`resolved-{id}`,
+    /// `response-summary-{id}`) from them, and the keyed transcript drops
+    /// duplicates. The first drive keeps its stable ids; later drives are
+    /// suffixed. A respond_ui resolution must then target the rewritten id
+    /// (the one a client would echo back), keeping the pending bookkeeping and
+    /// the derived notice ids consistent.
+    #[tokio::test]
+    async fn replay_rewrites_dialog_request_ids() {
+        let driver = MockDriver::new();
+        let (tx, mut rx) = mpsc::channel(64);
+        driver.subscribe(Box::new(move |ev| {
+            let _ = tx.try_send(ev);
+        }));
+
+        driver.play_script(vec![plan_step("req-plan-handoff-1")]);
+        driver.play_script(vec![plan_step("req-plan-handoff-1")]);
+
+        let first = next_dialog_id(&mut rx).await;
+        let second = next_dialog_id(&mut rx).await;
+        assert_eq!(first.as_deref(), Some("req-plan-handoff-1"));
+        assert_eq!(second.as_deref(), Some("req-plan-handoff-1-run1"));
+        assert_ne!(first, second);
+
+        // A response to the rewritten id resolves the pending dialog and emits
+        // notices whose ids are disjoint from the first run's.
+        driver.respond_ui(
+            HostUiResponse::Cancelled {
+                request_id: second.clone().unwrap(),
+                cancelled: true,
+            },
+            None,
+        );
+        let mut resolved: Option<String> = None;
+        let mut notice_ids: Vec<String> = Vec::new();
+        // Collect exactly the response batch: one HostUiResolved + two notices.
+        while resolved.is_none() || notice_ids.len() < 2 {
+            let Some(ev) = rx.recv().await else { break };
+            match ev {
+                SessionDriverEvent::HostUiResolved { request_id, .. } => {
+                    resolved = Some(request_id);
+                }
+                SessionDriverEvent::HostUiRequest { request, .. } => {
+                    if let HostUiRequest::Notify { request_id, .. } = request {
+                        notice_ids.push(request_id);
+                    }
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(resolved.as_deref(), second.as_deref());
+        assert!(
+            notice_ids
+                .iter()
+                .any(|id| id == "resolved-req-plan-handoff-1-run1"),
+            "expected a resolved-rewritten-id notice, got {notice_ids:?}"
+        );
+        assert!(
+            notice_ids
+                .iter()
+                .any(|id| id == "response-summary-req-plan-handoff-1-run1"),
+            "expected a response-summary-rewritten-id notice, got {notice_ids:?}"
+        );
     }
 }
