@@ -65,9 +65,9 @@
       ? "New session"
       : opening
         ? openingSession?.displayName || "Opening session"
-        : store.sessions.find((item) => item.sessionId === store.viewedSessionId)?.displayName ||
+        : s.ambient.title ||
+          store.sessions.find((item) => item.sessionId === store.viewedSessionId)?.displayName ||
           store.sessions.find((item) => item.sessionId === s.ref?.sessionId)?.displayName ||
-          s.ambient.title ||
           s.title ||
           "pantoken",
   );

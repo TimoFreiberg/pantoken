@@ -2,6 +2,8 @@
 //! (close-to-tray keeps the hub — and any phone connection — alive), the "Updating
 //! Pantoken…" overlay, notifications, and the fatal-error dialog.
 
+#![allow(clippy::items_after_test_module, dead_code)]
+
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -167,6 +169,24 @@ fn on_download_handler(
     }
 }
 
+fn unique_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let candidate = dir.join(name);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{e}")),
+        _ => (name.to_string(), String::new()),
+    };
+    for i in 1..1000 {
+        let c = dir.join(format!("{stem} ({i}){ext}"));
+        if !c.exists() {
+            return c;
+        }
+    }
+    dir.join(name)
+}
+
 #[cfg(test)]
 mod lifecycle_tests {
     use super::{shell_action, should_navigate_on_reveal, ShellAction, ShellEvent};
@@ -195,24 +215,6 @@ mod lifecycle_tests {
             assert_eq!(shell_action(event), ShellAction::Teardown);
         }
     }
-}
-
-fn unique_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
-    let candidate = dir.join(name);
-    if !candidate.exists() {
-        return candidate;
-    }
-    let (stem, ext) = match name.rsplit_once('.') {
-        Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{e}")),
-        _ => (name.to_string(), String::new()),
-    };
-    for i in 1..1000 {
-        let c = dir.join(format!("{stem} ({i}){ext}"));
-        if !c.exists() {
-            return c;
-        }
-    }
-    dir.join(name)
 }
 
 /// Show + focus the main window (tray "Open", second-instance launch, notification click).

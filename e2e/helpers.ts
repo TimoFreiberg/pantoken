@@ -106,12 +106,15 @@ export async function openSidebar(page: Page): Promise<void> {
   // preference, which may open or close it. Wait one frame for the resize handler
   // to settle before deciding whether the button is needed, so it doesn't detach
   // mid-click.
-  await page.waitForTimeout(50);
+  // Let a preceding UI close finish its browser-history pop before attempting a
+  // replacement open; otherwise the delayed pop can close the replacement.
+  await page.waitForTimeout(250);
   if ((await sidebar.getAttribute("data-open")) !== "true") {
     await page.getByTestId("sidebar-open").click({ force: true });
-    await page.waitForTimeout(100);
   }
-  await expect(sidebar).toHaveAttribute("data-open", "true");
+  // Phone overlay history closes asynchronously. Waiting on the state (rather than a
+  // fixed animation delay) also covers a deferred reopen while history.back() settles.
+  await expect(sidebar).toHaveAttribute("data-open", "true", { timeout: 10_000 });
 }
 
 /** Ensure the right context panel (flagged files, background jobs, todos) is open.
@@ -123,9 +126,19 @@ export async function openSidebar(page: Page): Promise<void> {
 export async function openRightSidebar(page: Page): Promise<void> {
   const panel = page.getByTestId("right-sidebar");
   if ((await panel.getAttribute("data-open")) !== "true") {
-    await page.getByTestId("context-open").click();
+    const sidebar = page.getByTestId("sidebar");
+    // Phone sessions and Context are peer full-screen views. Close Sessions first;
+    // otherwise its drawer/scrim intercepts the header Context button.
+    if ((await sidebar.getAttribute("data-open")) === "true") {
+      await sidebar.getByRole("button", { name: "Close sessions" }).click();
+      await expect(sidebar).toHaveAttribute("data-open", "false", { timeout: 10_000 });
+      // The attribute flips synchronously, but history.back()/popstate completes on
+      // the next browser turn; let that owned pop finish before replacing the view.
+      await page.waitForTimeout(250);
+    }
+    await page.getByTestId("context-open").click({ force: true });
   }
-  await expect(panel).toHaveAttribute("data-open", "true");
+  await expect(panel).toHaveAttribute("data-open", "true", { timeout: 10_000 });
 }
 
 /** Open the new-session chooser via the sidebar's top + button. */

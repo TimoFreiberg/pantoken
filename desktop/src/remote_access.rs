@@ -1,4 +1,6 @@
 //! Phone-access control-plane DTOs and origin/status policy.
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

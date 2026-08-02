@@ -2,7 +2,9 @@
 //! redacted diagnostics. The native registration boundary is intentionally narrow so CI can
 //! exercise the state mapping without pretending that an unsigned build is registered.
 
-use serde::{Deserialize, Serialize};
+#![allow(dead_code)]
+
+use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use url::Url;
 
@@ -30,9 +32,12 @@ pub fn launch_context() -> LaunchContext {
     {
         // The packaged launcher may inject the login context; absent that signal we choose the
         // deterministic ordinary/unknown-safe path rather than treating registration as proof.
-        return LaunchContext::Ordinary;
+        LaunchContext::Ordinary
     }
-    LaunchContext::Unknown
+    #[cfg(not(target_os = "macos"))]
+    {
+        LaunchContext::Unknown
+    }
 }
 
 pub fn classify_startup(context: LaunchContext) -> StartupMode {

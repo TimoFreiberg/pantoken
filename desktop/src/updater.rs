@@ -96,7 +96,7 @@ fn run_check(app: &AppHandle, manual: bool) {
         return;
     };
 
-    let Some(check_permit) = state.updater_barrier.admit() else {
+    let Some(_check_permit) = state.updater_barrier.admit() else {
         return;
     };
     let updater = match app.updater_builder().endpoints(vec![url]) {
@@ -538,6 +538,7 @@ fn http_loopback(
 
 /// Pure updater state transition. A failed install clears the applying overlay
 /// state while retaining the staged version for a subsequent retry.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InstallState {
     Staged,
@@ -546,6 +547,7 @@ enum InstallState {
     Relaunching,
 }
 
+#[allow(dead_code)]
 fn begin_install(state: InstallState, stopping: bool) -> InstallState {
     if stopping {
         InstallState::Staged
@@ -557,6 +559,7 @@ fn begin_install(state: InstallState, stopping: bool) -> InstallState {
     }
 }
 
+#[allow(dead_code)]
 fn install_transition(state: InstallState, success: bool, stopping: bool) -> InstallState {
     if stopping {
         return InstallState::Staged;

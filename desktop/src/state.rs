@@ -8,8 +8,6 @@ use crate::supervisor::Supervisor;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
-
 /// A running remote bridge session: the bridge task handle + its cancellation
 /// token + the connection state machine + the loopback port the bridge is
 /// listening on. Held by [`AppState`] in a `HashMap` keyed by remote profile id,

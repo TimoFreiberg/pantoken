@@ -15,6 +15,7 @@ use crate::config::PantokenConfig;
 /// Classification of the authenticated loopback health probe. These values deliberately do
 /// not retain response bodies or credentials, making them safe to forward to diagnostics.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(dead_code)]
 pub enum ProbeOutcome {
     Healthy,
     Unauthorized,
@@ -25,6 +26,7 @@ pub enum ProbeOutcome {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(dead_code)]
 pub enum RecoveryReason {
     Crash,
     Hang,
@@ -79,6 +81,7 @@ impl Default for SupervisionCore {
 }
 
 impl SupervisionCore {
+    #[allow(dead_code)]
     pub fn request_stop(&mut self) {
         self.stopping = true;
     }
@@ -124,9 +127,6 @@ impl SupervisionCore {
     }
 
     pub fn observe_exit(&mut self, rapid: bool) -> SupervisorDecision {
-        if self.stopping {
-            return SupervisorDecision::Stopped;
-        }
         if self.stopping {
             return SupervisorDecision::Stopped;
         }
@@ -367,54 +367,51 @@ fn supervise_one(
         }
 
         if Instant::now() >= next_probe {
-            match health_probe(port, config.token.as_deref()) {
-                outcome => {
-                    if outcome != ProbeOutcome::Healthy {
-                        on_event(SupervisorEvent::ProbeFailed { outcome });
+            let outcome = health_probe(port, config.token.as_deref());
+            if outcome != ProbeOutcome::Healthy {
+                on_event(SupervisorEvent::ProbeFailed { outcome });
+            }
+            let decision =
+                policy.observe_probe(outcome, !healthy && Instant::now() > boot_deadline);
+            match decision {
+                SupervisorDecision::Healthy { first_time } => {
+                    healthy = true;
+                    liveness_failures = 0;
+                    *started = true;
+                    on_event(SupervisorEvent::Healthy { first_time });
+                    next_probe = Instant::now() + Duration::from_secs(5);
+                }
+                SupervisorDecision::Restart(reason) => {
+                    on_event(SupervisorEvent::Restarting { reason });
+                    terminate(child);
+                    return;
+                }
+                SupervisorDecision::Unrecoverable(reason) => {
+                    let message = if reason == RecoveryReason::BootTimeout {
+                        format!(
+                            "The pantoken server didn't become healthy within {}s.",
+                            BOOT_HEALTH_TIMEOUT.as_secs()
+                        )
+                    } else {
+                        "The pantoken server entered an unrecoverable crash loop.".into()
+                    };
+                    on_event(SupervisorEvent::Unrecoverable(message));
+                    terminate(child);
+                    return;
+                }
+                SupervisorDecision::Stopped => {
+                    terminate(child);
+                    return;
+                }
+                SupervisorDecision::Wait => {
+                    if healthy {
+                        liveness_failures = liveness_failures.saturating_add(1);
                     }
-                    let decision =
-                        policy.observe_probe(outcome, !healthy && Instant::now() > boot_deadline);
-                    match decision {
-                        SupervisorDecision::Healthy { first_time } => {
-                            healthy = true;
-                            liveness_failures = 0;
-                            *started = true;
-                            on_event(SupervisorEvent::Healthy { first_time });
-                            next_probe = Instant::now() + Duration::from_secs(5);
-                        }
-                        SupervisorDecision::Restart(reason) => {
-                            on_event(SupervisorEvent::Restarting { reason });
-                            terminate(child);
-                            return;
-                        }
-                        SupervisorDecision::Unrecoverable(reason) => {
-                            let message = if reason == RecoveryReason::BootTimeout {
-                                format!(
-                                    "The pantoken server didn't become healthy within {}s.",
-                                    BOOT_HEALTH_TIMEOUT.as_secs()
-                                )
-                            } else {
-                                "The pantoken server entered an unrecoverable crash loop.".into()
-                            };
-                            on_event(SupervisorEvent::Unrecoverable(message));
-                            terminate(child);
-                            return;
-                        }
-                        SupervisorDecision::Stopped => {
-                            terminate(child);
-                            return;
-                        }
-                        SupervisorDecision::Wait => {
-                            if healthy {
-                                liveness_failures = liveness_failures.saturating_add(1);
-                            }
-                            next_probe = if healthy {
-                                Instant::now() + Duration::from_secs(5)
-                            } else {
-                                Instant::now() + Duration::from_millis(250)
-                            };
-                        }
-                    }
+                    next_probe = if healthy {
+                        Instant::now() + Duration::from_secs(5)
+                    } else {
+                        Instant::now() + Duration::from_millis(250)
+                    };
                 }
             }
         }
@@ -516,6 +513,7 @@ fn parse_http_status(response: &[u8]) -> Result<u16, HttpReadError> {
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 fn health_ok_with_token(port: u16, token: Option<&str>) -> bool {
     health_probe(port, token) == ProbeOutcome::Healthy
 }

@@ -393,6 +393,7 @@ fn validate_origin(origin: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn canonical_origin(origin: &str) -> Result<String, String> {
     validate_origin(origin)?;
     let mut parsed = url::Url::parse(origin).map_err(|_| "origin must be a valid HTTPS URL")?;

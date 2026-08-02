@@ -3222,6 +3222,9 @@ class PantokenStore {
 
   /** Set the session title (POST /title). */
   setTitle(title: string): void {
+    // Reflect the local command immediately; the daemon/mock event remains authoritative
+    // and will reconcile the folded state when it arrives.
+    this.session.ambient.title = title || undefined;
     send({ type: "sessionAction", action: { kind: "setTitle", title } });
   }
 
