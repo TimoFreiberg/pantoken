@@ -404,17 +404,6 @@ pub fn canonical_origin(origin: &str) -> Result<String, String> {
     Ok(parsed.to_string())
 }
 
-pub fn canonical_origin(origin: &str) -> Result<String, String> {
-    validate_origin(origin)?;
-    let mut parsed = url::Url::parse(origin).map_err(|_| "origin must be a valid HTTPS URL")?;
-    let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
-    parsed
-        .set_host(Some(&host))
-        .map_err(|_| "origin host is invalid")?;
-    parsed.set_path("/");
-    Ok(parsed.to_string())
-}
-
 pub(crate) struct HubResolution {
     hub_bin: PathBuf,
     client_dist: PathBuf,
