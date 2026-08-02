@@ -39,6 +39,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/push/unsubscribe", post(push_unsubscribe))
         .route("/push/test", post(push_test))
         .route("/update/state", post(update_state))
+        .route("/update/permit/consume", post(consume_update_permit))
         .route("/debug/state", get(debug_state))
         .route("/debug/reset", get(debug_reset).post(debug_reset))
         .fallback(static_fallback)
@@ -327,6 +328,46 @@ async fn update_state(
     let mut hub = state.hub.lock();
     let result = hub.report_update(sha, apply_failed, None);
     Json(result).into_response()
+}
+
+#[derive(Deserialize)]
+struct ConsumePermitBody {
+    #[serde(rename = "authorizationGeneration")]
+    authorization_generation: u64,
+    #[serde(rename = "leaseNonce")]
+    lease_nonce: String,
+    #[serde(rename = "leaseSha")]
+    lease_sha: String,
+}
+
+async fn consume_update_permit(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Result<Json<ConsumePermitBody>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    if !authorized(&state, &headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"permit": false, "reason": "unauthorized"})),
+        )
+            .into_response();
+    }
+    let Ok(Json(body)) = body else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"permit": false, "reason": "malformed"})),
+        )
+            .into_response();
+    };
+    let mut hub = state.hub.lock();
+    match hub.consume_update_permit(
+        body.authorization_generation,
+        &body.lease_nonce,
+        &body.lease_sha,
+    ) {
+        Ok(()) => Json(json!({"permit": true})).into_response(),
+        Err(reason) => Json(json!({"permit": false, "reason": reason})).into_response(),
+    }
 }
 
 // ── /debug/* ────────────────────────────────────────────────────────────

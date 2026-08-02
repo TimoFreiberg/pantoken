@@ -127,6 +127,11 @@ export { type StopState } from "./store-helpers.js";
  * clears the timer immediately, so this only fires when the server never
  * responds at all. */
 const STOP_CONFIRMATION_TIMEOUT_MS = 500;
+const APP_UPDATE_RECONNECT_TIMEOUT_MS = Number(
+  (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_APP_UPDATE_RECONNECT_TIMEOUT_MS ??
+    30_000,
+);
+export type AppUpdateState = "staged" | "deferred" | "applying" | "reconnecting" | "failed" | "idle";
 
 /** A view in the back/forward navigation history (⌘[ / ⌘]): a focused session, a
  *  pending new-session draft identified by its project cwd, or the session chooser.
@@ -522,7 +527,14 @@ class PantokenStore {
   // we're connected (server-pushed via `updateStatus`). Drives the sidebar update card;
   // `applying` is true between clicking "update now" and the server restarting. Distinct
   // from `swUpdateReady` (that's the PWA asset-cache refresh).
-  appUpdate = $state<{ sha: string; applying: boolean } | null>(null);
+  appUpdate = $state<{
+    sha: string;
+    applying: boolean;
+    state: AppUpdateState;
+    status?: "deferred" | "rejected";
+    reason?: "busy";
+  } | null>(null);
+  private appUpdateReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   // Global hotkey dispatch — incremented so $effect catches every keystroke.
   hotkeyAction = $state<{ n: number } | null>(null);
   // Bump to ask the composer textarea to retake focus — e.g. after the model/effort
@@ -838,6 +850,16 @@ class PantokenStore {
 
   get connection(): ConnectionState {
     return connectionState();
+  }
+  get appUpdateDisplayState(): AppUpdateState | "idle" {
+    if (!this.appUpdate) return "idle";
+    if (
+      this.appUpdate.state === "applying" &&
+      this.connection !== "connected"
+    ) {
+      return "reconnecting";
+    }
+    return this.appUpdate.state;
   }
   /** Authoritative transcript plus this client's optimistic outbox rows for the focused
    *  session. A server userMessage with the same prompt id suppresses the overlay before
@@ -1501,11 +1523,32 @@ class PantokenStore {
           this.chatNotice(`Shell environment warning: ${msg.env.detail}`, { durationMs: 0 });
         }
         break;
-      case "updateStatus":
-        this.appUpdate = msg.available
-          ? { sha: msg.sha ?? "", applying: msg.applying }
-          : null;
+      case "updateStatus": {
+        if (!msg.available) {
+          this.clearAppUpdateReconnectTimer();
+          this.appUpdate = null;
+          break;
+        }
+        const knownStatus = msg.status === "deferred" || msg.status === "rejected" ? msg.status : undefined;
+        const status = knownStatus ?? (msg.status === undefined ? undefined : "deferred");
+        const state: AppUpdateState = msg.applying
+          ? "applying"
+          : status === "deferred"
+            ? "deferred"
+            : status === "rejected"
+              ? "failed"
+              : "staged";
+        this.clearAppUpdateReconnectTimer();
+        if (msg.applying) notifyNativeUpdateStarting();
+        this.appUpdate = {
+          sha: msg.sha ?? "",
+          applying: msg.applying,
+          state,
+          status,
+          reason: msg.reason === "busy" ? "busy" : undefined,
+        };
         break;
+      }
       case "error":
         // Prompt-less create-on-click failure: the server sends an Error with
         // kind: None + "Could not create the new session" when has_first_prompt
@@ -1706,6 +1749,7 @@ class PantokenStore {
     this.unauthorizedReason = null;
     this.protocolMismatch = null;
     this.pushState = "idle";
+    this.clearAppUpdateReconnectTimer();
     this.appUpdate = null;
 
     // Session-lifecycle private state.
@@ -2131,7 +2175,23 @@ class PantokenStore {
    *  hub, so don't raise an overlay that nothing would ever tear down (until the native
    *  5-min failsafe). */
   requestAppUpdate(): void {
-    if (send({ type: "applyUpdate" })) notifyNativeUpdateStarting();
+    if (!send({ type: "applyUpdate" })) return;
+    if (this.appUpdate) {
+      this.appUpdate = { ...this.appUpdate, state: "deferred", applying: false };
+      this.clearAppUpdateReconnectTimer();
+      this.appUpdateReconnectTimer = setTimeout(() => {
+        if (this.appUpdate?.state === "applying" || this.appUpdate?.state === "reconnecting") {
+          this.appUpdate = { ...this.appUpdate, state: "failed", applying: false };
+        }
+        this.appUpdateReconnectTimer = null;
+      }, APP_UPDATE_RECONNECT_TIMEOUT_MS);
+    }
+  }
+  clearAppUpdateReconnectTimer(): void {
+    if (this.appUpdateReconnectTimer !== null) {
+      clearTimeout(this.appUpdateReconnectTimer);
+      this.appUpdateReconnectTimer = null;
+    }
   }
   /** Resume after a run-failed: send a minimal "continue" signal. The prior prompt
    *  was already accepted by the daemon (runFailed only fires after the turn

@@ -143,7 +143,27 @@ periodic loop (`src/updater.rs`) owns updates, checked every minute
 
 An install swaps the .app in place, relaunches, and the fresh server serves the fresh
 client — the never-restart-mid-turn guarantee holds. Install failures un-stick the
-card (`applyFailed`) so it offers retry.
+card (`applyFailed`) so it offers retry without deleting sessions or manually restarting.
+
+Remote Mini/apply contract:
+
+- The phone action is authenticated through the existing bearer-token session. The shell
+  sends `Authorization: Bearer <token>` on `/health`, `/update/state`, and the one-shot
+  `/update/permit/consume` check; tokens never appear in URLs or evidence. Revoke or rotate
+  the remote-access token through the existing remote-access settings/bootstrap procedure
+  after suspected exposure; subsequent requests fail closed with `401 unauthorized`.
+- An active or initializing turn is fail-closed: the card says it is deferred and no
+  install or relaunch begins. The final health check and short-lived SHA-bound permit are
+  rechecked atomically immediately before signed installation.
+- During install the card explains the temporary Pantoken.app restart and reconnect. The
+  reconnect presentation is bounded; timeout leaves a retryable failure while retaining
+  the staged version. A later retry can succeed normally.
+- This signed whole-app update is separate from the PWA service-worker `Refresh` action,
+  which only calls `window.location.reload()`. `forceUpdate` remains a desktop-shell-only
+  control and is not exposed as a phone workaround.
+- Manual Mini/iPhone validation must redact bearer tokens, URLs containing credentials, and
+  diagnostic payloads. Browser tests cannot prove iOS push delivery, LTE transitions,
+  tailnet reachability, or real signed `.app` replacement; those remain opt-in device checks.
 
 **Endpoint**, resolved at runtime, re-checked every cycle:
 

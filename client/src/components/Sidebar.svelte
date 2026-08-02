@@ -1117,16 +1117,29 @@
        because we're connected (server pushes `updateStatus`). One action, no dismiss —
        leave it sitting until you choose to apply. Distinct from the PWA refresh toast. -->
   {#if store.appUpdate}
-    <div class="app-update" data-testid="update-card">
-      <span class="app-update-label">Update available</span>
+    <div class="app-update" data-testid="update-card" role="status">
+      <div class="app-update-copy">
+        <strong class="app-update-label">Pantoken.app update ready</strong>
+        <span class="app-update-detail">
+          {#if store.appUpdateDisplayState === "deferred"}
+            Waiting for the active turn to finish — nothing was stopped.
+          {:else if store.appUpdateDisplayState === "applying"}
+            Installing the signed app and restarting the Mini. Your phone will reconnect briefly.
+          {:else if store.appUpdateDisplayState === "failed"}
+            The restart did not complete. The staged update is still available to retry.
+          {:else}
+            This temporarily restarts Pantoken.app. Use Refresh above only for a PWA service-worker update.
+          {/if}
+        </span>
+      </div>
       <Button
         variant="primary"
         size="sm"
-        title="Install the update and relaunch Pantoken"
-        disabled={store.appUpdate.applying}
+        title={store.appUpdateDisplayState === "failed" ? "Retry the signed app update" : "Install the update and relaunch Pantoken"}
+        disabled={store.appUpdateDisplayState === "applying"}
         onclick={() => store.requestAppUpdate()}
       >
-        {store.appUpdate.applying ? "Updating…" : "Update now"}
+        {store.appUpdateDisplayState === "applying" ? "Updating…" : store.appUpdateDisplayState === "failed" ? "Retry" : store.appUpdateDisplayState === "deferred" ? "Try again" : "Update now"}
       </Button>
     </div>
   {/if}
@@ -1415,17 +1428,31 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: 10px;
     margin: 0 16px 8px;
     padding: 8px 10px;
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     background: var(--surface);
   }
+  .app-update-copy {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+  }
   .app-update-label {
     font-size: 12px;
     color: var(--text);
-    white-space: nowrap;
+  }
+  .app-update-detail {
+    color: var(--text-faint);
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  .app-update :global(button) {
+    min-width: 44px;
+    min-height: 44px;
+    flex-shrink: 0;
   }
   .version-wrap {
     flex: 1;

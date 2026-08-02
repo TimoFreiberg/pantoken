@@ -266,6 +266,9 @@ export type ServerMessage =
       available: boolean;
       sha?: string;
       applying: boolean;
+      /** Optional state detail; missing/unknown values are treated as deferred by clients. */
+      status?: "deferred" | "rejected";
+      reason?: "busy";
     }
   /** Prefill the composer after a branch landed on a user prompt — navigateTree hands
    *  back that prompt's text for re-editing. Sent ONLY to the client that asked to

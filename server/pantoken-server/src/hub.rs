@@ -274,6 +274,13 @@ pub struct SessionHub {
     // ── Desktop update state ──────────────────────────────────────────────
     update_sha: Option<String>,
     applying: bool,
+    update_status: Option<String>,
+    update_reason: Option<String>,
+    authorization_generation: u64,
+    lease_nonce: Option<String>,
+    lease_sha: Option<String>,
+    lease_expires_at: Option<Instant>,
+    lease_expires_at_unix_ms: Option<u128>,
     desktop_stale: bool,
     force_requested: bool,
 
@@ -361,6 +368,13 @@ impl SessionHub {
             last_usage_emitted: HashMap::new(),
             update_sha: None,
             applying: false,
+            update_status: None,
+            update_reason: None,
+            authorization_generation: 0,
+            lease_nonce: None,
+            lease_sha: None,
+            lease_expires_at: None,
+            lease_expires_at_unix_ms: None,
             desktop_stale: false,
             force_requested: false,
             available_models: Vec::new(),
@@ -1110,6 +1124,10 @@ impl SessionHub {
         let mut changed = false;
         if sha != self.update_sha {
             self.update_sha = sha;
+            self.authorization_generation = self.authorization_generation.wrapping_add(1);
+            self.clear_update_lease();
+            self.update_status = None;
+            self.update_reason = None;
             if self.update_sha.is_none() {
                 self.applying = false; // applied/gone — drop any apply flag
             }
@@ -1117,6 +1135,9 @@ impl SessionHub {
         }
         if apply_failed && self.applying {
             self.applying = false;
+            self.update_status = Some("rejected".into());
+            self.update_reason = Some("failed".into());
+            self.clear_update_lease();
             changed = true;
         }
         if apply_failed {
@@ -1135,7 +1156,57 @@ impl SessionHub {
         serde_json::json!({
             "applying": self.applying,
             "force": force,
+            "authorizationGeneration": self.lease_nonce.as_ref().map(|_| self.authorization_generation),
+            "leaseNonce": self.lease_nonce,
+            "leaseSha": self.lease_sha,
+            "leaseExpiresAt": self.lease_expires_at_unix_ms,
         })
+    }
+
+    fn clear_update_lease(&mut self) {
+        self.lease_nonce = None;
+        self.lease_sha = None;
+        self.lease_expires_at = None;
+        self.lease_expires_at_unix_ms = None;
+    }
+
+    /// Atomically authorize one staged install. The caller must hold the hub mutex.
+    pub fn consume_update_permit(
+        &mut self,
+        generation: u64,
+        nonce: &str,
+        sha: &str,
+    ) -> Result<(), &'static str> {
+        if !self.running.is_empty() || !self.initializing.is_empty() {
+            self.clear_update_lease();
+            self.applying = false;
+            self.update_status = Some("deferred".into());
+            self.update_reason = Some("busy".into());
+            self.broadcast(self.update_status_msg());
+            return Err("busy");
+        }
+        if generation != self.authorization_generation {
+            return Err("generation_mismatch");
+        }
+        if self.lease_nonce.as_deref() != Some(nonce) {
+            return Err("replayed");
+        }
+        if self.lease_sha.as_deref() != Some(sha) || self.update_sha.as_deref() != Some(sha) {
+            return Err("sha_mismatch");
+        }
+        if self
+            .lease_expires_at
+            .is_none_or(|expiry| expiry <= Instant::now())
+        {
+            self.clear_update_lease();
+            return Err("expired");
+        }
+        self.clear_update_lease();
+        self.applying = true;
+        self.update_status = None;
+        self.update_reason = None;
+        self.broadcast(self.update_status_msg());
+        Ok(())
     }
 
     pub fn reset(&mut self, bootstrap: bool) {
@@ -1321,6 +1392,8 @@ impl SessionHub {
             available: self.update_sha.is_some(),
             sha: self.update_sha.clone(),
             applying: self.applying,
+            status: self.update_status.clone(),
+            reason: self.update_reason.clone(),
             desktop_stale: Some(self.desktop_stale),
         }
     }
@@ -2132,14 +2205,64 @@ impl SessionHub {
             }
             ClientMessage::ApplyUpdate => {
                 if self.update_sha.is_some() && !self.applying {
-                    self.applying = true;
+                    if !self.running.is_empty() || !self.initializing.is_empty() {
+                        self.update_status = Some("deferred".into());
+                        self.update_reason = Some("busy".into());
+                        self.clear_update_lease();
+                    } else {
+                        self.authorization_generation =
+                            self.authorization_generation.wrapping_add(1);
+                        let nonce_bytes: [u8; 32] = rand::random();
+                        self.lease_nonce = Some(
+                            nonce_bytes
+                                .iter()
+                                .map(|byte| format!("{byte:02x}"))
+                                .collect(),
+                        );
+                        self.lease_sha = self.update_sha.clone();
+                        self.lease_expires_at = Some(Instant::now() + Duration::from_secs(30));
+                        self.lease_expires_at_unix_ms = Some(
+                            SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis()
+                                .saturating_add(30_000),
+                        );
+                        self.update_status = None;
+                        self.update_reason = None;
+                    }
                     self.broadcast(self.update_status_msg());
                 }
             }
             ClientMessage::ForceUpdate => {
                 self.force_requested = true;
                 if self.update_sha.is_some() && !self.applying {
-                    self.applying = true;
+                    if !self.running.is_empty() || !self.initializing.is_empty() {
+                        self.update_status = Some("deferred".into());
+                        self.update_reason = Some("busy".into());
+                        self.clear_update_lease();
+                    } else {
+                        self.authorization_generation =
+                            self.authorization_generation.wrapping_add(1);
+                        let nonce_bytes: [u8; 32] = rand::random();
+                        self.lease_nonce = Some(
+                            nonce_bytes
+                                .iter()
+                                .map(|byte| format!("{byte:02x}"))
+                                .collect(),
+                        );
+                        self.lease_sha = self.update_sha.clone();
+                        self.lease_expires_at = Some(Instant::now() + Duration::from_secs(30));
+                        self.lease_expires_at_unix_ms = Some(
+                            SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis()
+                                .saturating_add(30_000),
+                        );
+                        self.update_status = None;
+                        self.update_reason = None;
+                    }
                     self.broadcast(self.update_status_msg());
                 }
             }
@@ -4843,10 +4966,36 @@ mod hub_models_tests {
                 ..
             } => {
                 assert!(available);
-                assert!(applying, "applyUpdate should flip applying to true");
+                assert!(
+                    !applying,
+                    "applyUpdate waits for the updater's atomic permit"
+                );
             }
             other => panic!("expected UpdateStatus after apply, got {other:?}"),
         }
+
+        let permit = hub.lock().report_update(Some("abc123".into()), false, None);
+        assert_eq!(permit["applying"], false);
+        assert!(permit["authorizationGeneration"].as_u64().is_some());
+        assert!(permit["leaseNonce"].as_str().is_some());
+        assert_eq!(permit["leaseSha"], "abc123");
+
+        // The updater consumes the permit immediately before installation.
+        let (generation, nonce, sha) = {
+            let hub = hub.lock();
+            (
+                hub.authorization_generation,
+                hub.lease_nonce.clone().unwrap(),
+                hub.lease_sha.clone().unwrap(),
+            )
+        };
+        assert!(
+            hub.lock()
+                .consume_update_permit(generation, &nonce, &sha)
+                .is_ok()
+        );
+        let result = hub.lock().report_update(Some("abc123".into()), false, None);
+        assert_eq!(result["applying"], true);
 
         // The updater's next poll (any sha report) returns applying=true.
         let result = hub.lock().report_update(Some("abc123".into()), false, None);
@@ -4920,11 +5069,40 @@ mod hub_models_tests {
         hub.lock().report_update(Some("abc123".into()), false, None);
         let _ = last_update(&mut a_rx).await; // drain staged broadcast
         hub.lock().handle_client(a_key, ClientMessage::ApplyUpdate);
-        let applying = last_update(&mut a_rx).await;
-        match applying {
-            ServerMessage::UpdateStatus { applying, .. } => assert!(applying),
-            other => panic!("expected applying UpdateStatus, got {other:?}"),
+        let staged = last_update(&mut a_rx).await;
+        match staged {
+            ServerMessage::UpdateStatus {
+                applying,
+                status,
+                reason,
+                ..
+            } => {
+                assert!(!applying);
+                assert_eq!(status.as_deref(), None);
+                assert_eq!(reason.as_deref(), None);
+            }
+            other => panic!("expected staged UpdateStatus, got {other:?}"),
         }
+        let permit = hub.lock().report_update(Some("abc123".into()), false, None);
+        let (generation, nonce, sha) = {
+            let hub = hub.lock();
+            (
+                hub.authorization_generation,
+                hub.lease_nonce.clone().unwrap(),
+                hub.lease_sha.clone().unwrap(),
+            )
+        };
+        assert!(
+            hub.lock()
+                .consume_update_permit(generation, &nonce, &sha)
+                .is_ok()
+        );
+        assert_eq!(permit["leaseSha"], "abc123");
+        let applying = last_update(&mut a_rx).await;
+        assert!(matches!(
+            applying,
+            ServerMessage::UpdateStatus { applying: true, .. }
+        ));
 
         // A failed apply reports back applyFailed → card returns to "update now".
         let result = hub.lock().report_update(Some("abc123".into()), true, None);

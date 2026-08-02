@@ -264,15 +264,23 @@ fn run_cycle_locked(app: &AppHandle, port: u16, endpoint: &str) -> Duration {
         }
     );
 
-    if !unattended {
-        // Defer: raise/refresh the sidebar card and learn whether the user clicked.
-        // Reporting with no token is retained for local mode; remote callers pass it
-        // through the same seam once config exposes the resolved Keychain token.
-        let report =
-            report_update_state(port, state.config.token.as_deref(), Some(&version), false);
-        if !report.allows_install() {
-            return PENDING_POLL;
-        }
+    // Report the staged version in every mode so the hub issues the same short-lived,
+    // SHA-bound lease. The permit consume is the final atomic activity check for both
+    // unattended idle installs and user-approved installs.
+    let report = report_update_state(port, state.config.token.as_deref(), Some(&version), false);
+    let Some((generation, nonce, lease_sha)) = report.permit() else {
+        return PENDING_POLL;
+    };
+    if lease_sha != version
+        || !consume_update_permit(
+            port,
+            state.config.token.as_deref(),
+            generation,
+            nonce,
+            lease_sha,
+        )
+    {
+        return PENDING_POLL;
     }
 
     if state.updater_stop.load(Ordering::SeqCst) {
@@ -327,20 +335,31 @@ enum Activity {
     Unauthorized,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ReportState {
-    Approved { applying: bool, force: bool },
+    Approved {
+        applying: bool,
+        force: bool,
+        authorization_generation: Option<u64>,
+        lease_nonce: Option<String>,
+        lease_sha: Option<String>,
+    },
     Unavailable,
     Unauthorized,
     Malformed,
 }
 
 impl ReportState {
-    fn allows_install(self) -> bool {
-        matches!(
-            self,
-            Self::Approved { applying: true, .. } | Self::Approved { force: true, .. }
-        )
+    fn permit(&self) -> Option<(u64, &str, &str)> {
+        match self {
+            Self::Approved {
+                authorization_generation: Some(generation),
+                lease_nonce: Some(nonce),
+                lease_sha: Some(sha),
+                ..
+            } => Some((*generation, nonce, sha)),
+            _ => None,
+        }
     }
 }
 
@@ -368,7 +387,42 @@ fn report_update_state(
     ReportState::Approved {
         applying: v.get("applying").and_then(|b| b.as_bool()).unwrap_or(false),
         force: v.get("force").and_then(|b| b.as_bool()).unwrap_or(false),
+        authorization_generation: v.get("authorizationGeneration").and_then(|v| v.as_u64()),
+        lease_nonce: v
+            .get("leaseNonce")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned),
+        lease_sha: v
+            .get("leaseSha")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned),
     }
+}
+
+/// Consume the one-shot lease immediately before install. Any malformed, unavailable,
+/// unauthorized, or denied response fails closed.
+fn consume_update_permit(
+    port: u16,
+    token: Option<&str>,
+    generation: u64,
+    nonce: &str,
+    sha: &str,
+) -> bool {
+    let body = serde_json::json!({
+        "authorizationGeneration": generation,
+        "leaseNonce": nonce,
+        "leaseSha": sha,
+    })
+    .to_string();
+    let HttpResponse::Ok(body) =
+        http_loopback(port, token, "POST", "/update/permit/consume", Some(&body))
+    else {
+        return false;
+    };
+    serde_json::from_str::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v.get("permit").and_then(|p| p.as_bool()))
+        == Some(true)
 }
 
 /// GET /health. Unknown/auth-failed activity is never interpreted as idle.
@@ -454,19 +508,18 @@ mod tests {
 
     #[test]
     fn updater_report_auth_contract() {
-        assert!(!ReportState::Unavailable.allows_install());
-        assert!(!ReportState::Unauthorized.allows_install());
-        assert!(!ReportState::Malformed.allows_install());
+        assert!(ReportState::Unavailable.permit().is_none());
+        assert!(ReportState::Unauthorized.permit().is_none());
+        assert!(ReportState::Malformed.permit().is_none());
         assert!(ReportState::Approved {
             applying: true,
-            force: false
+            force: false,
+            authorization_generation: Some(7),
+            lease_nonce: Some("nonce".into()),
+            lease_sha: Some("sha".into()),
         }
-        .allows_install());
-        assert!(ReportState::Approved {
-            applying: false,
-            force: true
-        }
-        .allows_install());
+        .permit()
+        .is_some());
     }
 
     #[test]

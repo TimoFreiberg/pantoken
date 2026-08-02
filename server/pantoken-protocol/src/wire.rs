@@ -247,6 +247,10 @@ pub enum ServerMessage {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         sha: Option<String>,
         applying: bool,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        status: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        reason: Option<String>,
         #[serde(
             skip_serializing_if = "Option::is_none",
             default,

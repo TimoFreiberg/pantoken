@@ -242,6 +242,26 @@ describe("remote access contract documentation (AC.1–AC.4)", () => {
     );
   });
 
+  test("remote_update_docs_contract", () => {
+    const desktop = read("desktop/README.md");
+    requireTerms(
+      desktop,
+      [
+        "signed whole-app update",
+        "PWA service-worker `Refresh`",
+        "active or initializing turn",
+        "fail-closed",
+        "retryable failure",
+        "Authorization: Bearer <token>",
+        "`/update/permit/consume`",
+        "tokens never appear in URLs",
+        "redact bearer tokens",
+        "iOS push delivery",
+      ],
+      "remote update operational contract",
+    );
+  });
+
   test("remote_contract_docs_cover_issue_147", () => {
     const desktop = read("desktop/README.md");
     const contract = read("docs/issues/mobile-access/01-remote-contract.md");
