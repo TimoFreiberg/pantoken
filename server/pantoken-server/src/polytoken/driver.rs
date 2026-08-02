@@ -3371,11 +3371,13 @@ impl PantokenDriver for PolytokenDriver {
             warn!("run_script({name}): fake mode without a fake control handle");
             return;
         };
-        tokio::spawn(async move {
+        let control_track = control.clone();
+        let handle = tokio::spawn(async move {
             if let Err(e) = control.run_script(&name).await {
                 warn!("fake run_script({name}) failed: {e}");
             }
         });
+        control_track.track_push_task(handle);
     }
 
     fn reset(&self, _bootstrap: bool) {

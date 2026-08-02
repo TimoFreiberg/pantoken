@@ -200,9 +200,6 @@ struct FakeState {
     /// Controlled-mode SSE sender. Present after GET /events connects; reset
     /// replaces it so a reset mid-stream cannot corrupt a later producer.
     sse_tx: Option<mpsc::Sender<Result<Event, std::convert::Infallible>>>,
-    /// Set when the rewind fixture has accepted POST /rewind; the scripted
-    /// session_rewound frame waits for this causal signal.
-    rewind_requested: bool,
     /// The active HTTP-replay scenario. In controlled (fake-mode) use this
     /// starts as the idle bootstrap scenario, then `run_script` swaps in the
     /// chosen flow's recordings (and resets cursors) so that flow's in-turn
@@ -611,6 +608,35 @@ fn rewind_ready_scenario(mut scenario: ScenarioFile) -> ScenarioFile {
     for (index, entry) in histories.into_iter().enumerate() {
         entry.response_body = Some(prompt_history(if index == 0 { 1 } else { 2 }));
     }
+    // The live flow fetches more than the base corpus records: the setup reseed
+    // (below) + the message_complete refetch + branch_from's post-rewind refresh
+    // + the session_rewound-triggered reseed need 4 /state and 4 /history
+    // servings (the base records 2 and 3). Loose-mode cursors 500 on
+    // exhaustion, so provision the extras (post-rewind state clones).
+    if let Some(last_state) = scenario
+        .http
+        .iter()
+        .rev()
+        .find(|entry| entry.method == "GET" && entry.path == "/state")
+        .cloned()
+    {
+        for _ in 0..2 {
+            scenario.http.push(HttpEntry {
+                method: "GET".into(),
+                path: "/state".into(),
+                request_body: None,
+                status: last_state.status,
+                response_body: last_state.response_body.clone(),
+            });
+        }
+    }
+    scenario.http.push(HttpEntry {
+        method: "GET".into(),
+        path: "/history".into(),
+        request_body: None,
+        status: 200,
+        response_body: Some(prompt_history(2)),
+    });
     scenario.sse = vec![
         corpus::SseFrame {
             seq: Some(1),
@@ -624,9 +650,19 @@ fn rewind_ready_scenario(mut scenario: ScenarioFile) -> ScenarioFile {
             session_id: "SESSION".into(),
             event: serde_json::json!({"type": "message_complete", "prompt_id": "PROMPT_0"}),
         },
+        // A setup-time discontinuity makes the client reseed (GET /history +
+        // GET /state) so the rewind-ready transcript populates deterministically
+        // and the rewind button appears. The actual rewind signal
+        // (session_rewound) stays reserved for after POST /rewind is accepted.
         corpus::SseFrame {
             seq: Some(3),
             emitted_at: "1970-01-01T00:00:02.000Z".into(),
+            session_id: "SESSION".into(),
+            event: serde_json::json!({"type": "stream_discontinuity", "missed": 1}),
+        },
+        corpus::SseFrame {
+            seq: Some(4),
+            emitted_at: "1970-01-01T00:00:03.000Z".into(),
             session_id: "SESSION".into(),
             event: serde_json::json!({"type": "session_rewound", "rewound_to_index": 0}),
         },
@@ -781,6 +817,12 @@ struct FakeControlInner {
     scenarios: Mutex<HashMap<String, ScenarioFile>>,
     sessions: Mutex<HashMap<String, Arc<FakeDaemon>>>,
     spawned: Mutex<Vec<Arc<FakeDaemon>>>,
+    /// The driver's fire-and-forget `run_script` push task (see
+    /// `PolytokenInner::run_script`). Tracked so a reset can abort a push that
+    /// is still awaiting a full SSE channel: the reset keeps the held-open
+    /// sender, so an unstuck stale task would otherwise keep pushing a previous
+    /// test's frames onto the next test's stream.
+    in_flight_push: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl FakeControlHub {
@@ -840,6 +882,7 @@ impl FakeControlHub {
                 scenarios: Mutex::new(scenarios),
                 sessions: Mutex::new(HashMap::new()),
                 spawned: Mutex::new(Vec::new()),
+                in_flight_push: Mutex::new(None),
             }),
         }
     }
@@ -866,6 +909,12 @@ impl FakeControlHub {
     }
 
     pub fn reset(&self) {
+        // Abort any still-pushing run_script task: the reset keeps the held-open
+        // SSE sender, so a stale push must not keep emitting a previous test's
+        // frames onto the (re-adopted) stream.
+        if let Some(handle) = self.inner.in_flight_push.lock().take() {
+            handle.abort();
+        }
         // Clear the HTTP replay cursors + call log, but KEEP the held-open SSE
         // sender: the driver keeps its warm session (and SSE subscription) across
         // a dev-surface reset, so dropping the sender here would force a reconnect
@@ -884,6 +933,12 @@ impl FakeControlHub {
             // the spawn-time bootstrap scenario.
             state.scenario_override = None;
         }
+    }
+
+    /// Record the driver's fire-and-forget `run_script` push task so `reset`
+    /// can abort it if the SSE channel was still backed up (see the struct doc).
+    pub fn track_push_task(&self, handle: tokio::task::JoinHandle<()>) {
+        *self.inner.in_flight_push.lock() = Some(handle);
     }
 
     /// Inject a custom scenario into the control hub's scenario map, so
@@ -1582,7 +1637,11 @@ async fn http_handler(
             })
             .map(frame_to_event);
         if let Some(event) = rewind_event {
-            if let Some(tx) = app.state.lock().sse_tx.clone() {
+            // Clone the sender under the lock, then DROP the guard before the
+            // await: a parking_lot guard is !Send, so holding it across an await
+            // would make the handler future !Send and break axum's Handler impl.
+            let sse_tx = app.state.lock().sse_tx.clone();
+            if let Some(tx) = sse_tx {
                 let _ = tx.send(Ok(event)).await;
             }
         }
@@ -1603,6 +1662,25 @@ async fn http_handler(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn handler_future_is_send() {
+        // Regression guard: http_handler's future must stay Send or axum's
+        // Handler impl no longer applies (a parking_lot guard held across an
+        // await broke this once, failing the whole lib build).
+        fn assert_send<F: std::future::Future + Send>(_: F) {}
+        assert_send(http_handler(
+            axum::extract::State(AppState {
+                state: Arc::new(Mutex::new(FakeState::default())),
+                scenario: Arc::new(scenario(serde_json::json!([]))),
+                sse_mode: SseMode::Controlled,
+            }),
+            axum::extract::Query(QueryParams {
+                rest: HashMap::new(),
+            }),
+            axum::extract::Request::new(axum::body::Body::empty()),
+        ));
+    }
 
     fn scenario(http: Value) -> ScenarioFile {
         serde_json::from_value(serde_json::json!({
