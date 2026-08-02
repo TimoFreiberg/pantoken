@@ -5110,10 +5110,12 @@ impl PantokenDriver for MockDriver {
             // client-side `listSessions` poll surfaces the new row.
             "newsession" => {
                 let mut sessions = self.sessions.lock();
-                sessions.insert(0, SessionListEntry {
-                    display_name: Some("External session".into()),
-                    ..new_session_entry("external-session", WORKSPACE_PATH)
-                });
+                if !sessions.iter().any(|s| s.session_id == "external-session") {
+                    sessions.insert(0, SessionListEntry {
+                        display_name: Some("External session".into()),
+                        ..new_session_entry("external-session", WORKSPACE_PATH)
+                    });
+                }
                 return;
             }
             _ => {
