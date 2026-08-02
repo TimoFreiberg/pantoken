@@ -563,7 +563,7 @@
   function onDocumentKeydown(e: KeyboardEvent): void {
     if (e.key !== "Escape") return;
     if (!current) return;
-    if (document.querySelector('[data-testid="plan-view"]')) return;
+    if (store.planViewOpen) return;
     if (e.defaultPrevented) return;
     if (OPEN_ESCAPE_OWNER_SELECTORS.some((sel) => document.querySelector(sel))) return;
     // Replicate the sheet's Escape semantics exactly: an armed plan cancel

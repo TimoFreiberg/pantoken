@@ -3,19 +3,32 @@ import { expect, type Page } from "@playwright/test";
 /** Reset the mock to the initial fixture, load the app in dev mode, and wait for
  *  the greeting conversation to finish replaying so assertions start from a known
  *  state. */
-export async function gotoFresh(page: Page): Promise<void> {
+export async function gotoFresh(
+  page: Page,
+  options: { preservePanelPreferences?: boolean } = {},
+): Promise<void> {
   await page.request.get("/debug/reset");
+  await page.addInitScript({
+    content: `
+      localStorage.removeItem("pantoken.scrollPositions");
+      localStorage.removeItem("pantoken.computerSetupDraft");
+      const key = "__pantokenE2ePanelPrefsInitialized";
+      if (!sessionStorage.getItem(key) && !${options.preservePanelPreferences ? "true" : "false"}) {
+        localStorage.removeItem("pantoken.sidebarOpen");
+        localStorage.removeItem("pantoken.rightSidebarPreference");
+        localStorage.removeItem("pantoken.rightSidebarOpen");
+        sessionStorage.setItem(key, "1");
+      }
+    `,
+  });
+  await page.goto("/?dev");
   // Clear persisted scroll positions before the app boots so each test starts clean:
   // localStorage survives a same-origin navigation, so a prior test's saved reading
   // position would otherwise boot-restore the greeting to a stale spot AND leak into
   // session-switch assertions. Scoped to this one key (drafts/theme/etc. persist).
-  // addInitScript runs before each navigation in this page's lifetime — once per test,
-  // no extra reload.
-  page.addInitScript(() => {
-    localStorage.removeItem("pantoken.scrollPositions");
-    localStorage.removeItem("pantoken.computerSetupDraft");
-  });
-  await page.goto("/?dev");
+  // addInitScript runs before each navigation in this page's lifetime. Scroll/draft
+  // isolation is per navigation; panel preferences are reset only on the first one so
+  // the persistence assertions below survive their deliberate reload.
   // The final text starts rendering before the fixture emits runCompleted. Wait for
   // the settled work block instead: its appearance proves the turn finished and the
   // live inline content has completed its collapse/reflow.
@@ -94,8 +107,10 @@ export async function openSidebar(page: Page): Promise<void> {
   // to settle before deciding whether the button is needed, so it doesn't detach
   // mid-click.
   await page.waitForTimeout(50);
-  if ((await sidebar.getAttribute("data-open")) !== "true")
-    await page.getByTestId("sidebar-open").click();
+  if ((await sidebar.getAttribute("data-open")) !== "true") {
+    await page.getByTestId("sidebar-open").click({ force: true });
+    await page.waitForTimeout(100);
+  }
   await expect(sidebar).toHaveAttribute("data-open", "true");
 }
 

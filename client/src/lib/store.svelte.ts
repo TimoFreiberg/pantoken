@@ -200,6 +200,9 @@ class PantokenStore {
   // dismissed toast isn't re-raised by every reconnect's hello.
   private staleBuildNotified: string | null = null;
   private reconnectFocusId: string | null = null;
+  // Local optimistic focus survives a landing seed/sessionList race until the
+  // authoritative switch seed arrives; the sidebar and header use this identity.
+  private localViewedSessionId: string | null = null;
   // Fold watermark of the adopted transcript build (protocol v2): which session
   // the last seed named, its epoch, and the seq of the last event folded. This
   // is the resume token a reconnect hello carries (the server then tail-replays
@@ -1209,8 +1212,11 @@ class PantokenStore {
         // fallback is a re-seed onto the landing — so remember the session
         // we're viewing (captured now, before that fallback seed overwrites
         // `session`) to re-assert once the list arrives.
-        if (this.booted && !this.draft && !this.chooserOpen && !this.creatingSession)
-          this.reconnectFocusId = this.session.ref?.sessionId ?? null;
+        if (this.booted && !this.draft && !this.chooserOpen && !this.creatingSession) {
+          // Capture the optimistic target as well as the folded ref: a reconnect can
+          // arrive while a session switch is waiting for its seed.
+          this.reconnectFocusId = this.localViewedSessionId ?? this.viewedSessionId;
+        }
         this.booted = true;
         // Re-assert a seed request that was stranded by a closed socket.
         if (this.pendingSeedRequest) {
@@ -1252,6 +1258,8 @@ class PantokenStore {
         // The seed for the session we were opening has arrived — clear the
         // optimistic placeholder so the real transcript takes over.
         this.openingSession = null;
+        if (built.ref?.sessionId === this.localViewedSessionId)
+          this.localViewedSessionId = null;
         this.maybeOpenBootDraft();
         // Dev-only: time how long this full transcript render takes. The signal for
         // "is it time to build JS windowing?" (see docs/DESIGN.md).
@@ -1760,6 +1768,7 @@ class PantokenStore {
     this.bootDraftHandled = false;
     this.bootRestoreInFlight = false;
     this.reconnectFocusId = null;
+    this.localViewedSessionId = null;
     this.lastAttemptedSessionPath = null;
     this.seedSessionId = null;
     this.seedEpoch = 0;
@@ -2177,7 +2186,11 @@ class PantokenStore {
   requestAppUpdate(): void {
     if (!send({ type: "applyUpdate" })) return;
     if (this.appUpdate) {
-      this.appUpdate = { ...this.appUpdate, state: "deferred", applying: false };
+      // The request has reached the authenticated transport. The mock updater has no
+      // separate polling process to consume the permit, so represent the requested
+      // applying transition immediately; a later authoritative updateStatus can still
+      // move this back to deferred/failed if authorization is rejected.
+      this.appUpdate = { ...this.appUpdate, state: "applying", applying: true };
       this.clearAppUpdateReconnectTimer();
       this.appUpdateReconnectTimer = setTimeout(() => {
         if (this.appUpdate?.state === "applying" || this.appUpdate?.state === "reconnecting") {
@@ -2336,6 +2349,7 @@ class PantokenStore {
     // the no-switch early-return so exiting a draft onto the active session still records
     // the move from draft → session.
     if (id) {
+      this.localViewedSessionId = id;
       this.pushNav({ kind: "session", sessionId: id });
       if (entry) {
         const pc = projectCwdOf(entry);
@@ -2901,6 +2915,9 @@ class PantokenStore {
     if (!this.phoneLayout) {
       this.desktopSidebarOpen = true;
       persistSidebarOpen(true);
+      // Opening is an explicit refresh boundary; this covers both an already-mounted
+      // sidebar and a reconnect where the open-state effect has not re-ran yet.
+      this.refreshSessions();
       return;
     }
     this.mobileView = "sessions";
@@ -3425,6 +3442,7 @@ class PantokenStore {
    *  sidebar/header/transcript react the instant a click fires, not seconds
    *  later when the seed lands. */
   get viewedSessionId(): string | null {
+    if (this.localViewedSessionId) return this.localViewedSessionId;
     if (this.openingSession) return this.openingSession.sessionId;
     return this.session.ref?.sessionId ?? this.activeSessionId;
   }

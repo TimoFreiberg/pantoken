@@ -128,7 +128,7 @@ test.describe("reload and reconnect survival (normal boot)", () => {
     await page.evaluate(() =>
       window.dispatchEvent(new Event("pantoken:test-disconnect")),
     );
-    const reconnect = page.getByRole("button", { name: "Reconnect" });
+    const reconnect = page.getByRole("button", { name: "Reconnect", exact: true });
     await expect(reconnect).toBeVisible();
     await reconnect.click();
 

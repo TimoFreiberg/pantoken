@@ -115,7 +115,7 @@ test("sidebar toggle: collapse, reopen via header icon, persist across reload, h
     "false",
   );
 
-  await gotoFresh(page);
+  await gotoFresh(page, { preservePanelPreferences: true });
 
   await expect(page.getByTestId("sidebar")).toHaveAttribute(
     "data-open",
@@ -274,7 +274,6 @@ test("sidebar refresh: new session appears via poll while open, poll stops on cl
   // a session arrives while the sidebar is open; the 10s poll would eventually
   // surface it, but we close before that can happen
   await mockScript(page, "newsession");
-
   await page.getByRole("button", { name: "Collapse sidebar" }).click();
   await expect(sidebar).toHaveAttribute("data-open", "false");
 

@@ -45,7 +45,8 @@
   const creating = $derived(store.creatingSession !== null);
   // An existing-session switch whose seed hasn't landed yet — show the target's
   // title immediately instead of the prior session's.
-  const opening = $derived(store.openingSession !== null);
+  const openingSession = $derived(store.openingSession);
+  const opening = $derived(openingSession !== null);
   // The focused session is warming up (created/opened, pre-stream) — show a small
   // spinner beside the title. Also during a new session's creation gap.
   const initializing = $derived(
@@ -63,8 +64,12 @@
     chooserUp || creating
       ? "New session"
       : opening
-        ? "Opening session"
-        : s.ambient.title || s.title || "pantoken",
+        ? openingSession?.displayName || "Opening session"
+        : store.sessions.find((item) => item.sessionId === store.viewedSessionId)?.displayName ||
+          store.sessions.find((item) => item.sessionId === s.ref?.sessionId)?.displayName ||
+          s.ambient.title ||
+          s.title ||
+          "pantoken",
   );
 
   // The "where am I" subtitle. The folded snapshot carries no cwd, so we
@@ -240,6 +245,7 @@
         class="context-entry"
         data-testid="context-open"
         data-context-count={contextCount}
+        data-tip-title="Show context panel (⌘⇧J)"
         title="Show context panel (⌘⇧J)"
         aria-label="Show context panel"
         onclick={() => store.openRightSidebar()}
