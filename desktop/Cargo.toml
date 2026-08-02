@@ -1,6 +1,6 @@
 [package]
 name = "pantoken-desktop"
-version = "0.2.102"
+version = "0.2.103"
 description = "Pantoken desktop shell — supervises the pantoken-server hub as a sidecar and hosts the web client"
 edition = "2021"
 publish = false
