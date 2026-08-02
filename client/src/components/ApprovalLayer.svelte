@@ -526,6 +526,58 @@
       }
     }
   }
+
+  // Deny-safe Escape must work even when focus has left the sheet (clicking the
+  // scrim moves focus to <body>, and the sheet's own keydown never fires there).
+  // A document-bubble listener catches that case, but it fires BEFORE every
+  // `<svelte:window>` bubble listener (PlanView, chooser, dir picker, settings,
+  // …), so it must defer to whichever Escape-owning surface is open rather than
+  // cancelling an approval underneath it. Guard order:
+  //   1. A pending dialog must exist (otherwise there is nothing to cancel).
+  //   2. The plan-view overlay owns Escape while open — `PlanView.svelte`
+  //      handles it on a WINDOW listener, so `defaultPrevented` is still false
+  //      here; without this guard, Escape would close PlanView AND the approval.
+  //   3. `defaultPrevented` — the sheet itself (focus inside), the
+  //      capture-phase ComputerSetupSheet, and element-level handlers (facet
+  //      listbox, composer textarea, …) already claimed Escape.
+  //   4. Any other open Escape-owning overlay (all `<svelte:window>` bubble
+  //      listeners except PlanView, plus the document-level host switcher and
+  //      sidebar row menus, which run after this listener).
+  const OPEN_ESCAPE_OWNER_SELECTORS = [
+    '[data-testid="plan-view"]',
+    '[data-testid="session-chooser"]',
+    '[data-testid="dir-picker"]',
+    '[data-testid="project-menu"]',
+    '[data-testid="settings-panel"]',
+    '[data-testid="connection-sheet-panel"]',
+    '[data-testid="computer-setup-panel"]',
+    '[data-testid="image-lightbox"]',
+    '[data-testid="job-detail"]',
+    '[data-testid="todo-detail"]',
+    '[data-testid="mobile-session-controls"]',
+    '[data-testid="prompt-map-sheet"]',
+    '#host-switcher-panel',
+    '[role="listbox"]',
+    '[role="menu"]',
+  ] as const;
+  function onDocumentKeydown(e: KeyboardEvent): void {
+    if (e.key !== "Escape") return;
+    if (!current) return;
+    if (document.querySelector('[data-testid="plan-view"]')) return;
+    if (e.defaultPrevented) return;
+    if (OPEN_ESCAPE_OWNER_SELECTORS.some((sel) => document.querySelector(sel))) return;
+    // Replicate the sheet's Escape semantics exactly: an armed plan cancel
+    // disarms instead of cancelling.
+    if (current.kind === "plan" && planCancelArmed) {
+      disarmPlanCancel();
+      return;
+    }
+    cancel();
+  }
+  $effect(() => {
+    document.addEventListener("keydown", onDocumentKeydown);
+    return () => document.removeEventListener("keydown", onDocumentKeydown);
+  });
 </script>
 
 {#if current}
