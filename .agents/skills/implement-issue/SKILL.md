@@ -33,7 +33,7 @@ Investigate the codebase, write and review the plan. The plan must instruct the 
 
 0. **Enter the workspace** — `pushd <absolute-workspace-dir>` (the path recorded in Step 0). The plan→execute handoff resets the working directory to the repo root, so execute must re-enter the issue workspace before any other step. The workspace, `node_modules`, and `.implement-issue-number` marker already exist on disk from Step 0 — don't recreate them.
 1. **Implement** the plan faithfully.
-2. **Review** using the `quality-review` skill — fix or rebut all findings, loop until clean.
+2. **Review** using the `quality-review` skill. Fix or rebut all findings, and if any findings at medium or above were found, repeate this step.
 3. **Integrate** — From this point on, a stop hook will guide you. Squash all commits into one, ensure the commit message includes `Fixes #<issue-number>` on its own line, then call `just integrate-into-main <issue-number>`. If it exits 2 (conflicts), resolve them with the `jj-resolve-conflicts` skill and retry. The stop hook will redirect you here if you try to stop before integrating.
 4. **Clean up** — after integration succeeds (exit 0), verify with `jj log -r 'main::@'` that you're in an empty commit on top of `main`, then run `just cleanup-current-workspace`.
 
