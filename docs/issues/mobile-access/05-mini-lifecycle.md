@@ -67,7 +67,21 @@ Required semantics:
 
 ## Documentation and manual requirements
 
-Document opt-in launch-at-login, tray close versus Quit, restart/recovery expectations, diagnostics, and security boundaries in the desktop README and Mini runbook. Manual checks must use a dedicated Mini/test account and redacted evidence. A user-managed Login Item/launch-agent fallback may be described only as a non-v1 workaround.
+Document opt-in launch-at-login, tray close versus Quit, restart/recovery expectations, diagnostics, and security boundaries in the desktop README and Mini runbook. Manual checks must use a dedicated Mini/test account and redacted evidence. User-managed Login Items and launch-agent/helper workarounds are explicitly outside v1 and are not configured or supported by Pantoken. The hub remains loopback-only; this issue does not document public binding or standalone-server operation.
+
+### `mini_startup_lifecycle_manual`
+
+Run only against a signed packaged `.app`, using a dedicated test account. Record timestamps, visible state, reachability, and status/error text; redact tokens, Authorization headers, credential-bearing URLs, and raw diagnostic payloads.
+
+1. Run `scripts/desktop/validate-macos-app.sh --app /path/to/Pantoken.app`; capture the reported artifact and packaged identifier/minimum-version checks.
+2. In Settings, enable launch-at-login. Confirm the actual `SMAppService.mainApp` state is registered/enabled; separately record approval-required, failure, or unavailable states. Disable it and confirm the queried state changes. Do not infer status from preferences or `smctl`.
+3. **MINI-LIFECYCLE-01:** reboot/login with registration enabled. Confirm the tray, supervised hub, and phone reachability are available during headless startup while no main window is visible; use Tray Open to reveal/focus it.
+4. Close the window (close-to-tray) and confirm the window hides while phone reachability and supervisor health remain available. Use Tray Open again.
+5. **MINI-LIFECYCLE-02:** exercise sleep/wake and Tailscale disconnect/reconnect. Record endpoint-unverified/unreachable versus recovered authenticated health without treating a failed probe as updater-idle.
+6. **MINI-LIFECYCLE-03:** induce a hub crash and hang. Confirm bounded restart/recovery, session preservation, and a visible crash-loop/boot-timeout stop state when recovery is exhausted.
+7. Use Cmd+Q and Tray Quit separately. Confirm both perform teardown and make the endpoint unavailable; ordinary window close must not.
+8. **MINI-UPDATE-02:** apply a signed update. Confirm updater polling stops before teardown/relaunch, reconnect succeeds, and an install failure clears apply state while retaining a retryable staged version. Retry once, then inspect redacted diagnostics.
+9. Disable registration, uninstall the app, and record the resulting status/error and endpoint behavior. No helper executable, launch agent, public binding, or standalone server is part of this v1 checklist.
 
 ## Risks and follow-up decisions
 

@@ -40,9 +40,7 @@ reason. They never include bearer tokens, Authorization headers, or query creden
 unauthorized health is fail-closed for updater idle decisions.
 
 The supported v1 path is the signed app's Service Management registration. User-managed Login Items
-or launch-agent workarounds are non-v1 and are not configured by Pantoken. Packaged manual checks
-remain required for reboot/login, approval/error messaging, close-versus-Quit, update persistence,
-and uninstall behavior.
+or launch-agent workarounds are non-v1 and are not configured by Pantoken. Packaged manual checks (including `scripts/desktop/validate-macos-app.sh --app PATH`) remain required for reboot/login, approval/error messaging, close-versus-Quit, update persistence, and uninstall behavior. The validator checks the packaged `Contents/Info.plist`; source metadata alone is not evidence of registration eligibility.
 
 ## How it works
 

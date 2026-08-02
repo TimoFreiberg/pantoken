@@ -13,9 +13,50 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
+use crate::lifecycle::HealthClass;
 use crate::state::AppState;
 
 pub const MAIN_WINDOW: &str = "main";
+
+/// A lazily-created window must join the already-running hub when the supervisor has
+/// reached health. Keeping this decision pure makes the reveal/readiness race testable.
+pub fn should_navigate_on_reveal(health: HealthClass) -> bool {
+    health == HealthClass::Healthy
+}
+
+/// Pure shell policy used by both native window-close handling and explicit quit paths.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ShellAction {
+    HideWindow,
+    Teardown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ShellEvent {
+    CloseRequested,
+    CmdQ,
+    AppQuit,
+    TrayQuit,
+    Signal,
+    UpdaterRelaunch,
+}
+
+pub fn shell_action(event: ShellEvent) -> ShellAction {
+    match event {
+        ShellEvent::CloseRequested => ShellAction::HideWindow,
+        ShellEvent::CmdQ
+        | ShellEvent::AppQuit
+        | ShellEvent::TrayQuit
+        | ShellEvent::Signal
+        | ShellEvent::UpdaterRelaunch => ShellAction::Teardown,
+    }
+}
+
+pub fn request_quit(app: &AppHandle) {
+    if shell_action(ShellEvent::AppQuit) == ShellAction::Teardown {
+        app.exit(0);
+    }
+}
 
 /// Build the main window on the bundled "Starting Pantoken…" page. The supervisor navigates
 /// it to the hub URL once /health answers. Chromeless: transparent titlebar, traffic
@@ -126,6 +167,36 @@ fn on_download_handler(
     }
 }
 
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::{shell_action, should_navigate_on_reveal, ShellAction, ShellEvent};
+    use crate::lifecycle::HealthClass;
+
+    #[test]
+    fn lazy_reveal_navigates_only_after_health() {
+        assert!(should_navigate_on_reveal(HealthClass::Healthy));
+        assert!(!should_navigate_on_reveal(HealthClass::EndpointUnverified));
+        assert!(!should_navigate_on_reveal(HealthClass::Shutdown));
+    }
+
+    #[test]
+    fn tray_close_keeps_supervisor_alive() {
+        assert_eq!(
+            shell_action(ShellEvent::CloseRequested),
+            ShellAction::HideWindow
+        );
+        for event in [
+            ShellEvent::CmdQ,
+            ShellEvent::AppQuit,
+            ShellEvent::TrayQuit,
+            ShellEvent::Signal,
+            ShellEvent::UpdaterRelaunch,
+        ] {
+            assert_eq!(shell_action(event), ShellAction::Teardown);
+        }
+    }
+}
+
 fn unique_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
     let candidate = dir.join(name);
     if !candidate.exists() {
@@ -148,10 +219,19 @@ fn unique_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
 pub fn show_main(app: &AppHandle) {
     #[cfg(target_os = "macos")]
     let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
-    if app.get_webview_window(MAIN_WINDOW).is_none() {
+    let created = app.get_webview_window(MAIN_WINDOW).is_none();
+    if created {
         let _ = create_main_window(app);
     }
     if let Some(w) = app.get_webview_window(MAIN_WINDOW) {
+        // The supervisor may have reached health while macOS was headless and no
+        // window existed. Join that live hub before revealing the newly-created page.
+        if created {
+            let state = app.state::<AppState>();
+            if should_navigate_on_reveal(state.diagnostics.snapshot().health) {
+                navigate_main(app, &state.config.app_url());
+            }
+        }
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
@@ -328,7 +408,7 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
                     }
                 }
                 "check-updates" => crate::updater::spawn_check(app.clone(), true),
-                "quit" => app.exit(0),
+                "quit" => request_quit(app),
                 _ => {}
             }
         })

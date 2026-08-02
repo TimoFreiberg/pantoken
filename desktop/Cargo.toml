@@ -46,5 +46,8 @@ tempfile = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3.2", features = ["NSEvent", "block2", "NSApplication", "NSResponder", "NSDockTile"] }
-objc2-foundation = "0.3.2"
+objc2-foundation = { version = "0.3.2", features = ["NSNotification", "NSOperation", "NSString", "block2"] }
+objc2-service-management = { version = "0.3.2", features = ["objc2", "SMAppService", "objc2-foundation"] }
+objc2-security = { version = "0.3.2", features = ["CSCommon", "SecStaticCode"] }
+objc2-core-foundation = "0.3.2"
 block2 = "0.6"

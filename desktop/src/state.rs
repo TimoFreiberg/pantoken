@@ -1,14 +1,14 @@
 //! Shared app state, managed by Tauri and reached from tray handlers / event threads.
 
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-
 use crate::config::PantokenConfig;
 use crate::lifecycle::{DiagnosticStore, LifecycleGate};
 use crate::remote_connection::RemoteConnection;
 use crate::shell::Overlay;
 use crate::supervisor::Supervisor;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
 /// A running remote bridge session: the bridge task handle + its cancellation
 /// token + the connection state machine + the loopback port the bridge is
@@ -71,13 +71,99 @@ impl RemoteSession {
     }
 }
 
+/// Coordinates updater cancellation, worker ownership, and in-flight install calls.
+/// The condition variable makes teardown wait deterministically without holding app locks.
+pub struct UpdaterBarrier {
+    state: Mutex<UpdaterBarrierState>,
+    wake: Condvar,
+}
+
+struct UpdaterBarrierState {
+    stopping: bool,
+    in_flight: usize,
+    workers: Vec<std::thread::JoinHandle<()>>,
+}
+
+impl UpdaterBarrier {
+    pub fn new() -> Self {
+        Self {
+            state: Mutex::new(UpdaterBarrierState {
+                stopping: false,
+                in_flight: 0,
+                workers: Vec::new(),
+            }),
+            wake: Condvar::new(),
+        }
+    }
+
+    pub fn admit(&self) -> Option<UpdaterPermit<'_>> {
+        let mut state = self.state.lock().unwrap();
+        if state.stopping {
+            return None;
+        }
+        state.in_flight += 1;
+        Some(UpdaterPermit { barrier: self })
+    }
+
+    pub fn register_worker(&self, worker: std::thread::JoinHandle<()>) {
+        let mut state = self.state.lock().unwrap();
+        if state.stopping {
+            // Keep ownership even when registration races teardown. Joining here is
+            // safe because the worker has not been exposed to teardown-sensitive
+            // work until it has been admitted by this barrier.
+            drop(state);
+            let _ = worker.join();
+        } else {
+            state.workers.push(worker);
+        }
+    }
+
+    /// Admit teardown and wait for every updater operation to leave before joining
+    /// the worker. Updater operations are required to observe `is_stopping()` at
+    /// their cancellation points; detaching here would allow a late plugin result
+    /// to touch the app after teardown.
+    pub fn stop_and_join(&self) {
+        let workers = {
+            let mut state = self.state.lock().unwrap();
+            state.stopping = true;
+            // Never detach an admitted updater operation: its permit is the ownership boundary
+            // that prevents late AppHandle/plugin actions after downstream teardown.
+            while state.in_flight != 0 {
+                state = self.wake.wait(state).unwrap();
+            }
+            std::mem::take(&mut state.workers)
+        };
+        for worker in workers {
+            let _ = worker.join();
+        }
+    }
+
+    pub fn is_stopping(&self) -> bool {
+        self.state.lock().unwrap().stopping
+    }
+}
+
+pub struct UpdaterPermit<'a> {
+    barrier: &'a UpdaterBarrier,
+}
+impl Drop for UpdaterPermit<'_> {
+    fn drop(&mut self) {
+        let mut state = self.barrier.state.lock().unwrap();
+        state.in_flight -= 1;
+        self.barrier.wake.notify_all();
+    }
+}
+
 pub struct AppState {
     pub config: Arc<PantokenConfig>,
     pub supervisor: Mutex<Option<Supervisor>>,
     pub overlay: Overlay,
-    /// Quit signal for the bundled-mode updater loop (a plain detached thread — this
-    /// keeps it from starting an install/relaunch while teardown is in flight).
+    /// Quit signal for the bundled-mode updater loop. The worker is owned by
+    /// `updater_barrier` and joined during teardown; this keeps it from starting
+    /// an install/relaunch while teardown is in flight.
     pub updater_stop: Arc<AtomicBool>,
+    /// Owns the updater worker and blocks new installs during teardown.
+    pub updater_barrier: Arc<UpdaterBarrier>,
     /// The dedicated multi-thread tokio runtime for the bridge + SSH child
     /// process. Tauri's internal `async_runtime` is sized for short plugin
     /// operations, not a persistent listener + long-running child; this runtime
@@ -114,6 +200,7 @@ impl AppState {
             supervisor: Mutex::new(None),
             overlay: Overlay::new(),
             updater_stop: Arc::new(AtomicBool::new(false)),
+            updater_barrier: Arc::new(UpdaterBarrier::new()),
             remote_runtime: Mutex::new(Some(runtime)),
             remote_handle: handle,
             remote: Mutex::new(HashMap::new()),
@@ -131,6 +218,8 @@ impl AppState {
             return;
         }
         self.updater_stop.store(true, Ordering::SeqCst);
+        // Wait for the updater worker and any install/plugin call before stopping the hub.
+        self.updater_barrier.stop_and_join();
         // Stop all remote sessions, then clear the map.
         let sessions: Vec<Arc<RemoteSession>> = self
             .remote

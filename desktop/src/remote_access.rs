@@ -26,7 +26,24 @@ pub struct RemoteAccessStatusDto {
 pub fn redact_origin(origin: Option<&str>) -> Option<String> {
     origin.map(|value| {
         url::Url::parse(value)
-            .map(|parsed| format!("{}//{}/", parsed.scheme(), parsed.host_str().unwrap_or("")))
+            .map(|parsed| {
+                let host = value
+                    .split_once("://")
+                    .and_then(|(_, rest)| rest.split(['/', '?', '#']).next())
+                    .and_then(|authority| {
+                        authority
+                            .rsplit_once('@')
+                            .map_or(Some(authority), |(_, host)| Some(host))
+                    })
+                    .unwrap_or(parsed.host_str().unwrap_or(""));
+                let host =
+                    if host.contains(':') && !host.starts_with('[') && parsed.port().is_none() {
+                        format!("[{host}]")
+                    } else {
+                        host.to_owned()
+                    };
+                format!("{}://{host}/", parsed.scheme())
+            })
             .unwrap_or_else(|_| "configured HTTPS origin".to_owned())
     })
 }

@@ -69,13 +69,16 @@ pub fn spawn_check(app: AppHandle, manual: bool) {
     if CHECK_IN_FLIGHT.swap(true, Ordering::SeqCst) {
         return;
     }
-    std::thread::spawn(move || {
+    let barrier = app.state::<AppState>().updater_barrier.clone();
+    let worker = std::thread::spawn(move || {
         run_check(&app, manual);
         CHECK_IN_FLIGHT.store(false, Ordering::SeqCst);
     });
+    barrier.register_worker(worker);
 }
 
 fn run_check(app: &AppHandle, manual: bool) {
+    let state = app.state::<AppState>();
     let Some(endpoint) = endpoint(app) else {
         if manual {
             app.dialog()
@@ -89,10 +92,13 @@ fn run_check(app: &AppHandle, manual: bool) {
         return;
     };
     let Ok(url) = url::Url::parse(&endpoint) else {
-        eprintln!("pantoken: invalid shell update endpoint: {endpoint}");
+        eprintln!("pantoken: invalid shell update endpoint; checks skipped");
         return;
     };
 
+    let Some(check_permit) = state.updater_barrier.admit() else {
+        return;
+    };
     let updater = match app.updater_builder().endpoints(vec![url]) {
         Ok(b) => match b.build() {
             Ok(u) => u,
@@ -159,16 +165,22 @@ fn run_check(app: &AppHandle, manual: bool) {
     }
 
     let state = app.state::<AppState>();
-    if !state.lifecycle_gate.admit_relaunch() {
-        state.overlay.hide(app);
+    if state.updater_barrier.is_stopping() || !state.lifecycle_gate.admit_relaunch() {
+        return;
+    }
+    let Some(_permit) = state.updater_barrier.admit() else {
+        state.lifecycle_gate.cancel_relaunch();
+        return;
+    };
+    if state.updater_barrier.is_stopping() {
+        state.lifecycle_gate.cancel_relaunch();
         return;
     }
     state.overlay.raise(app, "Updating Pantoken shell…");
     let result = tauri::async_runtime::block_on(update.download_and_install(|_, _| {}, || {}));
     match result {
         Ok(()) => {
-            if state.updater_stop.load(Ordering::SeqCst) {
-                state.overlay.hide(app);
+            if state.updater_stop.load(Ordering::SeqCst) || state.updater_barrier.is_stopping() {
                 return;
             }
             // The event-loop-mediated restart: RunEvent::Exit fires first (teardown
@@ -177,10 +189,16 @@ fn run_check(app: &AppHandle, manual: bool) {
             // variant.
             app.request_restart();
         }
-        Err(e) => {
+        Err(_e) => {
+            if state.updater_stop.load(Ordering::SeqCst) || state.updater_barrier.is_stopping() {
+                return;
+            }
+            state.lifecycle_gate.cancel_relaunch();
             state.overlay.hide(app);
             app.dialog()
-                .message(format!("Installing the update failed:\n{e}"))
+                .message(
+                    "Installing the update failed. The staged update remains available for retry.",
+                )
                 .title("Update failed")
                 .kind(MessageDialogKind::Error)
                 .blocking_show();
@@ -204,7 +222,8 @@ fn check_interval() -> Duration {
 const PENDING_POLL: Duration = Duration::from_secs(5);
 
 pub fn spawn_periodic(app: AppHandle) {
-    std::thread::spawn(move || {
+    let barrier = app.state::<AppState>().updater_barrier.clone();
+    let worker = std::thread::spawn(move || {
         // First cycle immediately (the startup check), then pace by what it found.
         loop {
             let state = app.state::<AppState>();
@@ -221,11 +240,17 @@ pub fn spawn_periodic(app: AppHandle) {
             }
         }
     });
+    barrier.register_worker(worker);
 }
 
 /// One check-decide-act cycle. Returns how long to sleep before the next one.
 fn run_cycle(app: &AppHandle) -> Duration {
     let state = app.state::<AppState>();
+    // Guard the complete cycle, including endpoint resolution and every plugin/
+    // network action. Teardown therefore closes admission before this work starts.
+    let Some(_cycle_permit) = state.updater_barrier.admit() else {
+        return PENDING_POLL;
+    };
     let port = state.config.server_port;
 
     // Re-resolved every cycle so configuring the endpoint doesn't need a relaunch.
@@ -310,8 +335,9 @@ fn run_cycle_locked(app: &AppHandle, port: u16, endpoint: &str) -> Duration {
             app.request_restart();
             PENDING_POLL // unreached in practice; the event loop is exiting
         }
-        Err(e) => {
-            eprintln!("pantoken: shell update install failed: {e}");
+        Err(_e) => {
+            eprintln!("pantoken: shell update install failed; staged update remains retryable");
+            state.lifecycle_gate.cancel_relaunch();
             state.overlay.hide(app);
             // applyFailed un-sticks the card's "Updating…" state so it offers retry.
             let _ = report_update_state(port, state.config.token.as_deref(), Some(&version), true);
@@ -510,9 +536,41 @@ fn http_loopback(
     }
 }
 
+/// Pure updater state transition. A failed install clears the applying overlay
+/// state while retaining the staged version for a subsequent retry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InstallState {
+    Staged,
+    Applying,
+    Retryable,
+    Relaunching,
+}
+
+fn begin_install(state: InstallState, stopping: bool) -> InstallState {
+    if stopping {
+        InstallState::Staged
+    } else {
+        match state {
+            InstallState::Staged | InstallState::Retryable => InstallState::Applying,
+            other => other,
+        }
+    }
+}
+
+fn install_transition(state: InstallState, success: bool, stopping: bool) -> InstallState {
+    if stopping {
+        return InstallState::Staged;
+    }
+    match (state, success) {
+        (InstallState::Applying, true) => InstallState::Relaunching,
+        (InstallState::Applying, false) => InstallState::Retryable,
+        (other, _) => other,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Activity, ReportState};
+    use super::{begin_install, install_transition, Activity, InstallState, ReportState};
 
     #[test]
     fn updater_report_auth_contract() {
@@ -528,6 +586,64 @@ mod tests {
         }
         .permit()
         .is_some());
+    }
+
+    #[test]
+    fn updater_install_failure_is_retryable() {
+        let applying = begin_install(InstallState::Staged, false);
+        assert_eq!(applying, InstallState::Applying);
+        let retryable = install_transition(applying, false, false);
+        assert_eq!(retryable, InstallState::Retryable);
+        // The retained staged artifact can be retried after failure.
+        assert_eq!(begin_install(retryable, false), InstallState::Applying);
+        assert_eq!(
+            install_transition(InstallState::Applying, true, false),
+            InstallState::Relaunching
+        );
+        assert_eq!(
+            install_transition(InstallState::Applying, true, true),
+            InstallState::Staged
+        );
+    }
+
+    #[test]
+    fn updater_teardown_order() {
+        use std::sync::{Arc, Mutex};
+        let barrier = Arc::new(crate::state::UpdaterBarrier::new());
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let permit = barrier.admit().expect("install admitted");
+        let worker_events = events.clone();
+        let worker = std::thread::spawn(move || {
+            worker_events.lock().unwrap().push("worker-start");
+            worker_events.lock().unwrap().push("worker-exit");
+        });
+        barrier.register_worker(worker);
+        while events.lock().unwrap().len() < 2 {
+            std::thread::yield_now();
+        }
+        let b = barrier.clone();
+        let teardown_events = events.clone();
+        let teardown = std::thread::spawn(move || {
+            b.stop_and_join();
+            teardown_events.lock().unwrap().push("teardown-complete");
+        });
+        while !barrier.is_stopping() {
+            std::thread::yield_now();
+        }
+        assert!(barrier.admit().is_none(), "teardown closes admission");
+        assert!(!teardown.is_finished(), "held permit must block teardown");
+        events.lock().unwrap().push("permit-release");
+        drop(permit);
+        teardown.join().unwrap();
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![
+                "worker-start",
+                "worker-exit",
+                "permit-release",
+                "teardown-complete"
+            ]
+        );
     }
 
     #[test]

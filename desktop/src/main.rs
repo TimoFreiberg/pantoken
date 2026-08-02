@@ -28,6 +28,91 @@ mod updater;
 use tauri::{AppHandle, Manager, RunEvent};
 
 use crate::config::PantokenConfig;
+
+#[cfg(target_os = "macos")]
+mod macos_launch_adapter {
+    use super::*;
+    use block2::RcBlock;
+    use objc2_app_kit::{
+        NSApplicationDidBecomeActiveNotification, NSApplicationDidFinishLaunchingNotification,
+    };
+    use objc2_foundation::{NSNotification, NSNotificationCenter};
+    use std::ptr::NonNull;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    static APP: OnceLock<Arc<Mutex<Option<AppHandle>>>> = OnceLock::new();
+    static LAUNCH: OnceLock<Arc<Mutex<lifecycle::LaunchContextState>>> = OnceLock::new();
+
+    /// Install AppKit launch notifications before Tauri creates its application delegate. The
+    /// observer is deliberately only an event adapter: launch/reopen state remains in the pure
+    /// lifecycle state machine and revealing always goes through the shared shell function.
+    pub fn install() {
+        let app = APP.get_or_init(|| Arc::new(Mutex::new(None))).clone();
+        let launch = LAUNCH
+            .get_or_init(|| {
+                Arc::new(Mutex::new(lifecycle::LaunchContextState::new(
+                    lifecycle::classify_startup(lifecycle::launch_context()),
+                )))
+            })
+            .clone();
+        let center = NSNotificationCenter::defaultCenter();
+        let names = unsafe {
+            [
+                NSApplicationDidFinishLaunchingNotification,
+                NSApplicationDidBecomeActiveNotification,
+            ]
+        };
+        for (index, name) in names.into_iter().enumerate() {
+            let app = app.clone();
+            let launch = launch.clone();
+            let block = RcBlock::new(move |_notification: NonNull<NSNotification>| {
+                let event = if index == 0 {
+                    lifecycle::LaunchEvent::DidFinishLaunching
+                } else {
+                    lifecycle::LaunchEvent::DidBecomeActive
+                };
+                if !launch.lock().unwrap().handle(event) {
+                    return;
+                }
+                if let Some(handle) = app.lock().unwrap().clone() {
+                    shell::show_main(&handle);
+                }
+            });
+            // SAFETY: the notification names are AppKit constants, the nil object/queue request
+            // is valid, and the block has the exact Foundation callback signature.
+            unsafe {
+                center.addObserverForName_object_queue_usingBlock(Some(name), None, None, &block);
+            }
+            // NSNotificationCenter retains the block observer token until removal. We do not
+            // remove it because the process lifetime is the adapter lifetime.
+        }
+    }
+
+    /// Forward a platform launch event through the shared state machine. Tauri's macOS runtime
+    /// invokes this for `NSApplicationDelegate::applicationShouldHandleReopen`, so Dock clicks
+    /// use the same reveal path as activation, tray Open, and second-instance launches.
+    pub fn handle_event(event: lifecycle::LaunchEvent, app: &AppHandle) {
+        let launch = LAUNCH.get_or_init(|| {
+            Arc::new(Mutex::new(lifecycle::LaunchContextState::new(
+                lifecycle::classify_startup(lifecycle::launch_context()),
+            )))
+        });
+        if launch.lock().unwrap().handle(event) {
+            shell::show_main(app);
+        }
+    }
+
+    pub fn attach_app(app: &AppHandle) {
+        let slot = APP.get_or_init(|| Arc::new(Mutex::new(None)));
+        *slot.lock().unwrap() = Some(app.clone());
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+mod macos_launch_adapter {
+    pub fn install() {}
+    pub fn attach_app(_: &tauri::AppHandle) {}
+}
 use std::sync::OnceLock;
 
 use crate::state::AppState;
@@ -44,9 +129,16 @@ fn main() {
     let term_signals = block_term_signals();
     LAUNCHED.set(std::time::Instant::now()).ok();
 
+    // Install the platform launch adapter before Tauri setup so login launches and the first
+    // AppKit activation are observed without relying on registration status or environment state.
+    macos_launch_adapter::install();
+
     tauri::Builder::default()
         // Must be first: a second launch hands off to us and exits before other plugins run.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            #[cfg(target_os = "macos")]
+            macos_launch_adapter::handle_event(lifecycle::LaunchEvent::SecondInstance, app);
+            #[cfg(not(target_os = "macos"))]
             shell::show_main(app);
         }))
         .plugin(tauri_plugin_dialog::init())
@@ -78,6 +170,7 @@ fn main() {
         .setup(|app| {
             let resource_dir = app.path().resource_dir()?;
             let handle = app.handle().clone();
+            macos_launch_adapter::attach_app(&handle);
             let (config, fatal) = match PantokenConfig::resolve_launch(&resource_dir) {
                 Ok(c) => (c, None),
                 // A resolve failure still wants the window + tray up so the fatal
@@ -87,11 +180,12 @@ fn main() {
             };
             app.manage(AppState::new(config));
 
-            let startup_mode = lifecycle::classify_startup(lifecycle::launch_context());
+            // Start headlessly for every launch. Login launches must not reveal a window, and
+            // ordinary launches wait for AppKit activation, tray Open, or second-instance focus
+            // to create/reveal it through the same shell path.
             shell::create_tray(&handle)?;
-            if !matches!(startup_mode, lifecycle::StartupMode::LoginLaunch) {
-                shell::create_main_window(&handle)?;
-            }
+            #[cfg(not(target_os = "macos"))]
+            shell::create_main_window(&handle)?;
 
             // Native macOS mouse thumb-button (back/forward) → webview nav.
             // No-op on non-macOS; the DOM onauxclick handler is the browser fallback.
@@ -134,8 +228,26 @@ impl RunWithSignals for tauri::App {
             handle.exit(0);
         });
         self.run(|app, event| {
-            if let RunEvent::Exit = event {
-                app.state::<AppState>().teardown();
+            #[cfg(target_os = "macos")]
+            if let RunEvent::Reopen { .. } = event {
+                // Tauri forwards NSApplicationDelegate::applicationShouldHandleReopen here.
+                // Keep Dock reopen on the same state-machine/reveal path as activation.
+                macos_launch_adapter::handle_event(lifecycle::LaunchEvent::Reopen, app);
+            }
+            match event {
+                // AppKit Cmd-Q/application termination arrives here before Tauri emits
+                // Exit. Admit it through the same request path as tray Quit and signals;
+                // the resulting Exit event performs the idempotent teardown exactly once.
+                RunEvent::ExitRequested { api, code, .. } => {
+                    if code.is_none() {
+                        api.prevent_exit();
+                        shell::request_quit(app);
+                    }
+                }
+                RunEvent::Exit => {
+                    app.state::<AppState>().teardown();
+                }
+                _ => {}
             }
         });
     }
@@ -176,8 +288,17 @@ fn lifecycle_diagnostics(state: tauri::State<'_, AppState>) -> lifecycle::Lifecy
 
 fn on_supervisor_event(app: &AppHandle, event: SupervisorEvent) {
     let state = app.state::<AppState>();
+    let endpoint = state.config.app_url();
+    let timestamp = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis().to_string())
+            .unwrap_or_else(|_| "0".into())
+    };
+    state.diagnostics.set_endpoint(&endpoint);
     match event {
         SupervisorEvent::Healthy { first_time } => {
+            state.diagnostics.record_healthy(&endpoint, timestamp());
             if first_time {
                 if let Some(t0) = LAUNCHED.get() {
                     eprintln!(
@@ -205,7 +326,42 @@ fn on_supervisor_event(app: &AppHandle, event: SupervisorEvent) {
                 updater::spawn_periodic(app.clone());
             }
         }
+        SupervisorEvent::ProbeFailed { outcome } => {
+            let health = match outcome {
+                crate::supervisor::ProbeOutcome::Unauthorized => {
+                    crate::lifecycle::HealthClass::Unauthorized
+                }
+                crate::supervisor::ProbeOutcome::Unreachable => {
+                    crate::lifecycle::HealthClass::EndpointUnreachable
+                }
+                crate::supervisor::ProbeOutcome::Malformed
+                | crate::supervisor::ProbeOutcome::WrongTarget
+                | crate::supervisor::ProbeOutcome::EndpointUnverified => {
+                    crate::lifecycle::HealthClass::EndpointUnverified
+                }
+                crate::supervisor::ProbeOutcome::Healthy => crate::lifecycle::HealthClass::Healthy,
+            };
+            state.diagnostics.set_health(health);
+            state
+                .diagnostics
+                .record_failure(health, format!("health probe: {outcome:?}"));
+        }
+        SupervisorEvent::Restarting { reason } => {
+            let health = match reason {
+                crate::supervisor::RecoveryReason::Hang => {
+                    crate::lifecycle::HealthClass::HangRestarting
+                }
+                _ => crate::lifecycle::HealthClass::CrashRestarting,
+            };
+            state
+                .diagnostics
+                .record_recovery(health, format!("{reason:?}"), timestamp());
+        }
         SupervisorEvent::Unrecoverable(message) => {
+            state.diagnostics.record_failure(
+                crate::lifecycle::HealthClass::HubUnreachable,
+                "unrecoverable supervisor state",
+            );
             state.overlay.hide(app);
             shell::present_fatal(app, &message);
         }
