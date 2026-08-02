@@ -159,10 +159,18 @@ fn run_check(app: &AppHandle, manual: bool) {
     }
 
     let state = app.state::<AppState>();
+    if !state.lifecycle_gate.admit_relaunch() {
+        state.overlay.hide(app);
+        return;
+    }
     state.overlay.raise(app, "Updating Pantoken shell…");
     let result = tauri::async_runtime::block_on(update.download_and_install(|_, _| {}, || {}));
     match result {
         Ok(()) => {
+            if state.updater_stop.load(Ordering::SeqCst) {
+                state.overlay.hide(app);
+                return;
+            }
             // The event-loop-mediated restart: RunEvent::Exit fires first (teardown
             // SIGTERMs the hub), then the new binary execs. Plain restart()
             // from a non-main thread does the same, but this is the documented-reliable
@@ -283,7 +291,7 @@ fn run_cycle_locked(app: &AppHandle, port: u16, endpoint: &str) -> Duration {
         return PENDING_POLL;
     }
 
-    if state.updater_stop.load(Ordering::SeqCst) {
+    if state.updater_stop.load(Ordering::SeqCst) || !state.lifecycle_gate.admit_relaunch() {
         return PENDING_POLL;
     }
     state.overlay.raise(app, "Updating Pantoken…");

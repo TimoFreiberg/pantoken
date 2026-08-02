@@ -203,9 +203,21 @@
   let phoneOrigin = $state("");
   let phoneEnabled = $state(false);
   let phoneStatus = $state("Phone access is controlled from the desktop app.");
+  let launchStatus = $state("Checking macOS launch-at-login status…");
+  let launchEnabled = $state(false);
   function isDesktopShell(): boolean {
     return typeof window !== "undefined" && Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
   }
+  async function lifecycleCommand(command: string): Promise<void> {
+    if (!isDesktopShell()) return;
+    const invoke = (window as unknown as { __TAURI_INTERNALS__: { invoke: (name: string, args?: Record<string, unknown>) => Promise<unknown> } }).__TAURI_INTERNALS__.invoke;
+    try {
+      const result = await invoke(command) as { state?: string; enabled?: boolean; message?: string };
+      launchEnabled = Boolean(result.enabled);
+      launchStatus = result.message ?? (launchEnabled ? "Starts at login." : "Does not start at login.");
+    } catch (error) { launchStatus = String(error); }
+  }
+
   async function phoneCommand(command: string, args?: Record<string, unknown>): Promise<void> {
     if (!isDesktopShell()) return;
     const invoke = (window as unknown as { __TAURI_INTERNALS__: { invoke: (name: string, args?: Record<string, unknown>) => Promise<unknown> } }).__TAURI_INTERNALS__.invoke;
@@ -762,6 +774,19 @@
               >
             </div>
           {/if}
+        </div>
+      </section>
+      {/if}
+
+      <!-- Launch at login -->
+      {#if activeSection === "phone" && isDesktopShell()}
+      <section class="group" data-testid="launch-at-login-section">
+        <div class="row">
+          <div class="rinfo"><div class="rlabel">Start Pantoken at login</div><div class="rdesc" role="status">{launchStatus} Login startup keeps the tray and hub available without opening a window.</div></div>
+          <div class="actions">
+            <Button onclick={() => void lifecycleCommand(launchEnabled ? "disable_launch_at_login" : "enable_launch_at_login")}>{launchEnabled ? "Disable" : "Enable"}</Button>
+            <Button onclick={() => void lifecycleCommand("lifecycle_status")}>Refresh</Button>
+          </div>
         </div>
       </section>
       {/if}

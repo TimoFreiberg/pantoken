@@ -24,6 +24,26 @@ dialog, never a silent fallback. What's new over Swift:
   (restart a hung-but-running server), crash-loop breaker, SIGTERM-safe teardown
   (a signal routes through the same cleanup as Cmd+Q — no orphaned processes).
 
+## Mac Mini lifecycle
+
+Launch-at-login is **opt-in** and is controlled by macOS `SMAppService.mainApp`; Pantoken never
+creates a helper, launch agent, or silent fallback. Settings reads the actual Service Management
+status and reports disabled, registered, approval-required, failure, and unavailable states.
+Only a signed packaged macOS app is authoritative for registration; debug/non-macOS builds report
+unavailable rather than pretending to be registered.
+
+A login launch starts the tray, supervised hub, and remote bridge headlessly. Tray **Open** creates
+(or reveals) and focuses the window. Closing the window hides it and leaves the hub and phone access
+alive; explicit **Quit** (tray, Cmd+Q, signal, or updater relaunch) performs complete teardown.
+Supervisor diagnostics expose safe endpoint metadata, health/recovery state, timestamps, and restart
+reason. They never include bearer tokens, Authorization headers, or query credentials. Failed or
+unauthorized health is fail-closed for updater idle decisions.
+
+The supported v1 path is the signed app's Service Management registration. User-managed Login Items
+or launch-agent workarounds are non-v1 and are not configured by Pantoken. Packaged manual checks
+remain required for reboot/login, approval/error messaging, close-versus-Quit, update persistence,
+and uninstall behavior.
+
 ## How it works
 
 On launch, the shell resolves its explicit local/remote mode before starting the sidecar:

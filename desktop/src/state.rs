@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::config::PantokenConfig;
+use crate::lifecycle::{DiagnosticStore, LifecycleGate};
 use crate::remote_connection::RemoteConnection;
 use crate::shell::Overlay;
 use crate::supervisor::Supervisor;
@@ -92,6 +93,8 @@ pub struct AppState {
     /// teardown stops all. The local computer is NOT in this map — it's the
     /// `Supervisor`.
     pub remote: Mutex<HashMap<String, Arc<RemoteSession>>>,
+    pub diagnostics: DiagnosticStore,
+    pub lifecycle_gate: LifecycleGate,
 }
 
 impl AppState {
@@ -114,6 +117,8 @@ impl AppState {
             remote_runtime: Mutex::new(Some(runtime)),
             remote_handle: handle,
             remote: Mutex::new(HashMap::new()),
+            diagnostics: DiagnosticStore::new(),
+            lifecycle_gate: LifecycleGate::new(),
         }
     }
 
@@ -122,6 +127,9 @@ impl AppState {
     /// (SIGTERM → bounded wait → SIGKILL). Finally drop the bridge runtime.
     /// Idempotent: each flag is sticky and each handle is take()n.
     pub fn teardown(&self) {
+        if !self.lifecycle_gate.begin_teardown() {
+            return;
+        }
         self.updater_stop.store(true, Ordering::SeqCst);
         // Stop all remote sessions, then clear the map.
         let sessions: Vec<Arc<RemoteSession>> = self
@@ -143,6 +151,8 @@ impl AppState {
         if let Some(rt) = self.remote_runtime.lock().unwrap().take() {
             rt.shutdown_background();
         }
+        self.diagnostics.shutdown();
+        self.lifecycle_gate.complete_teardown();
     }
 
     /// Remove + stop one remote session by profile id. Idempotent (no-op if the

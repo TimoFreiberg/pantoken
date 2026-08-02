@@ -148,6 +148,9 @@ fn unique_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
 pub fn show_main(app: &AppHandle) {
     #[cfg(target_os = "macos")]
     let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    if app.get_webview_window(MAIN_WINDOW).is_none() {
+        let _ = create_main_window(app);
+    }
     if let Some(w) = app.get_webview_window(MAIN_WINDOW) {
         let _ = w.show();
         let _ = w.unminimize();

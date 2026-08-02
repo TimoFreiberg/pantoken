@@ -11,6 +11,7 @@ mod bridge;
 mod config;
 mod dock_attention;
 mod docker_target;
+mod lifecycle;
 mod mouse_nav;
 mod proc;
 mod provisioning;
@@ -69,6 +70,10 @@ fn main() {
             remote_commands::inspect_container,
             dock_attention::request_dock_attention,
             dock_attention::set_dock_badge,
+            lifecycle_status,
+            enable_launch_at_login,
+            disable_launch_at_login,
+            lifecycle_diagnostics,
         ])
         .setup(|app| {
             let resource_dir = app.path().resource_dir()?;
@@ -82,8 +87,11 @@ fn main() {
             };
             app.manage(AppState::new(config));
 
-            shell::create_main_window(&handle)?;
+            let startup_mode = lifecycle::classify_startup(lifecycle::launch_context());
             shell::create_tray(&handle)?;
+            if !matches!(startup_mode, lifecycle::StartupMode::LoginLaunch) {
+                shell::create_main_window(&handle)?;
+            }
 
             // Native macOS mouse thumb-button (back/forward) → webview nav.
             // No-op on non-macOS; the DOM onauxclick handler is the browser fallback.
@@ -144,6 +152,26 @@ fn block_term_signals() -> libc::sigset_t {
         libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
         set
     }
+}
+
+#[tauri::command]
+fn lifecycle_status() -> lifecycle::LifecycleStatus {
+    lifecycle::status()
+}
+
+#[tauri::command]
+fn enable_launch_at_login() -> Result<lifecycle::LifecycleStatus, String> {
+    lifecycle::enable()
+}
+
+#[tauri::command]
+fn disable_launch_at_login() -> Result<lifecycle::LifecycleStatus, String> {
+    lifecycle::disable()
+}
+
+#[tauri::command]
+fn lifecycle_diagnostics(state: tauri::State<'_, AppState>) -> lifecycle::LifecycleDiagnostics {
+    state.diagnostics.snapshot()
 }
 
 fn on_supervisor_event(app: &AppHandle, event: SupervisorEvent) {
