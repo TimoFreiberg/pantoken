@@ -80,8 +80,8 @@ use async_trait::async_trait;
 
 use crate::archive_store::ArchiveStore;
 use crate::driver::{
-    BranchResult, ClearQueueResult, NewSessionOptsData, PantokenDriver, TodoDeleteDependent,
-    TodoDeleteError,
+    BranchResult, ClearQueueResult, NewSessionOptsData, PantokenDriver, RestoreFailureClass,
+    RetryAffordance, SessionSwitchError, TodoDeleteDependent, TodoDeleteError,
 };
 use crate::polytoken::config_watcher;
 use crate::polytoken::daemon_client::{
@@ -1764,9 +1764,10 @@ impl PantokenDriver for PolytokenDriver {
         // ghost transcript row. If the daemon accepts the prompt into the
         // pending-turn queue, keep it out of the transcript until the later
         // `pending_turn_input_drained` event promotes it into the active turn.
+        let daemon_text = text.clone();
         let accepted = ws
             .client
-            .prompt(&text, None)
+            .prompt(&daemon_text, None)
             .await
             .map_err(|e| format!("prompt failed: {e}"))?;
         self.inner
@@ -2134,10 +2135,16 @@ impl PantokenDriver for PolytokenDriver {
         }
     }
 
-    async fn open_session(&self, path: String) -> Result<Vec<SessionDriverEvent>, String> {
+    async fn open_session(
+        &self,
+        path: String,
+    ) -> Result<Vec<SessionDriverEvent>, SessionSwitchError> {
         let Some(session_id) = PolytokenInner::session_id_from_path(&path) else {
             warn!("open_session: could not resolve session id from path: {path}");
-            return Err(format!("could not resolve session id from path: {path}"));
+            return Err(SessionSwitchError::MissingSessionPath {
+                path: path.clone(),
+                detail: format!("could not resolve session id from path: {path}"),
+            });
         };
 
         // Fast path: if the session is already in the warm pool, the SSE consumer
@@ -2284,7 +2291,10 @@ impl PantokenDriver for PolytokenDriver {
         // still-warm daemon for a since-deleted project keeps working.
         if !Path::new(&cwd).is_dir() {
             error!("open_session: cold-start aborted for {session_id} — cwd does not exist: {cwd}");
-            return Err(format!("session directory no longer exists: {cwd}"));
+            return Err(SessionSwitchError::MissingCwd {
+                cwd: cwd.clone(),
+                detail: format!("session directory no longer exists: {cwd}"),
+            });
         }
 
         // Cold-start: no running daemon found (no startup.json, or attach
@@ -2329,8 +2339,8 @@ impl PantokenDriver for PolytokenDriver {
                 );
             }
             Err(e) => {
-                // Classify so the log level (and, via `classify_switch_error`
-                // in hub.rs, the user-facing message) matches whether this
+                // Classify below the driver/hub seam so the log level and typed
+                // user-facing message match whether this
                 // was ever going to work. Always propagate — swallowing this
                 // into `Ok(Vec::new())` is what caused restore failures to
                 // surface only as the generic "session switch returned no
@@ -2346,16 +2356,36 @@ impl PantokenDriver for PolytokenDriver {
                         "open_session: cold-start spawn failed for {session_id} (cwd {cwd}): {e}"
                     );
                 }
-                return Err(e);
+                return Err(SessionSwitchError::RestoreFailure {
+                    class: match class {
+                        RestoreErrorClass::DaemonStartupFailure => RestoreFailureClass::Startup,
+                        RestoreErrorClass::AuthFailure => RestoreFailureClass::Auth,
+                        RestoreErrorClass::Unreachable => RestoreFailureClass::Unreachable,
+                        _ => RestoreFailureClass::Other,
+                    },
+                    retry: if class.is_permanent() {
+                        RetryAffordance::Terminal
+                    } else {
+                        RetryAffordance::Retryable
+                    },
+                    detail: e,
+                });
             }
         }
 
         Ok(Vec::new())
     }
 
-    async fn reload_session(&self, path: String) -> Result<Vec<SessionDriverEvent>, String> {
-        let session_id = PolytokenInner::session_id_from_path(&path)
-            .ok_or_else(|| format!("could not resolve session id from path: {path}"))?;
+    async fn reload_session(
+        &self,
+        path: String,
+    ) -> Result<Vec<SessionDriverEvent>, SessionSwitchError> {
+        let session_id = PolytokenInner::session_id_from_path(&path).ok_or_else(|| {
+            SessionSwitchError::MissingSessionPath {
+                path: path.clone(),
+                detail: format!("could not resolve session id from path: {path}"),
+            }
+        })?;
         // Dispose existing warm session (extract before await to avoid holding the lock).
         // Teardown order: stop the SSE subscription (aborts the daemon's stream
         // loop → drops the subscribe closure's sender), drop our sender clone
@@ -2448,7 +2478,7 @@ impl PantokenDriver for PolytokenDriver {
     async fn new_session(
         &self,
         opts: NewSessionOptsData,
-    ) -> Result<Vec<SessionDriverEvent>, String> {
+    ) -> Result<Vec<SessionDriverEvent>, SessionSwitchError> {
         // Resolve cwd = opts.cwd trimmed or $HOME (a bare new session defaults to
         // $HOME — the contract the whole stack advertises). $HOME is set in
         // normal environments so the existence guard below accepts a cwd-less
@@ -2468,10 +2498,16 @@ impl PantokenDriver for PolytokenDriver {
         // against a typo'd path. Mirrors `polytoken-driver.ts:1181-1183`.
         let path = std::path::Path::new(&cwd);
         if !path.exists() {
-            return Err(format!("no such directory: {cwd}"));
+            return Err(SessionSwitchError::MissingCwd {
+                cwd: cwd.clone(),
+                detail: format!("no such directory: {cwd}"),
+            });
         }
         if !path.is_dir() {
-            return Err(format!("not a directory: {cwd}"));
+            return Err(SessionSwitchError::MissingCwd {
+                cwd: cwd.clone(),
+                detail: format!("not a directory: {cwd}"),
+            });
         }
 
         // Spawn + health + lease + state + SSE subscribe + insert into the warm
@@ -2595,7 +2631,21 @@ impl PantokenDriver for PolytokenDriver {
             }
             Err(e) => {
                 error!("new_session warm failed: {e}");
-                Err(e)
+                let class = RestoreErrorClass::classify(&e);
+                Err(SessionSwitchError::RestoreFailure {
+                    class: match class {
+                        RestoreErrorClass::DaemonStartupFailure => RestoreFailureClass::Startup,
+                        RestoreErrorClass::AuthFailure => RestoreFailureClass::Auth,
+                        RestoreErrorClass::Unreachable => RestoreFailureClass::Unreachable,
+                        _ => RestoreFailureClass::Other,
+                    },
+                    retry: if class.is_permanent() {
+                        RetryAffordance::Terminal
+                    } else {
+                        RetryAffordance::Retryable
+                    },
+                    detail: e,
+                })
             }
         }
     }
@@ -5148,19 +5198,13 @@ mod tests {
         .await
         .expect("open_session must return promptly, not hang");
         let err = result.expect_err("must fail, not silently return an empty seed");
-        assert!(
-            err.contains(project_dir.to_str().unwrap()),
-            "error should name the missing dir, got: {err}"
-        );
-        assert_eq!(
-            RestoreErrorClass::classify(&err),
-            RestoreErrorClass::MissingCwd,
-            "got: {err}"
-        );
-        assert!(
-            RestoreErrorClass::classify(&err).is_permanent(),
-            "deleted cwd must be permanent"
-        );
+        match &err {
+            SessionSwitchError::MissingCwd { cwd, detail } => {
+                assert_eq!(cwd, project_dir.to_str().unwrap());
+                assert!(detail.contains(project_dir.to_str().unwrap()));
+            }
+            other => panic!("expected MissingCwd, got: {other:?}"),
+        }
     }
 
     /// A stale `startup.json` (dead daemon) must not change the fail-fast outcome.
@@ -5204,10 +5248,13 @@ mod tests {
         .await
         .expect("open_session must return promptly, not hang");
         let err = result.expect_err("must fail, not silently return an empty seed");
-        assert!(
-            err.contains(project_dir.to_str().unwrap()),
-            "error should name the missing dir, got: {err}"
-        );
+        match &err {
+            SessionSwitchError::MissingCwd { cwd, detail } => {
+                assert_eq!(cwd, project_dir.to_str().unwrap());
+                assert!(detail.contains(project_dir.to_str().unwrap()));
+            }
+            other => panic!("expected MissingCwd, got: {other:?}"),
+        }
     }
 
     /// A cold-start spawn failure must propagate as Err, not silently degrade.
@@ -5245,15 +5292,21 @@ mod tests {
         .expect("open_session must return promptly, not hang");
         let err =
             result.expect_err("spawn failure must propagate as Err, not degrade to empty seed");
-        assert!(
-            err.contains("failed to spawn polytoken daemon"),
-            "got: {err}"
-        );
-        // Not the missing-cwd case — a plain spawn failure is non-permanent.
-        assert!(
-            !RestoreErrorClass::classify(&err).is_permanent(),
-            "spawn failure should not be permanent: {err}"
-        );
+        match &err {
+            SessionSwitchError::RestoreFailure {
+                class,
+                retry,
+                detail,
+            } => {
+                assert_eq!(*class, RestoreFailureClass::Other);
+                assert_eq!(*retry, RetryAffordance::Retryable);
+                assert!(
+                    detail.contains("failed to spawn polytoken daemon"),
+                    "got: {detail}"
+                );
+            }
+            other => panic!("expected retryable restore failure, got: {other:?}"),
+        }
     }
 
     // ---- rename doesn't work / renaming a cold session hijacks activeSessionId ----

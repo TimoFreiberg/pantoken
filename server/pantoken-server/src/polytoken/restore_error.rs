@@ -15,7 +15,7 @@
 //! is a separate pre-flight `is_dir()` guard in `open_session`; here,
 //! `classify()` names the reason and `is_permanent()` picks the log severity
 //! at the propagation point (`error!` for permanent, `warn!` for transient).
-//! The user-facing message is owned by the hub's `classify_switch_error`.
+//! The driver converts this low-level class into the typed session-switch contract before the hub renders it.
 
 /// A session-restore failure, classified by whether a retry could help.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

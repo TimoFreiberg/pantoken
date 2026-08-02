@@ -48,6 +48,99 @@ pub struct BranchResult {
     pub aborted: Option<bool>,
 }
 
+/// Retry policy attached by a concrete driver before an error crosses into the hub.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetryAffordance {
+    Retryable,
+    Terminal,
+}
+
+/// Restore-stage failure classes. These are deliberately independent of the
+/// human-readable diagnostic carried by the error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestoreFailureClass {
+    Startup,
+    Auth,
+    Unreachable,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeaseHolder {
+    pub summary: String,
+    pub expires_at: Option<String>,
+}
+
+/// Exhaustive error contract for session open/reload/new operations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionSwitchError {
+    LeaseConflict {
+        holder: Option<LeaseHolder>,
+        detail: String,
+    },
+    MissingSessionPath {
+        path: String,
+        detail: String,
+    },
+    MissingCwd {
+        cwd: String,
+        detail: String,
+    },
+    RestoreFailure {
+        class: RestoreFailureClass,
+        retry: RetryAffordance,
+        detail: String,
+    },
+    Unexpected {
+        operation: String,
+        detail: String,
+    },
+}
+
+impl SessionSwitchError {
+    pub fn unexpected(operation: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self::Unexpected {
+            operation: operation.into(),
+            detail: detail.into(),
+        }
+    }
+
+    /// Compatibility helpers for adapter diagnostics and legacy integration assertions.
+    /// The hub never uses these helpers for classification; it matches typed variants.
+    pub fn contains(&self, needle: &str) -> bool {
+        self.to_string().contains(needle)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.to_string().is_empty()
+    }
+}
+
+impl std::fmt::Display for SessionSwitchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::LeaseConflict { detail, .. }
+            | Self::MissingSessionPath { detail, .. }
+            | Self::MissingCwd { detail, .. }
+            | Self::RestoreFailure { detail, .. } => f.write_str(detail),
+            Self::Unexpected { operation, detail } => write!(f, "{operation}: {detail}"),
+        }
+    }
+}
+
+impl std::error::Error for SessionSwitchError {}
+
+impl From<String> for SessionSwitchError {
+    fn from(detail: String) -> Self {
+        Self::unexpected("session switch", detail)
+    }
+}
+impl From<&str> for SessionSwitchError {
+    fn from(detail: &str) -> Self {
+        Self::unexpected("session switch", detail)
+    }
+}
+
 /// The driver seam. Both the mock (fake daemon) and the real polytoken driver
 /// implement this trait. The hub owns a `Box<dyn PantokenDriver + Send + Sync>`.
 ///
@@ -114,10 +207,16 @@ pub trait PantokenDriver: Send + Sync {
     /// the mock's one-shot `failsession` 409 lease conflict, or a real
     /// claim-lease 409) so `switch_to` can classify + surface a client-visible
     /// `Error`. Ports the TS `Promise<SessionDriverEvent[]>` that throws.
-    async fn open_session(&self, path: String) -> Result<Vec<SessionDriverEvent>, String>;
+    async fn open_session(
+        &self,
+        path: String,
+    ) -> Result<Vec<SessionDriverEvent>, SessionSwitchError>;
 
     /// Reload a session from scratch by its .jsonl path.
-    async fn reload_session(&self, path: String) -> Result<Vec<SessionDriverEvent>, String> {
+    async fn reload_session(
+        &self,
+        path: String,
+    ) -> Result<Vec<SessionDriverEvent>, SessionSwitchError> {
         // Default: same as open_session (the mock's reload delegates to open).
         self.open_session(path).await
     }
@@ -143,7 +242,7 @@ pub trait PantokenDriver: Send + Sync {
     async fn new_session(
         &self,
         opts: NewSessionOptsData,
-    ) -> Result<Vec<SessionDriverEvent>, String>;
+    ) -> Result<Vec<SessionDriverEvent>, SessionSwitchError>;
 
     /// Jump the session to a prior tree entry and branch from it.
     async fn branch_from(

@@ -16,7 +16,8 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
 
 use crate::driver::{
-    BranchResult, ClearQueueResult, NewSessionOptsData, PantokenDriver, TodoDeleteError,
+    BranchResult, ClearQueueResult, LeaseHolder, NewSessionOptsData, PantokenDriver,
+    SessionSwitchError, TodoDeleteError,
 };
 use async_trait::async_trait;
 
@@ -3080,9 +3081,15 @@ impl PantokenDriver for MockDriver {
         Ok(())
     }
 
-    async fn open_session(&self, path: String) -> Result<Vec<SessionDriverEvent>, String> {
+    async fn open_session(
+        &self,
+        path: String,
+    ) -> Result<Vec<SessionDriverEvent>, SessionSwitchError> {
         if !self.sessions.lock().iter().any(|entry| entry.path == path) {
-            return Err("unknown mock session path".into());
+            return Err(SessionSwitchError::MissingSessionPath {
+                path,
+                detail: "unknown mock session path".into(),
+            });
         }
         // One-shot failure injection (armed via run_script("failsession")):
         // throw a 409 lease-conflict error before any state mutation, mirroring
@@ -3092,9 +3099,13 @@ impl PantokenDriver for MockDriver {
         // first attempt, so a Retry → second openSession succeeds. (Faithful port
         // of TS `MockDriver.openSession`, mock-driver.ts:614-619.)
         if self.fail_next_session.swap(false, Ordering::SeqCst) {
-            return Err(
-                "another TUI is attached to this session (\"tui\" pid 99999, lease expires in 30s). Detach it there (/detach) or wait 30s for its lease to lapse.".into()
-            );
+            return Err(SessionSwitchError::LeaseConflict {
+                holder: Some(LeaseHolder {
+                    summary: "\"tui\" pid 99999".into(),
+                    expires_at: None,
+                }),
+                detail: "another TUI is attached to this session (\"tui\" pid 99999, lease expires in 30s). Detach it there (/detach) or wait 30s for its lease to lapse.".into(),
+            });
         }
         // Faithful port of TS MockDriver.openSession(): the base seed, then any
         // pending host-UI dialogs for this session appended to the end so opening
@@ -3136,7 +3147,10 @@ impl PantokenDriver for MockDriver {
     /// warm AgentSession to throw away, so a reload is just a fresh seed of the same
     /// session — enough to exercise the hub's reseed path and the client wiring.
     /// (Faithful port of TS `MockDriver.reloadSession`, mock-driver.ts:649-651.)
-    async fn reload_session(&self, path: String) -> Result<Vec<SessionDriverEvent>, String> {
+    async fn reload_session(
+        &self,
+        path: String,
+    ) -> Result<Vec<SessionDriverEvent>, SessionSwitchError> {
         self.open_session(path).await
     }
 
@@ -3171,11 +3185,14 @@ impl PantokenDriver for MockDriver {
     async fn new_session(
         &self,
         opts: NewSessionOptsData,
-    ) -> Result<Vec<SessionDriverEvent>, String> {
+    ) -> Result<Vec<SessionDriverEvent>, SessionSwitchError> {
         // One-shot failure injection (armed via run_script("failnewsession")): fail before
         // any state mutation, mirroring TS `MockDriver.failNextNewSession`.
         if self.fail_next_new_session.swap(false, Ordering::SeqCst) {
-            return Err("new session failed (failnewsession)".to_string());
+            return Err(SessionSwitchError::unexpected(
+                "new_session",
+                "new session failed (failnewsession)",
+            ));
         }
         // One-shot artificial delay (armed via run_script("slownewsession")): widen
         // the client's warm-up window so e2e can assert the composer badges hold the

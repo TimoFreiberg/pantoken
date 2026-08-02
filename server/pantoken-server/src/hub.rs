@@ -57,7 +57,7 @@ use parking_lot::Mutex;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
-use crate::driver::{NewSessionOptsData, PantokenDriver, TodoDeleteError};
+use crate::driver::{NewSessionOptsData, PantokenDriver, SessionSwitchError, TodoDeleteError};
 use crate::journal::{
     SessionJournal, append_event, build_seed, bump_epoch, create_journal, meta_seed_events,
     tail_covers, try_merge,
@@ -124,8 +124,9 @@ pub async fn run_hub_op_applier(hub: Arc<Mutex<SessionHub>>, mut receiver: HubOp
 /// `classifySwitchError` (hub.ts:1333). Atomic new-session requests carrying their
 /// first prompt suppress that generic error because their correlated rejected
 /// `PromptResult` is the sole user-facing failure signal.
-type SwapFuture =
-    Pin<Box<dyn Future<Output = Result<Vec<SessionDriverEvent>, String>> + Send + 'static>>;
+type SwapFuture = Pin<
+    Box<dyn Future<Output = Result<Vec<SessionDriverEvent>, SessionSwitchError>> + Send + 'static>,
+>;
 
 /// What the hub hands to a notifier (e.g. the Web Push sender) for notable events.
 #[derive(Debug, Clone)]
@@ -2780,91 +2781,42 @@ type SwitchFuture =
 /// daemon-failed, startup-timeout, lease-conflict (409), connection-refused, and
 /// unresolved-path patterns, prettifying each with `kind: "session-switch"`; an
 /// unrecognized error falls back to a generic banner with no `kind`.
-fn classify_switch_error(raw: &str) -> (String, Option<String>) {
+fn render_switch_error(error: &SessionSwitchError) -> (String, Option<String>) {
     let session_switch = || Some("session-switch".to_string());
-    // The session's project directory no longer exists on disk (docs/TODO.md:
-    // restoring a session run in a now-deleted directory "can't ever
-    // succeed"). Permanent — deliberately does NOT match the client's
-    // LEASE_CONFLICT_RE, so no "Retry" action is offered for it (see
-    // store.svelte.ts), only the plain dismissible toast.
-    if let Some((_, tail)) = raw.split_once("session directory no longer exists:") {
-        let dir = tail.trim();
-        return (
-            format!(
-                "Couldn't restore this session — its directory no longer exists ({dir}). Move the project back to that path, or archive this session."
-            ),
+    match error {
+        SessionSwitchError::MissingCwd { cwd, .. } => (
+            format!("Couldn't restore this session — its directory no longer exists ({cwd}). Move the project back to that path, or archive this session."),
             session_switch(),
-        );
-    }
-    // Daemon failed to start (startup.json state:"failed") — the message already
-    // names the config/parse error; surface it plainly (TS captures the tail).
-    if let Some((_, tail)) = raw.split_once("polytoken daemon failed to start:") {
-        let detail = tail.trim().split(['\n', '\r']).next().unwrap_or("").trim();
-        return (
-            format!(
-                "Couldn't open this session — the daemon failed to start ({}). Try again, or open it in the TUI to diagnose.",
-                detail
-            ),
+        ),
+        SessionSwitchError::MissingSessionPath { path, detail } => (
+            format!("Couldn't open this session — its path wasn't recognized ({path}). {detail}"),
             session_switch(),
-        );
+        ),
+        SessionSwitchError::LeaseConflict { holder, detail } => {
+            let message = match holder {
+                Some(holder) if !holder.summary.is_empty() => {
+                    let expiry = holder
+                        .expires_at
+                        .as_deref()
+                        .map(|value| format!(", lease expires at {value}"))
+                        .unwrap_or_default();
+                    format!("{detail} (holder: {}{expiry})", holder.summary)
+                }
+                _ => detail.clone(),
+            };
+            (message, session_switch())
+        }
+        SessionSwitchError::RestoreFailure { class, detail, .. } => match class {
+            crate::driver::RestoreFailureClass::Startup => (format!("Couldn't open this session — the daemon failed to start ({detail}). Try again, or open it in the TUI to diagnose."), session_switch()),
+            crate::driver::RestoreFailureClass::Auth => ("Couldn't authenticate to the session daemon. The daemon may be a different version than expected.".into(), session_switch()),
+            crate::driver::RestoreFailureClass::Unreachable => ("Couldn't reach the session daemon. Try again — if it persists, the daemon may be wedged.".into(), session_switch()),
+            crate::driver::RestoreFailureClass::Other => (format!("session switch failed: {detail}"), session_switch()),
+        },
+        SessionSwitchError::Unexpected { operation, detail } => (
+            format!("session switch failed ({operation}): {detail}"),
+            None,
+        ),
     }
-    // The daemon process exited before it ever wrote a ready startup.json
-    // (e.g. a CLI parse error) — distinct from the state:"failed" case above
-    // (which the daemon reported cleanly) but equally not worth retrying
-    // as-is.
-    if raw.contains("polytoken daemon exited early") {
-        return (
-            "Couldn't open this session — the daemon exited immediately. Try again, or open it in the TUI to diagnose.".into(),
-            session_switch(),
-        );
-    }
-    // Daemon didn't bind its port in time (spawn or health timeout).
-    if raw.contains("did not become ready within") || raw.contains("did not become healthy within")
-    {
-        return (
-            "Couldn't open this session — the daemon took too long to start. Try again.".into(),
-            session_switch(),
-        );
-    }
-    // Lease conflict (409) — claimLease already formatted a readable message.
-    if raw.contains("another TUI is attached") || raw.contains("lease claim failed (409)") {
-        let message = if raw.contains("another TUI is attached") {
-            raw.to_string()
-        } else {
-            "This session is open in the TUI. Detach it there (/detach) or wait ~30s for its lease to lapse.".into()
-        };
-        return (message, session_switch());
-    }
-    // Connection refused / timed out reaching the daemon.
-    if raw.contains("lease claim failed (0)")
-        || raw.contains("request timed out")
-        || raw.contains("fetch failed")
-        || raw.contains("ECONNREFUSED")
-        || raw.contains("daemon health probe failed")
-    {
-        return (
-            "Couldn't reach the session daemon. Try again — if it persists, the daemon may be wedged.".into(),
-            session_switch(),
-        );
-    }
-    // 401 — auth failure (daemon 0.5.0+ bearer token mismatch). The token is
-    // read from the credential file; a 401 means the file is stale, missing,
-    // or the daemon is a different version than expected.
-    if raw.contains("lease claim failed (401)") || raw.contains("unauthorized") {
-        return (
-            "Couldn't authenticate to the session daemon. The daemon may be a different version than expected.".into(),
-            session_switch(),
-        );
-    }
-    // Could not resolve session id from path.
-    if raw.contains("could not resolve session id from path") {
-        return (
-            "Couldn't open this session — its path wasn't recognized.".into(),
-            session_switch(),
-        );
-    }
-    // Fallback: unknown error → keep the generic banner.
-    (format!("session switch failed: {raw}"), None)
 }
 
 /// The atomic session-swap state machine. Implements single-flight per connection:
@@ -2951,7 +2903,7 @@ fn switch_to(
                         .unwrap_or(false)
                 };
                 if !pending && !suppress_error {
-                    let (message, kind) = classify_switch_error(&raw);
+                    let (message, kind) = render_switch_error(&raw);
                     let h = hub.lock();
                     h.send_to_client(client_key, ServerMessage::Error { message, kind });
                 }
@@ -4142,7 +4094,7 @@ mod hub_models_tests {
     async fn failed_new_session_without_prompt_sends_error() {
         // When a plain `NewSession` (no first prompt) fails, the creation error
         // must reach the client as `ServerMessage::Error` — the path that
-        // `switch_to`'s Err arm → `classify_switch_error` takes
+        // `switch_to`'s typed-error arm → `render_switch_error` takes
         // (hub.rs ~2338-2352), plus the `has_first_prompt == false` fallback
         // (hub.rs ~1600-1608). Without a prompt there is no `PromptResult` to
         // restore a draft from, so `Error` is the only client-visible signal.
@@ -4232,7 +4184,10 @@ mod hub_models_tests {
             Box::pin(async move {
                 let _ = entered_tx.send(());
                 let _ = release_rx.await;
-                Err("first switch failed".into())
+                Err(SessionSwitchError::unexpected(
+                    "test switch",
+                    "first switch failed",
+                ))
             }) as SwapFuture
         });
         let first_task = tokio::spawn(switch_to(
@@ -4305,7 +4260,10 @@ mod hub_models_tests {
             Box::pin(async move {
                 let _ = entered_tx.send(());
                 let _ = release_rx.await;
-                Err("first switch failed".into())
+                Err(SessionSwitchError::unexpected(
+                    "test switch",
+                    "first switch failed",
+                ))
             }) as SwapFuture
         });
         let first_task = tokio::spawn(switch_to(
@@ -4318,7 +4276,12 @@ mod hub_models_tests {
         ));
         entered_rx.await.expect("first swap did not start");
         let queued_generic = Box::new(move |_hub: Arc<Mutex<SessionHub>>| {
-            Box::pin(async { Err("queued ordinary switch failed".into()) }) as SwapFuture
+            Box::pin(async {
+                Err(SessionSwitchError::unexpected(
+                    "test switch",
+                    "queued ordinary switch failed",
+                ))
+            }) as SwapFuture
         });
         let queued_task = tokio::spawn(switch_to(
             hub.clone(),
@@ -5123,94 +5086,21 @@ mod hub_models_tests {
         }
     }
 
-    // ── classify_switch_error table tests (Phase 1.8 lease-conflict) ────────
-    // Ports the six branches of TS `classifySwitchError` (hub.ts:129-184).
-    // `classify_switch_error` is a pure function — the cheapest, highest-value
-    // guard for the lease-conflict routing the e2e singleton exercises.
-
     #[test]
-    fn classify_switch_error_branches() {
-        // (input, expected_kind, message_must_contain)
-        let cases: &[(&str, Option<&str>, &str)] = &[
-            (
-                "another TUI is attached to this session (\"tui\" pid 99999, lease expires in 30s). Detach it there (/detach) or wait 30s for its lease to lapse.",
-                Some("session-switch"),
-                "another TUI is attached",
-            ),
-            (
-                "lease claim failed (409): held by other",
-                Some("session-switch"),
-                "Detach it there",
-            ),
-            (
-                "polytoken daemon exited early (status exit status: 1):\nstderr: bad args",
-                Some("session-switch"),
-                "exited immediately",
-            ),
-            (
-                "daemon health probe failed",
-                Some("session-switch"),
-                "Couldn't reach the session daemon",
-            ),
-            (
-                "polytoken daemon failed to start: config parse error near line 12",
-                Some("session-switch"),
-                "daemon failed to start",
-            ),
-            (
-                "daemon did not become healthy within 10s",
-                Some("session-switch"),
-                "took too long to start",
-            ),
-            (
-                "request timed out reaching daemon",
-                Some("session-switch"),
-                "Couldn't reach the session daemon",
-            ),
-            (
-                "could not resolve session id from path /x.jsonl",
-                Some("session-switch"),
-                "path wasn't recognized",
-            ),
-            (
-                "something totally unexpected",
-                None,
-                "session switch failed: something totally unexpected",
-            ),
-        ];
-
-        for (input, expected_kind, must_contain) in cases {
-            let (message, kind) = classify_switch_error(input);
-            assert_eq!(
-                kind.as_deref(),
-                *expected_kind,
-                "kind mismatch for input: {input}"
-            );
-            assert!(
-                message.contains(*must_contain),
-                "message must contain '{must_contain}': {message}\ninput: {input}"
-            );
-        }
-    }
-
-    #[test]
-    fn classify_missing_cwd_names_the_directory_and_is_permanent_shaped() {
-        // The concrete docs/TODO.md case: a cold session whose project cwd no
-        // longer exists. `open_session` (polytoken/driver.rs) produces this
-        // exact message before ever attempting a spawn.
-        let (message, kind) =
-            classify_switch_error("session directory no longer exists: /tmp/gone-project");
+    fn typed_switch_renderer_uses_variants_not_detail_words() {
+        let err = SessionSwitchError::MissingCwd {
+            cwd: "/tmp/gone-project".into(),
+            detail: "another TUI is attached".into(),
+        };
+        let (message, kind) = render_switch_error(&err);
         assert_eq!(kind.as_deref(), Some("session-switch"));
-        assert!(
-            message.contains("/tmp/gone-project"),
-            "message must name the missing directory: {message}"
-        );
-        assert!(message.contains("no longer exists"));
-        // Client-side note (store.svelte.ts LEASE_CONFLICT_RE): this message
-        // must NOT read as a lease conflict, or the client would wrongly
-        // offer a "Retry" action for a failure that can never succeed.
-        assert!(!message.contains("another TUI is attached"));
-        assert!(!message.contains("lease to lapse"));
+        assert!(message.contains("/tmp/gone-project"));
+        let err = SessionSwitchError::Unexpected {
+            operation: "new_session".into(),
+            detail: "daemon failed to start".into(),
+        };
+        let (_, kind) = render_switch_error(&err);
+        assert_eq!(kind, None);
     }
 
     /// `client_count()` mirrors TS `clientCount()` — 0 on a fresh hub, increments

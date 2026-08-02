@@ -12,7 +12,7 @@ use pantoken_protocol::wire::{DeliveryMode, LoginEnvStatus};
 use parking_lot::Mutex;
 use std::sync::Arc;
 
-use crate::driver::PantokenDriver;
+use crate::driver::{PantokenDriver, SessionSwitchError};
 
 type Listener = Box<dyn Fn(SessionDriverEvent) + Send + Sync>;
 
@@ -110,14 +110,17 @@ impl PantokenDriver for StubDriver {
         Vec::new()
     }
 
-    async fn open_session(&self, _path: String) -> Result<Vec<SessionDriverEvent>, String> {
+    async fn open_session(
+        &self,
+        _path: String,
+    ) -> Result<Vec<SessionDriverEvent>, SessionSwitchError> {
         Ok(Vec::new())
     }
 
     async fn new_session(
         &self,
         _opts: crate::driver::NewSessionOptsData,
-    ) -> Result<Vec<SessionDriverEvent>, String> {
+    ) -> Result<Vec<SessionDriverEvent>, SessionSwitchError> {
         Ok(Vec::new())
     }
 
