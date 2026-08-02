@@ -288,10 +288,6 @@ impl PantokenConfig {
         .collect()
     }
 
-    pub fn remote_access_path(&self) -> PathBuf {
-        self.data_dir.join("remote-access.json")
-    }
-
     pub fn validate_remote_port(port: u16) -> Result<u16, String> {
         if (1024..=65535).contains(&port) {
             Ok(port)
@@ -395,6 +391,17 @@ fn validate_origin(origin: &str) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+pub fn canonical_origin(origin: &str) -> Result<String, String> {
+    validate_origin(origin)?;
+    let mut parsed = url::Url::parse(origin).map_err(|_| "origin must be a valid HTTPS URL")?;
+    let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
+    parsed
+        .set_host(Some(&host))
+        .map_err(|_| "origin host is invalid")?;
+    parsed.set_path("/");
+    Ok(parsed.to_string())
 }
 
 pub fn canonical_origin(origin: &str) -> Result<String, String> {
@@ -535,10 +542,9 @@ mod tests {
         );
         let env = cfg.server_env();
         assert!(env.iter().any(|(k, v)| k == "PANTOKEN_PORT" && v == "9999"));
-        assert!(
-            env.iter()
-                .any(|(k, v)| k == "PANTOKEN_HOST" && v == "127.0.0.1")
-        );
+        assert!(env
+            .iter()
+            .any(|(k, v)| k == "PANTOKEN_HOST" && v == "127.0.0.1"));
         assert!(!env.iter().any(|(k, _)| k == "PANTOKEN_TOKEN"));
     }
 
@@ -554,16 +560,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(cfg.mode, LaunchMode::Remote);
-        assert!(
-            cfg.server_env()
-                .iter()
-                .any(|(k, v)| k == "PANTOKEN_TOKEN" && v == "test-token")
-        );
-        assert!(
-            cfg.server_env()
-                .iter()
-                .any(|(k, v)| k == "PANTOKEN_HOST" && v == "127.0.0.1")
-        );
+        assert!(cfg
+            .server_env()
+            .iter()
+            .any(|(k, v)| k == "PANTOKEN_TOKEN" && v == "test-token"));
+        assert!(cfg
+            .server_env()
+            .iter()
+            .any(|(k, v)| k == "PANTOKEN_HOST" && v == "127.0.0.1"));
     }
 
     #[test]

@@ -980,7 +980,7 @@ mod tests {
             Some("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789".into());
         let json = serde_json::to_string(&profile).unwrap();
         assert!(
-            json.contains("docker_socket_fingerprint"),
+            json.contains("dockerSocketFingerprint"),
             "JSON should contain the socket fingerprint field"
         );
         let back: RemoteProfile = serde_json::from_str(&json).unwrap();

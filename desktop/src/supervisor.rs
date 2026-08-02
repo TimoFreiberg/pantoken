@@ -6,8 +6,8 @@ use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::process::{Child, Command, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::config::PantokenConfig;
@@ -309,7 +309,7 @@ mod tests {
         assert_eq!(authorization_header(None), "");
         assert_eq!(
             authorization_header(Some("test-token")),
-            "Authorization: Bearer test-token\\r\\n"
+            "Authorization: Bearer test-token\r\n"
         );
         assert_eq!(authorization_header(Some("")), "");
     }
