@@ -863,6 +863,9 @@ impl std::fmt::Display for LeaseError {
 
 impl std::error::Error for LeaseError {}
 
+/// Compatibility conversion for legacy callers that only understand a
+/// displayable lease error. Driver-facing code must match `LeaseError` before
+/// using this adapter; in particular `Other` is never a conflict semantically.
 impl From<LeaseError> for LeaseConflictError {
     fn from(e: LeaseError) -> Self {
         match e {
@@ -896,6 +899,48 @@ pub type SleepFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 /// run without real wall-clock delay. Mirrors the `SpawnOverrideFn` pattern
 /// (`Arc<dyn Fn(...) -> Pin<Box<dyn Future + Send + 'static>> + Send + Sync>`).
 pub type SleepFn = Arc<dyn Fn(Duration) -> SleepFuture + Send + Sync>;
+
+/// Typed retry seam for new callers. Non-conflict errors are returned unchanged;
+/// only `LeaseError::Conflict` is retried. The legacy `retry_claim` below remains
+/// for compatibility with tests and older adapters.
+pub async fn retry_claim_typed<T, F, Fut>(
+    claim: F,
+    max_retries: Option<u32>,
+    delay_ms: Option<u64>,
+    sleep: SleepFn,
+) -> Result<T, LeaseError>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<T, LeaseError>>,
+{
+    let max_retries = max_retries.unwrap_or(3) as i32;
+    let delay_ms = delay_ms.unwrap_or(3000);
+    let mut last_held = None;
+    for attempt in 0..=max_retries {
+        match claim().await {
+            Ok(value) => return Ok(value),
+            Err(LeaseError::Other(detail)) => return Err(LeaseError::Other(detail)),
+            Err(LeaseError::Conflict { held }) => {
+                last_held = held.clone();
+                if attempt < max_retries {
+                    if let Some(expiry) = held
+                        .as_ref()
+                        .and_then(|h| h.expires_at.as_deref())
+                        .and_then(parse_iso8601_to_millis)
+                    {
+                        let remaining = expiry as i64 - current_millis();
+                        let window = (max_retries - attempt) as i64 * delay_ms as i64;
+                        if remaining > window {
+                            return Err(LeaseError::Conflict { held });
+                        }
+                    }
+                    sleep(Duration::from_millis(delay_ms)).await;
+                }
+            }
+        }
+    }
+    Err(LeaseError::Conflict { held: last_held })
+}
 
 /// Retry a claim function on lease-conflict errors, up to `max_retries` times
 /// with `delay_ms` backoff between attempts. Pure — takes the claim function so
@@ -1700,22 +1745,18 @@ impl DaemonClient {
         label: &str,
         max_retries: Option<u32>,
         delay_ms: Option<u64>,
-    ) -> Result<TuiAttachClaimResponse, LeaseConflictError> {
-        // Inline retry loop that shares the same logic as the standalone
-        // retry_claim_with_sleep seam. Only LeaseError::Conflict is retried;
-        // LeaseError::Other (401, 500, network) returns immediately.
+    ) -> Result<TuiAttachClaimResponse, LeaseError> {
+        // Inline retry loop preserves `LeaseError::Other` for auth, server, and
+        // transport failures; only `Conflict` participates in the retry policy.
+        // Only LeaseError::Conflict is retried; LeaseError::Other returns immediately.
         let max_r = max_retries.unwrap_or(3) as i32;
         let delay = delay_ms.unwrap_or(3000);
-        let mut last_conflict: Option<LeaseConflictError> = None;
+        let mut last_held: Option<LeaseHeldInfo> = None;
         for attempt in 0..=max_r {
             match self.claim_lease(label).await {
                 Ok(v) => return Ok(v),
                 Err(LeaseError::Other(msg)) => {
-                    // Non-retriable: return immediately.
-                    return Err(LeaseConflictError {
-                        message: msg,
-                        held: None,
-                    });
+                    return Err(LeaseError::Other(msg));
                 }
                 Err(LeaseError::Conflict { held }) => {
                     let e = LeaseConflictError {
@@ -1730,7 +1771,7 @@ impl DaemonClient {
                             .unwrap_or_else(|| "lease claim failed (409)".to_string()),
                         held: held.clone(),
                     };
-                    last_conflict = Some(e.clone());
+                    last_held = held.clone();
                     let expiry = held
                         .as_ref()
                         .and_then(|h| h.expires_at.as_deref())
@@ -1740,11 +1781,7 @@ impl DaemonClient {
                         let ms_until_expiry = expiry_millis as i64 - now_millis;
                         let remaining_delays = (max_r - attempt) as i64 * delay as i64;
                         if ms_until_expiry > remaining_delays {
-                            return Err(LeaseConflictError {
-                                message: format_lease_conflict_message(
-                                    e.held.as_ref(),
-                                    Some(ceil_seconds(ms_until_expiry)),
-                                ),
+                            return Err(LeaseError::Conflict {
                                 held: e.held.clone(),
                             });
                         }
@@ -1755,16 +1792,7 @@ impl DaemonClient {
                 }
             }
         }
-        let held = last_conflict.as_ref().and_then(|c| c.held.clone());
-        let seconds_to_lapse = held
-            .as_ref()
-            .and_then(|h| h.expires_at.as_deref())
-            .and_then(parse_iso8601_to_millis)
-            .map(|exp| ceil_seconds(exp as i64 - current_millis()));
-        Err(LeaseConflictError {
-            message: format_lease_conflict_message(held.as_ref(), seconds_to_lapse),
-            held,
-        })
+        Err(LeaseError::Conflict { held: last_held })
     }
 
     /// `POST /tui-attachment/heartbeat` — refresh the lease. 404/409 means the

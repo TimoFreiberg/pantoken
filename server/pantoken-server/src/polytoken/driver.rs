@@ -453,6 +453,107 @@ enum HealthProbeMode {
     ProbeOnce,
 }
 
+/// Typed failure produced while installing a live warm session.  The public
+/// driver maps this once into `SessionSwitchError`; keeping the stage here is
+/// what prevents the hub from having to infer meaning from diagnostic text.
+#[derive(Debug)]
+enum WarmInstallError {
+    Health {
+        detail: String,
+    },
+    LeaseConflict {
+        holder: Option<crate::polytoken::daemon_client::LeaseHeldInfo>,
+        detail: String,
+    },
+    Lease {
+        detail: String,
+    },
+    Subscription {
+        detail: String,
+    },
+    Hydration {
+        detail: String,
+    },
+    Startup {
+        detail: String,
+    },
+    History {
+        detail: String,
+    },
+}
+
+impl WarmInstallError {
+    fn detail(&self) -> &str {
+        match self {
+            Self::Health { detail }
+            | Self::LeaseConflict { detail, .. }
+            | Self::Lease { detail }
+            | Self::Subscription { detail }
+            | Self::Hydration { detail }
+            | Self::Startup { detail }
+            | Self::History { detail } => detail,
+        }
+    }
+}
+
+fn map_warm_error(operation: &str, error: WarmInstallError) -> SessionSwitchError {
+    match error {
+        WarmInstallError::LeaseConflict { holder, detail } => {
+            let display_detail = crate::polytoken::daemon_client::format_lease_conflict_message(
+                holder.as_ref(),
+                None,
+            );
+            SessionSwitchError::LeaseConflict {
+                holder: holder.map(|held| crate::driver::LeaseHolder {
+                    summary: held.summary,
+                    expires_at: held.expires_at,
+                }),
+                detail: if detail.is_empty() {
+                    display_detail
+                } else {
+                    format!("{detail}: {display_detail}")
+                },
+            }
+        }
+        WarmInstallError::Startup { detail } => {
+            let class = RestoreErrorClass::classify(&detail);
+            SessionSwitchError::RestoreFailure {
+                class: match class {
+                    RestoreErrorClass::DaemonStartupFailure => RestoreFailureClass::Startup,
+                    RestoreErrorClass::AuthFailure => RestoreFailureClass::Auth,
+                    RestoreErrorClass::Unreachable => RestoreFailureClass::Unreachable,
+                    _ => RestoreFailureClass::Other,
+                },
+                retry: if class.is_permanent() {
+                    RetryAffordance::Terminal
+                } else {
+                    RetryAffordance::Retryable
+                },
+                detail,
+            }
+        }
+        WarmInstallError::Health { detail }
+        | WarmInstallError::Lease { detail }
+        | WarmInstallError::Subscription { detail }
+        | WarmInstallError::Hydration { detail }
+        | WarmInstallError::History { detail } => SessionSwitchError::RestoreFailure {
+            class: if detail.contains("401") || detail.to_ascii_lowercase().contains("unauthorized")
+            {
+                RestoreFailureClass::Auth
+            } else if detail.to_ascii_lowercase().contains("connection")
+                || detail.to_ascii_lowercase().contains("connect")
+                || detail.to_ascii_lowercase().contains("refused")
+            {
+                RestoreFailureClass::Unreachable
+            } else {
+                RestoreFailureClass::Other
+            },
+            retry: RetryAffordance::Retryable,
+            detail: format!("{operation}: {detail}"),
+        },
+    }
+}
+
 impl PolytokenInner {
     fn emit(&self, ev: SessionDriverEvent) {
         let subs = self.subscribers.lock();
@@ -914,7 +1015,7 @@ impl PolytokenInner {
             )
             .await
         {
-            warn!("fake bootstrap warm failed: {e}");
+            warn!("fake bootstrap warm failed: {}", e.detail());
         }
     }
 
@@ -1051,7 +1152,7 @@ impl PolytokenInner {
         workspace: WorkspaceRef,
         owned_process: Option<tokio::process::Child>,
         probe: HealthProbeMode,
-    ) -> Result<Arc<WarmSession>, String> {
+    ) -> Result<Arc<WarmSession>, WarmInstallError> {
         let healthy = match probe {
             HealthProbeMode::ProbeOnce => {
                 // Attach path: the daemon should already be running. A single
@@ -1078,14 +1179,26 @@ impl PolytokenInner {
 
         if !healthy {
             Self::cleanup_owned_process(&client, owned_process).await;
-            return Err("daemon health probe failed".into());
+            return Err(WarmInstallError::Health {
+                detail: "daemon health probe failed".into(),
+            });
         }
 
         // Claim lease. No heartbeat exists when claim fails, but a daemon that
         // Pantoken spawned still belongs to this failed warm attempt.
         if let Err(error) = client.claim_lease("pantoken").await {
             Self::cleanup_owned_process(&client, owned_process).await;
-            return Err(format!("lease claim failed: {error}"));
+            return Err(match error {
+                crate::polytoken::daemon_client::LeaseError::Conflict { held } => {
+                    WarmInstallError::LeaseConflict {
+                        holder: held,
+                        detail: "lease claim failed".into(),
+                    }
+                }
+                crate::polytoken::daemon_client::LeaseError::Other(detail) => {
+                    WarmInstallError::Lease { detail }
+                }
+            });
         }
 
         // Connect `/events` before any snapshot request. The callback only queues
@@ -1103,11 +1216,15 @@ impl PolytokenInner {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
                 Self::cleanup_failed_hydration(&client, sub, owned_process).await;
-                return Err(format!("event subscription failed: {error}"));
+                return Err(WarmInstallError::Subscription {
+                    detail: format!("event subscription failed: {error}"),
+                });
             }
             Err(_) => {
                 Self::cleanup_failed_hydration(&client, sub, owned_process).await;
-                return Err("event subscription stopped before connecting".to_string());
+                return Err(WarmInstallError::Subscription {
+                    detail: "event subscription stopped before connecting".to_string(),
+                });
             }
         }
 
@@ -1117,29 +1234,33 @@ impl PolytokenInner {
         let state_res = client.state().await;
         let Some(last_state) = state_res.data else {
             Self::cleanup_failed_hydration(&client, sub, owned_process).await;
-            return Err(format!(
-                "GET /state hydration failed ({}): {}",
-                state_res.status,
-                state_res
-                    .error
-                    .as_deref()
-                    .unwrap_or("malformed success body")
-            ));
+            return Err(WarmInstallError::Hydration {
+                detail: format!(
+                    "GET /state hydration failed ({}): {}",
+                    state_res.status,
+                    state_res
+                        .error
+                        .as_deref()
+                        .unwrap_or("malformed success body")
+                ),
+            });
         };
         let monitor_mode = match client.get_permission_monitor().await {
             Ok(response) => Some(event_map::monitor_to_mode(&response.monitor)),
             Err(error) => {
                 Self::cleanup_failed_hydration(&client, sub, owned_process).await;
-                return Err(format!("GET /permission-monitor hydration failed: {error}"));
+                return Err(WarmInstallError::Hydration {
+                    detail: format!("GET /permission-monitor hydration failed: {error}"),
+                });
             }
         };
         let autodrain_enabled = match client.get_notification_autodrain().await {
             Ok(response) => Some(response.enabled),
             Err(error) => {
                 Self::cleanup_failed_hydration(&client, sub, owned_process).await;
-                return Err(format!(
-                    "GET /notification-autodrain hydration failed: {error}"
-                ));
+                return Err(WarmInstallError::Hydration {
+                    detail: format!("GET /notification-autodrain hydration failed: {error}"),
+                });
             }
         };
 
@@ -1337,7 +1458,7 @@ impl PolytokenInner {
         session_ref: SessionRef,
         workspace: WorkspaceRef,
         cwd: String,
-    ) -> Result<Arc<WarmSession>, String> {
+    ) -> Result<Arc<WarmSession>, WarmInstallError> {
         if let Some(ws) = self.get_warm(&session_id) {
             return Ok(ws);
         }
@@ -1357,8 +1478,9 @@ impl PolytokenInner {
             login_env: self.login_env.lock().clone(),
         };
 
-        let (spawned, child) =
-            crate::polytoken::daemon_client::spawn_daemon(&self.bin_path, opts).await?;
+        let (spawned, child) = crate::polytoken::daemon_client::spawn_daemon(&self.bin_path, opts)
+            .await
+            .map_err(|detail| WarmInstallError::Startup { detail })?;
 
         // The spawn reports the real session id; use it for the client + warm map.
         let session_id = spawned.session_id;
@@ -1399,7 +1521,7 @@ impl PolytokenInner {
         workspace: WorkspaceRef,
         port: u16,
         auth_token: Option<String>,
-    ) -> Result<Arc<WarmSession>, String> {
+    ) -> Result<Arc<WarmSession>, WarmInstallError> {
         if let Some(ws) = self.get_warm(&session_id) {
             return Ok(ws);
         }
@@ -1433,7 +1555,7 @@ impl PolytokenInner {
         session_ref: SessionRef,
         workspace: WorkspaceRef,
         cwd: String,
-    ) -> Result<Arc<WarmSession>, String> {
+    ) -> Result<Arc<WarmSession>, WarmInstallError> {
         if let Some(ws) = self.get_warm(&session_id) {
             return Ok(ws);
         }
@@ -1444,7 +1566,9 @@ impl PolytokenInner {
             global_config_dir: Some(default_global_config_dir().to_string_lossy().to_string()),
             login_env: self.login_env.lock().clone(),
         };
-        let (spawned, child) = spawn_daemon(&self.bin_path, opts).await?;
+        let (spawned, child) = spawn_daemon(&self.bin_path, opts)
+            .await
+            .map_err(|detail| WarmInstallError::Startup { detail })?;
         // spawned.auth_token is read from the credential file (Phase 3).
         let client = Arc::new(DaemonClient::new(
             spawned.session_id.clone(),
@@ -2263,17 +2387,30 @@ impl PantokenDriver for PolytokenDriver {
                             },
                         ));
                     }
-                    warn!(
-                        "open_session: attach succeeded for {session_id} but GET /history \
-                         returned no data (status {}); falling back to cold-start",
-                        history_res.status
-                    );
+                    self.inner
+                        .invalidate_warm_after_destructive_refresh_failure(&session_id, &ws)
+                        .await;
+                    return Err(map_warm_error(
+                        "open_session attach history",
+                        WarmInstallError::History {
+                            detail: format!(
+                                "GET /history hydration failed ({})",
+                                history_res.status
+                            ),
+                        },
+                    ));
                 }
                 Err(e) => {
-                    // Expected when the daemon from a stale startup.json has
-                    // died — the cold-start spawn below handles it. Keep this
-                    // at debug so normal operation stays warning-free.
-                    debug!("open_session: warm attach failed for {session_id}: {e}");
+                    if matches!(e, WarmInstallError::Health { .. }) {
+                        // A dead daemon recorded in startup.json is the one
+                        // safe attach failure to recover from.
+                        debug!(
+                            "open_session: stale warm attach for {session_id}: {}",
+                            e.detail()
+                        );
+                    } else {
+                        return Err(map_warm_error("open_session attach", e));
+                    }
                 }
             }
         }
@@ -2332,48 +2469,22 @@ impl PantokenDriver for PolytokenDriver {
                         },
                     ));
                 }
-                warn!(
-                    "open_session: cold-start spawn succeeded for {session_id} (cwd {cwd}) but \
-                     GET /history returned no data (status {}); falling back to an empty seed",
-                    history_res.status
-                );
+                self.inner
+                    .invalidate_warm_after_destructive_refresh_failure(&session_id, &ws)
+                    .await;
+                return Err(map_warm_error(
+                    "open_session cold-start history",
+                    WarmInstallError::History {
+                        detail: format!("GET /history hydration failed ({})", history_res.status),
+                    },
+                ));
             }
             Err(e) => {
-                // Classify below the driver/hub seam so the log level and typed
-                // user-facing message match whether this
-                // was ever going to work. Always propagate — swallowing this
-                // into `Ok(Vec::new())` is what caused restore failures to
-                // surface only as the generic "session switch returned no
-                // session" banner instead of the real reason.
-                let class = RestoreErrorClass::classify(&e);
-                if class.is_permanent() {
-                    error!(
-                        "open_session: cold-start spawn failed permanently for {session_id} \
-                         (cwd {cwd}): {e}"
-                    );
-                } else {
-                    warn!(
-                        "open_session: cold-start spawn failed for {session_id} (cwd {cwd}): {e}"
-                    );
-                }
-                return Err(SessionSwitchError::RestoreFailure {
-                    class: match class {
-                        RestoreErrorClass::DaemonStartupFailure => RestoreFailureClass::Startup,
-                        RestoreErrorClass::AuthFailure => RestoreFailureClass::Auth,
-                        RestoreErrorClass::Unreachable => RestoreFailureClass::Unreachable,
-                        _ => RestoreFailureClass::Other,
-                    },
-                    retry: if class.is_permanent() {
-                        RetryAffordance::Terminal
-                    } else {
-                        RetryAffordance::Retryable
-                    },
-                    detail: e,
-                });
+                let detail = e.detail().to_string();
+                warn!("open_session: cold-start failed for {session_id} (cwd {cwd}): {detail}");
+                return Err(map_warm_error("open_session cold-start", e));
             }
         }
-
-        Ok(Vec::new())
     }
 
     async fn reload_session(
@@ -2616,6 +2727,9 @@ impl PantokenDriver for PolytokenDriver {
                         },
                     )
                 } else {
+                    // New-session history is optional enrichment in the
+                    // established contract: retain the opening event, while
+                    // attach/resume history failures remain typed restore errors.
                     vec![SessionDriverEvent::SessionOpened {
                         base: SessionEventBase {
                             session_ref: ws.session_ref.clone(),
@@ -2630,22 +2744,8 @@ impl PantokenDriver for PolytokenDriver {
                 Ok(seed)
             }
             Err(e) => {
-                error!("new_session warm failed: {e}");
-                let class = RestoreErrorClass::classify(&e);
-                Err(SessionSwitchError::RestoreFailure {
-                    class: match class {
-                        RestoreErrorClass::DaemonStartupFailure => RestoreFailureClass::Startup,
-                        RestoreErrorClass::AuthFailure => RestoreFailureClass::Auth,
-                        RestoreErrorClass::Unreachable => RestoreFailureClass::Unreachable,
-                        _ => RestoreFailureClass::Other,
-                    },
-                    retry: if class.is_permanent() {
-                        RetryAffordance::Terminal
-                    } else {
-                        RetryAffordance::Retryable
-                    },
-                    detail: e,
-                })
+                error!("new_session warm failed: {}", e.detail());
+                Err(map_warm_error("new_session", e))
             }
         }
     }

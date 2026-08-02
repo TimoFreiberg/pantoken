@@ -110,18 +110,26 @@ impl PantokenDriver for StubDriver {
         Vec::new()
     }
 
+    /// This test-only stub has no session backend; returning an empty seed would
+    /// hide a switch failure, so unsupported switch operations are explicit.
     async fn open_session(
         &self,
         _path: String,
     ) -> Result<Vec<SessionDriverEvent>, SessionSwitchError> {
-        Ok(Vec::new())
+        Err(SessionSwitchError::unexpected(
+            "open_session",
+            "stub driver does not support session switching",
+        ))
     }
 
     async fn new_session(
         &self,
         _opts: crate::driver::NewSessionOptsData,
     ) -> Result<Vec<SessionDriverEvent>, SessionSwitchError> {
-        Ok(Vec::new())
+        Err(SessionSwitchError::unexpected(
+            "new_session",
+            "stub driver does not support session switching",
+        ))
     }
 
     async fn list_models(&self) -> Vec<ModelOption> {

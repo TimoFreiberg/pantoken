@@ -2776,11 +2776,9 @@ impl SessionHub {
 type SwitchFuture =
     std::pin::Pin<Box<dyn std::future::Future<Output = Option<SessionId>> + Send + 'static>>;
 
-/// Classify a raw session-switch error into a client-facing `{message, kind}`.
-/// Ports TS `classifySwitchError` (`server/src/hub.ts:129-184`): recognizes the
-/// daemon-failed, startup-timeout, lease-conflict (409), connection-refused, and
-/// unresolved-path patterns, prettifying each with `kind: "session-switch"`; an
-/// unrecognized error falls back to a generic banner with no `kind`.
+/// Render the driver's exhaustive typed session-switch error contract into the
+/// existing client-facing `{message, kind}` payload. Classification is entirely
+/// enum-driven; diagnostic details are displayed but never interpreted.
 fn render_switch_error(error: &SessionSwitchError) -> (String, Option<String>) {
     let session_switch = || Some("session-switch".to_string());
     match error {

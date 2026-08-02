@@ -22,7 +22,9 @@ use pantoken_protocol::session_driver::{
 };
 use tokio::sync::Mutex;
 
-use pantoken_server::driver::{NewSessionModel, NewSessionOptsData, PantokenDriver};
+use pantoken_server::driver::{
+    NewSessionModel, NewSessionOptsData, PantokenDriver, SessionSwitchError,
+};
 use pantoken_server::polytoken::daemon_client::{
     SpawnDaemonOpts, SpawnedDaemon, clear_spawn_override, set_spawn_override,
 };
@@ -1002,10 +1004,14 @@ async fn reload_session_disposes_old_warm_and_rewarms() {
     let calls_before = fake.recorded_calls().len();
     let path = reload_dir.join("session.json");
     let path = path.to_string_lossy().to_string();
-    let reseed = driver
+    let reload_error = driver
         .reload_session(path)
         .await
-        .expect("reload_session ok");
+        .expect_err("cold-start history failure must remain typed");
+    assert!(
+        matches!(reload_error, SessionSwitchError::RestoreFailure { .. }),
+        "unexpected reload error: {reload_error:?}"
+    );
     // The cold-start spawn re-hit the fake daemon's endpoints.
     assert!(
         fake.recorded_calls().len() > calls_before,
@@ -1018,13 +1024,15 @@ async fn reload_session_disposes_old_warm_and_rewarms() {
         "cold-start spawn: GET /health not hit after reload; calls: {:?}",
         fake.recorded_calls()
     );
-    let _ = reseed;
+    assert!(
+        driver.get_usage(Some("reload-1".into())).is_none(),
+        "failed history hydration must not leave a warm session"
+    );
 
-    // After disposal + re-warm, the NEW warm session is live and may emit SSE
-    // events. The old warm's consumer was stopped during disposal — any events
-    // arriving here are from the new session, not a leak of the old one.
+    // Disposal stops the failed warm's SSE consumer; no failed session remains
+    // active after the typed restore error.
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-    let _post_reload = rx.try_recv().ok(); // expected: new session emissions
+    let _post_reload = rx.try_recv().ok();
 
     driver.unsubscribe(sub_id);
 }
