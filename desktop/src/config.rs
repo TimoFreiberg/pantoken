@@ -168,11 +168,12 @@ impl PantokenConfig {
         let data_dir = std::env::var("PANTOKEN_APP_DATA_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| home_dir().join("Library/Application Support/Pantoken"));
+        #[cfg(not(target_os = "macos"))]
         let resolution = resolve_hub_mode(resource_dir)?;
         #[cfg(target_os = "macos")]
         {
             let store = default_token_store();
-            return Self::resolve_launch_with_token_store(resource_dir, &data_dir, store.as_ref());
+            Self::resolve_launch_with_token_store(resource_dir, &data_dir, store.as_ref())
         }
         #[cfg(not(target_os = "macos"))]
         {
