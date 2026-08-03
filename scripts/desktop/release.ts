@@ -1,50 +1,15 @@
 #!/usr/bin/env tsx
-// release.ts — cut a release: bump the version, commit, tag, push. CI does the rest
-// (the tag push triggers ci.yml's release-prepare job, which builds signed while
-// the gates run; release publishes via publish.ts once the gates pass).
-//
-//   just release [--patch|--minor|--major|--version X.Y.Z]
-//                                  [--dry-run] [--no-push]
-//
-// Default bump: --patch. What it does, in order:
-//   1. refuse a dirty working copy (the release commit must contain ONLY the bump)
-//   2. bump "version" in desktop/tauri.conf.json + Cargo.toml, sync the root Cargo.lock
-//   3. jj commit those three files ("Release vX.Y.Z")
-//   4. git tag vX.Y.Z on that commit (jj can't create tags; the colocated .git can)
-//   5. move the `main` bookmark to the release commit, `jj git push`, push the tag
-//
-// --no-push stops after step 4 and prints the push commands. --dry-run only prints
-// what would happen. Requires a colocated jj+git checkout (this repo is one).
-
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFile, writeFile } from "node:fs/promises";
 import { spawnAsync, isMain } from "../lib/node-compat.js";
+import { runReleaseReadiness } from "../release-readiness.js";
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const confPath = join(repoRoot, "desktop", "tauri.conf.json");
-const cargoPath = join(repoRoot, "desktop", "Cargo.toml");
+export interface ReleasePlan { current: string; next: string; tag: string; buildSha: string; target?: string; }
+export interface ReleaseRunner { capture(command: string[], cwd?: string): Promise<string>; run?(command: string[], cwd?: string): Promise<void>; }
+const defaultRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
-function fail(msg: string): never {
-  console.error(`release: ${msg}`);
-  process.exit(1);
-}
-
-async function capture(cmd: string[], cwd?: string): Promise<string> {
-  const result = await spawnAsync(cmd, {
-    cwd: cwd ?? repoRoot,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  if (result.code !== 0)
-    fail(`\`${cmd.join(" ")}\` failed:\n${result.stderr.trim() || result.stdout.trim()}`);
-  return result.stdout;
-}
-
-export function bumpVersion(
-  current: string,
-  kind: "patch" | "minor" | "major",
-): string {
+export function bumpVersion(current: string, kind: "patch" | "minor" | "major"): string {
   const m = current.match(/^(\d+)\.(\d+)\.(\d+)$/);
   if (!m) throw new Error(`unparseable version '${current}'`);
   const [major, minor, patch] = [Number(m[1]), Number(m[2]), Number(m[3])];
@@ -52,109 +17,55 @@ export function bumpVersion(
   if (kind === "minor") return `${major}.${minor + 1}.0`;
   return `${major}.${minor}.${patch + 1}`;
 }
+export function computeReleasePlan(current: string, next: string, buildSha: string, target?: string): ReleasePlan {
+  if (!/^\d+\.\d+\.\d+$/.test(next)) throw new Error(`implausible version '${next}'`);
+  if (!/^[0-9a-f]{40}$/.test(buildSha)) throw new Error(`invalid build SHA '${buildSha}'`);
+  return { current, next, tag: `v${next}`, buildSha, target };
+}
+
+async function defaultCapture(command: string[], cwd = defaultRoot): Promise<string> {
+  const result = await spawnAsync(command, { cwd, stdout: "pipe", stderr: "pipe" });
+  if (result.code !== 0) throw new Error(`\`${command.join(" ")}\` failed:\n${result.stderr.trim() || result.stdout.trim()}`);
+  return result.stdout;
+}
+const defaultRunner: ReleaseRunner = { capture: defaultCapture };
+
+export async function executeRelease(plan: ReleasePlan, options: { root?: string; dryRun?: boolean; noPush?: boolean; runner?: ReleaseRunner; readiness?: typeof runReleaseReadiness } = {}): Promise<void> {
+  const root = options.root ?? defaultRoot;
+  const runner = options.runner ?? defaultRunner;
+  const confPath = join(root, "desktop", "tauri.conf.json");
+  const cargoPath = join(root, "desktop", "Cargo.toml");
+  if (options.dryRun) { console.log(`[dry-run] would verify ${plan.tag}, bump, commit, tag${options.noPush ? " (no push)" : ", and push"}`); return; }
+  const dirty = (await runner.capture(["jj", "diff", "--summary"], root)).trim();
+  if (dirty) throw new Error(`working copy is not empty — commit or abandon first:\n${dirty}`);
+  if ((await runner.capture(["git", "tag", "-l", plan.tag], root)).trim()) throw new Error(`tag ${plan.tag} already exists locally`);
+  await (options.readiness ?? runReleaseReadiness)({ root, version: plan.next, buildSha: plan.buildSha, target: plan.target });
+  const confText = await readFile(confPath, "utf8");
+  const cargoText = await readFile(cargoPath, "utf8");
+  const confNeedle = `"version": "${plan.current}"`;
+  const cargoNeedle = `version = "${plan.current}"`;
+  if (!confText.includes(confNeedle) || !cargoText.includes(cargoNeedle)) throw new Error("could not find current version in release metadata");
+  await writeFile(confPath, confText.replace(confNeedle, `"version": "${plan.next}"`));
+  await writeFile(cargoPath, cargoText.replace(cargoNeedle, `version = "${plan.next}"`));
+  await runner.capture(["cargo", "update", "--workspace"], join(root, "desktop"));
+  await runner.capture(["jj", "commit", "desktop/tauri.conf.json", "desktop/Cargo.toml", "Cargo.lock", "-m", `Release ${plan.tag}`], root);
+  const commit = (await runner.capture(["jj", "log", "-r", "@-", "--no-graph", "-T", "commit_id"], root)).trim();
+  await runner.capture(["git", "tag", plan.tag, commit], root);
+  if (options.noPush) { console.log(`--no-push: jj bookmark move main --to ${commit.slice(0, 12)}`); return; }
+  await runner.capture(["jj", "bookmark", "move", "main", "--to", commit], root);
+  await runner.capture(["jj", "git", "push", "--bookmark", "main"], root);
+  await runner.capture(["git", "push", "origin", plan.tag], root);
+}
 
 if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2);
-  const dryRun = argv.includes("--dry-run");
-  const noPush = argv.includes("--no-push");
-  const vIdx = argv.indexOf("--version");
-
-  const conf = JSON.parse(await readFile(confPath, "utf8")) as { version?: string };
+  const root = defaultRoot;
+  const conf = JSON.parse(await readFile(join(root, "desktop", "tauri.conf.json"), "utf8")) as { version?: string };
   const current = conf.version ?? "";
-  const next =
-    vIdx >= 0
-      ? (argv[vIdx + 1] ?? fail("--version needs a value"))
-      : bumpVersion(
-          current,
-          argv.includes("--major")
-            ? "major"
-            : argv.includes("--minor")
-              ? "minor"
-              : "patch",
-        );
-  if (!/^\d+\.\d+\.\d+$/.test(next)) fail(`implausible version '${next}'`);
-  const tag = `v${next}`;
-
-  // Working copy must be clean: the release commit is the bump and nothing else.
-  const dirty = (await capture(["jj", "diff", "--summary"])).trim();
-  if (dirty) {
-    fail(
-      `working copy is not empty — commit or abandon first:\n${dirty}\n` +
-        `(the release commit must contain only the version bump)`,
-    );
-  }
-  if ((await capture(["git", "tag", "-l", tag])).trim()) {
-    fail(`tag ${tag} already exists locally — bump differently or delete it`);
-  }
-
-  console.log(`release: ${current} → ${next} (tag ${tag})`);
-  if (dryRun) {
-    console.log("[dry-run] would bump, commit, tag, move main, push");
-    process.exit(0);
-  }
-
-  // ── bump ──
-  const confText = await readFile(confPath, "utf8");
-  const confNeedle = `"version": "${current}"`;
-  if (!confText.includes(confNeedle))
-    fail(`couldn't find ${confNeedle} in tauri.conf.json`);
-  await writeFile(
-    confPath,
-    confText.replace(confNeedle, `"version": "${next}"`),
-  );
-
-  const cargoText = await readFile(cargoPath, "utf8");
-  const cargoNeedle = `version = "${current}"`;
-  if (!cargoText.includes(cargoNeedle))
-    fail(`couldn't find ${cargoNeedle} in Cargo.toml`);
-  await writeFile(
-    cargoPath,
-    cargoText.replace(cargoNeedle, `version = "${next}"`),
-  );
-
-  // Sync the lockfile's own-package entry (cargo check would too, but this is fast
-  // and touches nothing else).
-  await capture(
-    ["cargo", "update", "--workspace"],
-    join(repoRoot, "desktop"),
-  );
-
-  // ── commit + tag ──
-  // The subject "Release vX.Y.Z" is LOAD-BEARING: ci.yml skips the branch-push run
-  // for commits with this prefix (the tag push runs the full pipeline instead, so a
-  // release costs one CI run, not two). Change it there if you change it here.
-  await capture([
-    "jj",
-    "commit",
-    "desktop/tauri.conf.json",
-    "desktop/Cargo.toml",
-    "Cargo.lock",
-    "-m",
-    `Release ${tag}`,
-  ]);
-  const commit = (
-    await capture(["jj", "log", "-r", "@-", "--no-graph", "-T", "commit_id"])
-  ).trim();
-  await capture(["git", "tag", tag, commit]);
-  console.log(`committed + tagged ${tag} at ${commit.slice(0, 12)}`);
-
-  // ── push ──
-  if (noPush) {
-    console.log(
-      `--no-push: when ready →\n` +
-        `  jj bookmark move main --to ${commit.slice(0, 12)}\n` +
-        `  jj git push --bookmark main\n  git push origin ${tag}`,
-    );
-    process.exit(0);
-  }
-  await capture(["jj", "bookmark", "move", "main", "--to", commit]);
-  await capture(["jj", "git", "push", "--bookmark", "main"]);
-  await capture(["git", "push", "origin", tag]);
-
-  const origin = (await capture(["git", "remote", "get-url", "origin"])).trim();
-  const repo = origin.match(/github\.com[:/](.+?)(\.git)?$/)?.[1];
-  console.log(
-    `pushed main + ${tag}. CI runs tests, then the release job publishes.\n` +
-      (repo ? `watch: https://github.com/${repo}/actions` : ""),
-  );
+  const idx = argv.indexOf("--version");
+  const next = idx >= 0 ? (argv[idx + 1] ?? (() => { throw new Error("--version needs a value"); })()) : bumpVersion(current, argv.includes("--major") ? "major" : argv.includes("--minor") ? "minor" : "patch");
+  const dryRun = argv.includes("--dry-run");
+  const sha = dryRun ? "0".repeat(40) : (await defaultCapture(["git", "rev-parse", "HEAD"], root)).trim();
+  try { await executeRelease(computeReleasePlan(current, next, sha), { root, dryRun, noPush: argv.includes("--no-push") }); }
+  catch (error) { console.error(`release: ${error instanceof Error ? error.message : error}`); process.exit(1); }
 }

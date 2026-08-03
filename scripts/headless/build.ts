@@ -390,13 +390,14 @@ if (isMain(import.meta.url)) {
     // mode via .buckconfig.ci and copy them to the release asset paths.
     if (!skipBuild) {
       console.log("Building pantoken-server (Buck2 release)...");
-      archivePath = await buildViaBuck2({
+      const built = await buildViaBuck2({
         root: repoRoot,
         version,
         buildSha,
         outputDir,
         asset: target.asset,
       });
+      archivePath = built.archivePath;
     } else {
       // Reuse previously built artifacts (no Cargo fallback inside buck2 mode).
       archivePath = join(outputDir, target.asset);

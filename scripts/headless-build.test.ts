@@ -127,10 +127,11 @@ esac
       expect(args).toContain("--config-file");
       expect(args).toContain(".buckconfig.ci");
       // Archive copied to the release asset path
-      expect(archivePath).toBe(
+      expect(archivePath.archivePath).toBe(
         join(outputDir, "pantoken-headless-macos-aarch64.tar.gz"),
       );
-      expect(existsSync(archivePath)).toBe(true);
+      expect(existsSync(archivePath.archivePath)).toBe(true);
+      expect(archivePath.validatorPath).toBe(join(root, "target", "release", "pantoken-tar-validate"));
       // Validator copied to target/release with exec bit
       const validatorPath = join(root, "target", "release", "pantoken-tar-validate");
       expect(existsSync(validatorPath)).toBe(true);

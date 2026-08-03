@@ -2,7 +2,7 @@
 // Extracted from scripts/headless/build.ts so it can be unit-tested without
 // triggering the build script's top-level boot code.
 
-import { chmodSync, copyFileSync, existsSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { spawnAsync } from "./node-compat.js";
 import { parseBuck2ShowOutput } from "./build-server.js";
@@ -69,14 +69,20 @@ async function runBuck2Build(root: string, target: string): Promise<string> {
  * it via --config-file, so the embedded PANTOKEN_BUILD_SHA and the archive's
  * BUILD_SHA file agree (the smoke test asserts this).
  */
+export interface HeadlessBuildResult {
+  archivePath: string;
+  validatorPath: string;
+}
+
 export async function buildViaBuck2(opts: {
   root: string;
   version: string;
   buildSha: string;
   outputDir: string;
   asset: string;
-}): Promise<string> {
+}): Promise<HeadlessBuildResult> {
   const { root, version, buildSha, outputDir, asset } = opts;
+  mkdirSync(outputDir, { recursive: true });
   writeBuckConfigCi(root, { version, buildSha, releaseBuild: true });
 
   const archiveOut = await runBuck2Build(root, "//:pantoken_headless_unsigned");
@@ -91,5 +97,5 @@ export async function buildViaBuck2(opts: {
   copyFileSync(validatorOut, validatorPath);
   chmodSync(validatorPath, 0o755);
 
-  return archivePath;
+  return { archivePath, validatorPath };
 }

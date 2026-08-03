@@ -167,14 +167,76 @@ fi
 acquire_lock
 log "Lock acquired (PID $$, session $CURRENT_SESSION)"
 
-# Ensure lock is released on unexpected exit (but NOT on conflict — exit 2 keeps it)
+# Ensure lock is released on unexpected exit (but NOT on conflict — exit 2 keeps it).
+# Once rebase completes, every pre-bookmark failure restores the captured operation
+# exactly once. The gate owns its descendants; on interruption, terminate the gate
+# process group before restoring jj so no child can continue against the restored tree.
 RELEASE_ON_EXIT=true
+REBASE_COMPLETED=false
+ROLLBACK_DONE=false
+BOOKMARK_MOVE_STARTED=false
+PUSH_STARTED=false
+ORIGINAL_STATUS=1
+GATE_PID=""
+GATE_PGID=""
+
 _release_if_needed() {
+  local status=$?
   if [ "$RELEASE_ON_EXIT" = true ]; then
+    if [ "$status" -ne 0 ] && [ "$REBASE_COMPLETED" = true ] && [ "$BOOKMARK_MOVE_STARTED" = false ] && [ "$PUSH_STARTED" = false ]; then
+      rollback_after_rebase "$status"
+      return
+    fi
     release_lock
   fi
 }
+
+_wait_for_gate() {
+  if [ -n "$GATE_PID" ]; then
+    wait "$GATE_PID" 2>/dev/null || true
+    GATE_PID=""
+  fi
+}
+
+_terminate_gate() {
+  if [ -n "$GATE_PID" ] && kill -0 "$GATE_PID" 2>/dev/null; then
+    local group="${GATE_PGID:-$GATE_PID}"
+    kill -TERM -- "-$group" 2>/dev/null || kill -TERM "$GATE_PID" 2>/dev/null || true
+    _wait_for_gate
+  fi
+}
+
+rollback_after_rebase() {
+  local status="${1:-1}"
+  if [ "$REBASE_COMPLETED" != true ] || [ "$ROLLBACK_DONE" = true ]; then
+    release_lock
+    RELEASE_ON_EXIT=false
+    return "$status"
+  fi
+  ROLLBACK_DONE=true
+  trap - EXIT INT TERM
+  _terminate_gate
+  log "Restoring pre-rebase operation after failed local gate..."
+  if ! jj op restore "$PRE_REBASE_OP"; then
+    log "ERROR: failed to restore pre-rebase operation $PRE_REBASE_OP"
+    status=1
+  fi
+  release_lock
+  RELEASE_ON_EXIT=false
+  return "$status"
+}
+
+_on_signal() {
+  local signal_status=1
+  case "$1" in INT) signal_status=130 ;; TERM) signal_status=143 ;; esac
+  log "Integration interrupted; stopping local gate before rollback"
+  rollback_after_rebase "$signal_status"
+  exit "$signal_status"
+}
+
 trap _release_if_needed EXIT
+trap '_on_signal INT' INT
+trap '_on_signal TERM' TERM
 
 # ─── Integration steps ────────────────────────────────────────────────────────
 
@@ -240,9 +302,7 @@ fi
 if [ "$REBASE_STATUS" -ne 0 ]; then
   log "ERROR: rebase failed without conflicts — rolling back to pre-rebase state"
   log "Inspect the jj error, fix the underlying problem, then rerun 'just integrate-into-main $ISSUE_NUMBER'"
-  jj op restore "$PRE_REBASE_OP" || log "WARN: failed to restore pre-rebase operation"
-  release_lock
-  RELEASE_ON_EXIT=false
+  rollback_after_rebase 1
   exit 1
 fi
 
@@ -250,78 +310,33 @@ fi
 # The rebase excluded @ (to keep it from becoming a sibling), but that also
 # means @ is left behind at its old position. Move it on top of the content
 # commit so main..@ includes it and `jj new`/`jj squash` operations work.
+REBASE_COMPLETED=true
 if [ -n "$CONTENT_CHANGE" ]; then
-  jj new "$CONTENT_CHANGE" 2>/dev/null || true
-fi
-
-# 6. Run tests
-log "Running tests..."
-
-# 6a. pnpm run test (use the package.json test script, which filters to the
-#     curated test paths — bare `pnpm test` discovers all *.test.ts files
-#     including scripts/headless/, whose subprocess-spawning integration
-#     tests time out at the default limit).
-if ! pnpm run test; then
-  log "ERROR: pnpm test failed — rolling back to pre-rebase state"
-  log "Fix the failing tests, then rerun 'just integrate-into-main $ISSUE_NUMBER'"
-  jj op restore "$PRE_REBASE_OP"
-  release_lock
-  RELEASE_ON_EXIT=false
-  exit 1
-fi
-
-# 6b. pnpm run check (typecheck)
-if ! pnpm run check; then
-  log "ERROR: pnpm run check (typecheck) failed — rolling back to pre-rebase state"
-  log "Fix the typecheck errors, then rerun 'just integrate-into-main $ISSUE_NUMBER'"
-  jj op restore "$PRE_REBASE_OP"
-  release_lock
-  RELEASE_ON_EXIT=false
-  exit 1
-fi
-
-# 6c. cargo fmt (auto-format, not --check). The workspace Cargo.toml is at the
-#     repo root, so run from there with --all to cover all workspace members.
-if [ -f "Cargo.toml" ]; then
-  log "Running cargo fmt..."
-  if ! cargo fmt --all; then
-    log "ERROR: cargo fmt failed — inspect and fix the formatting error, then rerun 'just integrate-into-main $ISSUE_NUMBER'"
-    release_lock
-    RELEASE_ON_EXIT=false
-    exit 1
-  fi
-  # If fmt produced changes, squash them into the last non-empty commit
-  FMT_CHANGES=$(jj diff --summary 2>/dev/null | head -1 || true)
-  if [ -n "$FMT_CHANGES" ]; then
-    log "cargo fmt produced changes — squashing into last commit"
-    jj squash -u 2>/dev/null || true
-  fi
-fi
-
-# 6d. Rust clippy via Buck2 (deny warnings, matching CI's rust-server gate).
-# `just buck2-clippy` covers exactly the five server crates (the desktop/Tauri
-# crate is excluded — it needs macOS tooling and is tested in a separate CI
-# job) and is hermetic + cached.
-if [ -f "Cargo.toml" ]; then
-  log "Running buck2 clippy..."
-  if ! just buck2-clippy 2>&1; then
-    log "ERROR: buck2 clippy failed — fix warnings, then rerun 'just integrate-into-main $ISSUE_NUMBER'"
-    release_lock
-    RELEASE_ON_EXIT=false
+  if ! jj new "$CONTENT_CHANGE" 2>/dev/null; then
+    log "ERROR: failed to reattach working copy after rebase"
+    rollback_after_rebase 1
     exit 1
   fi
 fi
 
-# 6e. Rust tests via Buck2 (same crates as clippy)
-if [ -f "Cargo.toml" ]; then
-  log "Running buck2 tests..."
-  if ! just test-rs 2>&1; then
-    log "ERROR: buck2 tests failed — fix failing tests, then rerun 'just integrate-into-main $ISSUE_NUMBER'"
-    jj op restore "$PRE_REBASE_OP"
-    release_lock
-    RELEASE_ON_EXIT=false
-    exit 1
-  fi
+# 6. Run the complete host-applicable CI-equivalent gate. It deliberately runs
+# in full/default mode here; development-only gate selection and dry-run options
+# cannot bypass integration safety.
+log "Running full local CI-equivalent gate..."
+set +e
+python3 -c 'import os; os.setsid(); os.execvp("just", ["just", "ci-local"])' &
+GATE_PID=$!
+GATE_PGID=$GATE_PID
+wait "$GATE_PID"
+GATE_STATUS=$?
+GATE_PID=""
+GATE_PGID=""
+set -e
+if [ "$GATE_STATUS" -ne 0 ]; then
+  log "ERROR: local CI-equivalent gate failed (status $GATE_STATUS) — retained logs are under target/ci-local"
+  log "Fix the failing gate, then rerun 'just integrate-into-main $ISSUE_NUMBER'"
+  rollback_after_rebase "$GATE_STATUS"
+  exit "$GATE_STATUS"
 fi
 
 # 7. Advance main bookmark to the latest non-empty commit
@@ -333,6 +348,7 @@ if [ -z "$TARGET" ]; then
   exit 1
 fi
 log "Advancing main bookmark to $TARGET..."
+BOOKMARK_MOVE_STARTED=true
 jj bookmark move main --to "$TARGET" || {
   log "WARN: bookmark move failed — main may have moved. Re-fetching and retrying."
   jj git fetch
@@ -364,6 +380,7 @@ if [ "${INTEGRATE_DRY_RUN:-0}" = "1" ]; then
   log "DRY RUN: skipping jj git push"
 else
   log "Pushing to origin..."
+  PUSH_STARTED=true
   if ! jj git push --bookmark main; then
     log "ERROR: push failed — inspect the jj/git error, fix the remote or authentication problem, then rerun 'just integrate-into-main $ISSUE_NUMBER'"
     release_lock

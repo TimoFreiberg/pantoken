@@ -21,6 +21,11 @@ check-ts:
 test-ts:
     pnpm run test
 
+# CI-equivalent local gate. Runs all applicable host gates in parallel and retains failed logs.
+# Controls: PANTOKEN_CI_CPUS, PANTOKEN_CI_E2E_SHARDS, PANTOKEN_CI_RETAIN_LOGS=1.
+ci-local:
+    pnpm exec tsx scripts/ci-local.ts
+
 # Full local gate: TypeScript checks + unit tests + Rust fmt/clippy/build/test.
 check:
     just check-ts && just check-rs
@@ -127,7 +132,11 @@ smoke-test-headless *args:
 merge-release-metadata *args:
     pnpm exec tsx scripts/headless/merge-metadata.ts {{ args }}
 
-# Cut a desktop release (credential/signing workflow).
+# Run credential-free release verification for the next headless release.
+release-readiness *args:
+    pnpm exec tsx scripts/release-readiness.ts {{ args }}
+
+# Cut a desktop release (readiness runs before any mutation; signing/publishing remain CI workflows).
 release *args:
     pnpm exec tsx scripts/desktop/release.ts {{ args }}
 
