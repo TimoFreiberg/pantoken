@@ -108,8 +108,12 @@ impl SupervisionCore {
             return SupervisorDecision::Wait;
         }
         if !self.healthy && boot_timed_out {
-            self.terminal = Some(RecoveryReason::BootTimeout);
-            return SupervisorDecision::Unrecoverable(RecoveryReason::BootTimeout);
+            if !self.started {
+                self.terminal = Some(RecoveryReason::BootTimeout);
+                return SupervisorDecision::Unrecoverable(RecoveryReason::BootTimeout);
+            }
+            self.failures = 0;
+            return SupervisorDecision::Restart(RecoveryReason::BootTimeout);
         }
         self.failures = self.failures.saturating_add(1);
         if self.healthy && self.failures >= self.max_failures {
@@ -371,10 +375,8 @@ fn supervise_one(
             if outcome != ProbeOutcome::Healthy {
                 on_event(SupervisorEvent::ProbeFailed { outcome });
             }
-            let decision = policy.observe_probe(
-                outcome,
-                !*started && !healthy && Instant::now() > boot_deadline,
-            );
+            let decision =
+                policy.observe_probe(outcome, !healthy && Instant::now() > boot_deadline);
             match decision {
                 SupervisorDecision::Healthy { first_time } => {
                     healthy = true;
@@ -455,7 +457,7 @@ enum HttpReadError {
 /// Read until the complete header terminator, accepting fragmented TCP reads but never
 /// interpreting a partial status line as success. The cap prevents an untrusted endpoint from
 /// forcing unbounded allocation.
-fn read_http_response(stream: &mut TcpStream) -> Result<(u16, String), HttpReadError> {
+fn read_http_response(stream: &mut impl Read) -> Result<(u16, String), HttpReadError> {
     let mut response = Vec::with_capacity(256);
     let mut chunk = [0u8; 256];
     while response.len() < 16 * 1024 {
@@ -641,24 +643,49 @@ mod tests {
     }
 
     #[test]
-    fn http_reader_accepts_fragmented_valid_response() {
-        use std::io::Write;
-        use std::net::TcpListener;
-        use std::thread;
+    fn slow_restarted_child_gets_a_bounded_boot_retry() {
+        let mut core = SupervisionCore::with_limits(1, 2);
+        assert_eq!(
+            core.observe_probe(ProbeOutcome::Healthy, false),
+            SupervisorDecision::Healthy { first_time: true }
+        );
+        assert_eq!(
+            core.observe_exit(false),
+            SupervisorDecision::Restart(RecoveryReason::Crash)
+        );
+        assert_eq!(
+            core.observe_probe(ProbeOutcome::Unreachable, true),
+            SupervisorDecision::Restart(RecoveryReason::BootTimeout)
+        );
+    }
 
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let writer = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream.write_all(b"HTTP/1.1 204 No ").unwrap();
-            stream
-                .write_all(b"Content\r\nConnection: close\r\n\r\n")
-                .unwrap();
-        });
-        let mut stream = std::net::TcpStream::connect(address).unwrap();
-        let result = read_http_response(&mut stream).unwrap();
-        writer.join().unwrap();
-        assert_eq!(result, (204, String::new()));
+    #[test]
+    fn http_reader_accepts_fragmented_valid_response() {
+        struct FragmentedReader {
+            chunks: std::vec::IntoIter<&'static [u8]>,
+        }
+
+        impl std::io::Read for FragmentedReader {
+            fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+                let Some(chunk) = self.chunks.next() else {
+                    return Ok(0);
+                };
+                output[..chunk.len()].copy_from_slice(chunk);
+                Ok(chunk.len())
+            }
+        }
+
+        let mut reader = FragmentedReader {
+            chunks: vec![
+                b"HTTP/1.1 204 No ".as_slice(),
+                b"Content\r\nConnection: close\r\n\r\n".as_slice(),
+            ]
+            .into_iter(),
+        };
+        assert_eq!(
+            read_http_response(&mut reader).unwrap(),
+            (204, String::new())
+        );
     }
 
     #[test]
