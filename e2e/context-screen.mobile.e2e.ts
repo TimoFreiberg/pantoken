@@ -107,6 +107,7 @@ test("a UI close consumes the history entry so back still works cleanly after", 
 
   // Open again → the back gesture must close THIS open, first try (no stale
   // entry from the previous open/close cycle in between).
+  await expect.poll(() => page.evaluate(() => history.state?.pantokenOverlay ?? null)).toBeNull();
   await openRightSidebar(page);
   await expect(panel).toHaveAttribute("data-open", "true");
   await page.goBack();

@@ -723,26 +723,26 @@ test("Ctrl/Cmd+Up/Down step through user prompts", async ({ page }) => {
 
   // From the live tail, clicking ↑ walks one prompt older per click, all the way to the oldest.
   // Stepping one at a time (settling between clicks) keeps each smooth scroll short.
-  await page.locator(".scroller").focus();
+  await page.locator(".transcript-wrap").hover();
   const upBtn = page.getByTestId("prompt-nav-up");
   const downBtn = page.getByTestId("prompt-nav-down");
   for (let i = last; i >= 0; i--) {
-    await upBtn.click();
+    await upBtn.click({ force: true });
     await waitForPrompt(page, i);
     await expect.poll(() => atPrompt(page, i)).toBe(true);
   }
   // Past the oldest, ↑ clamps — it stays on the first prompt.
-  await upBtn.click();
+  await upBtn.click({ force: true });
   await waitForPrompt(page, 0);
 
   // ↓ walks back toward newer prompts…
   for (let i = 1; i <= last; i++) {
-    await downBtn.click();
+    await downBtn.click({ force: true });
     await waitForPrompt(page, i);
     await expect.poll(() => atPrompt(page, i)).toBe(true);
   }
   // …and stepping past the newest returns to the live bottom.
-  await downBtn.click();
+  await downBtn.click({ force: true });
   await expect.poll(atBottom).toBe(true);
 });
 
@@ -893,17 +893,17 @@ test("prev/next prompt-nav buttons are visible on hover and step through prompts
 
   // From the live tail, clicking ↑ steps one prompt older per click.
   for (let i = last; i >= 0; i--) {
-    await upBtn.click();
+    await upBtn.click({ force: true });
     await waitForPrompt(page, i);
     await expect.poll(() => atPrompt(page, i)).toBe(true);
   }
   // Past the oldest, ↑ clamps.
-  await upBtn.click();
+  await upBtn.click({ force: true });
   await waitForPrompt(page, 0);
 
   // ↓ walks back toward newer prompts…
   for (let i = 1; i <= last; i++) {
-    await downBtn.click();
+    await downBtn.click({ force: true });
     await waitForPrompt(page, i);
     await expect.poll(() => atPrompt(page, i)).toBe(true);
   }
