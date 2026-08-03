@@ -242,6 +242,51 @@ test("prompt-nav ↑ un-pins so streaming content doesn't yank back to the botto
   });
 });
 
+// Journey: a wheel during the prompt-nav settle window cancels the re-assert — the
+// user's scroll wins and the target row is NOT snapped back to the viewport top.
+// Regression guard for the nav-settle window's user-input cancellation wiring
+// (wheel/touch/scroll-key/scrollbar all call cancelNavSettle).
+test("wheel during a prompt-nav jump cancels the settle re-assert", async ({ page }) => {
+  await buildTallTranscript(page, 5);
+
+  const atPrompt = (idx: number) =>
+    page.evaluate((i) => {
+      const sc = document.querySelector(".scroller") as HTMLElement | null;
+      const row = document.querySelectorAll(".row.user")[i] as HTMLElement | undefined;
+      if (!sc || !row) return false;
+      const within =
+        row.getBoundingClientRect().top -
+        sc.getBoundingClientRect().top +
+        sc.scrollTop;
+      const max = sc.scrollHeight - sc.clientHeight;
+      return Math.abs(sc.scrollTop - Math.min(within, max)) < 4;
+    }, idx);
+
+  // ↑ from the tail lands on the most recent prompt (index 5) and opens the
+  // ~500ms nav-settle window. The transient data-nav-settling marker (set in
+  // jumpToTarget, cleared on cancellation/lapse) proves the window is ACTIVE here,
+  // so the wheel below lands inside it deterministically.
+  await page.locator(".transcript-wrap").hover();
+  await page.getByTestId("prompt-nav-up").click();
+  const scroller = page.locator(".scroller");
+  await expect(scroller).toHaveAttribute("data-nav-settling", "1", { timeout: 3000 });
+
+  // Wheel up DURING the window. Cancellation must stop the re-assert: the marker
+  // clears immediately, and after the window would have lapsed the target row must
+  // not be yanked back to the viewport top — the viewport stays where the wheel
+  // left it.
+  await wheelUp(page, 200);
+  await expect(scroller).not.toHaveAttribute("data-nav-settling", "1", { timeout: 3000 });
+  await page.waitForTimeout(900);
+
+  expect(await atPrompt(5)).toBe(false);
+  const gap = await page.evaluate(() => {
+    const sc = document.querySelector(".scroller") as HTMLElement;
+    return sc.scrollHeight - sc.scrollTop - sc.clientHeight;
+  });
+  expect(gap).toBeGreaterThan(80);
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Composer scroll-jump (merged from composer-scroll-jump.e2e.ts, issue #64)
 //

@@ -688,6 +688,12 @@
        composer below the keyboard; production has no devbar. */
     min-height: 0;
     overflow-y: auto;
+    /* Cap the test-only rail's share of the viewport so the transcript above it keeps
+       usable height at short windows (the rail scrolls internally). Without the cap, a
+       tall wrapped rail can squeeze .transcript-wrap so far that the floating
+       prompt-nav overlay positions up under the sticky app header, unreachable. 45vh
+       leaves tall viewports untouched (natural height is below the cap). */
+    max-height: 45vh;
     gap: 6px;
     justify-content: center;
     padding: 6px;

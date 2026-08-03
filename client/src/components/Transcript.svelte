@@ -311,6 +311,26 @@
     progScrollUntil = Date.now() + ms;
   }
 
+  // Prompt-nav settle window: after a nav jump the transcript layout is still settling
+  // (the "Worked for Ns" collapse animation, markstream block finalization, and
+  // content-visibility realization all land AFTER a one-shot scrollTo — the same late
+  // shifts settleScroll chases, see above), so the jump can land short or get clamped
+  // as scrollHeight corrects. Keep the target row and re-assert its clamped top against
+  // the CURRENT layout for a short window instead. `pinned` stays false the whole time
+  // (jumpToTarget sets it), so the streaming-pin effect and the ResizeObserver
+  // live-bottom branch (both gated on `pinned`) can't fight the jump. User input
+  // (wheel/touch/scroll-key/scrollbar) cancels the window immediately.
+  // The nav jump's programmatic hold (markProgScroll in jumpToTarget) is owned by the
+  // nav window: navHoldUntil records the exact deadline the nav last wrote to
+  // progScrollUntil, and cancellation zeroes progScrollUntil ONLY while it still
+  // matches — so a stale nav cleanup can never clear a window opened by
+  // settleScroll/send/search. `data-nav-settling` is a transient test/devtools marker
+  // proving the window is active (precedent: scroller.dataset.composerResizeN).
+  let navTarget: HTMLElement | null = null;
+  let navSettleUntil = 0;
+  let navHoldUntil = 0;
+  let navRafId: number | undefined;
+
   // ── Input-gated pin: `userScrolling` flag ──────────────────────────────────────
   //
   // The pin is turned OFF only by explicit user-input events, never by programmatic
@@ -345,7 +365,10 @@
   // to catch release outside the scroller), pointerleave, and pointercancel.
   let pointerDownOnScroller = false;
   function onScrollerPointerDown(e: PointerEvent): void {
-    if (e.target === scroller) pointerDownOnScroller = true;
+    if (e.target === scroller) {
+      pointerDownOnScroller = true;
+      cancelNavSettle();
+    }
   }
   function onScrollerPointerUp(): void {
     pointerDownOnScroller = false;
@@ -364,6 +387,7 @@
       )
     ) {
       markUserScroll(300); // keyboard scroll is animated; give it a longer window
+      cancelNavSettle();
     }
   }
 
@@ -596,6 +620,9 @@
     const n = store.promptSentN;
     if (n === lastSendN) return;
     lastSendN = n;
+    // Sending supersedes any in-flight nav jump (the user is now following the
+    // fresh reply, not the earlier prompt).
+    cancelNavSettle();
     pinned = true;
     navStepping = false;
     store.clearActiveUnread();
@@ -647,6 +674,8 @@
     const n = store.searchScrollN;
     if (n === lastSearchScrollN) return;
     lastSearchScrollN = n;
+    // Find-in-transcript supersedes any in-flight nav jump.
+    cancelNavSettle();
     pinned = false;
     markProgScroll(900); // cover the smooth scrollIntoView animation
   });
@@ -654,6 +683,9 @@
   /** Jump to the newest content and clear the unread flag (the "new messages ↓" pill). */
   function scrollToBottom(): void {
     if (!scroller) return;
+    // A nav jump may still hold the viewport on an earlier row — this explicit
+    // bottom jump supersedes it.
+    cancelNavSettle();
     // Ours — don't save transient mid-smooth-scroll positions (see settleScroll).
     progScrollUntil = Date.now() + 900;
     scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
@@ -670,6 +702,9 @@
    *  bottom) and re-pins, yanking back down. */
   function scrollToTop(): void {
     if (!scroller) return;
+    // Same supersede as scrollToBottom: an active nav window must not re-assert
+    // an earlier row over this explicit top jump.
+    cancelNavSettle();
     progScrollUntil = Date.now() + 900;
     userScrolling = false;
     clearTimeout(userScrollClearTimer);
@@ -715,6 +750,12 @@
     return null; // nothing below the fold → live bottom
   }
 
+  /** Jump to an already-selected prompt row. Arrow stepping and PromptMap both pass the
+   * DOM node directly. A single-shot scrollTo is NOT enough: the layout keeps settling
+   * for a few hundred ms after the jump (work-block collapse animation, markstream
+   * finalization, content-visibility realization — see the applyNavSettle comment), so
+   * we open a short nav-settle window that re-asserts the target's clamped top against
+   * the current layout on every relevant tick (ResizeObserver + rAF) until it holds. */
   function jumpToTarget(target: HTMLElement): void {
     if (!scroller || !target.isConnected) return;
     const scTop = scroller.getBoundingClientRect().top;
@@ -723,11 +764,23 @@
       Math.max(0, target.getBoundingClientRect().top - scTop + scroller.scrollTop),
       max,
     );
-    markProgScroll();
+    markProgScroll(600); // cover the whole nav window, not just the first scroll
+    navHoldUntil = progScrollUntil;
     pinned = false;
     navStepping = true;
     scroller.scrollTo({ top });
     flashPromptRow(target);
+    // Hold the target against late layout shifts for ~500ms. applyNavSettle runs
+    // every frame and clears the target itself once the window lapses, the row
+    // disconnects, or the user takes over — the loop then stops.
+    navTarget = target;
+    navSettleUntil = Date.now() + 500;
+    scroller.dataset.navSettling = "1";
+    const navRafLoop = () => {
+      applyNavSettle();
+      if (navTarget && scroller) navRafId = requestAnimationFrame(navRafLoop);
+    };
+    navRafId = requestAnimationFrame(navRafLoop);
   }
 
   /** Scroll the target prompt to the top of the viewport, anchoring every press to
@@ -764,6 +817,64 @@
     flashTimer = setTimeout(() => row.classList.remove("nav-flash"), 700);
   }
 
+  /** Re-assert the nav target's clamped top against the CURRENT layout. Mirrors
+   *  settleScroll's chase (a one-shot scrollTo lands short because scrollHeight /
+   *  row positions correct only after work-block collapse, markstream finalization,
+   *  and content-visibility realization settle). Runs from the ResizeObservers and the
+   *  nav rAF loop while the nav window is active.
+   *  Clear conditions (each also stops the rAF loop): the window lapsed, the target
+   *  disconnected, or the user took over (wheel/touch/scroll-key/scrollbar). A sample
+   *  within 1px does NOT clear — the layout can move the row again later in the window. */
+  function applyNavSettle(): void {
+    if (!scroller) return;
+    if (
+      Date.now() >= navSettleUntil ||
+      !navTarget ||
+      !navTarget.isConnected ||
+      userScrolling ||
+      pointerDownOnScroller
+    ) {
+      clearNavSettleState();
+      return;
+    }
+    const scTop = scroller.getBoundingClientRect().top;
+    const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    const top = Math.min(
+      Math.max(0, navTarget.getBoundingClientRect().top - scTop + scroller.scrollTop),
+      max,
+    );
+    if (Math.abs(scroller.scrollTop - top) > 1) {
+      // Re-extend the programmatic hold so onScroll treats this re-assert as ours
+      // (no transient position persistence, no nav-cursor drop / re-pin evaluation).
+      markProgScroll(300);
+      navHoldUntil = progScrollUntil;
+      scroller.scrollTo({ top });
+    }
+    // Within tolerance: keep the target active for the rest of the window.
+  }
+
+  /** Tear the nav window down: stop the loop, drop the target, and release the
+   *  programmatic hold — but only the hold the nav itself last wrote (exact deadline
+   *  match), never a window opened by settleScroll/send/search. */
+  function clearNavSettleState(): void {
+    if (navRafId !== undefined) {
+      cancelAnimationFrame(navRafId);
+      navRafId = undefined;
+    }
+    navTarget = null;
+    navSettleUntil = 0;
+    if (progScrollUntil === navHoldUntil) progScrollUntil = 0;
+    navHoldUntil = 0;
+    if (scroller) delete scroller.dataset.navSettling;
+  }
+
+  /** User input cancels the nav window immediately — no waiting for the next
+   *  ResizeObserver or rAF tick. Never touches `pinned` (the existing user-input
+   *  handlers own that decision). */
+  function cancelNavSettle(): void {
+    clearNavSettleState();
+  }
+
   onMount(() => {
     // Stash the reading position on tab-close/navigate-away so it restores next visit.
     // (Mirrors Composer's pagehide draft stash.) pagehide fires on bfcache eviction too,
@@ -778,6 +889,15 @@
     // 500ms window lapses. See settleScroll and the ResizeObserver callback below (#57).
     if (content && typeof ResizeObserver !== "undefined") {
       settleObserver = new ResizeObserver(() => {
+        if (navTarget && Date.now() < navSettleUntil) {
+          // Nav jump still settling: re-assert the target row against the new height
+          // (work-block collapse / markstream finalization / content-visibility
+          // realization all change content height late). Runs BEFORE the live-bottom
+          // branch, which is `pinned`-gated anyway — pinned is false during a jump.
+          markProgScroll(300);
+          applyNavSettle();
+          return;
+        }
         if (settleRatio === undefined) {
           // Live-bottom follow: re-assert the bottom on ANY content height change
           // while pinned — NOT just within the 500ms settle window. Image decode,
@@ -813,6 +933,13 @@
     let viewportObserver: ResizeObserver | undefined;
     if (scroller && typeof ResizeObserver !== "undefined") {
       viewportObserver = new ResizeObserver(() => {
+        if (navTarget && Date.now() < navSettleUntil) {
+          // Nav jump still settling and the VIEWPORT (clientHeight) changed — the
+          // target's clamped top moved with it; re-assert (see the .col observer).
+          markProgScroll(300);
+          applyNavSettle();
+          return;
+        }
         if (settleRatio === undefined) {
           // Live-bottom follow: re-assert the bottom on viewport height changes
           // while pinned — the composer growing shrinks clientHeight, opening a gap.
@@ -875,6 +1002,7 @@
       window.removeEventListener("pointerup", onWindowPointerUp);
       window.removeEventListener("keydown", onScrollTopBottomKey);
       clearTimeout(userScrollClearTimer);
+      if (navRafId !== undefined) cancelAnimationFrame(navRafId);
     };
   });
 </script>
@@ -907,8 +1035,14 @@
   bind:this={scroller}
   tabindex="0"
   onscroll={onScroll}
-  onwheel={() => markUserScroll()}
-  ontouchstart={() => markUserScroll()}
+  onwheel={() => {
+    markUserScroll();
+    cancelNavSettle();
+  }}
+  ontouchstart={() => {
+    markUserScroll();
+    cancelNavSettle();
+  }}
   onkeydown={onScrollerKey}
   onpointerdown={onScrollerPointerDown}
   onpointerup={onScrollerPointerUp}

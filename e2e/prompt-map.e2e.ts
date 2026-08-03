@@ -29,12 +29,31 @@ test("clicking a map tick shares prompt navigation and highlights active turns",
   const map = page.getByTestId("prompt-map");
   await expect(map.getByTestId("prompt-map-tick")).toHaveCount(3);
 
+  /** True when the scroller sits at prompt `idx`'s block-start target (same ≤4px
+   *  check as polish.e2e.ts's atPrompt) — the map tick shares jumpToTarget's
+   *  nav-settle path, so the landing must hold at the viewport top. */
+  const atPrompt = (idx: number) =>
+    page.evaluate((i) => {
+      const sc = document.querySelector(".scroller") as HTMLElement | null;
+      const row = document.querySelectorAll(".row.user")[i] as HTMLElement | undefined;
+      if (!sc || !row) return false;
+      const within =
+        row.getBoundingClientRect().top -
+        sc.getBoundingClientRect().top +
+        sc.scrollTop;
+      const max = sc.scrollHeight - sc.clientHeight;
+      return Math.abs(sc.scrollTop - Math.min(within, max)) < 4;
+    }, idx);
+
   const scroller = page.locator(".scroller");
   await scrollUpViaKeyboard(page);
   await expect.poll(() => scroller.evaluate((node) => node.scrollTop)).toBe(0);
   await map.getByTestId("prompt-map-tick").nth(1).click();
   await expect(page.locator(".row.user.nav-flash")).toHaveCount(1);
   await expect.poll(() => scroller.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+  // The clicked prompt's row must land (and hold) at the viewport top via the shared
+  // jumpToPrompt → jumpToTarget nav-settle path — not just flash and scroll.
+  await expect.poll(() => atPrompt(1), { timeout: 10_000 }).toBe(true);
 
   await page.locator(".transcript-wrap").hover();
   await page.getByTestId("prompt-nav-down").click();
