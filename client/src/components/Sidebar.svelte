@@ -1165,7 +1165,13 @@
       aria-expanded={buildOpen}
       aria-haspopup="dialog"
       aria-label={`Build version: ${buildVersion}`}
-      onclick={() => (buildPinned = !buildPinned)}
+      onclick={() => {
+        buildPinned = !buildPinned;
+        // Clear the hover/focus latch on click: a second tap must be able to
+        // dismiss the pinned pop on touch, where the label keeps focus (and
+        // onfocusin would otherwise keep buildHovered=true indefinitely).
+        buildHovered = false;
+      }}
       onkeydown={(e) => {
         if (e.key === "Escape" && buildPinned) {
           e.preventDefault();

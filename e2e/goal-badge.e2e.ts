@@ -50,7 +50,9 @@ test('goal card: inspect, Allow, and Escape journeys', async ({ page }) => {
   await expect(dialog).toHaveAttribute('aria-modal', 'true');
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toBeHidden();
-  await expect(page.getByText('Dialog cancelled.')).toBeVisible();
+  await expect(
+    page.locator('.row.notice .ntext').filter({ hasText: 'Dialog cancelled.' }).last(),
+  ).toBeVisible();
 
   await drive(page, 'goal');
   dialog = page.getByRole('dialog');
@@ -64,7 +66,9 @@ test('goal card: inspect, Allow, and Escape journeys', async ({ page }) => {
   await expect(dialog).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toBeHidden();
-  await expect(page.getByText('Dialog cancelled.')).toBeVisible();
+  await expect(
+    page.locator('.row.notice .ntext').filter({ hasText: 'Dialog cancelled.' }).last(),
+  ).toBeVisible();
 });
 
 // Journey: an unknown interrogative type renders an error card with a single
@@ -85,5 +89,7 @@ test('unknown interrogative type renders an error card with Dismiss', async ({ p
   // Dismiss produces {cancelled:true} → Cancel via the reverse builder's Unknown arm.
   await actions.getByRole('button', { name: 'Dismiss' }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.getByText('Dialog cancelled.')).toBeVisible();
+  await expect(
+    page.locator('.row.notice .ntext').filter({ hasText: 'Dialog cancelled.' }).last(),
+  ).toBeVisible();
 });

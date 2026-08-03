@@ -17,6 +17,7 @@ export async function gotoFresh(
         localStorage.removeItem("pantoken.sidebarOpen");
         localStorage.removeItem("pantoken.rightSidebarPreference");
         localStorage.removeItem("pantoken.rightSidebarOpen");
+        localStorage.removeItem("pantoken.showArchived");
         sessionStorage.setItem(key, "1");
       }
     `,
@@ -177,7 +178,15 @@ export async function openSidebar(page: Page): Promise<void> {
   // mid-click.
   if ((await sidebar.getAttribute("data-open")) !== "true") {
     const openButton = page.getByTestId("sidebar-open");
-    await openButton.click({ force: true });
+    // The drawer keeps its content mounted off-screen, and `data-open` flips before
+    // the exit transition ends. A real click at the button's center mid-transition
+    // (even force) lands on whichever drawer element is sweeping over that point —
+    // e.g. the filter toggle, silently flipping the archived filter. Dispatch the
+    // click directly on the button instead: no hit-testing, so it can never land on
+    // a sweeping drawer control, and no separate resolve→dispatch window (the button
+    // can vanish within a few frames when a desktop layout auto-opens the sidebar,
+    // so the dispatch must be atomic).
+    await openButton.evaluate((el) => (el as HTMLElement).click());
     // A close pop can finish in the same task as the click dispatch. If that click
     // raced the reactive mobile-view update, retry only after observing that the
     // drawer is still closed; this keeps the helper state-driven rather than timing-based.
@@ -185,7 +194,7 @@ export async function openSidebar(page: Page): Promise<void> {
       .poll(() => sidebar.getAttribute("data-open"), { timeout: 2_000 })
       .toBe("true")
       .catch(async () => {
-        await openButton.click({ force: true });
+        await openButton.evaluate((el) => (el as HTMLElement).click());
       });
   }
   // Phone overlay history closes asynchronously. Waiting on the state (rather than a

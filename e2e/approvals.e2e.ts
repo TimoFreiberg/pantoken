@@ -37,7 +37,9 @@ test("confirm dialog: allow, layout, deny, label, and Escape journeys", async ({
   await expect(dialog).toHaveAttribute("aria-modal", "true");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toBeHidden();
-  await expect(page.getByText("Dialog cancelled.")).toBeVisible();
+  await expect(
+    page.locator(".row.notice .ntext").filter({ hasText: "Dialog cancelled." }).last(),
+  ).toBeVisible();
 
   // Re-drive for the labelled-modal accessibility contract.
   await drive(page, "confirm");
@@ -46,7 +48,9 @@ test("confirm dialog: allow, layout, deny, label, and Escape journeys", async ({
   await expect(dialog).toHaveAttribute("aria-modal", "true");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toBeHidden();
-  await expect(page.getByText("Dialog cancelled.")).toBeVisible();
+  await expect(
+    page.locator(".row.notice .ntext").filter({ hasText: "Dialog cancelled." }).last(),
+  ).toBeVisible();
 });
 
 // Journey: input requests are independently resolved on one boot.
@@ -188,7 +192,8 @@ test("permission card: shows tool name + input preview + pruned options", async 
     ).toHaveCount(0);
   }
 
-  await drive(page, "permission");
+  // The dialog from the first drive is still open — resolve it directly rather
+  // than re-driving (the open sheet would intercept the dev-bar click).
   const sessionDialog = page.getByRole("dialog");
   await sessionDialog.getByRole("radio", { name: "Allow for session", exact: true }).click();
   await expect(page.getByText("Received: Allow for session")).toBeVisible();
@@ -198,7 +203,9 @@ test("permission card: shows tool name + input preview + pruned options", async 
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toBeHidden();
-  await expect(page.getByText("Dialog cancelled.")).toBeVisible();
+  await expect(
+    page.locator(".row.notice .ntext").filter({ hasText: "Dialog cancelled." }).last(),
+  ).toBeVisible();
 
   await drive(page, "permission");
   const keyboardDialog = page.getByRole("dialog");

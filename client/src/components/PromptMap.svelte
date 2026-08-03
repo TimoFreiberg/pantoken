@@ -147,9 +147,13 @@
     if (index < 0 || index >= entries.length || !scroller) return;
     const entry = entries[index];
     if (!entry) return;
-    const target = scroller.querySelector<HTMLElement>(
-      `.transcript-turn[data-prompt-id="${CSS.escape(entry.id)}"]`,
-    );
+    const target =
+      scroller.querySelector<HTMLElement>(
+        `.row.user[data-prompt-id="${CSS.escape(entry.id)}"]`,
+      ) ??
+      scroller.querySelector<HTMLElement>(
+        `.transcript-turn[data-prompt-id="${CSS.escape(entry.id)}"]`,
+      );
     if (!target) return;
     onjump(target);
     sheetOpen = false;
