@@ -28,8 +28,9 @@ async function buildMultiTurn(page: Page, turns: number): Promise<void> {
  *  tail to reach the top settles at the bottom — `min(within, max)` models that. */
 function atPrompt(page: Page, idx: number) {
   return page.evaluate((i) => {
-    const sc = document.querySelector(".scroller") as HTMLElement;
-    const row = document.querySelectorAll(".row.user")[i] as HTMLElement;
+    const sc = document.querySelector(".scroller") as HTMLElement | null;
+    const row = document.querySelectorAll(".row.user")[i] as HTMLElement | undefined;
+    if (!sc || !row) return false;
     const within =
       row.getBoundingClientRect().top -
       sc.getBoundingClientRect().top +
@@ -37,6 +38,12 @@ function atPrompt(page: Page, idx: number) {
     const max = sc.scrollHeight - sc.clientHeight;
     return Math.abs(sc.scrollTop - Math.min(within, max)) < 4;
   }, idx);
+}
+
+/** Require the indexed prompt target to remain correct across two layout polls. */
+async function waitForPrompt(page: Page, idx: number): Promise<void> {
+  await expect.poll(() => atPrompt(page, idx), { timeout: 10_000 }).toBe(true);
+  await expect.poll(() => atPrompt(page, idx), { timeout: 10_000 }).toBe(true);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -697,7 +704,7 @@ test("Ctrl/Cmd+Up anchors to the scroll position, not always the last prompt", a
 // Journey: Ctrl/Cmd+Up/Down step through user prompts
 test("Ctrl/Cmd+Up/Down step through user prompts", async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 600 });
-  await page.waitForTimeout(50);
+  await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1100);
   // Build several turns so the oldest prompts have enough content below them to scroll to
   // the top (a short final turn can't, which is fine — the stepper clamps there).
   await buildMultiTurn(page, 5);
@@ -720,20 +727,22 @@ test("Ctrl/Cmd+Up/Down step through user prompts", async ({ page }) => {
   const upBtn = page.getByTestId("prompt-nav-up");
   const downBtn = page.getByTestId("prompt-nav-down");
   for (let i = last; i >= 0; i--) {
-    await upBtn.press("Enter");
+    await upBtn.click();
+    await waitForPrompt(page, i);
     await expect.poll(() => atPrompt(page, i)).toBe(true);
   }
   // Past the oldest, ↑ clamps — it stays on the first prompt.
-  await upBtn.press("Enter");
-  await expect.poll(() => atPrompt(page, 0)).toBe(true);
+  await upBtn.click();
+  await waitForPrompt(page, 0);
 
   // ↓ walks back toward newer prompts…
   for (let i = 1; i <= last; i++) {
-    await downBtn.press("Enter");
+    await downBtn.click();
+    await waitForPrompt(page, i);
     await expect.poll(() => atPrompt(page, i)).toBe(true);
   }
   // …and stepping past the newest returns to the live bottom.
-  await downBtn.press("Enter");
+  await downBtn.click();
   await expect.poll(atBottom).toBe(true);
 });
 
@@ -861,7 +870,7 @@ test("prev/next prompt-nav buttons are visible on hover and step through prompts
   page,
 }) => {
   await page.setViewportSize({ width: 1100, height: 600 });
-  await page.waitForTimeout(50);
+  await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1100);
   // Build several turns so the oldest prompts have enough content below them to scroll to
   // the top (a short final turn can't, which is fine — the stepper clamps there).
   await buildMultiTurn(page, 5);
@@ -874,7 +883,7 @@ test("prev/next prompt-nav buttons are visible on hover and step through prompts
   // hovered. Hover the transcript-wrap to reveal it.
   const upBtn = page.getByTestId("prompt-nav-up");
   const downBtn = page.getByTestId("prompt-nav-down");
-  await page.locator(".scroller").focus();
+  await page.locator(".transcript-wrap").hover();
   await expect(upBtn).toBeVisible();
   await expect(downBtn).toBeVisible();
 
@@ -884,16 +893,18 @@ test("prev/next prompt-nav buttons are visible on hover and step through prompts
 
   // From the live tail, clicking ↑ steps one prompt older per click.
   for (let i = last; i >= 0; i--) {
-    await upBtn.press("Enter");
+    await upBtn.click();
+    await waitForPrompt(page, i);
     await expect.poll(() => atPrompt(page, i)).toBe(true);
   }
   // Past the oldest, ↑ clamps.
-  await upBtn.press("Enter");
-  await expect.poll(() => atPrompt(page, 0)).toBe(true);
+  await upBtn.click();
+  await waitForPrompt(page, 0);
 
   // ↓ walks back toward newer prompts…
   for (let i = 1; i <= last; i++) {
-    await downBtn.press("Enter");
+    await downBtn.click();
+    await waitForPrompt(page, i);
     await expect.poll(() => atPrompt(page, i)).toBe(true);
   }
 });

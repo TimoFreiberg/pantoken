@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
-import { drive, gotoFresh, openRightSidebar, openSidebar } from "./helpers.js";
+import {
+  closeOverlayAndWaitForOwnedPop,
+  drive,
+  gotoFresh,
+  openRightSidebar,
+  openSidebar,
+} from "./helpers.js";
 
 // Mobile sidebar flow tests (Pixel 7 viewport). One test per coherent user
 // journey, merging the former sidebar.mobile, sidebar-resize.mobile, and
@@ -80,8 +86,11 @@ test("mobile context panel: closed by default, reachable from header, collapse i
   // The collapse control ("Collapse context panel") and the scrim
   // ("Close context panel", tap-outside-to-dismiss) carry distinct labels;
   // scoping keeps the control lookup local to the drawer.
-  await collapse.click();
-  await expect(panel).toHaveAttribute("data-open", "false");
+  await closeOverlayAndWaitForOwnedPop(page, {
+    overlayId: "context",
+    close: () => collapse.click(),
+    closed: () => expect(panel).toHaveAttribute("data-open", "false"),
+  });
   await page.getByTestId("context-open").click();
   await expect(panel).toHaveAttribute("data-open", "true");
 

@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { gotoFresh, openSidebar } from "./helpers.js";
+import { closeOverlayAndWaitForOwnedPop, gotoFresh, openSidebar } from "./helpers.js";
 
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nWQAAAAASUVORK5CYII=",
@@ -73,7 +73,11 @@ test.describe("Sessions sidebar", () => {
         "manysessions",
       ),
     );
-    await sidebar.getByRole("button", { name: "Close sessions" }).click();
+    await closeOverlayAndWaitForOwnedPop(page, {
+      overlayId: "sessions",
+      close: () => sidebar.getByRole("button", { name: "Close sessions" }).click(),
+      closed: () => expect(sidebar).toHaveAttribute("data-open", "false"),
+    });
     await openSidebar(page);
 
     const group = sidebar
@@ -105,7 +109,11 @@ test.describe("Sessions sidebar", () => {
         "manysessions",
       ),
     );
-    await sidebar.getByRole("button", { name: "Close sessions" }).click();
+    await closeOverlayAndWaitForOwnedPop(page, {
+      overlayId: "sessions",
+      close: () => sidebar.getByRole("button", { name: "Close sessions" }).click(),
+      closed: () => expect(sidebar).toHaveAttribute("data-open", "false"),
+    });
     await openSidebar(page);
 
     const group = sidebar
@@ -115,8 +123,11 @@ test.describe("Sessions sidebar", () => {
     await expect(group.locator("[data-testid='session-status']")).toHaveCount(8);
 
     // Phone close path uses the actual drawer control and is also history-backed.
-    await sidebar.getByRole("button", { name: "Close sessions" }).click();
-    await expect(sidebar).toHaveAttribute("data-open", "false");
+    await closeOverlayAndWaitForOwnedPop(page, {
+      overlayId: "sessions",
+      close: () => sidebar.getByRole("button", { name: "Close sessions" }).click(),
+      closed: () => expect(sidebar).toHaveAttribute("data-open", "false"),
+    });
     await openSidebar(page);
 
     await expect(group.locator("[data-testid='session-status']")).toHaveCount(5);

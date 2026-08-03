@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { gotoFresh, openSidebar } from "./helpers.js";
+import { gotoFresh, openSidebar, waitForSessionReady } from "./helpers.js";
 
 // CI runs Chromium on Linux, where the app's hotkeys read Ctrl (the handler accepts
 // metaKey || ctrlKey), so the presses use "Control+…" to match the other specs.
@@ -33,19 +33,21 @@ test("⌘[ and ⌘] step back and forward through visited sessions", async ({
   page,
 }) => {
   await openSidebar(page);
-  await expect(title(page)).toContainText("Wire up the WebSocket bridge");
+  const bridgeRow = row(page, "Wire up the WebSocket bridge");
+  await waitForSessionReady(page, { title: "Wire up the WebSocket bridge", row: bridgeRow });
 
-  // Visit a second session.
-  await row(page, "Explore the fold reducer").click();
-  await expect(title(page)).toContainText("Explore the fold reducer");
+  // Visit a second session, retaining the exact row locator for the active-state check.
+  const foldRow = row(page, "Explore the fold reducer");
+  await foldRow.click();
+  await waitForSessionReady(page, { title: "Explore the fold reducer", row: foldRow });
 
   // Back → the bridge session.
   await page.keyboard.press("Control+[");
-  await expect(title(page)).toContainText("Wire up the WebSocket bridge");
+  await waitForSessionReady(page, { title: "Wire up the WebSocket bridge", row: bridgeRow });
 
   // Forward → the fold-reducer session again.
   await page.keyboard.press("Control+]");
-  await expect(title(page)).toContainText("Explore the fold reducer");
+  await waitForSessionReady(page, { title: "Explore the fold reducer", row: foldRow });
 });
 
 // Back history reaches the chooser from a visited session

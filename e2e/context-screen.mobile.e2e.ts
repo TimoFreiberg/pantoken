@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import {
   drive,
   gotoFresh,
+  closeOverlayAndWaitForOwnedPop,
   openRightSidebar,
   openSidebar,
 } from "./helpers.js";
@@ -98,8 +99,11 @@ test("a UI close consumes the history entry so back still works cleanly after", 
   // Open → close via the back arrow (a UI close, not a history pop).
   await openRightSidebar(page);
   await expect(panel).toHaveAttribute("data-open", "true");
-  await panel.getByRole("button", { name: "Collapse context panel" }).click();
-  await expect(panel).toHaveAttribute("data-open", "false");
+  await closeOverlayAndWaitForOwnedPop(page, {
+    overlayId: "context",
+    close: () => panel.getByRole("button", { name: "Collapse context panel" }).click(),
+    closed: () => expect(panel).toHaveAttribute("data-open", "false"),
+  });
 
   // Open again → the back gesture must close THIS open, first try (no stale
   // entry from the previous open/close cycle in between).

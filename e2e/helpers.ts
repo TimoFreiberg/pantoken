@@ -58,6 +58,75 @@ export async function waitForSettledWorkBlocks(
   });
 }
 
+/** Wait until an optimistic session switch has finished rendering its transcript.
+ * The optional row is captured before navigation, so duplicate display names cannot
+ * make this assertion observe the wrong session. */
+export async function waitForSessionReady(
+  page: Page,
+  options: { title: string; row?: import("@playwright/test").Locator },
+): Promise<void> {
+  await expect(page.locator("header .title")).toContainText(options.title, {
+    timeout: 15_000,
+  });
+  await expect(page.getByTestId("opening-session-placeholder")).toHaveCount(0, {
+    timeout: 15_000,
+  });
+  if (options.row) await expect(options.row).toHaveClass(/\bactive\b/, { timeout: 15_000 });
+}
+
+/** Close a phone overlay through its UI and prove that its owned history entry has
+ * been consumed. The listener is installed before `close`, because overlayHistory.closed
+ * calls history.back() asynchronously and a marker replacement alone is not proof that
+ * the owned pop completed. */
+export async function closeOverlayAndWaitForOwnedPop(
+  page: Page,
+  options: {
+    overlayId: string;
+    close: () => Promise<void> | void;
+    closed: () => Promise<void> | void;
+  },
+): Promise<void> {
+  const { overlayId } = options;
+  await page.evaluate((id) => {
+    const marker = (history.state as { pantokenOverlay?: string } | null)?.pantokenOverlay;
+    if (marker !== id) throw new Error(`Expected overlay history marker ${id}, got ${marker ?? "none"}`);
+    const key = "__pantokenOwnedOverlayPop";
+    (window as unknown as Record<string, unknown>)[key] = { id, seen: false, marker: null };
+    const listener = () => {
+      const state = history.state as { pantokenOverlay?: string } | null;
+      const observed = { id, seen: true, marker: state?.pantokenOverlay ?? null, settled: false };
+      (window as unknown as Record<string, unknown>)[key] = observed;
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          observed.settled =
+            (history.state as { pantokenOverlay?: string } | null)?.pantokenOverlay !== id;
+        }),
+      );
+      window.removeEventListener("popstate", listener);
+    };
+    window.addEventListener("popstate", listener);
+  }, overlayId);
+  await options.close();
+  await options.closed();
+  await expect
+    .poll(
+      () =>
+        page.evaluate((id) => {
+          const observed = (window as unknown as Record<string, unknown>)[
+            "__pantokenOwnedOverlayPop"
+          ] as { id?: string; seen?: boolean; marker?: string | null; settled?: boolean } | undefined;
+          return (
+            observed?.id === id &&
+            observed.seen === true &&
+            observed.marker !== id &&
+            observed.settled === true
+          );
+        }, overlayId),
+      { timeout: 10_000 },
+    )
+    .toBe(true);
+}
+
 /** Expand a settled turn's collapsible "Worked for Ns" block so its tools + intermediate
  *  narration render. Settled turns collapse that section by default; tests that assert on
  *  working-step content must reveal it first. Targets the most recent turn's block by
@@ -106,9 +175,6 @@ export async function openSidebar(page: Page): Promise<void> {
   // preference, which may open or close it. Wait one frame for the resize handler
   // to settle before deciding whether the button is needed, so it doesn't detach
   // mid-click.
-  // Let a preceding UI close finish its browser-history pop before attempting a
-  // replacement open; otherwise the delayed pop can close the replacement.
-  await page.waitForTimeout(250);
   if ((await sidebar.getAttribute("data-open")) !== "true") {
     await page.getByTestId("sidebar-open").click({ force: true });
   }
@@ -130,11 +196,11 @@ export async function openRightSidebar(page: Page): Promise<void> {
     // Phone sessions and Context are peer full-screen views. Close Sessions first;
     // otherwise its drawer/scrim intercepts the header Context button.
     if ((await sidebar.getAttribute("data-open")) === "true") {
-      await sidebar.getByRole("button", { name: "Close sessions" }).click();
-      await expect(sidebar).toHaveAttribute("data-open", "false", { timeout: 10_000 });
-      // The attribute flips synchronously, but history.back()/popstate completes on
-      // the next browser turn; let that owned pop finish before replacing the view.
-      await page.waitForTimeout(250);
+      await closeOverlayAndWaitForOwnedPop(page, {
+        overlayId: "sessions",
+        close: () => sidebar.getByRole("button", { name: "Close sessions" }).click(),
+        closed: () => expect(sidebar).toHaveAttribute("data-open", "false", { timeout: 10_000 }),
+      });
     }
     await page.getByTestId("context-open").click({ force: true });
   }
