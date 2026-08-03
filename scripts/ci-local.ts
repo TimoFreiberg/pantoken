@@ -66,7 +66,7 @@ export function prerequisiteChecks(host = currentHost()): PrerequisiteCheck[] {
     { command: "cargo", requiredBy: ["rust-server", "desktop", "buck2"], available: false },
     { command: "buck2", requiredBy: ["rust-server", "buck2", "web-e2e", "web-live"], available: false },
     { command: "python3", requiredBy: ["rust-server", "buck2"], available: false },
-    ...(host === "macos" ? [{ command: "cargo-nextest", requiredBy: ["desktop"] as GateName[], available: false }] : []),
+    ...(host === "macos" ? [{ command: "cargo-nextest", requiredBy: ["desktop", "buck2"] as GateName[], available: false }] : []),
   );
   return checks;
 }
@@ -109,7 +109,7 @@ export function gateSpecs(options: RunnerOptions = {}): GateSpec[] {
   if (host === "linux") specs.push({ name: "rust-server", commands: ["cargo fmt --all -- --check", "bash scripts/ci/retry-transient.sh 'just buck2-clippy'", "bash scripts/ci/retry-transient.sh 'just build-rs && just build-server-rs'", "just test-rs", "just targets-check-rs", "just test-inventory-check-rs"] });
   if (host === "macos") {
     specs.push({ name: "desktop", commands: ["pnpm run build", "bash scripts/ci/retry-transient.sh 'pnpm exec tsx scripts/desktop/build-hub.ts --debug'", "pnpm run test", "cargo fmt --check -p pantoken-desktop", "cargo clippy --locked -p pantoken-desktop --all-targets -- -D warnings", "cargo nextest run -p pantoken-desktop"] });
-    specs.push({ name: "buck2", commands: ["bash scripts/ci/retry-transient.sh 'just buck2-clippy'", "bash scripts/ci/retry-transient.sh 'just build-rs && just build-server-rs'", "just test-rs", "just targets-check-rs", "just test-inventory-check-rs"] });
+    specs.push({ name: "buck2", commands: ["bash scripts/ci/retry-transient.sh 'just buck2-clippy'", "bash scripts/ci/retry-transient.sh 'just build-rs && just build-server-rs'", "just test-rs-nextest", "just targets-check-rs", "just test-inventory-check-rs"] });
   }
   return specs;
 }
@@ -126,14 +126,32 @@ function terminateChildren(): void {
   }
 }
 
-async function executeCommand(command: string, logPath: string, env: NodeJS.ProcessEnv, chunks: Buffer[]): Promise<number> {
+async function executeCommand(gate: GateName, command: string, env: NodeJS.ProcessEnv, chunks: Buffer[]): Promise<number> {
   return await new Promise((resolveCode) => {
+    const startedAt = Date.now();
+    console.log(`[ci-local] ${gate}: starting ${command}`);
+    const heartbeat = setInterval(() => {
+      const elapsed = Math.round((Date.now() - startedAt) / 1000);
+      console.log(`[ci-local] ${gate}: still running (${elapsed}s)`);
+    }, 60_000);
     const child = spawn("bash", ["-o", "pipefail", "-c", command], { env, stdio: ["ignore", "pipe", "pipe"], detached: true });
     activeChildren.add(child);
     child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
     child.stderr.on("data", (chunk: Buffer) => chunks.push(chunk));
-    child.on("close", (code) => { activeChildren.delete(child); resolveCode(code ?? 1); });
-    child.on("error", (error) => { activeChildren.delete(child); chunks.push(Buffer.from(String(error))); resolveCode(1); });
+    child.on("close", (code) => {
+      clearInterval(heartbeat);
+      activeChildren.delete(child);
+      const elapsed = Math.round((Date.now() - startedAt) / 1000);
+      console.log(`[ci-local] ${gate}: ${code === 0 ? "passed" : `failed (exit ${code ?? 1})`} after ${elapsed}s`);
+      resolveCode(code ?? 1);
+    });
+    child.on("error", (error) => {
+      clearInterval(heartbeat);
+      activeChildren.delete(child);
+      chunks.push(Buffer.from(String(error)));
+      console.log(`[ci-local] ${gate}: failed to start after ${Math.round((Date.now() - startedAt) / 1000)}s`);
+      resolveCode(1);
+    });
   });
 }
 
@@ -143,8 +161,15 @@ async function executeProcess(spec: GateSpec, logPath: string, env: NodeJS.Proce
   // Playwright's mock shards are independent CI processes. Run them concurrently;
   // each has its own Vite port and dev.ts auto-assigns its backend/data ports.
   const codes = spec.name === "web-e2e"
-    ? await Promise.all(spec.commands.map((command) => executeCommand(command, logPath, mergedEnv, chunks)))
-    : [await executeCommand(spec.commands.join(" && "), logPath, mergedEnv, chunks)];
+    ? await Promise.all(spec.commands.map((command) => executeCommand(spec.name, command, mergedEnv, chunks)))
+    : [];
+  if (spec.name !== "web-e2e") {
+    for (const command of spec.commands) {
+      const code = await executeCommand(spec.name, command, mergedEnv, chunks);
+      codes.push(code);
+      if (code !== 0) break;
+    }
+  }
   await writeFile(logPath, Buffer.concat(chunks));
   return codes.some((code) => code !== 0) ? 1 : 0;
 }

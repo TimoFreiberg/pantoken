@@ -186,6 +186,12 @@ server-bin-rs:
 test-rs:
     bash scripts/buck2/check-version.sh && buck2 test '//server/pantoken-protocol:fold_corpus_tests' '//server/pantoken-daemon-types:target_version_test' '//server/pantoken-daemon-types:daemon_types_roundtrip' '//server/pantoken-daemon-types:schema_inventory_test' '//server/pantoken-remote-layout:unit_tests' '//server/pantoken-tar-validate:unit_tests' '//server/pantoken-server:server_lib_unit_tests' '//server/pantoken-server:corpus_tests' '//server/pantoken-server:live_path_tests' '//server/pantoken-server:contract_scenarios_tests' '//server/pantoken-server:websocket_adapter_tests' '//server/pantoken-server:stdio_adapter_tests' '//server/pantoken-server:resume_and_recovery_tests' '//server/pantoken-server:remote_runtime_tests'
 
+# Run the same server workspace tests with nextest's per-test timeout and
+# failure reporting. Used by the local macOS gate because Buck2's rust_test
+# runner has a monolithic target timeout.
+test-rs-nextest:
+    cargo nextest run -p pantoken-protocol -p pantoken-daemon-types -p pantoken-remote-layout -p pantoken-server -p pantoken-tar-validate
+
 # Build the unsigned headless archive via Buck2 (uses remote cache if .buckconfig.local present).
 archive-rs:
     bash scripts/buck2/check-version.sh && buck2 build '//:pantoken_headless_unsigned'

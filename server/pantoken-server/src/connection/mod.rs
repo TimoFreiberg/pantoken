@@ -554,7 +554,9 @@ mod tests {
             .await
             .unwrap();
         // Close the inbound channel so recv returns None → session tears down.
-        inbound_tx.send(None).await.unwrap();
+        // Dropping the sender models transport EOF; an in-band `None` can race
+        // with the session's transition from the hello gate to its split reader.
+        drop(inbound_tx);
 
         // The session should have sent a Hello back (the hub's add_client sends it).
         let mut got_hello = false;
@@ -570,6 +572,9 @@ mod tests {
             got_hello,
             "session must send a Hello back on successful auth"
         );
+        // Release the receiver before awaiting teardown. Any queued follow-up
+        // message then makes the pump's send fail instead of keeping it alive.
+        drop(outbound_rx);
 
         // Session exits cleanly.
         tokio::time::timeout(Duration::from_secs(2), handle)
