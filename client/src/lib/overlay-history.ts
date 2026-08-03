@@ -72,7 +72,6 @@ export function createOverlayHistory(env: OverlayHistoryEnv) {
             stack.push(entry);
             env.pushState({ pantokenOverlay: entry.id });
           }
-          deferredStack = [];
         }
         return;
       }
