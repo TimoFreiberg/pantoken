@@ -95,33 +95,9 @@ Begin your report with:
 <findings, or "none" if all criteria satisfied>
 ```
 
-## Step 4: Surface all reports
+## Step 4: Address the findings
 
-Print the global review reports (from Step 1) verbatim, then the quality
-review report verbatim, under its own header:
-
-    ## Reviewer: C+S
-
-    <global C+S report>
-
-    ## Reviewer: D+T
-
-    <global D+T report>
-
-    ## Reviewer: Quality
-
-    <quality reviewer report>
-
-Do not add commentary or merge findings across the three reports. The
-consumer decides what to act on.
-
-## Looping
-
-When used as an adversarial gate during implementation, loop:
-implement → commit → review → fix → repeat. Commit between rounds so each
-reviewer sees the cumulative diff at a definite state. Keep going until both
-the global review and the quality pass are clean. If you keep looping on the
-same issue without converging, stop and escalate to the operator with the
-outstanding findings.
-When the implementation passes review, squash the fix commits into the main
-implementation review.
+Fix or rebut all review findings.
+Squash your fixes into the implementation commit.
+If any findings were at medium or above, repeat this skill until the
+implementation passes review.
