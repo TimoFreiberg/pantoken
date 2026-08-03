@@ -59,6 +59,7 @@ pub struct SupervisionCore {
     healthy: bool,
     failures: u32,
     rapid_restarts: u32,
+    boot_timeout_restarts: u32,
     max_failures: u32,
     max_rapid_restarts: u32,
     stopping: bool,
@@ -72,6 +73,7 @@ impl Default for SupervisionCore {
             healthy: false,
             failures: 0,
             rapid_restarts: 0,
+            boot_timeout_restarts: 0,
             max_failures: LIVENESS_STRIKES,
             max_rapid_restarts: MAX_RAPID_RESTARTS,
             stopping: false,
@@ -103,6 +105,7 @@ impl SupervisionCore {
                 let first_time = !self.started;
                 self.started = true;
                 self.healthy = true;
+                self.boot_timeout_restarts = 0;
                 return SupervisorDecision::Healthy { first_time };
             }
             return SupervisorDecision::Wait;
@@ -111,6 +114,11 @@ impl SupervisionCore {
             if !self.started {
                 self.terminal = Some(RecoveryReason::BootTimeout);
                 return SupervisorDecision::Unrecoverable(RecoveryReason::BootTimeout);
+            }
+            self.boot_timeout_restarts = self.boot_timeout_restarts.saturating_add(1);
+            if self.boot_timeout_restarts > self.max_rapid_restarts {
+                self.terminal = Some(RecoveryReason::CrashLoop);
+                return SupervisorDecision::Unrecoverable(RecoveryReason::CrashLoop);
             }
             self.failures = 0;
             return SupervisorDecision::Restart(RecoveryReason::BootTimeout);
@@ -643,11 +651,48 @@ mod tests {
     }
 
     #[test]
-    fn slow_restarted_child_gets_a_bounded_boot_retry() {
+    fn repeated_slow_restarted_children_eventually_stop() {
         let mut core = SupervisionCore::with_limits(1, 2);
         assert_eq!(
             core.observe_probe(ProbeOutcome::Healthy, false),
             SupervisorDecision::Healthy { first_time: true }
+        );
+        assert_eq!(
+            core.observe_exit(false),
+            SupervisorDecision::Restart(RecoveryReason::Crash)
+        );
+        assert_eq!(
+            core.observe_probe(ProbeOutcome::Unreachable, true),
+            SupervisorDecision::Restart(RecoveryReason::BootTimeout)
+        );
+        assert_eq!(
+            core.observe_probe(ProbeOutcome::Unreachable, true),
+            SupervisorDecision::Restart(RecoveryReason::BootTimeout)
+        );
+        assert_eq!(
+            core.observe_probe(ProbeOutcome::Unreachable, true),
+            SupervisorDecision::Unrecoverable(RecoveryReason::CrashLoop)
+        );
+    }
+
+    #[test]
+    fn healthy_recovery_resets_boot_timeout_budget() {
+        let mut core = SupervisionCore::with_limits(1, 1);
+        assert_eq!(
+            core.observe_probe(ProbeOutcome::Healthy, false),
+            SupervisorDecision::Healthy { first_time: true }
+        );
+        assert_eq!(
+            core.observe_exit(false),
+            SupervisorDecision::Restart(RecoveryReason::Crash)
+        );
+        assert_eq!(
+            core.observe_probe(ProbeOutcome::Unreachable, true),
+            SupervisorDecision::Restart(RecoveryReason::BootTimeout)
+        );
+        assert_eq!(
+            core.observe_probe(ProbeOutcome::Healthy, false),
+            SupervisorDecision::Healthy { first_time: false }
         );
         assert_eq!(
             core.observe_exit(false),
