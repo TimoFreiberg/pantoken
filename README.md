@@ -23,7 +23,9 @@ The release matrix is two targets:
 - `x86_64-unknown-linux-gnu` — Linux x86_64 (remote provisioning / Docker)
 
 See [`docs/DESIGN.md`](docs/DESIGN.md) for the full architecture and
-[`docs/DECISIONS.md`](docs/DECISIONS.md) for settled design decisions.
+[`docs/DECISIONS.md`](docs/DECISIONS.md) for settled design decisions. The opt-in Mac Mini
+private PWA path is documented in [`docs/mac-mini-remote-access.md`](docs/mac-mini-remote-access.md);
+it is distinct from the desktop-initiated SSH remote-target mode.
 
 ## Status
 

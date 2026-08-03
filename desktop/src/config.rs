@@ -165,28 +165,44 @@ impl PantokenConfig {
     /// historical random-port behavior; enabled remote mode is deterministic and
     /// fails closed if its persisted configuration or Keychain item is invalid.
     pub fn resolve_launch(resource_dir: &Path) -> Result<Self, String> {
-        let resolution = resolve_hub_mode(resource_dir)?;
-        let local_port =
-            || free_port().map_err(|e| format!("couldn't acquire local loopback port: {e}"));
         let data_dir = std::env::var("PANTOKEN_APP_DATA_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| home_dir().join("Library/Application Support/Pantoken"));
-        let remote = Self::load_remote(&data_dir.join("remote-access.json"))?;
-        if !remote.enabled {
-            return Ok(Self::build(local_port()?, resolution));
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = remote;
-            let _ = resolution;
-            return Err("remote mode requires the macOS Keychain adapter".into());
-        }
+        let resolution = resolve_hub_mode(resource_dir)?;
         #[cfg(target_os = "macos")]
         {
             let store = default_token_store();
-            let token = Self::ensure_token(store.as_ref())?;
-            Self::remote(remote.hub_port, resolution, token)
+            return Self::resolve_launch_with_token_store(resource_dir, &data_dir, store.as_ref());
         }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let remote = Self::load_remote(&data_dir.join("remote-access.json"))?;
+            if remote.enabled {
+                return Err("remote mode requires the macOS Keychain adapter".into());
+            }
+            Ok(Self::build(
+                free_port().map_err(|e| format!("couldn't acquire local loopback port: {e}"))?,
+                resolution,
+            ))
+        }
+    }
+
+    #[cfg(any(test, target_os = "macos"))]
+    pub fn resolve_launch_with_token_store(
+        resource_dir: &Path,
+        data_dir: &Path,
+        token_store: &dyn TokenStore,
+    ) -> Result<Self, String> {
+        let resolution = resolve_hub_mode(resource_dir)?;
+        let remote = Self::load_remote(&data_dir.join("remote-access.json"))?;
+        if !remote.enabled {
+            return Ok(Self::build(
+                free_port().map_err(|e| format!("couldn't acquire local loopback port: {e}"))?,
+                resolution,
+            ));
+        }
+        let token = Self::ensure_token(token_store)?;
+        Self::remote(remote.hub_port, resolution, token)
     }
 
     /// Config for the fatal-error path when resolve() failed: dummy paths that

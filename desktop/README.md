@@ -26,6 +26,8 @@ dialog, never a silent fallback. What's new over Swift:
 
 ## Mac Mini lifecycle
 
+For the supported private iPhone PWA topology, see [`../docs/mac-mini-remote-access.md`](../docs/mac-mini-remote-access.md) and its [`validation record`](../docs/mac-mini-remote-access-validation.md). Tailscale Serve is manual and opt-in; the bundled server remains authenticated and loopback-only. A signed app update is separate from a PWA service-worker refresh.
+
 Launch-at-login is **opt-in** and is controlled by macOS `SMAppService.mainApp`; Pantoken never
 creates a helper, launch agent, or silent fallback. Settings reads the actual Service Management
 status and reports disabled, registered, approval-required, failure, and unavailable states.

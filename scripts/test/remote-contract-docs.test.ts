@@ -11,6 +11,17 @@ const adr = read(adrPath);
 const design = read("docs/DESIGN.md");
 const decisions = read("docs/DECISIONS.md");
 const validation = read("docs/issues/mobile-access/06-validation-and-docs.md");
+const architectureDocs = [
+  "README.md",
+  "desktop/README.md",
+  "docs/ADR-mac-mini-remote-access.md",
+  "docs/mac-mini-remote-access.md",
+  "docs/mac-mini-remote-access-validation.md",
+  "docs/DESIGN.md",
+  "docs/DECISIONS.md",
+  "docs/PLAN-mobile.md",
+  ...["01-remote-contract.md", "02-authenticated-sidecar.md", "03-phone-bootstrap.md", "04-remote-app-updates.md", "05-mini-lifecycle.md", "06-validation-and-docs.md"].map((name) => `docs/issues/mobile-access/${name}`),
+];
 
 function requireTerms(document: string, terms: readonly string[], label: string) {
   for (const term of terms) {
@@ -29,6 +40,11 @@ function requireResolvedMarkdownLinks(document: string, documentPath: string) {
 }
 
 describe("remote access contract documentation (AC.1–AC.4)", () => {
+  test("remote_access_architecture_docs", () => {
+    for (const path of architectureDocs) expect(existsSync(join(repoRoot, path)), `${path} exists`).toBe(true);
+    const current = architectureDocs.map(read).join("\n");
+    requireTerms(current, ["private HTTPS Tailscale Serve", "127.0.0.1:<stable-port>", "loopback-only", "no Funnel", "second backend", "signed `.app` update", "PWA service-worker"], "architecture docs");
+  });
   test("authoritative ADR exists and architecture links resolve (AC.1)", () => {
     expect(existsSync(join(repoRoot, adrPath))).toBe(true);
     requireTerms(adr, [

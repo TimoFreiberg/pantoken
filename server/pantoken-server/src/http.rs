@@ -153,6 +153,7 @@ async fn health(headers: HeaderMap, State(state): State<AppState>) -> Response {
     let hub = state.hub.lock();
     let activity = hub.activity();
     Json(json!({
+        "service": "pantoken-server",
         "ok": true,
         "clients": hub.client_count(),
         "running": activity["running"],

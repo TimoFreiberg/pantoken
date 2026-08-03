@@ -80,7 +80,7 @@ Rust with the desktop shell, so there's no synergy argument. Until then: PWA.
 | Notification deep-links | `public/sw.js` `notificationclick` → `url` from `PushNotification.url` | plumbing exists |
 | SW update flow | `lib/sw.ts` + `public/sw.js` | working |
 | PWA manifest + icons (incl. maskable) | `client/public/manifest.webmanifest` | good; description is "Remote control for your coding agent" |
-| Tailscale + token + TLS + blue-green deploy | `deploy/` | working |
+| Private Tailscale Serve + bearer token + TLS | [`mac-mini-remote-access.md`](mac-mini-remote-access.md) | opt-in/manual; no direct exposure, Funnel, port forwarding, or second backend |
 | e2e mobile project (Pixel 7, Chromium) | `playwright.config.ts` | working; extend with new specs |
 
 The mobile app is therefore **not a new app**: it's a form-factor redesign of
