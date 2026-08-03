@@ -3663,14 +3663,20 @@ impl PantokenDriver for PolytokenDriver {
 /// `$HOME`; a bare relative path resolves against `$HOME`; `.`/`..` collapse
 /// lexically (no disk access, so it works for not-yet-existing paths too).
 fn resolve_picker_path(path: Option<&str>) -> String {
-    use std::path::{Component, Path, PathBuf};
     let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+    resolve_picker_path_with_home(path, &home)
+}
+
+fn resolve_picker_path_with_home(path: Option<&str>, home: &str) -> String {
+    use std::path::{Component, Path, PathBuf};
     let raw = path.map(str::trim).filter(|s| !s.is_empty());
-    let Some(raw) = raw else { return home };
+    let Some(raw) = raw else {
+        return home.to_string();
+    };
 
     // Expand a leading `~` (`~` or `~/...`) to $HOME; anything else keeps its text.
     let expanded: PathBuf = if raw == "~" {
-        return home;
+        return home.to_string();
     } else if let Some(rest) = raw.strip_prefix("~/") {
         Path::new(&home).join(rest)
     } else if Path::new(raw).is_absolute() {
@@ -3744,22 +3750,39 @@ mod tests {
 
     #[test]
     fn resolve_picker_path_expands_tilde_and_normalizes() {
-        // SAFETY: single-threaded test; set a deterministic HOME.
-        unsafe { std::env::set_var("HOME", "/home/tester") };
-        assert_eq!(resolve_picker_path(None), "/home/tester");
-        assert_eq!(resolve_picker_path(Some("")), "/home/tester");
-        assert_eq!(resolve_picker_path(Some("  ")), "/home/tester");
-        assert_eq!(resolve_picker_path(Some("~")), "/home/tester");
-        assert_eq!(resolve_picker_path(Some("~/src")), "/home/tester/src");
+        let home = "/home/tester";
+        assert_eq!(resolve_picker_path_with_home(None, home), "/home/tester");
         assert_eq!(
-            resolve_picker_path(Some("~/src/../lib")),
+            resolve_picker_path_with_home(Some(""), home),
+            "/home/tester"
+        );
+        assert_eq!(
+            resolve_picker_path_with_home(Some("  "), home),
+            "/home/tester"
+        );
+        assert_eq!(
+            resolve_picker_path_with_home(Some("~"), home),
+            "/home/tester"
+        );
+        assert_eq!(
+            resolve_picker_path_with_home(Some("~/src"), home),
+            "/home/tester/src"
+        );
+        assert_eq!(
+            resolve_picker_path_with_home(Some("~/src/../lib"), home),
             "/home/tester/lib"
         );
         // Absolute paths are normalized but not home-rooted.
-        assert_eq!(resolve_picker_path(Some("/etc/../usr/bin")), "/usr/bin");
-        assert_eq!(resolve_picker_path(Some("/")), "/");
+        assert_eq!(
+            resolve_picker_path_with_home(Some("/etc/../usr/bin"), home),
+            "/usr/bin"
+        );
+        assert_eq!(resolve_picker_path_with_home(Some("/"), home), "/");
         // A bare relative path resolves against HOME (the picker's root).
-        assert_eq!(resolve_picker_path(Some("src")), "/home/tester/src");
+        assert_eq!(
+            resolve_picker_path_with_home(Some("src"), home),
+            "/home/tester/src"
+        );
     }
 
     /// A minimal `PolytokenInner` for recency/focus tests — only the `order` +
