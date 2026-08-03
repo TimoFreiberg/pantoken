@@ -1144,9 +1144,12 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        std::env::set_var("PANTOKEN_APP_DATA_DIR", &dir);
 
-        let config = PantokenConfig::fallback(0);
+        let config = PantokenConfig::fallback_with_app_data_dir(0, Some(&dir));
+        assert_eq!(
+            config.remote_profiles_path(),
+            dir.join("remote-profiles.json")
+        );
         let state = AppState::new(config);
 
         // Save two profiles.

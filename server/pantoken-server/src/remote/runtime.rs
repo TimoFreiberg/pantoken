@@ -171,20 +171,28 @@ pub async fn run_stdio_proxy(root: &Path) -> std::io::Result<()> {
 /// Buck2 supplies `PANTOKEN_SERVER_BIN` as a resource-relative path and
 /// `RUNFILES_DIR` identifies the runfiles root. Cargo callers omit the
 /// override and use the conventional `target/debug/pantoken-server` path.
-pub fn resolve_server_binary() -> std::io::Result<PathBuf> {
-    if let Some(value) = std::env::var_os("PANTOKEN_SERVER_BIN") {
-        let value = value.to_string_lossy();
-        if value.trim().is_empty() {
+/// Resolve a server binary from explicit environment values and a Cargo fallback.
+///
+/// `OsStr` inputs deliberately preserve non-UTF-8 paths. The production wrapper
+/// below supplies values from the process environment; tests can provide an
+/// isolated set of values without mutating that environment.
+pub fn resolve_server_binary_with_paths(
+    server_bin: Option<&std::ffi::OsStr>,
+    runfiles_dir: Option<&std::ffi::OsStr>,
+    cargo_fallback: &Path,
+) -> std::io::Result<PathBuf> {
+    if let Some(value) = server_bin {
+        if value.to_string_lossy().trim().is_empty() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "PANTOKEN_SERVER_BIN must not be empty",
             ));
         }
-        let path = PathBuf::from(value.as_ref());
+        let path = PathBuf::from(value);
         if path.is_file() {
             return Ok(path);
         }
-        if let Some(runfiles) = std::env::var_os("RUNFILES_DIR") {
+        if let Some(runfiles) = runfiles_dir {
             let resolved = PathBuf::from(runfiles).join(&path);
             if resolved.is_file() {
                 return Ok(resolved);
@@ -206,6 +214,20 @@ pub fn resolve_server_binary() -> std::io::Result<PathBuf> {
         ));
     }
 
+    if cargo_fallback.is_file() {
+        Ok(cargo_fallback.to_path_buf())
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!(
+                "pantoken-server binary not found at {}",
+                cargo_fallback.display()
+            ),
+        ))
+    }
+}
+
+pub fn resolve_server_binary() -> std::io::Result<PathBuf> {
     let exe =
         std::env::current_exe().map_err(|e| std::io::Error::other(format!("current_exe: {e}")))?;
     let fallback = exe
@@ -213,14 +235,11 @@ pub fn resolve_server_binary() -> std::io::Result<PathBuf> {
         .and_then(Path::parent)
         .map(|p| p.join("pantoken-server"))
         .ok_or_else(|| std::io::Error::other("current_exe has no Cargo target directory"))?;
-    if fallback.is_file() {
-        Ok(fallback)
-    } else {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("pantoken-server binary not found at {}", fallback.display()),
-        ))
-    }
+    resolve_server_binary_with_paths(
+        std::env::var_os("PANTOKEN_SERVER_BIN").as_deref(),
+        std::env::var_os("RUNFILES_DIR").as_deref(),
+        &fallback,
+    )
 }
 
 /// Connect to the runtime socket, bootstrapping the runtime if absent.
@@ -550,94 +569,78 @@ pub fn assert_no_public_tcp_listener() {
 
 #[cfg(test)]
 mod resolver_tests {
-    use super::resolve_server_binary;
+    use super::resolve_server_binary_with_paths;
+    use std::ffi::OsString;
     use std::path::PathBuf;
-    use std::sync::{Mutex, OnceLock};
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
-
-    struct EnvGuard {
-        server_bin: Option<std::ffi::OsString>,
-        runfiles: Option<std::ffi::OsString>,
-    }
-
-    impl EnvGuard {
-        fn new() -> Self {
-            Self {
-                server_bin: std::env::var_os("PANTOKEN_SERVER_BIN"),
-                runfiles: std::env::var_os("RUNFILES_DIR"),
-            }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            unsafe {
-                match &self.server_bin {
-                    Some(value) => std::env::set_var("PANTOKEN_SERVER_BIN", value),
-                    None => std::env::remove_var("PANTOKEN_SERVER_BIN"),
-                }
-                match &self.runfiles {
-                    Some(value) => std::env::set_var("RUNFILES_DIR", value),
-                    None => std::env::remove_var("RUNFILES_DIR"),
-                }
-            }
-        }
-    }
 
     #[test]
-    fn resolves_override_and_runfiles_and_rejects_invalid_values() {
-        let _lock = env_lock().lock().unwrap();
-        let _guard = EnvGuard::new();
+    fn resolves_direct_runfiles_empty_and_invalid_values() {
         let root = tempfile::tempdir().unwrap();
         let direct = root.path().join("direct-server");
         std::fs::write(&direct, b"binary").unwrap();
-        unsafe {
-            std::env::set_var("PANTOKEN_SERVER_BIN", &direct);
-            std::env::remove_var("RUNFILES_DIR");
-        }
-        assert_eq!(resolve_server_binary().unwrap(), direct);
+        let fallback = root.path().join("fallback");
+        assert_eq!(
+            resolve_server_binary_with_paths(Some(direct.as_os_str()), None, &fallback).unwrap(),
+            direct
+        );
 
         let runfiles = root.path().join("runfiles");
         let relative = PathBuf::from("bin/pantoken-server");
         let runfile = runfiles.join(&relative);
         std::fs::create_dir_all(runfile.parent().unwrap()).unwrap();
         std::fs::write(&runfile, b"binary").unwrap();
-        unsafe {
-            std::env::set_var("PANTOKEN_SERVER_BIN", &relative);
-            std::env::set_var("RUNFILES_DIR", &runfiles);
-        }
-        assert_eq!(resolve_server_binary().unwrap(), runfile);
+        assert_eq!(
+            resolve_server_binary_with_paths(
+                Some(relative.as_os_str()),
+                Some(runfiles.as_os_str()),
+                &fallback
+            )
+            .unwrap(),
+            runfile
+        );
 
-        unsafe { std::env::set_var("PANTOKEN_SERVER_BIN", "missing-server") };
-        let error = resolve_server_binary().unwrap_err();
+        let empty = OsString::new();
+        assert_eq!(
+            resolve_server_binary_with_paths(Some(&empty), None, &fallback)
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+        let error = resolve_server_binary_with_paths(
+            Some(OsString::from("missing-server").as_os_str()),
+            None,
+            &fallback,
+        )
+        .unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
         assert!(error.to_string().contains("PANTOKEN_SERVER_BIN"));
     }
 
     #[test]
-    fn uses_cargo_fallback_only_without_override() {
-        let _lock = env_lock().lock().unwrap();
-        let _guard = EnvGuard::new();
-        unsafe {
-            std::env::remove_var("PANTOKEN_SERVER_BIN");
-            std::env::remove_var("RUNFILES_DIR");
-        }
-        let expected = std::env::current_exe()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("pantoken-server");
-        let resolved = resolve_server_binary();
-        if expected.is_file() {
-            assert_eq!(resolved.unwrap(), expected);
-        } else {
-            assert_eq!(resolved.unwrap_err().kind(), std::io::ErrorKind::NotFound);
-        }
+    fn uses_explicit_cargo_fallback_when_override_absent() {
+        let root = tempfile::tempdir().unwrap();
+        let fallback = root.path().join("pantoken-server");
+        std::fs::write(&fallback, b"binary").unwrap();
+        assert_eq!(
+            resolve_server_binary_with_paths(None, None, &fallback).unwrap(),
+            fallback
+        );
+        let missing = root.path().join("missing");
+        assert_eq!(
+            resolve_server_binary_with_paths(None, None, &missing)
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::NotFound
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preserves_non_utf8_override_values() {
+        use std::os::unix::ffi::OsStringExt;
+        let value = OsString::from_vec(vec![b'b', b'a', 0xff]);
+        let fallback = PathBuf::from("fallback");
+        let error = resolve_server_binary_with_paths(Some(&value), None, &fallback).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
     }
 }

@@ -39,17 +39,23 @@ pub fn legacy_data_dir() -> PathBuf {
 /// create a fresh data dir in the default location).
 pub fn migrate_legacy_data_dir(cfg: &Config) {
     // Only migrate when using the default data dir (no explicit PANTOKEN_DATA_DIR).
-    if std::env::var("PANTOKEN_DATA_DIR").is_ok() {
-        return;
-    }
+    let data_dir_configured = std::env::var_os("PANTOKEN_DATA_DIR").is_some();
     let legacy = legacy_data_dir();
-    migrate_legacy_dir(cfg, &legacy);
+    migrate_legacy_dir_with_config(cfg, &legacy, data_dir_configured);
 }
 
-/// Core migration logic with an explicit legacy dir. Separated from
-/// [`migrate_legacy_data_dir`] so tests can pass a concrete path without
-/// mutating process-global env vars (`XDG_STATE_HOME`), which races under
-/// parallel test execution.
+/// Core migration decision with explicit inputs. `data_dir_configured` is a
+/// presence flag rather than a path so a present-but-empty `PANTOKEN_DATA_DIR`
+/// retains its historical no-op behavior. Tests can pass isolated paths and
+/// configuration state without mutating process-global environment.
+fn migrate_legacy_dir_with_config(cfg: &Config, legacy: &Path, data_dir_configured: bool) {
+    if data_dir_configured {
+        return;
+    }
+    migrate_legacy_dir(cfg, legacy);
+}
+
+/// Core migration logic with an explicit legacy dir.
 fn migrate_legacy_dir(cfg: &Config, legacy: &Path) {
     if !legacy.exists() {
         return;
@@ -349,7 +355,7 @@ mod tests {
             data_dir: new_dir.clone(),
             ..test_config()
         };
-        migrate_legacy_dir(&cfg, &legacy);
+        migrate_legacy_dir_with_config(&cfg, &legacy, false);
 
         assert!(new_dir.exists(), "new dir should exist after migration");
         assert!(
@@ -377,7 +383,7 @@ mod tests {
             data_dir: new_dir.clone(),
             ..test_config()
         };
-        migrate_legacy_dir(&cfg, &legacy);
+        migrate_legacy_dir_with_config(&cfg, &legacy, false);
 
         // New dir wins — its file is intact, legacy untouched (left for manual cleanup).
         assert!(new_dir.join("new.txt").exists());
@@ -386,32 +392,35 @@ mod tests {
     }
 
     #[test]
-    fn migrate_is_noop_when_pantoken_data_dir_set() {
+    fn migrate_is_noop_when_pantoken_data_dir_is_present_and_nonempty() {
         let temp = tempfile::tempdir().unwrap();
-        let legacy = temp.path().join(".local").join("state").join("pantoken");
+        let legacy = temp.path().join("legacy");
         std::fs::create_dir_all(&legacy).unwrap();
         std::fs::write(legacy.join("data.txt"), "data").unwrap();
-
-        // Setting PANTOKEN_DATA_DIR makes migrate_legacy_data_dir skip migration
-        // entirely (early return before touching legacy_data_dir). This is the
-        // only test that still mutates an env var — it's safe because no other
-        // test in this module reads PANTOKEN_DATA_DIR.
-        unsafe {
-            std::env::set_var("PANTOKEN_DATA_DIR", "/custom/explicit");
-        }
-
         let cfg = Config {
             data_dir: PathBuf::from("/custom/explicit"),
             ..test_config()
         };
-        migrate_legacy_data_dir(&cfg);
-
-        // Legacy untouched because PANTOKEN_DATA_DIR was set.
+        migrate_legacy_dir_with_config(&cfg, &legacy, true);
         assert!(legacy.exists());
         assert!(legacy.join("data.txt").exists());
+    }
 
-        unsafe {
-            std::env::remove_var("PANTOKEN_DATA_DIR");
-        }
+    #[test]
+    fn migrate_is_noop_when_pantoken_data_dir_is_present_but_empty() {
+        let temp = tempfile::tempdir().unwrap();
+        let legacy = temp.path().join("legacy");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("data.txt"), "data").unwrap();
+        let cfg = Config {
+            data_dir: PathBuf::from("/unused/empty-config"),
+            ..test_config()
+        };
+
+        // The explicit presence bit preserves `PANTOKEN_DATA_DIR=""` semantics.
+        migrate_legacy_dir_with_config(&cfg, &legacy, true);
+
+        assert!(legacy.exists());
+        assert!(legacy.join("data.txt").exists());
     }
 }

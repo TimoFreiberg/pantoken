@@ -210,20 +210,43 @@ impl PantokenConfig {
     /// nothing will ever spawn from — it exists so the window/tray (which read config
     /// for display) can come up under the fatal dialog.
     pub fn fallback(server_port: u16) -> Self {
-        Self::build(
+        Self::fallback_with_app_data_dir(server_port, None)
+    }
+
+    /// Build a fallback config with an isolated data directory.
+    ///
+    /// Production callers use [`Self::fallback`], whose data directory follows the
+    /// process configuration. Tests can provide the directory explicitly instead
+    /// of mutating the process environment.
+    pub fn fallback_with_app_data_dir(server_port: u16, data_dir: Option<&Path>) -> Self {
+        Self::build_with_data_dir(
             server_port,
             HubResolution {
                 hub_bin: PathBuf::new(),
                 client_dist: PathBuf::new(),
             },
+            data_dir,
         )
     }
 
     fn build(server_port: u16, resolution: HubResolution) -> Self {
+        Self::build_with_data_dir(server_port, resolution, None)
+    }
+
+    fn build_with_data_dir(
+        server_port: u16,
+        resolution: HubResolution,
+        explicit_data_dir: Option<&Path>,
+    ) -> Self {
         let home = home_dir();
-        let data_dir = std::env::var("PANTOKEN_APP_DATA_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| home.join("Library/Application Support/Pantoken"));
+        let data_dir = explicit_data_dir
+            .map(Path::to_path_buf)
+            .or_else(|| {
+                std::env::var("PANTOKEN_APP_DATA_DIR")
+                    .ok()
+                    .map(PathBuf::from)
+            })
+            .unwrap_or_else(|| home.join("Library/Application Support/Pantoken"));
 
         let path_dirs = [
             home.join(".bun/bin"),

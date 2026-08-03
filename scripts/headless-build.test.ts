@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   existsSync,
   mkdtempSync,
@@ -16,14 +16,6 @@ import {
   buildViaBuck2,
 } from "./lib/headless-build.js";
 import { headlessTargetForTriple } from "./desktop/release-constants.js";
-
-const ORIGINAL_PATH = process.env.PATH;
-
-afterEach(() => {
-  process.env.PATH = ORIGINAL_PATH;
-  delete process.env.BUCK2_FAKE_ARGS_LOG;
-  delete process.env.BUCK2_FAKE_OUT;
-});
 
 describe("buckConfigCiContents", () => {
   it("serializes the [pantoken] block with release_build=1", () => {
@@ -82,7 +74,7 @@ describe("buildViaBuck2", () => {
         script,
         `#!/usr/bin/env bash
 set -euo pipefail
-echo "$@" > "$BUCK2_FAKE_ARGS_LOG"
+printf '%s|PATH=%s|OUT=%s\n' "$*" "$PATH" "$BUCK2_FAKE_OUT" >> "$BUCK2_FAKE_ARGS_LOG"
 TARGET="\${!#}"
 case "$TARGET" in
   "//:pantoken_headless_unsigned")
@@ -101,9 +93,13 @@ esac
 `,
         { mode: 0o755 },
       );
-      process.env.PATH = `${fakeBin}:${ORIGINAL_PATH}`;
-      process.env.BUCK2_FAKE_ARGS_LOG = argsLog;
-      process.env.BUCK2_FAKE_OUT = fakeOut;
+      const parentPath = process.env.PATH;
+      const env = {
+        ...process.env,
+        PATH: `${fakeBin}:${parentPath ?? ""}`,
+        BUCK2_FAKE_ARGS_LOG: argsLog,
+        BUCK2_FAKE_OUT: fakeOut,
+      };
 
       const outputDir = join(root, "target", "release", "headless");
       mkdirSync(outputDir, { recursive: true });
@@ -113,6 +109,7 @@ esac
         buildSha: "0123456789abcdef0123456789abcdef01234567",
         outputDir,
         asset: "pantoken-headless-macos-aarch64.tar.gz",
+        env,
       });
 
       // .buckconfig.ci written with the release config
@@ -122,10 +119,23 @@ esac
           "build_sha = 0123456789abcdef0123456789abcdef01234567\n" +
           "release_build = 1\n",
       );
-      // Both buck2 invocations pass the config file
-      const args = readFileSync(argsLog, "utf8").trim();
-      expect(args).toContain("--config-file");
-      expect(args).toContain(".buckconfig.ci");
+      // Both buck2 invocations receive the same scoped environment and config.
+      const invocations = readFileSync(argsLog, "utf8").trim().split("\n");
+      expect(invocations).toHaveLength(2);
+      expect(invocations[0]).toContain("//:pantoken_headless_unsigned");
+      expect(invocations[1]).toContain(
+        "//server/pantoken-tar-validate:pantoken_tar_validate",
+      );
+      for (const invocation of invocations) {
+        expect(invocation).toContain("--config-file");
+        expect(invocation).toContain(".buckconfig.ci");
+        expect(invocation).toContain(`PATH=${fakeBin}:${parentPath ?? ""}`);
+        expect(invocation).toContain(`OUT=${fakeOut}`);
+      }
+      // The parent test environment was never modified.
+      expect(process.env.PATH).toBe(parentPath);
+      expect(process.env.BUCK2_FAKE_ARGS_LOG).toBeUndefined();
+      expect(process.env.BUCK2_FAKE_OUT).toBeUndefined();
       // Archive copied to the release asset path
       expect(archivePath.archivePath).toBe(
         join(outputDir, "pantoken-headless-macos-aarch64.tar.gz"),

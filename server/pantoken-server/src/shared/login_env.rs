@@ -12,19 +12,39 @@ use pantoken_protocol::wire::LoginEnvStatus;
 /// Resolve which shell to run: the configured override wins, then `$SHELL`, then
 /// the OS passwd login shell, then sane fallbacks. Returns `None` if none exists
 /// on disk.
-pub fn resolve_login_shell(configured: Option<&str>) -> Option<String> {
-    let candidates = [
-        configured.map(str::to_string),
-        std::env::var("SHELL").ok(),
-        user_login_shell(),
-        Some("/bin/zsh".to_string()),
-        Some("/bin/bash".to_string()),
-    ];
-
-    candidates
+/// Select the first existing shell from explicit candidate values.
+///
+/// The production wrapper reads `SHELL` and passwd data, while callers and tests
+/// can provide isolated values and an existence predicate.
+pub fn resolve_login_shell_with_candidates<F>(
+    configured: Option<&str>,
+    shell_env: Option<&str>,
+    passwd_shell: Option<&str>,
+    fallback_shells: &[&str],
+    exists: F,
+) -> Option<String>
+where
+    F: Fn(&str) -> bool,
+{
+    configured
         .into_iter()
-        .flatten()
-        .find(|candidate| !candidate.is_empty() && Path::new(candidate).exists())
+        .chain(shell_env)
+        .chain(passwd_shell)
+        .chain(fallback_shells.iter().copied())
+        .find(|candidate| !candidate.is_empty() && exists(candidate))
+        .map(str::to_string)
+}
+
+pub fn resolve_login_shell(configured: Option<&str>) -> Option<String> {
+    let shell_env = std::env::var("SHELL").ok();
+    let passwd_shell = user_login_shell();
+    resolve_login_shell_with_candidates(
+        configured,
+        shell_env.as_deref(),
+        passwd_shell.as_deref(),
+        &["/bin/zsh", "/bin/bash"],
+        |candidate| Path::new(candidate).exists(),
+    )
 }
 
 fn user_login_shell() -> Option<String> {
@@ -236,71 +256,73 @@ mod tests {
     }
 
     mod resolve_login_shell {
-        use std::sync::Mutex;
-
         use super::*;
 
-        static SHELL_ENV_MUTEX: Mutex<()> = Mutex::new(());
-
-        struct EnvGuard {
-            prev: Option<String>,
-        }
-
-        impl EnvGuard {
-            fn set_shell(value: &str) -> Self {
-                let prev = std::env::var("SHELL").ok();
-                unsafe {
-                    std::env::set_var("SHELL", value);
-                }
-                Self { prev }
-            }
-
-            fn unset_shell() -> Self {
-                let prev = std::env::var("SHELL").ok();
-                unsafe {
-                    std::env::remove_var("SHELL");
-                }
-                Self { prev }
-            }
-        }
-
-        impl Drop for EnvGuard {
-            fn drop(&mut self) {
-                unsafe {
-                    match &self.prev {
-                        Some(value) => std::env::set_var("SHELL", value),
-                        None => std::env::remove_var("SHELL"),
-                    }
-                }
-            }
+        fn select(
+            configured: Option<&str>,
+            env: Option<&str>,
+            passwd: Option<&str>,
+            existing: &[&str],
+        ) -> Option<String> {
+            resolve_login_shell_with_candidates(
+                configured,
+                env,
+                passwd,
+                &["/bin/zsh", "/bin/bash"],
+                |candidate| existing.contains(&candidate),
+            )
         }
 
         #[test]
-        fn a_configured_shell_that_exists_wins() {
-            let _lock = SHELL_ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        fn configured_shell_has_highest_precedence() {
             assert_eq!(
-                resolve_login_shell(Some("/bin/bash")).as_deref(),
-                Some("/bin/bash")
+                select(
+                    Some("configured"),
+                    Some("env"),
+                    Some("passwd"),
+                    &["configured", "env", "passwd"]
+                ),
+                Some("configured".into())
             );
         }
 
         #[test]
-        fn a_non_existent_configured_path_is_skipped_for_shell() {
-            let _lock = SHELL_ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
-            let _guard = EnvGuard::set_shell("/bin/bash");
+        fn shell_env_wins_over_passwd_and_defaults() {
             assert_eq!(
-                resolve_login_shell(Some("/no/such/shell")).as_deref(),
-                Some("/bin/bash")
+                select(
+                    None,
+                    Some("env"),
+                    Some("passwd"),
+                    &["env", "passwd", "/bin/bash"]
+                ),
+                Some("env".into())
             );
         }
 
         #[test]
-        fn null_configured_and_no_shell_falls_back_to_an_existing_default_shell() {
-            let _lock = SHELL_ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
-            let _guard = EnvGuard::unset_shell();
-            let shell = resolve_login_shell(None);
-            assert!(shell.is_some());
-            assert!(Path::new(shell.as_deref().unwrap()).exists());
+        fn nonexistent_earlier_candidates_are_skipped() {
+            assert_eq!(
+                select(
+                    Some("missing"),
+                    Some("also-missing"),
+                    Some("passwd"),
+                    &["passwd", "/bin/zsh"]
+                ),
+                Some("passwd".into())
+            );
+        }
+
+        #[test]
+        fn fallback_order_is_zsh_then_bash() {
+            assert_eq!(
+                select(None, None, None, &["/bin/bash"]),
+                Some("/bin/bash".into())
+            );
+            assert_eq!(
+                select(None, None, None, &["/bin/zsh"]),
+                Some("/bin/zsh".into())
+            );
+            assert_eq!(select(None, None, None, &[]), None);
         }
     }
 

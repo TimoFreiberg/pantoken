@@ -20,6 +20,7 @@
 //! polytoken can be isolated under `~/.local/share/pantoken/tools/...` with
 //! XDG roots derived from the same base.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 /// Validation error for the remote layout.
@@ -52,42 +53,68 @@ impl std::fmt::Display for LayoutError {
 
 impl std::error::Error for LayoutError {}
 
-/// Resolve the default remote root: `~/.local/share/pantoken`.
+/// Resolve the default remote root from explicit environment values.
 ///
-/// Honors `XDG_DATA_HOME` if set and non-empty, falling back to
-/// `~/.local/share`. This mirrors polytoken's own sessions-registry convention.
-/// Distinct from the local server's `default_data_dir()` (which uses
-/// `XDG_STATE_HOME`).
-pub fn default_remote_root() -> PathBuf {
-    let data_home = std::env::var("XDG_DATA_HOME")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
+/// `xdg_data_home` and `home` are passed as optional values so callers can
+/// distinguish an absent variable from a present-but-empty one. This is the
+/// pure seam used by tests; [`default_remote_root`] is the process-environment
+/// wrapper used in production.
+pub fn default_remote_root_with_env(
+    home: Option<&OsStr>,
+    xdg_data_home: Option<&OsStr>,
+) -> PathBuf {
+    let data_home = xdg_data_home
+        .filter(|value| is_nonempty(value))
         .map(PathBuf::from)
-        .unwrap_or_else(|| home_dir().join(".local").join("share"));
+        .unwrap_or_else(|| home_dir_from_value(home).join(".local").join("share"));
     data_home.join("pantoken")
 }
 
-/// Resolve the remote root from the environment.
-///
-/// Reads `PANTOKEN_REMOTE_ROOT` override (for tests/advanced use), falling back
-/// to [`default_remote_root()`].
-pub fn remote_root_from_env() -> PathBuf {
-    std::env::var("PANTOKEN_REMOTE_ROOT")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(default_remote_root)
+/// Resolve the default remote root: `~/.local/share/pantoken`.
+pub fn default_remote_root() -> PathBuf {
+    default_remote_root_with_env(
+        std::env::var_os("HOME").as_deref(),
+        std::env::var_os("XDG_DATA_HOME").as_deref(),
+    )
 }
 
-/// Home directory (cross-platform). Uses the `HOME` env var on Unix.
-fn home_dir() -> PathBuf {
-    if let Ok(home) = std::env::var("HOME")
-        && !home.is_empty()
-    {
-        return PathBuf::from(home);
-    }
-    // Fallback — unlikely to be reached on a normal Unix system.
-    PathBuf::from("/")
+/// Resolve a remote root from explicit environment values.
+///
+/// A missing or empty `PANTOKEN_REMOTE_ROOT` falls back to the explicit XDG
+/// and home values. [`remote_root_from_env`] supplies process environment.
+pub fn remote_root_from_values(
+    remote_root: Option<&OsStr>,
+    home: Option<&OsStr>,
+    xdg_data_home: Option<&OsStr>,
+) -> PathBuf {
+    remote_root
+        .filter(|value| is_nonempty(value))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_remote_root_with_env(home, xdg_data_home))
+}
+
+/// Resolve the remote root from the process environment.
+pub fn remote_root_from_env() -> PathBuf {
+    remote_root_from_values(
+        std::env::var_os("PANTOKEN_REMOTE_ROOT").as_deref(),
+        std::env::var_os("HOME").as_deref(),
+        std::env::var_os("XDG_DATA_HOME").as_deref(),
+    )
+}
+
+fn is_nonempty(value: &OsStr) -> bool {
+    !value.is_empty()
+        && value
+            .to_str()
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(true)
+}
+
+/// Home directory (cross-platform), with `/` as the historical fallback.
+fn home_dir_from_value(home: Option<&OsStr>) -> PathBuf {
+    home.filter(|value| is_nonempty(value))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"))
 }
 
 // ── Path derivation ───────────────────────────────────────────────────
@@ -219,96 +246,55 @@ mod tests {
     //! - `xdg_paths_stay_under_remote_root`
 
     use super::*;
-    use std::sync::Mutex;
-
-    // Env var tests can race if run in parallel with other tests touching the
-    // same env var. Use a mutex to serialize them.
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
-
-    /// Helper: set an env var, wrapping the Rust 2024 unsafe requirement.
-    fn set_env(key: &str, val: &str) {
-        // SAFETY: tests are serialized by ENV_MUTEX, so there is no concurrent
-        // access to the process environment from these tests.
-        unsafe { std::env::set_var(key, val) };
-    }
-
-    /// Helper: remove an env var, wrapping the Rust 2024 unsafe requirement.
-    fn remove_env(key: &str) {
-        // SAFETY: tests are serialized by ENV_MUTEX.
-        unsafe { std::env::remove_var(key) };
-    }
 
     // ── default_and_override_tests ────────────────────────────────────
 
     #[test]
-    fn default_root_is_xdg_data_home_pantoken() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        let saved_home = std::env::var("HOME").ok();
-        let saved_xdg = std::env::var("XDG_DATA_HOME").ok();
-        let saved_remote = std::env::var("PANTOKEN_REMOTE_ROOT").ok();
+    fn default_root_falls_back_to_home_when_xdg_is_absent_or_empty() {
+        let home = OsStr::new("/tmp/test-home");
+        let expected = PathBuf::from("/tmp/test-home/.local/share/pantoken");
 
-        remove_env("XDG_DATA_HOME");
-        remove_env("PANTOKEN_REMOTE_ROOT");
-        set_env("HOME", "/tmp/test-home");
-
-        let root = default_remote_root();
-        assert_eq!(root, PathBuf::from("/tmp/test-home/.local/share/pantoken"));
-
-        restore_env("HOME", saved_home);
-        restore_env("XDG_DATA_HOME", saved_xdg);
-        restore_env("PANTOKEN_REMOTE_ROOT", saved_remote);
+        assert_eq!(default_remote_root_with_env(Some(home), None), expected);
+        assert_eq!(
+            default_remote_root_with_env(Some(home), Some(OsStr::new(""))),
+            expected
+        );
+        assert_eq!(
+            default_remote_root_with_env(Some(home), Some(OsStr::new("  "))),
+            expected
+        );
     }
 
     #[test]
     fn default_root_honors_xdg_data_home() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        let saved_home = std::env::var("HOME").ok();
-        let saved_xdg = std::env::var("XDG_DATA_HOME").ok();
-        let saved_remote = std::env::var("PANTOKEN_REMOTE_ROOT").ok();
-
-        set_env("HOME", "/tmp/test-home");
-        set_env("XDG_DATA_HOME", "/tmp/xdg-data");
-        remove_env("PANTOKEN_REMOTE_ROOT");
-
-        let root = default_remote_root();
-        assert_eq!(root, PathBuf::from("/tmp/xdg-data/pantoken"));
-
-        restore_env("HOME", saved_home);
-        restore_env("XDG_DATA_HOME", saved_xdg);
-        restore_env("PANTOKEN_REMOTE_ROOT", saved_remote);
+        assert_eq!(
+            default_remote_root_with_env(
+                Some(OsStr::new("/tmp/test-home")),
+                Some(OsStr::new("/tmp/xdg-data")),
+            ),
+            PathBuf::from("/tmp/xdg-data/pantoken")
+        );
     }
 
     #[test]
-    fn remote_root_from_env_override() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        let saved_remote = std::env::var("PANTOKEN_REMOTE_ROOT").ok();
-
-        set_env("PANTOKEN_REMOTE_ROOT", "/custom/remote/root");
-        assert_eq!(remote_root_from_env(), PathBuf::from("/custom/remote/root"));
-
-        restore_env("PANTOKEN_REMOTE_ROOT", saved_remote);
+    fn remote_root_override_and_empty_fallback() {
+        let home = Some(OsStr::new("/tmp/test-home2"));
+        assert_eq!(
+            remote_root_from_values(Some(OsStr::new("/custom/remote/root")), home, None),
+            PathBuf::from("/custom/remote/root")
+        );
+        assert_eq!(
+            remote_root_from_values(Some(OsStr::new("")), home, None),
+            PathBuf::from("/tmp/test-home2/.local/share/pantoken")
+        );
     }
 
     #[test]
-    fn remote_root_from_env_empty_falls_back_to_default() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        let saved_remote = std::env::var("PANTOKEN_REMOTE_ROOT").ok();
-        let saved_home = std::env::var("HOME").ok();
-
-        set_env("HOME", "/tmp/test-home2");
-        set_env("PANTOKEN_REMOTE_ROOT", "");
-        let root = remote_root_from_env();
-        assert_eq!(root, PathBuf::from("/tmp/test-home2/.local/share/pantoken"));
-
-        restore_env("PANTOKEN_REMOTE_ROOT", saved_remote);
-        restore_env("HOME", saved_home);
-    }
-
-    fn restore_env(key: &str, saved: Option<String>) {
-        match saved {
-            Some(v) => set_env(key, &v),
-            None => remove_env(key),
-        }
+    fn missing_home_uses_root_fallback() {
+        assert_eq!(
+            default_remote_root_with_env(None, None),
+            PathBuf::from("/.local/share/pantoken")
+        );
     }
 
     // ── path derivation tests ─────────────────────────────────────────

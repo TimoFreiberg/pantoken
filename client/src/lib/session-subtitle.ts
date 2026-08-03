@@ -7,6 +7,8 @@
 export function sessionSubtitle(opts: {
   cwd?: string;
   liveCwd?: string;
+  /** Home directory used to abbreviate out-of-project paths; defaults to HOME. */
+  home?: string;
 }): string {
   const projectCwd = opts.cwd ?? "";
   if (!projectCwd) return "no session";
@@ -21,7 +23,7 @@ export function sessionSubtitle(opts: {
     return `${projectBasename} › ${rel}`;
   }
   // Outside the project: show the full path with ~ for home.
-  return `${projectBasename} › ${tildeHome(liveCwd)}`;
+  return `${projectBasename} › ${tildeHome(liveCwd, opts.home)}`;
 }
 
 function basename(p: string): string {
@@ -30,11 +32,12 @@ function basename(p: string): string {
 }
 
 /** Replace a leading $HOME with ~ for compact display of out-of-project paths. */
-function tildeHome(p: string): string {
+function tildeHome(p: string, homeOverride?: string): string {
   const home =
-    typeof process !== "undefined" && process.env?.HOME
+    homeOverride ??
+    (typeof process !== "undefined" && process.env?.HOME
       ? process.env.HOME
-      : "";
+      : "");
   if (home && p.startsWith(home + "/")) {
     return `~${p.slice(home.length)}`;
   }

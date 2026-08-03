@@ -32,7 +32,11 @@ export function writeBuckConfigCi(root: string, config: BuckConfigCi): string {
   return path;
 }
 
-async function runBuck2Build(root: string, target: string): Promise<string> {
+async function runBuck2Build(
+  root: string,
+  target: string,
+  env?: NodeJS.ProcessEnv,
+): Promise<string> {
   const args = [
     "buck2",
     "build",
@@ -43,6 +47,7 @@ async function runBuck2Build(root: string, target: string): Promise<string> {
   ];
   const result = await spawnAsync(args, {
     cwd: root,
+    env,
     stdout: "pipe",
     stderr: "inherit",
   });
@@ -80,18 +85,21 @@ export async function buildViaBuck2(opts: {
   buildSha: string;
   outputDir: string;
   asset: string;
+  /** Environment passed only to the Buck2 child processes. */
+  env?: NodeJS.ProcessEnv;
 }): Promise<HeadlessBuildResult> {
-  const { root, version, buildSha, outputDir, asset } = opts;
+  const { root, version, buildSha, outputDir, asset, env } = opts;
   mkdirSync(outputDir, { recursive: true });
   writeBuckConfigCi(root, { version, buildSha, releaseBuild: true });
 
-  const archiveOut = await runBuck2Build(root, "//:pantoken_headless_unsigned");
+  const archiveOut = await runBuck2Build(root, "//:pantoken_headless_unsigned", env);
   const archivePath = join(outputDir, asset);
   copyFileSync(archiveOut, archivePath);
 
   const validatorOut = await runBuck2Build(
     root,
     "//server/pantoken-tar-validate:pantoken_tar_validate",
+    env,
   );
   const validatorPath = join(root, "target", "release", "pantoken-tar-validate");
   copyFileSync(validatorOut, validatorPath);

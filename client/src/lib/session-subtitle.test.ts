@@ -25,9 +25,12 @@ describe("sessionSubtitle", () => {
   });
 
   it("shows a tilde-prefixed path outside the project", () => {
-    process.env.HOME = "/Users/timo";
     expect(
-      sessionSubtitle({ cwd: PROJECT, liveCwd: "/Users/timo/src/other" }),
+      sessionSubtitle({
+        cwd: PROJECT,
+        liveCwd: "/Users/timo/src/other",
+        home: "/Users/timo",
+      }),
     ).toBe("pantoken › ~/src/other");
   });
 

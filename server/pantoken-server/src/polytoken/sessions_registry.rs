@@ -81,32 +81,27 @@ pub enum ParentSessionRef {
 /// overrides this; callers that spawn a daemon with a custom dir should pass the
 /// same dir here so the list matches.
 pub fn default_sessions_dir() -> PathBuf {
-    let base = std::env::var("XDG_DATA_HOME")
-        .ok()
-        .map(|s| {
-            let trimmed = s.trim().to_string();
-            if trimmed.is_empty() {
-                PathBuf::from(home_dir()).join(".local").join("share")
-            } else {
-                PathBuf::from(trimmed)
-            }
-        })
-        .unwrap_or_else(|| PathBuf::from(home_dir()).join(".local").join("share"));
-    base.join("polytoken").join("sessions")
+    default_sessions_dir_with_env(
+        std::env::var("XDG_DATA_HOME").ok().as_deref(),
+        std::env::var("HOME").ok().as_deref(),
+    )
 }
 
-/// Get the home directory from `$HOME`, falling back to the user's home via
-/// the libc `getpwuid` if unset (mirrors Node's `os.homedir()`).
-fn home_dir() -> String {
-    if let Ok(home) = std::env::var("HOME") {
-        if !home.is_empty() {
-            return home;
-        }
-    }
-    // Fallback: use getpwuid_r via libc.
-    // This mirrors Node's os.homedir() which tries environment variables first.
-    // If HOME is unset, we fall back to a best-effort.
-    String::new()
+/// Resolve the default sessions directory from explicit environment values.
+/// A missing or blank XDG value falls back to the supplied home directory.
+/// This keeps path resolution deterministic for tests without mutating the
+/// process environment.
+pub fn default_sessions_dir_with_env(xdg_data_home: Option<&str>, home: Option<&str>) -> PathBuf {
+    let base = xdg_data_home
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(home.unwrap_or_default())
+                .join(".local")
+                .join("share")
+        });
+    base.join("polytoken").join("sessions")
 }
 
 /// Read one session dir's `session.json`, or `None` if it has none (a failed
@@ -347,43 +342,9 @@ pub fn list_cold_sessions(
 mod tests {
     //! Mirrors `server/src/polytoken/sessions-registry.test.ts` (15 tests).
     //!
-    //! Env-var tests mutate global process state, so they are serialized behind a
-    //! single `ENV_MUTEX` (the `serial_test` crate is not a dev-dep here).
-
     use super::*;
     use std::fs;
     use std::path::PathBuf;
-    use std::sync::Mutex;
-
-    /// Serializes env-mutating tests so they don't race each other under the
-    /// default parallel test runner. `set_var`/`remove_var` are `unsafe` on
-    /// edition 2024, hence the explicit `unsafe` blocks.
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
-
-    /// RAII guard that restores `XDG_DATA_HOME` to its prior value (or unsets
-    /// it) on drop — even if the test's assertion panics, so one failing test
-    /// can't bleed a stale env var into the rest of the process.
-    struct XdgGuard {
-        orig: Option<String>,
-    }
-    impl XdgGuard {
-        fn set(value: Option<&str>) -> Self {
-            let orig = std::env::var("XDG_DATA_HOME").ok();
-            match value {
-                Some(v) => unsafe { std::env::set_var("XDG_DATA_HOME", v) },
-                None => unsafe { std::env::remove_var("XDG_DATA_HOME") },
-            }
-            Self { orig }
-        }
-    }
-    impl Drop for XdgGuard {
-        fn drop(&mut self) {
-            match self.orig.take() {
-                Some(v) => unsafe { std::env::set_var("XDG_DATA_HOME", v) },
-                None => unsafe { std::env::remove_var("XDG_DATA_HOME") },
-            }
-        }
-    }
 
     /// Base `SessionJson`, equivalent to the TS `baseMeta()` helper. Takes an
     /// override closure so each test customizes only the fields it cares about.
@@ -428,22 +389,19 @@ mod tests {
 
     #[test]
     fn default_sessions_dir_respects_xdg_data_home() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        // Restored on drop (even on panic) so a failing assert can't bleed the
-        // var into other tests.
-        let _env = XdgGuard::set(Some("/custom/xdg"));
-        let dir = default_sessions_dir();
+        let dir = default_sessions_dir_with_env(Some("/custom/xdg"), Some("/home/test"));
         assert_eq!(dir, PathBuf::from("/custom/xdg/polytoken/sessions"));
     }
 
     #[test]
     fn default_sessions_dir_falls_back_to_home_local_share() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        let _env = XdgGuard::set(None);
-        let dir = default_sessions_dir();
-        let s = dir.to_string_lossy();
-        assert!(s.contains("polytoken/sessions"));
-        assert!(s.contains(".local/share"));
+        for xdg in [None, Some("")] {
+            let dir = default_sessions_dir_with_env(xdg, Some("/home/test"));
+            assert_eq!(
+                dir,
+                PathBuf::from("/home/test/.local/share/polytoken/sessions")
+            );
+        }
     }
 
     // ── read_session_json ─────────────────────────────────────────────────

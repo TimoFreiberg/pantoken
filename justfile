@@ -36,6 +36,7 @@ test:
 
 # Quick local gate: TypeScript checks followed by unit tests; no Rust or E2E.
 quality:
+    pnpm exec tsx scripts/check-test-env-mutations.ts
     just check-ts
     just test-ts
 
