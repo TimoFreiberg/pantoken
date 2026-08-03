@@ -181,13 +181,11 @@ build-server-rs:
 server-bin-rs:
     @bash scripts/buck2/check-version.sh && buck2 build --show-output '//server/pantoken-server:pantoken_server' | tail -1 | awk '{print $$2}'
 
-# Run all server Rust tests with cargo-nextest. Buck2 remains responsible for
-# Rust clippy/build/cache validation, while nextest provides isolated test
-# execution and failure reporting for every Rust test entry point.
+# Run all server Rust tests with Buck2's native test runner.
+# Buck2 builds the test binaries, supplies declared resources/environment, and
+# enforces a 15-minute timeout for the overall test invocation.
 test-rs:
-    bash scripts/buck2/check-version.sh && \
-    server_bin="$(buck2 build --show-output '//server/pantoken-server:pantoken_server' | tail -1 | awk '{print $2}')" && \
-    PANTOKEN_SERVER_BIN="$server_bin" cargo nextest run -p pantoken-protocol -p pantoken-daemon-types -p pantoken-remote-layout -p pantoken-server -p pantoken-tar-validate
+    bash scripts/buck2/check-version.sh && buck2 test --overall-timeout 15m '//server/...'
 
 # Build the unsigned headless archive via Buck2 (uses remote cache if .buckconfig.local present).
 archive-rs:
