@@ -109,7 +109,7 @@ export function gateSpecs(options: RunnerOptions = {}): GateSpec[] {
   if (host === "linux") specs.push({ name: "rust-server", commands: ["cargo fmt --all -- --check", "bash scripts/ci/retry-transient.sh 'just buck2-clippy'", "bash scripts/ci/retry-transient.sh 'just build-rs && just build-server-rs'", "just test-rs", "just targets-check-rs", "just test-inventory-check-rs"] });
   if (host === "macos") {
     specs.push({ name: "desktop", commands: ["pnpm run build", "bash scripts/ci/retry-transient.sh 'pnpm exec tsx scripts/desktop/build-hub.ts --debug'", "pnpm run test", "cargo fmt --check -p pantoken-desktop", "cargo clippy --locked -p pantoken-desktop --all-targets -- -D warnings", "cargo nextest run -p pantoken-desktop"] });
-    specs.push({ name: "buck2", commands: ["bash scripts/ci/retry-transient.sh 'just buck2-clippy'", "bash scripts/ci/retry-transient.sh 'just build-rs && just build-server-rs'", "just test-rs-nextest", "just targets-check-rs", "just test-inventory-check-rs"] });
+    specs.push({ name: "buck2", commands: ["bash scripts/ci/retry-transient.sh 'just buck2-clippy'", "bash scripts/ci/retry-transient.sh 'just build-rs && just build-server-rs'", "just test-rs", "just targets-check-rs", "just test-inventory-check-rs"] });
   }
   return specs;
 }

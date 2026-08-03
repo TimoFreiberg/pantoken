@@ -281,6 +281,9 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
       # Tailscale connection for remote cache (trusted PRs/pushes only).
       # Skips gracefully when TS_AUTH_KEY is not configured (local-only builds).
       - name: Connect to Tailscale
@@ -371,6 +374,9 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
       # Tailscale connection for remote cache (trusted PRs/pushes only).
       # Skips gracefully when TS_AUTH_KEY is not configured (local-only builds).
       - name: Connect to Tailscale
