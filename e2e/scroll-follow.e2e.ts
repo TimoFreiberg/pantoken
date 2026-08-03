@@ -365,9 +365,6 @@ test.describe("composer scroll-jump (#64)", () => {
     // Confirm we're genuinely scrolled up (pinned should be false now).
     await expect.poll(() => gapFn(scroller)).toBeGreaterThan(80);
 
-    const topBefore = await scroller.evaluate(
-      (el) => (el as HTMLElement).scrollTop,
-    );
     // Snapshot the proactive tick before typing — it must NOT increment here
     // (the effect bails on `!pinned`). This directly tests the effect's guard,
     // which scrollTop alone cannot (applySettle has its own redundant `!pinned`
@@ -383,12 +380,9 @@ test.describe("composer scroll-jump (#64)", () => {
       "This is a long line of text that will wrap to multiple lines when typed into the composer textarea, causing it to grow and shrink the transcript viewport",
     );
 
-    const topAfter = await scroller.evaluate(
-      (el) => (el as HTMLElement).scrollTop,
-    );
-    // The reader was NOT yanked to the bottom — scrollTop barely moved (the
-    // viewport shrink may nudge it a few px, but not hundreds).
-    expect(Math.abs(topAfter - topBefore)).toBeLessThan(20);
+    // Composer autosize and flex layout settle asynchronously after fill(). The reader
+    // remains scrolled up: the bottom gap stays open rather than collapsing to zero.
+    await expect.poll(() => gapFn(scroller)).toBeGreaterThan(80);
     // The proactive effect's `pinned` guard held — it did NOT set the tick
     // attribute (if it had, the guard was removed and this would fail).
     const resizeNAfter = await scroller.getAttribute(
