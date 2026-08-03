@@ -66,8 +66,8 @@ pub enum LaunchViewState {
     Revealed,
 }
 
-/// Pure launch-context state machine. The first activation generated while AppKit launches is
-/// consumed; subsequent activation/reopen/tray events reveal the window.
+/// Pure launch-context state machine. Login launches consume AppKit's initial activation;
+/// ordinary launches reveal on their first real activation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LaunchContextState {
     pub mode: StartupMode,
@@ -85,12 +85,19 @@ impl LaunchContextState {
     pub fn handle(&mut self, event: LaunchEvent) -> bool {
         match (self.view, event) {
             (LaunchViewState::Launching, LaunchEvent::DidFinishLaunching) => {
-                self.view = LaunchViewState::InitialActivationIgnored;
+                if self.mode != StartupMode::OrdinaryActivation {
+                    self.view = LaunchViewState::InitialActivationIgnored;
+                }
                 false
             }
             (LaunchViewState::Launching, LaunchEvent::DidBecomeActive) => {
-                self.view = LaunchViewState::InitialActivationIgnored;
-                false
+                if self.mode == StartupMode::OrdinaryActivation {
+                    self.view = LaunchViewState::Revealed;
+                    true
+                } else {
+                    self.view = LaunchViewState::InitialActivationIgnored;
+                    false
+                }
             }
             (LaunchViewState::InitialActivationIgnored, LaunchEvent::DidBecomeActive) => {
                 self.view = LaunchViewState::AwaitingUserActivation;
@@ -596,6 +603,14 @@ mod tests {
         assert_eq!(login.view, LaunchViewState::AwaitingUserActivation);
         assert!(login.handle(LaunchEvent::Reopen));
         assert_eq!(login.view, LaunchViewState::Revealed);
+    }
+
+    #[test]
+    fn ordinary_launch_reveals_on_initial_activation() {
+        let mut state = LaunchContextState::new(StartupMode::OrdinaryActivation);
+        assert!(!state.handle(LaunchEvent::DidFinishLaunching));
+        assert!(state.handle(LaunchEvent::DidBecomeActive));
+        assert_eq!(state.view, LaunchViewState::Revealed);
     }
 
     #[test]

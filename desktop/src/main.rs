@@ -286,6 +286,33 @@ fn lifecycle_diagnostics(state: tauri::State<'_, AppState>) -> lifecycle::Lifecy
     state.diagnostics.snapshot()
 }
 
+fn recovery_message(outcome: crate::supervisor::ProbeOutcome) -> &'static str {
+    match outcome {
+        crate::supervisor::ProbeOutcome::Unauthorized => {
+            "Pantoken hub authorization failed; retrying…"
+        }
+        crate::supervisor::ProbeOutcome::Unreachable => "Pantoken hub is unavailable; retrying…",
+        crate::supervisor::ProbeOutcome::Malformed => {
+            "Pantoken hub returned an invalid health response; retrying…"
+        }
+        crate::supervisor::ProbeOutcome::WrongTarget => {
+            "Pantoken endpoint changed unexpectedly; retrying…"
+        }
+        crate::supervisor::ProbeOutcome::EndpointUnverified => {
+            "Pantoken endpoint could not be verified; retrying…"
+        }
+        crate::supervisor::ProbeOutcome::Healthy => "Pantoken hub is healthy.",
+    }
+}
+
+fn recovery_message_for_reason(reason: crate::supervisor::RecoveryReason) -> &'static str {
+    match reason {
+        crate::supervisor::RecoveryReason::Hang => "Pantoken hub stopped responding; restarting…",
+        crate::supervisor::RecoveryReason::Crash => "Pantoken hub stopped; restarting…",
+        _ => "Pantoken hub is recovering; restarting…",
+    }
+}
+
 fn on_supervisor_event(app: &AppHandle, event: SupervisorEvent) {
     let state = app.state::<AppState>();
     let endpoint = state.config.app_url();
@@ -299,6 +326,7 @@ fn on_supervisor_event(app: &AppHandle, event: SupervisorEvent) {
     match event {
         SupervisorEvent::Healthy { first_time } => {
             state.diagnostics.record_healthy(&endpoint, timestamp());
+            shell::clear_recovery_notice(app);
             if first_time {
                 if let Some(t0) = LAUNCHED.get() {
                     eprintln!(
@@ -345,6 +373,7 @@ fn on_supervisor_event(app: &AppHandle, event: SupervisorEvent) {
             state
                 .diagnostics
                 .record_failure(health, format!("health probe: {outcome:?}"));
+            shell::show_recovery_notice(app, recovery_message(outcome));
         }
         SupervisorEvent::Restarting { reason } => {
             let health = match reason {
@@ -356,6 +385,7 @@ fn on_supervisor_event(app: &AppHandle, event: SupervisorEvent) {
             state
                 .diagnostics
                 .record_recovery(health, format!("{reason:?}"), timestamp());
+            shell::show_recovery_notice(app, recovery_message_for_reason(reason));
         }
         SupervisorEvent::Unrecoverable(message) => {
             state.diagnostics.record_failure(

@@ -240,6 +240,12 @@ pub fn show_main(app: &AppHandle) {
     }
 }
 
+pub fn clear_recovery_notice(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window(MAIN_WINDOW) {
+        let _ = w.eval(CLEAR_RECOVERY_JS);
+    }
+}
+
 pub fn navigate_main(app: &AppHandle, url: &str) {
     if let Some(w) = app.get_webview_window(MAIN_WINDOW) {
         if let Ok(parsed) = url::Url::parse(url) {
@@ -327,6 +333,15 @@ impl Overlay {
     }
 }
 
+/// Show a compact, non-modal recovery notice without blocking the webview or composer.
+pub fn show_recovery_notice(app: &AppHandle, message: &str) {
+    if let Some(w) = app.get_webview_window(MAIN_WINDOW) {
+        let message_json =
+            serde_json::to_string(message).unwrap_or_else(|_| "\"Hub unavailable\"".into());
+        let _ = w.eval(recovery_notice_js(&message_json));
+    }
+}
+
 fn raise_js(label_json: &str) -> String {
     format!(
         r#"(() => {{
@@ -362,6 +377,26 @@ fn raise_js(label_json: &str) -> String {
 const HIDE_JS: &str = r#"(() => {
   const o = document.getElementById('pantoken-native-overlay');
   if (o) { o.style.opacity = '0'; setTimeout(() => o.remove(), 220); }
+})();"#;
+
+fn recovery_notice_js(message_json: &str) -> String {
+    format!(
+        r#"(() => {{
+  let n = document.getElementById('pantoken-native-recovery');
+  if (!n) {{
+    n = document.createElement('div');
+    n.id = 'pantoken-native-recovery';
+    n.style.cssText = 'position:fixed;left:16px;right:16px;bottom:16px;z-index:2147483646;padding:10px 14px;border-radius:12px;background:rgba(120,45,25,.92);color:white;font:500 13px -apple-system,system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.2);pointer-events:none';
+    document.documentElement.appendChild(n);
+  }}
+  n.textContent = {message_json};
+}})();"#
+    )
+}
+
+const CLEAR_RECOVERY_JS: &str = r#"(() => {
+  const n = document.getElementById('pantoken-native-recovery');
+  if (n) n.remove();
 })();"#;
 
 // ───────────────────────────────── tray ─────────────────────────────────

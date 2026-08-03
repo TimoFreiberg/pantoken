@@ -536,44 +536,9 @@ fn http_loopback(
     }
 }
 
-/// Pure updater state transition. A failed install clears the applying overlay
-/// state while retaining the staged version for a subsequent retry.
-#[cfg_attr(not(test), allow(dead_code))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum InstallState {
-    Staged,
-    Applying,
-    Retryable,
-    Relaunching,
-}
-
-#[allow(dead_code)]
-fn begin_install(state: InstallState, stopping: bool) -> InstallState {
-    if stopping {
-        InstallState::Staged
-    } else {
-        match state {
-            InstallState::Staged | InstallState::Retryable => InstallState::Applying,
-            other => other,
-        }
-    }
-}
-
-#[allow(dead_code)]
-fn install_transition(state: InstallState, success: bool, stopping: bool) -> InstallState {
-    if stopping {
-        return InstallState::Staged;
-    }
-    match (state, success) {
-        (InstallState::Applying, true) => InstallState::Relaunching,
-        (InstallState::Applying, false) => InstallState::Retryable,
-        (other, _) => other,
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{begin_install, install_transition, Activity, InstallState, ReportState};
+    use super::{Activity, ReportState};
 
     #[test]
     fn updater_report_auth_contract() {
@@ -589,24 +554,6 @@ mod tests {
         }
         .permit()
         .is_some());
-    }
-
-    #[test]
-    fn updater_install_failure_is_retryable() {
-        let applying = begin_install(InstallState::Staged, false);
-        assert_eq!(applying, InstallState::Applying);
-        let retryable = install_transition(applying, false, false);
-        assert_eq!(retryable, InstallState::Retryable);
-        // The retained staged artifact can be retried after failure.
-        assert_eq!(begin_install(retryable, false), InstallState::Applying);
-        assert_eq!(
-            install_transition(InstallState::Applying, true, false),
-            InstallState::Relaunching
-        );
-        assert_eq!(
-            install_transition(InstallState::Applying, true, true),
-            InstallState::Staged
-        );
     }
 
     #[test]

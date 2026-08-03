@@ -371,8 +371,10 @@ fn supervise_one(
             if outcome != ProbeOutcome::Healthy {
                 on_event(SupervisorEvent::ProbeFailed { outcome });
             }
-            let decision =
-                policy.observe_probe(outcome, !healthy && Instant::now() > boot_deadline);
+            let decision = policy.observe_probe(
+                outcome,
+                !*started && !healthy && Instant::now() > boot_deadline,
+            );
             match decision {
                 SupervisorDecision::Healthy { first_time } => {
                     healthy = true;
@@ -559,7 +561,8 @@ fn sleep_unless_stopped(stop: &AtomicBool, total: Duration) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        authorization_header, ProbeOutcome, RecoveryReason, SupervisionCore, SupervisorDecision,
+        authorization_header, read_http_response, ProbeOutcome, RecoveryReason, SupervisionCore,
+        SupervisorDecision,
     };
 
     #[test]
@@ -638,11 +641,24 @@ mod tests {
     }
 
     #[test]
-    fn http_parser_accepts_fragmented_valid_response() {
-        assert_eq!(
-            super::parse_http_status(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n"),
-            Ok(204)
-        );
+    fn http_reader_accepts_fragmented_valid_response() {
+        use std::io::Write;
+        use std::net::TcpListener;
+        use std::thread;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let writer = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.write_all(b"HTTP/1.1 204 No ").unwrap();
+            stream
+                .write_all(b"Content\r\nConnection: close\r\n\r\n")
+                .unwrap();
+        });
+        let mut stream = std::net::TcpStream::connect(address).unwrap();
+        let result = read_http_response(&mut stream).unwrap();
+        writer.join().unwrap();
+        assert_eq!(result, (204, String::new()));
     }
 
     #[test]
