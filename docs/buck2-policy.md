@@ -190,7 +190,7 @@ Clippy runs through Buck2's built-in `[clippy.json]` subtargets on every `rust_l
 2. Connects to Tailscale and generates `.buckconfig.local` (trusted runs only).
 3. Runs clippy on all server library crates via `just buck2-clippy`.
 4. Builds all server crates + the `pantoken-server` binary via `just build-rs` / `just build-server-rs`.
-5. Runs the server Rust tests via `just test-rs`, which uses cargo-nextest for per-test timeouts and failure reporting.
+5. Runs the server Rust tests via `just test-rs`, which uses cargo-nextest for isolated test execution and failure reporting.
 6. Builds the unsigned headless archive in the release configuration (via `.buckconfig.ci` with `release_build = 1` + `--config-file`). **Skipped on PRs** (`if: github.event_name != 'pull_request'`); runs on tags, non-release main pushes, and manual dispatches.
 7. Validates the archive via `just validate-archive-rs-ci` (passes `--config-file .buckconfig.ci`, so the sh_test validates the release-config archive — plain `validate-archive-rs` would rebuild + validate a dev-config archive). Also skipped on PRs, alongside the build.
 8. Runs target manifest and test inventory checks.

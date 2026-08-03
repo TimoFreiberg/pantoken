@@ -261,7 +261,7 @@ jobs:
       - run: cargo nextest run -p pantoken-desktop
 
   rust-server:
-    name: rust server — fmt, clippy, buck2 build+test (Linux)
+    name: rust server — fmt, clippy, Buck2 build + nextest (Linux)
     if: github.ref_type == 'tag' || github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Release v')
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -341,7 +341,7 @@ jobs:
       - name: Buck2 test inventory check
         run: just test-inventory-check-rs
 
-  # Buck2 gate on macOS arm64. Builds all server crates + tests, builds +
+  # Buck2 gate on macOS arm64. Builds all server crates, runs cargo-nextest,
   # validates the unsigned headless archive in the RELEASE configuration
   # (release_build=1, real VERSION/BUILD_SHA — the same config the
   # release-prepare jobs use), and checks target/test manifests. Uses remote
@@ -437,8 +437,8 @@ jobs:
         run: bash scripts/ci/retry-transient.sh 'just buck2-clippy'
       - name: Buck2 build
         run: bash scripts/ci/retry-transient.sh 'just build-rs && just build-server-rs'
-      # Run all Buck2 tests
-      - name: Buck2 test
+      # Run all Rust tests with cargo-nextest; Buck2 provides the server build.
+      - name: Cargo nextest
         run: just test-rs
       # Determine PANTOKEN_VERSION (from tag or desktop/Cargo.toml). Only
       # consumed by the release-config archive build, so skip it on PRs too.

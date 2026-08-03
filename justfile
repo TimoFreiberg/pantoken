@@ -182,8 +182,8 @@ server-bin-rs:
     @bash scripts/buck2/check-version.sh && buck2 build --show-output '//server/pantoken-server:pantoken_server' | tail -1 | awk '{print $$2}'
 
 # Run all server Rust tests with cargo-nextest. Buck2 remains responsible for
-# Rust clippy/build/cache validation, while nextest provides per-test timeouts
-# and failure reporting for every Rust test entry point.
+# Rust clippy/build/cache validation, while nextest provides isolated test
+# execution and failure reporting for every Rust test entry point.
 test-rs:
     bash scripts/buck2/check-version.sh && \
     server_bin="$(buck2 build --show-output '//server/pantoken-server:pantoken_server' | tail -1 | awk '{print $2}')" && \
