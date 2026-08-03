@@ -500,6 +500,7 @@ mod tests {
 
     #[tokio::test]
     async fn overflow_disconnect_reconnects_with_tail_or_seed() {
+        eprintln!("START connection::tests::overflow_disconnect_reconnects_with_tail_or_seed");
         let env = test_env();
         let hub = env.hub.clone();
         let (transport, inbound_tx, closed) = blocked_in_mem_split();
@@ -539,6 +540,7 @@ mod tests {
 
     #[tokio::test]
     async fn connection_session_hello_gate_auth_accept() {
+        eprintln!("START connection::tests::connection_session_hello_gate_auth_accept");
         // No token configured → any hello is accepted.
         let env = test_env();
         let (transport, inbound_tx, mut outbound_rx, closed) = in_mem_split();
@@ -553,25 +555,21 @@ mod tests {
             }))
             .await
             .unwrap();
-        // Close the inbound channel so recv returns None → session tears down.
-        // Dropping the sender models transport EOF; an in-band `None` can race
-        // with the session's transition from the hello gate to its split reader.
-        drop(inbound_tx);
-
         // The session should have sent a Hello back (the hub's add_client sends it).
-        let mut got_hello = false;
-        while let Ok(msg) =
-            tokio::time::timeout(Duration::from_millis(500), outbound_rx.recv()).await
-        {
-            if matches!(msg, Some(ServerMessage::Hello { .. })) {
-                got_hello = true;
-                break;
+        // Wait for that bootstrap message before closing inbound. Otherwise the
+        // session can observe EOF and tear down the pump before the Hello is sent.
+        loop {
+            match tokio::time::timeout(Duration::from_millis(500), outbound_rx.recv()).await {
+                Ok(Some(ServerMessage::Hello { .. })) => break,
+                Ok(Some(_)) => continue,
+                Ok(None) => panic!("outbound channel closed before session Hello"),
+                Err(_) => panic!("timed out waiting for session Hello"),
             }
         }
-        assert!(
-            got_hello,
-            "session must send a Hello back on successful auth"
-        );
+        // Close the inbound channel so recv returns None → session tears down.
+        // Dropping the sender models transport EOF after bootstrap completes.
+        drop(inbound_tx);
+
         // Release the receiver before awaiting teardown. Any queued follow-up
         // message then makes the pump's send fail instead of keeping it alive.
         drop(outbound_rx);
@@ -589,6 +587,7 @@ mod tests {
 
     #[tokio::test]
     async fn connection_session_hello_gate_auth_reject() {
+        eprintln!("START connection::tests::connection_session_hello_gate_auth_reject");
         // Token configured → a hello without it is rejected.
         let mut env = test_env();
         env.config = Arc::new(Config {
@@ -620,6 +619,7 @@ mod tests {
 
     #[tokio::test]
     async fn connection_session_rejects_non_hello_first_message() {
+        eprintln!("START connection::tests::connection_session_rejects_non_hello_first_message");
         let env = test_env();
         let (transport, inbound_tx, _outbound_rx, closed) = in_mem_split();
         let session = ConnectionSession::new(transport, env);
@@ -640,6 +640,7 @@ mod tests {
 
     #[tokio::test]
     async fn connection_session_ping_pong_routing() {
+        eprintln!("START connection::tests::connection_session_ping_pong_routing");
         // A Ping after hello must produce a Pong (routed through the hub's
         // handle_client → send_to_client → pump → transport).
         let env = test_env();
@@ -685,11 +686,15 @@ mod tests {
 
         // Teardown.
         inbound_tx.send(None).await.unwrap();
-        let _ = tokio::time::timeout(Duration::from_secs(2), handle).await;
+        tokio::time::timeout(Duration::from_secs(2), handle)
+            .await
+            .expect("session did not exit after EOF")
+            .expect("session task panicked");
     }
 
     #[tokio::test]
     async fn connection_session_cleanup_on_eof() {
+        eprintln!("START connection::tests::connection_session_cleanup_on_eof");
         // On transport EOF (recv returns None), the client must be removed
         // from the hub (client_count returns to 0).
         let env = test_env();
