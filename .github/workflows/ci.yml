@@ -14,7 +14,7 @@
 #                tauri-build stages `externalBin` at compile time and errors if missing.
 #                Also CI's production client-build gate: it builds client/dist once,
 #                which tauri-build stages as a bundle resource at compile time.
-#   rust-server: fmt + buck2 clippy + buck2 build+test for the Rust server, on Linux.
+#   rust-server: fmt + Buck2 clippy/build + cargo-nextest for the Rust server, on Linux.
 #                Node-free — no client build. Uses the remote cache for trusted PRs/pushes.
 #   buck2:       macOS arm64 Buck2 gate — builds all server crates, tests,
 #                builds + validates the unsigned headless archive in the RELEASE
@@ -333,7 +333,7 @@ jobs:
         run: bash scripts/ci/retry-transient.sh 'just buck2-clippy'
       - name: Buck2 build
         run: bash scripts/ci/retry-transient.sh 'just build-rs && just build-server-rs'
-      - name: Buck2 test
+      - name: Cargo nextest
         run: just test-rs
       # Target + test inventory checks
       - name: Buck2 target manifest check
