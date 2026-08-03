@@ -15,7 +15,7 @@
     entries: PromptMapEntry[];
     scroller: HTMLDivElement | undefined;
     sessionKey?: string;
-    onjump: (index: number) => void;
+    onjump: (target: HTMLElement) => void;
   }
 
   let { entries, scroller, sessionKey = "", onjump }: Props = $props();
@@ -144,8 +144,14 @@
   }
 
   function jump(index: number): void {
-    if (index < 0 || index >= entries.length) return;
-    onjump(index);
+    if (index < 0 || index >= entries.length || !scroller) return;
+    const entry = entries[index];
+    if (!entry) return;
+    const target = scroller.querySelector<HTMLElement>(
+      `.transcript-turn[data-prompt-id="${CSS.escape(entry.id)}"]`,
+    );
+    if (!target) return;
+    onjump(target);
     sheetOpen = false;
     if (historyTracked) {
       handledClose = true;

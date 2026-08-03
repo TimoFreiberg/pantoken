@@ -715,15 +715,8 @@
     return null; // nothing below the fold → live bottom
   }
 
-  /** Jump to a prompt by the stable user-item index shared with PromptMap. */
-  function jumpToPrompt(index: number): void {
-    if (!scroller || index < 0) return;
-    const entry = promptMapEntries[index];
-    if (!entry) return;
-    const target = scroller.querySelector<HTMLElement>(
-      `.row.user[data-prompt-id="${CSS.escape(entry.id)}"]`,
-    );
-    if (!target) return;
+  function jumpToTarget(target: HTMLElement): void {
+    if (!scroller || !target.isConnected) return;
     const scTop = scroller.getBoundingClientRect().top;
     const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
     const top = Math.min(
@@ -745,7 +738,7 @@
     const last = prompts.length - 1;
     if (last < 0) return;
     if (dir === -1) {
-      jumpToPrompt(firstUpAnchor(prompts));
+      jumpToTarget(prompts[firstUpAnchor(prompts)]!);
       return;
     }
     const idx = firstDownAnchor(prompts);
@@ -754,7 +747,7 @@
       scrollToBottom();
       return;
     }
-    jumpToPrompt(idx);
+    jumpToTarget(prompts[idx]!);
   }
 
   // Brief highlight flash on a prompt row the user just jumped to, so an instant scroll
@@ -905,7 +898,7 @@
   entries={promptMapEntries}
   {scroller}
   sessionKey={store.session.ref?.sessionId ?? ""}
-  onjump={jumpToPrompt}
+  onjump={jumpToTarget}
 />
 <PullIndicator snap={pull.snap} refreshing={pull.refreshing} testid="ptr-transcript" />
 <div
