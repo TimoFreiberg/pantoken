@@ -2904,7 +2904,7 @@ class PantokenStore {
   closeSidebar(): void {
     if (this.phoneLayout) {
       if (this.mobileView === "sessions") this.mobileView = "transcript";
-      overlayHistory.closed("sidebar");
+      overlayHistory.closed("sessions");
     } else {
       this.desktopSidebarOpen = false;
       persistSidebarOpen(false);
@@ -2923,7 +2923,7 @@ class PantokenStore {
     this.mobileView = "sessions";
     // Phone: the sessions view is an overlay — let the back gesture close it. The close
     // callback skips overlayHistory.closed() (the entry is already popped).
-    overlayHistory.opened("sidebar", () => {
+    overlayHistory.opened("sessions", () => {
       if (this.mobileView === "sessions") this.mobileView = "transcript";
     });
   }

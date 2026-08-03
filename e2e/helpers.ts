@@ -176,7 +176,17 @@ export async function openSidebar(page: Page): Promise<void> {
   // to settle before deciding whether the button is needed, so it doesn't detach
   // mid-click.
   if ((await sidebar.getAttribute("data-open")) !== "true") {
-    await page.getByTestId("sidebar-open").click({ force: true });
+    const openButton = page.getByTestId("sidebar-open");
+    await openButton.click({ force: true });
+    // A close pop can finish in the same task as the click dispatch. If that click
+    // raced the reactive mobile-view update, retry only after observing that the
+    // drawer is still closed; this keeps the helper state-driven rather than timing-based.
+    await expect
+      .poll(() => sidebar.getAttribute("data-open"), { timeout: 2_000 })
+      .toBe("true")
+      .catch(async () => {
+        await openButton.click({ force: true });
+      });
   }
   // Phone overlay history closes asynchronously. Waiting on the state (rather than a
   // fixed animation delay) also covers a deferred reopen while history.back() settles.
@@ -202,7 +212,14 @@ export async function openRightSidebar(page: Page): Promise<void> {
         closed: () => expect(sidebar).toHaveAttribute("data-open", "false", { timeout: 10_000 }),
       });
     }
-    await page.getByTestId("context-open").click({ force: true });
+    const openButton = page.getByTestId("context-open");
+    await openButton.click({ force: true });
+    await expect
+      .poll(() => panel.getAttribute("data-open"), { timeout: 2_000 })
+      .toBe("true")
+      .catch(async () => {
+        await openButton.click({ force: true });
+      });
   }
   await expect(panel).toHaveAttribute("data-open", "true", { timeout: 10_000 });
 }
