@@ -47,7 +47,7 @@ browser copy? Un-quarantine it: `xattr -cr /path/to/Pantoken.app`. See
 
 ## Quick start (dev)
 
-Before starting, have pnpm, Node, Rust, `just`, `cargo-nextest`, and the Playwright
+Before starting, have pnpm, Node, Rust, `just`, Buck2, and the Playwright
 browsers available. pnpm, Node, and Rust versions are pinned (`package.json` `packageManager`
 and `rust-toolchain.toml` respectively); see
 [`docs/toolchain-baseline.md`](docs/toolchain-baseline.md) for the full baseline and [`docs/buck2-policy.md`](docs/buck2-policy.md) for the additive Buck2 foundation.
@@ -76,7 +76,7 @@ The normal local interface is `just`; descriptions are grouped in `just --list`:
 just quality       # quick check + unit-test gate
 just check         # aggregate TypeScript/client checks
 just test          # unit tests
-just check-rs      # Rust fmt, clippy, and nextest
+just check-rs      # Rust fmt, clippy, Buck2 build, and test
 just build-client  # client production bundle
 just e2e           # default mock-driver Playwright suite
 just e2e-live      # corpus-backed live-driver suite (expensive)

@@ -34,8 +34,8 @@ Tool versions (pnpm, Node, Rust) are pinned; see
 
 ## Commands
 
-The normal contributor interface is `just`. Prerequisites are Node, pnpm, Rust, `just`,
-`cargo-nextest`, and Playwright browsers; recipes do not install or upgrade
+The normal contributor interface is `just`. Prerequisites are Node, pnpm, Rust, `just`, Buck2, and Playwright
+browsers; recipes do not install or upgrade
 these tools. Run the explicit dependency install when needed, then use the mock driver
 for local UI work:
 

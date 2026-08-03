@@ -38,7 +38,7 @@ just implement-issue 42
    - Fetches latest main, rebases `main..@` onto `main@origin`
    - Verifies exactly one non-empty commit above `main` (squash enforcement)
    - Verifies at least one non-empty commit contains `Fixes #N` in its message
-   - Runs `pnpm run test` + `pnpm run check` + `cargo fmt` + `cargo clippy` + `cargo nextest`
+   - Runs `pnpm run test` + `pnpm run check` + `cargo fmt` + `just buck2-clippy` + `just test-rs`
    - Advances the main bookmark, pushes
    - Prints a cleanup hint (`just cleanup-current-workspace`) on success
    - On conflict: exits 2 (lock held), agent resolves and retries

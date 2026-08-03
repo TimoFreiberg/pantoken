@@ -28,7 +28,7 @@ describe("local CI runner", () => {
     expect(selectGates("linux").find((g) => g.name === "desktop")).toMatchObject({ status: "skipped", reason: "host unavailable" });
     expect(selectGates("macos").filter((g) => g.status === "applicable").map((g) => g.name)).toEqual(["desktop", "buck2"]);
     const result = await resolvePrerequisites("linux", {}, async () => false);
-    expect(result.blocked).toEqual(expect.arrayContaining([expect.stringContaining("pnpm"), expect.stringContaining("buck2"), expect.stringContaining("cargo-nextest")]));
+    expect(result.blocked).toEqual(expect.arrayContaining([expect.stringContaining("pnpm"), expect.stringContaining("buck2"), expect.stringContaining("cargo")]));
   });
 
   it("does not launch Linux CI web gates on macOS", async () => {

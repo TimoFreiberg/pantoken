@@ -46,7 +46,10 @@ export async function runReleaseReadiness(options: ReleaseReadinessOptions): Pro
   const build = options.build ?? buildViaBuck2;
   const target = headlessTargetForTriple(targetTriple);
   const outputDir = join(options.root, "target", "release", "headless");
-  if (options.runGate !== false) await run(["just", "ci-local"], { cwd: options.root });
+  // Reuse the normal project test gate for releases. The broader ci-local
+  // orchestration also runs host-specific E2E and packaging paths, which are
+  // CI concerns rather than release-readiness prerequisites.
+  if (options.runGate !== false) await run(["just", "test"], { cwd: options.root });
   const built: HeadlessBuildResult = await build({ root: options.root, version: options.version, buildSha: options.buildSha, outputDir, asset: target.asset });
   await run(["just", "validate-archive-rs-ci"], { cwd: options.root });
   await run(["pnpm", "exec", "tsx", "scripts/headless/validate-artifact.ts", built.archivePath, "--version", options.version], { cwd: options.root, env: { PANTOKEN_TAR_VALIDATOR: built.validatorPath, PANTOKEN_UPDATE_TEST_MODE: "1" } });

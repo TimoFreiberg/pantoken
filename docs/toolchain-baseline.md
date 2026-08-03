@@ -82,7 +82,7 @@ These prerequisite tools are documented in `README.md` / `AGENTS.md` but are
 | Tool | Version | Notes |
 |------|---------|-------|
 | just | 1.57.0 | |
-| cargo-nextest | 0.9.140 | Test runner for Rust |
+| cargo-nextest | 0.9.140 | Test runner for the Tauri desktop crate only |
 | direnv | 2.37.1 | Activates `.envrc` (sets `CARGO_TARGET_DIR`) |
 | jj | 0.43.0 | Version control system |
 | Playwright | 1.61.0 | E2E test framework |
@@ -99,7 +99,7 @@ migration, not to pre-existing drift.
 |--------|-------------|
 | `just check` | Typecheck (protocol, scripts, e2e, parity, svelte) |
 | `just test` | Unit tests |
-| `just check-rs` | Rust fmt + clippy + nextest |
+| `just check-rs` | Rust fmt + Buck2 clippy/build/test |
 | `just build-client` | Client production bundle |
 | `just e2e` | Mock-driver Playwright suite |
 | `just e2e-live` | Corpus-backed live-driver suite |
@@ -117,7 +117,7 @@ migration, not to pre-existing drift.
 | `web-e2e` | Playwright e2e (2 shards, mock driver) |
 | `web-live` | Blocking corpus-backed live e2e (fake daemon, provider-free) |
 | `desktop` | Tauri shell fmt + clippy + nextest (macOS) |
-| `rust-server` | Rust server fmt + clippy + nextest |
+| `rust-server` | Rust server fmt + Buck2 clippy/build/test |
 | `release-prepare` | Signed macOS desktop + headless artifacts |
 | `release-prepare-linux` | Linux x86_64 headless artifact |
 | `release` | Publish (tag-triggered, gated by all above) |
@@ -198,8 +198,9 @@ From a clean checkout:
 
 ```bash
 # 1. Install prerequisites: Node 22 (via nvm/fnm/volta or direct), pnpm,
-#    rust (via rustup), just, cargo-nextest, direnv, jj, and
-#    Playwright browsers.
+#    rust (via rustup), just, Buck2, direnv, jj, and
+#    Playwright browsers. cargo-nextest is additionally needed for the
+#    macOS-only Tauri desktop gate.
 #    rustup reads rust-toolchain.toml automatically — the pinned 1.97.1
 #    (with rustfmt + clippy) is installed on first cargo command.
 #    nvm/fnm reads .nvmrc automatically — Node 22 LTS is installed.
@@ -217,7 +218,7 @@ rustc --version   # → rustc 1.97.1
 
 # 5. Run the quality gate + Rust gate:
 just quality      # check + unit tests
-just check-rs     # Rust fmt + clippy + nextest
+just check-rs     # Rust fmt + clippy + Buck2 build/test
 ```
 
 Both `just quality` and `just check-rs` must pass with the pinned tools.
