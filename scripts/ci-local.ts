@@ -66,7 +66,7 @@ export function prerequisiteChecks(host = currentHost()): PrerequisiteCheck[] {
     { command: "cargo", requiredBy: ["rust-server", "desktop", "buck2"], available: false },
     { command: "buck2", requiredBy: ["rust-server", "buck2", "web-e2e", "web-live"], available: false },
     { command: "python3", requiredBy: ["rust-server", "buck2"], available: false },
-    ...(host === "macos" ? [{ command: "cargo-nextest", requiredBy: ["desktop", "buck2"] as GateName[], available: false }] : []),
+    ...(host === "linux" || host === "macos" ? [{ command: "cargo-nextest", requiredBy: ["rust-server", ...(host === "macos" ? ["desktop", "buck2"] : [])] as GateName[], available: false }] : []),
   );
   return checks;
 }
