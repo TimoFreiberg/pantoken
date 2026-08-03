@@ -30,17 +30,20 @@
 //! relying on racy task re-locking; it is a documented divergence from TS rather
 //! than an exact ordering match.
 //!
-//! The queue is bounded (256). Enqueue uses `try_send` because the hub dispatch
-//! path is deliberately synchronous; a full queue is treated as a fail-loud
-//! canary instead of silently dropping a completion. Phase 2 reuses this same
-//! queue-over-bare-mutex idiom for sequential SSE event folding.
+//! The separate driver/completion queue is unbounded and never participates in
+//! client backpressure. Hub-to-client queues are bounded to 128; delivery uses
+//! `try_send` synchronously, and Full/Closed fail closed by removing only the
+//! affected client. Reconnect then resumes from a tail or full seed.
 //!
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use futures_util::FutureExt;
@@ -54,8 +57,8 @@ use pantoken_protocol::wire::{
     SessionAttentionPhase,
 };
 use parking_lot::Mutex;
-use tokio::sync::mpsc;
-use tracing::{error, info};
+use tokio::sync::{Notify, mpsc};
+use tracing::{error, info, warn};
 
 use crate::driver::{NewSessionOptsData, PantokenDriver, SessionSwitchError, TodoDeleteError};
 use crate::journal::{
@@ -163,6 +166,8 @@ impl AttentionPhase {}
 /// One connected client (WS connection). Focus is per-connection.
 struct ClientConn {
     send: mpsc::Sender<ServerMessage>,
+    removed: Arc<Notify>,
+    removed_flag: Arc<AtomicBool>,
     /// The session this connection is viewing (None = the empty landing).
     focused_id: Option<SessionId>,
     /// Single-flight per connection: a swap can block, so only one runs at a time.
@@ -201,6 +206,26 @@ struct BufferedSwapEvent {
 
 const SWAP_BUFFER_CAP: usize = 256;
 const SWAP_BUFFER_TTL_MS: u128 = 5000;
+/// Hub-to-client queues are intentionally bounded: overflow invalidates the
+/// client's ordered view, so the client is removed and recovers by reconnecting
+/// with its resume token (tail replay or a full seed).
+pub const CLIENT_QUEUE_CAPACITY: usize = 128;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeliveryOutcome {
+    Delivered,
+    Failed {
+        client_key: u64,
+        context: &'static str,
+        kind: DeliveryFailure,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeliveryFailure {
+    Full,
+    Closed,
+}
 
 /// The injectable file-manager spawn seam (see `SessionHub::open_in_file_manager`).
 type OpenInFileManager = Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
@@ -504,9 +529,9 @@ impl SessionHub {
 
             // Viewers get the fresh seed.
             let msg = self.seed_msg(Some(&sid));
-            let focused: Vec<_> = self.clients_focused(&sid);
-            for send in focused {
-                let _ = send.try_send(msg.clone());
+            let focused = self.clients_focused(&sid);
+            for client_key in focused {
+                self.deliver(client_key, "ingest.session_reset", msg.clone());
             }
             return;
         }
@@ -523,9 +548,9 @@ impl SessionHub {
             epoch,
             seq,
         };
-        let focused: Vec<_> = self.clients_focused(&sid);
-        for send in focused {
-            let _ = send.try_send(msg.clone());
+        let focused = self.clients_focused(&sid);
+        for client_key in focused {
+            self.deliver(client_key, "ingest.event", msg.clone());
         }
     }
 
@@ -614,12 +639,55 @@ impl SessionHub {
     }
 
     /// Get all send channels focused on a session.
-    fn clients_focused(&self, sid: &SessionId) -> Vec<mpsc::Sender<ServerMessage>> {
+    fn clients_focused(&self, sid: &SessionId) -> Vec<u64> {
         self.clients
-            .values()
-            .filter(|c| c.focused_id.as_ref() == Some(sid))
-            .map(|c| c.send.clone())
+            .iter()
+            .filter(|(_, c)| c.focused_id.as_ref() == Some(sid))
+            .map(|(key, _)| *key)
             .collect()
+    }
+
+    pub(crate) fn deliver(
+        &mut self,
+        client_key: u64,
+        context: &'static str,
+        msg: ServerMessage,
+    ) -> DeliveryOutcome {
+        let result = self
+            .clients
+            .get(&client_key)
+            .map(|conn| conn.send.try_send(msg));
+        let Some(result) = result else {
+            return DeliveryOutcome::Failed {
+                client_key,
+                context,
+                kind: DeliveryFailure::Closed,
+            };
+        };
+        match result {
+            Ok(()) => DeliveryOutcome::Delivered,
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                warn!(
+                    client_key,
+                    context,
+                    "hub client queue full; disconnecting client to preserve ordered stream"
+                );
+                self.remove_client(client_key);
+                DeliveryOutcome::Failed {
+                    client_key,
+                    context,
+                    kind: DeliveryFailure::Full,
+                }
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                self.remove_client(client_key);
+                DeliveryOutcome::Failed {
+                    client_key,
+                    context,
+                    kind: DeliveryFailure::Closed,
+                }
+            }
+        }
     }
 
     /// The main event ingestion path — called by the driver's event stream.
@@ -675,10 +743,14 @@ impl SessionHub {
                 Box::new(move |hub| {
                     Box::pin(async move {
                         let jobs = driver.list_jobs(Some(session_id.clone())).await;
-                        let h = hub.lock();
-                        let senders = h.clients_focused(&session_id);
-                        for send in senders {
-                            let _ = send.try_send(ServerMessage::JobsList { jobs: jobs.clone() });
+                        let mut h = hub.lock();
+                        let clients = h.clients_focused(&session_id);
+                        for client_key in clients {
+                            h.deliver(
+                                client_key,
+                                "jobs.refresh",
+                                ServerMessage::JobsList { jobs: jobs.clone() },
+                            );
                         }
                     })
                 }),
@@ -1295,7 +1367,9 @@ impl SessionHub {
         mpsc::Sender<ServerMessage>,
         mpsc::Receiver<ServerMessage>,
     ) {
-        let (tx, rx) = mpsc::channel(128);
+        let (tx, rx) = mpsc::channel(CLIENT_QUEUE_CAPACITY);
+        let removed = Arc::new(Notify::new());
+        let removed_flag = Arc::new(AtomicBool::new(false));
 
         let focused_id = match &resume {
             Some(r) => {
@@ -1315,6 +1389,8 @@ impl SessionHub {
 
         let conn = ClientConn {
             send: tx.clone(),
+            removed,
+            removed_flag,
             focused_id: focused_id.clone(),
             switch_in_flight: false,
             pending_switch: None,
@@ -1330,48 +1406,119 @@ impl SessionHub {
         // Send hello synchronously. Use the shared constant so the greeting can
         // never drift from the client's compiled-in version (the mismatch guard
         // is the whole point of bumping it).
-        let _ = tx.try_send(ServerMessage::Hello {
-            protocol_version: PROTOCOL_VERSION,
-            server_id: self.server_id.clone(),
-            server_label: self.server_label.clone(),
-            data_dir: self
-                .data_dir
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_default(),
-            build_sha: Some(self.build_sha.clone()),
-        });
+        if !matches!(
+            self.deliver(
+                client_key,
+                "bootstrap.hello",
+                ServerMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    server_id: self.server_id.clone(),
+                    server_label: self.server_label.clone(),
+                    data_dir: self
+                        .data_dir
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default(),
+                    build_sha: Some(self.build_sha.clone()),
+                },
+            ),
+            DeliveryOutcome::Delivered
+        ) {
+            return (client_key, tx, rx);
+        }
 
         // Resume: replay missed tail, or full seed
         if let Some(r) = &resume {
             if let Some(j) = self.journals.get(&r.session_id) {
-                if j.epoch == r.epoch && tail_covers(j, r.seq) {
-                    for f in &j.tail {
-                        if f.seq > r.seq {
-                            let _ = tx.try_send(ServerMessage::Event {
-                                event: f.ev.clone(),
-                                epoch: j.epoch,
-                                seq: f.seq,
-                            });
+                let replay = if j.epoch == r.epoch && tail_covers(j, r.seq) {
+                    Some((
+                        j.epoch,
+                        j.tail
+                            .iter()
+                            .filter(|f| f.seq > r.seq)
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                    ))
+                } else {
+                    None
+                };
+                if let Some((epoch, replay)) = replay {
+                    for f in replay {
+                        if !matches!(
+                            self.deliver(
+                                client_key,
+                                "bootstrap.resume_tail",
+                                ServerMessage::Event {
+                                    event: f.ev,
+                                    epoch,
+                                    seq: f.seq
+                                }
+                            ),
+                            DeliveryOutcome::Delivered
+                        ) {
+                            break;
                         }
                     }
                 } else {
-                    let _ = tx.try_send(self.seed_msg(Some(&r.session_id)));
+                    self.deliver(
+                        client_key,
+                        "bootstrap.seed",
+                        self.seed_msg(Some(&r.session_id)),
+                    );
                 }
             } else {
-                let _ = tx.try_send(self.seed_msg(focused_id.as_ref()));
+                self.deliver(
+                    client_key,
+                    "bootstrap.seed",
+                    self.seed_msg(focused_id.as_ref()),
+                );
             }
         } else {
-            let _ = tx.try_send(self.seed_msg(focused_id.as_ref()));
+            self.deliver(
+                client_key,
+                "bootstrap.seed",
+                self.seed_msg(focused_id.as_ref()),
+            );
         }
 
-        // Send session status + update status + pantoken settings synchronously
-        let _ = tx.try_send(self.session_status_msg());
-        let _ = tx.try_send(self.update_status_msg());
-        let _ = tx.try_send(self.pantoken_settings_msg());
+        // Send session status + update status + pantoken settings synchronously.
+        if !self.has_client(client_key) {
+            return (client_key, tx, rx);
+        }
+        self.deliver(
+            client_key,
+            "bootstrap.session_status",
+            self.session_status_msg(),
+        );
+        if !self.has_client(client_key) {
+            return (client_key, tx, rx);
+        }
+        self.deliver(
+            client_key,
+            "bootstrap.update_status",
+            self.update_status_msg(),
+        );
+        if !self.has_client(client_key) {
+            return (client_key, tx, rx);
+        }
+        self.deliver(
+            client_key,
+            "bootstrap.settings",
+            self.pantoken_settings_msg(),
+        );
 
         // Return the channel — the caller will spawn async work for the lists
         (client_key, tx, rx)
+    }
+
+    pub fn client_removal_signal(&self, client_key: u64) -> Option<(Arc<Notify>, Arc<AtomicBool>)> {
+        self.clients
+            .get(&client_key)
+            .map(|conn| (conn.removed.clone(), conn.removed_flag.clone()))
+    }
+
+    pub fn has_client(&self, client_key: u64) -> bool {
+        self.clients.contains_key(&client_key)
     }
 
     /// Get the last client key assigned (for backward compat with main.rs hack).
@@ -1382,6 +1529,8 @@ impl SessionHub {
     /// Remove a client by key.
     pub fn remove_client(&mut self, client_key: u64) {
         if let Some(conn) = self.clients.remove(&client_key) {
+            conn.removed_flag.store(true, Ordering::Release);
+            conn.removed.notify_one();
             if let Some(pending) = conn.pending_switch {
                 let _ = pending.resolve.send(None);
             }
@@ -1399,10 +1548,11 @@ impl SessionHub {
         }
     }
 
-    /// Broadcast a message to all connected clients.
-    fn broadcast(&self, msg: ServerMessage) {
-        for conn in self.clients.values() {
-            let _ = conn.send.try_send(msg.clone());
+    /// Broadcast a message through the fail-closed hub→client delivery policy.
+    fn broadcast(&mut self, msg: ServerMessage) {
+        let keys: Vec<_> = self.clients.keys().copied().collect();
+        for client_key in keys {
+            self.deliver(client_key, "broadcast", msg.clone());
         }
     }
 
@@ -1669,7 +1819,7 @@ impl SessionHub {
                     Box::new(move |hub| {
                         Box::pin(async move {
                             let restored = driver.clear_queue(target).await;
-                            let h = hub.lock();
+                            let mut h = hub.lock();
                             h.send_to_client(
                                 client_key,
                                 ServerMessage::QueueRestored {
@@ -1741,7 +1891,7 @@ impl SessionHub {
                                 switch_to(hub.clone(), client_key, swap, true, false, false).await;
                             if sid.is_some() {
                                 if let Some(text) = prefill.lock().take() {
-                                    let h = hub.lock();
+                                    let mut h = hub.lock();
                                     h.send_to_client(
                                         client_key,
                                         ServerMessage::EditorPrefill { text },
@@ -1921,7 +2071,7 @@ impl SessionHub {
                         Box::pin(async move {
                             let result = driver.detach_session(path.clone()).await;
                             if let Err(msg) = result {
-                                let h = hub.lock();
+                                let mut h = hub.lock();
                                 h.send_to_client(
                                     client_key,
                                     ServerMessage::Error {
@@ -1974,9 +2124,13 @@ impl SessionHub {
                                         // Send the empty seed to all clients
                                         // viewing this session so they clear
                                         // their cached folded state.
-                                        let focused: Vec<_> = h.clients_focused(&sid);
-                                        for send in focused {
-                                            let _ = send.try_send(msg.clone());
+                                        let focused = h.clients_focused(&sid);
+                                        for client_key in focused {
+                                            h.deliver(
+                                                client_key,
+                                                "detach_session.empty_seed",
+                                                msg.clone(),
+                                            );
                                         }
                                     }
                                 }
@@ -1995,7 +2149,7 @@ impl SessionHub {
                     Box::new(move |hub| {
                         Box::pin(async move {
                             let commands = driver.list_commands(focused).await;
-                            let h = hub.lock();
+                            let mut h = hub.lock();
                             h.send_to_client(client_key, ServerMessage::CommandList { commands });
                         })
                     }),
@@ -2009,7 +2163,7 @@ impl SessionHub {
                     Box::new(move |hub| {
                         Box::pin(async move {
                             let facets = driver.list_facets(focused).await;
-                            let h = hub.lock();
+                            let mut h = hub.lock();
                             h.send_to_client(client_key, ServerMessage::FacetList { facets });
                         })
                     }),
@@ -2023,7 +2177,7 @@ impl SessionHub {
                     Box::new(move |hub| {
                         Box::pin(async move {
                             let jobs = driver.list_jobs(focused).await;
-                            let h = hub.lock();
+                            let mut h = hub.lock();
                             h.send_to_client(client_key, ServerMessage::JobsList { jobs });
                         })
                     }),
@@ -2045,7 +2199,7 @@ impl SessionHub {
                                     // updates through the event stream.
                                 }
                                 Err(TodoDeleteError::NotFound) => {
-                                    let h = hub.lock();
+                                    let mut h = hub.lock();
                                     h.send_to_client(
                                         client_key,
                                         ServerMessage::Error {
@@ -2057,7 +2211,7 @@ impl SessionHub {
                                 Err(TodoDeleteError::DependentsExist(deps)) => {
                                     let titles: Vec<&str> =
                                         deps.iter().map(|d| d.title.as_str()).collect();
-                                    let h = hub.lock();
+                                    let mut h = hub.lock();
                                     h.send_to_client(
                                         client_key,
                                         ServerMessage::Error {
@@ -2072,7 +2226,7 @@ impl SessionHub {
                                     );
                                 }
                                 Err(TodoDeleteError::TurnInFlight) => {
-                                    let h = hub.lock();
+                                    let mut h = hub.lock();
                                     h.send_to_client(
                                         client_key,
                                         ServerMessage::Error {
@@ -2085,7 +2239,7 @@ impl SessionHub {
                                     );
                                 }
                                 Err(TodoDeleteError::Other(msg)) => {
-                                    let h = hub.lock();
+                                    let mut h = hub.lock();
                                     h.send_to_client(
                                         client_key,
                                         ServerMessage::Error {
@@ -2116,7 +2270,7 @@ impl SessionHub {
                             let files = driver
                                 .list_files(query.clone(), focused, cwd, include_ignored)
                                 .await;
-                            let h = hub.lock();
+                            let mut h = hub.lock();
                             h.send_to_client(
                                 client_key,
                                 ServerMessage::FileList {
@@ -2138,7 +2292,7 @@ impl SessionHub {
                     Box::new(move |hub| {
                         Box::pin(async move {
                             let listing = driver.list_dir(path.clone()).await;
-                            let h = hub.lock();
+                            let mut h = hub.lock();
                             h.send_to_client(
                                 client_key,
                                 ServerMessage::DirListing {
@@ -2159,7 +2313,7 @@ impl SessionHub {
                     Box::new(move |hub| {
                         Box::pin(async move {
                             let stat = driver.stat_path(path.clone()).await;
-                            let h = hub.lock();
+                            let mut h = hub.lock();
                             h.send_to_client(
                                 client_key,
                                 ServerMessage::PathStat { stat, request_id },
@@ -2300,10 +2454,8 @@ impl SessionHub {
     }
 
     /// Send a message to a specific client by key.
-    pub fn send_to_client(&self, client_key: u64, msg: ServerMessage) {
-        if let Some(conn) = self.clients.get(&client_key) {
-            let _ = conn.send.try_send(msg);
-        }
+    pub fn send_to_client(&mut self, client_key: u64, msg: ServerMessage) {
+        self.deliver(client_key, "per_client", msg);
     }
 
     /// Broadcast a session list with pre-fetched data (avoids re-locking).
@@ -2312,12 +2464,22 @@ impl SessionHub {
         sessions: Vec<pantoken_protocol::session_driver::SessionListEntry>,
         default_cwd: String,
     ) {
-        for conn in self.clients.values() {
-            let _ = conn.send.try_send(ServerMessage::SessionList {
-                sessions: sessions.clone(),
-                active_session_id: conn.focused_id.clone(),
-                default_new_session_cwd: default_cwd.clone(),
-            });
+        let payloads: Vec<_> = self
+            .clients
+            .iter()
+            .map(|(key, conn)| {
+                (
+                    *key,
+                    ServerMessage::SessionList {
+                        sessions: sessions.clone(),
+                        active_session_id: conn.focused_id.clone(),
+                        default_new_session_cwd: default_cwd.clone(),
+                    },
+                )
+            })
+            .collect();
+        for (client_key, msg) in payloads {
+            self.deliver(client_key, "session_list.broadcast", msg);
         }
         self.session_list_dirty = false;
     }
@@ -2356,12 +2518,22 @@ impl SessionHub {
     pub async fn broadcast_session_list(&mut self) {
         let sessions = self.driver.list_sessions().await;
         let default_new_session_cwd = std::env::var("HOME").unwrap_or_default();
-        for conn in self.clients.values() {
-            let _ = conn.send.try_send(ServerMessage::SessionList {
-                sessions: sessions.clone(),
-                active_session_id: conn.focused_id.clone(),
-                default_new_session_cwd: default_new_session_cwd.clone(),
-            });
+        let payloads: Vec<_> = self
+            .clients
+            .iter()
+            .map(|(key, conn)| {
+                (
+                    *key,
+                    ServerMessage::SessionList {
+                        sessions: sessions.clone(),
+                        active_session_id: conn.focused_id.clone(),
+                        default_new_session_cwd: default_new_session_cwd.clone(),
+                    },
+                )
+            })
+            .collect();
+        for (client_key, msg) in payloads {
+            self.deliver(client_key, "session_list.broadcast_async", msg);
         }
         self.session_list_dirty = false;
     }
@@ -2377,47 +2549,51 @@ impl SessionHub {
         dead_code,
         reason = "connect-time command list fan-out is incomplete until Phase 1 hub parity"
     )]
-    async fn send_command_list(&self, client_key: u64) {
+    async fn send_command_list(&mut self, client_key: u64) {
         let focused = self
             .clients
             .get(&client_key)
             .and_then(|c| c.focused_id.clone());
         let commands = self.driver.list_commands(focused).await;
-        if let Some(conn) = self.clients.get(&client_key) {
-            let _ = conn.send.try_send(ServerMessage::CommandList { commands });
-        }
+        self.deliver(
+            client_key,
+            "per_client.command_list",
+            ServerMessage::CommandList { commands },
+        );
     }
 
     #[expect(
         dead_code,
         reason = "connect-time facet list fan-out is incomplete until Phase 1 hub parity"
     )]
-    async fn send_facet_list(&self, client_key: u64) {
+    async fn send_facet_list(&mut self, client_key: u64) {
         let focused = self
             .clients
             .get(&client_key)
             .and_then(|c| c.focused_id.clone());
         let facets = self.driver.list_facets(focused).await;
-        if let Some(conn) = self.clients.get(&client_key) {
-            let _ = conn.send.try_send(ServerMessage::FacetList { facets });
-        }
+        self.deliver(
+            client_key,
+            "per_client.facet_list",
+            ServerMessage::FacetList { facets },
+        );
     }
 
     #[expect(
         dead_code,
         reason = "connect-time file index fan-out is incomplete until Phase 1 hub parity"
     )]
-    async fn send_file_index(&self, client_key: u64) {
+    async fn send_file_index(&mut self, client_key: u64) {
         let focused = self
             .clients
             .get(&client_key)
             .and_then(|c| c.focused_id.clone());
         let (files, truncated) = self.driver.list_file_index(focused).await;
-        if let Some(conn) = self.clients.get(&client_key) {
-            let _ = conn
-                .send
-                .try_send(ServerMessage::FileIndex { files, truncated });
-        }
+        self.deliver(
+            client_key,
+            "per_client.file_index",
+            ServerMessage::FileIndex { files, truncated },
+        );
     }
 
     // ── liveTick / refreshUsage ────────────────────────────────────────────
@@ -2447,7 +2623,7 @@ impl SessionHub {
                 Box::pin(async move {
                     let sessions = driver.list_sessions().await;
                     let default_new_session_cwd = std::env::var("HOME").unwrap_or_default();
-                    let h = hub.lock();
+                    let mut h = hub.lock();
                     h.send_to_client(
                         client_key,
                         ServerMessage::SessionList {
@@ -2481,7 +2657,7 @@ impl SessionHub {
             Box::new(move |hub| {
                 Box::pin(async move {
                     let commands = driver.list_commands(focused_for_commands).await;
-                    let h = hub.lock();
+                    let mut h = hub.lock();
                     h.send_to_client(client_key, ServerMessage::CommandList { commands });
                 })
             }),
@@ -2494,7 +2670,7 @@ impl SessionHub {
             Box::new(move |hub| {
                 Box::pin(async move {
                     let facets = driver.list_facets(focused_for_facets).await;
-                    let h = hub.lock();
+                    let mut h = hub.lock();
                     h.send_to_client(client_key, ServerMessage::FacetList { facets });
                 })
             }),
@@ -2507,7 +2683,7 @@ impl SessionHub {
             Box::new(move |hub| {
                 Box::pin(async move {
                     let (files, truncated) = driver.list_file_index(focused_for_files).await;
-                    let h = hub.lock();
+                    let mut h = hub.lock();
                     h.send_to_client(client_key, ServerMessage::FileIndex { files, truncated });
                 })
             }),
@@ -2520,7 +2696,7 @@ impl SessionHub {
             Box::new(move |hub| {
                 Box::pin(async move {
                     let refs = driver.list_at_refs(focused_for_at_refs).await;
-                    let h = hub.lock();
+                    let mut h = hub.lock();
                     h.send_to_client(client_key, ServerMessage::AtRefs { refs });
                 })
             }),
@@ -2532,7 +2708,7 @@ impl SessionHub {
             Box::new(move |hub| {
                 Box::pin(async move {
                     let defaults = driver.get_model_defaults().await;
-                    let h = hub.lock();
+                    let mut h = hub.lock();
                     h.broadcast(ServerMessage::ModelDefaults { defaults });
                 })
             }),
@@ -2902,7 +3078,7 @@ fn switch_to(
                 };
                 if !pending && !suppress_error {
                     let (message, kind) = render_switch_error(&raw);
-                    let h = hub.lock();
+                    let mut h = hub.lock();
                     h.send_to_client(client_key, ServerMessage::Error { message, kind });
                 }
                 None
@@ -2980,7 +3156,7 @@ async fn finish_switch(
     };
 
     let Some(sid) = sid else {
-        let h = hub.lock();
+        let mut h = hub.lock();
         h.send_to_client(
             client_key,
             ServerMessage::Error {
@@ -3033,18 +3209,16 @@ async fn finish_switch(
             let h = hub.lock();
             h.seed_msg(Some(&sid))
         };
-        // Re-seed co-viewers (excluding the requester, already seeded above)
-        let viewers: Vec<mpsc::Sender<ServerMessage>> = {
-            let h = hub.lock();
-            h.clients
-                .iter()
-                .filter(|(k, _)| **k != client_key)
-                .filter(|(_, c)| c.focused_id.as_ref() == Some(&sid))
-                .map(|(_, c)| c.send.clone())
-                .collect()
-        };
-        for send in viewers {
-            let _ = send.try_send(msg.clone());
+        // Re-seed co-viewers (excluding the requester, already seeded above).
+        let mut h = hub.lock();
+        let viewers: Vec<_> = h
+            .clients
+            .iter()
+            .filter(|(key, c)| **key != client_key && c.focused_id.as_ref() == Some(&sid))
+            .map(|(key, _)| *key)
+            .collect();
+        for viewer_key in viewers {
+            h.deliver(viewer_key, "finish_switch.coviewer_seed", msg.clone());
         }
     }
 
@@ -3072,7 +3246,7 @@ async fn finish_switch(
         Box::new(move |hub| {
             Box::pin(async move {
                 let commands = driver.list_commands(focused).await;
-                let h = hub.lock();
+                let mut h = hub.lock();
                 h.send_to_client(client_key, ServerMessage::CommandList { commands });
             })
         }),
@@ -3087,7 +3261,7 @@ async fn finish_switch(
         Box::new(move |hub| {
             Box::pin(async move {
                 let facets = driver.list_facets(focused).await;
-                let h = hub.lock();
+                let mut h = hub.lock();
                 h.send_to_client(client_key, ServerMessage::FacetList { facets });
             })
         }),
@@ -3102,7 +3276,7 @@ async fn finish_switch(
         Box::new(move |hub| {
             Box::pin(async move {
                 let (files, truncated) = driver.list_file_index(focused).await;
-                let h = hub.lock();
+                let mut h = hub.lock();
                 h.send_to_client(client_key, ServerMessage::FileIndex { files, truncated });
             })
         }),
@@ -3118,7 +3292,7 @@ async fn finish_switch(
         Box::new(move |hub| {
             Box::pin(async move {
                 let refs = driver.list_at_refs(focused).await;
-                let h = hub.lock();
+                let mut h = hub.lock();
                 h.send_to_client(client_key, ServerMessage::AtRefs { refs });
             })
         }),
@@ -3137,7 +3311,7 @@ async fn finish_switch(
         Box::new(move |hub| {
             Box::pin(async move {
                 let defaults = driver.get_model_defaults().await;
-                let h = hub.lock();
+                let mut h = hub.lock();
                 h.broadcast(ServerMessage::ModelDefaults { defaults });
             })
         }),
@@ -5815,6 +5989,143 @@ mod hub_models_tests {
 
     /// C4/AC.5: the hub op queue is unbounded — enqueuing >256 ops must not
     /// panic, even if the applier hasn't drained any.
+    #[test]
+    fn hub_delivery_source_audit_has_no_raw_server_message_try_send() {
+        let source = include_str!("hub.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        let raw: Vec<_> = production
+            .lines()
+            .filter(|line| line.contains("try_send"))
+            .filter(|line| !line.contains("conn.send.try_send(msg)"))
+            .filter(|line| !line.contains("completion queue"))
+            .filter(|line| !line.contains("source"))
+            .collect();
+        assert!(
+            raw.iter().all(|line| line.trim_start().starts_with("//!")),
+            "raw hub delivery send found: {raw:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn hub_client_queue_overflow_removes_stalled_client() {
+        let (_driver, hub, _ops) = test_hub();
+        let (client_key, tx, mut rx) = hub.lock().add_client(None);
+        drop(tx);
+        for _ in 0..(CLIENT_QUEUE_CAPACITY - 5) {
+            assert_eq!(
+                hub.lock()
+                    .deliver(client_key, "test.fill", ServerMessage::Pong),
+                DeliveryOutcome::Delivered
+            );
+        }
+        let outcome = hub
+            .lock()
+            .deliver(client_key, "test.overflow", ServerMessage::Pong);
+        assert_eq!(
+            outcome,
+            DeliveryOutcome::Failed {
+                client_key,
+                context: "test.overflow",
+                kind: DeliveryFailure::Full
+            }
+        );
+        assert!(!hub.lock().has_client(client_key));
+        while rx.recv().await.is_some() {}
+        assert!(rx.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn resume_replay_overflow_is_fail_closed() {
+        let (_driver, hub, _ops) = test_hub();
+        let (client_key, tx, mut rx) = hub.lock().add_client(None);
+        drop(tx);
+        for _ in 0..(CLIENT_QUEUE_CAPACITY - 5) {
+            assert_eq!(
+                hub.lock()
+                    .deliver(client_key, "test.fill", ServerMessage::Pong),
+                DeliveryOutcome::Delivered
+            );
+        }
+        let outcome = hub
+            .lock()
+            .deliver(client_key, "bootstrap.resume_tail", ServerMessage::Pong);
+        assert!(matches!(
+            outcome,
+            DeliveryOutcome::Failed {
+                kind: DeliveryFailure::Full,
+                ..
+            }
+        ));
+        assert!(!hub.lock().has_client(client_key));
+        while rx.recv().await.is_some() {}
+    }
+
+    #[tokio::test]
+    async fn bootstrap_overflow_removes_client_and_suppresses_connect_lists() {
+        let (_driver, hub, _ops) = test_hub();
+        let (client_key, tx, mut rx) = hub.lock().add_client(None);
+        drop(tx);
+        for _ in 0..(CLIENT_QUEUE_CAPACITY - 5) {
+            hub.lock()
+                .deliver(client_key, "bootstrap.fill", ServerMessage::Pong);
+        }
+        let outcome = hub
+            .lock()
+            .deliver(client_key, "bootstrap.seed", ServerMessage::Pong);
+        assert_eq!(
+            outcome,
+            DeliveryOutcome::Failed {
+                client_key,
+                context: "bootstrap.seed",
+                kind: DeliveryFailure::Full
+            }
+        );
+        assert!(!hub.lock().has_client(client_key));
+        while rx.recv().await.is_some() {}
+    }
+
+    #[tokio::test]
+    async fn hub_overflow_isolates_healthy_subscribers() {
+        let (_driver, hub, _ops) = test_hub();
+        let (stalled, stalled_tx, _stalled_rx) = hub.lock().add_client(None);
+        let (healthy, healthy_tx, mut healthy_rx) = hub.lock().add_client(None);
+        drop(stalled_tx);
+        drop(healthy_tx);
+        for _ in 0..(CLIENT_QUEUE_CAPACITY - 5) {
+            hub.lock()
+                .deliver(stalled, "test.fill", ServerMessage::Pong);
+        }
+        let mut h = hub.lock();
+        h.broadcast(ServerMessage::Pong);
+        assert!(!h.has_client(stalled));
+        assert!(h.has_client(healthy));
+        drop(h);
+        assert!(matches!(
+            healthy_rx.recv().await,
+            Some(ServerMessage::Hello { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn hub_closed_sender_is_removed_without_escalation() {
+        let (_driver, hub, _ops) = test_hub();
+        let (client_key, tx, rx) = hub.lock().add_client(None);
+        drop(rx);
+        drop(tx);
+        let outcome = hub
+            .lock()
+            .deliver(client_key, "test.closed", ServerMessage::Pong);
+        assert_eq!(
+            outcome,
+            DeliveryOutcome::Failed {
+                client_key,
+                context: "test.closed",
+                kind: DeliveryFailure::Closed
+            }
+        );
+        assert!(!hub.lock().has_client(client_key));
+    }
+
     #[tokio::test]
     async fn hub_op_queue_overflow_does_not_panic() {
         let (tx, _rx) = hub_op_channel(); // _rx: never drained — simulates a stalled applier

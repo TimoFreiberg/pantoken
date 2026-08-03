@@ -152,11 +152,16 @@ impl<T: Transport + TransportSplit> ConnectionSession<T> {
         // stored in the ClientConn (we drop it — the hub owns the live one).
         // rx goes to the pump task. spawn_connect_lists fires the async
         // sessionList/modelList/commandList/facetList/fileIndex follow-ups.
-        let (client_key, _tx, rx) = {
+        let (client_key, _tx, rx, removed, _removed_flag) = {
             let mut hub = self.env.hub.lock();
             let result = hub.add_client(resume);
-            hub.spawn_connect_lists(result.0);
-            result
+            let Some((removed, removed_flag)) = hub.client_removal_signal(result.0) else {
+                return;
+            };
+            if hub.has_client(result.0) {
+                hub.spawn_connect_lists(result.0);
+            }
+            (result.0, result.1, result.2, removed, removed_flag)
         };
         // Drop the returned tx clone immediately — the hub's ClientConn holds
         // the only other clone, so rx.recv() returns None once the client is
@@ -167,9 +172,9 @@ impl<T: Transport + TransportSplit> ConnectionSession<T> {
         // ── Outbound pump ────────────────────────────────────────────────
         //
         // A spawned task owns the transport's send side, reading ServerMessages
-        // from the hub channel (buffer 128 — set in hub.add_client) and writing
-        // them out. On channel close (client removed from hub → tx dropped → rx
-        // returns None) the pump closes the transport and exits.
+        // from the bounded hub channel (capacity is defined in hub.rs) and writing
+        // them out. Receiver closure or the sticky client-removal signal closes
+        // the transport; the signal also interrupts a blocked writer.send.
         //
         // The pump borrows the transport's send capability, so we split it out
         // via a oneshot/pump-owned sender. Because Transport is `&mut self` on
@@ -200,15 +205,20 @@ impl<T: Transport + TransportSplit> ConnectionSession<T> {
         let (mut reader, writer) = self.transport.split();
 
         // Outbound pump: owns the writer half + the hub channel receiver.
-        let pump = tokio::spawn(async move {
+        let mut pump = tokio::spawn(async move {
             let mut rx = rx;
             let mut writer = writer;
             while let Some(msg) = rx.recv().await {
-                if !writer.send(msg).await {
-                    break;
+                let send = writer.send(msg);
+                tokio::pin!(send);
+                tokio::select! {
+                    result = &mut send => {
+                        if !result { break; }
+                    }
+                    _ = removed.notified() => break,
                 }
             }
-            // Channel closed (client removed from hub) — close the write half.
+            // Channel closed or removal signaled (client removed from hub) — close the write half.
             writer.close().await;
         });
 
@@ -217,16 +227,27 @@ impl<T: Transport + TransportSplit> ConnectionSession<T> {
         // Read ClientMessages, skip hello (already authed), dispatch to the
         // hub. handle_client is sync; driver work is spawned as separate
         // HubOp tasks. Mirrors main.rs:376–410.
-        while let Some(msg) = reader.recv().await {
-            match msg {
-                ClientMessage::Hello { .. } => {
-                    // Already authed — skip (a re-hello is a no-op, matching
-                    // the old code's `if type == "hello" { continue; }`).
-                    continue;
+        let mut pump_finished = false;
+        loop {
+            tokio::select! {
+                result = &mut pump => {
+                    // The hub removed this client (or the writer failed), so the
+                    // inbound half must stop waiting as well.
+                    let _ = result;
+                    pump_finished = true;
+                    break;
                 }
-                other => {
-                    let mut hub = self.env.hub.lock();
-                    hub.handle_client(client_key, other);
+                msg = reader.recv() => {
+                    let Some(msg) = msg else { break; };
+                    match msg {
+                        ClientMessage::Hello { .. } => {
+                            // Already authed — skip repeated hellos.
+                        }
+                        other => {
+                            let mut hub = self.env.hub.lock();
+                            hub.handle_client(client_key, other);
+                        }
+                    }
                 }
             }
         }
@@ -240,7 +261,9 @@ impl<T: Transport + TransportSplit> ConnectionSession<T> {
             hub.remove_client(client_key);
         }
         // Wait for the pump to finish so we don't leak a task.
-        let _ = pump.await;
+        if !pump_finished {
+            let _ = pump.await;
+        }
         // reader is dropped here; the write half was consumed by the pump.
     }
 }
@@ -330,6 +353,7 @@ mod tests {
         inbound_rx: tokio::sync::mpsc::Receiver<Option<ClientMessage>>,
         outbound_tx: tokio::sync::mpsc::UnboundedSender<ServerMessage>,
         closed: Arc<std::sync::atomic::AtomicBool>,
+        block_send: bool,
     }
 
     #[async_trait::async_trait]
@@ -354,6 +378,7 @@ mod tests {
     struct InMemWriter {
         outbound_tx: tokio::sync::mpsc::UnboundedSender<ServerMessage>,
         closed: Arc<std::sync::atomic::AtomicBool>,
+        block_send: bool,
     }
 
     #[async_trait::async_trait]
@@ -369,6 +394,9 @@ mod tests {
     #[async_trait::async_trait]
     impl TransportWrite for InMemWriter {
         async fn send(&mut self, msg: ServerMessage) -> bool {
+            if self.block_send {
+                std::future::pending::<()>().await;
+            }
             self.outbound_tx.send(msg).is_ok()
         }
         async fn close(&mut self) {
@@ -387,6 +415,7 @@ mod tests {
                 InMemWriter {
                     outbound_tx: self.outbound_tx,
                     closed: self.closed,
+                    block_send: self.block_send,
                 },
             )
         }
@@ -447,8 +476,65 @@ mod tests {
             inbound_rx,
             outbound_tx: outbound_tx.clone(),
             closed: closed.clone(),
+            block_send: false,
         };
         (transport, inbound_tx, outbound_rx, closed)
+    }
+
+    fn blocked_in_mem_split() -> (
+        InMemorySplitTransport,
+        tokio::sync::mpsc::Sender<Option<ClientMessage>>,
+        Arc<std::sync::atomic::AtomicBool>,
+    ) {
+        let (inbound_tx, inbound_rx) = mpsc::channel(16);
+        let (outbound_tx, _outbound_rx) = mpsc::unbounded_channel();
+        let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let transport = InMemorySplitTransport {
+            inbound_rx,
+            outbound_tx,
+            closed: closed.clone(),
+            block_send: true,
+        };
+        (transport, inbound_tx, closed)
+    }
+
+    #[tokio::test]
+    async fn overflow_disconnect_reconnects_with_tail_or_seed() {
+        let env = test_env();
+        let hub = env.hub.clone();
+        let (transport, inbound_tx, closed) = blocked_in_mem_split();
+        let session = ConnectionSession::new(transport, env);
+        let task = tokio::spawn(async move { session.run().await });
+        inbound_tx
+            .send(Some(ClientMessage::Hello {
+                auth: None,
+                resume: None,
+            }))
+            .await
+            .expect("hello accepted");
+        tokio::task::yield_now().await;
+        let client_key = hub.lock().last_client_key();
+        assert!(hub.lock().has_client(client_key));
+        let overflow = (0..=crate::hub::CLIENT_QUEUE_CAPACITY)
+            .map(|_| {
+                hub.lock()
+                    .deliver(client_key, "test.fill", ServerMessage::Pong)
+            })
+            .find(|outcome| matches!(outcome, crate::hub::DeliveryOutcome::Failed { .. }))
+            .expect("queue did not overflow");
+        assert!(matches!(
+            overflow,
+            crate::hub::DeliveryOutcome::Failed {
+                kind: crate::hub::DeliveryFailure::Full,
+                ..
+            }
+        ));
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("blocked outbound pump did not terminate")
+            .expect("connection task panicked");
+        assert!(closed.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(!hub.lock().has_client(client_key));
     }
 
     #[tokio::test]
