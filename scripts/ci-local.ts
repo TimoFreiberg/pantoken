@@ -142,14 +142,14 @@ async function executeCommand(gate: GateName, command: string, env: NodeJS.Proce
       clearInterval(heartbeat);
       activeChildren.delete(child);
       const elapsed = Math.round((Date.now() - startedAt) / 1000);
-      console.log(`[ci-local] ${gate}: ${code === 0 ? "passed" : `failed (exit ${code ?? 1})`} after ${elapsed}s`);
+      console.log(`[ci-local] ${gate}: ${code === 0 ? "passed" : `failed (exit ${code ?? 1})`} after ${elapsed}s: ${command}`);
       resolveCode(code ?? 1);
     });
     child.on("error", (error) => {
       clearInterval(heartbeat);
       activeChildren.delete(child);
       chunks.push(Buffer.from(String(error)));
-      console.log(`[ci-local] ${gate}: failed to start after ${Math.round((Date.now() - startedAt) / 1000)}s`);
+      console.log(`[ci-local] ${gate}: failed to start after ${Math.round((Date.now() - startedAt) / 1000)}s: ${command}`);
       resolveCode(1);
     });
   });
