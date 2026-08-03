@@ -34,9 +34,8 @@ test("active-only filter hides archived + stale sessions; show-all reveals them"
   await expect(sidebar.getByTestId("hidden-count")).toHaveCount(0);
 });
 
-// Journey: the filter replaces the standalone hidden-count control and exposes
-// its mode via aria-label as it toggles.
-test("the filter replaces the standalone hidden-count control", async ({
+// Journey: active-only/show-all filters preserve hidden-count affordances in one boot.
+test("active-only filter and filter affordance expose the same hidden sessions", async ({
   page,
 }) => {
   await openSidebar(page);
@@ -45,17 +44,24 @@ test("the filter replaces the standalone hidden-count control", async ({
   // Default active-only view hides the archived + stale fixtures, with no extra row.
   await expect(sidebar.getByTestId("hidden-count")).toHaveCount(0);
   await expect(sidebar.getByText("Archived experiment")).toHaveCount(0);
+  await expect(sidebar.getByText("Old spike")).toHaveCount(0);
+  await expect(sidebar.getByText("stale-proj", { exact: true })).toHaveCount(0);
+  await expect(sidebar.getByTestId("filter-toggle")).toHaveAttribute("title", /2 hidden/);
 
-  // The existing top-right filter reveals them and remains accessible.
   const filter = sidebar.getByTestId("filter-toggle");
   await expect(filter).toHaveAttribute("aria-label", "Show all sessions");
   await filter.click();
   await expect(sidebar.getByText("Archived experiment")).toBeVisible();
   await expect(sidebar.getByText("Old spike")).toBeVisible();
-  await expect(filter).toHaveAttribute(
-    "aria-label",
-    "Show active sessions only",
-  );
+  await expect(sidebar.getByText("stale-proj", { exact: true })).toBeVisible();
+  await expect(sidebar.getByTestId("hidden-count")).toHaveCount(0);
+  await expect(filter).toHaveAttribute("aria-label", "Show active sessions only");
+
+  // Restore the default active-only state before ending this journey.
+  await filter.click();
+  await expect(sidebar.getByText("Archived experiment")).toHaveCount(0);
+  await expect(sidebar.getByText("Old spike")).toHaveCount(0);
+  await expect(filter).toHaveAttribute("aria-label", "Show all sessions");
 });
 
 // Journey: right-clicking a session row opens its overflow menu; archiving

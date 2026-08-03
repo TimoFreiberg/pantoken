@@ -41,33 +41,27 @@ test('the goal badge renders with summary and tooltip, then hides when cleared',
   await expect(badge).toHaveCount(0);
 });
 
-// Journey: a goal proposal renders as a blocking dialog with a title and message
-// body (the proposed summary).
-test('goal card renders as a blocking dialog with title + message', async ({ page }) => {
+// Journey: goal proposal requests are independently resolved on one boot.
+test('goal card: inspect, Allow, and Escape journeys', async ({ page }) => {
   await drive(page, 'goal');
-  const dialog = page.getByRole('dialog', { name: 'Ship feature X' });
+  let dialog = page.getByRole('dialog', { name: 'Ship feature X' });
   await expect(dialog).toBeVisible();
-  // The proposed summary renders as the message body.
   await expect(dialog.getByText('Implement the new dashboard widget')).toBeVisible();
-  // The dialog is blocking — a scrim/backdrop is present.
   await expect(dialog).toHaveAttribute('aria-modal', 'true');
-});
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toBeHidden();
+  await expect(page.getByText('Dialog cancelled.')).toBeVisible();
 
-// Journey: clicking Allow resolves a goal card (approved notice appears).
-test('clicking Allow resolves the goal card', async ({ page }) => {
   await drive(page, 'goal');
-  const dialog = page.getByRole('dialog');
+  dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'Allow' }).click();
-  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('dialog')).toBeHidden();
   await expect(page.getByText('Approved — continuing.')).toBeVisible();
-});
 
-// Journey: Escape cancels a goal card (deny-safe) — the "Dialog cancelled."
-// notice appears.
-test('Escape cancels the goal card (deny-safe)', async ({ page }) => {
   await drive(page, 'goal');
-  await expect(page.getByRole('dialog')).toBeVisible();
+  dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toBeHidden();
   await expect(page.getByText('Dialog cancelled.')).toBeVisible();

@@ -13,7 +13,7 @@ function actionNames(dialog: import("@playwright/test").Locator) {
 // daemon wire label and must not leak into the accessible name.
 test("plan-handoff preserves daemon action ordering and reveals refusal feedback", async ({ page }) => {
   await drive(page, "planhandoff");
-  const dialog = page.getByRole("dialog", { name: "Plan handoff" });
+  let dialog = page.getByRole("dialog", { name: "Plan handoff" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("plan.md")).toBeVisible();
   await expect(dialog.getByRole("heading", { name: "Plan: Add facet indicator + plan-handoff card" })).toBeVisible();
@@ -25,31 +25,34 @@ test("plan-handoff preserves daemon action ordering and reveals refusal feedback
   await expect(dialog.getByRole("button", { name: /Tab for feedback/ })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
   await expect(dialog.getByRole("textbox", { name: /feedback/i })).toBeFocused();
-});
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
 
-// Clicking Implement (new context) resolves the plan-handoff card.
-test("clicking Implement (new context) resolves the plan-handoff card", async ({
-  page,
-}) => {
   await drive(page, "planhandoff");
-  const dialog = page.getByRole("dialog", { name: "Plan handoff" });
+  dialog = page.getByRole("dialog", { name: "Plan handoff" });
   await expect(dialog).toBeVisible();
-
-  await dialog
-    .getByRole("button", { name: "Implement (new context)", exact: true })
-    .click();
-  // The mock acks a value response with "Received: <value>".
+  await dialog.getByRole("button", { name: "Implement (new context)", exact: true }).click();
   await expect(page.getByText("Received: Implement (new context)")).toBeVisible();
   await expect(dialog).toBeHidden();
 });
 
-// Escape cancels the plan-handoff card (deny-safe).
-test("Escape cancels the plan-handoff card (deny-safe)", async ({ page }) => {
+// Journey: normal plan-handoff resolution and cancellation paths. Each request is
+// resolved before the next drive so the dev-bar fixture controls remain usable.
+test("plan-handoff resolves and cancels successive requests", async ({ page }) => {
   await drive(page, "planhandoff");
-  await expect(page.getByRole("dialog")).toBeVisible();
+  const implementation = page.getByRole("dialog", { name: "Plan handoff" });
+  await expect(implementation).toBeVisible();
+  await implementation
+    .getByRole("button", { name: "Implement (new context)", exact: true })
+    .click();
+  await expect(page.getByText("Received: Implement (new context)")).toBeVisible();
+  await expect(implementation).toBeHidden();
+
+  await drive(page, "planhandoff");
+  const cancelled = page.getByRole("dialog", { name: "Plan handoff" });
+  await expect(cancelled).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).toBeHidden();
-  // The acknowledgement renders as a transcript notice row.
+  await expect(cancelled).toBeHidden();
   await expect(
     page.locator(".row.notice .ntext").filter({ hasText: "Dialog cancelled." }),
   ).toHaveCount(1);

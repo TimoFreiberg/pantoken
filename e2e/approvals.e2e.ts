@@ -7,22 +7,17 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-// Journey: confirm dialog — Allow resolves and surfaces an approval notice.
-test("confirm dialog: Allow resolves and surfaces a notice", async ({
-  page,
-}) => {
+// Journey: confirm requests are independently resolved on one boot.
+test("confirm dialog: allow, layout, deny, label, and Escape journeys", async ({ page }) => {
   await drive(page, "confirm");
-  const dialog = page.getByRole("dialog");
+  let dialog = page.getByRole("dialog");
   await expect(dialog.getByText("Run destructive command?")).toBeVisible();
   await dialog.getByRole("button", { name: "Allow" }).click();
   await expect(page.getByRole("dialog")).toBeHidden();
   await expect(page.getByText("Approved — continuing.")).toBeVisible();
-});
 
-// Journey: confirm dialog — Allow and Deny buttons share the row equally.
-test("confirm dialog action buttons share the row equally", async ({ page }) => {
   await drive(page, "confirm");
-  const dialog = page.getByRole("dialog");
+  dialog = page.getByRole("dialog");
   const allow = dialog.getByRole("button", { name: "Allow" });
   const deny = dialog.getByRole("button", { name: "Deny" });
   const allowBox = await allow.boundingBox();
@@ -32,23 +27,62 @@ test("confirm dialog action buttons share the row equally", async ({ page }) => 
   if (allowBox && denyBox) {
     expect(Math.abs(allowBox.width - denyBox.width)).toBeLessThanOrEqual(2);
   }
-});
-
-// Journey: confirm dialog — Deny resolves with the deny notice.
-test("confirm dialog: Deny resolves with the deny notice", async ({ page }) => {
-  await drive(page, "confirm");
-  await page.getByRole("dialog").getByRole("button", { name: "Deny" }).click();
+  await deny.click();
+  await expect(page.getByRole("dialog")).toBeHidden();
   await expect(page.getByText("Denied — skipping that step.")).toBeVisible();
+
+  await drive(page, "confirm");
+  dialog = page.getByRole("dialog", { name: "Run destructive command?" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(page.getByText("Dialog cancelled.")).toBeVisible();
+
+  // Re-drive for the labelled-modal accessibility contract.
+  await drive(page, "confirm");
+  dialog = page.getByRole("dialog", { name: "Run destructive command?" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(page.getByText("Dialog cancelled.")).toBeVisible();
 });
 
-// Journey: input dialog — type a value and submit it.
-test("input dialog submits a value", async ({ page }) => {
+// Journey: input requests are independently resolved on one boot.
+test("input dialog: submit and dirty backdrop dismissal journeys", async ({ page }) => {
   await drive(page, "input");
-  const dialog = page.getByRole("dialog");
+  let dialog = page.getByRole("dialog");
   await expect(dialog.getByText("Commit message")).toBeVisible();
   await dialog.getByRole("textbox").fill("My commit");
   await dialog.getByRole("button", { name: "Submit" }).click();
+  await expect(page.getByRole("dialog")).toBeHidden();
   await expect(page.getByText("Received: My commit")).toBeVisible();
+
+  await drive(page, "input");
+  dialog = page.getByRole("dialog");
+  let field = dialog.getByRole("textbox");
+  await expect(field).toHaveValue("Add /health route");
+  await field.fill("half-typed commit");
+  await page.locator('.scrim[role="presentation"]').click({ position: { x: 5, y: 5 } });
+  await expect(dialog).toBeVisible();
+  await expect(field).toHaveValue("half-typed commit");
+  await field.fill("Add /health route");
+  await page.locator('.scrim[role="presentation"]').click({ position: { x: 5, y: 5 } });
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  // Re-drive for the dirty-backdrop dismissal contract.
+  await drive(page, "input");
+  dialog = page.getByRole("dialog");
+  field = dialog.getByRole("textbox");
+  await expect(field).toHaveValue("Add /health route");
+  await field.fill("half-typed commit");
+  await page.locator('.scrim[role="presentation"]').click({ position: { x: 5, y: 5 } });
+  await expect(dialog).toBeVisible();
+  await expect(field).toHaveValue("half-typed commit");
+  await field.fill("Add /health route");
+  await page.locator('.scrim[role="presentation"]').click({ position: { x: 5, y: 5 } });
+  await expect(page.getByRole("dialog")).toBeHidden();
 });
 
 // Journey: select dialog — a 3+ option select is an arrow-navigable radiogroup.
@@ -75,50 +109,6 @@ test("a 3+ option select is an arrow-navigable radiogroup", async ({
   await page.keyboard.press("Enter");
   await expect(page.getByRole("dialog")).toBeHidden();
   await expect(page.getByText("Received: staging")).toBeVisible();
-});
-
-// Journey: input dialog — a backdrop tap is ignored once the dialog is dirty.
-test("a backdrop tap is ignored once an input dialog is dirty", async ({
-  page,
-}) => {
-  await drive(page, "input");
-  const dialog = page.getByRole("dialog");
-  const field = dialog.getByRole("textbox");
-  await expect(field).toHaveValue("Add /health route"); // the initial value
-
-  // Dirty: typing diverges from the initial value, so a stray backdrop tap is swallowed
-  // and the half-typed text survives.
-  await field.fill("half-typed commit");
-  await page.locator(".scrim[role=\"presentation\"]").click({ position: { x: 5, y: 5 } });
-  await expect(dialog).toBeVisible();
-  await expect(field).toHaveValue("half-typed commit");
-
-  // Restore the field to its initial value → no longer dirty → the backdrop dismisses.
-  await field.fill("Add /health route");
-  await page.locator(".scrim[role=\"presentation\"]").click({ position: { x: 5, y: 5 } });
-  await expect(page.getByRole("dialog")).toBeHidden();
-});
-
-// Journey: confirm dialog — the approval sheet is a labelled modal.
-test("the approval sheet is a labelled modal (aria-modal + accessible name)", async ({
-  page,
-}) => {
-  await drive(page, "confirm");
-  const dialog = page.getByRole("dialog", { name: "Run destructive command?" });
-  await expect(dialog).toBeVisible();
-  await expect(dialog).toHaveAttribute("aria-modal", "true");
-});
-
-// Journey: confirm dialog — Escape cancels (deny-safe) and surfaces the cancelled notice.
-test("Escape cancels the dialog (deny-safe) and surfaces the cancelled notice", async ({
-  page,
-}) => {
-  await drive(page, "confirm");
-  await expect(page.getByRole("dialog")).toBeVisible();
-  // Focus moves into the sheet on open; Escape routes through its deny-safe cancel.
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).toBeHidden();
-  await expect(page.getByText("Dialog cancelled.")).toBeVisible();
 });
 
 // Journey: ambient status — status strip + a collapsed tasklist pill that expands.
@@ -197,47 +187,31 @@ test("permission card: shows tool name + input preview + pruned options", async 
       dialog.getByRole("radio", { name: label }),
     ).toHaveCount(0);
   }
-});
 
-// Journey: permission card — clicking Allow for session resolves the card.
-test("permission card: clicking Allow for session resolves the card", async ({
-  page,
-}) => {
   await drive(page, "permission");
-  const dialog = page.getByRole("dialog");
-  await dialog
-    .getByRole("radio", { name: "Allow for session", exact: true })
-    .click();
-  // The mock acks a value response with "Received: <value>".
+  const sessionDialog = page.getByRole("dialog");
+  await sessionDialog.getByRole("radio", { name: "Allow for session", exact: true }).click();
   await expect(page.getByText("Received: Allow for session")).toBeVisible();
-  await expect(dialog).toBeHidden();
-});
+  await expect(sessionDialog).toBeHidden();
 
-// Journey: permission card — Escape cancels (deny-safe).
-test("permission card: Escape cancels (deny-safe)", async ({ page }) => {
   await drive(page, "permission");
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toBeHidden();
   await expect(page.getByText("Dialog cancelled.")).toBeVisible();
-});
 
-// Journey: permission card — arrow-navigable radiogroup (roving tabindex + Enter).
-test("permission card is an arrow-navigable radiogroup", async ({ page }) => {
   await drive(page, "permission");
-  const dialog = page.getByRole("dialog");
-  await expect(dialog.getByRole("radiogroup")).toBeVisible();
-  const options = dialog.getByRole("radio");
-  await expect(options).toHaveCount(3);
-
-  // ArrowDown moves focus + marks the option selected (roving tabindex).
-  await options.first().focus();
+  const keyboardDialog = page.getByRole("dialog");
+  const keyboardOptions = keyboardDialog.getByRole("radio");
+  await expect(keyboardDialog.getByRole("radiogroup")).toBeVisible();
+  await expect(keyboardOptions).toHaveCount(3);
+  await keyboardOptions.first().focus();
   await page.keyboard.press("ArrowDown");
-  await expect(options.nth(1)).toBeFocused();
-  await expect(options.nth(1)).toHaveAttribute("aria-checked", "true");
-
-  // Enter submits the focused radio.
+  await expect(keyboardOptions.nth(1)).toBeFocused();
+  await expect(keyboardOptions.nth(1)).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(keyboardDialog).toBeHidden();
   await expect(page.getByText("Received: Allow once")).toBeVisible();
 });
+
+

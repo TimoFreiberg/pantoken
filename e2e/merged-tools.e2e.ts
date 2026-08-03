@@ -10,30 +10,35 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-// Journey: a mixed run of tools each renders as its own card (no prose summary)
-test("a mixed run of tools each renders as its own card (no prose summary)", async ({
-  page,
-}) => {
+// Journey: two search turns preserve independent card rendering and expansion.
+test("search turns each render standalone tool cards", async ({ page }) => {
   await drive(page, "search");
-  // The search turn settles, so its working section collapses behind "Worked for Ns";
-  // reveal it to reach the tool cards.
   await expect(page.getByText("Reconnect lives in")).toBeVisible();
   await expandWork(page);
 
   // 2 reads + 2 greps + 1 find + 1 bash = 6 individual tool cards, each standalone.
-  // No prose summary row — each tool is its own expandable card.
-  const work = page.getByTestId("work-body").last();
-  const cards = work.locator(":scope > .tool");
+  let work = page.getByTestId("work-body").last();
+  let cards = work.locator(":scope > .tool");
   await expect(cards).toHaveCount(6);
-  // Each card carries its own header + status (settled-ok shows no error dot).
   const okCards = work.locator(":scope > .tool.ok");
   await expect(okCards).toHaveCount(6);
   await expect(okCards.locator(":scope > .head .status")).toHaveCount(0);
-  await expect(okCards.first().locator(":scope > .head")).toHaveAccessibleName(
-    /completed/,
-  );
-  // No summary rows exist anymore.
+  await expect(okCards.first().locator(":scope > .head")).toHaveAccessibleName(/completed/);
   await expect(work.locator(":scope > .tool.summary")).toHaveCount(0);
+
+  await drive(page, "search");
+  await expect(page.getByText("Reconnect lives in")).toBeVisible();
+  await expandWork(page);
+  work = page.getByTestId("work-body").last();
+  cards = work.locator(":scope > .tool");
+  await expect(cards).toHaveCount(6);
+  await expect(work.locator(":scope > .tool.summary")).toHaveCount(0);
+  // Each card expands independently and other cards remain collapsed.
+  await expect(cards.first().locator(":scope > .body")).toHaveCount(0);
+  await cards.first().locator(":scope > .head").click();
+  await expect(cards.first().locator(":scope > .body")).toBeVisible();
+  await expect(cards.first().getByText("private reconnect()", { exact: false })).toBeVisible();
+  await expect(cards.nth(1).locator(":scope > .body")).toHaveCount(0);
 });
 
 // Journey: a skill load (read of a SKILL.md) renders as its own card, not a prose label

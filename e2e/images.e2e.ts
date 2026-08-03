@@ -261,70 +261,33 @@ function imageToolCard(page: Page) {
   return page.locator(".tool").filter({ has: page.locator("img.out-img") });
 }
 
-// Flow: a user's image attachment is echoed back into the transcript as a decoded
-// thumbnail (previously write-only).
-test("image echo: a user's image attachment is echoed back into the transcript", async ({
-  page,
-}) => {
+// Journey: repeated image fixture turns preserve attachment echo, tool output, and
+// viewer behavior. Locators are scoped to the latest matching item after each drive.
+test("image rendering and viewer behaviors across successive turns", async ({ page }) => {
   await drive(page, "images");
-  await expect(
-    page.getByText("can you mock up a cleaner layout?"),
-  ).toBeVisible();
-
-  // The composer sent the attachment as a data URL; the user row renders it back as
-  // a thumbnail (previously write-only — sent to the agent, never shown to the user).
-  const att = page.locator("img.att-img");
-  await expect(att).toHaveCount(1);
+  await expect(page.getByText("can you mock up a cleaner layout?")).toBeVisible();
+  let att = page.locator("img.att-img").last();
   await expect(att).toBeVisible();
   await expect(att).toHaveAttribute("src", /^data:image\/png;base64,/);
-  // It actually decoded, not just an <img> with a broken src.
-  await expect
-    .poll(() => att.evaluate((i: HTMLImageElement) => i.naturalWidth))
-    .toBeGreaterThan(0);
-});
+  await expect.poll(() => att.evaluate((i: HTMLImageElement) => i.naturalWidth)).toBeGreaterThan(0);
 
-// Flow: a tool's image output is visible without drilling into the collapsed work, and
-// the accompanying text note lives in the collapsible card body.
-test("tool image output: visible without drilling into the collapsed work; text note in the card body", async ({
-  page,
-}) => {
   await drive(page, "images");
-  // The screenshot/mockup tool is pulled out of the collapsible work into the turn's
-  // always-visible slot, and its <img> renders outside the card's expand toggle — so it
-  // shows with NO work-block expand and NO tool-card click. Wait on the <img> itself as
-  // the settle signal (this turn no longer renders a "Worked for Ns" block).
-  const out = page.locator("img.out-img");
+  const out = page.locator("img.out-img").last();
   await expect(out).toBeVisible();
   await expect(out).toHaveAttribute("src", /^data:image\/png;base64,/);
-  await expect
-    .poll(() => out.evaluate((i: HTMLImageElement) => i.naturalWidth))
-    .toBeGreaterThan(0);
-
-  // The accompanying text note still lives in the collapsible card body — reveal it.
-  const card = imageToolCard(page);
+  await expect.poll(() => out.evaluate((i: HTMLImageElement) => i.naturalWidth)).toBeGreaterThan(0);
+  const card = imageToolCard(page).last();
   await card.locator(".head").click();
   await expect(card.getByText("Rendered mockup (160×100 PNG).")).toBeVisible();
-});
 
-// Flow: clicking a sent image opens the full-screen viewer, and Escape dismisses it.
-test("sent image viewer: clicking a sent image opens the full-screen viewer; Escape dismisses", async ({
-  page,
-}) => {
   await drive(page, "images");
-  const att = page.locator("img.att-img");
+  att = page.locator("img.att-img").last();
   await expect(att).toBeVisible();
-
-  // No viewer until the thumbnail is clicked.
   await expect(page.getByTestId("image-lightbox")).toHaveCount(0);
   await att.click();
-
   const lightbox = page.getByTestId("image-lightbox");
   await expect(lightbox).toBeVisible();
-  await expect(lightbox.locator(".stage img")).toHaveAttribute(
-    "src",
-    /^data:image\/png;base64,/,
-  );
-  // Escape dismisses.
+  await expect(lightbox.locator(".stage img")).toHaveAttribute("src", /^data:image\/png;base64,/);
   await page.keyboard.press("Escape");
   await expect(lightbox).toHaveCount(0);
 });
