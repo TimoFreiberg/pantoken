@@ -5,6 +5,11 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawnAsync, isMain } from "./lib/node-compat.js";
 import { buildViaBuck2, type HeadlessBuildResult } from "./lib/headless-build.js";
+import {
+  runCapturedReleaseCommand,
+  runReleaseCommand,
+  type ReleaseCommandExecutor,
+} from "./lib/release-command.js";
 import { HEADLESS_TARGETS, headlessTargetForTriple } from "./desktop/release-constants.js";
 
 export interface ReleaseReadinessOptions {
@@ -15,6 +20,7 @@ export interface ReleaseReadinessOptions {
   runGate?: boolean;
   run?: CommandRunner;
   build?: typeof buildViaBuck2;
+  commandExecutor?: ReleaseCommandExecutor;
 }
 export interface ReleaseReadinessResult { archivePath: string; validatorPath: string; }
 export type CommandRunner = (command: string[], options: { cwd: string; env?: Record<string, string> }) => Promise<void>;
@@ -35,15 +41,13 @@ export function validateReadinessInputs(version: string, buildSha: string, targe
   return selected.targetTriple;
 }
 
-const realRun: CommandRunner = async (command, options) => {
-  const result = await spawnAsync(command, { cwd: options.cwd, env: options.env ? { ...process.env, ...options.env } : undefined, stdout: "inherit", stderr: "inherit" });
-  if ((result.code ?? 1) !== 0) throw new Error(`${command.join(" ")} failed with exit code ${result.code}`);
-};
-
 export async function runReleaseReadiness(options: ReleaseReadinessOptions): Promise<ReleaseReadinessResult> {
   const targetTriple = validateReadinessInputs(options.version, options.buildSha, options.target);
-  const run = options.run ?? realRun;
-  const build = options.build ?? buildViaBuck2;
+  const commandExecutor = options.commandExecutor ?? runCapturedReleaseCommand;
+  const run = options.run ?? ((command, commandOptions) =>
+    runReleaseCommand(command, commandOptions, commandExecutor));
+  const build = options.build ?? ((buildOptions) =>
+    buildViaBuck2({ ...buildOptions, executor: commandExecutor }));
   const target = headlessTargetForTriple(targetTriple);
   const outputDir = join(options.root, "target", "release", "headless");
   // Reuse the normal project test gate for releases. The broader ci-local

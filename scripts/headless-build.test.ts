@@ -14,7 +14,9 @@ import {
   buckConfigCiContents,
   writeBuckConfigCi,
   buildViaBuck2,
+  type HeadlessBuildSpawner,
 } from "./lib/headless-build.js";
+import type { SpawnOptions } from "./lib/node-compat.js";
 import { headlessTargetForTriple } from "./desktop/release-constants.js";
 
 describe("buckConfigCiContents", () => {
@@ -61,6 +63,74 @@ describe("writeBuckConfigCi", () => {
 });
 
 describe("buildViaBuck2", () => {
+  it("uses inherited stderr on the default executor path", async () => {
+    const root = mkdtempSync(join(tmpdir(), "buck2-stdio-"));
+    const calls: SpawnOptions[] = [];
+    const archive = join(root, "archive");
+    const validator = join(root, "validator");
+    writeFileSync(archive, "archive");
+    writeFileSync(validator, "validator");
+    const spawn: HeadlessBuildSpawner = async (_command, options = {}) => {
+      calls.push(options);
+      return {
+        code: 0,
+        stdout: calls.length === 1
+          ? `//:pantoken_headless_unsigned ${archive}\n`
+          : `//server/pantoken-tar-validate:pantoken_tar_validate ${validator}\n`,
+        stderr: "",
+      };
+    };
+    try {
+      await buildViaBuck2({
+        root,
+        version: "0.2.1",
+        buildSha: "0123456789abcdef0123456789abcdef01234567",
+        outputDir: join(root, "target", "release", "headless"),
+        asset: "archive.tar.gz",
+      }, { spawnAsync: spawn });
+      expect(calls).toHaveLength(2);
+      expect(calls.every((options) => options.stdout === "pipe" && options.stderr === "inherit")).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("uses an injected executor for both Buck2 builds and still copies parsed outputs", async () => {
+    const root = mkdtempSync(join(tmpdir(), "buck2-injected-"));
+    const archive = join(root, "archive");
+    const validator = join(root, "validator");
+    writeFileSync(archive, "archive");
+    writeFileSync(validator, "validator");
+    const calls: string[][] = [];
+    try {
+      const result = await buildViaBuck2({
+        root,
+        version: "0.2.1",
+        buildSha: "0123456789abcdef0123456789abcdef01234567",
+        outputDir: join(root, "target", "release", "headless"),
+        asset: "archive.tar.gz",
+        executor: async (command) => {
+          calls.push(command);
+          return {
+            code: 0,
+            stdout: command.at(-1) === "//:pantoken_headless_unsigned"
+              ? `//:pantoken_headless_unsigned ${archive}\n`
+              : `//server/pantoken-tar-validate:pantoken_tar_validate ${validator}\n`,
+            stderr: "captured stderr",
+          };
+        },
+      });
+      expect(calls).toHaveLength(2);
+      expect(calls[0]).toContain("//:pantoken_headless_unsigned");
+      expect(calls[1]).toContain("//server/pantoken-tar-validate:pantoken_tar_validate");
+      expect(existsSync(result.archivePath)).toBe(true);
+      expect(existsSync(result.validatorPath)).toBe(true);
+      expect(statSync(result.validatorPath).mode & 0o111).not.toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("builds both targets with the release config and copies them to the release asset paths", async () => {
     const root = mkdtempSync(join(tmpdir(), "buck2-build-"));
     const fakeBin = mkdtempSync(join(tmpdir(), "buck2-bin-"));

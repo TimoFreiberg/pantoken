@@ -47,6 +47,13 @@ returned archive with the returned trusted tar validator, and extracts/smoke-tes
 that same archive. The API returns `{ archivePath, validatorPath }`, so validation
 cannot accidentally inspect a different artifact.
 
+Readiness child commands capture stdout and stderr on success and print only a
+start status and a stop status with the elapsed duration. If a readiness child
+fails, its captured stdout and stderr are printed after the failed stop status.
+This concise output applies only to readiness child commands; outer release VCS
+and metadata-mutation commands, and standalone artifact builds, keep their
+existing logging.
+
 Omit options only when using a wrapper that supplies explicit values; the release
 CLI derives the next version and captures one immutable `git rev-parse HEAD` SHA
 before readiness. Linux uses

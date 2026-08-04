@@ -4,8 +4,9 @@
 
 import { chmodSync, copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { spawnAsync } from "./node-compat.js";
+import { spawnAsync, type SpawnResult } from "./node-compat.js";
 import { parseBuck2ShowOutput } from "./build-server.js";
+import type { ReleaseCommandExecutor } from "./release-command.js";
 
 /** The [pantoken] config section written to .buckconfig.ci for release builds. */
 export interface BuckConfigCi {
@@ -32,10 +33,18 @@ export function writeBuckConfigCi(root: string, config: BuckConfigCi): string {
   return path;
 }
 
+export type Buck2CommandExecutor = ReleaseCommandExecutor;
+export type HeadlessBuildSpawner = (
+  command: string[],
+  options?: Parameters<typeof spawnAsync>[1],
+) => Promise<SpawnResult>;
+
 async function runBuck2Build(
   root: string,
   target: string,
-  env?: NodeJS.ProcessEnv,
+  env: NodeJS.ProcessEnv | undefined,
+  executor: Buck2CommandExecutor | undefined,
+  spawn: HeadlessBuildSpawner,
 ): Promise<string> {
   const args = [
     "buck2",
@@ -45,12 +54,14 @@ async function runBuck2Build(
     "--show-output",
     target,
   ];
-  const result = await spawnAsync(args, {
-    cwd: root,
-    env,
-    stdout: "pipe",
-    stderr: "inherit",
-  });
+  const result = executor
+    ? await executor(args, { cwd: root, env })
+    : await spawn(args, {
+        cwd: root,
+        env,
+        stdout: "pipe",
+        stderr: "inherit",
+      });
   if (result.code !== 0) {
     throw new Error(`buck2 build of ${target} failed with exit code ${result.code}`);
   }
@@ -79,20 +90,32 @@ export interface HeadlessBuildResult {
   validatorPath: string;
 }
 
-export async function buildViaBuck2(opts: {
-  root: string;
-  version: string;
-  buildSha: string;
-  outputDir: string;
-  asset: string;
-  /** Environment passed only to the Buck2 child processes. */
-  env?: NodeJS.ProcessEnv;
-}): Promise<HeadlessBuildResult> {
-  const { root, version, buildSha, outputDir, asset, env } = opts;
+export async function buildViaBuck2(
+  opts: {
+    root: string;
+    version: string;
+    buildSha: string;
+    outputDir: string;
+    asset: string;
+    /** Environment passed only to the Buck2 child processes. */
+    env?: NodeJS.ProcessEnv;
+    /** Optional capture/timing executor used by release-readiness. */
+    executor?: Buck2CommandExecutor;
+  },
+  dependencies: { spawnAsync?: HeadlessBuildSpawner } = {},
+): Promise<HeadlessBuildResult> {
+  const { root, version, buildSha, outputDir, asset, env, executor } = opts;
+  const spawn = dependencies.spawnAsync ?? spawnAsync;
   mkdirSync(outputDir, { recursive: true });
   writeBuckConfigCi(root, { version, buildSha, releaseBuild: true });
 
-  const archiveOut = await runBuck2Build(root, "//:pantoken_headless_unsigned", env);
+  const archiveOut = await runBuck2Build(
+    root,
+    "//:pantoken_headless_unsigned",
+    env,
+    executor,
+    spawn,
+  );
   const archivePath = join(outputDir, asset);
   copyFileSync(archiveOut, archivePath);
 
@@ -100,6 +123,8 @@ export async function buildViaBuck2(opts: {
     root,
     "//server/pantoken-tar-validate:pantoken_tar_validate",
     env,
+    executor,
+    spawn,
   );
   const validatorPath = join(root, "target", "release", "pantoken-tar-validate");
   copyFileSync(validatorOut, validatorPath);

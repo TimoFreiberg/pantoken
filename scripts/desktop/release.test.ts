@@ -14,4 +14,12 @@ describe("release planning", () => {
     await expect(executeRelease(computeReleasePlan("1.0.0", "1.0.1", "a".repeat(40)), { root: "/nonexistent", runner, readiness: readiness as never })).rejects.toThrow();
     expect(events).toEqual(["jj", "git", "readiness"]);
   });
+
+  it("keeps the outer release module outside the readiness command executor scope", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const source = readFileSync(resolve(import.meta.dirname, "release.ts"), "utf8");
+    expect(source).toContain("runReleaseReadiness");
+    expect(source).not.toMatch(/(?:release-command(?:\.js|\.ts)|runCapturedReleaseCommand|runReleaseCommand|commandExecutor)/);
+  });
 });
