@@ -36,6 +36,8 @@ missing. Targets that don't depend on ring (e.g. `pantoken-protocol`,
 
 The initial boundary is the deterministic `server` Rust libraries, binaries, tests, and unsigned headless archive inputs. Buck2 also builds the server binary consumed by the dev server (`scripts/dev.ts`) and the desktop hub (`scripts/desktop/build-hub.ts`). Buck2 consumes declared frontend outputs only; it does not run Vite, JavaScript tests, or Playwright. It does not package Tauri, sign artifacts, access credentials, deploy, or publish.
 
+Putting `tsc`, `svelte-check`, Vite, Vitest, or Playwright behind a Buck2 `genrule` would not automatically provide caching benefits. A rule that merely invokes pnpm while relying on ambient `node_modules`, PATH, VCS state, or environment is not a reliably cacheable hermetic action. Meaningful cacheability requires a wrapper or native rule to declare stable inputs including the pinned Node and pnpm versions, `pnpm-lock.yaml` and package artifacts, source/configuration files, generated inputs and VCS metadata used for build stamping, a pinned execution platform, and (for Playwright) browser/runtime dependencies; ambient environment must be cleared or explicitly declared. A future Buck2 integration is possible for a specific deterministic output, but only after those inputs and cache invalidation have been demonstrated. Until then, pnpm remains authoritative for JavaScript.
+
 All 5 server crates build successfully under Buck2, including the `pantoken-server` binary (the OpenSSL gap was resolved in Issue #119 via the ece RustCrypto fork and reqwest rustls-tls switch). See the “No OpenSSL policy” decision in `docs/DECISIONS.md`. Cargo and pnpm direct workflows must remain usable.
 
 ## Target conventions
