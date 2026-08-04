@@ -14,24 +14,20 @@
 // scroll follows). It's gated on `e.target === scroller` so content clicks
 // (which target child elements) don't set it. Both are OR'd: either is a
 // user-initiated scroll. The un-pin decision then requires BOTH a
-// user-input signal AND a genuine upward move that has left the 80px bottom zone.
+// user-input signal AND a genuine upward move (`top < prevTop`).
 //
-// WHY `&& top < prevTop && gap >= 80` ON THE UNPIN (not just `userScrolling`): two
-// guards —
-//   1. Jitter: a 10px upward nudge that stays within the bottom zone would otherwise
-//      un-pin, twitchy against the gap-only rule's deliberate 80px tolerance.
-//   2. Session switch: `prevTop` is component-scoped (not per-session), so it's stale
-//      across a switch. The `&& gap >= 80` guard closes the switch-to-a-SHORTER-live-
-//      session case (landing at its bottom clamps `gap < 80` → re-pin regardless of the
-//      stale prevTop). The switch-to-a-TALLER-live-session case is closed in the WIRING
-//      instead: Transcript.svelte's session-restore effect resets `lastScrollTop = 0` at
-//      the switch, so the cross-session comparison can only re-pin or hold, never
-//      spuriously un-pin.
+// WHY the direction check is separate from the input gate:
+//   - A strict downward movement into the bottom zone (`gap < 80`) is enough to re-pin,
+//     regardless of whether the movement came from user input or layout settling.
+//   - An upward movement un-pins only when an input signal is present. It un-pins
+//     immediately, even when the movement remains within the bottom zone, while
+//     programmatic/content-layout movement continues to hold the prior state.
 //
-// Re-pin is movement-based and unambiguous: reaching the bottom zone (`gap < 80`) via
-// any cause → re-pin. Programmatic scrolls that reach the bottom (snapToBottom,
-// ResizeObserver re-assert) correctly re-pin; user scrolls that return to the bottom
-// correctly re-pin.
+// Session switch: `prevTop` is component-scoped (not per-session), so it is stale across
+// a switch. A shorter-session clamp may move upward into the bottom zone, but without an
+// input signal the reducer holds the prior state. The taller-session case is closed in
+// the WIRING: Transcript.svelte resets `lastScrollTop = 0` at the switch, so the
+// cross-session comparison can only re-pin or hold, never spuriously un-pin.
 
 export type PinnedInput = {
   /** Whether the viewport was pinned before this scroll event. */
@@ -50,11 +46,14 @@ export type PinnedInput = {
 
 /** Whether the transcript should stay stuck to the live bottom after a scroll event.
  *
- *  - Re-pin whenever the viewport reaches the bottom zone (from any direction, any cause).
- *  - Un-pin only on a genuine user-input scroll-up that has left the 80px bottom zone
- *    (`userScrolling || pointerDownOnScroller`) AND moved scrollTop upward.
- *  - Otherwise (programmatic scroll, content-shrink, moved down or held but still short
- *    of the bottom) hold the prior pin so the streaming-pin effect keeps following. */
+ *  - Re-pin only after a strict downward movement into the bottom zone (`top > prevTop`
+ *    and `gap < 80`). This is input-independent, so an unpinned reader can scroll back
+ *    down to the live tail.
+ *  - After the existing input gate (`userScrolling || pointerDownOnScroller`), un-pin on
+ *    any strict upward movement (`top < prevTop`), including a movement that remains
+ *    inside the bottom zone.
+ *  - Otherwise hold the prior pin. Stationary events and upward programmatic/content-
+ *    layout movement therefore cannot change the state. */
 export function nextPinned({
   prevPinned,
   prevTop,
@@ -63,7 +62,7 @@ export function nextPinned({
   userScrolling,
   pointerDownOnScroller,
 }: PinnedInput): boolean {
-  if (gap < 80) return true;
-  if ((userScrolling || pointerDownOnScroller) && top < prevTop && gap >= 80) return false;
+  if (top > prevTop && gap < 80) return true;
+  if ((userScrolling || pointerDownOnScroller) && top < prevTop) return false;
   return prevPinned;
 }

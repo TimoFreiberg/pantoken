@@ -359,9 +359,9 @@
   // too (buttons, links). We gate on `e.target === scroller` so only scrollbar
   // drags (which target the scroller element itself, not a child) set the flag.
   // Without this gate, a content click held during a content-shrink clamp-down
-  // (#86 scenario) would false-un-pin — the shrink produces `top < prevTop &&
-  // gap >= 80`, and `pointerDownOnScroller` being true would satisfy the un-pin
-  // condition even though no user scroll occurred. Cleared on pointerup (window,
+  // (#86 scenario) would false-un-pin — the shrink can produce `top < prevTop`, and
+  // `pointerDownOnScroller` being true would satisfy the input gate even though no
+  // user scroll occurred. Cleared on pointerup (window,
   // to catch release outside the scroller), pointerleave, and pointercancel.
   let pointerDownOnScroller = false;
   function onScrollerPointerDown(e: PointerEvent): void {
@@ -377,9 +377,9 @@
   /** Mark scrolling for keyboard scroll keys (PgUp, ↑, Home, Space, etc.).
    *  Bubbles from any focused child of `.scroller` too (e.g. prompt-expand
    *  buttons), but not from the composer textarea (a sibling, outside the
-   *  scroller). The `top < prevTop && gap >= 80` geometry guard in nextPinned
-   *  prevents false un-pins from non-scrolling keypresses (e.g. Space on a
-   *  button that doesn't cause an upward scroll). */
+   *  scroller). The strict `top < prevTop` direction check in nextPinned prevents
+   *  false un-pins from non-scrolling keypresses (e.g. Space on a button that does
+   *  not cause an upward scroll); stationary events preserve the prior pin state. */
   function onScrollerKey(e: KeyboardEvent): void {
     if (
       ["PageUp", "PageDown", "ArrowUp", "ArrowDown", "Home", "End", " "].includes(
@@ -446,11 +446,13 @@
     const gap = h - top - scroller.clientHeight;
     // Input-gated pin (extracted, unit-tested in scroll-follow.test.ts): the viewport
     // un-pins ONLY when a user-input event (wheel, touch, keyboard, scrollbar drag) set
-    // `userScrolling`/`pointerDownOnScroller` AND the scroll moved scrollTop upward past
-    // the 80px bottom zone. Programmatic scrolls (ResizeObserver re-asserts, settleScroll,
-    // content-shrink clamps) never set these flags, so they structurally can't false-un-pin.
-    // Re-pin is movement-based and unambiguous: reaching the bottom zone (gap < 80) via any
-    // cause → re-pin. See scroll-follow.ts for the full rationale.
+    // `userScrolling`/`pointerDownOnScroller` AND the scroll moved strictly upward
+    // (`top < lastScrollTop`), including a small move within the 80px bottom zone.
+    // Programmatic scrolls (ResizeObserver re-asserts, settleScroll, content-shrink
+    // clamps) never set these flags, so they structurally can't false-un-pin. Re-pin is
+    // directional too: only strict downward movement into the bottom zone (`top >
+    // lastScrollTop && gap < 80`) re-pins. Stationary events hold the prior state. See
+    // scroll-follow.ts for the full rationale.
     //
     // During a programmatic scroll window (progScrollUntil), hold the current pin state —
     // don't call nextPinned. This covers find-in-transcript's scrollIntoView (which sets
@@ -563,9 +565,9 @@
     // spuriously un-pin a LIVE session. `lastScrollTop` is component-scoped (not
     // per-session), so without this it would carry the prior (taller) session's scrollTop;
     // switching to a taller live session whose first chase frame lands short (scrollHeight
-    // grows under it on first render) would feed nextPinned a stale-higher prevTop and trip
-    // `top < prevTop && gap >= 80` — un-pinning the live tail, the same stuck-pill symptom
-    // this fix targets. With prevTop=0 the comparison can only re-pin or hold. (A scrolled-
+    // grows under it on first render) would feed nextPinned a stale-higher prevTop and,
+    // if input state leaked across the switch, trip the upward-unpin branch. With
+    // prevTop=0 and the input flags reset, the comparison can only re-pin or hold. (A scrolled-
     // up restore relies on `pinned` being set false explicitly below, not on this branch.)
     // Also reset `userScrolling` — a user-input flag from the prior session shouldn't carry
     // over, and a pending clear-timer could re-set it after the reset.
@@ -667,8 +669,8 @@
   // TranscriptSearch bumps `store.searchScrollN` before scrollIntoView. The user is now
   // reading a match, not following the live tail — un-pin so the streaming-pin effect
   // doesn't yank back to the bottom on the next content delta. Also mark a programmatic
-  // scroll window so the scrollIntoView's animation (which passes through the bottom zone
-  // where gap < 80 would re-pin) holds the un-pinned state.
+  // scroll window so the scrollIntoView animation's downward movement into the bottom
+  // zone cannot re-pin the explicitly un-pinned state.
   let lastSearchScrollN = store.searchScrollN;
   $effect(() => {
     const n = store.searchScrollN;
@@ -698,8 +700,8 @@
    *  `userScrolling` so the `progScrollUntil` guard in onScroll holds the
    *  un-pinned state for the full smooth-scroll window — otherwise, when the
    *  scroller has focus, `onScrollerKey` fires first and sets `userScrolling`,
-   *  bypassing that guard; `nextPinned` then sees `gap < 80` (starting from the
-   *  bottom) and re-pins, yanking back down. */
+   *  bypassing that guard; nextPinned would then treat the programmatic movement
+   *  as input-gated and could change the explicit top-jump state. */
   function scrollToTop(): void {
     if (!scroller) return;
     // Same supersede as scrollToBottom: an active nav window must not re-assert

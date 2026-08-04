@@ -315,12 +315,6 @@ are REAL but **provisional** — they embed local `/Users/timo/...` paths from t
 - [ ] code-block language label
 - [ ] "New since you left" divider (marker at first message while unfocused)
 - [ ] Inline image rendering (markdown image / screenshot path → inline)
-- [ ] **Directional re-pin (#159):** the 80px bottom-zone re-pin (`nextPinned`,
-      `client/src/lib/scroll-follow.ts`) fires on ANY movement into the zone —
-      including a prompt-nav ↑ whose jump lands short of a settled row. Deferred
-      follow-up: re-pin only after downward movement. Explicitly out of scope for
-      the prompt-nav first-step fix (2026-08-03; see that commit's description).
-
 ### Sessions & navigation
 
 - [ ] Command palette (⌘K) — fuzzy switcher over sessions + actions

@@ -21,19 +21,45 @@ const BASE = {
 } as const;
 
 describe("nextPinned", () => {
-  test("reaches the bottom zone from any direction → pinned", () => {
-    // Scroll DOWN to the bottom (common: a reader scrolling back down).
+  test("strict downward movement into the bottom zone → re-pins", () => {
+    // A reader who is scrolled up can return to the live tail without needing a
+    // separate explicit bottom action.
     expect(
       nextPinned({ ...BASE, prevPinned: false, prevTop: 400, top: 1000, gap: BOTTOM }),
     ).toBe(true);
-    // Already pinned, a chase frame re-asserts the bottom.
+    // The re-pin is input-independent, including while a user-scroll flag is active.
     expect(
-      nextPinned({ ...BASE, prevPinned: true, prevTop: 1000, top: 1000, gap: BOTTOM }),
+      nextPinned({
+        ...BASE,
+        prevPinned: false,
+        userScrolling: true,
+        prevTop: 990,
+        top: 1000,
+        gap: BOTTOM,
+      }),
     ).toBe(true);
-    // Even an upward move that lands back in the bottom zone re-pins.
+  });
+
+  test("stationary or upward movement in the bottom zone does not auto-pin", () => {
     expect(
-      nextPinned({ ...BASE, prevPinned: false, prevTop: 1050, top: 1010, gap: BOTTOM }),
+      nextPinned({ ...BASE, prevPinned: false, prevTop: 1000, top: 1000, gap: BOTTOM }),
+    ).toBe(false);
+    expect(
+      nextPinned({ ...BASE, userScrolling: true, prevTop: 1000, top: 1000, gap: BOTTOM }),
     ).toBe(true);
+    expect(
+      nextPinned({
+        ...BASE,
+        prevPinned: false,
+        userScrolling: true,
+        prevTop: 1050,
+        top: 1010,
+        gap: BOTTOM,
+      }),
+    ).toBe(false);
+    expect(
+      nextPinned({ ...BASE, prevPinned: false, prevTop: 400, top: 1000, gap: 80 }),
+    ).toBe(false);
   });
 
   test("content grew under a pinned viewport (gap opens, scrollTop unchanged) → STAYS pinned", () => {
@@ -50,9 +76,9 @@ describe("nextPinned", () => {
     expect(nextPinned({ ...BASE, prevTop: 1000, top: 1005, gap: SHORT })).toBe(true);
   });
 
-  test("a genuine user scroll-up (userScrolling) that leaves the bottom zone → un-pins", () => {
+  test("a genuine user scroll-up (userScrolling) → un-pins immediately", () => {
     // THE CORE NEW BEHAVIOR: userScrolling is true (a wheel/touch/keyboard event
-    // fired), scrollTop decreased, gap ≥ 80 → un-pin.
+    // fired) and scrollTop decreased, so the pin turns off even inside the bottom zone.
     expect(
       nextPinned({ ...BASE, userScrolling: true, prevTop: 1000, top: 400, gap: SHORT }),
     ).toBe(false);
@@ -69,7 +95,7 @@ describe("nextPinned", () => {
     ).toBe(false);
   });
 
-  test("userScrolling: false (programmatic scroll) + top < prevTop + gap ≥ 80 → STAYS pinned", () => {
+  test("userScrolling: false (programmatic scroll) + top < prevTop → STAYS pinned", () => {
     // AC.2: a programmatic scroll (ResizeObserver re-assert, content-shrink clamp,
     // settleScroll) lowers scrollTop but never sets userScrolling → the input gate
     // holds the pin. This is the structural guarantee that replaces the old
@@ -87,7 +113,7 @@ describe("nextPinned", () => {
     ).toBe(true);
   });
 
-  test("pointerDownOnScroller: true (scrollbar drag) + top < prevTop + gap ≥ 80 → un-pins", () => {
+  test("pointerDownOnScroller: true (scrollbar drag) + top < prevTop → un-pins", () => {
     // Scrollbar drag: no wheel/touch event fires, but the pointer is down on the
     // scroller and a scroll followed. Treated as user-initiated → un-pin.
     expect(
@@ -102,10 +128,9 @@ describe("nextPinned", () => {
     ).toBe(false);
   });
 
-  test("a jitter within the 80px bottom zone does NOT un-pin", () => {
-    // A 10px upward nudge while still in the bottom zone: the `&& gap >= 80` guard on
-    // the unpin keeps us pinned. Without it, a bare `top < prevTop` rule would twitch
-    // off.
+  test("a small input-gated upward nudge within the bottom zone → un-pins", () => {
+    // Proximity does not protect a pinned viewport from an actual upward user movement,
+    // however small.
     expect(
       nextPinned({
         ...BASE,
@@ -114,6 +139,13 @@ describe("nextPinned", () => {
         top: 990,
         gap: BOTTOM,
       }),
+    ).toBe(false);
+  });
+
+  test("an upward movement within the bottom zone without input → holds", () => {
+    // Layout changes and content-shrink clamps still cannot false-unpin.
+    expect(
+      nextPinned({ ...BASE, prevTop: 1000, top: 990, gap: BOTTOM }),
     ).toBe(true);
   });
 
@@ -121,17 +153,17 @@ describe("nextPinned", () => {
     // prevTop is component-scoped, so a switch from a tall scrolled-down session
     // (prevTop ≈ 5000) to a shorter live session whose bottom sits at top ≈ 700 fires a
     // scroll event with top < prevTop. But the DOM swap clamps scrollTop to the new max,
-    // so the viewport landed AT the new bottom (gap < 80) → re-pin. (Transcript.svelte's
-    // restore effect ALSO resets lastScrollTop to 0 at the switch — so prevTop would
-    // actually be 0 here; this case still passes with the stale value thanks to gap < 80.)
+    // so the viewport landed AT the new bottom (gap < 80). With no input signal, the
+    // reducer preserves the prior pinned state despite the stale comparison. The
+    // Transcript.svelte restore effect also resets lastScrollTop = 0 at every switch.
     expect(
       nextPinned({ ...BASE, prevTop: 5000, top: 700, gap: BOTTOM }),
     ).toBe(true);
   });
 
   test("session switch to a TALLER live session, first chase frame lands short → STAYS pinned", () => {
-    // The case the `&& gap >= 80` guard does NOT close: switching to a taller live
-    // session whose first chase frame lands short, with a stale-higher prevTop carried
+    // The directional reducer does not close this case by itself: switching to a taller
+    // live session whose first chase frame lands short, with a stale-higher prevTop carried
     // from the prior session. The fix is in the WIRING: Transcript.svelte's restore
     // effect resets lastScrollTop = 0 at the switch, so prevTop = 0 here, and
     // `top < 0` is impossible → the frame holds pinned. This test pins the wiring
