@@ -480,13 +480,17 @@ jobs:
         run: just test-inventory-check-rs
 
   # Tag pushes only (scripts/desktop/release.ts creates them): prepare the signed
-  # desktop and headless release bundle in parallel with the gates, then publish only
-  # after those gates pass. Releases live in TimoFreiberg/pantoken.
+  # desktop and headless release bundle after the Linux artifact handoff, in parallel
+  # with the gates, then publish only after those gates pass. Releases live in
+  # TimoFreiberg/pantoken.
   # The minisign key comes from the TAURI_SIGNING_PRIVATE_KEY Actions secret
   # (one-time setup: gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/pantoken-shell.key).
   release-prepare:
     name: release — prepare signed desktop + headless artifacts
     if: startsWith(github.ref, 'refs/tags/v')
+    # The desktop build embeds the exact signed Linux archive digest, so the
+    # producer must finish before this macOS packaging job starts.
+    needs: release-prepare-linux
     runs-on: macos-14 # arm64 → the darwin-aarch64 artifact installed apps expect
     # 50m: the job stacks the Tauri cargo release build with a full cold
     # optimized Buck2 compile on the first tag run; later runs warm via the
@@ -524,6 +528,20 @@ jobs:
         run: brew install minisign
       - name: Check minisign
         run: minisign -v
+      # The Linux producer uploads the signed archive, signature, and its
+      # per-target metadata. Stage them at the exact directory desktop/build.rs
+      # hashes so a missing handoff cannot silently embed an all-zero digest.
+      - name: Download Linux release artifacts for desktop digest
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-release-artifacts-linux
+          path: target/release/headless
+      - name: Preflight staged Linux release artifacts
+        run: |
+          set -e
+          test -f target/release/headless/pantoken-headless-linux-x86_64.tar.gz
+          test -f target/release/headless/pantoken-headless-linux-x86_64.tar.gz.sig
+          test -f target/release/headless/release-metadata-linux.json
       # Tailscale connection for the Buck2 remote cache (tag pushes; trusted).
       # The buck2 gate job populates the release-config entries on non-release
       # main pushes and tags (PRs skip the release-config build); the
@@ -588,15 +606,11 @@ jobs:
           [build]
           execution_platforms = toolchains//platforms:remote_cache
           EOF
-      - name: Build signed desktop release artifacts
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-          PANTOKEN_BUILD_SHA: ${{ github.sha }}
-        run: bash scripts/ci/retry-transient.sh 'pnpm exec tsx scripts/desktop/publish.ts --dry-run --repo TimoFreiberg/pantoken --tag-must-match "${{ github.ref_name }}"'
       # Headless release artifact via Buck2: build.ts --builder buck2 writes
       # .buckconfig.ci (version/build_sha/release_build=1), builds the archive
       # + tar validator, and continues with signing + verification + metadata.
+      # The staged Linux archive is available for desktop/build.rs; the Linux
+      # metadata remains separate and is merged only in the publish job.
       # Secrets never enter cacheable Buck2 actions (docs/buck2-policy.md).
       - name: Build headless release artifact
         env:
@@ -606,6 +620,25 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_TEXT: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_TEXT }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: bash scripts/ci/retry-transient.sh 'pnpm exec tsx scripts/headless/build.ts --builder buck2 --tag "${{ github.ref_name }}"'
+      # Package desktop only after both headless archives exist: desktop/build.rs
+      # hashes the staged signed Linux archive into the provisioning manifest.
+      - name: Build signed desktop release artifacts
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          PANTOKEN_BUILD_SHA: ${{ github.sha }}
+        run: bash scripts/ci/retry-transient.sh 'pnpm exec tsx scripts/desktop/publish.ts --dry-run --repo TimoFreiberg/pantoken --tag-must-match "${{ github.ref_name }}"'
+      # build.ts intentionally does not rebuild or merge the separately staged
+      # Linux metadata here. Add hashes for the already-built desktop files while
+      # preserving the macOS headless metadata for the final merge in publish.
+      - name: Refresh macOS release metadata with desktop assets
+        run: pnpm exec tsx scripts/headless/refresh-metadata.ts target/release/headless/release-metadata.json target/release/bundle/macos
+      # This release-only test observes the compiled manifest and fails before
+      # publication if the embedded Linux digest is still the zero placeholder.
+      - name: Verify embedded Linux digest
+        env:
+          PANTOKEN_RELEASE_BUILD: "1"
+        run: cargo test --locked -p pantoken-desktop embedded_manifest_contains_real_linux_digest
       # Extra hermetic gate: run the archive sh_test against the release-config
       # Buck2 archive (validate-archive-rs-ci passes --config-file .buckconfig.ci,
       # so the test validates the archive built above, not a dev-config one).
@@ -643,8 +676,8 @@ jobs:
 
   # Build + smoke-test the Linux x86_64 headless artifact on a Linux runner.
   # The binary must be compiled natively (no cross-compilation) so the smoke
-  # test can actually execute it. This job runs in parallel with the macOS
-  # release-prepare and the gate jobs.
+  # test can actually execute it. This producer runs in parallel with the gate
+  # jobs, then release-prepare waits for its signed artifact before packaging.
   release-prepare-linux:
     name: release — prepare Linux x86_64 headless artifact
     if: startsWith(github.ref, 'refs/tags/v')

@@ -166,4 +166,119 @@ describe("ci.yml release path (Buck2-authoritative)", () => {
       ),
     ).toContain("retry-transient.sh");
   });
+
+  it("release-prepare waits for Linux and preflights the staged signed artifact", () => {
+    const block = jobBlock("release-prepare");
+    expect(block).toMatch(/needs:\s*release-prepare-linux/);
+
+    const download = stepBlock(block, "Download Linux release artifacts for desktop digest");
+    expect(download).toContain("actions/download-artifact@v4");
+    expect(download).toContain("name: signed-release-artifacts-linux");
+    expect(download).toContain("path: target/release/headless");
+
+    const preflight = stepBlock(block, "Preflight staged Linux release artifacts");
+    for (const path of [
+      "target/release/headless/pantoken-headless-linux-x86_64.tar.gz",
+      "target/release/headless/pantoken-headless-linux-x86_64.tar.gz.sig",
+      "target/release/headless/release-metadata-linux.json",
+    ]) {
+      expect(preflight).toContain(`test -f ${path}`);
+    }
+    const downloadStart = block.indexOf("      - name: Download Linux release artifacts for desktop digest");
+    const preflightStart = block.indexOf("      - name: Preflight staged Linux release artifacts");
+    const nextStepAfterDownload = block.indexOf("\n      - ", downloadStart + 1);
+    expect(downloadStart).toBeGreaterThan(-1);
+    expect(nextStepAfterDownload + 1).toBe(preflightStart);
+  });
+
+  it("builds both headless targets before desktop packaging and verifies the embedded digest", () => {
+    const block = jobBlock("release-prepare");
+    const downloadIdx = block.indexOf("Download Linux release artifacts for desktop digest");
+    const preflightIdx = block.indexOf("Preflight staged Linux release artifacts");
+    const headlessIdx = block.indexOf("Build headless release artifact");
+    const desktopIdx = block.indexOf("Build signed desktop release artifacts");
+    const refreshIdx = block.indexOf("Refresh macOS release metadata with desktop assets");
+    const verifyIdx = block.indexOf("Verify embedded Linux digest");
+    const assembleIdx = block.indexOf("Assemble retained release bundle");
+    const uploadIdx = block.indexOf("Upload signed release artifacts");
+
+    expect(downloadIdx).toBeGreaterThan(-1);
+    expect(preflightIdx).toBeGreaterThan(downloadIdx);
+    expect(headlessIdx).toBeGreaterThan(preflightIdx);
+    expect(desktopIdx).toBeGreaterThan(headlessIdx);
+    expect(refreshIdx).toBeGreaterThan(desktopIdx);
+    expect(verifyIdx).toBeGreaterThan(refreshIdx);
+    expect(assembleIdx).toBeGreaterThan(refreshIdx);
+    expect(assembleIdx).toBeGreaterThan(verifyIdx);
+    expect(uploadIdx).toBeGreaterThan(assembleIdx);
+
+    const refresh = stepBlock(block, "Refresh macOS release metadata with desktop assets");
+    expect(refresh).toContain("scripts/headless/refresh-metadata.ts");
+    expect(refresh).toContain("target/release/headless/release-metadata.json");
+    expect(refresh).toContain("target/release/bundle/macos");
+
+    const verify = stepBlock(block, "Verify embedded Linux digest");
+    expect(verify).toContain('PANTOKEN_RELEASE_BUILD: "1"');
+    expect(verify).toContain("cargo test --locked -p pantoken-desktop embedded_manifest_contains_real_linux_digest");
+  });
+
+  it("retains release validation, signing, smoke-test, and artifact upload contracts", () => {
+    const block = jobBlock("release-prepare");
+    expect(stepBlock(block, "Build signed desktop release artifacts")).toMatch(
+      /TAURI_SIGNING_PRIVATE_KEY:.*PANTOKEN_BUILD_SHA:/s,
+    );
+    expect(stepBlock(block, "Build headless release artifact")).toContain(
+      "TAURI_SIGNING_PRIVATE_KEY_TEXT",
+    );
+    expect(stepBlock(block, "Validate Buck2-built archive (release config)")).toContain(
+      "just validate-archive-rs-ci",
+    );
+    expect(stepBlock(block, "Install trusted tar validator for preparation")).toContain(
+      "test -x target/release/pantoken-tar-validate",
+    );
+    expect(stepBlock(block, "Validate headless artifact")).toContain(
+      "pantoken-headless-macos-aarch64.tar.gz",
+    );
+    expect(stepBlock(block, "Smoke-test compiled headless artifact")).toMatch(
+      /tar -xzf target\/release\/headless\/pantoken-headless-macos-aarch64\.tar\.gz[\s\S]*smoke-test\.ts/,
+    );
+    const assemble = stepBlock(block, "Assemble retained release bundle");
+    for (const path of [
+      "Pantoken.app.tar.gz",
+      "Pantoken.app.tar.gz.sig",
+      "latest.json",
+      "pantoken-headless-macos-aarch64.tar.gz",
+      "pantoken-headless-macos-aarch64.tar.gz.sig",
+      "release-metadata.json",
+    ]) {
+      expect(assemble).toContain(path);
+    }
+    const upload = stepBlock(block, "Upload signed release artifacts");
+    expect(upload).toContain("name: signed-release-artifacts-macos");
+    expect(upload).toContain("path: target/release/release-bundle");
+  });
+
+  it("publishes refreshed macOS metadata merged with the Linux metadata", () => {
+    const block = jobBlock("release");
+    const downloadIdx = block.indexOf("Download Linux release artifacts");
+    const mergeIdx = block.indexOf("Merge Linux artifacts into release bundle");
+    const merge = stepBlock(block, "Merge Linux artifacts into release bundle");
+    expect(downloadIdx).toBeGreaterThan(-1);
+    expect(mergeIdx).toBeGreaterThan(downloadIdx);
+    expect(merge).toContain("scripts/headless/merge-metadata.ts");
+    expect(merge).toContain("target/release/release-bundle/release-metadata.json");
+    expect(merge).toContain("target/release/release-bundle-linux/release-metadata-linux.json");
+    expect(merge.indexOf("release-metadata.json")).toBeLessThan(
+      merge.indexOf("release-metadata-linux.json"),
+    );
+  });
+
+  it("documents the cross-runner handoff and headless-before-desktop ordering", () => {
+    const readme = readFileSync(resolve(import.meta.dirname, "../desktop/README.md"), "utf8");
+    const publishing = readme.slice(readme.indexOf("## Publishing a release"));
+    expect(publishing).toContain("release-prepare-linux");
+    expect(publishing).toMatch(/depends on that job\s+completing/);
+    expect(publishing).toContain("target/release/headless");
+    expect(publishing).toContain("macOS headless artifact before the desktop");
+  });
 });

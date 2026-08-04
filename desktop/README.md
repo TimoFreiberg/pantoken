@@ -205,12 +205,18 @@ just release                                # --patch (default), --minor, --majo
 
 It bumps the version (tauri.conf.json + Cargo.toml + lock), commits `Release vX.Y.Z`,
 tags it (via the colocated `.git` — jj can't create tags), moves `main`, and pushes.
-The tag triggers ci.yml's `release-prepare` job, which builds signed on a macOS
-runner (headless artifacts via Buck2 — `build.ts --builder buck2` in release
-mode — desktop via Tauri/Cargo) while the web + desktop gates run; once those
-gates pass, `release` publishes the prepared artifacts via `publish.ts`. Running
-apps pick the release up within a minute. One-time setup: the minisign key as an
-Actions secret —
+The tag triggers ci.yml's `release-prepare-linux` job for the signed Linux
+x86_64 headless artifact. The macOS `release-prepare` job depends on that job
+completing, stages its archive at `target/release/headless`, and builds the
+macOS headless artifact before the desktop Tauri/Cargo package. This ordering is
+load-bearing: `desktop/build.rs` hashes the staged Linux archive into the SSH
+provisioning manifest instead of embedding a zero placeholder. The macOS job
+then refreshes desktop hashes without rebuilding either headless artifact; the
+publish job merges the retained macOS metadata with the untouched Linux metadata.
+The web + desktop gates run alongside preparation, and once those gates pass,
+`release` publishes the prepared artifacts via `publish.ts`. Running apps pick
+the release up within a minute. One-time setup: the minisign key as an Actions
+secret —
 
 ```bash
 gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/pantoken-shell.key
