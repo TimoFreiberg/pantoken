@@ -227,6 +227,18 @@ pub fn resolve_server_binary_with_paths(
     }
 }
 
+/// Return inherited XDG variables for the child runtime without mutating or
+/// consulting process-global state. The production wrapper supplies
+/// `std::env::var_os`; tests can inject an isolated lookup map.
+pub fn inherited_xdg_assignments(
+    lookup: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> Vec<(String, std::ffi::OsString)> {
+    ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"]
+        .into_iter()
+        .filter_map(|key| lookup(key).map(|value| (key.to_string(), value)))
+        .collect()
+}
+
 pub fn resolve_server_binary() -> std::io::Result<PathBuf> {
     let exe =
         std::env::current_exe().map_err(|e| std::io::Error::other(format!("current_exe: {e}")))?;
@@ -320,13 +332,11 @@ async fn connect_with_bootstrap(root: &Path, socket_path: &Path) -> std::io::Res
     if let Ok(bin) = std::env::var("PANTOKEN_POLYTOKEN_BIN") {
         cmd.env("PANTOKEN_POLYTOKEN_BIN", bin);
     }
-    // Phase 3: XDG isolation env vars (set by the desktop provisioning layer
-    // when the polytoken is Pantoken-managed). These are inherited from the
-    // stdio-proxy process's environment (set on the SSH command by the desktop).
-    for var in ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"] {
-        if let Ok(val) = std::env::var(var) {
-            cmd.env(var, val);
-        }
+    // Preserve XDG variables inherited from the remote user's environment at
+    // the stdio-proxy/runtime boundary. This is environment propagation, not
+    // profile-generated isolation; the profile path never sets these values.
+    for (key, value) in inherited_xdg_assignments(|var| std::env::var_os(var)) {
+        cmd.env(key, value);
     }
     cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::null());
@@ -574,7 +584,7 @@ pub fn assert_no_public_tcp_listener() {
 
 #[cfg(test)]
 mod resolver_tests {
-    use super::resolve_server_binary_with_paths;
+    use super::{inherited_xdg_assignments, resolve_server_binary_with_paths};
     use std::ffi::OsString;
     use std::path::PathBuf;
 
@@ -619,6 +629,24 @@ mod resolver_tests {
         .unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
         assert!(error.to_string().contains("PANTOKEN_SERVER_BIN"));
+    }
+
+    #[test]
+    fn runtime_forwards_inherited_xdg_variables() {
+        let values = std::collections::HashMap::from([
+            ("XDG_CONFIG_HOME", OsString::from("/tmp/config")),
+            ("XDG_DATA_HOME", OsString::from("/tmp/data")),
+            ("XDG_CACHE_HOME", OsString::from("/tmp/cache")),
+        ]);
+        let assignments = inherited_xdg_assignments(|key| values.get(key).cloned());
+        assert_eq!(
+            assignments,
+            vec![
+                ("XDG_CONFIG_HOME".into(), OsString::from("/tmp/config")),
+                ("XDG_DATA_HOME".into(), OsString::from("/tmp/data")),
+                ("XDG_CACHE_HOME".into(), OsString::from("/tmp/cache")),
+            ]
+        );
     }
 
     #[test]

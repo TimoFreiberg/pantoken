@@ -501,6 +501,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn docker_executor_spawn_proxy_command_has_no_xdg_assignments() {
+        let transport = Arc::new(FakeSshTransport::new(FakeScenario::healthy()));
+        let executor = DockerExecutor::new(transport.clone(), command(), target());
+        executor
+            .spawn_proxy(
+                "/opt/pantoken-server".into(),
+                vec![("PANTOKEN_TEST_ENV".into(), "preserved".into())],
+            )
+            .await
+            .expect("spawn proxy");
+        let commands = transport.proxy_commands();
+        let command = commands.last().expect("proxy command captured");
+        let raw = command
+            .raw_remote_command
+            .as_deref()
+            .expect("raw Docker command");
+        assert!(raw.contains("--env PANTOKEN_TEST_ENV=preserved"));
+        for key in ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"] {
+            assert!(!raw.contains(key), "Docker proxy must not set {key}: {raw}");
+        }
+    }
+
+    #[tokio::test]
     async fn docker_upload_targets_container_only_and_preserves_bytes() {
         let transport = Arc::new(FakeSshTransport::new(FakeScenario::healthy()));
         let executor = DockerExecutor::new(transport.clone(), command(), target());

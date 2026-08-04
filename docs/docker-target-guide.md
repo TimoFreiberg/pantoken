@@ -19,7 +19,7 @@ Dev server (SSH host)
 Docker container (Linux x86_64)
   ├── pantoken-server (remote runtime, stdio-proxy mode)
   ├── polytoken daemon (managed or existing)
-  └── Pantoken data (releases, XDG, sessions, logs)
+  └── Pantoken data (releases, sessions, logs)
 ```
 
 Pantoken's SSH connection to the server is separate from execution inside the
@@ -199,7 +199,6 @@ To remove Pantoken's footprint from a container:
    e.g. `/var/lib/pantoken`). This removes:
    - Downloaded Pantoken helper releases
    - Managed polytoken binaries (if installed by Pantoken)
-   - Isolated XDG data, config, and cache
    - Session state and logs
 2. Delete the Pantoken profile from the Computers settings.
 

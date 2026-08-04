@@ -10,7 +10,9 @@ import {
   normalizeError,
   toValidationDraft,
   draftToExecutionTargetProfile,
+  normalizeComputerSetupDraft,
 } from "./profile-form.js";
+import { profileEditor } from "./profile-editor.svelte.js";
 import type { RemoteProfile } from "./hosts/types.js";
 
 function baseDraft(overrides: Partial<ProfileFormDraft> = {}): ProfileFormDraft {
@@ -141,7 +143,6 @@ function baseSetupDraft(overrides: Partial<ComputerSetupDraft> = {}): ComputerSe
     polytokenPolicy: "requireExisting",
     serverPath: "",
     remoteRootOverride: "",
-    xdgMode: "isolated",
     containerName: "",
     containerUser: "",
     containerWorkdir: "",
@@ -157,7 +158,6 @@ function makeHostProfile(overrides: Partial<RemoteProfile> = {}): RemoteProfile 
     sshDestination: "user@host",
     port: 22,
     polytokenPolicy: "requireExisting",
-    xdgMode: "isolated",
     executionTarget: { kind: "host" },
     riskAcknowledgements: {},
     ...overrides,
@@ -171,7 +171,6 @@ function makeDockerProfile(overrides: Partial<RemoteProfile> = {}): RemoteProfil
     sshDestination: "user@host",
     port: 2222,
     polytokenPolicy: "offerInstall",
-    xdgMode: "shared",
     executionTarget: {
       kind: "dockerContainer",
       containerName: "my-container",
@@ -190,7 +189,6 @@ describe("defaultDraft", () => {
     expect(draft.executionTarget).toBe("host");
     expect(draft.port).toBe("22");
     expect(draft.polytokenPolicy).toBe("requireExisting");
-    expect(draft.xdgMode).toBe("isolated");
     expect(draft.name).toBe("");
   });
 
@@ -228,7 +226,6 @@ describe("draftFromProfile", () => {
     expect(draft.pantokenRoot).toBe("/root/.local/share/pantoken");
     expect(draft.port).toBe("2222");
     expect(draft.polytokenPolicy).toBe("offerInstall");
-    expect(draft.xdgMode).toBe("shared");
   });
 
   test("port defaults to 22 when absent", () => {
@@ -278,10 +275,10 @@ describe("isDirty", () => {
     expect(isDirty(baseline, current)).toBe(true);
   });
 
-  test("changing xdgMode → dirty", () => {
+  test("unchanged reduced draft remains clean", () => {
     const baseline = baseSetupDraft();
-    const current = { ...baseline, xdgMode: "shared" as const };
-    expect(isDirty(baseline, current)).toBe(true);
+    const current = structuredClone(baseline);
+    expect(isDirty(baseline, current)).toBe(false);
   });
 
   test("changing remoteRootOverride → dirty", () => {
@@ -393,6 +390,49 @@ describe("normalizeError", () => {
   test("number → summary is string representation", () => {
     const result = normalizeError(42, "connect");
     expect(result.summary).toBe("42");
+  });
+});
+
+describe("normalizeComputerSetupDraft", () => {
+  const supported = baseSetupDraft({
+    name: "Legacy server",
+    sshDestination: "user@example.com",
+    polytokenPolicy: "offerInstall",
+    remoteRootOverride: "/custom/root",
+    serverPath: "/opt/pantoken-server",
+  });
+
+  test("rejects malformed persisted drafts", () => {
+    expect(normalizeComputerSetupDraft({ ...supported, port: 22 })).toBeNull();
+    expect(normalizeComputerSetupDraft(null)).toBeNull();
+  });
+});
+
+describe("profile editor draft persistence", () => {
+  test("legacy_draft_keys_are_dropped_on_persist", () => {
+    for (const legacyKey of ["xdgMode", "xdg_mode"] as const) {
+      localStorage.clear();
+      const supported = baseSetupDraft({
+        name: "Persisted server",
+        sshDestination: "user@example.com",
+        remoteRootOverride: "/custom/root",
+        serverPath: "/opt/pantoken-server",
+      });
+      localStorage.setItem(
+        "pantoken.computerSetupDraft",
+        JSON.stringify({ ...supported, [legacyKey]: "isolated" }),
+      );
+      const loaded = profileEditor.loadDraftFromStorage();
+      expect(loaded).toEqual(supported);
+      profileEditor.draft = loaded;
+      profileEditor.persistDraft();
+      const rewritten = JSON.parse(localStorage.getItem("pantoken.computerSetupDraft")!);
+      expect(rewritten).toEqual(supported);
+      expect(rewritten).not.toHaveProperty("xdgMode");
+      expect(rewritten).not.toHaveProperty("xdg_mode");
+    }
+    profileEditor.draft = null;
+    localStorage.clear();
   });
 });
 

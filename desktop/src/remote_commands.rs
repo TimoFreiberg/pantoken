@@ -1134,7 +1134,7 @@ mod tests {
     /// Build a test AppState with a temp data dir + two saved profiles.
     fn test_app_state_two_profiles() -> AppState {
         use crate::config::PantokenConfig;
-        use crate::remote_profile::{PolytokenPolicy, RemoteProfile, XdgMode};
+        use crate::remote_profile::{PolytokenPolicy, RemoteProfile};
 
         let dir = std::env::temp_dir().join(format!(
             "pantoken-test-{}",
@@ -1163,7 +1163,6 @@ mod tests {
                     polytoken_policy: PolytokenPolicy::RequireExisting,
                     remote_root_override: Some("/tmp/pantoken-a".into()),
                     server_path: None,
-                    xdg_mode: XdgMode::default(),
                     execution_target: crate::remote_profile::ExecutionTargetProfile::default(),
                     risk_acknowledgements: crate::remote_profile::RiskAcknowledgements::default(),
                 },
@@ -1175,7 +1174,6 @@ mod tests {
                     polytoken_policy: PolytokenPolicy::RequireExisting,
                     remote_root_override: Some("/tmp/pantoken-b".into()),
                     server_path: None,
-                    xdg_mode: XdgMode::default(),
                     execution_target: crate::remote_profile::ExecutionTargetProfile::default(),
                     risk_acknowledgements: crate::remote_profile::RiskAcknowledgements::default(),
                 },
@@ -1569,7 +1567,6 @@ mod tests {
             polytoken_policy: PolytokenPolicy::RequireExisting,
             remote_root_override: Some("/tmp/pantoken-test".into()),
             server_path: None,
-            xdg_mode: crate::remote_profile::XdgMode::default(),
             execution_target: crate::remote_profile::ExecutionTargetProfile::default(),
             risk_acknowledgements: crate::remote_profile::RiskAcknowledgements::default(),
         };
@@ -1615,7 +1612,6 @@ mod tests {
             polytoken_policy: PolytokenPolicy::RequireExisting,
             remote_root_override: Some("/tmp/pantoken-test".into()),
             server_path: None,
-            xdg_mode: crate::remote_profile::XdgMode::default(),
             execution_target: crate::remote_profile::ExecutionTargetProfile::default(),
             risk_acknowledgements: crate::remote_profile::RiskAcknowledgements::default(),
         };
@@ -1662,7 +1658,6 @@ mod tests {
             polytoken_policy: PolytokenPolicy::RequireExisting,
             remote_root_override: Some("/tmp/pantoken-test".into()),
             server_path: None,
-            xdg_mode: crate::remote_profile::XdgMode::default(),
             execution_target: crate::remote_profile::ExecutionTargetProfile::default(),
             risk_acknowledgements: crate::remote_profile::RiskAcknowledgements::default(),
         };
@@ -1711,7 +1706,6 @@ mod tests {
             polytoken_policy: PolytokenPolicy::RequireExisting,
             remote_root_override: Some("/tmp/pantoken-test".into()),
             server_path: None,
-            xdg_mode: crate::remote_profile::XdgMode::default(),
             execution_target: crate::remote_profile::ExecutionTargetProfile::default(),
             risk_acknowledgements: crate::remote_profile::RiskAcknowledgements::default(),
         };
@@ -1780,7 +1774,6 @@ mod tests {
             polytoken_policy: PolytokenPolicy::OfferInstall,
             remote_root_override: Some("/tmp/pantoken-test".into()),
             server_path: None,
-            xdg_mode: crate::remote_profile::XdgMode::default(),
             execution_target: crate::remote_profile::ExecutionTargetProfile::default(),
             risk_acknowledgements: crate::remote_profile::RiskAcknowledgements::default(),
         };
@@ -1858,7 +1851,6 @@ mod tests {
             polytoken_policy: PolytokenPolicy::RequireExisting,
             remote_root_override: Some("/tmp/pantoken-test".into()),
             server_path: None,
-            xdg_mode: crate::remote_profile::XdgMode::default(),
             execution_target: crate::remote_profile::ExecutionTargetProfile::default(),
             risk_acknowledgements: crate::remote_profile::RiskAcknowledgements::default(),
         };

@@ -38,7 +38,6 @@ function profile(overrides: Partial<RemoteProfile> = {}): RemoteProfile {
     label: "My Remote",
     sshDestination: "user@example.com",
     polytokenPolicy: "requireExisting",
-    xdgMode: "isolated",
     executionTarget: { kind: "host" },
     riskAcknowledgements: {},
     ...overrides,
@@ -58,14 +57,13 @@ function snapshot(overrides: Record<string, unknown> = {}) {
 }
 
 describe("TauriHostProvider", () => {
-  test("addProfile sends the nested camelCase command shape and maps native defaults", async () => {
+  test("tauri_profile_command_omits_xdg_mode", async () => {
     const calls: Array<{ cmd: string; args?: Record<string, unknown> }> = [];
     const nativeProfile = {
       id: "remote-1",
       label: "My Remote",
       sshDestination: "user@example.com",
       polytokenPolicy: "requireExisting",
-      xdgMode: "isolated",
     };
     globalThis.window = {
       __TAURI_INTERNALS__: {
@@ -86,15 +84,33 @@ describe("TauriHostProvider", () => {
       sshDestination: "user@example.com",
       port: 2222,
       polytokenPolicy: "requireExisting",
-      xdgMode: "isolated",
       executionTarget: { kind: "host" },
       riskAcknowledgements: {},
     });
+    expect(sent).not.toHaveProperty("xdgMode");
+    expect(sent).not.toHaveProperty("xdg_mode");
     expect(sent).not.toHaveProperty("ssh_destination");
     expect(sent).toHaveProperty("remoteRootOverride", undefined);
     expect(sent).toHaveProperty("serverPath", undefined);
     expect(saved.executionTarget).toEqual({ kind: "host" });
     expect(saved.riskAcknowledgements).toEqual({});
+  });
+
+  test("tauri_profile_response_without_xdg_mode_maps", async () => {
+    installInvoke({
+      list_remote_profiles: [() => [{ id: "remote-1", label: "My Remote", sshDestination: "user@example.com", polytokenPolicy: "requireExisting" }]],
+    });
+    const profiles = await createTauriHostProvider(() => "").listProfiles();
+    expect(profiles[0]).toEqual({
+      id: "remote-1",
+      label: "My Remote",
+      sshDestination: "user@example.com",
+      polytokenPolicy: "requireExisting",
+      executionTarget: { kind: "host" },
+      riskAcknowledgements: {},
+    });
+    expect(profiles[0]).not.toHaveProperty("xdgMode");
+    expect(profiles[0]).not.toHaveProperty("xdg_mode");
   });
 
   test("listHosts maps snapshots to descriptors (local overlay, Docker subtitle, empty-label fallback)", async () => {

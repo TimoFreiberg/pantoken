@@ -245,21 +245,18 @@ changing the state machine's shape or the overlay's rendering. The cost is two
 enum variants that are dead code until Phase 3 — a small price for a stable
 contract.
 
-## Remote deployment Phase 3: XDG isolation — isolated by default
+## Remote deployment Phase 3: XDG roots are always shared
 
-**Decision:** a Pantoken-managed polytoken on the remote host uses
-**isolated** XDG roots under the remote root
-(`~/.local/share/pantoken/tools/polytoken/xdg/{config,data,cache}`) by
-default. Sharing the user's existing polytoken XDG roots requires explicit
-user confirmation (`xdg_mode: Shared` on the profile).
+**Decision:** remote Pantoken profiles always use the remote user's existing
+polytoken XDG roots. There is no profile-level XDG isolation choice and the
+SSH bridge never generates `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, or
+`XDG_CACHE_HOME` overrides.
 
-**Rationale:** never silently share production state. A Pantoken-managed
-polytoken could interfere with the user's existing polytoken sessions,
-configuration, or cache. Isolated roots under the remote root keep
-Pantoken's polytoken state fully self-contained and removable. The XDG
-override paths are derived from the remote root via the shared
-`pantoken-remote-layout` crate, ensuring both the desktop provisioning layer
-and the remote runtime agree on the layout.
+Existing profile JSON remains readable for compatibility: legacy `xdgMode` and
+`xdg_mode` keys, with either historical value, are ignored on load and omitted
+when the profile is rewritten. The remote-root layout crate continues to own
+Pantoken's binaries, runtime sockets, logs, and metadata; it no longer derives
+isolated polytoken XDG directories.
 
 ## Remote deployment Phase 3: channel derivation from version string
 
@@ -283,7 +280,7 @@ both `pantoken-server` (remote runtime) and `desktop` (provisioning).
 
 **Rationale:** `pantoken-server` is binary-heavy (axum, tower, web-push,
 jwt-simple…). The desktop crate cannot depend on it. Both sides must agree on
-path layout (where polytoken binaries, XDG roots, install metadata live).
+path layout (where Pantoken-owned polytoken binaries and install metadata live).
 Extracting the pure functions into a tiny shared crate is the single source
 of truth — no risk of two copies drifting.
 **Update:** the crate now also hosts the release manifest contract types

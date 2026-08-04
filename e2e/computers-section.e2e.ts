@@ -66,6 +66,19 @@ async function getProfileId(page: Page, label: string): Promise<string> {
   );
 }
 
+/** Assert the shared advanced controls remain and XDG controls are absent. */
+async function expectSharedAdvancedControls(page: Page, edit = false): Promise<void> {
+  await page.getByRole("button", { name: "Advanced" }).click();
+  const panel = page.getByTestId("computer-setup-panel");
+  await expect(panel.getByRole("radiogroup", { name: "Polytoken policy" })).toBeVisible();
+  await expect(panel.getByRole("textbox", { name: /Remote-root override/ })).toBeVisible();
+  await expect(panel.getByLabel("Server binary path")).toBeVisible();
+  await expect(panel.getByText("XDG mode", { exact: true })).toHaveCount(0);
+  await expect(panel.getByText("Isolated", { exact: true })).toHaveCount(0);
+  await expect(panel.getByText("Shared", { exact: true })).toHaveCount(0);
+  if (edit) await expect(panel.getByTestId("cs-reconnect-notice")).toBeVisible();
+}
+
 /** Count profiles. */
 async function countProfiles(page: Page): Promise<number> {
   return page.evaluate(() => {
@@ -99,6 +112,11 @@ async function createHostProfile(page: Page, name: string, ssh: string): Promise
 // ── Flows ────────────────────────────────────────────────────────────────────
 
 // Opening the Add Computer sheet: host-switcher launcher, default env, focus
+test("Host add Advanced keeps shared-root controls without XDG mode", async ({ page }) => {
+  await openAddComputer(page);
+  await expectSharedAdvancedControls(page);
+});
+
 test("Setup sheet open and initial state from host switcher", async ({ page }) => {
   const switcher = page.getByTestId("host-switcher");
   await switcher.getByTestId("host-switcher-trigger").click();
@@ -179,7 +197,52 @@ test("Host switcher dropdown shows a single add entry labeled Add remote host", 
   await expect(switcher.getByTestId("manage-computers-btn")).toBeVisible();
 });
 
+async function resetProfileCaptures(page: Page): Promise<void> {
+  await page.evaluate(() => (window as unknown as { __pantokenHosts?: { resetProfileCaptures: () => void } }).__pantokenHosts?.resetProfileCaptures());
+}
+
+async function lastProfileCapture(page: Page, kind: "added" | "updated"): Promise<Record<string, unknown>> {
+  return page.evaluate((kind) => {
+    const hosts = (window as unknown as { __pantokenHosts?: { getLastAddedProfile: () => unknown; getLastUpdatedProfile: () => unknown } }).__pantokenHosts;
+    return (kind === "added" ? hosts?.getLastAddedProfile() : hosts?.getLastUpdatedProfile()) as Record<string, unknown>;
+  }, kind);
+}
+
 // Host profile creation and listing (AC.4 Host)
+test("host_add_profile_payload_omits_xdg_mode_and_preserves_advanced_fields", async ({ page }) => {
+  await resetProfileCaptures(page);
+  await openAddComputer(page);
+  await page.getByTestId("cs-name-input").fill("Payload Host");
+  await page.getByTestId("cs-ssh-input").fill("user@payload.test");
+  await page.getByRole("button", { name: "Advanced" }).click();
+  await page.getByRole("radio", { name: "Offer install" }).click();
+  await page.getByTestId("cs-root-override-input").fill("/srv/payload-root");
+  await page.getByLabel("Server binary path").fill("/opt/payload-server");
+  await page.getByTestId("cs-test-ssh").click();
+  await expect(page.getByTestId("cs-provisioning")).toBeVisible({ timeout: 10000 });
+  const profile = await lastProfileCapture(page, "added");
+  expect(profile).toMatchObject({ label: "Payload Host", sshDestination: "user@payload.test", polytokenPolicy: "offerInstall", remoteRootOverride: "/srv/payload-root", serverPath: "/opt/payload-server", executionTarget: { kind: "host" } });
+  expect(profile).not.toHaveProperty("xdgMode");
+  expect(profile).not.toHaveProperty("xdg_mode");
+});
+
+test("host_edit_profile_payload_omits_xdg_mode_and_preserves_advanced_fields", async ({ page }) => {
+  await createHostProfile(page, "Editable Host", "user@editable.test");
+  await resetProfileCaptures(page);
+  await openSettings(page, "computers");
+  await page.locator("[data-testid^='computer-row-']").filter({ hasText: "Editable Host" }).getByRole("button", { name: "Edit" }).click();
+  await expect(page.getByTestId("computer-setup-panel")).toBeVisible();
+  await page.getByRole("button", { name: "Advanced" }).click();
+  await page.getByRole("radio", { name: "Offer install" }).click();
+  await page.getByTestId("cs-edit-root-override").fill("/srv/edited-root");
+  await page.getByLabel("Server binary path").fill("/opt/edited-server");
+  await page.getByTestId("cs-reconnect-later").click();
+  const profile = await lastProfileCapture(page, "updated");
+  expect(profile).toMatchObject({ label: "Editable Host", polytokenPolicy: "offerInstall", remoteRootOverride: "/srv/edited-root", serverPath: "/opt/edited-server", executionTarget: { kind: "host" } });
+  expect(profile).not.toHaveProperty("xdgMode");
+  expect(profile).not.toHaveProperty("xdg_mode");
+});
+
 test("Host profile creation and listing", async ({ page }) => {
   await createHostProfile(page, "Test Server", "user@test.example.com");
   // Reopen settings to verify the profile appears.
@@ -203,6 +266,7 @@ test("Edit a profile: pre-fill, exec env, port field sizing (AC.10)", async ({ p
   await expect(page.getByTestId("cs-edit-exec-env")).toContainText("immutable");
   // Name should be pre-filled.
   await expect(page.getByTestId("cs-edit-name")).toHaveValue("Edit Me");
+  await expectSharedAdvancedControls(page, true);
 
   const editSsh = page.getByTestId("cs-edit-ssh");
   const editPort = page.locator("#cs-edit-port");
@@ -241,6 +305,7 @@ test("Profile round-trip: create then edit (AC.13)", async ({ page }) => {
   await expect(page.getByTestId("computer-setup-panel")).toBeVisible();
   await expect(page.getByTestId("cs-edit-name")).toHaveValue("Round Trip");
   await expect(page.getByTestId("cs-edit-ssh")).toHaveValue("user@roundtrip.example.com");
+  await expectSharedAdvancedControls(page, true);
 });
 
 // Validation: button enable/disable and inline errors, no secret fields

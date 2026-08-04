@@ -2,7 +2,7 @@
 //!
 //! Sits between SSH connect and runtime start. The desktop orchestrates:
 //! probe the remote host → check polytoken compatibility → (optionally)
-//! install polytoken → configure XDG isolation → reconcile/recover from
+//! install polytoken → reconcile/recover from
 //! interrupted installs → drive the connection state machine through
 //! `Provisioning`.
 //!

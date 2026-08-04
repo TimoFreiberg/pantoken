@@ -22,7 +22,6 @@
     PolytokenPolicy,
     RemoteProfile,
     TestSshResult,
-    XdgMode,
   } from "../lib/hosts/types.js";
   import type { HostProvider } from "../lib/hosts/provider.js";
   import {
@@ -146,7 +145,6 @@
   const polytokenPolicy = $derived(draft?.polytokenPolicy ?? "requireExisting");
   const remoteRootOverride = $derived(draft?.remoteRootOverride ?? "");
   const serverPath = $derived(draft?.serverPath ?? "");
-  const xdgMode = $derived(draft?.xdgMode ?? "isolated");
   const containerName = $derived(draft?.containerName ?? "");
   const containerUser = $derived(draft?.containerUser ?? "");
   const pantokenRoot = $derived(draft?.pantokenRoot ?? "");
@@ -585,7 +583,6 @@
 
   function buildProfile(cn: string): RemoteProfile {
     const id = editProfile?.id ?? `docker-${Date.now()}`;
-    const d = profileEditor.draft;
     return {
       id,
       label: name || humanizeContainerName(cn),
@@ -594,7 +591,6 @@
       polytokenPolicy,
       remoteRootOverride: remoteRootOverride || undefined,
       serverPath: serverPath || undefined,
-      xdgMode,
       executionTarget: {
         kind: "dockerContainer",
         containerName: cn,
@@ -616,7 +612,6 @@
       polytokenPolicy,
       remoteRootOverride: remoteRootOverride || undefined,
       serverPath: serverPath || undefined,
-      xdgMode,
       executionTarget: { kind: "host" },
       riskAcknowledgements: editProfile?.riskAcknowledgements ?? {},
     };
@@ -935,7 +930,7 @@
       polytokenPolicy: d.polytokenPolicy,
       remoteRootOverride: d.remoteRootOverride || undefined,
       serverPath: d.serverPath || undefined,
-      xdgMode: d.xdgMode,
+      riskAcknowledgements: editProfile.riskAcknowledgements,
       executionTarget: editProfile.executionTarget.kind === "dockerContainer"
         ? {
             kind: "dockerContainer",
@@ -1274,18 +1269,6 @@
               <label for="cs-server-path">Server binary path</label>
               <input id="cs-server-path" type="text" placeholder="Default" value={serverPath} oninput={(e) => updateDraft("serverPath", (e.target as HTMLInputElement).value)} />
             </div>
-            <div class="field">
-              <label>XDG mode</label>
-              <SegmentedControl
-                ariaLabel="XDG mode"
-                value={xdgMode}
-                onchange={(v: "isolated" | "shared") => updateDraft("xdgMode", v)}
-                options={[
-                  { value: "isolated", label: "Isolated", title: "Stores config, sessions, and cache in isolated directories." },
-                  { value: "shared", label: "Shared", title: "Shares config, sessions, and cache with your existing polytoken install." },
-                ]}
-              />
-            </div>
           </div>
         {/if}
       {/if}
@@ -1557,10 +1540,6 @@
             <div class="field">
               <label for="cs-edit-server">Server binary path</label>
               <input id="cs-edit-server" type="text" value={serverPath} oninput={(e) => updateDraft("serverPath", (e.target as HTMLInputElement).value)} />
-            </div>
-            <div class="field">
-              <label>XDG mode</label>
-              <SegmentedControl ariaLabel="XDG mode" value={xdgMode} onchange={(v: "isolated" | "shared") => updateDraft("xdgMode", v)} options={[{ value: "isolated", label: "Isolated", title: "Stores config, sessions, and cache in isolated directories." }, { value: "shared", label: "Shared", title: "Shares config, sessions, and cache with your existing polytoken install." }]} />
             </div>
           </div>
         {/if}

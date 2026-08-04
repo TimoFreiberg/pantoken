@@ -1,8 +1,10 @@
 //! Idempotent provisioning reconciliation (Phase 3, step 5).
 //!
 //! Orchestrates the provisioning flow: probe → compat check → (optionally)
-//! install → configure XDG. Drives `ConnectionState::Provisioning` via the
-//! existing `ConnectionStateSink` trait.
+//! install/reconcile. Remote profiles use the remote user's existing polytoken
+//! XDG roots; provisioning does not configure profile-level XDG isolation.
+//! Drives `ConnectionState::Provisioning` via the existing `ConnectionStateSink`
+//! trait.
 //!
 //! ## Idempotency
 //!
@@ -328,7 +330,7 @@ mod tests {
     use super::*;
     use crate::bridge::fake::FakeSshTransport;
     use crate::bridge::CommandOutput;
-    use crate::remote_profile::{PolytokenPolicy, XdgMode};
+    use crate::remote_profile::PolytokenPolicy;
 
     fn no_http_fetch() -> super::HttpFetch {
         Arc::new(|_url: &str| Box::pin(async { Err("http fetch not configured in test".into()) }))
@@ -385,7 +387,6 @@ mod tests {
             polytoken_policy: policy,
             remote_root_override: Some("/tmp/pantoken-test".into()),
             server_path: None,
-            xdg_mode: XdgMode::default(),
             execution_target: crate::remote_profile::ExecutionTargetProfile::default(),
             risk_acknowledgements: crate::remote_profile::RiskAcknowledgements::default(),
         }

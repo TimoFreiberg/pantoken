@@ -278,6 +278,98 @@ describe("remote access contract documentation (AC.1–AC.4)", () => {
     );
   });
 
+  test("issue_162_profile_contract_absence", () => {
+    const productionPaths = [
+      "client/src/lib/hosts/types.ts",
+      "client/src/lib/profile-form.ts",
+      "client/src/lib/profile-editor.svelte.ts",
+      "client/src/components/ComputerSetupSheet.svelte",
+      "client/src/lib/hosts/tauri-provider.ts",
+      "client/src/lib/hosts/dev-provider.ts",
+      "desktop/src/remote_profile.rs",
+      "desktop/src/bridge.rs",
+      "desktop/src/bridge/fake.rs",
+      "desktop/src/remote_executor.rs",
+      "desktop/src/provisioning/mod.rs",
+      "desktop/src/provisioning/reconcile.rs",
+      "desktop/src/remote_commands.rs",
+      "desktop/src/remote_connection.rs",
+      "server/pantoken-remote-layout/src/layout.rs",
+    ];
+    const forbidden = [
+      /\bXdgMode\b/,
+      /\bxdgMode\s*:/,
+      /\bxdg_mode\s*:/,
+      /polytoken_xdg_(?:config|data|cache)\s*\(/,
+      /XDG_(?:CONFIG_HOME|DATA_HOME|CACHE_HOME)\s*=/,
+    ];
+    for (const path of productionPaths) {
+      const source = read(path);
+      for (const pattern of forbidden) {
+        expect(source, `${path} must not contain ${pattern}`).not.toMatch(pattern);
+      }
+    }
+
+    // Compatibility fixtures may mention legacy keys, but only in the named
+    // migration/bridge/E2E assertions. This keeps the migration escape hatch
+    // explicit without allowing the removed profile contract back into helpers
+    // or unrelated tests.
+    const compatibilityFixtures = [
+      ["client/src/lib/profile-form.test.ts", ["legacy_draft_keys_are_dropped_on_persist"]],
+      ["client/src/lib/hosts/tauri-provider.test.ts", ["tauri_profile_command_omits_xdg_mode", "tauri_profile_response_without_xdg_mode_maps"]],
+      ["desktop/src/remote_profile.rs", ["remote_profile_legacy_xdg_keys_are_dropped_on_reserialization"]],
+      ["desktop/src/bridge.rs", ["ssh_command_from_profile_has_no_xdg_assignments"]],
+      ["e2e/computers-section.e2e.ts", ["host_add_profile_payload_omits_xdg_mode_and_preserves_advanced_fields", "host_edit_profile_payload_omits_xdg_mode_and_preserves_advanced_fields"]],
+      ["e2e/container-setup.e2e.ts", ["docker_add_profile_payload_omits_xdg_mode_and_preserves_advanced_fields", "docker_edit_profile_payload_omits_xdg_mode_and_preserves_advanced_fields"]],
+    ] as const;
+    for (const [path, testNames] of compatibilityFixtures) {
+      const source = read(path);
+      const literalOffsets = [...source.matchAll(/["'`]xdg(?:Mode|_mode)["'`]/g)].map((match) => match.index!);
+      const allowedRanges = testNames.map((testName) => {
+        const start = source.indexOf(testName);
+        expect(start, `${path} must define ${testName}`).toBeGreaterThanOrEqual(0);
+        const candidates = [
+          source.indexOf("\n  test(", start + testName.length),
+          source.indexOf("\ntest(", start + testName.length),
+          source.indexOf("\n    #[test]", start + testName.length),
+          source.indexOf("\n    #[tokio::test]", start + testName.length),
+        ].filter((offset) => offset >= 0);
+        return [start, candidates.length ? Math.min(...candidates) : source.length] as const;
+      });
+      for (const offset of literalOffsets) {
+        expect(
+          allowedRanges.some(([start, end]) => offset >= start && offset < end),
+          `${path} legacy key literal must be inside a named compatibility test`,
+        ).toBe(true);
+      }
+    }
+
+    expect(read("server/pantoken-server/src/remote/runtime.rs")).toContain("inherited_xdg_assignments");
+    // The parity harness is intentionally outside this production-source allowlist;
+    // it may export isolated XDG roots for test safety.
+  });
+
+  test("issue_162_documentation_contract", () => {
+    const decisions = read("docs/DECISIONS.md");
+    const decisionStart = decisions.indexOf("## Remote deployment Phase 3: XDG roots are always shared");
+    const decisionEnd = decisions.indexOf("## Remote deployment Phase 3: channel derivation", decisionStart);
+    const decisionSection = decisions.slice(decisionStart, decisionEnd);
+    requireTerms(decisionSection, ["always use the remote user's existing", "no profile-level XDG isolation choice", "legacy `xdgMode`", "`xdg_mode`", "omitted", "rewritten"], "issue-162 decision");
+    expect(decisionSection).not.toContain("isolated by default");
+
+    const design = read("docs/DESIGN.md");
+    const designStart = design.indexOf("**XDG roots**");
+    const designSection = design.slice(designStart, designStart + 650);
+    requireTerms(designSection, ["always use", "existing polytoken XDG roots", "no XDG mode", "generic bridge/runtime", "Legacy", "dropped"], "issue-162 design");
+    expect(designSection).not.toContain("Default is `Isolated`");
+
+    const docker = read("docs/docker-target-guide.md");
+    const cleanupStart = docker.indexOf("## Cleanup and uninstall");
+    const cleanupSection = docker.slice(cleanupStart, cleanupStart + 900);
+    expect(cleanupSection).not.toContain("Isolated XDG");
+    requireTerms(cleanupSection, ["Managed polytoken binaries", "Session state and logs"], "issue-162 Docker cleanup");
+  });
+
   test("remote_contract_docs_cover_issue_147", () => {
     const desktop = read("desktop/README.md");
     const contract = read("docs/issues/mobile-access/01-remote-contract.md");

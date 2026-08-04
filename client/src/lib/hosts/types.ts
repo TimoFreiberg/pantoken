@@ -152,9 +152,6 @@ export interface HostSummary {
 /** Policy for the remote polytoken runtime install. Mirrors the Rust enum. */
 export type PolytokenPolicy = "requireExisting" | "offerInstall";
 
-/** XDG isolation mode for a Pantoken-managed polytoken. Mirrors the Rust enum. */
-export type XdgMode = "isolated" | "shared";
-
 /**
  * Tagged execution target. `host` (the serde default for all existing profile
  * JSON) runs on the SSH host. `docker` runs inside a pinned, already-running
@@ -235,8 +232,6 @@ export interface RemoteProfile {
   remoteRootOverride?: string;
   /** Override for the remote `pantoken-server` binary path. */
   serverPath?: string;
-  /** XDG isolation mode for a Pantoken-managed polytoken. */
-  xdgMode: XdgMode;
   /** Execution target. Defaults to host mode for existing profiles. */
   executionTarget: ExecutionTargetProfile;
   /**
@@ -260,7 +255,6 @@ export function hostProfileFromDescriptor(
     label: descriptor.label,
     sshDestination: descriptor.subtitle,
     polytokenPolicy: "requireExisting",
-    xdgMode: "isolated",
     executionTarget: { kind: "host" },
     riskAcknowledgements: {},
   };

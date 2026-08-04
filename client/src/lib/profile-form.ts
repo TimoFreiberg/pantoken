@@ -7,7 +7,6 @@ import type {
   ExecutionTargetProfile,
   PolytokenPolicy,
   RemoteProfile,
-  XdgMode,
 } from "./hosts/types.js";
 import type { ComputerSetupIntent } from "./profile-editor.svelte.js";
 
@@ -42,11 +41,49 @@ export interface ComputerSetupDraft {
   polytokenPolicy: PolytokenPolicy;
   serverPath: string;
   remoteRootOverride: string;
-  xdgMode: XdgMode;
   containerName: string;
   containerUser: string;
   containerWorkdir: string;
   pantokenRoot: string;
+}
+
+/**
+ * Project an unknown persisted value onto the supported draft contract.
+ *
+ * This intentionally does not spread the input object: older drafts may carry
+ * removed `xdgMode`/`xdg_mode` keys, and rewriting a normalized draft must drop
+ * them while preserving every supported field.
+ */
+export function normalizeComputerSetupDraft(value: unknown): ComputerSetupDraft | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  const stringFields = [
+    "name",
+    "sshDestination",
+    "port",
+    "serverPath",
+    "remoteRootOverride",
+    "containerName",
+    "containerUser",
+    "containerWorkdir",
+    "pantokenRoot",
+  ] as const;
+  if (stringFields.some((field) => typeof input[field] !== "string")) return null;
+  if (input.executionTarget !== "host" && input.executionTarget !== "docker") return null;
+  if (input.polytokenPolicy !== "requireExisting" && input.polytokenPolicy !== "offerInstall") return null;
+  return {
+    name: input.name as string,
+    sshDestination: input.sshDestination as string,
+    port: input.port as string,
+    executionTarget: input.executionTarget,
+    polytokenPolicy: input.polytokenPolicy,
+    serverPath: input.serverPath as string,
+    remoteRootOverride: input.remoteRootOverride as string,
+    containerName: input.containerName as string,
+    containerUser: input.containerUser as string,
+    containerWorkdir: input.containerWorkdir as string,
+    pantokenRoot: input.pantokenRoot as string,
+  };
 }
 
 /** Map the draft's shorthand executionTarget to the persisted union. */
@@ -84,7 +121,6 @@ export function defaultDraft(intent: ComputerSetupIntent): ComputerSetupDraft {
     polytokenPolicy: "requireExisting",
     serverPath: "",
     remoteRootOverride: "",
-    xdgMode: "isolated",
     containerName: "",
     containerUser: "",
     containerWorkdir: "",
@@ -104,7 +140,6 @@ export function draftFromProfile(profile: RemoteProfile): ComputerSetupDraft {
       polytokenPolicy: profile.polytokenPolicy,
       serverPath: profile.serverPath ?? "",
       remoteRootOverride: profile.remoteRootOverride ?? "",
-      xdgMode: profile.xdgMode,
       containerName: target.containerName,
       containerUser: target.user,
       containerWorkdir: target.workdir ?? "",
@@ -119,7 +154,6 @@ export function draftFromProfile(profile: RemoteProfile): ComputerSetupDraft {
     polytokenPolicy: profile.polytokenPolicy,
     serverPath: profile.serverPath ?? "",
     remoteRootOverride: profile.remoteRootOverride ?? "",
-    xdgMode: profile.xdgMode,
     containerName: "",
     containerUser: "",
     containerWorkdir: "",
@@ -148,7 +182,7 @@ export function toValidationDraft(
 /**
  * Deep-compare every saved field. Returns true if the draft differs from the
  * baseline. Replaces the old "any field non-empty" check which missed port,
- * executionTarget, serverPath, and xdgMode changes.
+ * executionTarget and serverPath changes.
  */
 export function isDirty(
   baseline: ComputerSetupDraft | null,
@@ -163,7 +197,6 @@ export function isDirty(
     baseline.polytokenPolicy !== current.polytokenPolicy ||
     baseline.serverPath !== current.serverPath ||
     baseline.remoteRootOverride !== current.remoteRootOverride ||
-    baseline.xdgMode !== current.xdgMode ||
     baseline.containerName !== current.containerName ||
     baseline.containerUser !== current.containerUser ||
     baseline.containerWorkdir !== current.containerWorkdir ||

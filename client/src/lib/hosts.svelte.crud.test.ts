@@ -35,7 +35,6 @@ function makeProfile(id: string, overrides: Partial<RemoteProfile> = {}): Remote
     label: `Profile ${id}`,
     sshDestination: "user@host",
     polytokenPolicy: "requireExisting",
-    xdgMode: "isolated",
     executionTarget: { kind: "host" },
     riskAcknowledgements: {},
     ...overrides,

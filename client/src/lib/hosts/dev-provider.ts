@@ -12,6 +12,12 @@ import type {
 } from "./types.js";
 import type { HostProvider } from "./provider.js";
 
+export interface DevProfileCaptures {
+  added: RemoteProfile[];
+  updated: RemoteProfile[];
+  acknowledgements: Array<{ id: string; riskId: string; fingerprint: string }>;
+}
+
 export interface DevHostControls {
   setState(id: string, state: HostConnectionState): void;
   setActivity(id: string, activity: HostActivity): void;
@@ -37,6 +43,14 @@ export interface DevHostControls {
   /** Toggle whether Docker container targets are supported (PWA-degradation test hook). */
   setSupportsContainerTargets(enabled: boolean): void;
   setFailure(id: string, label: string, action?: string, detail?: string): void;
+  /** Return cloned profile/acknowledgement payloads captured by the dev provider. */
+  getProfileCaptures(): DevProfileCaptures;
+  /** Clear captured profile/acknowledgement payloads. */
+  resetProfileCaptures(): void;
+  /** Return the latest captured add/update/ack payloads for assertions. */
+  getLastAddedProfile(): RemoteProfile | null;
+  getLastUpdatedProfile(): RemoteProfile | null;
+  getAcknowledgementCaptures(): Array<{ id: string; riskId: string; fingerprint: string }>;
   // ── Deterministic async hooks for testing ─────────────────────────────────
   /** Control the next addProfile call: delay, reject, or resolve normally. */
   setNextAddProfileBehavior(behavior: { delay?: number; reject?: unknown } | null): void;
@@ -129,6 +143,11 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
   const inspectionMap = new Map<string, ContainerInspection>();
   const provisioningPhaseMap = new Map<string, number>();
   const acknowledgedRisks = new Map<string, Set<string>>(); // hostId → set of riskIds acknowledged
+  const profileCaptures: DevProfileCaptures = {
+    added: [],
+    updated: [],
+    acknowledgements: [],
+  };
   const containerIdMap = new Map<string, string>(); // hostId → current containerId
   // Pre-registered risks to apply to the next docker profile created (for e2e).
   let nextDockerRisks: PendingRisk[] | null = null;
@@ -308,6 +327,7 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
       nextAddProfile = null;
       return applyBehavior(behavior, () => {
         const stored = structuredClone(profile);
+        profileCaptures.added.push(structuredClone(profile));
         profileMap.set(profile.id, stored);
         // If it's a Docker profile, add a corresponding host descriptor.
         if (profile.executionTarget.kind === "dockerContainer") {
@@ -353,6 +373,7 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
       const behavior = nextUpdateProfile;
       nextUpdateProfile = null;
       await applyBehavior(behavior, () => undefined);
+      profileCaptures.updated.push(structuredClone(profile));
       profileMap.set(profile.id, structuredClone(profile));
     },
     deleteProfile: async (id) => {
@@ -365,6 +386,7 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
       containerIdMap.delete(id);
     },
     acknowledgeRisk: async (id, riskId, fingerprint) => {
+      profileCaptures.acknowledgements.push({ id, riskId, fingerprint });
       const behavior = nextAcknowledgeRisk;
       nextAcknowledgeRisk = null;
       await applyBehavior(behavior, () => {
@@ -448,6 +470,15 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
     setActivity,
     emit,
     setFailure,
+    getProfileCaptures: () => structuredClone(profileCaptures),
+    resetProfileCaptures: () => {
+      profileCaptures.added.length = 0;
+      profileCaptures.updated.length = 0;
+      profileCaptures.acknowledgements.length = 0;
+    },
+    getLastAddedProfile: () => structuredClone(profileCaptures.added.at(-1) ?? null),
+    getLastUpdatedProfile: () => structuredClone(profileCaptures.updated.at(-1) ?? null),
+    getAcknowledgementCaptures: () => structuredClone(profileCaptures.acknowledgements),
     setMessageSink: (next) => { sink = next; },
     setPendingRisks,
     setPendingRisksForNextDocker: (risks: PendingRisk[]) => { nextDockerRisks = risks; },

@@ -375,9 +375,11 @@ inspection.
 
 Phase 3 adds the provisioning layer that sits between SSH connect and runtime
 start. The desktop orchestrates: probe the remote host → check polytoken
-compatibility → (optionally) install polytoken → configure XDG isolation →
-reconcile/recover from interrupted installs → drive the connection state
-machine through `Provisioning`.
+compatibility → (optionally) install polytoken → reconcile/recover from
+interrupted installs → drive the connection state machine through
+`Provisioning`. Remote profiles use the remote user's existing polytoken XDG
+roots; XDG inheritance at the runtime boundary is generic environment
+propagation, not a profile setting.
 
 ### Shared layout crate (`pantoken-remote-layout`)
 
@@ -421,13 +423,13 @@ version-target directory. Never replaces a working version in place. Records
 provenance (version, target, source URL, SHA256, channel, timestamp) in
 `install.json`. Trust level: checksum-only (no signature).
 
-**XDG isolation** (`remote_profile.rs` + `bridge.rs`): a `XdgMode` field on
-`RemoteProfile` controls whether the polytoken daemon uses Pantoken-managed
-XDG roots (under the remote root) or shares the user's existing roots.
-Default is `Isolated` — never silently share production state. The XDG
-override paths are set as env vars on the SSH command via `SshCommand::extra_env`,
-inherited by the `pantoken-server` stdio-proxy, and re-threaded to the runtime
-child in `connect_with_bootstrap`.
+**XDG roots** (`remote_profile.rs` + `bridge.rs`): remote profiles always use
+the remote user's existing polytoken XDG roots. The profile has no XDG mode
+field, and `SshCommand::extra_env` is reserved for generic bridge/runtime
+environment plumbing rather than profile-generated XDG assignments. Legacy
+`xdgMode`/`xdg_mode` JSON keys are accepted and dropped when rewritten. The
+runtime may forward inherited XDG variables to its child without changing
+that shared-root profile behavior.
 
 **Reconciliation** (`provisioning/reconcile.rs`): orchestrates the flow
 idempotently. Cleans stale staging directories before probing. If a compatible

@@ -80,7 +80,6 @@ interface RemoteProfileCommand {
   polytokenPolicy: string;
   remoteRootOverride?: string;
   serverPath?: string;
-  xdgMode: string;
   executionTarget?: RemoteProfile["executionTarget"];
   riskAcknowledgements?: RemoteProfile["riskAcknowledgements"];
 }
@@ -336,7 +335,6 @@ function profileToCmd(profile: RemoteProfile): RemoteProfileCommand {
     polytokenPolicy: profile.polytokenPolicy,
     remoteRootOverride: profile.remoteRootOverride,
     serverPath: profile.serverPath,
-    xdgMode: profile.xdgMode,
     executionTarget: profile.executionTarget,
     riskAcknowledgements: profile.riskAcknowledgements,
   };
@@ -357,7 +355,6 @@ function cmdToProfile(cmd: RemoteProfileCommand): RemoteProfile {
     polytokenPolicy: cmd.polytokenPolicy as RemoteProfile["polytokenPolicy"],
     remoteRootOverride: cmd.remoteRootOverride,
     serverPath: cmd.serverPath,
-    xdgMode: cmd.xdgMode as RemoteProfile["xdgMode"],
     executionTarget: cmd.executionTarget ?? { kind: "host" },
     riskAcknowledgements: cmd.riskAcknowledgements ?? {},
   };

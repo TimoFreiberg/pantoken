@@ -3,6 +3,7 @@ import {
   type ComputerSetupDraft,
   defaultDraft,
   draftFromProfile,
+  normalizeComputerSetupDraft,
 } from "./profile-form.js";
 
 /**
@@ -119,7 +120,8 @@ class ProfileEditorState {
   persistDraft(): void {
     if (!this.draft) return;
     try {
-      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(this.draft));
+      const normalized = normalizeComputerSetupDraft(this.draft);
+      if (normalized) localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(normalized));
     } catch {
       // Storage failure must not prevent in-memory editing.
     }
@@ -130,7 +132,7 @@ class ProfileEditorState {
     try {
       const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
       if (!raw) return null;
-      return JSON.parse(raw) as ComputerSetupDraft;
+      return normalizeComputerSetupDraft(JSON.parse(raw));
     } catch {
       return null;
     }

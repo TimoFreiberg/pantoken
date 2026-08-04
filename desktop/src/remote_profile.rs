@@ -102,10 +102,6 @@ pub struct RemoteProfile {
         skip_serializing_if = "Option::is_none"
     )]
     pub server_path: Option<String>,
-    /// XDG isolation mode for a Pantoken-managed polytoken. Defaults to
-    /// `Isolated` — Pantoken-managed XDG roots under the remote root.
-    #[serde(alias = "xdg_mode", default)]
-    pub xdg_mode: XdgMode,
     #[serde(alias = "execution_target", default)]
     pub execution_target: ExecutionTargetProfile,
     #[serde(alias = "risk_acknowledgements", default)]
@@ -122,22 +118,6 @@ pub enum PolytokenPolicy {
     /// The desktop may offer to install / upgrade the remote runtime.
     /// Defined for Phase 3 (auto-provisioning); not wired in Phase 2.
     OfferInstall,
-}
-
-/// XDG isolation mode for a Pantoken-managed polytoken on the remote host.
-///
-/// Controls whether the polytoken daemon uses Pantoken-managed XDG roots
-/// (under the remote root) or shares the user's existing polytoken XDG roots.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum XdgMode {
-    /// Pantoken-managed XDG roots under the remote root. This is the safe
-    /// default — never silently share production state.
-    #[default]
-    Isolated,
-    /// User confirmed sharing existing polytoken XDG roots. No XDG override
-    /// env vars are set; polytoken uses its default roots.
-    Shared,
 }
 
 /// Field names that a plaintext secret carrier would plausibly use. The
@@ -496,7 +476,6 @@ mod tests {
             polytoken_policy: PolytokenPolicy::RequireExisting,
             remote_root_override: Some("/srv/pantoken".into()),
             server_path: Some("/usr/local/bin/pantoken-server".into()),
-            xdg_mode: XdgMode::default(),
             execution_target: ExecutionTargetProfile::default(),
             risk_acknowledgements: RiskAcknowledgements::default(),
         }
@@ -526,7 +505,6 @@ mod tests {
             "polytokenPolicy",
             "remoteRootOverride",
             "serverPath",
-            "xdgMode",
             "executionTarget",
             "riskAcknowledgements",
         ] {
@@ -537,7 +515,6 @@ mod tests {
             "polytoken_policy",
             "remote_root_override",
             "server_path",
-            "xdg_mode",
             "execution_target",
             "risk_acknowledgements",
         ] {
@@ -613,20 +590,36 @@ mod tests {
     }
 
     #[test]
-    fn remote_profile_host_mode_migration() {
-        let legacy = serde_json::json!({
-            "id": "legacy",
-            "label": "Legacy host",
-            "ssh_destination": "work-server",
-            "polytoken_policy": "requireExisting",
-            "xdg_mode": "isolated"
-        });
-        let profile: RemoteProfile = serde_json::from_value(legacy).expect("legacy profile");
-        assert_eq!(profile.execution_target, ExecutionTargetProfile::Host);
-        assert_eq!(
-            profile.risk_acknowledgements,
-            RiskAcknowledgements::default()
-        );
+    fn remote_profile_legacy_xdg_keys_are_dropped_on_reserialization() {
+        for (key, value) in [
+            ("xdgMode", "isolated"),
+            ("xdgMode", "shared"),
+            ("xdg_mode", "isolated"),
+            ("xdg_mode", "shared"),
+        ] {
+            let mut legacy = serde_json::json!({
+                "id": "legacy",
+                "label": "Legacy host",
+                "ssh_destination": "work-server",
+                "polytoken_policy": "requireExisting",
+                "remote_root_override": "/srv/pantoken",
+                "server_path": "/opt/pantoken-server"
+            });
+            legacy[key] = serde_json::Value::String(value.into());
+            let profile: RemoteProfile = serde_json::from_value(legacy).expect("legacy profile");
+            assert_eq!(
+                profile.remote_root_override.as_deref(),
+                Some("/srv/pantoken")
+            );
+            assert_eq!(profile.server_path.as_deref(), Some("/opt/pantoken-server"));
+            let rewritten = serde_json::to_value(profile).expect("reserialize");
+            assert!(rewritten.get("xdgMode").is_none());
+            assert!(rewritten.get("xdg_mode").is_none());
+            assert_eq!(
+                rewritten.get("sshDestination").and_then(|v| v.as_str()),
+                Some("work-server")
+            );
+        }
     }
 
     #[test]
@@ -639,7 +632,6 @@ mod tests {
             "polytokenPolicy": "offerInstall",
             "remoteRootOverride": "/srv/pantoken",
             "serverPath": "/opt/pantoken-server",
-            "xdgMode": "shared",
             "executionTarget": {
                 "kind": "dockerContainer",
                 "containerName": "work-api",

@@ -169,7 +169,23 @@ const INSPECTION_WITH_SOCKET = {
 // Flow tests — container provisioning family
 // ---------------------------------------------------------------------------
 
+async function expectSharedAdvancedControls(page: import("@playwright/test").Page): Promise<void> {
+  await page.getByRole("button", { name: "Advanced" }).click();
+  const panel = page.getByTestId("computer-setup-panel");
+  await expect(panel.getByRole("radiogroup", { name: "Polytoken policy" })).toBeVisible();
+  await expect(panel.getByRole("textbox", { name: /Remote-root override/ })).toBeVisible();
+  await expect(panel.getByLabel("Server binary path")).toBeVisible();
+  await expect(panel.getByText("XDG mode", { exact: true })).toHaveCount(0);
+  await expect(panel.getByText("Isolated", { exact: true })).toHaveCount(0);
+  await expect(panel.getByText("Shared", { exact: true })).toHaveCount(0);
+}
+
 // Open the Setup Docker sheet and test SSH to reveal the container picker
+test("Docker add Advanced keeps shared-root controls without XDG mode", async ({ page }) => {
+  await openDockerSetupFromSwitcher(page);
+  await expectSharedAdvancedControls(page);
+});
+
 test("Setup Docker sheet opens and SSH test reveals the container picker", async ({ page }) => {
   await openDockerSetupFromSwitcher(page);
   await expect(page.getByTestId("computer-setup-panel")).toBeVisible();
@@ -427,7 +443,66 @@ test("Container replacement shows reconnecting then failure UI", async ({ page }
   await expect(page.getByTestId("failure-section")).toBeVisible();
 });
 
+async function resetProfileCaptures(page: import("@playwright/test").Page): Promise<void> {
+  await page.evaluate(() => (window as unknown as { __pantokenHosts?: { resetProfileCaptures: () => void } }).__pantokenHosts?.resetProfileCaptures());
+}
+
+async function lastProfileCapture(page: import("@playwright/test").Page, kind: "added" | "updated"): Promise<Record<string, unknown>> {
+  return page.evaluate((kind) => {
+    const hosts = (window as unknown as { __pantokenHosts?: { getLastAddedProfile: () => unknown; getLastUpdatedProfile: () => unknown } }).__pantokenHosts;
+    return (kind === "added" ? hosts?.getLastAddedProfile() : hosts?.getLastUpdatedProfile()) as Record<string, unknown>;
+  }, kind);
+}
+
+async function acknowledgementCaptures(page: import("@playwright/test").Page): Promise<Array<{ id: string; riskId: string; fingerprint: string }>> {
+  return page.evaluate(() => (window as unknown as { __pantokenHosts?: { getAcknowledgementCaptures: () => Array<{ id: string; riskId: string; fingerprint: string }> } }).__pantokenHosts?.getAcknowledgementCaptures() ?? []);
+}
+
 // Docker profile appears in Computers section with Docker tag
+test("docker_add_profile_payload_omits_xdg_mode_and_preserves_advanced_fields", async ({ page }) => {
+  await resetProfileCaptures(page);
+  await openDockerSetupFromSwitcher(page);
+  await page.getByRole("button", { name: "Advanced" }).click();
+  await page.getByRole("radio", { name: "Offer install" }).click();
+  await page.getByTestId("cs-root-override-input").fill("/srv/docker-remote-root");
+  await page.getByLabel("Server binary path").fill("/opt/docker-server");
+  await setPendingRisksForNextDocker(page, [ROOT_RISK]);
+  await page.getByTestId("cs-ssh-input").fill("user@docker-payload.test");
+  await page.getByTestId("cs-test-ssh").click();
+  await expect(page.getByTestId("cs-ssh-summary")).toBeVisible({ timeout: 10000 });
+  await page.getByTestId("cs-container-work-api-dev").click();
+  await page.getByTestId("cs-customize-toggle").click();
+  await page.getByTestId("cs-user-input").fill("root");
+  await page.getByTestId("cs-root-input").fill("/srv/docker-root");
+  await page.getByTestId("cs-workdir-input").fill("/workspace/payload");
+  await page.getByTestId("cs-use-container").click();
+  await expect(page.getByTestId("cs-risks-panel")).toBeVisible({ timeout: 10000 });
+  await page.getByTestId("cs-accept-risks").click();
+  const profile = await lastProfileCapture(page, "added");
+  expect(profile).toMatchObject({ sshDestination: "user@docker-payload.test", polytokenPolicy: "offerInstall", remoteRootOverride: "/srv/docker-remote-root", serverPath: "/opt/docker-server", executionTarget: { kind: "dockerContainer", containerName: "work-api-dev", user: "root", workdir: "/workspace/payload", pantokenRoot: "/srv/docker-root" } });
+  expect(await acknowledgementCaptures(page)).toEqual([{ id: expect.any(String), riskId: "root-1", fingerprint: "root:dev-id-work-api-dev" }]);
+  expect(profile).not.toHaveProperty("xdgMode");
+  expect(profile).not.toHaveProperty("xdg_mode");
+});
+
+test("docker_edit_profile_payload_omits_xdg_mode_and_preserves_advanced_fields", async ({ page }) => {
+  await createDockerProfile(page);
+  await resetProfileCaptures(page);
+  await openSettings(page, "computers");
+  await page.locator("[data-testid^='computer-row-']").filter({ hasText: "Work API Dev" }).getByRole("button", { name: "Edit" }).click();
+  await expect(page.getByTestId("computer-setup-panel")).toBeVisible();
+  await page.getByRole("button", { name: "Advanced" }).click();
+  await page.getByRole("radio", { name: "Offer install" }).click();
+  await page.getByTestId("cs-edit-root-override").fill("/srv/docker-edited");
+  await page.getByLabel("Server binary path").fill("/opt/docker-server");
+  await page.getByTestId("cs-reconnect-later").click();
+  const profile = await lastProfileCapture(page, "updated");
+  expect(profile).toMatchObject({ polytokenPolicy: "offerInstall", remoteRootOverride: "/srv/docker-edited", serverPath: "/opt/docker-server", executionTarget: { kind: "dockerContainer" } });
+  expect(profile).not.toHaveProperty("xdgMode");
+  expect(profile).not.toHaveProperty("xdg_mode");
+  expect(await acknowledgementCaptures(page)).toEqual([]);
+});
+
 test("Docker profile appears in Computers section with Docker tag", async ({ page }) => {
   test.setTimeout(60000);
   await createDockerProfile(page);
@@ -459,6 +534,7 @@ test("Edit dialog shows exec env, docker target, and reconnect buttons", async (
   await expect(page.getByTestId("cs-edit-exec-env")).toContainText("immutable");
   // Docker target section should be present.
   await expect(page.getByTestId("cs-edit-docker-target")).toBeVisible();
+  await expectSharedAdvancedControls(page);
 
   // Re-asserted: shared panel visibility from the "reconnect buttons" sub-flow.
   await expect(page.getByTestId("computer-setup-panel")).toBeVisible();

@@ -79,8 +79,8 @@ pub struct SshCommand {
     pub port: Option<u16>,
     pub remote_root: String,
     pub server_path: String,
-    /// Extra env vars to set on the remote command (e.g. XDG override paths
-    /// for isolated polytoken). Prepended as `KEY=VAL ` before the exec.
+    /// Extra environment variables to set on the remote command. Prepended as
+    /// `KEY=VAL ` before the exec for generic bridge/runtime plumbing.
     pub extra_env: Vec<(String, String)>,
     /// Audited complete remote command for target executors. Host mode leaves
     /// this unset and uses the structured root/server/env fields above.
@@ -180,42 +180,12 @@ fn shell_quote(word: &str) -> String {
 
 impl From<&RemoteProfile> for SshCommand {
     fn from(profile: &RemoteProfile) -> Self {
-        // Phase 5: populate extra_env with XDG override paths when the profile
-        // uses isolated XDG mode (the default). When shared, no overrides are
-        // set — polytoken uses its default roots.
-        let mut extra_env = Vec::new();
-        if profile.xdg_mode == crate::remote_profile::XdgMode::Isolated {
-            let root = profile.remote_root();
-            // The remote root may be a ~-prefixed path (default) or absolute.
-            // The XDG functions expect a Path; for ~ paths we pass them as-is
-            // (the remote shell expands ~).
-            let root_path = std::path::Path::new(root);
-            extra_env.push((
-                "XDG_CONFIG_HOME".into(),
-                pantoken_remote_layout::layout::polytoken_xdg_config(root_path)
-                    .to_string_lossy()
-                    .into_owned(),
-            ));
-            extra_env.push((
-                "XDG_DATA_HOME".into(),
-                pantoken_remote_layout::layout::polytoken_xdg_data(root_path)
-                    .to_string_lossy()
-                    .into_owned(),
-            ));
-            extra_env.push((
-                "XDG_CACHE_HOME".into(),
-                pantoken_remote_layout::layout::polytoken_xdg_cache(root_path)
-                    .to_string_lossy()
-                    .into_owned(),
-            ));
-        }
-
         SshCommand {
             destination: profile.ssh_destination.clone(),
             port: profile.port,
             remote_root: profile.remote_root().to_string(),
             server_path: profile.server_path().to_string(),
-            extra_env,
+            extra_env: Vec::new(),
             raw_remote_command: None,
         }
     }
@@ -1287,6 +1257,9 @@ mod tests {
     use super::*;
     use crate::bridge::fake::{FakeScenario, FakeSshTransport};
     use crate::remote_connection::ConnectionFailureState;
+    use crate::remote_profile::{
+        ExecutionTargetProfile, PolytokenPolicy, RemoteProfile, RiskAcknowledgements,
+    };
     use futures_util::{SinkExt, StreamExt};
     use pantoken_protocol::wire::{ClientMessage, ServerMessage, PROTOCOL_VERSION};
     use std::sync::Arc;
@@ -1454,6 +1427,48 @@ mod tests {
     }
 
     // ── AC.3: ssh command construction + redaction ───────────────────────
+
+    #[test]
+    fn ssh_command_from_profile_has_no_xdg_assignments() {
+        let profile = RemoteProfile {
+            id: "legacy".into(),
+            label: "Legacy profile".into(),
+            ssh_destination: "user@example.com".into(),
+            port: Some(2222),
+            polytoken_policy: PolytokenPolicy::RequireExisting,
+            remote_root_override: Some("/srv/pantoken".into()),
+            server_path: Some("/opt/pantoken-server".into()),
+            execution_target: ExecutionTargetProfile::Host,
+            risk_acknowledgements: RiskAcknowledgements::default(),
+        };
+        let command = SshCommand::from(&profile);
+        assert!(command.extra_env.is_empty());
+        let remote = command.remote_command();
+        for key in ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"] {
+            assert!(
+                !remote.contains(key),
+                "profile command must not set {key}: {remote}"
+            );
+        }
+
+        for legacy_key in ["xdgMode", "xdg_mode"] {
+            let mut payload = serde_json::json!({
+                "id": "legacy",
+                "label": "Legacy profile",
+                "sshDestination": "user@example.com",
+                "polytokenPolicy": "requireExisting",
+                "remoteRootOverride": "/srv/pantoken",
+                "serverPath": "/opt/pantoken-server",
+                "executionTarget": { "kind": "host" },
+                "riskAcknowledgements": {}
+            });
+            payload[legacy_key] = serde_json::Value::String("isolated".into());
+            let legacy: RemoteProfile = serde_json::from_value(payload).expect("legacy profile");
+            let command = SshCommand::from(&legacy);
+            assert!(command.extra_env.is_empty());
+            assert!(!command.remote_command().contains("XDG_"));
+        }
+    }
 
     #[test]
     fn ssh_command_construction_tests() {

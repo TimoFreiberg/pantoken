@@ -160,6 +160,8 @@ pub struct FakeSshTransport {
     /// Exact remote stdin commands and their byte streams (Docker uploads).
     #[allow(clippy::type_complexity)]
     stdin_commands: Arc<Mutex<Vec<(String, Vec<u8>)>>>,
+    /// Resolved proxy commands for Docker/bridge inspection tests.
+    proxy_commands: Arc<Mutex<Vec<SshCommand>>>,
 }
 
 /// A canned response for a `run_command` call.
@@ -212,6 +214,7 @@ impl FakeSshTransport {
             command_responses: Arc::new(Mutex::new(Vec::new())),
             remote_fs: Arc::new(Mutex::new(FakeRemoteFs::new())),
             stdin_commands: Arc::new(Mutex::new(Vec::new())),
+            proxy_commands: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -246,6 +249,11 @@ impl FakeSshTransport {
     #[allow(clippy::type_complexity)]
     pub fn stdin_commands(&self) -> Arc<Mutex<Vec<(String, Vec<u8>)>>> {
         self.stdin_commands.clone()
+    }
+
+    /// Snapshot the resolved proxy commands recorded by this transport.
+    pub fn proxy_commands(&self) -> Vec<SshCommand> {
+        self.proxy_commands.lock().unwrap().clone()
     }
 }
 
@@ -323,6 +331,7 @@ impl Clone for FakeSshTransport {
             command_responses: self.command_responses.clone(),
             remote_fs: self.remote_fs.clone(),
             stdin_commands: self.stdin_commands.clone(),
+            proxy_commands: self.proxy_commands.clone(),
         }
     }
 }
@@ -330,8 +339,9 @@ impl Clone for FakeSshTransport {
 impl SshTransport for FakeSshTransport {
     fn spawn_proxy(
         &self,
-        _command: SshCommand,
+        command: SshCommand,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = io::Result<SshProxy>> + Send>> {
+        self.proxy_commands.lock().unwrap().push(command);
         let scenario = self.scenario.clone();
         self.spawn_count.fetch_add(1, Ordering::SeqCst);
         self.spawn_notify.notify_one();
