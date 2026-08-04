@@ -20,7 +20,8 @@ pantoken-remote-layout = { path = "server/pantoken-remote-layout" }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "io-std", "process", "sync", "time", "macros", "fs", "signal"] }
+# `test-util` enables deterministic Tokio-clock tests; it does not change runtime behavior.
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "io-std", "process", "sync", "time", "macros", "fs", "signal", "test-util"] }
 axum = { version = "0.8", features = ["ws"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 tower = "0.5"

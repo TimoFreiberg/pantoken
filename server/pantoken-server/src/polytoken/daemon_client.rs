@@ -894,11 +894,87 @@ impl From<LeaseError> for LeaseConflictError {
 /// stored as a trait object.
 pub type SleepFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
-/// An injectable sleep seam for [`retry_claim`]. The default (used by
-/// [`retry_claim`]) is `tokio::time::sleep`; tests pass a no-op so retry loops
-/// run without real wall-clock delay. Mirrors the `SpawnOverrideFn` pattern
-/// (`Arc<dyn Fn(...) -> Pin<Box<dyn Future + Send + 'static>> + Send + Sync>`).
+/// An injectable sleep seam for lease retry. The default is
+/// `tokio::time::sleep`; tests pass a no-op so retry loops run without real
+/// wall-clock delay. Mirrors the `SpawnOverrideFn` pattern.
 pub type SleepFn = Arc<dyn Fn(Duration) -> SleepFuture + Send + Sync>;
+
+/// An injectable epoch-millisecond clock used by lease retry expiry decisions.
+/// Production wrappers capture [`current_millis`]; tests provide a fixed value
+/// so expiry fixtures do not depend on wall-clock timing.
+pub type NowMillisFn = Arc<dyn Fn() -> i64 + Send + Sync>;
+
+fn real_now_millis() -> i64 {
+    current_millis()
+}
+
+fn real_sleep() -> SleepFn {
+    Arc::new(|d| Box::pin(tokio::time::sleep(d)))
+}
+
+/// The shared retry core. It owns the retry-window policy and accepts both timing
+/// seams; adapters below preserve the typed, legacy, and daemon-client error APIs.
+#[derive(Debug)]
+enum RetryClaimFailure {
+    Other(String),
+    Conflict {
+        held: Option<LeaseHeldInfo>,
+        ms_until_expiry: Option<i64>,
+    },
+}
+
+async fn retry_claim_core<T, F, Fut>(
+    claim: F,
+    max_retries: Option<u32>,
+    delay_ms: Option<u64>,
+    sleep: SleepFn,
+    now_millis: NowMillisFn,
+) -> Result<T, RetryClaimFailure>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<T, LeaseError>>,
+{
+    let max_retries = max_retries.unwrap_or(3) as i32;
+    let delay_ms = delay_ms.unwrap_or(3000);
+    let mut last_conflict: Option<(Option<LeaseHeldInfo>, Option<u128>)> = None;
+
+    for attempt in 0..=max_retries {
+        match claim().await {
+            Ok(value) => return Ok(value),
+            Err(LeaseError::Other(detail)) => return Err(RetryClaimFailure::Other(detail)),
+            Err(LeaseError::Conflict { held }) => {
+                let expiry = held
+                    .as_ref()
+                    .and_then(|h| h.expires_at.as_deref())
+                    .and_then(parse_iso8601_to_millis);
+                let ms_until_expiry = expiry.map(|expiry| expiry as i64 - now_millis());
+                last_conflict = Some((held.clone(), expiry));
+
+                if let (Some(remaining), true) = (ms_until_expiry, attempt < max_retries) {
+                    let window = (max_retries - attempt) as i64 * delay_ms as i64;
+                    if remaining > window {
+                        return Err(RetryClaimFailure::Conflict {
+                            held,
+                            ms_until_expiry: Some(remaining),
+                        });
+                    }
+                }
+                if attempt < max_retries {
+                    sleep(Duration::from_millis(delay_ms)).await;
+                }
+            }
+        }
+    }
+
+    // Preserve the old final-message behavior: compute the final wait after the
+    // last claim, using the injected clock rather than a wall-clock read.
+    let (held, expiry) = last_conflict.unwrap_or((None, None));
+    let ms_until_expiry = expiry.map(|expiry| expiry as i64 - now_millis());
+    Err(RetryClaimFailure::Conflict {
+        held,
+        ms_until_expiry,
+    })
+}
 
 /// Typed retry seam for new callers. Non-conflict errors are returned unchanged;
 /// only `LeaseError::Conflict` is retried. The legacy `retry_claim` below remains
@@ -913,33 +989,32 @@ where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = Result<T, LeaseError>>,
 {
-    let max_retries = max_retries.unwrap_or(3) as i32;
-    let delay_ms = delay_ms.unwrap_or(3000);
-    let mut last_held = None;
-    for attempt in 0..=max_retries {
-        match claim().await {
-            Ok(value) => return Ok(value),
-            Err(LeaseError::Other(detail)) => return Err(LeaseError::Other(detail)),
-            Err(LeaseError::Conflict { held }) => {
-                last_held = held.clone();
-                if attempt < max_retries {
-                    if let Some(expiry) = held
-                        .as_ref()
-                        .and_then(|h| h.expires_at.as_deref())
-                        .and_then(parse_iso8601_to_millis)
-                    {
-                        let remaining = expiry as i64 - current_millis();
-                        let window = (max_retries - attempt) as i64 * delay_ms as i64;
-                        if remaining > window {
-                            return Err(LeaseError::Conflict { held });
-                        }
-                    }
-                    sleep(Duration::from_millis(delay_ms)).await;
-                }
-            }
-        }
+    retry_claim_typed_with_clock(
+        claim,
+        max_retries,
+        delay_ms,
+        sleep,
+        Arc::new(real_now_millis),
+    )
+    .await
+}
+
+async fn retry_claim_typed_with_clock<T, F, Fut>(
+    claim: F,
+    max_retries: Option<u32>,
+    delay_ms: Option<u64>,
+    sleep: SleepFn,
+    now_millis: NowMillisFn,
+) -> Result<T, LeaseError>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<T, LeaseError>>,
+{
+    match retry_claim_core(claim, max_retries, delay_ms, sleep, now_millis).await {
+        Ok(value) => Ok(value),
+        Err(RetryClaimFailure::Other(detail)) => Err(LeaseError::Other(detail)),
+        Err(RetryClaimFailure::Conflict { held, .. }) => Err(LeaseError::Conflict { held }),
     }
-    Err(LeaseError::Conflict { held: last_held })
 }
 
 /// Retry a claim function on lease-conflict errors, up to `max_retries` times
@@ -962,13 +1037,13 @@ where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = Result<T, LeaseError>>,
 {
-    let sleep: SleepFn = Arc::new(|d| Box::pin(tokio::time::sleep(d)));
-    retry_claim_with_sleep(claim, max_retries, delay_ms, sleep).await
+    retry_claim_with_sleep(claim, max_retries, delay_ms, real_sleep()).await
 }
 
 /// Same as [`retry_claim`] but with an injectable sleep seam. `sleep` is called
 /// with `Duration::from_millis(delay_ms)` between retries; tests pass a no-op
-/// future so the loop is instant and deterministic.
+/// future so the loop is instant and deterministic. The default clock remains
+/// the real epoch clock; tests use the internal clock-enabled adapter.
 pub async fn retry_claim_with_sleep<T, F, Fut>(
     claim: F,
     max_retries: Option<u32>,
@@ -979,71 +1054,44 @@ where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = Result<T, LeaseError>>,
 {
-    let max_retries = max_retries.unwrap_or(3) as i32;
-    let delay_ms = delay_ms.unwrap_or(3000);
-    let mut last_conflict: Option<LeaseConflictError> = None;
-    for attempt in 0..=max_retries {
-        match claim().await {
-            Ok(v) => return Ok(v),
-            Err(LeaseError::Other(msg)) => {
-                // Non-retriable: return immediately.
-                return Err(LeaseConflictError {
-                    message: msg,
-                    held: None,
-                });
-            }
-            Err(LeaseError::Conflict { held }) => {
-                let e = LeaseConflictError {
-                    message: held
-                        .as_ref()
-                        .map(|h| {
-                            format!(
-                                "another TUI is attached to this session ({}). Detach it there (/detach) or wait ~30s for its lease to lapse.",
-                                h.summary
-                            )
-                        })
-                        .unwrap_or_else(|| "lease claim failed (409)".to_string()),
-                    held: held.clone(),
-                };
-                last_conflict = Some(e.clone());
-                let expiry = held
-                    .as_ref()
-                    .and_then(|h| h.expires_at.as_deref())
-                    .and_then(parse_iso8601_to_millis);
-                if let (Some(expiry_millis), true) = (expiry, attempt < max_retries) {
-                    let now_millis = current_millis();
-                    let ms_until_expiry = expiry_millis as i64 - now_millis;
-                    let remaining_delays = (max_retries - attempt) as i64 * delay_ms as i64;
-                    // The lease won't lapse within the retry window (active TUI heartbeating).
-                    // Stop retrying — surface the manual Retry toast with the computed wait.
-                    if ms_until_expiry > remaining_delays {
-                        return Err(LeaseConflictError {
-                            message: format_lease_conflict_message(
-                                e.held.as_ref(),
-                                Some(ceil_seconds(ms_until_expiry)),
-                            ),
-                            held: e.held.clone(),
-                        });
-                    }
-                }
-                if attempt < max_retries {
-                    sleep(Duration::from_millis(delay_ms)).await;
-                }
-            }
-        }
+    retry_claim_with_sleep_and_clock(
+        claim,
+        max_retries,
+        delay_ms,
+        sleep,
+        Arc::new(real_now_millis),
+    )
+    .await
+}
+
+async fn retry_claim_with_sleep_and_clock<T, F, Fut>(
+    claim: F,
+    max_retries: Option<u32>,
+    delay_ms: Option<u64>,
+    sleep: SleepFn,
+    now_millis: NowMillisFn,
+) -> Result<T, LeaseConflictError>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<T, LeaseError>>,
+{
+    match retry_claim_core(claim, max_retries, delay_ms, sleep, now_millis).await {
+        Ok(value) => Ok(value),
+        Err(RetryClaimFailure::Other(message)) => Err(LeaseConflictError {
+            message,
+            held: None,
+        }),
+        Err(RetryClaimFailure::Conflict {
+            held,
+            ms_until_expiry,
+        }) => Err(LeaseConflictError {
+            message: format_lease_conflict_message(
+                held.as_ref(),
+                ms_until_expiry.map(ceil_seconds),
+            ),
+            held,
+        }),
     }
-    // All retries exhausted. Build the final message with the computed time-to-lapse
-    // (or "~30s" when the body lacked an expiry).
-    let held = last_conflict.as_ref().and_then(|c| c.held.clone());
-    let seconds_to_lapse = held
-        .as_ref()
-        .and_then(|h| h.expires_at.as_deref())
-        .and_then(parse_iso8601_to_millis)
-        .map(|exp| ceil_seconds(exp as i64 - current_millis()));
-    Err(LeaseConflictError {
-        message: format_lease_conflict_message(held.as_ref(), seconds_to_lapse),
-        held,
-    })
 }
 
 /// Parse an ISO-8601 timestamp to epoch millis. Returns None on failure.
@@ -1461,6 +1509,18 @@ impl DaemonClient {
         path: &str,
         body: Option<&str>,
     ) -> DaemonResponse<T> {
+        self.post_with_options(path, body, false).await
+    }
+
+    /// POST variant used by lease claim. The daemon's structured 409 body contains
+    /// `active.expires_at`, which the retry policy must parse; ordinary POST callers
+    /// retain the existing message-first error normalization.
+    async fn post_with_options<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        body: Option<&str>,
+        preserve_lease_conflict_body: bool,
+    ) -> DaemonResponse<T> {
         // error_for_status: prefer parsed body.message, fall back to raw text slice.
         // We can't easily type the closure to match `Option<&T>` with message field,
         // so we capture the raw text via a two-phase approach: parse for message.
@@ -1490,6 +1550,12 @@ impl DaemonClient {
                 };
                 let error = if status < 400 {
                     None
+                } else if preserve_lease_conflict_body && status == 409 {
+                    // Lease retry needs the structured `active.expires_at`, not just
+                    // the daemon's human-readable top-level message. Keep the full
+                    // body so parsing cannot fail because a future body grows past
+                    // the generic error preview limit.
+                    Some(text)
                 } else {
                     // Preserve the daemon's public message and machine-actionable code.
                     let parsed_error = serde_json::from_str::<serde_json::Value>(&text)
@@ -1650,7 +1716,11 @@ impl DaemonClient {
         };
         let body_str = serde_json::to_string(&body).unwrap_or_default();
         let res = self
-            .post::<TuiAttachClaimResponse>("/tui-attachment/claim", Some(&body_str))
+            .post_with_options::<TuiAttachClaimResponse>(
+                "/tui-attachment/claim",
+                Some(&body_str),
+                true,
+            )
             .await;
         if res.status != 200 || res.data.is_none() {
             if res.status == 409 {
@@ -1746,53 +1816,30 @@ impl DaemonClient {
         max_retries: Option<u32>,
         delay_ms: Option<u64>,
     ) -> Result<TuiAttachClaimResponse, LeaseError> {
-        // Inline retry loop preserves `LeaseError::Other` for auth, server, and
-        // transport failures; only `Conflict` participates in the retry policy.
-        // Only LeaseError::Conflict is retried; LeaseError::Other returns immediately.
-        let max_r = max_retries.unwrap_or(3) as i32;
-        let delay = delay_ms.unwrap_or(3000);
-        let mut last_held: Option<LeaseHeldInfo> = None;
-        for attempt in 0..=max_r {
-            match self.claim_lease(label).await {
-                Ok(v) => return Ok(v),
-                Err(LeaseError::Other(msg)) => {
-                    return Err(LeaseError::Other(msg));
-                }
-                Err(LeaseError::Conflict { held }) => {
-                    let e = LeaseConflictError {
-                        message: held
-                            .as_ref()
-                            .map(|h| {
-                                format!(
-                                    "another TUI is attached to this session ({}). Detach it there (/detach) or wait ~30s for its lease to lapse.",
-                                    h.summary
-                                )
-                            })
-                            .unwrap_or_else(|| "lease claim failed (409)".to_string()),
-                        held: held.clone(),
-                    };
-                    last_held = held.clone();
-                    let expiry = held
-                        .as_ref()
-                        .and_then(|h| h.expires_at.as_deref())
-                        .and_then(parse_iso8601_to_millis);
-                    if let (Some(expiry_millis), true) = (expiry, attempt < max_r) {
-                        let now_millis = current_millis();
-                        let ms_until_expiry = expiry_millis as i64 - now_millis;
-                        let remaining_delays = (max_r - attempt) as i64 * delay as i64;
-                        if ms_until_expiry > remaining_delays {
-                            return Err(LeaseError::Conflict {
-                                held: e.held.clone(),
-                            });
-                        }
-                    }
-                    if attempt < max_r {
-                        tokio::time::sleep(Duration::from_millis(delay)).await;
-                    }
-                }
-            }
+        self.claim_lease_with_retry_and_clock(
+            label,
+            max_retries,
+            delay_ms,
+            real_sleep(),
+            Arc::new(real_now_millis),
+        )
+        .await
+    }
+
+    async fn claim_lease_with_retry_and_clock(
+        &self,
+        label: &str,
+        max_retries: Option<u32>,
+        delay_ms: Option<u64>,
+        sleep: SleepFn,
+        now_millis: NowMillisFn,
+    ) -> Result<TuiAttachClaimResponse, LeaseError> {
+        let claim = || self.claim_lease(label);
+        match retry_claim_core(claim, max_retries, delay_ms, sleep, now_millis).await {
+            Ok(value) => Ok(value),
+            Err(RetryClaimFailure::Other(message)) => Err(LeaseError::Other(message)),
+            Err(RetryClaimFailure::Conflict { held, .. }) => Err(LeaseError::Conflict { held }),
         }
-        Err(LeaseError::Conflict { held: last_held })
     }
 
     /// `POST /tui-attachment/heartbeat` — refresh the lease. 404/409 means the
@@ -3569,22 +3616,59 @@ sleep 30
     // are instant and deterministic, mirroring the TS `sleep: async () => {}`.
     // -------------------------------------------------------------------------
 
-    /// A no-op sleep seam — the Rust analogue of the TS `async () => {}`. The
-    /// retry loop awaits it between attempts but wall-clock never advances, so
-    /// `current_millis()` is effectively frozen across retries.
+    /// A no-op sleep seam — the Rust analogue of the TS `async () => {}`.
+    /// Retry tests pair it with the fixed clock below, so neither fixture nor
+    /// retry behavior depends on wall-clock timing.
     fn no_op_sleep() -> SleepFn {
         Arc::new(|_d: Duration| Box::pin(async {}) as SleepFuture)
     }
 
-    /// Build an ISO-8601 expiry `ms_from_now` milliseconds in the future, the
-    /// shape the daemon emits and `parse_iso8601_to_millis` parses. Mirrors the
-    /// `now_iso8601()` formatting but offsets from the current epoch millis.
+    const TEST_NOW_MILLIS: i64 = 1_700_000_000_000;
+
+    fn fixed_now_millis() -> NowMillisFn {
+        Arc::new(|| TEST_NOW_MILLIS)
+    }
+
+    /// Build an ISO-8601 expiry `ms_from_now` milliseconds after a fixed epoch.
+    /// The fixture is intentionally independent of the machine clock; callers
+    /// use `*_with_clock` below with the same fixed epoch.
     fn iso_expiry(ms_from_now: i64) -> String {
-        let millis = (current_millis() + ms_from_now).max(0) as u64;
+        let millis = (TEST_NOW_MILLIS + ms_from_now).max(0) as u64;
         let secs = millis / 1000;
         let subsec_millis = (millis % 1000) as u32;
         let (y, mo, d, h, mi, s) = epoch_to_civil(secs);
         format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}.{subsec_millis:03}Z")
+    }
+
+    async fn retry_claim_with_fixed_clock<T, F, Fut>(
+        claim: F,
+        max_retries: Option<u32>,
+        delay_ms: Option<u64>,
+        sleep: SleepFn,
+    ) -> Result<T, LeaseConflictError>
+    where
+        F: Fn() -> Fut,
+        Fut: std::future::Future<Output = Result<T, LeaseError>>,
+    {
+        retry_claim_with_sleep_and_clock(claim, max_retries, delay_ms, sleep, fixed_now_millis())
+            .await
+    }
+
+    // Keep the existing lease-retry cases on the deterministic adapter. The
+    // production function above still captures the real clock; this test-only
+    // forwarding function exercises the injected clock without rewriting every
+    // legacy fixture call site.
+    async fn retry_claim_with_sleep<T, F, Fut>(
+        claim: F,
+        max_retries: Option<u32>,
+        delay_ms: Option<u64>,
+        sleep: SleepFn,
+    ) -> Result<T, LeaseConflictError>
+    where
+        F: Fn() -> Fut,
+        Fut: std::future::Future<Output = Result<T, LeaseError>>,
+    {
+        retry_claim_with_fixed_clock(claim, max_retries, delay_ms, sleep).await
     }
 
     /// Build a `LeaseError::Conflict` like `claim_lease` returns on a 409 — the
@@ -3598,6 +3682,59 @@ sleep 30
                 expires_at: Some(expires_at.to_string()),
             }),
         }
+    }
+
+    #[tokio::test]
+    async fn retry_claim_typed_stops_early_when_lease_will_not_lapse() {
+        let calls = Arc::new(std::sync::Mutex::new(0u32));
+        let calls_fn = calls.clone();
+        let expiry = iso_expiry(10_000);
+        let result: Result<String, LeaseError> = retry_claim_typed_with_clock(
+            move || {
+                let calls = calls_fn.clone();
+                let expiry = expiry.clone();
+                Box::pin(async move {
+                    *calls.lock().expect("calls") += 1;
+                    Err::<String, LeaseError>(conflict("\"tui\" pid 99999", &expiry))
+                })
+            },
+            Some(3),
+            Some(100),
+            no_op_sleep(),
+            fixed_now_millis(),
+        )
+        .await;
+        assert!(matches!(result, Err(LeaseError::Conflict { .. })));
+        assert_eq!(*calls.lock().expect("calls"), 1);
+    }
+
+    #[tokio::test]
+    async fn retry_claim_typed_retries_when_lease_will_lapse_within_window() {
+        let calls = Arc::new(std::sync::Mutex::new(0u32));
+        let calls_fn = calls.clone();
+        let expiry = iso_expiry(1);
+        let result: Result<String, LeaseError> = retry_claim_typed_with_clock(
+            move || {
+                let calls = calls_fn.clone();
+                let expiry = expiry.clone();
+                Box::pin(async move {
+                    let mut count = calls.lock().expect("calls");
+                    *count += 1;
+                    if *count == 1 {
+                        Err(conflict("\"tui\" pid 99999", &expiry))
+                    } else {
+                        Ok::<String, LeaseError>("ok".into())
+                    }
+                })
+            },
+            Some(3),
+            Some(100),
+            no_op_sleep(),
+            fixed_now_millis(),
+        )
+        .await;
+        assert_eq!(result.expect("retry should succeed"), "ok");
+        assert_eq!(*calls.lock().expect("calls"), 2);
     }
 
     // retryClaim — test 1: succeeds on first try (no retry).
@@ -3625,11 +3762,114 @@ sleep 30
 
     // retryClaim — test 2: retries on 409, succeeds on 2nd attempt.
     #[tokio::test]
-    async fn retry_claim_retries_then_succeeds() {
+    async fn daemon_client_claim_lease_with_retry_uses_fixed_clock_for_early_stop_and_retry() {
+        use axum::{
+            Router, extract::State, http::StatusCode, response::IntoResponse, routing::post,
+        };
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::net::TcpListener;
+
+        async fn run_case(expiry_offset: i64, should_retry: bool) {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let handler_calls = calls.clone();
+            let expiry = iso_expiry(expiry_offset);
+            let expected_expiry = expiry.clone();
+            let app = Router::new()
+                .route(
+                    "/tui-attachment/claim",
+                    post(move |State(calls): State<Arc<AtomicUsize>>| {
+                        let expiry = expiry.clone();
+                        async move {
+                            let call = calls.fetch_add(1, Ordering::SeqCst);
+                            if call == 0 && should_retry {
+                                (
+                                    StatusCode::CONFLICT,
+                                    serde_json::json!({
+                                        "active": {
+                                            "active_pid": 99999,
+                                            "active_terminal_label": "tui",
+                                            "expires_at": expiry,
+                                        },
+                                        "message": "lease held",
+                                    })
+                                    .to_string(),
+                                )
+                                    .into_response()
+                            } else if !should_retry {
+                                (
+                                    StatusCode::CONFLICT,
+                                    serde_json::json!({
+                                        "active": {
+                                            "active_pid": 99999,
+                                            "active_terminal_label": "tui",
+                                            "expires_at": expiry,
+                                        },
+                                        "message": "lease held",
+                                    })
+                                    .to_string(),
+                                )
+                                    .into_response()
+                            } else {
+                                (
+                                    StatusCode::OK,
+                                    serde_json::json!({
+                                        "expires_after_seconds": 30,
+                                        "expires_at": expiry,
+                                        "heartbeat_interval_seconds": 5,
+                                        "lease_id": "fixed-test-lease",
+                                    })
+                                    .to_string(),
+                                )
+                                    .into_response()
+                            }
+                        }
+                    }),
+                )
+                .with_state(handler_calls);
+            let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+            let port = listener.local_addr().expect("local addr").port();
+            let server = tokio::spawn(async move {
+                axum::serve(listener, app).await.expect("serve");
+            });
+
+            let client = DaemonClient::new("fixed-clock-session".into(), port, 1234, None);
+            let result = client
+                .claim_lease_with_retry_and_clock(
+                    "test",
+                    Some(3),
+                    Some(100),
+                    no_op_sleep(),
+                    fixed_now_millis(),
+                )
+                .await;
+            if should_retry {
+                assert!(
+                    result.is_ok(),
+                    "lease should succeed after retry: {result:?}"
+                );
+                assert_eq!(calls.load(Ordering::SeqCst), 2);
+                client.clear_lease().await;
+            } else {
+                let Err(LeaseError::Conflict { held }) = result else {
+                    panic!("far expiry should stop with a parsed lease conflict");
+                };
+                let held = held.expect("structured 409 should include holder info");
+                assert_eq!(held.expires_at.as_deref(), Some(expected_expiry.as_str()));
+                assert_eq!(calls.load(Ordering::SeqCst), 1);
+            }
+            server.abort();
+        }
+
+        run_case(10_000, false).await;
+        run_case(1, true).await;
+    }
+
+    #[tokio::test]
+    async fn retry_claim_legacy_retries_when_lease_will_lapse() {
         let calls = std::sync::Arc::new(std::sync::Mutex::new(0u32));
         let calls_fn = calls.clone();
-        // Expiry ~1ms — lapses well within the retry window so the early-exit
-        // doesn't fire. The no-op sleep means wall-clock barely advances.
+        // Expiry 1ms after the fixed test epoch — lapses well within the retry
+        // window, so the early-exit does not fire.
         let expiry = iso_expiry(1);
         let result: String = retry_claim_with_sleep(
             move || {
@@ -3778,10 +4018,11 @@ sleep 30
     // retryClaim — test 5: stops early when the lease won't lapse within the
     // retry window.
     #[tokio::test]
-    async fn retry_claim_stops_early_when_lease_wont_lapse() {
+    async fn retry_claim_legacy_stops_early_when_lease_will_not_lapse() {
         let calls = std::sync::Arc::new(std::sync::Mutex::new(0u32));
         let calls_fn = calls.clone();
-        // Expiry 60s out — far beyond the ~3ms retry window (3 retries × 1ms).
+        // Expiry 60 seconds after the fixed test epoch — far beyond the 3ms
+        // retry window (3 retries × 1ms).
         let expiry = iso_expiry(60_000);
         let result: Result<String, LeaseConflictError> = retry_claim_with_sleep(
             move || {
@@ -3806,8 +4047,8 @@ sleep 30
     // (not ~30s).
     #[tokio::test]
     async fn retry_claim_final_error_includes_computed_wait() {
-        // Expiry 5s out. With a no-op sleep (clock frozen), the early-exit
-        // condition `ms_until_expiry > remaining_delays` first becomes true at
+        // Expiry 5 seconds after the fixed test epoch. With the fixed clock,
+        // the early-exit condition `ms_until_expiry > remaining_delays` first becomes true at
         // attempt 1 (5000 > (3-1)*2000 = 4000), so this EARLY-EXITS at attempt 1
         // — it does NOT exhaust. The early-exit path rebuilds the message via
         // `format_lease_conflict_message(held, Some(ceil_seconds(5000)))`, so

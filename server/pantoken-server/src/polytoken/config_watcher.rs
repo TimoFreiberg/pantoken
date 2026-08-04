@@ -30,6 +30,8 @@ use std::time::Duration;
 use notify::event::Event as NotifyEvent;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::Mutex;
+#[cfg(test)]
+use tokio::sync::Notify;
 use tokio::sync::mpsc;
 use tracing::{error, warn};
 
@@ -696,8 +698,11 @@ mod tests {
 
         let called = Arc::new(Mutex::new(false));
         let called_clone = called.clone();
+        let invalidation_seen = Arc::new(Notify::new());
+        let invalidation_seen_clone = invalidation_seen.clone();
         let invalidation: InvalidationCallback = Arc::new(move |_| {
             *called_clone.lock() = true;
+            invalidation_seen_clone.notify_one();
         });
 
         let (handle, status) = setup_watcher(
@@ -718,19 +723,15 @@ mod tests {
             _ => panic!("expected Ok status for valid tempdir: {status:?}"),
         }
 
-        // Write a file in the watched directory and poll for the invalidation
-        // callback to fire (with a generous timeout to avoid CI flakiness).
+        // Write a file in the watched directory and await the invalidation
+        // callback (with a generous timeout to avoid CI flakiness).
         std::fs::write(config_dir.join("test.toml"), "test").expect("write");
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-        loop {
-            if *called.lock() {
-                break;
-            }
-            if tokio::time::Instant::now() >= deadline {
-                panic!("invalidation callback did not fire within 5s timeout");
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        // Await the real notify callback rather than polling a shared flag. The
+        // timeout remains a real external-I/O hang guard: filesystem delivery and
+        // the watcher thread are intentionally not virtualized.
+        tokio::time::timeout(Duration::from_secs(5), invalidation_seen.notified())
+            .await
+            .expect("invalidation callback did not fire within 5s timeout");
         assert!(
             *called.lock(),
             "invalidation should have fired after file write"

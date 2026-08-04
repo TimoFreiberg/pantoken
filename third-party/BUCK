@@ -10156,6 +10156,7 @@ cargo.rust_library(
         "socket2",
         "sync",
         "time",
+        "test-util",
         "tokio-macros",
     ],
     platform = {

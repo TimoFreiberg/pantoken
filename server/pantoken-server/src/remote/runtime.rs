@@ -448,6 +448,11 @@ pub async fn run_remote_runtime(
         }
     }
 
+    // The accept loop has ended (normally due to the public idle-exit signal).
+    // Always stop and await the lifecycle task before returning so it cannot
+    // outlive this runtime or retain the hub/driver after shutdown.
+    lifecycle.shutdown().await;
+
     info!("remote runtime: shutting down");
     Ok(())
 }

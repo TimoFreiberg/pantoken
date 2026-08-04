@@ -276,6 +276,11 @@ pub struct SessionHub {
     /// ≤0 disables eviction. Set from `Config::journal_idle_evict_ms`.
     journal_idle_evict_ms: i64,
 
+    /// Test-only signal used to prove the coalescing task has reached its timer
+    /// before a paused-time test advances the clock.
+    #[cfg(test)]
+    test_timer_started: Option<Arc<Notify>>,
+
     /// Injectable seam for opening the data dir in the platform file manager.
     /// Defaults to the real spawn; tests override it to exercise the failure
     /// path (mirrors TS's injected `openInFileManager`).
@@ -379,6 +384,8 @@ impl SessionHub {
             build_sha,
             delta_flush_ms,
             journal_idle_evict_ms,
+            #[cfg(test)]
+            test_timer_started: None,
             open_in_file_manager: Box::new(default_open_in_file_manager),
             journals: HashMap::new(),
             pending_deltas: HashMap::new(),
@@ -591,7 +598,13 @@ impl SessionHub {
         let hub_ops = self.hub_ops.clone();
         let flush_sid = sid.clone();
         let flush_ms = self.delta_flush_ms;
+        #[cfg(test)]
+        let timer_started = self.test_timer_started.clone();
         runtime.spawn(async move {
+            #[cfg(test)]
+            if let Some(timer_started) = timer_started {
+                timer_started.notify_one();
+            }
             tokio::select! {
                 // Flushed or dropped by another path — timer cancelled.
                 _ = abort_rx => {}
@@ -2734,6 +2747,15 @@ impl SessionHub {
     /// have no warm daemon attachment, if they've been idle longer than
     /// `journal_idle_evict_ms`. Called from the live-refresh tick.
     fn evict_idle_journals(&mut self) {
+        self.evict_idle_journals_at(Instant::now());
+    }
+
+    /// Apply the idle-journal policy at an explicit monotonic timestamp.
+    ///
+    /// The live path uses [`evict_idle_journals`] so production continues to
+    /// sample the real clock. Keeping the timestamp explicit here lets tests
+    /// exercise the age boundary and every retention guard without sleeping.
+    fn evict_idle_journals_at(&mut self, now: Instant) {
         if self.journal_idle_evict_ms <= 0 {
             return;
         }
@@ -2743,7 +2765,6 @@ impl SessionHub {
             return;
         }
         let threshold = Duration::from_millis(self.journal_idle_evict_ms as u64);
-        let now = Instant::now();
 
         // Collect victims — can't remove while iterating the same HashMap.
         let victims: Vec<SessionId> = self
@@ -4068,10 +4089,13 @@ mod hub_models_tests {
 
     /// A coalesced assistantDelta run must reach viewers once delta_flush_ms
     /// elapses, with no non-delta event required to force it out.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn coalesced_deltas_flush_on_the_timer_without_a_following_event() {
         let (_driver, hub, mut ops) = test_hub(); // delta_flush_ms = 10
+        let timer_started = Arc::new(Notify::new());
+        hub.lock().test_timer_started = Some(timer_started.clone());
         let (_client_key, _tx, mut rx) = hub.lock().add_client(None);
+        drain_connect_messages(&mut rx).await;
 
         let delta = |text: &str| SessionDriverEvent::AssistantDelta {
             base: SessionEventBase {
@@ -4087,19 +4111,27 @@ mod hub_models_tests {
         hub.lock().on_event(delta("hel"));
         hub.lock().on_event(delta("lo"));
 
-        // The timer enqueues a delta_flush op after ~10ms; apply it.
+        // Do not advance until the spawned task has been polled and is waiting
+        // on its sleep; otherwise paused time can advance before the timer exists.
+        timer_started.notified().await;
+        tokio::time::advance(Duration::from_millis(10)).await;
+        tokio::task::yield_now().await;
+
+        // The timer now enqueued a delta_flush op; apply that exact operation.
         apply_one(hub.clone(), &mut ops).await;
 
-        let msg = drain_until(&mut rx, |msg| {
-            matches!(
+        let msg = loop {
+            let msg = rx.recv().await.expect("client channel should remain open");
+            if matches!(
                 msg,
                 ServerMessage::Event {
                     event: SessionDriverEvent::AssistantDelta { .. },
                     ..
                 }
-            )
-        })
-        .await;
+            ) {
+                break msg;
+            }
+        };
         match msg {
             ServerMessage::Event {
                 event: SessionDriverEvent::AssistantDelta { text, .. },
@@ -6194,6 +6226,85 @@ mod hub_models_tests {
         h.set_journal(sid.into(), create_journal(epoch, &seed));
     }
 
+    fn set_test_journal_activity(hub: &Arc<Mutex<SessionHub>>, sid: &str, at: Instant) {
+        hub.lock()
+            .journals
+            .get_mut(sid)
+            .expect("test journal should exist")
+            .last_activity = at;
+    }
+
+    fn eviction_now() -> Instant {
+        Instant::now()
+    }
+
+    #[test]
+    fn journal_eviction_boundary_is_inclusive() {
+        let (_driver, hub) = test_hub_with_eviction(50);
+        insert_test_journal(&hub, "boundary-session");
+        let now = eviction_now();
+
+        set_test_journal_activity(&hub, "boundary-session", now - Duration::from_millis(49));
+        hub.lock().evict_idle_journals_at(now);
+        assert!(
+            hub.lock().has_journal(&"boundary-session".to_string()),
+            "journal just below the threshold must survive"
+        );
+
+        set_test_journal_activity(&hub, "boundary-session", now - Duration::from_millis(50));
+        hub.lock().evict_idle_journals_at(now);
+        assert!(
+            !hub.lock().has_journal(&"boundary-session".to_string()),
+            "journal at the threshold must be evicted"
+        );
+    }
+
+    #[test]
+    fn initializing_and_pending_delta_journals_are_not_evicted() {
+        let (_driver, hub) = test_hub_with_eviction(50);
+        insert_test_journal(&hub, "initializing-session");
+        insert_test_journal(&hub, "pending-session");
+        let now = eviction_now();
+        for sid in ["initializing-session", "pending-session"] {
+            set_test_journal_activity(&hub, sid, now - Duration::from_millis(50));
+        }
+
+        {
+            let mut h = hub.lock();
+            h.set_initializing(&"initializing-session".to_string(), true);
+            h.pending_deltas.insert(
+                "pending-session".to_string(),
+                PendingDelta {
+                    ev: SessionDriverEvent::AssistantDelta {
+                        base: SessionEventBase {
+                            session_ref: session_ref_for("pending-session"),
+                            timestamp: ts(),
+                            run_id: None,
+                            subagent_handle: None,
+                        },
+                        text: "pending".into(),
+                        channel: Some(
+                            pantoken_protocol::session_driver::AssistantDeltaChannel::Text,
+                        ),
+                        entry_id: None,
+                    },
+                    timer_abort: tokio::sync::oneshot::channel().0,
+                },
+            );
+            h.evict_idle_journals_at(now);
+        }
+
+        let h = hub.lock();
+        assert!(
+            h.has_journal(&"initializing-session".to_string()),
+            "initializing journal must not be evicted"
+        );
+        assert!(
+            h.has_journal(&"pending-session".to_string()),
+            "journal with a pending delta must not be evicted"
+        );
+    }
+
     /// AC.1: A journal for a session with no viewers, no running turn, no warm
     /// daemon, idle past the threshold, is evicted.
     #[test]
@@ -6202,9 +6313,9 @@ mod hub_models_tests {
         insert_test_journal(&hub, "idle-session");
         assert!(hub.lock().has_journal(&"idle-session".to_string()));
 
-        // Wait past the eviction threshold (50ms).
-        std::thread::sleep(std::time::Duration::from_millis(80));
-        hub.lock().evict_idle_journals();
+        let now = Instant::now();
+        set_test_journal_activity(&hub, "idle-session", now - Duration::from_millis(51));
+        hub.lock().evict_idle_journals_at(now);
 
         assert!(
             !hub.lock().has_journal(&"idle-session".to_string()),
@@ -6224,8 +6335,9 @@ mod hub_models_tests {
             .set_client_focus(client_key, "viewed-session".into());
         assert!(hub.lock().has_viewer(&"viewed-session".to_string()));
 
-        std::thread::sleep(std::time::Duration::from_millis(80));
-        hub.lock().evict_idle_journals();
+        let now = Instant::now();
+        set_test_journal_activity(&hub, "viewed-session", now - Duration::from_millis(50));
+        hub.lock().evict_idle_journals_at(now);
 
         assert!(
             hub.lock().has_journal(&"viewed-session".to_string()),
@@ -6244,8 +6356,9 @@ mod hub_models_tests {
         hub.lock().set_running(&sid, true);
         assert!(hub.lock().running.contains("running-session"));
 
-        std::thread::sleep(std::time::Duration::from_millis(80));
-        hub.lock().evict_idle_journals();
+        let now = Instant::now();
+        set_test_journal_activity(&hub, "running-session", now - Duration::from_millis(50));
+        hub.lock().evict_idle_journals_at(now);
 
         assert!(
             hub.lock().has_journal(&"running-session".to_string()),
@@ -6268,8 +6381,9 @@ mod hub_models_tests {
             .expect("default focus should be set by seed_default");
         assert!(hub.lock().has_journal(&default_sid));
 
-        std::thread::sleep(std::time::Duration::from_millis(80));
-        hub.lock().evict_idle_journals();
+        let now = Instant::now();
+        set_test_journal_activity(&hub, &default_sid, now - Duration::from_millis(50));
+        hub.lock().evict_idle_journals_at(now);
 
         assert!(
             hub.lock().has_journal(&default_sid),
@@ -6284,8 +6398,9 @@ mod hub_models_tests {
         insert_test_journal(&hub, "idle-session");
         assert!(hub.lock().has_journal(&"idle-session".to_string()));
 
-        std::thread::sleep(std::time::Duration::from_millis(80));
-        hub.lock().evict_idle_journals();
+        let now = Instant::now();
+        set_test_journal_activity(&hub, "idle-session", now - Duration::from_secs(1));
+        hub.lock().evict_idle_journals_at(now);
 
         assert!(
             hub.lock().has_journal(&"idle-session".to_string()),
@@ -6300,9 +6415,9 @@ mod hub_models_tests {
         insert_test_journal(&hub, "recent-session");
         assert!(hub.lock().has_journal(&"recent-session".to_string()));
 
-        // Only wait 50ms — well under the 200ms threshold.
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        hub.lock().evict_idle_journals();
+        let now = Instant::now();
+        set_test_journal_activity(&hub, "recent-session", now - Duration::from_millis(199));
+        hub.lock().evict_idle_journals_at(now);
 
         assert!(
             hub.lock().has_journal(&"recent-session".to_string()),
@@ -6318,12 +6433,13 @@ mod hub_models_tests {
         let (driver, hub) = test_hub_with_eviction(50);
         insert_test_journal(&hub, "warm-session");
 
+        let now = Instant::now();
+        set_test_journal_activity(&hub, "warm-session", now - Duration::from_millis(50));
+
         // Mark the session as warm (simulates a live daemon attachment).
         driver.add_warm_session("warm-session".into());
         assert!(driver.has_warm_session(&"warm-session".to_string()));
-
-        std::thread::sleep(std::time::Duration::from_millis(80));
-        hub.lock().evict_idle_journals();
+        hub.lock().evict_idle_journals_at(now);
 
         assert!(
             hub.lock().has_journal(&"warm-session".to_string()),
@@ -6333,10 +6449,7 @@ mod hub_models_tests {
         // Now simulate daemon crash: remove the warm session.
         driver.remove_warm_session(&"warm-session".to_string());
         assert!(!driver.has_warm_session(&"warm-session".to_string()));
-
-        // Wait past the threshold again, then evict.
-        std::thread::sleep(std::time::Duration::from_millis(80));
-        hub.lock().evict_idle_journals();
+        hub.lock().evict_idle_journals_at(now);
 
         assert!(
             !hub.lock().has_journal(&"warm-session".to_string()),

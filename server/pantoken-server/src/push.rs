@@ -929,11 +929,12 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let port = addr.port();
+        // Binding the listener is the readiness point; the spawned accept loop
+        // will be scheduled while the first real request is delivered. Avoid a
+        // fixed startup sleep that adds scheduler-dependent latency to every test.
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
-        // Give the server a moment to start.
-        tokio::time::sleep(Duration::from_millis(50)).await;
         (format!("http://127.0.0.1:{port}/send"), captured)
     }
 
