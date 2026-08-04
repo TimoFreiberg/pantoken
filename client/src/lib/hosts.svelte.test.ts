@@ -216,6 +216,29 @@ describe("HostCoordinator message routing boundary", () => {
     expect(store.serverId).toBe(null);
   });
 
+  test("seed readiness stays latched across sessions and resets on host switch", async () => {
+    const { coordinator, fakeClient } = await setupCoordinatorWithFakeClient();
+
+    // Establish the local host's initial boot seed.
+    store.onServer(helloMsg("local-server", "Local Server"));
+    store.onServer(seedMsg("local-session"));
+    expect(store.initialSeedAdopted).toBe(true);
+
+    // Host switching clears the latch before the target host's first seed.
+    await coordinator.selectHost("remote-1");
+    expect(store.initialSeedAdopted).toBe(false);
+    fakeClient.deliver(helloMsg("remote-server", "Remote Server"));
+    expect(store.initialSeedAdopted).toBe(false);
+
+    fakeClient.deliver(seedMsg("remote-session-1"));
+    expect(store.initialSeedAdopted).toBe(true);
+
+    // A normal later session seed changes session readiness but not boot readiness.
+    fakeClient.deliver(seedMsg("remote-session-2"));
+    expect(store.ready).toBe(true);
+    expect(store.initialSeedAdopted).toBe(true);
+  });
+
   test("selecting a computer clears ordinary unseen", async () => {
     const { coordinator, fakeClient } = await setupCoordinatorWithFakeClient();
 

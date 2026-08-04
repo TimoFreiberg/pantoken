@@ -38,6 +38,12 @@ export default defineConfig({
   use: {
     baseURL: `http://localhost:${VITE_PORT}`,
     trace: "on-first-retry",
+    // E2E contexts intentionally block PWA service workers. Local reproduction of
+    // the paste failure showed no late navigation, so this is the deterministic
+    // isolation fallback: a prior test's worker cannot activate or replace the
+    // document between boot readiness and synthetic paste. Production registration
+    // and update behavior are unchanged.
+    serviceWorkers: "block",
     // NOTE: clipboard permissions live on the Chromium projects below — WebKit
     // rejects those permission names at context creation.
   },

@@ -487,8 +487,19 @@
     els[next]?.focus();
   }
 
+  // PlanView is rendered only when both the toggle and the active-plan text are
+  // present. Keep this predicate tied to the actual render contract: the toggle can
+  // outlive the session text briefly during a session transition.
+  function isRenderedPlanView(): boolean {
+    return store.planViewOpen && Boolean(store.session.activePlan);
+  }
+
   function onSheetKeydown(e: KeyboardEvent): void {
     if (e.key === "Escape") {
+      // This handler is on the approval sheet, so it runs at the event target before
+      // PlanView's window-level handler. Let the rendered overlay claim Escape without
+      // preventing default or changing the pending approval's deny-safe state.
+      if (isRenderedPlanView()) return;
       e.preventDefault();
       if (current?.kind === "plan" && planCancelArmed) {
         disarmPlanCancel();
@@ -534,9 +545,9 @@
   // …), so it must defer to whichever Escape-owning surface is open rather than
   // cancelling an approval underneath it. Guard order:
   //   1. A pending dialog must exist (otherwise there is nothing to cancel).
-  //   2. The plan-view overlay owns Escape while open — `PlanView.svelte`
-  //      handles it on a WINDOW listener, so `defaultPrevented` is still false
-  //      here; without this guard, Escape would close PlanView AND the approval.
+  //   2. The rendered plan-view overlay owns Escape — `PlanView.svelte`
+  //      handles it on a WINDOW listener. This guard covers the document-bubble path;
+  //      the sheet's target-level path has the same guard above because it runs first.
   //   3. `defaultPrevented` — the sheet itself (focus inside), the
   //      capture-phase ComputerSetupSheet, and element-level handlers (facet
   //      listbox, composer textarea, …) already claimed Escape.
@@ -563,7 +574,7 @@
   function onDocumentKeydown(e: KeyboardEvent): void {
     if (e.key !== "Escape") return;
     if (!current) return;
-    if (store.planViewOpen) return;
+    if (isRenderedPlanView()) return;
     if (e.defaultPrevented) return;
     if (OPEN_ESCAPE_OWNER_SELECTORS.some((sel) => document.querySelector(sel))) return;
     // Replicate the sheet's Escape semantics exactly: an armed plan cancel

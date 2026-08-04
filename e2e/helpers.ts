@@ -34,6 +34,15 @@ export async function gotoFresh(
   // the settled work block instead: its appearance proves the turn finished and the
   // live inline content has completed its collapse/reflow.
   await waitForSettledWorkBlocks(page, 1);
+  // This is the deterministic mock-client boot boundary: the stable shell reports
+  // that it adopted its first seed, and the composer proves the session surface is
+  // mounted. It is intentionally not network-idle (the WS stays open and Vite traffic
+  // is not a useful readiness signal).
+  await expect(page.getByTestId("app-shell")).toHaveAttribute(
+    "data-seed-ready",
+    "true",
+  );
+  await expect(page.locator('textarea[role="combobox"]')).toBeVisible();
 }
 
 /** Click one of the dev-bar buttons that drives the mock to a named UI state. */

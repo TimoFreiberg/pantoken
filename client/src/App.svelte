@@ -496,7 +496,12 @@
     <button onclick={() => location.reload()}>Reload</button>
   </div>
 {:else}
-<div class="shell" inert={profileEditor.open}>
+<div
+  class="shell"
+  inert={profileEditor.open}
+  data-testid="app-shell"
+  data-seed-ready={store.initialSeedAdopted ? "true" : "false"}
+>
   <Sidebar edge={edge} coordinator={hostCoordinator} />
   <!-- No edge pop-in arrows on either side: both collapsed panels reopen from a chevron
        in the header (StatusHeader), at the leading/trailing edge respectively — the top

@@ -1,6 +1,169 @@
 import { expect, type Page, test } from "@playwright/test";
 import { drive, gotoFresh, waitForSettledWorkBlocks } from "./helpers.js";
 
+type NavigationRecord = {
+  sequence: number;
+  timestamp: number;
+  url: string;
+  initialNavigation: boolean;
+  type:
+    | "frame-navigated"
+    | "load"
+    | "requestfailed"
+    | "pageerror"
+    | "console";
+  status?: number;
+  failure?: string;
+  message?: string;
+  readyState?: string;
+  navigationType?: string;
+  serviceWorkerController?: boolean;
+  serviceWorkerRegistrations?: number;
+  protocolMismatch?: string | null;
+  appUpdateReady?: boolean;
+};
+
+type NavigationObserver = {
+  records: NavigationRecord[];
+  frameNavigationCount: number;
+  stop: () => Promise<void>;
+  snapshot: () => string;
+};
+
+function installNavigationObserver(page: Page): NavigationObserver {
+  const records: NavigationRecord[] = [];
+  const requestStatuses = new Map<string, number>();
+  let sequence = 0;
+  let frameNavigationCount = 0;
+  let mainFrameNavigationSeen = false;
+  let stopped = false;
+
+  const push = (
+    record: Omit<NavigationRecord, "sequence" | "timestamp" | "initialNavigation">,
+  ): NavigationRecord | undefined => {
+    if (stopped) return undefined;
+    const initialNavigation =
+      record.type === "frame-navigated" && !mainFrameNavigationSeen;
+    if (initialNavigation) mainFrameNavigationSeen = true;
+    const completeRecord: NavigationRecord = {
+      sequence: ++sequence,
+      timestamp: Date.now(),
+      initialNavigation,
+      ...record,
+    };
+    records.push(completeRecord);
+    return completeRecord;
+  };
+
+  const onRequest = (request: import("@playwright/test").Request) => {
+    if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+      requestStatuses.set(request.url(), 0);
+    }
+  };
+  const onResponse = (response: import("@playwright/test").Response) => {
+    const request = response.request();
+    if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+      requestStatuses.set(request.url(), response.status());
+    }
+  };
+  const onRequestFailed = (request: import("@playwright/test").Request) => {
+    if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+      push({
+        type: "requestfailed",
+        url: request.url(),
+        failure: request.failure()?.errorText,
+        status: requestStatuses.get(request.url()),
+      });
+    }
+  };
+  const pendingDiagnostics = new Set<Promise<void>>();
+  const trackDiagnostics = (
+    type: "frame-navigated" | "load",
+    url: string,
+    status: number | undefined,
+  ) => {
+    const record = push({ type, url, status });
+    if (!record) return;
+    const pending = readPageDiagnostics(page).then((details) => {
+      Object.assign(record, details);
+    });
+    pendingDiagnostics.add(pending);
+    void pending.finally(() => pendingDiagnostics.delete(pending));
+  };
+  const onFrameNavigated = (frame: import("@playwright/test").Frame) => {
+    if (frame !== page.mainFrame()) return;
+    frameNavigationCount += 1;
+    trackDiagnostics("frame-navigated", frame.url(), requestStatuses.get(frame.url()));
+  };
+  const onLoad = () => {
+    trackDiagnostics("load", page.url(), requestStatuses.get(page.url()));
+  };
+  const onPageError = (error: Error) => {
+    push({
+      type: "pageerror",
+      url: page.url(),
+      message: error.stack ?? error.message,
+    });
+  };
+  const onConsole = (message: import("@playwright/test").ConsoleMessage) => {
+    if (message.type() === "error" || message.type() === "warning") {
+      push({
+        type: "console",
+        url: page.url(),
+        message: `${message.type()}: ${message.text()}`,
+      });
+    }
+  };
+
+  page.on("request", onRequest);
+  page.on("response", onResponse);
+  page.on("requestfailed", onRequestFailed);
+  page.on("framenavigated", onFrameNavigated);
+  page.on("load", onLoad);
+  page.on("pageerror", onPageError);
+  page.on("console", onConsole);
+  const observer: NavigationObserver = {
+    records,
+    get frameNavigationCount() {
+      return frameNavigationCount;
+    },
+    stop: async () => {
+      stopped = true;
+      page.off("request", onRequest);
+      page.off("response", onResponse);
+      page.off("requestfailed", onRequestFailed);
+      page.off("framenavigated", onFrameNavigated);
+      page.off("load", onLoad);
+      page.off("pageerror", onPageError);
+      page.off("console", onConsole);
+      await Promise.allSettled(pendingDiagnostics);
+    },
+    snapshot: () => JSON.stringify(records),
+  };
+  return observer;
+}
+
+async function readPageDiagnostics(page: Page): Promise<
+  Omit<NavigationRecord, "sequence" | "timestamp" | "type" | "url" | "initialNavigation">
+> {
+  try {
+    return await page.evaluate(async () => ({
+      readyState: document.readyState,
+      navigationType: (
+        performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined
+      )?.type,
+      serviceWorkerController: Boolean(navigator.serviceWorker?.controller),
+      serviceWorkerRegistrations: "serviceWorker" in navigator
+        ? (await navigator.serviceWorker.getRegistrations()).length
+        : 0,
+      protocolMismatch: document.querySelector(".fatal")?.textContent?.trim() ?? null,
+      appUpdateReady: Boolean(document.querySelector(".update-toast")),
+    }));
+  } catch {
+    return {};
+  }
+}
+
 /** Read the current bottom gap (scrollHeight - scrollTop - clientHeight). */
 function gapFn(scroller: import("@playwright/test").Locator) {
   return scroller.evaluate(
@@ -99,7 +262,19 @@ async function dispatchFiles(
 }
 
 test.beforeEach(async ({ page }) => {
-  await gotoFresh(page);
+  // Phase 1 lifecycle observation starts before gotoFresh so the initial document
+  // navigation is distinguishable from any late reload before synthetic paste.
+  const observer = installNavigationObserver(page);
+  try {
+    await gotoFresh(page);
+  } catch (error) {
+    throw new Error(
+      `Fresh image boot failed; diagnostics=${observer.snapshot()}: ${String(error)}`,
+      { cause: error },
+    );
+  } finally {
+    await observer.stop();
+  }
 });
 
 // Flow: paste a screenshot, send it image-only, and confirm the outbox proxy-leak
@@ -107,9 +282,43 @@ test.beforeEach(async ({ page }) => {
 test("paste + send: a pasted screenshot attaches, image-only send works, and no prompt-outbox banner appears", async ({
   page,
 }) => {
-  await dispatchFiles(page, "paste", [
-    { name: "screenshot.png", type: "image/png", base64: PNG },
-  ]);
+  await expect(page.getByTestId("app-shell")).toHaveAttribute("data-seed-ready", "true");
+  await expect(page.locator('textarea[role="combobox"]')).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(async () => ({
+        controller: Boolean(navigator.serviceWorker?.controller),
+        registrations: "serviceWorker" in navigator
+          ? (await navigator.serviceWorker.getRegistrations()).length
+          : 0,
+      })),
+    )
+    .toEqual({ controller: false, registrations: 0 });
+
+  const observer = installNavigationObserver(page);
+  const beforeDispatch = observer.frameNavigationCount;
+  let dispatchError: unknown;
+  try {
+    await dispatchFiles(page, "paste", [
+      { name: "screenshot.png", type: "image/png", base64: PNG },
+    ]);
+  } catch (error) {
+    dispatchError = error;
+  } finally {
+    await observer.stop();
+  }
+  const dispatchNavigations = observer.frameNavigationCount - beforeDispatch;
+  if (dispatchError !== undefined) {
+    throw new Error(
+      `Synthetic paste failed after ${dispatchNavigations} frame navigation(s); ` +
+        `diagnostics=${observer.snapshot()}: ${String(dispatchError)}`,
+      { cause: dispatchError },
+    );
+  }
+  expect(
+    dispatchNavigations,
+    `Synthetic paste dispatch navigated the document; diagnostics=${observer.snapshot()}`,
+  ).toBe(0);
 
   await expect(page.locator(".thumb-chip img")).toHaveCount(1);
   const send = page.getByRole("button", { name: "Send", exact: true });

@@ -1,7 +1,76 @@
 import { expect, test } from "@playwright/test";
 import { drive, gotoFresh, openSidebar } from "./helpers.js";
 
+async function gateInitialWebSocket(page: import("@playwright/test").Page) {
+  await page.addInitScript(() => {
+    const NativeWebSocket = window.WebSocket;
+    let allow = false;
+
+    class BlockedSocket {
+      binaryType: BinaryType = "blob";
+      bufferedAmount = 0;
+      extensions = "";
+      onclose: ((event: CloseEvent) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      onopen: ((event: Event) => void) | null = null;
+      protocol = "";
+      readyState: 0 | 1 | 2 | 3 = NativeWebSocket.CONNECTING;
+      url = "ws://pantoken-blocked";
+
+      constructor() {
+        window.setTimeout(() => {
+          if (allow) return;
+          this.readyState = NativeWebSocket.CLOSED;
+          this.onclose?.(new CloseEvent("close"));
+        }, 0);
+      }
+      addEventListener() {}
+      removeEventListener() {}
+      dispatchEvent() { return true; }
+      close() {
+        this.readyState = NativeWebSocket.CLOSED;
+        this.onclose?.(new CloseEvent("close"));
+      }
+      send() {}
+    }
+
+    function GatedWebSocket(url: string | URL, protocols?: string | string[]): WebSocket {
+      if (!allow) return new BlockedSocket() as unknown as WebSocket;
+      return protocols === undefined
+        ? new NativeWebSocket(url)
+        : new NativeWebSocket(url, protocols);
+    }
+    GatedWebSocket.CONNECTING = NativeWebSocket.CONNECTING;
+    GatedWebSocket.OPEN = NativeWebSocket.OPEN;
+    GatedWebSocket.CLOSING = NativeWebSocket.CLOSING;
+    GatedWebSocket.CLOSED = NativeWebSocket.CLOSED;
+    GatedWebSocket.prototype = NativeWebSocket.prototype;
+    window.WebSocket = GatedWebSocket as unknown as typeof WebSocket;
+    Object.assign(window, {
+      __pantokenAllowWebSocket: () => { allow = true; },
+    });
+  });
+}
+
 // --- Session lifecycle (normal boot) ---
+
+test("app shell exposes a false-to-true seed readiness transition", async ({ page }) => {
+  await page.request.get("/debug/reset");
+  await gateInitialWebSocket(page);
+  await page.goto("/?dev");
+
+  const shell = page.getByTestId("app-shell");
+  await expect(shell).toHaveAttribute("data-seed-ready", "false");
+  await page.evaluate(() => {
+    const allow = (window as unknown as { __pantokenAllowWebSocket?: () => void })
+      .__pantokenAllowWebSocket;
+    if (!allow) throw new Error("initial WebSocket gate hook is missing");
+    allow();
+  });
+  await expect(shell).toHaveAttribute("data-seed-ready", "true");
+  await expect(page.locator('textarea[role="combobox"]')).toBeVisible();
+});
 
 test.describe("session lifecycle (normal boot)", () => {
   test.beforeEach(async ({ page }) => {
@@ -355,6 +424,7 @@ test("a protocol-version skew shows the update-required screen", async ({
     page.getByRole("heading", { name: "Update required" }),
   ).toBeVisible();
   await expect(page.getByText(/doesn't match client/)).toBeVisible();
+  await expect(page.getByTestId("app-shell")).toHaveCount(0);
 });
 
 // A notification deep link (/?session=<id>) focuses its target session on load,

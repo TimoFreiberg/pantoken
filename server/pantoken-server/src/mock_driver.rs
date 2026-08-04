@@ -4806,7 +4806,10 @@ impl PantokenDriver for MockDriver {
             ],
             "planfacet" => vec![
                 ScriptStep { wait_ms: 0, event: SessionDriverEvent::SessionUpdated { base: base(), snapshot: snap(SessionStatus::Idle, Some("plan".into()), None, None, None, None) } },
-                ScriptStep { wait_ms: 1500, event: SessionDriverEvent::SessionUpdated { base: base(), snapshot: snap(SessionStatus::Idle, Some("execute".into()), None, None, None, None) } },
+                // Explicitly clear activePlan when leaving the plan facet. Omitting the
+                // field preserves it under the protocol's overwrite-guard semantics and
+                // cannot exercise the stale PlanView toggle regression.
+                ScriptStep { wait_ms: 1500, event: SessionDriverEvent::SessionUpdated { base: base(), snapshot: snap(SessionStatus::Idle, Some("execute".into()), None, Some(String::new()), None, None) } },
             ],
             "permission" => vec![
                 ScriptStep { wait_ms: 0, event: SessionDriverEvent::HostUiRequest { base: base(), request: HostUiRequest::Permission {

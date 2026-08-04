@@ -150,6 +150,16 @@ test("plan-handoff Escape closes only the plan-view overlay over a pending appro
   await page.keyboard.press("Meta+p");
   const modal = page.getByTestId("plan-view");
   await expect(modal).toBeVisible();
+  // Meta+P does not move focus into PlanView. This assertion intentionally proves
+  // the target-level approval handler is still first in the next Escape dispatch.
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const dialog = document.querySelector('[role="dialog"][aria-labelledby="approval-title"]');
+        return Boolean(dialog && dialog.contains(document.activeElement));
+      }),
+    )
+    .toBe(true);
 
   // Escape closes only the overlay — the approval dialog stays open.
   await page.keyboard.press("Escape");
@@ -157,6 +167,32 @@ test("plan-handoff Escape closes only the plan-view overlay over a pending appro
   await expect(dialog).toBeVisible();
 
   // The approval is still dismissible by its own Escape once the overlay is gone.
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+});
+
+test("plan-handoff Escape cancels after the rendered PlanView disappears on active-plan transition", async ({
+  page,
+}) => {
+  // Seed the plan text before opening the pending handoff; the approval scrim hides
+  // the dev bar, so the facet transition is invoked through the mock hook.
+  await drive(page, "planview");
+  await drive(page, "planhandoff");
+  const dialog = page.getByRole("dialog", { name: "Plan handoff" });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Meta+p");
+  await expect(page.getByTestId("plan-view")).toBeVisible();
+
+  await page.evaluate(() => {
+    const mock = (window as unknown as { __pantokenMock?: (script: string) => void })
+      .__pantokenMock;
+    if (!mock) throw new Error("mock hook unavailable");
+    mock("planfacet");
+  });
+  await expect(page.getByTestId("plan-view")).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+
+  // The stale toggle must not swallow Escape after the rendered panel disappears.
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
 });

@@ -165,6 +165,10 @@ class PantokenStore {
    *  server didn't provide one — older/mock servers). */
   dataDir = $state("");
   ready = $state(false);
+  /** True after this selected host has adopted its first session seed. Unlike
+   * `ready`, this remains true through ordinary later session seeds and only
+   * resets when host-scoped bootstrap state is reset or switched. */
+  initialSeedAdopted = $state(false);
   unauthorized = $state(false);
   /** Why the auth gate is showing, so it can explain itself. "expired" = a token was
    *  rejected mid-session (vs. first-run no-token); "signed-out" = explicit sign-out. */
@@ -1238,6 +1242,9 @@ class PantokenStore {
         this.session = built;
         this.settleStopOperation();
         this.ready = true;
+        // This is a per-selected-host boot latch, not per-session readiness: later
+        // openSession seeds must not make the stable shell disappear again.
+        this.initialSeedAdopted = true;
         // A seed for the session we're creating may already carry its first prompt
         // (or none yet — the userMessage event folds in next). Either way, hand off.
         this.maybeFinishCreating();
@@ -1753,6 +1760,7 @@ class PantokenStore {
     this.serverLabel = "This computer";
     this.dataDir = "";
     this.ready = false;
+    this.initialSeedAdopted = false;
     this.unauthorized = false;
     this.unauthorizedReason = null;
     this.protocolMismatch = null;
