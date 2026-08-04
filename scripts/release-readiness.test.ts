@@ -100,6 +100,7 @@ describe("runReleaseReadiness default wiring", () => {
           log: (message) => logs.push(message),
         });
       const error = await runReleaseReadiness({ ...baseOptions(root), commandExecutor: executor }).catch((caught) => caught as Error);
+      if (!(error instanceof Error)) throw new Error("expected release readiness to reject with an Error");
       expect(error.message).toMatch(/exit code 23[\s\S]*after 250ms[\s\S]*readiness stdout[\s\S]*readiness stderr/);
       expect(logs).toEqual([
         "release-readiness: start just test",

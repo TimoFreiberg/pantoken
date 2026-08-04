@@ -45,6 +45,7 @@ describe("runCapturedReleaseCommand", () => {
     ).catch((caught) => caught as Error);
 
     expect(error).toBeInstanceOf(Error);
+    if (!(error instanceof Error)) throw new Error("expected a rejected command to produce an Error");
     expect(error.message).toContain("validate archive");
     expect(error.message).toContain("exit code 17");
     expect(error.message).toContain("1.25s");
@@ -71,6 +72,7 @@ describe("runCapturedReleaseCommand", () => {
       },
     ).catch((caught) => caught as Error);
 
+    if (!(error instanceof Error)) throw new Error("expected a rejected spawn to produce an Error");
     expect(error.message).toContain("missing-command");
     expect(error.message).toContain("ENOENT: missing command");
     expect(error.message).toContain("200ms");
