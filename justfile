@@ -137,8 +137,9 @@ merge-release-metadata *args:
 release-readiness *args:
     pnpm exec tsx scripts/release-readiness.ts {{ args }}
 
-# Cut a desktop release (readiness runs before any mutation; signing/publishing remain CI workflows).
+# Cut a desktop release (typechecks and readiness run before any mutation; signing/publishing remain CI workflows).
 release *args:
+    just check-ts
     pnpm exec tsx scripts/desktop/release.ts {{ args }}
 
 # Publish a desktop release and its updater manifest (credentials required).
