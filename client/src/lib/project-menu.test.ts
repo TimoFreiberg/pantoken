@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { SessionListEntry } from "@pantoken/protocol";
+import { sessionId, type SessionListEntry } from "@pantoken/protocol";
 import { deriveKnownProjects, rankProjects } from "./project-menu.js";
 
 const NOW = 1_700_000_000_000;
@@ -7,7 +7,7 @@ const isoAgo = (ms: number) => new Date(NOW - ms).toISOString();
 
 function entry(over: Partial<SessionListEntry> = {}): SessionListEntry {
   return {
-    sessionId: "s",
+    sessionId: sessionId("s"),
     path: "/s.jsonl",
     cwd: "/proj",
     preview: "",
@@ -23,9 +23,9 @@ function entry(over: Partial<SessionListEntry> = {}): SessionListEntry {
 describe("deriveKnownProjects", () => {
   test("deduplicates by project cwd", () => {
     const sessions = [
-      entry({ sessionId: "a", cwd: "/proj/pantoken" }),
-      entry({ sessionId: "b", cwd: "/proj/pantoken" }),
-      entry({ sessionId: "c", cwd: "/proj/scratch" }),
+      entry({ sessionId: sessionId("a"), cwd: "/proj/pantoken" }),
+      entry({ sessionId: sessionId("b"), cwd: "/proj/pantoken" }),
+      entry({ sessionId: sessionId("c"), cwd: "/proj/scratch" }),
     ];
     const projects = deriveKnownProjects(sessions);
     expect(projects).toHaveLength(2);
@@ -35,9 +35,9 @@ describe("deriveKnownProjects", () => {
 
   test("sorts by most-recently-used first", () => {
     const sessions = [
-      entry({ sessionId: "old", cwd: "/proj/old", lastUserMessageAt: isoAgo(60_000 * 60) }),
-      entry({ sessionId: "new", cwd: "/proj/new", lastUserMessageAt: isoAgo(60_000) }),
-      entry({ sessionId: "mid", cwd: "/proj/mid", lastUserMessageAt: isoAgo(60_000 * 30) }),
+      entry({ sessionId: sessionId("old"), cwd: "/proj/old", lastUserMessageAt: isoAgo(60_000 * 60) }),
+      entry({ sessionId: sessionId("new"), cwd: "/proj/new", lastUserMessageAt: isoAgo(60_000) }),
+      entry({ sessionId: sessionId("mid"), cwd: "/proj/mid", lastUserMessageAt: isoAgo(60_000 * 30) }),
     ];
     const projects = deriveKnownProjects(sessions);
     expect(projects.map((p) => p.cwd)).toEqual([
@@ -49,8 +49,8 @@ describe("deriveKnownProjects", () => {
 
   test("keeps the most recent lastUsed when deduplicating", () => {
     const sessions = [
-      entry({ sessionId: "a", cwd: "/proj/pantoken", lastUserMessageAt: isoAgo(60_000 * 10) }),
-      entry({ sessionId: "b", cwd: "/proj/pantoken", lastUserMessageAt: isoAgo(60_000) }),
+      entry({ sessionId: sessionId("a"), cwd: "/proj/pantoken", lastUserMessageAt: isoAgo(60_000 * 10) }),
+      entry({ sessionId: sessionId("b"), cwd: "/proj/pantoken", lastUserMessageAt: isoAgo(60_000) }),
     ];
     const projects = deriveKnownProjects(sessions);
     expect(projects).toHaveLength(1);
@@ -59,8 +59,8 @@ describe("deriveKnownProjects", () => {
 
   test("falls back to updatedAt when lastUserMessageAt is absent", () => {
     const sessions = [
-      entry({ sessionId: "a", cwd: "/proj/a", lastUserMessageAt: undefined, updatedAt: isoAgo(60_000) }),
-      entry({ sessionId: "b", cwd: "/proj/b", lastUserMessageAt: undefined, updatedAt: isoAgo(60_000 * 10) }),
+      entry({ sessionId: sessionId("a"), cwd: "/proj/a", lastUserMessageAt: undefined, updatedAt: isoAgo(60_000) }),
+      entry({ sessionId: sessionId("b"), cwd: "/proj/b", lastUserMessageAt: undefined, updatedAt: isoAgo(60_000 * 10) }),
     ];
     const projects = deriveKnownProjects(sessions);
     expect(projects.map((p) => p.cwd)).toEqual(["/proj/a", "/proj/b"]);

@@ -4,7 +4,12 @@
 import { realpathSync } from "node:fs";
 import { dirname } from "node:path";
 import { createRequire } from "node:module";
-import { foldEvent, initialSessionState } from "../protocol/src/index.js";
+import {
+  foldEvent,
+  initialSessionState,
+  sessionId,
+  workspaceId,
+} from "../protocol/src/index.js";
 
 // Two-hop resolution through the Bun store — see perf-streaming.ts.
 const require = createRequire(import.meta.url);
@@ -44,9 +49,9 @@ function toDeltas(text: string, chunk = 3): string[] {
   return deltas;
 }
 
-function baseEvent(sessionId: string) {
+function baseEvent(id: string) {
   return {
-    sessionRef: { sessionId, workspaceId: sessionId },
+    sessionRef: { sessionId: sessionId(id), workspaceId: workspaceId(id) },
     timestamp: new Date().toISOString(),
   };
 }

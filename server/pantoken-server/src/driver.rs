@@ -33,7 +33,7 @@ pub struct NewSessionModel {
 }
 
 /// Atomically clear and return the targeted session's text-only driver queues.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ClearQueueResult {
     pub steering: Vec<String>,
     pub follow_up: Vec<String>,
@@ -130,6 +130,83 @@ impl std::fmt::Display for SessionSwitchError {
 
 impl std::error::Error for SessionSwitchError {}
 
+/// Errors returned by optional driver capabilities.
+///
+/// `Unsupported` means that the driver does not implement the capability at
+/// all. A successful empty result (or `Ok(())` for a no-op) means that the
+/// capability exists and currently has no data/effect. `OperationFailed`
+/// preserves a human-readable diagnostic for a capability that was attempted
+/// but could not complete.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DriverError {
+    Unsupported {
+        operation: &'static str,
+    },
+    OperationFailed {
+        operation: &'static str,
+        message: String,
+        /// A partial result that must be delivered before the error. Currently
+        /// used by clear_queue so a later daemon dequeue failure cannot lose
+        /// text already recovered from the local queue.
+        recovery: Option<ClearQueueResult>,
+    },
+}
+
+impl DriverError {
+    pub fn unsupported(operation: &'static str) -> Self {
+        Self::Unsupported { operation }
+    }
+
+    pub fn operation_failed(operation: &'static str, message: impl Into<String>) -> Self {
+        Self::OperationFailed {
+            operation,
+            message: message.into(),
+            recovery: None,
+        }
+    }
+
+    pub fn operation_failed_with_recovery(
+        operation: &'static str,
+        message: impl Into<String>,
+        recovery: ClearQueueResult,
+    ) -> Self {
+        Self::OperationFailed {
+            operation,
+            message: message.into(),
+            recovery: Some(recovery),
+        }
+    }
+
+    pub const fn operation(&self) -> &'static str {
+        match self {
+            Self::Unsupported { operation } | Self::OperationFailed { operation, .. } => *operation,
+        }
+    }
+
+    /// Compatibility helper for callers that only need to assert preserved
+    /// human-readable diagnostics.
+    pub fn contains(&self, needle: &str) -> bool {
+        self.to_string().contains(needle)
+    }
+}
+
+impl std::fmt::Display for DriverError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unsupported { operation } => {
+                write!(f, "{operation} is not supported by this driver")
+            }
+            Self::OperationFailed {
+                operation, message, ..
+            } => {
+                write!(f, "{operation} failed: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DriverError {}
+
 impl From<String> for SessionSwitchError {
     fn from(detail: String) -> Self {
         Self::unexpected("session switch", detail)
@@ -144,9 +221,10 @@ impl From<&str> for SessionSwitchError {
 /// The driver seam. Both the mock (fake daemon) and the real polytoken driver
 /// implement this trait. The hub owns a `Box<dyn PantokenDriver + Send + Sync>`.
 ///
-/// Optional methods follow the TS pattern of `?.` optional chaining: the hub
-/// guards with `if let Some(_)` before calling them. In Rust we represent this
-/// as default implementations that return `None` or a not-supported error.
+/// Capability methods use concrete `Result` returns: default implementations return
+/// `DriverError::Unsupported`, while attempted operations can return
+/// `DriverError::OperationFailed` with the underlying diagnostic. Query methods that
+/// genuinely have no data continue to use `None` or empty results.
 #[async_trait]
 pub trait PantokenDriver: Send + Sync {
     /// Subscribe to driver events. Returns an unsubscribe function.
@@ -174,8 +252,11 @@ pub trait PantokenDriver: Send + Sync {
     async fn abort(&self, session_id: Option<SessionId>) -> Result<(), String>;
 
     /// Atomically clear and return the targeted session's text-only driver queues.
-    async fn clear_queue(&self, _session_id: Option<SessionId>) -> ClearQueueResult {
-        ClearQueueResult::default()
+    async fn clear_queue(
+        &self,
+        _session_id: Option<SessionId>,
+    ) -> Result<ClearQueueResult, DriverError> {
+        Err(DriverError::unsupported("clear_queue"))
     }
 
     /// Respond to a host UI request.
@@ -185,7 +266,9 @@ pub trait PantokenDriver: Send + Sync {
     async fn list_sessions(&self) -> Vec<SessionListEntry>;
 
     /// Archive or unarchive a session by its .jsonl path.
-    async fn set_archived(&self, _path: String, _archived: bool) {}
+    async fn set_archived(&self, _path: String, _archived: bool) -> Result<(), DriverError> {
+        Err(DriverError::unsupported("set_archived"))
+    }
 
     /// The captured login-shell env status, surfaced in the Settings panel. The
     /// live `PolytokenDriver` overrides this with its real capture; mock/default
@@ -200,7 +283,9 @@ pub trait PantokenDriver: Send + Sync {
     }
 
     /// Rename a session by its .jsonl path.
-    async fn rename_session(&self, _path: String, _name: String) {}
+    async fn rename_session(&self, _path: String, _name: String) -> Result<(), DriverError> {
+        Err(DriverError::unsupported("rename_session"))
+    }
 
     /// Switch the active session to the given .jsonl path. Resolves with the SEED
     /// events for the now-active session, or `Err(message)` on a failure (e.g.
@@ -224,9 +309,9 @@ pub trait PantokenDriver: Send + Sync {
     /// Detach from a session: release the TUI attachment lease so an external
     /// client (terminal polytoken CLI) can take over. Tears down SSE + drops the
     /// warm session but does NOT kill the daemon. Only meaningful for the
-    /// polytoken driver; the mock/fake default is a no-op.
-    async fn detach_session(&self, _path: String) -> Result<(), String> {
-        Ok(())
+    /// polytoken driver; the default implementation reports Unsupported.
+    async fn detach_session(&self, _path: String) -> Result<(), DriverError> {
+        Err(DriverError::unsupported("detach_session"))
     }
 
     /// The landing session a freshly-connecting client adopts.
@@ -300,8 +385,11 @@ pub trait PantokenDriver: Send + Sync {
 
     /// Background jobs (subagent + shell) running in the daemon. The hub calls
     /// this on every snapshot refresh and broadcasts `JobsList`.
-    async fn list_jobs(&self, _session_id: Option<SessionId>) -> Vec<BackgroundJob> {
-        vec![]
+    async fn list_jobs(
+        &self,
+        _session_id: Option<SessionId>,
+    ) -> Result<Vec<BackgroundJob>, DriverError> {
+        Err(DriverError::unsupported("list_jobs"))
     }
 
     /// Delete a todo by its integer ID. Returns `Err` with a `TodoDeleteError`
@@ -326,13 +414,13 @@ pub trait PantokenDriver: Send + Sync {
         &self,
         _action: SessionAction,
         _session_id: Option<SessionId>,
-    ) -> Result<(), String> {
-        Ok(())
+    ) -> Result<(), DriverError> {
+        Err(DriverError::unsupported("session_action"))
     }
 
     /// Permanently reap an empty, default-settings session.
-    async fn destroy_session(&self, _path: String) -> Result<(), String> {
-        Err("session destruction is not supported by this driver".into())
+    async fn destroy_session(&self, _path: String) -> Result<(), DriverError> {
+        Err(DriverError::unsupported("destroy_session"))
     }
 
     /// The daemon's global default model/thinking for new sessions.

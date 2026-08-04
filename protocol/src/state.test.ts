@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
-import type { SessionDriverEvent, SessionRef } from "./session-driver.js";
+import { sessionId, workspaceId, type SessionDriverEvent, type SessionRef } from "./session-driver.js";
 import { foldAll, foldEvent, initialSessionState } from "./state.js";
 
-const ref: SessionRef = { workspaceId: "w", sessionId: "s" };
+const ref: SessionRef = { workspaceId: workspaceId("w"), sessionId: sessionId("s") };
 const base = (over: Partial<SessionDriverEvent> = {}) =>
   ({ sessionRef: ref, timestamp: "t", ...over }) as SessionDriverEvent;
 
@@ -131,7 +131,7 @@ describe("foldEvent", () => {
         timestamp: "settle-at",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t",
@@ -213,7 +213,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "running",
           updatedAt: "t",
@@ -235,7 +235,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t",
@@ -254,7 +254,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t1",
@@ -269,7 +269,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t2",
@@ -285,7 +285,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t",
@@ -304,7 +304,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t1",
@@ -319,7 +319,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t2",
@@ -336,7 +336,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t",
@@ -356,7 +356,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t1",
@@ -371,7 +371,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t2",
@@ -388,7 +388,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t",
@@ -408,7 +408,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t1",
@@ -423,7 +423,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t2",
@@ -442,7 +442,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t1",
@@ -457,7 +457,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t2",
@@ -478,7 +478,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t",
@@ -498,7 +498,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t1",
@@ -513,7 +513,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t2",
@@ -532,7 +532,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t1",
@@ -547,7 +547,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t2",
@@ -574,7 +574,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t",
@@ -603,7 +603,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t1",
@@ -618,7 +618,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t2",
@@ -634,7 +634,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t",
@@ -653,7 +653,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t1",
@@ -668,7 +668,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t2",
@@ -684,7 +684,7 @@ describe("foldEvent", () => {
         type: "sessionUpdated",
         snapshot: {
           ref,
-          workspace: { workspaceId: "w", path: "/p" },
+          workspace: { workspaceId: workspaceId("w"), path: "/p" },
           title: "t",
           status: "idle",
           updatedAt: "t",

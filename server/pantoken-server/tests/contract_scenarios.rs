@@ -30,7 +30,7 @@ use pantoken_protocol::wire::SessionAction;
 use serde_json::{Value, json};
 use tokio::sync::Mutex;
 
-use pantoken_server::driver::{NewSessionOptsData, PantokenDriver};
+use pantoken_server::driver::{DriverError, NewSessionOptsData, PantokenDriver};
 use pantoken_server::polytoken::daemon_client::{
     SpawnDaemonOpts, SpawnedDaemon, clear_spawn_override, set_spawn_override,
 };
@@ -506,7 +506,7 @@ async fn assert_attach_chain_failure(kind: AttachFailureKind) {
     }
 
     assert!(
-        driver.get_usage(Some(session_id)).is_none(),
+        driver.get_usage(Some(session_id.into())).is_none(),
         "{kind:?}: failed attach must not install a warm session"
     );
     fake.assert_expectations_consumed()
@@ -849,12 +849,10 @@ async fn wait_for_queue_updated(rx: &mut tokio::sync::mpsc::Receiver<SessionDriv
 /// A 3-item queue drains fully (all texts returned, exactly one DELETE per
 /// item). The local queue is populated from `pending_turn_input_queued` SSE
 /// events (no `GET /turn/input` — the live daemon 0.5.8+ doesn't expose it).
-/// Error variants are pinned AS THE CODE BEHAVES (driver.rs returns
-/// `ClearQueueResult`, not `Result`):
+/// Error variants preserve both the typed failure and any partial recovery:
 ///   * empty queue → an EMPTY result (no SSE events → no local queue items);
-///   * `DELETE` 500 on the second dequeue → the DELETE drain stops while the
-///     result still carries the local queue's texts (partial drain, no error
-///     propagation);
+///   * `DELETE` 500 on the second dequeue → the DELETE drain stops and the
+///     `OperationFailed` carries the local queue's texts for restoration;
 ///   * `POST /prompt` 409 → `prompt` returns Err carrying the daemon's public
 ///     code/message (this one IS propagated).
 #[tokio::test]
@@ -895,7 +893,10 @@ async fn multi_item_queue_drain_and_queue_errors() {
         // Drain any remaining QueueUpdated events (one per QueueAdd).
         wait_for_queue_updated(&mut rx).await;
         wait_for_queue_updated(&mut rx).await;
-        let result = driver.clear_queue(Some("queue-drain".into())).await;
+        let result = driver
+            .clear_queue(Some("queue-drain".into()))
+            .await
+            .expect("clear_queue should be supported");
         assert_eq!(
             result.steering,
             vec![
@@ -938,7 +939,10 @@ async fn multi_item_queue_drain_and_queue_errors() {
             .new_session(NewSessionOptsData::default())
             .await
             .expect("warm session");
-        let result = driver.clear_queue(Some("queue-empty".into())).await;
+        let result = driver
+            .clear_queue(Some("queue-empty".into()))
+            .await
+            .expect("clear_queue should be supported");
         assert!(
             result.steering.is_empty(),
             "empty local queue must yield an empty ClearQueueResult: {:?}",
@@ -994,15 +998,25 @@ async fn multi_item_queue_drain_and_queue_errors() {
         wait_for_queue_updated(&mut rx).await;
         wait_for_queue_updated(&mut rx).await;
         wait_for_queue_updated(&mut rx).await;
-        let result = driver.clear_queue(Some("queue-dequeue-error".into())).await;
-        // The returned texts come from the LOCAL QUEUE, not the deletes, so
-        // all 3 are returned despite the failed dequeue; the DELETE drain
-        // itself stops at the failure.
-        assert_eq!(
-            result.steering.len(),
-            3,
-            "clear_queue returns the local queue's texts even when the drain stops early: {:?}",
-            result
+        let error = driver
+            .clear_queue(Some("queue-dequeue-error".into()))
+            .await
+            .expect_err("a dequeue failure must be surfaced");
+        match &error {
+            DriverError::OperationFailed {
+                operation,
+                message,
+                recovery: Some(restored),
+            } => {
+                assert_eq!(*operation, "clear_queue");
+                assert!(message.contains("dequeue exploded"));
+                assert_eq!(restored.steering, vec!["third text".to_string()]);
+            }
+            other => panic!("expected clear_queue recovery, got {other:?}"),
+        }
+        assert!(
+            error.to_string().contains("dequeue exploded"),
+            "clear_queue should preserve the daemon diagnostic: {error}"
         );
         assert_eq!(
             fake.recorded_calls()
@@ -2147,6 +2161,8 @@ async fn command_action_error_propagation_preserves_daemon_error() {
             kind.http(),
         );
         let session_id = kind.session_id();
+        let typed_session_id: pantoken_protocol::session_driver::SessionId =
+            session_id.clone().into();
         let fake = Arc::new(
             fake_daemon::spawn_strict_with_bootstrap(scenario, session_id.clone(), 0).await,
         );
@@ -2164,31 +2180,42 @@ async fn command_action_error_propagation_preserves_daemon_error() {
                     SessionAction::GoalSet {
                         summary: "finish the thing".into(),
                     },
-                    Some(session_id.clone()),
+                    Some(typed_session_id.clone()),
                 )
                 .await
-                .expect_err("goal 500 must fail"),
+                .expect_err("goal 500 must fail")
+                .to_string(),
             ActionErrorKind::Compact409 => driver
-                .session_action(SessionAction::Compact, Some(session_id.clone()))
+                .session_action(SessionAction::Compact, Some(typed_session_id.clone()))
                 .await
-                .expect_err("compact 409 must fail"),
+                .expect_err("compact 409 must fail")
+                .to_string(),
             ActionErrorKind::SetTitle500 => driver
                 .session_action(
                     SessionAction::SetTitle {
                         title: "my title".into(),
                     },
-                    Some(session_id.clone()),
+                    Some(typed_session_id.clone()),
                 )
                 .await
-                .expect_err("title 500 must fail"),
+                .expect_err("title 500 must fail")
+                .to_string(),
             ActionErrorKind::Prompt500 => driver
-                .prompt("hello".into(), None, Some(session_id.clone()), vec![], None)
+                .prompt(
+                    "hello".into(),
+                    None,
+                    Some(typed_session_id.clone()),
+                    vec![],
+                    None,
+                )
                 .await
-                .expect_err("prompt 500 must fail"),
+                .expect_err("prompt 500 must fail")
+                .to_string(),
             ActionErrorKind::Abort500 => driver
-                .abort(Some(session_id.clone()))
+                .abort(Some(typed_session_id.clone()))
                 .await
-                .expect_err("cancel 500 must fail"),
+                .expect_err("cancel 500 must fail")
+                .to_string(),
         };
 
         // The caller-visible error preserves the daemon's code + message.
@@ -2264,12 +2291,12 @@ fn count_state_calls(fake: &fake_daemon::FakeDaemon) -> usize {
 async fn warm_strict_session(
     driver: &PolytokenDriver,
     fake: &Arc<fake_daemon::FakeDaemon>,
-) -> String {
+) -> pantoken_protocol::session_driver::SessionId {
     driver
         .new_session(NewSessionOptsData::default())
         .await
         .expect("warm path must succeed");
-    fake.session_id.clone()
+    fake.session_id.clone().into()
 }
 
 #[tokio::test]

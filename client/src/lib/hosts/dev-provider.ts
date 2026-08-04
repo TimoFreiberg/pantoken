@@ -1,4 +1,4 @@
-import type { ServerMessage, SessionAttention } from "@pantoken/protocol";
+import { sessionId, type ServerMessage, type SessionAttention } from "@pantoken/protocol";
 import type {
   ContainerInspection,
   ContainerSummary,
@@ -200,11 +200,11 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
   };
   const setActivity = (id: string, activity: HostActivity): void => {
     const attention: SessionAttention[] = [];
-    if (activity.waiting) attention.push({ sessionId: `${id}-waiting`, phase: "waiting", updatedAt: new Date().toISOString() });
-    if (activity.failed) attention.push({ sessionId: `${id}-failed`, phase: "failed", updatedAt: new Date().toISOString() });
+    if (activity.waiting) attention.push({ sessionId: sessionId(`${id}-waiting`), phase: "waiting", updatedAt: new Date().toISOString() });
+    if (activity.failed) attention.push({ sessionId: sessionId(`${id}-failed`), phase: "failed", updatedAt: new Date().toISOString() });
     emit(id, {
       type: "sessionStatus",
-      runningIds: activity.running ? [`${id}-running`] : [],
+      runningIds: activity.running ? [sessionId(`${id}-running`)] : [],
       initializingIds: [],
       attention,
     } as ServerMessage);

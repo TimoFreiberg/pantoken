@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { SessionAttention } from "@pantoken/protocol";
+import { sessionId as protocolSessionId, type SessionAttention } from "@pantoken/protocol";
 import {
   applySessionStatus,
   clearOnSelect,
@@ -11,7 +11,7 @@ function attention(
   phase: SessionAttention["phase"],
 ): SessionAttention {
   return {
-    sessionId,
+    sessionId: protocolSessionId(sessionId),
     phase,
     updatedAt: "2026-01-01T00:00:00Z",
   };

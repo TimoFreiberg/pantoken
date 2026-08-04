@@ -54,7 +54,7 @@ mod tests {
 
     fn entry_with(session_id: &str, preview: &str, user_message_count: i64) -> SessionListEntry {
         SessionListEntry {
-            session_id: session_id.to_string(),
+            session_id: session_id.into(),
             path: format!("/sessions/{session_id}.jsonl"),
             cwd: "/proj".to_string(),
             display_name: None,

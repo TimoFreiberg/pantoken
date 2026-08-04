@@ -13,7 +13,12 @@
 import { realpathSync } from "node:fs";
 import { dirname } from "node:path";
 import { createRequire } from "node:module";
-import { foldEvent, initialSessionState } from "../protocol/src/index.js";
+import {
+  foldEvent,
+  initialSessionState,
+  sessionId,
+  workspaceId,
+} from "../protocol/src/index.js";
 
 // Resolve the real parser the app uses (a transitive dep of markstream-svelte).
 // Two hops because the isolated-install store keeps transitive deps out of
@@ -81,12 +86,9 @@ function toDeltas(text: string, chunk = 3): string[] {
   return deltas;
 }
 
-function baseEvent(sessionId: string): {
-  sessionRef: { sessionId: string; workspaceId: string };
-  timestamp: string;
-} {
+function baseEvent(id: string) {
   return {
-    sessionRef: { sessionId, workspaceId: sessionId },
+    sessionRef: { sessionId: sessionId(id), workspaceId: workspaceId(id) },
     timestamp: new Date().toISOString(),
   };
 }

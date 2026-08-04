@@ -11,7 +11,7 @@
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
-use pantoken_protocol::wire::{ClientMessage, ServerMessage};
+use pantoken_protocol::wire::{ClientMessage, ServerMessage, parse_client_message_value};
 use tracing::warn;
 
 use crate::connection::{Transport, TransportRead, TransportSplit, TransportWrite};
@@ -40,9 +40,7 @@ impl Transport for WsAdapter {
                         Ok(v) => v,
                         Err(_) => continue,
                     };
-                    // Skip anything that's not a recognizable ClientMessage —
-                    // the old code did `continue` on JSON parse errors too.
-                    match serde_json::from_value::<ClientMessage>(parsed) {
+                    match parse_client_message_value(parsed) {
                         Ok(m) => return Some(m),
                         Err(e) => {
                             warn!("failed to parse client message: {e}");
@@ -102,7 +100,7 @@ impl TransportRead for WsReader {
                         Ok(v) => v,
                         Err(_) => continue,
                     };
-                    match serde_json::from_value::<ClientMessage>(parsed) {
+                    match parse_client_message_value(parsed) {
                         Ok(m) => return Some(m),
                         Err(e) => {
                             warn!("failed to parse client message: {e}");

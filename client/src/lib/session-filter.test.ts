@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { SessionListEntry } from "@pantoken/protocol";
+import { sessionId, type SessionListEntry } from "@pantoken/protocol";
 import {
   STALE_MS,
   SESSIONS_PER_GROUP,
@@ -14,7 +14,7 @@ const isoAgo = (ms: number) => new Date(NOW - ms).toISOString();
 
 function entry(over: Partial<SessionListEntry> = {}): SessionListEntry {
   return {
-    sessionId: "s",
+    sessionId: sessionId("s"),
     path: "/s.jsonl",
     cwd: "/proj",
     preview: "",
@@ -144,10 +144,10 @@ describe("filterSessions", () => {
 
   test("pinnedIds keeps archived/stale sessions visible and out of hiddenCount", () => {
     const sessions = [
-      entry({ sessionId: "live", path: "/live", cwd: "/p" }),
-      entry({ sessionId: "arch", path: "/arch", cwd: "/p", archived: true }),
+      entry({ sessionId: sessionId("live"), path: "/live", cwd: "/p" }),
+      entry({ sessionId: sessionId("arch"), path: "/arch", cwd: "/p", archived: true }),
       entry({
-        sessionId: "old",
+        sessionId: sessionId("old"),
         path: "/old",
         cwd: "/p",
         updatedAt: isoAgo(STALE_MS + 1000),
@@ -201,7 +201,7 @@ describe("splitGroup", () => {
   // Build N sessions s0..sN-1, sorted newest-first by index 0 = newest.
   function items(n: number): SessionListEntry[] {
     return Array.from({ length: n }, (_, i) =>
-      entry({ sessionId: `s${i}`, path: `/s${i}` }),
+      entry({ sessionId: sessionId(`s${i}`), path: `/s${i}` }),
     );
   }
 

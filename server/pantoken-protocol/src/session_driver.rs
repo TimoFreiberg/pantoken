@@ -5,6 +5,7 @@
 //! crate mirrors it and is validated by byte-compatibility via the e2e suite.
 
 use serde::{Deserialize, Deserializer, Serialize};
+use std::{borrow::Borrow, fmt, ops::Deref};
 
 fn is_false(value: &bool) -> bool {
     !*value
@@ -29,8 +30,146 @@ where
 
 // ── Primitive type aliases ──────────────────────────────────────────────
 
-pub type WorkspaceId = String;
-pub type SessionId = String;
+/// Nominal workspace identity with the same JSON representation as the former
+/// `String` alias. Empty IDs remain valid for legacy workspace rows.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct WorkspaceId(String);
+
+impl From<String> for WorkspaceId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for WorkspaceId {
+    fn from(value: &str) -> Self {
+        Self(value.to_owned())
+    }
+}
+
+impl From<&String> for WorkspaceId {
+    fn from(value: &String) -> Self {
+        Self(value.clone())
+    }
+}
+
+impl From<WorkspaceId> for String {
+    fn from(value: WorkspaceId) -> Self {
+        value.0
+    }
+}
+
+impl WorkspaceId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl AsRef<str> for WorkspaceId {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl Borrow<str> for WorkspaceId {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Deref for WorkspaceId {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl fmt::Display for WorkspaceId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+/// Nominal session identity with the same JSON representation as the former
+/// `String` alias. Empty IDs remain valid for legacy session rows.
+///
+/// ```
+/// use pantoken_protocol::session_driver::{SessionId, SessionRef};
+///
+/// let id = SessionId::from("session-1");
+/// let reference = SessionRef { workspace_id: "workspace-1".into(), session_id: id };
+/// assert_eq!(reference.session_id.as_ref(), "session-1");
+/// ```
+///
+/// ```compile_fail
+/// use pantoken_protocol::session_driver::SessionId;
+///
+/// fn lookup(_: SessionId) {}
+/// let plain = String::from("session-1");
+/// lookup(plain);
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SessionId(String);
+
+impl From<String> for SessionId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for SessionId {
+    fn from(value: &str) -> Self {
+        Self(value.to_owned())
+    }
+}
+
+impl From<&String> for SessionId {
+    fn from(value: &String) -> Self {
+        Self(value.clone())
+    }
+}
+
+impl From<SessionId> for String {
+    fn from(value: SessionId) -> Self {
+        value.0
+    }
+}
+
+impl SessionId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl AsRef<str> for SessionId {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl Borrow<str> for SessionId {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Deref for SessionId {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl fmt::Display for SessionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 pub type RunId = String;
 pub type Timestamp = String;
 

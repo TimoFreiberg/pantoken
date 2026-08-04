@@ -80,8 +80,8 @@ use async_trait::async_trait;
 
 use crate::archive_store::ArchiveStore;
 use crate::driver::{
-    BranchResult, ClearQueueResult, NewSessionOptsData, PantokenDriver, RestoreFailureClass,
-    RetryAffordance, SessionSwitchError, TodoDeleteDependent, TodoDeleteError,
+    BranchResult, ClearQueueResult, DriverError, NewSessionOptsData, PantokenDriver,
+    RestoreFailureClass, RetryAffordance, SessionSwitchError, TodoDeleteDependent, TodoDeleteError,
 };
 use crate::polytoken::config_watcher;
 use crate::polytoken::daemon_client::{
@@ -668,11 +668,11 @@ impl PolytokenInner {
     /// two components — matching the TS `null` return whose callers throw
     /// `"could not resolve session id from path"`. Callers must propagate
     /// that as an `Err` rather than proceeding with a bogus id.
-    fn session_id_from_path(path: &str) -> Option<String> {
+    fn session_id_from_path(path: &str) -> Option<SessionId> {
         let normalized = path.replace('\\', "/");
         let parts: Vec<&str> = normalized.split('/').filter(|s| !s.is_empty()).collect();
         if parts.len() >= 2 && parts[parts.len() - 1] == "session.json" {
-            Some(parts[parts.len() - 2].to_string())
+            Some(parts[parts.len() - 2].into())
         } else {
             None
         }
@@ -998,17 +998,17 @@ impl PolytokenInner {
     /// by `warm_session` from the spawn result.
     async fn bootstrap_fake(self: Arc<Self>) {
         let workspace = WorkspaceRef {
-            workspace_id: "fake".to_string(),
+            workspace_id: "fake".to_string().into(),
             path: "/fake".to_string(),
             display_name: None,
         };
         let session_ref = SessionRef {
-            workspace_id: "fake".to_string(),
-            session_id: "fake-bootstrap".to_string(),
+            workspace_id: "fake".to_string().into(),
+            session_id: "fake-bootstrap".into(),
         };
         if let Err(e) = self
             .warm_session(
-                "fake-bootstrap".to_string(),
+                "fake-bootstrap".into(),
                 session_ref,
                 workspace,
                 "/fake".to_string(),
@@ -1483,7 +1483,7 @@ impl PolytokenInner {
             .map_err(|detail| WarmInstallError::Startup { detail })?;
 
         // The spawn reports the real session id; use it for the client + warm map.
-        let session_id = spawned.session_id;
+        let session_id: SessionId = spawned.session_id.into();
         let port = spawned.port;
         // The session_ref's session_id was provisional (unknown pre-spawn);
         // fix it to the real id so SSE-mapped events carry the correct ref.
@@ -1492,7 +1492,7 @@ impl PolytokenInner {
             session_id: session_id.clone(),
         };
         let client = Arc::new(DaemonClient::new(
-            session_id.clone(),
+            session_id.to_string(),
             port,
             std::process::id() as i32,
             spawned.auth_token.clone(),
@@ -1527,7 +1527,7 @@ impl PolytokenInner {
         }
 
         let client = Arc::new(DaemonClient::new(
-            session_id.clone(),
+            session_id.to_string(),
             port,
             std::process::id() as i32,
             auth_token,
@@ -1561,7 +1561,7 @@ impl PolytokenInner {
         }
         let opts = SpawnDaemonOpts {
             cwd: Some(cwd),
-            session_id: Some(session_id.clone()),
+            session_id: Some(session_id.to_string()),
             sessions_dir: Some(self.sessions_dir.to_string_lossy().to_string()),
             global_config_dir: Some(default_global_config_dir().to_string_lossy().to_string()),
             login_env: self.login_env.lock().clone(),
@@ -1997,7 +1997,10 @@ impl PantokenDriver for PolytokenDriver {
             .map_err(|e| format!("Couldn't send stop to the daemon: {e}"))
     }
 
-    async fn clear_queue(&self, session_id: Option<SessionId>) -> ClearQueueResult {
+    async fn clear_queue(
+        &self,
+        session_id: Option<SessionId>,
+    ) -> Result<ClearQueueResult, DriverError> {
         // Contract (see the mock): return EVERY queued text and leave the queue
         // empty — the hub hands the texts back to the requesting composer. The
         // daemon's only removal primitive is DELETE /turn/input/newest, so:
@@ -2008,10 +2011,10 @@ impl PantokenDriver for PolytokenDriver {
         // Convergence of the shared queueUpdated state rides the dequeue SSE events
         // (each triggers a QueueRemove effect).
         let Some(sid) = session_id else {
-            return ClearQueueResult::default();
+            return Ok(ClearQueueResult::default());
         };
         let Some(ws) = self.inner.get_warm(&sid) else {
-            return ClearQueueResult::default();
+            return Ok(ClearQueueResult::default());
         };
         // Read texts from local state and clear optimistically.
         let texts: Vec<String> = {
@@ -2020,20 +2023,67 @@ impl PantokenDriver for PolytokenDriver {
             queue.clear();
             texts
         };
-        for _ in &texts {
+        // DELETE /turn/input/newest removes the newest item first. Keep only
+        // successfully deleted texts for recovery: texts whose DELETE failed
+        // remain in the daemon queue and must not also be offered to the composer.
+        let mut restored_texts = Vec::with_capacity(texts.len());
+        for text in texts.iter().rev() {
             // 409 (queue already empty) is an Ok no-op; stop only on real failures
             // rather than hammering a daemon that just refused us.
-            if ws.client.dequeue_newest_input().await.is_err() {
-                break;
+            if let Err(error) = ws.client.dequeue_newest_input().await {
+                restored_texts.reverse();
+                let undeleted = texts
+                    .iter()
+                    .take(texts.len().saturating_sub(restored_texts.len()))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                {
+                    let recovery_stamp = DriverMapCtx::now_ts();
+                    let mut queue = ws.queue.lock();
+                    queue.extend(undeleted.iter().enumerate().map(|(index, text)| {
+                        SessionQueuedMessage {
+                            id: format!("recovered-{index}-{recovery_stamp}"),
+                            mode: pantoken_protocol::session_driver::SessionMessageDeliveryMode::Steer,
+                            text: text.clone(),
+                            created_at: DriverMapCtx::now_ts(),
+                            updated_at: DriverMapCtx::now_ts(),
+                            references: None,
+                        }
+                    }));
+                }
+                let messages = ws.queue.lock().clone();
+                self.inner.emit(SessionDriverEvent::QueueUpdated {
+                    base: SessionEventBase {
+                        session_ref: ws.session_ref.clone(),
+                        timestamp: DriverMapCtx::now_ts(),
+                        run_id: None,
+                        subagent_handle: None,
+                    },
+                    messages,
+                });
+                let restored = ClearQueueResult {
+                    steering: restored_texts,
+                    follow_up: Vec::new(),
+                };
+                return Err(DriverError::operation_failed_with_recovery(
+                    "clear_queue",
+                    format!(
+                        "{error}; restored {} queued message(s)",
+                        restored.steering.len()
+                    ),
+                    restored,
+                ));
             }
+            restored_texts.push(text.clone());
         }
-        ClearQueueResult {
+        restored_texts.reverse();
+        Ok(ClearQueueResult {
             // Queue items surface in pantoken as mode:Steer (the daemon has no
             // steer/follow-up discriminator) — hand the texts back on that side;
             // the client joins steering ++ follow_up, so order is preserved.
-            steering: texts,
+            steering: restored_texts,
             follow_up: Vec::new(),
-        }
+        })
     }
 
     fn respond_ui(&self, response: HostUiResponse, session_id: Option<SessionId>) {
@@ -2138,7 +2188,7 @@ impl PantokenDriver for PolytokenDriver {
                 .read()
                 .as_ref()
                 .and_then(|s| s.session_title.clone());
-            let session_path = sessions_dir.join(sid).join("session.json");
+            let session_path = sessions_dir.join(sid.as_str()).join("session.json");
             let cwd = ws.workspace.path.clone();
             warm_entries.push(SessionListEntry {
                 session_id: sid.clone(),
@@ -2156,7 +2206,7 @@ impl PantokenDriver for PolytokenDriver {
             });
             if let Some(state) = ws.last_state.read().as_ref() {
                 if let Some(u) = event_map::usage_from_state(Some(state)) {
-                    warm_usage.insert(sid.clone(), u);
+                    warm_usage.insert(sid.to_string(), u);
                 }
             }
         }
@@ -2164,13 +2214,13 @@ impl PantokenDriver for PolytokenDriver {
 
         let merged = merge_session_lists(&on_disk, &warm_entries)
             .into_iter()
-            .filter(|entry| !tombstones.contains(&entry.session_id))
+            .filter(|entry| !tombstones.contains(entry.session_id.as_str()))
             .collect::<Vec<_>>();
         // Overlay live usage onto the winning entry (disk supersedes the warm
         // placeholder, so usage set only on warmEntries would be lost on merge).
         merged
             .into_iter()
-            .map(|e| match warm_usage.get(&e.session_id) {
+            .map(|e| match warm_usage.get(e.session_id.as_str()) {
                 Some(u) => SessionListEntry {
                     usage: Some(u.clone()),
                     ..e
@@ -2183,8 +2233,12 @@ impl PantokenDriver for PolytokenDriver {
     /// Set/clear the archived flag for a session. Mirrors `polytoken-driver.ts:1351`
     /// `setArchived`: flipping the flag is enough for the list overlay (the read
     /// side already consults the archive store).
-    async fn set_archived(&self, path: String, archived: bool) {
-        self.inner.archive_store.lock().set(&path, archived);
+    async fn set_archived(&self, path: String, archived: bool) -> Result<(), DriverError> {
+        self.inner
+            .archive_store
+            .lock()
+            .set(&path, archived)
+            .map_err(|error| DriverError::operation_failed("set_archived", error))
     }
 
     fn login_env_status(&self) -> LoginEnvStatus {
@@ -2216,47 +2270,35 @@ impl PantokenDriver for PolytokenDriver {
     ///   daemon itself writes when a warm rename lands, so the cold read path
     ///   (`sessions_registry::cold_session_entry`) and a warm rename agree on
     ///   one on-disk representation — no separate pantoken-only overlay needed.
-    async fn rename_session(&self, path: String, name: String) {
-        let Some(session_id) = PolytokenInner::session_id_from_path(&path) else {
-            warn!("rename_session: could not resolve session id from path: {path}");
-            return;
-        };
+    async fn rename_session(&self, path: String, name: String) -> Result<(), DriverError> {
+        let session_id = PolytokenInner::session_id_from_path(&path).ok_or_else(|| {
+            DriverError::operation_failed(
+                "rename_session",
+                format!("could not resolve session id from path: {path}"),
+            )
+        })?;
 
         if let Some(ws) = self.inner.get_warm(&session_id) {
-            match ws.client.set_title(&name).await {
-                Ok(()) => {
-                    if let Some(state) = ws.last_state.write().as_mut() {
-                        state.session_title = Some(name.clone());
-                    }
-                }
-                Err(e) => {
-                    warn!("rename_session: POST /title failed for {session_id}: {e}");
-                    self.inner.emit(SessionDriverEvent::HostUiRequest {
-                        base: SessionEventBase {
-                            session_ref: ws.session_ref.clone(),
-                            timestamp: DriverMapCtx::now_ts(),
-                            run_id: None,
-                            subagent_handle: None,
-                        },
-                        request: HostUiRequest::Notify {
-                            request_id: format!(
-                                "rename-failed-{}",
-                                chrono::Utc::now().timestamp_millis()
-                            ),
-                            message: format!("Couldn't rename session: {e}"),
-                            level: Some(NotifyLevel::Error),
-                        },
-                    });
-                }
+            ws.client.set_title(&name).await.map_err(|error| {
+                DriverError::operation_failed(
+                    "rename_session",
+                    format!("POST /title failed for {session_id}: {error}"),
+                )
+            })?;
+            if let Some(state) = ws.last_state.write().as_mut() {
+                state.session_title = Some(name.clone());
             }
-            return;
+            return Ok(());
         }
 
         // Cold: never reaches get_warm/open_session/focus above — no spawn,
         // no activeSessionId change, by construction.
-        if let Err(e) = sessions_registry::write_overridden_title(Path::new(&path), &name) {
-            warn!("rename_session: failed to persist title for cold session {path}: {e}");
-        }
+        sessions_registry::write_overridden_title(Path::new(&path), &name).map_err(|error| {
+            DriverError::operation_failed(
+                "rename_session",
+                format!("failed to persist title for cold session {path}: {error}"),
+            )
+        })
     }
 
     async fn open_session(
@@ -2280,7 +2322,7 @@ impl PantokenDriver for PolytokenDriver {
         // finish_switch can extract the sid and reconcile running/attention — the
         // only things the full seed was used for on a warm re-open.
         if let Some(ws) = self.inner.get_warm(&session_id) {
-            let real_id = ws.client.session_id.clone();
+            let real_id: SessionId = ws.client.session_id.clone().into();
             self.inner.focus(&real_id);
             let ctx = DriverMapCtx {
                 session_ref: ws.session_ref.clone(),
@@ -2322,7 +2364,7 @@ impl PantokenDriver for PolytokenDriver {
         // This mirrors the TS resume path where warmSession reuses the existing
         // port. The auth token is read from the credential file pointed to by
         // startup.json.credential_file_path (daemon 0.5.0+ bearer auth).
-        let session_dir = self.inner.sessions_dir.join(&session_id);
+        let session_dir = self.inner.sessions_dir.join(session_id.as_str());
         let startup_path = session_dir.join("startup.json");
         let (port, auth_token) = if startup_path.exists() {
             if let Ok(raw) = std::fs::read_to_string(&startup_path) {
@@ -2363,7 +2405,7 @@ impl PantokenDriver for PolytokenDriver {
                 Ok(ws) => {
                     // Refocus the warm session (most-recently focused) — mirrors
                     // TS `focus(existing.ref.sessionId)` on the instant-switch path.
-                    let real_id = ws.client.session_id.clone();
+                    let real_id: SessionId = ws.client.session_id.clone().into();
                     self.inner.focus(&real_id);
                     // Build the seed from current /state + /history. The leading
                     // SessionOpened is authoritative for idle vs running; replaying
@@ -2449,7 +2491,7 @@ impl PantokenDriver for PolytokenDriver {
             .await
         {
             Ok(ws) => {
-                let real_id = ws.client.session_id.clone();
+                let real_id: SessionId = ws.client.session_id.clone().into();
                 self.inner.focus(&real_id);
                 let ctx = DriverMapCtx {
                     session_ref: ws.session_ref.clone(),
@@ -2551,9 +2593,13 @@ impl PantokenDriver for PolytokenDriver {
     /// release lease) matches `dispose_warm` / `reload_session` exactly, which
     /// is battle-tested — the only difference is `release_lease()` instead of
     /// `close()`.
-    async fn detach_session(&self, path: String) -> Result<(), String> {
-        let session_id = PolytokenInner::session_id_from_path(&path)
-            .ok_or_else(|| format!("could not resolve session id from path: {path}"))?;
+    async fn detach_session(&self, path: String) -> Result<(), DriverError> {
+        let session_id = PolytokenInner::session_id_from_path(&path).ok_or_else(|| {
+            DriverError::operation_failed(
+                "detach_session",
+                format!("could not resolve session id from path: {path}"),
+            )
+        })?;
         let removed = self.inner.warm.write().remove(&session_id);
         if let Some(ws) = removed {
             // Extract handles before awaiting (avoid holding parking_lot guards
@@ -2625,7 +2671,7 @@ impl PantokenDriver for PolytokenDriver {
         // pool, all via warm_session. The session id comes back from the spawn.
         let session_ref = SessionRef {
             workspace_id: WorkspaceId::default(),
-            session_id: String::new(), // filled from the spawn below
+            session_id: SessionId::default(), // filled from the spawn below
         };
         let workspace = WorkspaceRef {
             workspace_id: WorkspaceId::default(),
@@ -2635,7 +2681,7 @@ impl PantokenDriver for PolytokenDriver {
 
         // warm_session needs a provisional session id to key the warm map; the
         // real id is returned by the spawn and overrides it inside warm_session.
-        let provisional_id = "__new__".to_string();
+        let provisional_id: SessionId = "__new__".into();
         match self
             .inner
             .warm_session(provisional_id, session_ref, workspace, cwd)
@@ -3152,26 +3198,34 @@ impl PantokenDriver for PolytokenDriver {
         }
     }
 
-    async fn list_jobs(&self, session_id: Option<SessionId>) -> Vec<BackgroundJob> {
+    async fn list_jobs(
+        &self,
+        session_id: Option<SessionId>,
+    ) -> Result<Vec<BackgroundJob>, DriverError> {
         let Some(sid) = &session_id else {
-            return vec![];
+            return Ok(vec![]);
         };
         let Some(ws) = self.inner.get_warm(sid) else {
-            return vec![];
+            return Ok(vec![]);
         };
         let res = ws.client.jobs().await;
         if res.status != 200 {
-            tracing::warn!(
-                "GET /jobs failed ({}): {}",
-                res.status,
-                res.error.as_deref().unwrap_or("")
-            );
-            return vec![];
+            return Err(DriverError::operation_failed(
+                "list_jobs",
+                format!(
+                    "GET /jobs failed ({}): {}",
+                    res.status,
+                    res.error.as_deref().unwrap_or("")
+                ),
+            ));
         }
         let Some(snapshots) = res.data else {
-            return vec![];
+            return Err(DriverError::operation_failed(
+                "list_jobs",
+                "GET /jobs returned no data",
+            ));
         };
-        snapshots
+        Ok(snapshots
             .iter()
             .map(|j| {
                 let kind = match j.kind {
@@ -3212,7 +3266,7 @@ impl PantokenDriver for PolytokenDriver {
                     output_bytes,
                 }
             })
-            .collect()
+            .collect())
     }
 
     async fn delete_todo(
@@ -3267,23 +3321,34 @@ impl PantokenDriver for PolytokenDriver {
         &self,
         action: SessionAction,
         session_id: Option<SessionId>,
-    ) -> Result<(), String> {
+    ) -> Result<(), DriverError> {
         use crate::polytoken::daemon_client::McpServerAction;
         let Some(sid) = &session_id else {
-            return Err("no session targeted".into());
+            return Err(DriverError::operation_failed(
+                "session_action",
+                "no session targeted",
+            ));
         };
         {
             let lifecycle = self.inner.lifecycle.lock();
-            lifecycle.ensure_healthy()?;
+            if let Err(error) = lifecycle.ensure_healthy() {
+                return Err(DriverError::operation_failed("session_action", error));
+            }
             if matches!(
                 lifecycle.state(sid),
                 LifecycleState::Tombstoned | LifecycleState::DestroyPending
             ) {
-                return Err("session has been destroyed or is being destroyed".into());
+                return Err(DriverError::operation_failed(
+                    "session_action",
+                    "session has been destroyed or is being destroyed",
+                ));
             }
         }
         let Some(ws) = self.inner.get_warm(sid) else {
-            return Err("no warm polytoken session to configure".into());
+            return Err(DriverError::operation_failed(
+                "session_action",
+                "no warm polytoken session to configure",
+            ));
         };
         let blocks_lifecycle = matches!(
             &action,
@@ -3441,7 +3506,7 @@ impl PantokenDriver for PolytokenDriver {
         match result {
             Err(e) => {
                 self.inner.report_action_error(&ws.session_ref, &what, &e);
-                return Err(e);
+                return Err(DriverError::operation_failed("session_action", e));
             }
             Ok(()) => {
                 if let Some(msg) = notice {
@@ -3451,30 +3516,43 @@ impl PantokenDriver for PolytokenDriver {
                     self.inner
                         .lifecycle
                         .lock()
-                        .set(sid.clone(), LifecycleState::LiveConfigAction)?;
+                        .set(sid.clone(), LifecycleState::LiveConfigAction)
+                        .map_err(|error| DriverError::operation_failed("session_action", error))?;
                 }
             }
         }
         Ok(())
     }
 
-    async fn destroy_session(&self, path: String) -> Result<(), String> {
-        let sid = std::path::Path::new(&path)
+    async fn destroy_session(&self, path: String) -> Result<(), DriverError> {
+        let sid: SessionId = std::path::Path::new(&path)
             .parent()
             .and_then(std::path::Path::file_name)
             .and_then(|name| name.to_str())
-            .ok_or_else(|| "invalid session path".to_string())?
-            .to_string();
-        let expected = self.inner.sessions_dir.join(&sid).join("session.json");
+            .ok_or_else(|| {
+                DriverError::operation_failed("destroy_session", "invalid session path")
+            })?
+            .into();
+        let expected = self
+            .inner
+            .sessions_dir
+            .join(sid.as_str())
+            .join("session.json");
         if std::path::Path::new(&path) != expected {
-            return Err("invalid session path".into());
+            return Err(DriverError::operation_failed(
+                "destroy_session",
+                "invalid session path",
+            ));
         }
         let state = self.inner.lifecycle.lock().state(&sid);
         if matches!(
             state,
             LifecycleState::AcceptedPrompt | LifecycleState::LiveConfigAction
         ) {
-            return Err("session is populated or configured".into());
+            return Err(DriverError::operation_failed(
+                "destroy_session",
+                "session is populated or configured",
+            ));
         }
         if matches!(state, LifecycleState::Tombstoned) {
             return Ok(());
@@ -3482,7 +3560,8 @@ impl PantokenDriver for PolytokenDriver {
         self.inner
             .lifecycle
             .lock()
-            .set(sid.clone(), LifecycleState::DestroyPending)?;
+            .set(sid.clone(), LifecycleState::DestroyPending)
+            .map_err(|error| DriverError::operation_failed("destroy_session", error))?;
         let warm = self.inner.warm.write().remove(&sid);
         if let Some(ws) = warm {
             self.inner.dispose_warm(&ws).await;
@@ -3490,7 +3569,8 @@ impl PantokenDriver for PolytokenDriver {
         self.inner
             .lifecycle
             .lock()
-            .set(sid.clone(), LifecycleState::Tombstoned)?;
+            .set(sid.clone(), LifecycleState::Tombstoned)
+            .map_err(|error| DriverError::operation_failed("destroy_session", error))?;
         self.inner.order.lock().retain(|id| id != &sid);
         Ok(())
     }
@@ -3638,7 +3718,7 @@ impl PantokenDriver for PolytokenDriver {
         // Note: we don't remove from the warm map inside the loop because
         // dispose_warm needs the warm map intact for its teardown. After
         // disposal, remove the disposed sessions.
-        let active: Vec<_> = {
+        let active: Vec<SessionId> = {
             let warm = self.inner.warm.read();
             warm.values()
                 .filter(|ws| {
@@ -3652,7 +3732,7 @@ impl PantokenDriver for PolytokenDriver {
                 .collect()
         };
         let mut warm = self.inner.warm.write();
-        warm.retain(|sid, _| active.contains(sid));
+        warm.retain(|sid, _| active.iter().any(|active_sid| active_sid == sid));
     }
 }
 
@@ -3891,7 +3971,7 @@ mod tests {
             PolytokenInner::session_id_from_path(
                 "/home/user/.pantoken/sessions/2025-01-15T10-30-00-my-task/session.json"
             ),
-            Some("2025-01-15T10-30-00-my-task".to_string())
+            Some("2025-01-15T10-30-00-my-task".into())
         );
 
         // Windows-style backslash paths should work too.
@@ -3899,7 +3979,7 @@ mod tests {
             PolytokenInner::session_id_from_path(
                 "C:\\Users\\timo\\.pantoken\\sessions\\2025-01-15T10-30-00-my-task\\session.json"
             ),
-            Some("2025-01-15T10-30-00-my-task".to_string())
+            Some("2025-01-15T10-30-00-my-task".into())
         );
 
         // Trailing slash should not confuse the split.
@@ -3907,7 +3987,7 @@ mod tests {
             PolytokenInner::session_id_from_path(
                 "/home/user/.pantoken/sessions/2025-01-15T10-30-00-my-task/session.json/"
             ),
-            Some("2025-01-15T10-30-00-my-task".to_string())
+            Some("2025-01-15T10-30-00-my-task".into())
         );
     }
 
@@ -3931,26 +4011,26 @@ mod tests {
 
     #[test]
     fn focus_moves_known_id_to_back() {
-        let inner = inner_with_order(vec!["a".to_string(), "b".to_string(), "c".to_string()], 64);
+        let inner = inner_with_order(vec!["a".into(), "b".into(), "c".into()], 64);
         // Focus "a" (the front/LRU) → it becomes the most-recent.
-        inner.focus(&"a".to_string());
+        inner.focus(&"a".into());
         assert_eq!(
             *inner.order.lock(),
-            vec!["b".to_string(), "c".to_string(), "a".to_string()],
+            vec!["b".into(), "c".into(), "a".into()],
             "focus should move the id to the back (most-recently focused)"
         );
     }
 
     #[test]
     fn focus_idempotent_on_repeated_focus() {
-        let inner = inner_with_order(vec!["a".to_string(), "b".to_string(), "c".to_string()], 64);
-        inner.focus(&"c".to_string()); // already at back
+        let inner = inner_with_order(vec!["a".into(), "b".into(), "c".into()], 64);
+        inner.focus(&"c".into()); // already at back
         assert_eq!(
             *inner.order.lock(),
-            vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            vec!["a".into(), "b".into(), "c".into()],
             "re-focusing the most-recent id should be a no-op (idempotent, no dup)"
         );
-        inner.focus(&"c".to_string()); // again
+        inner.focus(&"c".into()); // again
         assert_eq!(
             inner.order.lock().len(),
             3,
@@ -3960,11 +4040,11 @@ mod tests {
 
     #[test]
     fn focus_unknown_id_appends_to_back() {
-        let inner = inner_with_order(vec!["a".to_string(), "b".to_string()], 64);
-        inner.focus(&"z".to_string()); // unknown
+        let inner = inner_with_order(vec!["a".into(), "b".into()], 64);
+        inner.focus(&"z".into()); // unknown
         assert_eq!(
             *inner.order.lock(),
-            vec!["a".to_string(), "b".to_string(), "z".to_string()],
+            vec!["a".into(), "b".into(), "z".into()],
             "focusing an unknown id should append it to the back"
         );
     }
@@ -4007,7 +4087,7 @@ mod tests {
             last_state: RwLock::new(None),
             session_ref: SessionRef {
                 workspace_id: workspace.workspace_id.clone(),
-                session_id: session_id.to_string(),
+                session_id: session_id.into(),
             },
             workspace,
             pending_interrogatives: Mutex::new(HashMap::new()),
@@ -4038,14 +4118,14 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let sessions_dir = dir.path().join("sessions");
         write_session_json(&sessions_dir, session_id, cwd);
-        let mut inner = inner_with_order(vec![session_id.to_string()], 64);
+        let mut inner = inner_with_order(vec![session_id.into()], 64);
         inner.sessions_dir = sessions_dir;
         inner.bin_path = "polytoken-test".into();
         inner.command_runner = runner;
         inner
             .warm
             .write()
-            .insert(session_id.to_string(), warm_for(session_id));
+            .insert(session_id.into(), warm_for(session_id));
         (
             PolytokenDriver {
                 inner: Arc::new(inner),
@@ -5455,20 +5535,20 @@ mod tests {
             .join("session.json")
             .to_string_lossy()
             .to_string();
-        driver
+        let _ = driver
             .rename_session(path, "Renamed While Cold".to_string())
             .await;
 
         // No warm session created (doesn't hijack activeSessionId).
         assert!(
-            driver.inner.get_warm(&"cold-1".to_string()).is_none(),
+            driver.inner.get_warm(&SessionId::from("cold-1")).is_none(),
             "cold rename must not warm"
         );
         // Title is visible via list_sessions() and persists across a restart.
         let sessions = driver.list_sessions().await;
         let entry = sessions
             .iter()
-            .find(|s| s.session_id == "cold-1")
+            .find(|s| s.session_id == SessionId::from("cold-1"))
             .expect("cold-1 should be listed");
         assert_eq!(entry.display_name.as_deref(), Some("Renamed While Cold"));
 
@@ -5481,7 +5561,7 @@ mod tests {
         let sessions_after_restart = restarted_driver.list_sessions().await;
         let entry_after_restart = sessions_after_restart
             .iter()
-            .find(|s| s.session_id == "cold-1")
+            .find(|s| s.session_id == SessionId::from("cold-1"))
             .expect("cold-1 should survive a restart");
         assert_eq!(
             entry_after_restart.display_name.as_deref(),
@@ -5489,7 +5569,7 @@ mod tests {
         );
     }
 
-    /// A cold rename with an unresolvable path must degrade quietly (no panic/spawn).
+    /// A cold rename with an unresolvable path returns a typed error (no panic/spawn).
     #[tokio::test]
     async fn rename_session_with_unresolvable_path_is_a_quiet_no_op() {
         let _lock = OVERRIDE_MUTEX.lock().await;
@@ -5501,13 +5581,15 @@ mod tests {
         let _guard = PanicIfSpawnedGuard::install();
 
         // Not a session.json path — session_id_from_path returns None.
-        driver
+        let error = driver
             .rename_session(
                 "/not/a/session/path.txt".to_string(),
                 "New Name".to_string(),
             )
-            .await;
-        // No assertion beyond "didn't panic" — proves the not-found path degrades quietly.
+            .await
+            .expect_err("an unresolvable path must fail without spawning");
+        assert_eq!(error.operation(), "rename_session");
+        assert!(error.to_string().contains("could not resolve session id"));
     }
 
     /// Minimal `SessionStateSnapshot` with only `available_skills`/`available_subagents` set.

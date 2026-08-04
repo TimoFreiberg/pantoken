@@ -51,7 +51,7 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use pantoken_protocol::frame::{self, FrameDecoder};
 use pantoken_protocol::transport::{ClientEnvelope, ServerEnvelope};
-use pantoken_protocol::wire::ClientMessage;
+use pantoken_protocol::wire::parse_client_message_value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
@@ -1015,7 +1015,11 @@ async fn run_ws_relay(
                         if text.is_empty() {
                             continue;
                         }
-                        match serde_json::from_str::<ClientMessage>(&text) {
+                        match serde_json::from_str::<serde_json::Value>(&text)
+                            .map_err(|error| format!("invalid JSON: {error}"))
+                            .and_then(|value| {
+                                parse_client_message_value(value).map_err(|error| error.to_string())
+                            }) {
                             Ok(msg) => {
                                 let env = ClientEnvelope::new(msg);
                                 match frame::encode_client(&env) {
@@ -1030,8 +1034,8 @@ async fn run_ws_relay(
                                     }
                                 }
                             }
-                            Err(e) => {
-                                warn!(target: "pantoken::bridge", "bridge: invalid ClientMessage JSON: {e}");
+                            Err(error) => {
+                                warn!(target: "pantoken::bridge", "bridge: invalid ClientMessage JSON: {error}");
                             }
                         }
                     }

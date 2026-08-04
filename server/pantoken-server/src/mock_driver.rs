@@ -16,7 +16,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
 
 use crate::driver::{
-    BranchResult, ClearQueueResult, LeaseHolder, NewSessionOptsData, PantokenDriver,
+    BranchResult, ClearQueueResult, DriverError, LeaseHolder, NewSessionOptsData, PantokenDriver,
     SessionSwitchError, TodoDeleteError,
 };
 use async_trait::async_trait;
@@ -2185,7 +2185,7 @@ struct InFlightHandle {
 
 /// The ref + snapshot of a just-created session, consumed by the first prompt.
 struct LastCreated {
-    session_id: String,
+    session_id: SessionId,
     snapshot: SessionSnapshot,
 }
 
@@ -2866,7 +2866,10 @@ impl PantokenDriver for MockDriver {
         Ok(())
     }
 
-    async fn clear_queue(&self, session_id: Option<SessionId>) -> ClearQueueResult {
+    async fn clear_queue(
+        &self,
+        session_id: Option<SessionId>,
+    ) -> Result<ClearQueueResult, DriverError> {
         let sid = session_id.unwrap_or_else(|| SESSION_ID.into());
         let queued = {
             let mut queues = self.queues.lock();
@@ -2875,7 +2878,7 @@ impl PantokenDriver for MockDriver {
             queued
         };
         self.emit_queue(&sid);
-        ClearQueueResult {
+        Ok(ClearQueueResult {
             steering: queued
                 .iter()
                 .filter(|message| message.mode == SessionMessageDeliveryMode::Steer)
@@ -2886,7 +2889,7 @@ impl PantokenDriver for MockDriver {
                 .filter(|message| message.mode == SessionMessageDeliveryMode::FollowUp)
                 .map(|message| message.text.clone())
                 .collect(),
-        }
+        })
     }
 
     fn respond_ui(&self, response: HostUiResponse, _session_id: Option<SessionId>) {
@@ -3046,7 +3049,7 @@ impl PantokenDriver for MockDriver {
         self.sessions.lock().clone()
     }
 
-    async fn destroy_session(&self, path: String) -> Result<(), String> {
+    async fn destroy_session(&self, path: String) -> Result<(), DriverError> {
         let mut sessions = self.sessions.lock();
         let Some(index) = sessions.iter().position(|entry| entry.path == path) else {
             return Ok(());
@@ -3056,7 +3059,10 @@ impl PantokenDriver for MockDriver {
             || self.accepted_prompts.lock().contains(&entry.session_id)
             || self.live_config_actions.lock().contains(&entry.session_id)
         {
-            return Err("session is populated or configured".into());
+            return Err(DriverError::operation_failed(
+                "destroy_session",
+                "session is populated or configured",
+            ));
         }
         sessions.remove(index);
         drop(sessions);
@@ -3154,6 +3160,12 @@ impl PantokenDriver for MockDriver {
         self.open_session(path).await
     }
 
+    /// Detach is a successful no-op in the mock: it has no daemon lease or SSE
+    /// stream to release, while the hub still exercises its cleanup/broadcast path.
+    async fn detach_session(&self, _path: String) -> Result<(), DriverError> {
+        Ok(())
+    }
+
     async fn branch_from(
         &self,
         entry_id: String,
@@ -3223,10 +3235,10 @@ impl PantokenDriver for MockDriver {
             .map(|s| s.to_string())
             .unwrap_or_else(|| WORKSPACE_PATH.to_string());
         // sessionId = dir === NEW_SESSION_ENTRY.cwd ? NEW_SESSION_ENTRY.sessionId : `new-${dir}`
-        let session_id = if dir == WORKSPACE_PATH {
-            "new-session".to_string()
+        let session_id: SessionId = if dir == WORKSPACE_PATH {
+            "new-session".into()
         } else {
-            format!("new-{dir}")
+            format!("new-{dir}").into()
         };
         // Prepend a synthetic "new" row (unless one for this sessionId already
         // exists) so the new session shows in the sidebar — faithful port of TS
@@ -3234,7 +3246,7 @@ impl PantokenDriver for MockDriver {
         {
             let mut sessions = self.sessions.lock();
             if !sessions.iter().any(|s| s.session_id == session_id) {
-                sessions.insert(0, new_session_entry(&session_id, &dir));
+                sessions.insert(0, new_session_entry(session_id.as_str(), &dir));
                 self.empty_default.lock().insert(session_id.clone());
             }
         }
@@ -3274,7 +3286,7 @@ impl PantokenDriver for MockDriver {
         Ok(events)
     }
 
-    async fn set_archived(&self, path: String, archived: bool) {
+    async fn set_archived(&self, path: String, archived: bool) -> Result<(), DriverError> {
         // Flip the row's `archived` flag in the mutable session list.
         let mut sessions = self.sessions.lock();
         for s in sessions.iter_mut() {
@@ -3282,14 +3294,15 @@ impl PantokenDriver for MockDriver {
                 s.archived = archived;
             }
         }
+        Ok(())
     }
 
-    async fn rename_session(&self, path: String, name: String) {
+    async fn rename_session(&self, path: String, name: String) -> Result<(), DriverError> {
         // Faithful port of TS `renameSession()`: set the row's displayName to the
         // trimmed name (no-op on empty).
         let next = name.trim();
         if next.is_empty() {
-            return;
+            return Ok(());
         }
         let mut sessions = self.sessions.lock();
         for s in sessions.iter_mut() {
@@ -3297,6 +3310,7 @@ impl PantokenDriver for MockDriver {
                 s.display_name = Some(next.to_string());
             }
         }
+        Ok(())
     }
 
     async fn list_models(&self) -> Vec<ModelOption> {
@@ -3416,8 +3430,11 @@ impl PantokenDriver for MockDriver {
         }
     }
 
-    async fn list_jobs(&self, _session_id: Option<SessionId>) -> Vec<BackgroundJob> {
-        self.jobs.lock().clone()
+    async fn list_jobs(
+        &self,
+        _session_id: Option<SessionId>,
+    ) -> Result<Vec<BackgroundJob>, DriverError> {
+        Ok(self.jobs.lock().clone())
     }
 
     async fn delete_todo(
@@ -3479,10 +3496,10 @@ impl PantokenDriver for MockDriver {
         &self,
         action: SessionAction,
         session_id: Option<SessionId>,
-    ) -> Result<(), String> {
+    ) -> Result<(), DriverError> {
         // Stamp events with the target session (falls back to the default mock
         // session when no target is given — the historical behavior).
-        let sid = session_id.unwrap_or_else(|| SESSION_ID.to_string());
+        let sid = session_id.unwrap_or_else(|| SESSION_ID.into());
         if matches!(
             &action,
             SessionAction::SetModel { .. }
@@ -3494,7 +3511,7 @@ impl PantokenDriver for MockDriver {
             self.live_config_actions.lock().insert(sid.clone());
         }
         let base = || SessionEventBase {
-            session_ref: session_ref_for(&sid),
+            session_ref: session_ref_for(sid.as_str()),
             timestamp: ts(),
             run_id: None,
             subagent_handle: None,
@@ -3872,7 +3889,7 @@ impl PantokenDriver for MockDriver {
                 };
                 for i in 0..6 {
                     sessions.push(SessionListEntry {
-                        session_id: format!("extra-session-{i}"),
+                        session_id: format!("extra-session-{i}").into(),
                         path: format!("/sessions/extra-session-{i}.jsonl"),
                         cwd: WORKSPACE_PATH.into(),
                         display_name: Some(format!("Extra task #{i}")),
@@ -5113,7 +5130,10 @@ impl PantokenDriver for MockDriver {
             // client-side `listSessions` poll surfaces the new row.
             "newsession" => {
                 let mut sessions = self.sessions.lock();
-                if !sessions.iter().any(|s| s.session_id == "external-session") {
+                if !sessions
+                    .iter()
+                    .any(|s| s.session_id == "external-session".into())
+                {
                     sessions.insert(0, SessionListEntry {
                         display_name: Some("External session".into()),
                         ..new_session_entry("external-session", WORKSPACE_PATH)

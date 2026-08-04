@@ -169,6 +169,22 @@ regenerate-in-CI gate is fragile against version skew. Freshness is a
 documented local discipline: after bumping polytoken, run
 `just codegen-polytoken-rs` and commit the regenerated `lib.rs`.
 
+## Protocol decoding: tolerant unknown object fields
+
+**Decision:** Pantoken decoders ignore unknown object fields so additive fields remain
+forward-compatible across the protocol-version handshake. The known required fields and
+known field types remain validated; known discriminants are still validated and
+rejected when missing, mistyped, or unknown. An additive unknown field is not a
+protocol-version bump.
+
+Strict unknown-key rejection would catch typos more aggressively, but it would also
+turn every additive field into a breaking change for older clients and servers. Strict unknown-key rejection
+is therefore intentionally not used for this protocol boundary. This
+project chooses tolerant object decoding because the protocol version is reserved
+for incompatible wire changes, while malformed known data and unknown variants must
+still fail closed at every parser boundary.
+
+
 ## Remote deployment: envelope-vs-raw wire format (Option A)
 
 **Decision:** the `WireEnvelope`/frame codec is a **stdio-only** wire concern.

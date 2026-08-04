@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use pantoken_daemon_types::SseEnvelope;
 use pantoken_protocol::session_driver::{
-    SessionDriverEvent, SessionRef, SessionStatus, WorkspaceRef,
+    SessionDriverEvent, SessionId, SessionRef, SessionStatus, WorkspaceRef,
 };
 use tokio::sync::Mutex;
 
@@ -108,11 +108,11 @@ impl Default for PureCtx {
     fn default() -> Self {
         Self {
             r#ref: SessionRef {
-                workspace_id: "w".to_string(),
-                session_id: "s".to_string(),
+                workspace_id: "w".to_string().into(),
+                session_id: "s".into(),
             },
             workspace: WorkspaceRef {
-                workspace_id: "w".to_string(),
+                workspace_id: "w".to_string().into(),
                 path: "/w".to_string(),
                 display_name: None,
             },
@@ -235,7 +235,7 @@ async fn model_switches_post_full_registry_model_id() {
                 model_id: "deepseek/deepseek-v4-pro".into(),
                 thinking_level: None,
             },
-            Some(fake.session_id.clone()),
+            Some(fake.session_id.clone().into()),
         )
         .await;
 
@@ -360,7 +360,7 @@ async fn rename_session_warm_posts_title_and_updates_list_sessions_immediately()
     // Any `.../<session_id>/session.json`-shaped path resolves the session id;
     // it need not exist on disk — a WARM rename never touches the filesystem.
     let path = format!("/fake/sessions/{}/session.json", fake.session_id);
-    driver
+    let _ = driver
         .rename_session(path, "Renamed While Warm".to_string())
         .await;
 
@@ -379,7 +379,7 @@ async fn rename_session_warm_posts_title_and_updates_list_sessions_immediately()
     let sessions = driver.list_sessions().await;
     let entry = sessions
         .iter()
-        .find(|s| s.session_id == fake.session_id)
+        .find(|s| s.session_id.as_str() == fake.session_id)
         .expect("the warm session should still be listed");
     assert_eq!(
         entry.display_name.as_deref(),
@@ -494,7 +494,7 @@ async fn prompt_echoes_images_and_warns_with_prompt_id() {
         .prompt(
             "hello with image".into(),
             Some(pantoken_protocol::wire::DeliveryMode::FollowUp),
-            Some(fake.session_id.clone()),
+            Some(fake.session_id.clone().into()),
             vec![image],
             Some("custom-prompt-id".into()),
         )
@@ -581,7 +581,7 @@ async fn queued_prompt_updates_queue_without_user_echo() {
         .prompt(
             "queued from prompt".into(),
             None,
-            Some(fake.session_id.clone()),
+            Some(fake.session_id.clone().into()),
             vec![],
             Some("client-queued-prompt-id".into()),
         )
@@ -922,7 +922,7 @@ async fn assert_hydration_failure_cleanup(endpoint: &str, malformed_success: boo
         "{endpoint}: failed hydration must not reconnect"
     );
     assert!(
-        driver.get_usage(Some(session_id)).is_none(),
+        driver.get_usage(Some(session_id.into())).is_none(),
         "{endpoint}: failed hydration must not install a warm session"
     );
 }
@@ -1545,13 +1545,17 @@ async fn assert_rewind_refresh_failure_detaches(endpoint: &str, occurrence: usiz
         .expect("warm session");
 
     let error = driver
-        .branch_from("target-prompt".into(), false, Some(session_id.clone()))
+        .branch_from(
+            "target-prompt".into(),
+            false,
+            Some(session_id.clone().into()),
+        )
         .await
         .expect_err("accepted rewind with failed refresh must detach");
     assert!(error.contains("rewind succeeded"), "{error}");
     assert!(error.contains("must be reopened"), "{error}");
     assert!(
-        !driver.has_warm_session(&session_id),
+        !driver.has_warm_session(&session_id.clone().into()),
         "destructively changed session must not retain stale warm state"
     );
     assert!(
@@ -1605,7 +1609,9 @@ async fn branch_rewind_rejection_preserves_warm_session_and_public_error() {
         "public error message lost: {error}"
     );
     assert!(
-        driver.has_warm_session(&"rewind-rejected".to_string()),
+        driver.has_warm_session(&pantoken_protocol::session_driver::SessionId::from(
+            "rewind-rejected"
+        )),
         "a rejected rewind must retain the existing authoritative attachment"
     );
     assert!(
@@ -1907,7 +1913,10 @@ async fn clear_queue_drains_daemon_queue_and_returns_texts() {
         }
     }
 
-    let restored = driver.clear_queue(Some(fake.session_id.clone())).await;
+    let restored = driver
+        .clear_queue(Some(fake.session_id.clone().into()))
+        .await
+        .expect("clear_queue should be supported");
 
     // The local queue had one item ("Then reply with exactly: QUEUE-DONE" —
     // from the PendingTurnInputQueued SSE event). Its text must come back for
@@ -1973,7 +1982,7 @@ async fn warm_cap_evicts_lru_idle_session() {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     while let Ok(Some(ev)) = tokio::time::timeout_at(deadline, rx.recv()).await {
         if let SessionDriverEvent::SessionClosed { base, .. } = ev {
-            closed_ids.push(base.session_ref.session_id.clone());
+            closed_ids.push(base.session_ref.session_id.to_string());
         }
     }
 
@@ -1995,7 +2004,7 @@ async fn warm_cap_evicts_lru_idle_session() {
         .list_sessions()
         .await
         .into_iter()
-        .map(|e| e.session_id)
+        .map(|e| e.session_id.to_string())
         .collect();
     assert!(
         !listed.contains(&lru_id),
@@ -2062,7 +2071,7 @@ async fn warm_cap_never_evicts_in_flight() {
         .list_sessions()
         .await
         .into_iter()
-        .map(|e| e.session_id)
+        .map(|e| e.session_id.to_string())
         .collect();
     assert!(
         listed.contains(&lru_id),
@@ -2156,8 +2165,8 @@ async fn list_sessions_overlays_archive_flags() {
     // spawned. This test only exercises the cold-session listing path.
     let data_dir = tempfile::tempdir().expect("tempdir");
     let sessions_dir = data_dir.path().join("sessions");
-    let session_id = "sess-archive-wt";
-    let session_dir = sessions_dir.join(session_id);
+    let session_id: SessionId = "sess-archive-wt".into();
+    let session_dir = sessions_dir.join(session_id.as_str());
     std::fs::create_dir_all(&session_dir).expect("mkdir session dir");
 
     let project_path = "/home/user/project-x";
@@ -2212,8 +2221,8 @@ async fn set_archived_persists_and_overlays() {
     // No override mutex needed — no spawn, cold-session path only.
     let data_dir = tempfile::tempdir().expect("tempdir");
     let sessions_dir = data_dir.path().join("sessions");
-    let session_id = "sess-archive-write";
-    let session_dir = sessions_dir.join(session_id);
+    let session_id: SessionId = "sess-archive-write".into();
+    let session_dir = sessions_dir.join(session_id.as_str());
     std::fs::create_dir_all(&session_dir).expect("mkdir session dir");
     let session_json_path = session_dir.join("session.json");
     let session_json_path_str = session_json_path.to_string_lossy().to_string();
@@ -2236,7 +2245,7 @@ async fn set_archived_persists_and_overlays() {
     .await;
 
     // Archive: the flag flips and archived.json records the path.
-    driver
+    let _ = driver
         .set_archived(session_json_path_str.clone(), true)
         .await;
     let entry = driver
@@ -2259,7 +2268,7 @@ async fn set_archived_persists_and_overlays() {
     );
 
     // Unarchive: both clear.
-    driver
+    let _ = driver
         .set_archived(session_json_path_str.clone(), false)
         .await;
     let entry = driver
@@ -2487,8 +2496,10 @@ async fn goal_no_body_actions_accept_204_without_warning() {
             .await
             .expect("new_session");
 
+        let typed_session_id: pantoken_protocol::session_driver::SessionId =
+            fake.session_id.clone().into();
         let _ = driver
-            .session_action(action.clone(), Some(fake.session_id.clone()))
+            .session_action(action.clone(), Some(typed_session_id))
             .await;
 
         // The driver POSTed to the goal endpoint.
@@ -2603,8 +2614,10 @@ async fn goal_actions_emit_info_notice_on_success() {
             .await
             .expect("new_session");
 
+        let typed_session_id: pantoken_protocol::session_driver::SessionId =
+            fake.session_id.clone().into();
         let _ = driver
-            .session_action(action.clone(), Some(fake.session_id.clone()))
+            .session_action(action.clone(), Some(typed_session_id))
             .await;
 
         // Drain events and look for an info-level Notify with the expected message.
@@ -2885,7 +2898,7 @@ async fn active_turn_survives_proxy_drop_real() {
     };
 
     // Extract the session_id for later resume.
-    let session_id = "fake-bootstrap".to_string();
+    let session_id: SessionId = "fake-bootstrap".into();
 
     // Start a turn: push the first few frames of the streaming-turn scenario.
     // The message_start frame (frame 2) emits a SessionUpdated { status: Running }

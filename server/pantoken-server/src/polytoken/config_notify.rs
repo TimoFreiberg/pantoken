@@ -88,8 +88,8 @@ mod tests {
 
     fn test_ref() -> SessionRef {
         SessionRef {
-            workspace_id: "/test".to_string(),
-            session_id: "test-sid".to_string(),
+            workspace_id: "/test".to_string().into(),
+            session_id: "test-sid".into(),
         }
     }
 

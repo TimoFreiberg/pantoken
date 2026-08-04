@@ -638,8 +638,8 @@ mod tests {
     fn ctx() -> HistoryMapCtx {
         HistoryMapCtx {
             r#ref: SessionRef {
-                workspace_id: "ws".to_string(),
-                session_id: "s1".to_string(),
+                workspace_id: "ws".to_string().into(),
+                session_id: "s1".into(),
             },
         }
     }

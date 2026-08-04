@@ -2,10 +2,32 @@
 // This is the normalized, JSON-serializable surface of a daemon session.
 // We adopt it as pantoken's wire contract; trimmed to what pantoken consumes.
 
-export type WorkspaceId = string;
-export type SessionId = string;
+/** Nominal workspace identity. The runtime representation remains the wire string. */
+export type WorkspaceId = string & { readonly __workspaceIdBrand: unique symbol };
+/** Nominal session identity. Empty strings remain representable for legacy rows. */
+export type SessionId = string & { readonly __sessionIdBrand: unique symbol };
 export type RunId = string;
 export type Timestamp = string;
+
+/** Construct a typed workspace identity at a storage/wire boundary. */
+export function workspaceId(value: string): WorkspaceId {
+  return value as WorkspaceId;
+}
+
+/** Construct a typed session identity at a storage/wire boundary. */
+export function sessionId(value: string): SessionId {
+  return value as SessionId;
+}
+
+/** Runtime guard for decoded or persisted workspace IDs. */
+export function isWorkspaceId(value: unknown): value is WorkspaceId {
+  return typeof value === "string";
+}
+
+/** Runtime guard for decoded or persisted session IDs. */
+export function isSessionId(value: unknown): value is SessionId {
+  return typeof value === "string";
+}
 
 export interface WorkspaceRef {
   readonly workspaceId: WorkspaceId;

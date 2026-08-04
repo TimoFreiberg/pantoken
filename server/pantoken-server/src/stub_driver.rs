@@ -183,3 +183,48 @@ impl PantokenDriver for StubDriver {
         ModelDefaults::default()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::driver::{DriverError, PantokenDriver};
+    use pantoken_protocol::wire::SessionAction;
+
+    #[tokio::test]
+    async fn optional_capabilities_are_explicitly_unsupported_by_default() {
+        let driver = StubDriver::new();
+        let results = [
+            ("clear_queue", driver.clear_queue(None).await.map(|_| ())),
+            (
+                "set_archived",
+                driver.set_archived("/session".into(), true).await,
+            ),
+            (
+                "rename_session",
+                driver
+                    .rename_session("/session".into(), "renamed".into())
+                    .await,
+            ),
+            (
+                "detach_session",
+                driver.detach_session("/session".into()).await,
+            ),
+            ("list_jobs", driver.list_jobs(None).await.map(|_| ())),
+            (
+                "session_action",
+                driver.session_action(SessionAction::Compact, None).await,
+            ),
+            (
+                "destroy_session",
+                driver.destroy_session("/session".into()).await,
+            ),
+        ];
+
+        for (expected, result) in results {
+            assert!(matches!(
+                result,
+                Err(DriverError::Unsupported { operation }) if operation == expected
+            ));
+        }
+    }
+}

@@ -2794,14 +2794,14 @@ mod tests {
 
     fn test_ref() -> SessionRef {
         SessionRef {
-            workspace_id: "w".to_string(),
-            session_id: "s".to_string(),
+            workspace_id: "w".to_string().into(),
+            session_id: "s".into(),
         }
     }
 
     fn test_workspace() -> WorkspaceRef {
         WorkspaceRef {
-            workspace_id: "w".to_string(),
+            workspace_id: "w".to_string().into(),
             path: "/w".to_string(),
             display_name: None,
         }

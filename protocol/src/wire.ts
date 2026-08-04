@@ -5,19 +5,22 @@
 // `sessionId` to target a specific session (D8 multi-session); omit it and the
 // server applies the command to the currently-focused session.
 
-import type {
-  BackgroundJob,
-  CommandInfo,
-  FileInfo,
-  HostUiResponse,
-  ImageContent,
-  ModelCatalogDiagnostic,
-  ModelDefaults,
-  ModelOption,
-  PermissionMonitorMode,
-  SessionDriverEvent,
-  SessionId,
-  SessionListEntry,
+import {
+  sessionId,
+  workspaceId,
+  type BackgroundJob,
+  type CommandInfo,
+  type FileInfo,
+  type HostUiRequest,
+  type HostUiResponse,
+  type ImageContent,
+  type ModelCatalogDiagnostic,
+  type ModelDefaults,
+  type ModelOption,
+  type PermissionMonitorMode,
+  type SessionDriverEvent,
+  type SessionId,
+  type SessionListEntry,
 } from "./session-driver.js";
 // Bump on any breaking client↔server wire change so the hello handshake fails
 // loud (client/src/lib/store.svelte.ts mismatch guard) instead of a stale bundle
@@ -114,6 +117,18 @@ export interface SessionAttention {
   readonly pendingCount?: number;
   readonly pendingTitle?: string;
   readonly updatedAt: string;
+}
+
+export interface TrustRequestOption {
+  readonly label: string;
+  readonly trusted: boolean;
+}
+
+export interface TrustRequest {
+  readonly requestId: string;
+  readonly cwd: string;
+  readonly title: string;
+  readonly options: readonly TrustRequestOption[];
 }
 
 export type ServerMessage =
@@ -255,6 +270,14 @@ export type ServerMessage =
       pendingRestart: boolean;
       backgroundModelWarning?: string;
     }
+  | {
+      type: "trustRequest";
+      requestId: string;
+      cwd: string;
+      title: string;
+      options: readonly TrustRequestOption[];
+    }
+  | { type: "trustResolved"; requestId: string }
   /** Desktop auto-update status (driven by the desktop shell's updater loop via the
    *  /update/state endpoint). `available` true means a new app version was downloaded but
    *  deferred because a client is connected — clients show the sidebar update card; `sha`
@@ -268,7 +291,9 @@ export type ServerMessage =
       applying: boolean;
       /** Optional state detail; missing/unknown values are treated as deferred by clients. */
       status?: "deferred" | "rejected";
-      reason?: "busy";
+      reason?: "busy" | "failed";
+      /** Optional desktop-shell state; additive and ignored by older clients. */
+      desktopStale?: boolean;
     }
   /** Prefill the composer after a branch landed on a user prompt — navigateTree hands
    *  back that prompt's text for re-editing. Sent ONLY to the client that asked to
@@ -299,7 +324,11 @@ export type ServerMessage =
       accepted: boolean;
       error?: string;
     }
-  | { type: "error"; message: string; kind?: "session-switch" | "abort" };
+  | {
+      type: "error";
+      message: string;
+      kind?: "session-switch" | "abort" | "sessionAction" | "destroySession";
+    };
 
 /** Tail-resume request: "I still hold {sessionId} folded through {epoch, seq}".
  *  Carried on the reconnect hello; when the server's journal epoch matches and
@@ -489,6 +518,11 @@ export type ClientMessage =
   /** Client-detected desync (an event-seq gap): ask for a fresh seed of the
    *  targeted session (omitted -> this connection's focus) instead of folding
    *  a diverged stream. */
+  | {
+      type: "trustResponse";
+      requestId: string;
+      choice: number | null;
+    }
   | { type: "requestSeed"; sessionId?: SessionId }
   /** Dev-only: drive the mock fixture to a named scripted state. */
   | { type: "mock"; script: string }
@@ -506,23 +540,408 @@ export type ClientMessage =
    *  one on a schedule. */
   | { type: "ping" };
 
-/** Parse a raw WS frame into a typed message, or null on bad JSON / missing `type`.
- *  The two wire envelopes (client + server) are structurally identical, so one
- *  generic parser backs both public functions. */
-function parseMessage<T extends { type: string }>(raw: string): T | null {
-  try {
-    const v = JSON.parse(raw);
-    if (v && typeof v === "object" && typeof v.type === "string") return v as T;
-  } catch {
-    /* drop */
+type JsonObject = Record<string, unknown>;
+type Validator = (value: unknown) => boolean;
+type ObjectValidator = (value: JsonObject) => boolean;
+
+function object(value: unknown): JsonObject | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonObject)
+    : null;
+}
+function has(value: JsonObject, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+function string(value: unknown): value is string {
+  return typeof value === "string";
+}
+function boolean(value: unknown): value is boolean {
+  return typeof value === "boolean";
+}
+function number(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+// JSON numbers must remain exactly representable on both the JS and Rust sides.
+// Rust ingress accepts i64/u64 values; the client additionally rejects values
+// outside Number's safe integer range so it cannot silently round a wire ID.
+const MAX_SAFE_WIRE_INTEGER = Number.MAX_SAFE_INTEGER;
+function integer(value: unknown): value is number {
+  return number(value) && Number.isInteger(value) && Math.abs(value) <= MAX_SAFE_WIRE_INTEGER;
+}
+function unsignedInteger(value: unknown): value is number {
+  return integer(value) && value >= 0;
+}
+function optional(value: JsonObject, key: string, validator: Validator): boolean {
+  return !has(value, key) || validator(value[key]);
+}
+function nullable(value: unknown, validator: Validator): boolean {
+  return value === null || validator(value);
+}
+function arrayOf(value: unknown, validator: Validator): boolean {
+  return Array.isArray(value) && value.every(validator);
+}
+function required(value: JsonObject, key: string, validator: Validator): boolean {
+  return has(value, key) && validator(value[key]);
+}
+function oneOf<T extends string>(...values: readonly T[]): Validator {
+  return (value): value is T => string(value) && values.includes(value as T);
+}
+
+function sessionRef(value: unknown): boolean {
+  const v = object(value);
+  if (!v || !string(v.workspaceId) || !string(v.sessionId)) return false;
+  v.workspaceId = workspaceId(v.workspaceId);
+  v.sessionId = sessionId(v.sessionId);
+  return true;
+}
+function image(value: unknown): boolean {
+  const v = object(value);
+  return !!v && v.type === "image" && required(v, "data", string) && required(v, "mimeType", string);
+}
+function resolvedRef(value: unknown): boolean {
+  const v = object(value);
+  return !!v && required(v, "kind", string) && required(v, "name", string) && optional(v, "fileKind", string);
+}
+function queuedMessage(value: unknown): boolean {
+  const v = object(value);
+  return !!v && required(v, "id", string) && required(v, "mode", oneOf("steer", "followUp")) &&
+    required(v, "text", string) && required(v, "createdAt", string) && required(v, "updatedAt", string) &&
+    optional(v, "references", (x) => arrayOf(x, resolvedRef));
+}
+function sessionConfig(value: unknown): boolean {
+  const v = object(value);
+  return !!v && optional(v, "modelId", string) && optional(v, "thinkingLevel", string) &&
+    optional(v, "availableThinkingLevels", (x) => arrayOf(x, string));
+}
+function usage(value: unknown): boolean {
+  const v = object(value);
+  return !!v && required(v, "tokens", (x) => x === null || integer(x)) && required(v, "contextWindow", integer) &&
+    required(v, "percent", (x) => x === null || number(x));
+}
+function mcpInfo(value: unknown): boolean {
+  const v = object(value);
+  return !!v && required(v, "serverName", string) && required(v, "status", oneOf("connected", "disconnected", "reconnecting", "disabled")) &&
+    required(v, "toolCount", number);
+}
+function diagnostic(value: unknown): boolean {
+  const v = object(value);
+  return !!v && required(v, "kind", oneOf("couldNotBeParsed", "emptyOutput", "noResponse")) && required(v, "message", string);
+}
+function modelOption(value: unknown): boolean {
+  const v = object(value);
+  return !!v && required(v, "modelId", string) && required(v, "label", string) &&
+    optional(v, "thinkingLevels", (x) => arrayOf(x, string)) && optional(v, "defaultThinkingLevel", string);
+}
+function commandInfo(value: unknown): boolean {
+  const v = object(value);
+  return !!v && required(v, "name", string) && required(v, "source", oneOf("extension", "prompt", "skill", "builtin")) &&
+    optional(v, "description", string) && optional(v, "argumentHint", string);
+}
+function fileInfo(value: unknown): boolean {
+  const v = object(value);
+  return !!v && required(v, "path", string) && required(v, "isDirectory", boolean);
+}
+function modelDefaults(value: unknown): boolean {
+  const v = object(value);
+  return !!v && optional(v, "modelId", string) && optional(v, "thinkingLevel", string) &&
+    required(v, "favorites", (x) => arrayOf(x, string)) &&
+    optional(v, "defaultPermissionMonitor", oneOf("standard", "bypass", "bypass_plus", "autonomous"));
+}
+function goal(value: unknown): boolean {
+  const v = object(value);
+  return !!v && required(v, "summary", string) && required(v, "lifecycle", string);
+}
+function flaggedFile(value: unknown): boolean {
+  const v = object(value);
+  return !!v && required(v, "path", string) && required(v, "mode", oneOf("included", "referenced"));
+}
+function todo(value: unknown): boolean {
+  const v = object(value);
+  return !!v && required(v, "id", integer) && required(v, "title", string) && required(v, "description", string) &&
+    required(v, "status", oneOf("pending", "in_progress", "done", "blocked")) &&
+    required(v, "dependencies", (x) => arrayOf(x, integer)) && optional(v, "createdAt", string);
+}
+function sessionAttention(value: unknown): boolean {
+  const v = object(value);
+  return !!v && required(v, "sessionId", string) && required(v, "phase", oneOf("running", "waiting", "failed", "done")) && optional(v, "activity", string) && optional(v, "pendingCount", integer) && optional(v, "pendingTitle", string) && required(v, "updatedAt", string);
+}
+function backgroundJob(value: unknown): boolean {
+  const v = object(value);
+  return !!v && required(v, "handle", string) && required(v, "kind", oneOf("shell", "subagent")) &&
+    required(v, "status", oneOf("reserved", "running", "completed", "failed", "cancelled")) &&
+    required(v, "toolName", string) && required(v, "createdAt", string) && required(v, "updatedAt", string) &&
+    optional(v, "endedAt", string) && optional(v, "startedAt", string) && optional(v, "subagentType", string) &&
+    optional(v, "model", string) && optional(v, "subagentHandle", string) && optional(v, "expiring", boolean) &&
+    optional(v, "outputTail", string) && optional(v, "outputBytes", number);
+}
+function workspace(value: unknown): boolean {
+  const v = object(value);
+  return !!v && required(v, "workspaceId", string) && required(v, "path", string) && optional(v, "displayName", string);
+}
+function snapshot(value: unknown): boolean {
+  const v = object(value);
+  return !!v && required(v, "ref", sessionRef) && required(v, "workspace", workspace) && required(v, "title", string) &&
+    required(v, "status", oneOf("idle", "initializing", "running", "failed")) && required(v, "updatedAt", string) &&
+    optional(v, "archivedAt", string) && optional(v, "preview", string) && optional(v, "config", sessionConfig) &&
+    optional(v, "usage", usage) && optional(v, "runningRunId", string) && optional(v, "queuedMessages", (x) => arrayOf(x, queuedMessage)) &&
+    optional(v, "facet", string) && optional(v, "permissionMonitor", oneOf("standard", "bypass", "bypass_plus", "autonomous")) &&
+    optional(v, "adventurousHandoff", boolean) && optional(v, "notificationAutodrain", boolean) && optional(v, "activePlan", string) &&
+    optional(v, "goal", (x) => nullable(x, goal)) && optional(v, "flags", (x) => arrayOf(x, flaggedFile)) &&
+    optional(v, "todos", (x) => arrayOf(x, todo)) && optional(v, "mcpServers", (x) => arrayOf(x, mcpInfo)) &&
+    optional(v, "cwd", string) && optional(v, "cwdStackDepth", number);
+}
+function sessionListEntry(value: unknown): boolean {
+  const v = object(value);
+  return !!v && required(v, "sessionId", string) && required(v, "path", string) && required(v, "cwd", string) &&
+    optional(v, "displayName", string) && required(v, "preview", string) && required(v, "userMessageCount", number) &&
+    required(v, "updatedAt", string) && required(v, "createdAt", string) && required(v, "lastUserMessageAt", string) &&
+    optional(v, "parentSessionPath", string) && optional(v, "usage", usage) && required(v, "archived", boolean) &&
+    optional(v, "lifecycle", oneOf("emptyDefault", "acceptedPrompt", "liveConfigAction", "unknown"));
+}
+function qnaAnswer(value: unknown): boolean {
+  const v = object(value);
+  return !!v && required(v, "selectedOptionIndices", (x) => arrayOf(x, integer)) && required(v, "customText", string);
+}
+function qnaQuestion(value: unknown): boolean {
+  const v = object(value);
+  return !!v && required(v, "question", string) && optional(v, "context", string) &&
+    optional(v, "options", (x) => arrayOf(x, (y) => {
+      const o = object(y);
+      return !!o && required(o, "label", string) && optional(o, "description", string);
+    })) && optional(v, "multiSelect", boolean);
+}
+function hostResponse(value: unknown): boolean {
+  const v = object(value);
+  if (!v || !required(v, "requestId", string)) return false;
+  if (has(v, "value")) return string(v.value) && optional(v, "feedback", string);
+  if (has(v, "confirmed")) return boolean(v.confirmed);
+  if (has(v, "answers")) return arrayOf(v.answers, qnaAnswer);
+  return v.cancelled === true;
+}
+const hostRequestValidators = {
+  confirm: (v: JsonObject) => required(v, "title", string) && required(v, "message", string) && optional(v, "defaultValue", boolean) && optional(v, "timeoutMs", number),
+  input: (v: JsonObject) => required(v, "title", string) && optional(v, "placeholder", string) && optional(v, "initialValue", string) && optional(v, "timeoutMs", number),
+  select: (v: JsonObject) => required(v, "title", string) && required(v, "options", (x) => arrayOf(x, string)) && optional(v, "allowMultiple", boolean) && optional(v, "timeoutMs", number),
+  editor: (v: JsonObject) => required(v, "title", string) && optional(v, "initialValue", string),
+  qna: (v: JsonObject) => optional(v, "title", string) && required(v, "questions", (x) => arrayOf(x, qnaQuestion)) && optional(v, "timeoutMs", number),
+  plan: (v: JsonObject) => required(v, "title", string) && required(v, "planText", string) && optional(v, "displayPath", string) && optional(v, "targetFacet", string) && required(v, "actionLabels", (x) => Array.isArray(x) && x.length === 3 && x.every(string)) && optional(v, "refuseLabel", string) && optional(v, "timeoutMs", number),
+  permission: (v: JsonObject) => required(v, "title", string) && required(v, "toolName", (x) => x === null || string(x)) && required(v, "toolInput", (x) => x === null || string(x)) && required(v, "options", (x) => arrayOf(x, string)) && optional(v, "timeoutMs", number),
+  unknown: (v: JsonObject) => required(v, "title", string) && required(v, "message", string),
+  notify: (v: JsonObject) => required(v, "message", string) && optional(v, "level", oneOf("info", "warning", "error")),
+  status: (v: JsonObject) => required(v, "key", string) && optional(v, "text", string),
+  widget: (v: JsonObject) => required(v, "key", string) && optional(v, "lines", (x) => arrayOf(x, string)) && optional(v, "placement", oneOf("aboveComposer", "belowComposer")),
+  title: (v: JsonObject) => required(v, "title", string),
+  editorText: (v: JsonObject) => required(v, "text", string),
+  reset: (_v: JsonObject) => true,
+} satisfies Record<HostUiRequest["kind"], ObjectValidator>;
+
+function validatorFor<T extends string>(table: Record<T, ObjectValidator>, key: unknown): ObjectValidator | undefined {
+  return string(key) && Object.prototype.hasOwnProperty.call(table, key)
+    ? table[key as T]
+    : undefined;
+}
+function hostRequest(value: unknown): boolean {
+  const v = object(value);
+  if (!v || !required(v, "kind", string) || !required(v, "requestId", string)) return false;
+  const validator = validatorFor(hostRequestValidators, v.kind);
+  return validator ? validator(v) : false;
+}
+const sessionEventValidators = {
+  sessionOpened: (v: JsonObject) => required(v, "snapshot", snapshot),
+  sessionUpdated: (v: JsonObject) => required(v, "snapshot", snapshot),
+  assistantDelta: (v: JsonObject) => required(v, "text", string) && optional(v, "channel", oneOf("text", "thinking")) && optional(v, "entryId", string),
+  queuedMessageStarted: (v: JsonObject) => required(v, "message", queuedMessage),
+  queueUpdated: (v: JsonObject) => required(v, "messages", (x) => arrayOf(x, queuedMessage)),
+  userMessage: (v: JsonObject) => required(v, "id", string) && required(v, "text", string) && optional(v, "images", (x) => arrayOf(x, image)) && optional(v, "entryId", string) && optional(v, "references", (x) => arrayOf(x, resolvedRef)),
+  customMessage: (v: JsonObject) => required(v, "id", string) && required(v, "customType", string) && required(v, "text", string) && required(v, "display", boolean) && optional(v, "turnBoundary", boolean),
+  toolStarted: (v: JsonObject) => required(v, "toolName", string) && required(v, "callId", string) && optional(v, "label", string) && optional(v, "description", string),
+  toolUpdated: (v: JsonObject) => required(v, "callId", string) && optional(v, "text", string) && optional(v, "progress", number),
+  toolFinished: (v: JsonObject) => required(v, "callId", string) && required(v, "success", boolean) && optional(v, "images", (x) => arrayOf(x, image)) && optional(v, "interrupted", boolean),
+  runCompleted: (v: JsonObject) => required(v, "snapshot", snapshot) && optional(v, "userEntryId", string) && optional(v, "assistantEntryId", string),
+  usageUpdated: (v: JsonObject) => required(v, "usage", usage),
+  runFailed: (v: JsonObject) => { const e = object(v.error); return !!e && required(e, "message", string) && optional(e, "code", string); },
+  hostUiRequest: (v: JsonObject) => required(v, "request", hostRequest),
+  hostUiResolved: (v: JsonObject) => required(v, "requestId", string),
+  extensionCompatibilityIssue: (v: JsonObject) => { const i = object(v.issue); return !!i && required(i, "capability", string) && required(i, "classification", oneOf("terminal-only")) && required(i, "message", string) && optional(i, "extensionPath", string) && optional(i, "eventName", string); },
+  sessionClosed: (v: JsonObject) => required(v, "reason", oneOf("manual", "ended", "failed")),
+  sessionReset: (_v: JsonObject) => true,
+  nestedReplayStatus: (v: JsonObject) => required(v, "subagentHandle", string) && required(v, "status", oneOf("loading", "available", "unavailable")) && optional(v, "reason", string),
+} satisfies Record<SessionDriverEvent["type"], ObjectValidator>;
+
+function sessionEvent(value: unknown): boolean {
+  const v = object(value);
+  if (!v || !required(v, "type", string) || !required(v, "sessionRef", sessionRef) || !required(v, "timestamp", string) ||
+    !optional(v, "runId", string) || !optional(v, "subagentHandle", string)) return false;
+  const validator = validatorFor(sessionEventValidators, v.type);
+  return validator ? validator(v) : false;
+}
+function resume(value: unknown): boolean {
+  const v = object(value);
+  return !!v && required(v, "sessionId", string) && required(v, "epoch", unsignedInteger) && required(v, "seq", unsignedInteger);
+}
+const actionValidators = {
+  toggleAdventurousHandoff: (_v: JsonObject) => true,
+  setNotificationAutodrain: (v: JsonObject) => required(v, "enabled", boolean),
+  compact: (_v: JsonObject) => true,
+  clearContext: (_v: JsonObject) => true,
+  setMcpServer: (v: JsonObject) => required(v, "serverName", string) && required(v, "action", oneOf("enable", "disable", "disconnect", "reconnect")),
+  setModel: (v: JsonObject) => required(v, "modelId", string) && optional(v, "thinkingLevel", string),
+  setThinking: (v: JsonObject) => required(v, "level", string),
+  setFacet: (v: JsonObject) => required(v, "facet", string),
+  setPermissionMonitor: (v: JsonObject) => required(v, "mode", oneOf("standard", "bypass", "bypass_plus", "autonomous")),
+  resetShell: (_v: JsonObject) => true,
+  daemonReload: (_v: JsonObject) => true,
+  goalSet: (v: JsonObject) => required(v, "summary", string),
+  goalPause: (_v: JsonObject) => true,
+  goalResume: (_v: JsonObject) => true,
+  goalClear: (_v: JsonObject) => true,
+  setTitle: (v: JsonObject) => required(v, "title", string),
+} satisfies Record<SessionAction["kind"], ObjectValidator>;
+
+function action(value: unknown): boolean {
+  const v = object(value);
+  if (!v || !required(v, "kind", string)) return false;
+  const validator = validatorFor(actionValidators, v.kind);
+  return validator ? validator(v) : false;
+}
+function normalizeIds(value: JsonObject): void {
+  if (string(value.sessionId)) value.sessionId = sessionId(value.sessionId);
+  if (string(value.activeSessionId)) value.activeSessionId = sessionId(value.activeSessionId);
+  if (Array.isArray(value.runningIds)) value.runningIds = value.runningIds.map((x) => sessionId(x as string));
+  if (Array.isArray(value.initializingIds)) value.initializingIds = value.initializingIds.map((x) => sessionId(x as string));
+  if (Array.isArray(value.sessions)) for (const entry of value.sessions) {
+    const e = object(entry);
+    if (e && string(e.sessionId)) e.sessionId = sessionId(e.sessionId);
   }
-  return null;
+  if (Array.isArray(value.attention)) for (const entry of value.attention) {
+    const e = object(entry);
+    if (e && string(e.sessionId)) e.sessionId = sessionId(e.sessionId);
+  }
+  if (object(value.resume)) {
+    const r = object(value.resume);
+    if (r && string(r.sessionId)) r.sessionId = sessionId(r.sessionId);
+  }
+  if (object(value.event)) normalizeEventIds(object(value.event));
+  if (Array.isArray(value.events)) for (const event of value.events) normalizeEventIds(object(event));
+}
+function normalizeEventIds(value: JsonObject | null): void {
+  if (!value) return;
+  const ref = object(value.sessionRef);
+  if (ref && string(ref.workspaceId) && string(ref.sessionId)) {
+    ref.workspaceId = workspaceId(ref.workspaceId);
+    ref.sessionId = sessionId(ref.sessionId);
+  }
+  if (object(value.snapshot)) {
+    const s = object(value.snapshot);
+    const r = s && object(s.ref);
+    if (r && string(r.workspaceId) && string(r.sessionId)) {
+      r.workspaceId = workspaceId(r.workspaceId);
+      r.sessionId = sessionId(r.sessionId);
+    }
+    const workspace = s && object(s.workspace);
+    if (workspace && string(workspace.workspaceId)) {
+      workspace.workspaceId = workspaceId(workspace.workspaceId);
+    }
+  }
+}
+const noFields: Validator = (_value) => true;
+const nullableString: Validator = (value) => value === null || string(value);
+
+const clientMessageValidators = {
+  hello: (v: JsonObject) => optional(v, "auth", string) && optional(v, "resume", resume),
+  prompt: (v: JsonObject) => required(v, "text", string) && optional(v, "promptId", string) && optional(v, "images", (x) => arrayOf(x, image)) && optional(v, "deliverAs", oneOf("steer", "followUp")) && optional(v, "sessionId", string),
+  abort: (v: JsonObject) => optional(v, "requestId", string) && optional(v, "sessionId", string),
+  restoreQueue: (v: JsonObject) => optional(v, "sessionId", string),
+  respondUi: (v: JsonObject) => required(v, "response", hostResponse) && optional(v, "sessionId", string),
+  sessionAction: (v: JsonObject) => required(v, "action", action) && optional(v, "sessionId", string),
+  destroySession: (v: JsonObject) => required(v, "path", string),
+  setLoginShell: (v: JsonObject) => required(v, "path", nullableString),
+  setBackgroundModel: (v: JsonObject) => required(v, "spec", nullableString),
+  openSession: (v: JsonObject) => required(v, "path", string),
+  reloadSession: (v: JsonObject) => required(v, "path", string),
+  branch: (v: JsonObject) => required(v, "entryId", string) && optional(v, "summarize", boolean) && optional(v, "sessionId", string),
+  newSession: (v: JsonObject) => optional(v, "cwd", string) && optional(v, "model", (x) => { const m = object(x); return !!m && required(m, "modelId", string); }) && optional(v, "thinking", string) && optional(v, "facet", string) && optional(v, "permissionMonitor", oneOf("standard", "bypass", "bypass_plus", "autonomous")) && optional(v, "prompt", string) && optional(v, "promptId", string) && optional(v, "images", (x) => arrayOf(x, image)),
+  listSessions: noFields,
+  setArchived: (v: JsonObject) => required(v, "path", string) && required(v, "archived", boolean),
+  renameSession: (v: JsonObject) => required(v, "path", string) && required(v, "name", string),
+  detachSession: (v: JsonObject) => required(v, "path", string),
+  listCommands: noFields,
+  listFacets: noFields,
+  fetchJobs: noFields,
+  deleteTodo: (v: JsonObject) => required(v, "id", integer),
+  queryFiles: (v: JsonObject) => required(v, "query", string) && optional(v, "cwd", string) && optional(v, "includeIgnored", boolean),
+  queryDir: (v: JsonObject) => required(v, "requestId", unsignedInteger) && optional(v, "path", string),
+  statPath: (v: JsonObject) => required(v, "path", string) && required(v, "requestId", unsignedInteger),
+  applyUpdate: noFields,
+  forceUpdate: noFields,
+  trustResponse: (v: JsonObject) => required(v, "requestId", string) && required(v, "choice", (x) => x === null || integer(x)),
+  requestSeed: (v: JsonObject) => optional(v, "sessionId", string),
+  mock: (v: JsonObject) => required(v, "script", string),
+  openDataDir: noFields,
+  ping: noFields,
+} satisfies Record<ClientMessage["type"], ObjectValidator>;
+
+function validClient(value: JsonObject): boolean {
+  if (!string(value.type)) return false;
+  if (!Object.prototype.hasOwnProperty.call(clientMessageValidators, value.type)) return false;
+  const validator = clientMessageValidators[value.type as ClientMessage["type"]];
+  return validator ? validator(value) : false;
+}
+const serverMessageValidators = {
+  hello: (v: JsonObject) => {
+    if (!required(v, "protocolVersion", unsignedInteger) || !required(v, "serverId", string) || !optional(v, "serverLabel", string) || !required(v, "dataDir", string) || !optional(v, "buildSha", string)) return false;
+    if (!has(v, "serverLabel")) v.serverLabel = "";
+    return true;
+  },
+  pong: noFields,
+  seed: (v: JsonObject) => required(v, "sessionId", (x) => nullable(x, string)) && required(v, "epoch", unsignedInteger) && required(v, "seq", unsignedInteger) && required(v, "events", (x) => arrayOf(x, sessionEvent)),
+  event: (v: JsonObject) => required(v, "event", sessionEvent) && required(v, "epoch", unsignedInteger) && required(v, "seq", unsignedInteger),
+  sessionList: (v: JsonObject) => required(v, "sessions", (x) => arrayOf(x, sessionListEntry)) && required(v, "activeSessionId", (x) => nullable(x, string)) && required(v, "defaultNewSessionCwd", string),
+  sessionStatus: (v: JsonObject) => required(v, "runningIds", (x) => arrayOf(x, string)) && optional(v, "initializingIds", (x) => arrayOf(x, string)) && optional(v, "attention", (x) => arrayOf(x, sessionAttention)),
+  modelList: (v: JsonObject) => required(v, "models", (x) => arrayOf(x, modelOption)) && optional(v, "diagnostic", diagnostic),
+  commandList: (v: JsonObject) => required(v, "commands", (x) => arrayOf(x, commandInfo)),
+  facetList: (v: JsonObject) => required(v, "facets", (x) => arrayOf(x, string)),
+  jobsList: (v: JsonObject) => required(v, "jobs", (x) => arrayOf(x, backgroundJob)),
+  fileIndex: (v: JsonObject) => { if (!required(v, "files", (x) => arrayOf(x, fileInfo)) || !optional(v, "truncated", boolean)) return false; if (!has(v, "truncated")) v.truncated = false; return true; },
+  fileList: (v: JsonObject) => required(v, "query", string) && required(v, "files", (x) => arrayOf(x, fileInfo)) && optional(v, "includeIgnored", boolean),
+  atRefs: (v: JsonObject) => required(v, "skills", (x) => arrayOf(x, string)) && required(v, "subagents", (x) => arrayOf(x, string)),
+  dirListing: (v: JsonObject) => required(v, "requestId", unsignedInteger) && required(v, "path", string) && required(v, "parent", (x) => nullable(x, string)) && required(v, "entries", (x) => arrayOf(x, string)) && optional(v, "error", boolean),
+  pathStat: (v: JsonObject) => required(v, "requestId", unsignedInteger) && required(v, "path", string) && required(v, "exists", boolean) && required(v, "isDir", boolean),
+  modelDefaults: (v: JsonObject) => required(v, "defaults", modelDefaults),
+  pantokenSettings: (v: JsonObject) => { const s = object(v.settings); const e = object(v.env); return !!s && (required(s, "loginShell", nullableString) && required(s, "backgroundModel", nullableString) && optional(s, "enabledExtensions", (x) => x === null || arrayOf(x, string))) && !!e && required(e, "activeShell", nullableString) && required(e, "ok", boolean) && optional(e, "detail", string) && required(v, "pendingRestart", boolean) && optional(v, "backgroundModelWarning", string); },
+  trustRequest: (v: JsonObject) => required(v, "requestId", string) && required(v, "cwd", string) && required(v, "title", string) && required(v, "options", (x) => arrayOf(x, (y) => { const o = object(y); return !!o && required(o, "label", string) && required(o, "trusted", boolean); })),
+  trustResolved: (v: JsonObject) => required(v, "requestId", string),
+  updateStatus: (v: JsonObject) => required(v, "available", boolean) && optional(v, "sha", string) && required(v, "applying", boolean) && optional(v, "status", oneOf("deferred", "rejected")) && optional(v, "reason", oneOf("busy", "failed")) && optional(v, "desktopStale", boolean),
+  editorPrefill: (v: JsonObject) => required(v, "text", string),
+  promptResult: (v: JsonObject) => required(v, "promptId", string) && required(v, "accepted", boolean) && optional(v, "sessionId", string) && optional(v, "error", string),
+  queueRestored: (v: JsonObject) => required(v, "steering", (x) => arrayOf(x, string)) && required(v, "followUp", (x) => arrayOf(x, string)),
+  abortResult: (v: JsonObject) => optional(v, "requestId", string) && required(v, "accepted", boolean) && optional(v, "error", string),
+  error: (v: JsonObject) => required(v, "message", string) && optional(v, "kind", oneOf("session-switch", "abort", "sessionAction", "destroySession")),
+} satisfies Record<ServerMessage["type"], ObjectValidator>;
+
+function validServer(value: JsonObject): boolean {
+  if (!string(value.type)) return false;
+  if (!Object.prototype.hasOwnProperty.call(serverMessageValidators, value.type)) return false;
+  const validator = serverMessageValidators[value.type as ServerMessage["type"]];
+  return validator ? validator(value) : false;
+}
+
+/** Parse a raw WS frame, validating known fields and discriminants while ignoring unknown keys. */
+function parseMessage<T extends { type: string }>(raw: string, validator: (value: JsonObject) => boolean): T | null {
+  try {
+    const value = object(JSON.parse(raw));
+    if (!value || !validator(value)) return null;
+    normalizeIds(value);
+    return value as T;
+  } catch {
+    return null;
+  }
 }
 
 export function parseClientMessage(raw: string): ClientMessage | null {
-  return parseMessage<ClientMessage>(raw);
+  return parseMessage<ClientMessage>(raw, validClient);
 }
 
 export function parseServerMessage(raw: string): ServerMessage | null {
-  return parseMessage<ServerMessage>(raw);
+  return parseMessage<ServerMessage>(raw, validServer);
 }

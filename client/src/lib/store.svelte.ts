@@ -21,6 +21,7 @@ import {
   type ModelOption,
   type PermissionMonitorMode,
   type ServerMessage,
+  sessionId as protocolSessionId,
   type SessionAttention,
   type SessionConfig,
   type SessionListEntry,
@@ -1104,7 +1105,7 @@ class PantokenStore {
     setResumeProvider(() =>
       this.seedSessionId && this.seedEpoch > 0
         ? {
-            sessionId: this.seedSessionId,
+            sessionId: protocolSessionId(this.seedSessionId),
             epoch: this.seedEpoch,
             seq: this.seedSeq,
           }
@@ -1352,7 +1353,7 @@ class PantokenStore {
         // Exclude the focused session two ways: `activeSessionId` (from the session
         // list) AND the folded seed's `ref` (which always lands before live events) —
         // so a focused turn that completes before the list arrives never self-marks.
-        const next = new Set(msg.runningIds);
+        const next = new Set<string>(msg.runningIds);
         const viewing = this.session.ref?.sessionId;
         const newlyUnread = [...this.runningIds].filter(
           (id) =>
@@ -1875,7 +1876,7 @@ class PantokenStore {
             text: prompt.text,
             images: prompt.images,
             deliverAs: prompt.deliverAs,
-            sessionId: prompt.sessionId,
+            sessionId: prompt.sessionId === undefined ? undefined : protocolSessionId(prompt.sessionId),
           })
         : send({
             type: "newSession",
@@ -2117,7 +2118,7 @@ class PantokenStore {
       text: t,
       images,
       deliverAs,
-      sessionId: this.session.ref?.sessionId ?? undefined,
+      sessionId: this.session.ref?.sessionId === undefined ? undefined : protocolSessionId(this.session.ref.sessionId),
     });
     if (!accepted) return false;
     // Record the sent prompt for ArrowUp recall, then clear the live text AND its stored copy.
@@ -2156,7 +2157,7 @@ class PantokenStore {
     const restoreText = opts?.restoreOnAccepted ? this.abortRestoreText : null;
     this.pendingAbortRestore =
       restoreText != null ? { text: restoreText, sessionId, requestId } : null;
-    if (!send({ type: "abort", requestId, sessionId })) {
+    if (!send({ type: "abort", requestId, sessionId: protocolSessionId(sessionId) })) {
       // Offline: the request can't leave. The Stop button is already disabled
       // with an explanatory tooltip — that's the single contextual
       // representation. No sidebar error, no chat toast, no retry state.
@@ -3171,7 +3172,7 @@ class PantokenStore {
     send({
       type: "sessionAction",
       action: { kind: "toggleAdventurousHandoff" },
-      sessionId,
+      sessionId: sessionId === undefined ? undefined : protocolSessionId(sessionId),
     });
   }
 

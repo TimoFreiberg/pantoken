@@ -5,10 +5,11 @@
 //!
 //! Faithful port of `server/src/archive-store.ts`.
 //!
-//! **I/O failure policy:** `new` and `persist` degrade gracefully — they log
-//! via `tracing::error!` and continue with in-memory state rather than panicking.
-//! A read-only filesystem or a failed write never crashes the server; the
-//! in-memory set remains correct for the session's lifetime.
+//! **I/O failure policy:** `new` and `load` degrade gracefully — they log via
+//! `tracing::error!` and continue with in-memory state rather than panicking.
+//! A failed archive write never crashes the server, but `set` returns its
+//! diagnostic so the driver can report `OperationFailed` instead of claiming
+//! durable success. The in-memory set remains correct for the session lifetime.
 
 use std::collections::HashSet;
 use std::fs;
@@ -40,21 +41,27 @@ impl ArchiveStore {
     }
 
     /// Set/clear the archived flag for a session path. Persists only on an actual change.
-    pub fn set(&mut self, path: &str, archived: bool) {
-        let changed = if archived {
-            !self.archived.contains(path)
-        } else {
-            self.archived.contains(path)
-        };
-        if !changed {
-            return;
+    /// The in-memory state changes only after persistence succeeds, so a failed write can
+    /// be retried with the same requested state without being mistaken for a no-op.
+    pub fn set(&mut self, path: &str, archived: bool) -> Result<(), String> {
+        let was_archived = self.archived.contains(path);
+        if was_archived == archived {
+            return Ok(());
         }
         if archived {
             self.archived.insert(path.to_string());
         } else {
             self.archived.remove(path);
         }
-        self.persist();
+        if let Err(error) = self.persist() {
+            if was_archived {
+                self.archived.insert(path.to_string());
+            } else {
+                self.archived.remove(path);
+            }
+            return Err(error);
+        }
+        Ok(())
     }
 
     fn load(&mut self) {
@@ -78,17 +85,11 @@ impl ArchiveStore {
         }
     }
 
-    fn persist(&self) {
-        let json = match serde_json::to_string_pretty(&self.archived.iter().collect::<Vec<_>>()) {
-            Ok(j) => j,
-            Err(e) => {
-                tracing::error!("[archive] failed to serialize index: {e}");
-                return;
-            }
-        };
-        if let Err(e) = fs::write(&self.file, json) {
-            tracing::error!("[archive] failed to write {}: {e}", self.file.display());
-        }
+    fn persist(&self) -> Result<(), String> {
+        let json = serde_json::to_string_pretty(&self.archived.iter().collect::<Vec<_>>())
+            .map_err(|error| format!("failed to serialize archive index: {error}"))?;
+        fs::write(&self.file, json)
+            .map_err(|error| format!("failed to write {}: {error}", self.file.display()))
     }
 }
 
@@ -109,9 +110,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("archived.json");
         let mut store = ArchiveStore::new(file);
-        store.set("/a.jsonl", true);
+        store.set("/a.jsonl", true).unwrap();
         assert!(store.has("/a.jsonl"));
-        store.set("/a.jsonl", false);
+        store.set("/a.jsonl", false).unwrap();
         assert!(!store.has("/a.jsonl"));
     }
 
@@ -120,8 +121,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("archived.json");
         let mut s1 = ArchiveStore::new(&file);
-        s1.set("/a.jsonl", true);
-        s1.set("/b.jsonl", true);
+        s1.set("/a.jsonl", true).unwrap();
+        s1.set("/b.jsonl", true).unwrap();
         let s2 = ArchiveStore::new(&file);
         assert!(s2.has("/a.jsonl"));
         assert!(s2.has("/b.jsonl"));
@@ -133,8 +134,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("archived.json");
         let mut s1 = ArchiveStore::new(&file);
-        s1.set("/a.jsonl", true);
-        s1.set("/a.jsonl", false);
+        s1.set("/a.jsonl", true).unwrap();
+        s1.set("/a.jsonl", false).unwrap();
         let raw = fs::read_to_string(&file).unwrap();
         let arr: Vec<String> = serde_json::from_str(&raw).unwrap();
         assert_eq!(arr, Vec::<String>::new());
@@ -148,29 +149,24 @@ mod tests {
     }
 
     #[test]
-    fn archive_store_read_only_dir_does_not_panic() {
-        // A read-only directory: set() should not panic, in-memory has() still works.
+    fn archive_store_persistence_failure_can_be_retried() {
+        // Use a directory at the persistence path so fs::write fails
+        // deterministically on every platform and under every test user.
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("archived.json");
-        let mut store = ArchiveStore::new(file.clone());
-        // Make the directory read-only after construction.
-        store.set("/a.jsonl", true);
-        assert!(store.has("/a.jsonl"));
-        // Now make the parent read-only and try another set — should not panic.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o444));
-        }
-        store.set("/b.jsonl", true);
+        fs::create_dir(&file).unwrap();
+        let mut store = ArchiveStore::new(&file);
+
+        let result = store.set("/b.jsonl", true);
+        assert!(result.is_err(), "persistence failure must be returned");
         assert!(
-            store.has("/b.jsonl"),
-            "in-memory state should be correct even if persist failed"
+            !store.has("/b.jsonl"),
+            "failed persistence must not commit in-memory state"
         );
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o755));
-        }
+
+        fs::remove_dir(&file).unwrap();
+        store.set("/b.jsonl", true).unwrap();
+        assert!(store.has("/b.jsonl"));
+        assert!(ArchiveStore::new(&file).has("/b.jsonl"));
     }
 }

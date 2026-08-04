@@ -251,7 +251,7 @@ fn cold_session_entry_from_meta(
     };
 
     SessionListEntry {
-        session_id: session_id.to_string(),
+        session_id: session_id.into(),
         path: session_dir
             .join("session.json")
             .to_string_lossy()
@@ -507,7 +507,7 @@ mod tests {
         )
         .expect("should build an entry");
 
-        assert_eq!(entry.session_id, "abc123");
+        assert_eq!(entry.session_id, "abc123".into());
         assert_eq!(entry.cwd, "/my/proj");
         assert_eq!(entry.preview, "do the thing");
         assert!(!entry.archived);
@@ -739,11 +739,11 @@ mod tests {
         assert_eq!(entries.len(), 2);
         let s1 = entries
             .iter()
-            .find(|e| e.session_id == "s1")
+            .find(|e| e.session_id == "s1".into())
             .expect("s1 present");
         let s2 = entries
             .iter()
-            .find(|e| e.session_id == "s2")
+            .find(|e| e.session_id == "s2".into())
             .expect("s2 present");
         assert!(!s1.archived);
         assert!(s2.archived);

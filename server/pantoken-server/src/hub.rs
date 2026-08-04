@@ -60,13 +60,27 @@ use parking_lot::Mutex;
 use tokio::sync::{Notify, mpsc};
 use tracing::{error, info, warn};
 
-use crate::driver::{NewSessionOptsData, PantokenDriver, SessionSwitchError, TodoDeleteError};
+use crate::driver::{
+    DriverError, NewSessionOptsData, PantokenDriver, SessionSwitchError, TodoDeleteError,
+};
 use crate::journal::{
     SessionJournal, append_event, build_seed, bump_epoch, create_journal, meta_seed_events,
     tail_covers, try_merge,
 };
 
 type HubApplyFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
+/// Log the complete driver diagnostic, but keep the client-visible error generic
+/// because daemon/network/filesystem details are not safe UI payloads.
+fn client_driver_error(error: &DriverError) -> String {
+    let detail = error.to_string();
+    error!(
+        operation = error.operation(),
+        detail = %detail,
+        "driver operation failed"
+    );
+    format!("{} failed; see server logs for details", error.operation())
+}
 
 type HubOp = Box<dyn FnOnce(Arc<Mutex<SessionHub>>) -> HubApplyFuture + Send + 'static>;
 
@@ -300,7 +314,7 @@ pub struct SessionHub {
     default_focus_id: Option<SessionId>,
     ever_connected: bool,
     session_list_dirty: bool,
-    last_usage_emitted: HashMap<String, SessionUsage>,
+    last_usage_emitted: HashMap<SessionId, SessionUsage>,
 
     // ── Desktop update state ──────────────────────────────────────────────
     update_sha: Option<String>,
@@ -465,11 +479,11 @@ impl SessionHub {
     /// Extract the session id from a session.json path (parent dir name).
     /// Mirrors `PolytokenInner::session_id_from_path` but available to the hub
     /// (which doesn't have access to the polytoken driver's inner).
-    fn session_id_from_path(path: &str) -> Option<String> {
+    fn session_id_from_path(path: &str) -> Option<SessionId> {
         let normalized = path.replace('\\', "/");
         let parts: Vec<&str> = normalized.split('/').filter(|s| !s.is_empty()).collect();
         if parts.len() >= 2 && parts[parts.len() - 1] == "session.json" {
-            Some(parts[parts.len() - 2].to_string())
+            Some(parts[parts.len() - 2].into())
         } else {
             None
         }
@@ -755,15 +769,40 @@ impl SessionHub {
                 "fetch_jobs_on_update",
                 Box::new(move |hub| {
                     Box::pin(async move {
-                        let jobs = driver.list_jobs(Some(session_id.clone())).await;
-                        let mut h = hub.lock();
-                        let clients = h.clients_focused(&session_id);
-                        for client_key in clients {
-                            h.deliver(
-                                client_key,
-                                "jobs.refresh",
-                                ServerMessage::JobsList { jobs: jobs.clone() },
-                            );
+                        match driver.list_jobs(Some(session_id.clone())).await {
+                            Ok(jobs) => {
+                                let mut h = hub.lock();
+                                let clients = h.clients_focused(&session_id);
+                                for client_key in clients {
+                                    h.deliver(
+                                        client_key,
+                                        "jobs.refresh",
+                                        ServerMessage::JobsList { jobs: jobs.clone() },
+                                    );
+                                }
+                            }
+                            Err(error) => {
+                                warn!(
+                                    operation = error.operation(),
+                                    detail = %error,
+                                    session_id = %session_id,
+                                    "ambient jobs refresh failed"
+                                );
+                                let mut h = hub.lock();
+                                let clients = h.clients_focused(&session_id);
+                                for client_key in clients {
+                                    h.deliver(
+                                        client_key,
+                                        "jobs.refresh.error",
+                                        ServerMessage::Error {
+                                            message:
+                                                "jobs refresh failed; see server logs for details"
+                                                    .into(),
+                                            kind: None,
+                                        },
+                                    );
+                                }
+                            }
                         }
                     })
                 }),
@@ -1134,8 +1173,8 @@ impl SessionHub {
                 .session_titles
                 .get(&sid)
                 .cloned()
-                .unwrap_or_else(|| sid.clone());
-            let url = format!("/?session={}", urlencoding::encode(&sid));
+                .unwrap_or_else(|| sid.to_string());
+            let url = format!("/?session={}", urlencoding::encode(sid.as_str()));
             let badge = Some(self.attention_badge_count());
             let disc = ev.type_discriminator();
             if disc == "runCompleted" {
@@ -1696,7 +1735,7 @@ impl SessionHub {
                                 hub.lock().send_to_client(
                                     client_key,
                                     ServerMessage::Error {
-                                        message: error,
+                                        message: client_driver_error(&error),
                                         kind: Some("sessionAction".into()),
                                     },
                                 );
@@ -1737,7 +1776,7 @@ impl SessionHub {
                                 Err(error) => hub.lock().send_to_client(
                                     client_key,
                                     ServerMessage::Error {
-                                        message: error,
+                                        message: client_driver_error(&error),
                                         kind: Some("destroySession".into()),
                                     },
                                 ),
@@ -1831,15 +1870,41 @@ impl SessionHub {
                     "restore_queue",
                     Box::new(move |hub| {
                         Box::pin(async move {
-                            let restored = driver.clear_queue(target).await;
-                            let mut h = hub.lock();
-                            h.send_to_client(
-                                client_key,
-                                ServerMessage::QueueRestored {
-                                    steering: restored.steering,
-                                    follow_up: restored.follow_up,
-                                },
-                            );
+                            match driver.clear_queue(target).await {
+                                Ok(restored) => {
+                                    let mut h = hub.lock();
+                                    h.send_to_client(
+                                        client_key,
+                                        ServerMessage::QueueRestored {
+                                            steering: restored.steering,
+                                            follow_up: restored.follow_up,
+                                        },
+                                    );
+                                }
+                                Err(error) => {
+                                    let mut h = hub.lock();
+                                    if let DriverError::OperationFailed {
+                                        recovery: Some(restored),
+                                        ..
+                                    } = &error
+                                    {
+                                        h.send_to_client(
+                                            client_key,
+                                            ServerMessage::QueueRestored {
+                                                steering: restored.steering.clone(),
+                                                follow_up: restored.follow_up.clone(),
+                                            },
+                                        );
+                                    }
+                                    h.send_to_client(
+                                        client_key,
+                                        ServerMessage::Error {
+                                            message: client_driver_error(&error),
+                                            kind: None,
+                                        },
+                                    );
+                                }
+                            }
                         })
                     }),
                 );
@@ -2044,8 +2109,17 @@ impl SessionHub {
                     "set_archived",
                     Box::new(move |hub| {
                         Box::pin(async move {
-                            driver.set_archived(path, archived).await;
-                            // Re-broadcast the session list
+                            if let Err(error) = driver.set_archived(path, archived).await {
+                                hub.lock().send_to_client(
+                                    client_key,
+                                    ServerMessage::Error {
+                                        message: client_driver_error(&error),
+                                        kind: None,
+                                    },
+                                );
+                                return;
+                            }
+                            // Re-broadcast the session list only after a successful archive.
                             let sessions = driver.list_sessions().await;
                             let default_cwd = std::env::var("HOME").unwrap_or_default();
                             let mut h = hub.lock();
@@ -2065,8 +2139,17 @@ impl SessionHub {
                     "rename_session",
                     Box::new(move |hub| {
                         Box::pin(async move {
-                            driver.rename_session(path, name).await;
-                            // Re-broadcast the session list
+                            if let Err(error) = driver.rename_session(path, name).await {
+                                hub.lock().send_to_client(
+                                    client_key,
+                                    ServerMessage::Error {
+                                        message: client_driver_error(&error),
+                                        kind: None,
+                                    },
+                                );
+                                return;
+                            }
+                            // Re-broadcast the session list only after a successful rename.
                             let sessions = driver.list_sessions().await;
                             let default_cwd = std::env::var("HOME").unwrap_or_default();
                             let mut h = hub.lock();
@@ -2088,7 +2171,7 @@ impl SessionHub {
                                 h.send_to_client(
                                     client_key,
                                     ServerMessage::Error {
-                                        message: msg,
+                                        message: client_driver_error(&msg),
                                         kind: None,
                                     },
                                 );
@@ -2189,9 +2272,21 @@ impl SessionHub {
                     "fetch_jobs",
                     Box::new(move |hub| {
                         Box::pin(async move {
-                            let jobs = driver.list_jobs(focused).await;
-                            let mut h = hub.lock();
-                            h.send_to_client(client_key, ServerMessage::JobsList { jobs });
+                            match driver.list_jobs(focused).await {
+                                Ok(jobs) => {
+                                    let mut h = hub.lock();
+                                    h.send_to_client(client_key, ServerMessage::JobsList { jobs });
+                                }
+                                Err(error) => {
+                                    hub.lock().send_to_client(
+                                        client_key,
+                                        ServerMessage::Error {
+                                            message: client_driver_error(&error),
+                                            kind: None,
+                                        },
+                                    );
+                                }
+                            }
                         })
                     }),
                 );
@@ -2877,7 +2972,7 @@ impl SessionHub {
                 .get(&sid)
                 .and_then(|j| j.session_ref.clone())
                 .unwrap_or(SessionRef {
-                    workspace_id: sid.clone(),
+                    workspace_id: sid.to_string().into(),
                     session_id: sid.clone(),
                 });
 
@@ -4000,6 +4095,54 @@ mod hub_models_tests {
     }
 
     #[tokio::test]
+    async fn optional_capability_failures_are_client_visible() {
+        let driver: Arc<dyn PantokenDriver> = Arc::new(crate::stub_driver::StubDriver::new());
+        let (tx, mut ops) = hub_op_channel();
+        let hub = SessionHub::new(
+            driver,
+            tx,
+            None,
+            250,
+            "test-server".into(),
+            None,
+            "test-sha".into(),
+            10,
+            0,
+        );
+        let (client_key, _tx, mut rx) = hub.lock().add_client(None);
+        drain_connect_messages(&mut rx).await;
+
+        let messages = vec![
+            ClientMessage::SetArchived {
+                path: "/session".into(),
+                archived: true,
+            },
+            ClientMessage::RenameSession {
+                path: "/session".into(),
+                name: "renamed".into(),
+            },
+            ClientMessage::DetachSession {
+                path: "/session".into(),
+            },
+            ClientMessage::FetchJobs,
+            ClientMessage::SessionAction {
+                action: pantoken_protocol::wire::SessionAction::Compact,
+                session_id: None,
+            },
+            ClientMessage::DestroySession {
+                path: "/session".into(),
+            },
+        ];
+        for message in messages {
+            hub.lock().handle_client(client_key, message);
+            apply_one(hub.clone(), &mut ops).await;
+            let error =
+                drain_until(&mut rx, |msg| matches!(msg, ServerMessage::Error { .. })).await;
+            assert!(matches!(error, ServerMessage::Error { .. }));
+        }
+    }
+
+    #[tokio::test]
     async fn open_data_dir_errors_when_unconfigured() {
         let (_driver, hub, _ops) = test_hub();
         let (client_key, _tx, mut rx) = hub.lock().add_client(None);
@@ -4542,7 +4685,7 @@ mod hub_models_tests {
                 .list_sessions()
                 .await
                 .iter()
-                .any(|entry| entry.session_id == "new-/second")
+                .any(|entry| entry.session_id == "new-/second".into())
         );
     }
 
@@ -5643,13 +5786,13 @@ mod hub_models_tests {
         // Capture the pre-detach epoch for AC.3.
         let pre_epoch = hub
             .lock()
-            .seed_of(Some(&sid.to_string()))
+            .seed_of(Some(&sid.into()))
             .map(|(epoch, _, _)| epoch)
             .expect("journal should exist before detach");
 
         // Add a client focused on the session.
         let (client_key, _tx, mut rx) = hub.lock().add_client(None);
-        hub.lock().set_client_focus(client_key, sid.to_string());
+        hub.lock().set_client_focus(client_key, sid.into());
 
         // Drain the initial connect-time messages (Hello, Seed for the
         // default session, SessionStatus, UpdateStatus, PantokenSettings).
@@ -5666,7 +5809,7 @@ mod hub_models_tests {
 
         // AC.1: journal is removed.
         assert!(
-            !hub.lock().has_journal(&sid.to_string()),
+            !hub.lock().has_journal(&sid.into()),
             "journal should be dropped after detach"
         );
 
@@ -5748,7 +5891,7 @@ mod hub_models_tests {
         insert_test_journal(&hub, sid);
 
         let (client_key, _tx, mut rx) = hub.lock().add_client(None);
-        hub.lock().set_client_focus(client_key, sid.to_string());
+        hub.lock().set_client_focus(client_key, sid.into());
 
         // Drain the initial connect-time Seed for the default session.
         let _ = drain_until(&mut rx, |msg| matches!(msg, ServerMessage::Seed { .. })).await;
@@ -5784,7 +5927,7 @@ mod hub_models_tests {
 
         // The journal must NOT have been re-created.
         assert!(
-            !hub.lock().has_journal(&sid.to_string()),
+            !hub.lock().has_journal(&sid.into()),
             "journal should not be re-created by a late SessionClosed"
         );
 
@@ -5807,7 +5950,7 @@ mod hub_models_tests {
         insert_test_journal(&hub, sid);
 
         // Simulate the session being the landing session.
-        hub.lock().default_focus_id = Some(sid.to_string());
+        hub.lock().default_focus_id = Some(sid.into());
 
         let (client_key, _tx, _rx) = hub.lock().add_client(None);
         hub.lock().handle_client(
@@ -5828,7 +5971,7 @@ mod hub_models_tests {
         // default_focus_id pointing at another session.
         let other_sid = "other-session";
         insert_test_journal(&hub, other_sid);
-        hub.lock().default_focus_id = Some("keep-this".to_string());
+        hub.lock().default_focus_id = Some("keep-this".into());
 
         hub.lock().handle_client(
             client_key,
@@ -5840,7 +5983,7 @@ mod hub_models_tests {
 
         assert_eq!(
             hub.lock().default_focus_id,
-            Some("keep-this".to_string()),
+            Some("keep-this".into()),
             "default_focus_id should NOT be cleared when it points at a different session"
         );
     }
@@ -6247,14 +6390,14 @@ mod hub_models_tests {
         set_test_journal_activity(&hub, "boundary-session", now - Duration::from_millis(49));
         hub.lock().evict_idle_journals_at(now);
         assert!(
-            hub.lock().has_journal(&"boundary-session".to_string()),
+            hub.lock().has_journal(&"boundary-session".into()),
             "journal just below the threshold must survive"
         );
 
         set_test_journal_activity(&hub, "boundary-session", now - Duration::from_millis(50));
         hub.lock().evict_idle_journals_at(now);
         assert!(
-            !hub.lock().has_journal(&"boundary-session".to_string()),
+            !hub.lock().has_journal(&"boundary-session".into()),
             "journal at the threshold must be evicted"
         );
     }
@@ -6271,9 +6414,9 @@ mod hub_models_tests {
 
         {
             let mut h = hub.lock();
-            h.set_initializing(&"initializing-session".to_string(), true);
+            h.set_initializing(&"initializing-session".into(), true);
             h.pending_deltas.insert(
-                "pending-session".to_string(),
+                "pending-session".into(),
                 PendingDelta {
                     ev: SessionDriverEvent::AssistantDelta {
                         base: SessionEventBase {
@@ -6296,11 +6439,11 @@ mod hub_models_tests {
 
         let h = hub.lock();
         assert!(
-            h.has_journal(&"initializing-session".to_string()),
+            h.has_journal(&"initializing-session".into()),
             "initializing journal must not be evicted"
         );
         assert!(
-            h.has_journal(&"pending-session".to_string()),
+            h.has_journal(&"pending-session".into()),
             "journal with a pending delta must not be evicted"
         );
     }
@@ -6311,14 +6454,14 @@ mod hub_models_tests {
     fn evict_idle_journal_after_timeout() {
         let (_driver, hub) = test_hub_with_eviction(50);
         insert_test_journal(&hub, "idle-session");
-        assert!(hub.lock().has_journal(&"idle-session".to_string()));
+        assert!(hub.lock().has_journal(&"idle-session".into()));
 
         let now = Instant::now();
         set_test_journal_activity(&hub, "idle-session", now - Duration::from_millis(51));
         hub.lock().evict_idle_journals_at(now);
 
         assert!(
-            !hub.lock().has_journal(&"idle-session".to_string()),
+            !hub.lock().has_journal(&"idle-session".into()),
             "idle journal should be evicted after timeout"
         );
     }
@@ -6333,14 +6476,14 @@ mod hub_models_tests {
         let (client_key, _tx, _rx) = hub.lock().add_client(None);
         hub.lock()
             .set_client_focus(client_key, "viewed-session".into());
-        assert!(hub.lock().has_viewer(&"viewed-session".to_string()));
+        assert!(hub.lock().has_viewer(&"viewed-session".into()));
 
         let now = Instant::now();
         set_test_journal_activity(&hub, "viewed-session", now - Duration::from_millis(50));
         hub.lock().evict_idle_journals_at(now);
 
         assert!(
-            hub.lock().has_journal(&"viewed-session".to_string()),
+            hub.lock().has_journal(&"viewed-session".into()),
             "journal with active viewer must not be evicted"
         );
     }
@@ -6352,16 +6495,20 @@ mod hub_models_tests {
         insert_test_journal(&hub, "running-session");
 
         // Mark the session as running.
-        let sid = "running-session".to_string();
+        let sid: SessionId = "running-session".into();
         hub.lock().set_running(&sid, true);
-        assert!(hub.lock().running.contains("running-session"));
+        assert!(
+            hub.lock()
+                .running
+                .contains(&SessionId::from("running-session"))
+        );
 
         let now = Instant::now();
         set_test_journal_activity(&hub, "running-session", now - Duration::from_millis(50));
         hub.lock().evict_idle_journals_at(now);
 
         assert!(
-            hub.lock().has_journal(&"running-session".to_string()),
+            hub.lock().has_journal(&"running-session".into()),
             "journal for running session must not be evicted"
         );
     }
@@ -6396,14 +6543,14 @@ mod hub_models_tests {
     fn eviction_disabled_when_zero() {
         let (_driver, hub) = test_hub_with_eviction(0);
         insert_test_journal(&hub, "idle-session");
-        assert!(hub.lock().has_journal(&"idle-session".to_string()));
+        assert!(hub.lock().has_journal(&"idle-session".into()));
 
         let now = Instant::now();
         set_test_journal_activity(&hub, "idle-session", now - Duration::from_secs(1));
         hub.lock().evict_idle_journals_at(now);
 
         assert!(
-            hub.lock().has_journal(&"idle-session".to_string()),
+            hub.lock().has_journal(&"idle-session".into()),
             "journal must not be evicted when eviction is disabled (0)"
         );
     }
@@ -6413,14 +6560,14 @@ mod hub_models_tests {
     fn recently_active_journal_not_evicted() {
         let (_driver, hub) = test_hub_with_eviction(200);
         insert_test_journal(&hub, "recent-session");
-        assert!(hub.lock().has_journal(&"recent-session".to_string()));
+        assert!(hub.lock().has_journal(&"recent-session".into()));
 
         let now = Instant::now();
         set_test_journal_activity(&hub, "recent-session", now - Duration::from_millis(199));
         hub.lock().evict_idle_journals_at(now);
 
         assert!(
-            hub.lock().has_journal(&"recent-session".to_string()),
+            hub.lock().has_journal(&"recent-session".into()),
             "recently active journal must not be evicted"
         );
     }
@@ -6438,21 +6585,21 @@ mod hub_models_tests {
 
         // Mark the session as warm (simulates a live daemon attachment).
         driver.add_warm_session("warm-session".into());
-        assert!(driver.has_warm_session(&"warm-session".to_string()));
+        assert!(driver.has_warm_session(&"warm-session".into()));
         hub.lock().evict_idle_journals_at(now);
 
         assert!(
-            hub.lock().has_journal(&"warm-session".to_string()),
+            hub.lock().has_journal(&"warm-session".into()),
             "journal for warm session must not be evicted"
         );
 
         // Now simulate daemon crash: remove the warm session.
-        driver.remove_warm_session(&"warm-session".to_string());
-        assert!(!driver.has_warm_session(&"warm-session".to_string()));
+        driver.remove_warm_session(&"warm-session".into());
+        assert!(!driver.has_warm_session(&"warm-session".into()));
         hub.lock().evict_idle_journals_at(now);
 
         assert!(
-            !hub.lock().has_journal(&"warm-session".to_string()),
+            !hub.lock().has_journal(&"warm-session".into()),
             "journal for crashed-daemon session should be evicted after warm removal"
         );
     }
