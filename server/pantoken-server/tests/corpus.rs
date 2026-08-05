@@ -444,8 +444,18 @@ fn replay_contract(
         let raw = serde_json::to_value(&envelope.event).unwrap();
         raw_events.push(raw);
         let result = event_map::map_daemon_event(&envelope.event, &mut acc, &ctx);
+        let reseed = result
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, DaemonEffect::Reseed));
         events.extend(result.events);
         effects.extend(result.effects.iter().map(effect_expectation));
+        // The real driver resets every stream accumulator before replaying history
+        // for a reseed. Mirror that boundary in the corpus fold so post-gap frames
+        // cannot inherit an interrupted block or stale prompt identity.
+        if reseed {
+            event_map::reset_accumulator(&mut acc);
+        }
     }
     (raw_events, events, effects, acc)
 }
@@ -1322,6 +1332,7 @@ fn disposition_label(d: event_map::EventDisposition) -> &'static str {
     match d {
         Mapped => "mapped",
         StateRefetch => "state_refetch",
+        StateRefetchOrNoop => "state_refetch_or_noop",
         Reseed => "reseed",
         UserNotice => "user_notice",
         IntentionalNoop => "intentional_noop",

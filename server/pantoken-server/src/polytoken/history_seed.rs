@@ -30,6 +30,8 @@
 //! never crashing the seed.
 
 use pantoken_daemon_types::SessionHistoryItem;
+
+use crate::polytoken::event_map::OPAQUE_REASONING_PLACEHOLDER;
 use pantoken_protocol::session_driver::{
     AssistantDeltaChannel, ImageContent, SessionConfig, SessionDriverEvent, SessionEventBase,
     SessionRef, SessionSnapshot, SessionStatus, WorkspaceRef,
@@ -321,7 +323,31 @@ pub fn history_to_seed_events(
                                 description: None,
                             });
                         }
-                        // redacted_thinking / open_ai_reasoning_opaque: no transcript text (skip).
+                        // History has the completed block, so project the same final
+                        // summary-or-placeholder representation as the live mapper
+                        // and Polytoken TUI. Provider-private data/id fields remain
+                        // daemon-only.
+                        "redacted_thinking" | "open_ai_reasoning_opaque" => {
+                            let text = if block_type == "open_ai_reasoning_opaque" {
+                                b.get("summary")
+                                    .and_then(|v| v.as_str())
+                                    .filter(|s| !s.is_empty())
+                                    .unwrap_or(OPAQUE_REASONING_PLACEHOLDER)
+                            } else {
+                                OPAQUE_REASONING_PLACEHOLDER
+                            };
+                            out.push(SessionDriverEvent::AssistantDelta {
+                                base: SessionEventBase {
+                                    session_ref: ref_.clone(),
+                                    timestamp: stamp,
+                                    run_id: None,
+                                    subagent_handle: None,
+                                },
+                                text: text.to_string(),
+                                channel: Some(AssistantDeltaChannel::Thinking),
+                                entry_id: prompt_id.map(|s| s.to_string()),
+                            });
+                        }
                         _ => {}
                     }
                 }
@@ -754,6 +780,43 @@ mod tests {
             }
             other => panic!("expected AssistantDelta(thinking), got {:?}", other),
         }
+    }
+
+    #[test]
+    fn opaque_history_projects_summary_or_constant_placeholder_without_private_fields() {
+        let sentinel = "HUGE_OPAQUE_DATA_SENTINEL";
+        let items = vec![json!({
+            "type": "assistant",
+            "prompt_id": "p1",
+            "blocks": [
+                { "type": "redacted_thinking", "data": sentinel },
+                { "type": "open_ai_reasoning_opaque", "data": sentinel, "id": "opaque-id", "summary": "readable summary" },
+                { "type": "open_ai_reasoning_opaque", "data": sentinel, "id": "opaque-id-2" },
+            ],
+        })];
+        let out = history_to_seed_events(&items, &ctx());
+        assert_eq!(out.len(), 3);
+        let texts: Vec<&str> = out
+            .iter()
+            .map(|event| match event {
+                SessionDriverEvent::AssistantDelta { text, channel, .. } => {
+                    assert_eq!(*channel, Some(AssistantDeltaChannel::Thinking));
+                    text.as_str()
+                }
+                other => panic!("expected AssistantDelta, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            texts,
+            vec![
+                OPAQUE_REASONING_PLACEHOLDER,
+                "readable summary",
+                OPAQUE_REASONING_PLACEHOLDER
+            ]
+        );
+        let serialized = serde_json::to_string(&out).unwrap();
+        assert!(!serialized.contains(sentinel));
+        assert!(!serialized.contains("opaque-id"));
     }
 
     #[test]

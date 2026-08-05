@@ -155,7 +155,7 @@
     "final_session": {
       "mapped_event_count": 2,
       "assistant_delta_count": 1,
-      "open_block_count": 1,
+      "open_block_count": 0,
       "tool_input_buffer_empty": true,
       "turn_error_present": false
     },

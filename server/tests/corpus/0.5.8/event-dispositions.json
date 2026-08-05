@@ -177,7 +177,7 @@
       "assistant_delta_count": 0,
       "open_block_count": 0,
       "tool_input_buffer_empty": true,
-      "turn_error_present": true
+      "turn_error_present": false
     },
     "capabilities": []
   }

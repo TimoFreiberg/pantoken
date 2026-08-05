@@ -1405,11 +1405,21 @@ async fn reconnect_tool_call_reseeds_to_clean_accumulator() {
         "the reseed replay must contain the recovered transcript row"
     );
 
+    // A fresh turn begins after reseed. Reset intentionally clears the expected
+    // prompt identity, so block events are accepted only after a new
+    // message_start establishes the turn.
+    gate.push(sse_frame(
+        4,
+        json!({"type": "message_start", "prompt_id": "PROMPT_0"}),
+    ))
+    .await
+    .expect("push post-reseed message_start");
+
     // A fresh tool sequence after the reseed: the accumulator must be CLEAN —
     // the new input delta alone (no stale prefix) parses into the ToolStarted
     // input.
     gate.push(sse_frame(
-        4,
+        5,
         json!({
             "type": "content_block_start",
             "prompt_id": "PROMPT_0",
@@ -1420,7 +1430,7 @@ async fn reconnect_tool_call_reseeds_to_clean_accumulator() {
     .await
     .expect("push fresh tool_use block");
     gate.push(sse_frame(
-        5,
+        6,
         json!({
             "type": "content_block_delta",
             "prompt_id": "PROMPT_0",
@@ -1431,7 +1441,7 @@ async fn reconnect_tool_call_reseeds_to_clean_accumulator() {
     .await
     .expect("push fresh tool input");
     gate.push(sse_frame(
-        6,
+        7,
         json!({"type": "tool_call", "call_id": "call2", "name": "bash", "prompt_id": "PROMPT_0"}),
     ))
     .await

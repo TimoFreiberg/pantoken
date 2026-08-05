@@ -69,13 +69,28 @@ pub struct ToolUseBlockMeta {
     pub name: String,
 }
 
-/// The event-fold's working memory. Tracks the current streaming block kind,
-/// accrues partial JSON for tool_use blocks, and holds turn-level error state.
+/// The Polytoken TUI-equivalent fixed projection for provider-private reasoning
+/// blocks that have no readable summary. Keep this constant-size: opaque payloads
+/// must never enter Pantoken's append-only transcript protocol.
+pub const OPAQUE_REASONING_PLACEHOLDER: &str = "opaque reasoning block";
+
+/// The event-fold's working memory. Tracks the current streaming block kind and
+/// identity, accrues partial JSON for tool_use blocks, and holds turn-level error
+/// state. Block identity is separate from the turn identity so delayed events from
+/// an earlier prompt cannot attach to a later prompt that reused an index.
 #[derive(Debug, Clone)]
 pub struct FoldAccumulator {
     /// The current block's kind discriminator (from content_block_start).
     /// `None` when no block is open. Routes deltas to the correct channel.
     pub block_kind: Option<BlockKind>,
+    /// Prompt identity of the currently open block, if any.
+    pub block_prompt_id: Option<String>,
+    /// Message-local index of the currently open block, if any.
+    pub block_index: Option<i32>,
+    /// Whether the active OpenAI opaque block emitted a nonempty readable summary.
+    pub opaque_summary_emitted: bool,
+    /// Prompt identity expected for the current turn, set by message_start.
+    pub expected_prompt_id: Option<String>,
     /// Accumulated partial_json for an in-flight tool_use block (emitted on tool_call).
     pub tool_input_buffer: String,
     /// The current tool_use block's metadata from content_block_start (id, name).
@@ -97,6 +112,10 @@ pub struct TurnError {
 pub fn create_accumulator() -> FoldAccumulator {
     FoldAccumulator {
         block_kind: None,
+        block_prompt_id: None,
+        block_index: None,
+        opaque_summary_emitted: false,
+        expected_prompt_id: None,
         tool_input_buffer: String::new(),
         tool_use_block: None,
         turn_error: None,
@@ -113,6 +132,10 @@ pub fn create_accumulator() -> FoldAccumulator {
 /// so a reconnect is the only signal that stream state may have been lost.
 pub fn reset_accumulator(acc: &mut FoldAccumulator) {
     acc.block_kind = None;
+    acc.block_prompt_id = None;
+    acc.block_index = None;
+    acc.opaque_summary_emitted = false;
+    acc.expected_prompt_id = None;
     acc.tool_input_buffer.clear();
     acc.tool_use_block = None;
     acc.turn_error = None;
@@ -1350,6 +1373,41 @@ fn block_kind_from_content(kind: &ContentBlockKind) -> BlockKind {
     }
 }
 
+fn block_matches(acc: &FoldAccumulator, prompt_id: &str, block_index: i32) -> bool {
+    acc.block_prompt_id.as_deref() == Some(prompt_id) && acc.block_index == Some(block_index)
+}
+
+fn clear_block_identity(acc: &mut FoldAccumulator) {
+    acc.block_kind = None;
+    acc.block_prompt_id = None;
+    acc.block_index = None;
+    acc.opaque_summary_emitted = false;
+}
+
+/// Project an opaque/redacted block only after it closes. AssistantDelta is
+/// append-only, so emitting a placeholder at block start would leave an
+/// incorrect placeholder prefix when a later OpenAI summary arrives.
+fn finalize_opaque_block(
+    acc: &mut FoldAccumulator,
+    base: &SessionEventBase,
+) -> Vec<SessionDriverEvent> {
+    let should_placeholder = matches!(
+        acc.block_kind,
+        Some(BlockKind::RedactedThinking | BlockKind::OpenAiReasoningOpaque)
+    ) && !acc.opaque_summary_emitted;
+    let mut events = Vec::new();
+    if should_placeholder {
+        events.push(SessionDriverEvent::AssistantDelta {
+            base: base.clone(),
+            text: OPAQUE_REASONING_PLACEHOLDER.to_string(),
+            channel: Some(AssistantDeltaChannel::Thinking),
+            entry_id: None,
+        });
+    }
+    clear_block_identity(acc);
+    events
+}
+
 // ---------------------------------------------------------------------------
 // The mapper — map one DaemonEvent to zero or more pantoken events + effects.
 //
@@ -1392,6 +1450,7 @@ fn annotate_subagent_handle(result: &mut FoldResult, handle: Option<&str>) {
 pub enum EventDisposition {
     Mapped,
     StateRefetch,
+    StateRefetchOrNoop,
     Reseed,
     UserNotice,
     IntentionalNoop,
@@ -1416,7 +1475,7 @@ pub const DAEMON_EVENT_DISPOSITIONS: &[(&str, EventDisposition)] = &[
     ("notification_autodrain_switch", EventDisposition::Mapped),
     ("goal_driver_update", EventDisposition::Mapped),
     ("hook_fired", EventDisposition::Mapped),
-    ("message_complete", EventDisposition::StateRefetch),
+    ("message_complete", EventDisposition::StateRefetchOrNoop),
     ("turn_cancelled", EventDisposition::StateRefetch),
     ("pending_turn_input_queued", EventDisposition::StateRefetch),
     (
@@ -1490,8 +1549,8 @@ pub fn event_disposition_for_wire_name(name: &str) -> Option<EventDisposition> {
         | "notification_autodrain_switch"
         | "goal_driver_update"
         | "hook_fired" => Mapped,
-        "message_complete"
-        | "turn_cancelled"
+        "message_complete" => StateRefetchOrNoop,
+        "turn_cancelled"
         | "pending_turn_input_queued"
         | "pending_turn_input_dequeued"
         | "pending_turn_input_discarded"
@@ -1625,6 +1684,14 @@ pub fn map_daemon_event(
             !result.effects.is_empty(),
             "state-refetch event produced no authoritative follow-up"
         ),
+        EventDisposition::StateRefetchOrNoop => assert!(
+            result.effects.is_empty()
+                || result
+                    .effects
+                    .iter()
+                    .any(|effect| matches!(effect, DaemonEffect::FetchState { .. })),
+            "conditional state-refetch event produced an invalid result"
+        ),
         EventDisposition::Reseed => assert!(
             result
                 .effects
@@ -1650,49 +1717,66 @@ fn map_daemon_event_inner(
 
     match ev {
         // ===== Turn boundaries =====
-        DaemonEvent::MessageStart { .. } => {
-            // A turn began — the turn-start signal (like the original driver's agent_start). Also clears
-            // any transient error state: if the daemon retries after a model_error, this
-            // new message_start means the retry is underway.
+        DaemonEvent::MessageStart { prompt_id, .. } => {
+            // A new message supersedes any interrupted block. Finalize opaque blocks
+            // before changing the turn identity so an interrupted block contributes at
+            // most one bounded placeholder.
+            let mut events = finalize_opaque_block(acc, &base);
+            acc.tool_input_buffer.clear();
+            acc.tool_use_block = None;
+            acc.expected_prompt_id = Some(prompt_id.clone());
+            // A turn began — also clear transient error state: if the daemon retries
+            // after a model_error, this message_start means the retry is underway.
             acc.turn_error = None;
-            fold_result(
-                vec![SessionDriverEvent::SessionUpdated {
-                    base,
-                    snapshot: ctx.snapshot(SessionStatus::Running),
-                }],
-                vec![],
-            )
+            events.push(SessionDriverEvent::SessionUpdated {
+                base,
+                snapshot: ctx.snapshot(SessionStatus::Running),
+            });
+            fold_result(events, vec![])
         }
 
         DaemonEvent::MessageComplete { prompt_id, .. } => {
-            // The turn ended — the boundary choke point (like the original driver's agent_end). If a
-            // model_error occurred during the turn (and wasn't cleared by a retry's
-            // message_start), fail the run; otherwise fetch fresh state for usage +
-            // emit runCompleted.
+            // Once a turn has started, a completion from another prompt is stale. It
+            // must not consume turn_error, finalize the active block, or trigger a
+            // state fetch. A fresh accumulator retains the historical standalone
+            // message_complete compatibility path.
+            if let Some(expected_prompt_id) = acc.expected_prompt_id.as_deref()
+                && expected_prompt_id != prompt_id
+            {
+                return FoldResult::default();
+            }
+
+            let mut events = finalize_opaque_block(acc, &base);
+            acc.tool_input_buffer.clear();
+            acc.tool_use_block = None;
+            acc.expected_prompt_id = None;
+
+            // The turn ended — the boundary choke point (like the original driver's
+            // agent_end). If a model_error occurred during the turn (and wasn't
+            // cleared by a retry's message_start), fail the run; otherwise fetch
+            // fresh state for usage + emit runCompleted.
             if let Some(turn_err) = acc.turn_error.take() {
+                events.push(SessionDriverEvent::RunFailed {
+                    base,
+                    error: pantoken_protocol::session_driver::SessionErrorInfo {
+                        message: turn_err.message,
+                        code: None,
+                        details: None,
+                    },
+                });
                 return fold_result(
-                    vec![SessionDriverEvent::RunFailed {
-                        base,
-                        error: pantoken_protocol::session_driver::SessionErrorInfo {
-                            message: turn_err.message,
-                            code: None,
-                            details: None,
-                        },
-                    }],
+                    events,
                     vec![DaemonEffect::FetchState {
                         emit: FetchEmit::RunCompleted,
                         prompt_id: Some(prompt_id.clone()),
                     }],
                 );
             }
-            // Usage is on GET /state, not on the event. Defer to
-            // the driver's fetchState effect, which refreshes the cache and then calls
-            // build_post_fetch_event("runCompleted", ctx, promptId) to produce the
-            // runCompleted event. The prompt_id is the daemon's per-turn id — the same
-            // one the user message and assistant reply share — and becomes the branch
-            // handle (entryId) that the transcript's "branch from here" buttons name.
+            // Usage is on GET /state, not on the event. Defer to the driver's
+            // fetchState effect, which refreshes the cache and then calls
+            // build_post_fetch_event("runCompleted", ctx, promptId).
             fold_result(
-                vec![],
+                events,
                 vec![DaemonEffect::FetchState {
                     emit: FetchEmit::RunCompleted,
                     prompt_id: Some(prompt_id.clone()),
@@ -1713,9 +1797,22 @@ fn map_daemon_event_inner(
         }
 
         // ===== Content block streaming (the accumulator) =====
-        DaemonEvent::ContentBlockStart { block_type, .. } => {
-            // Set the current block kind so deltas know which channel to route to.
+        DaemonEvent::ContentBlockStart {
+            block_index,
+            block_type,
+            prompt_id,
+            ..
+        } => {
+            if acc.expected_prompt_id.as_deref() != Some(prompt_id.as_str()) {
+                return FoldResult::default();
+            }
+            // A new matching start can supersede an interrupted opaque block. Finalize
+            // it before installing the new identity; this also clears stale tool state.
+            let events = finalize_opaque_block(acc, &base);
+            acc.block_prompt_id = Some(prompt_id.clone());
+            acc.block_index = Some(*block_index);
             acc.block_kind = Some(block_kind_from_content(block_type));
+            acc.opaque_summary_emitted = false;
             acc.tool_input_buffer.clear();
             if let ContentBlockKind::ToolUse { id, name, .. } = block_type {
                 acc.tool_use_block = Some(ToolUseBlockMeta {
@@ -1725,10 +1822,18 @@ fn map_daemon_event_inner(
             } else {
                 acc.tool_use_block = None;
             }
-            FoldResult::default()
+            fold_result(events, vec![])
         }
 
-        DaemonEvent::ContentBlockDelta { delta, .. } => {
+        DaemonEvent::ContentBlockDelta {
+            block_index,
+            delta,
+            prompt_id,
+            ..
+        } => {
+            if !block_matches(acc, prompt_id, *block_index) {
+                return FoldResult::default();
+            }
             // text → assistantDelta (main channel)
             if let BlockDeltaPayload::Text { text } = delta {
                 if acc.block_kind == Some(BlockKind::Text) {
@@ -1757,33 +1862,28 @@ fn map_daemon_event_inner(
                     );
                 }
             }
-            // redacted_thinking → assistantDelta (thinking channel, redacted content)
-            if let BlockDeltaPayload::RedactedThinking { data } = delta {
-                if acc.block_kind == Some(BlockKind::RedactedThinking) {
-                    return fold_result(
-                        vec![SessionDriverEvent::AssistantDelta {
-                            base,
-                            text: data.clone(),
-                            channel: Some(AssistantDeltaChannel::Thinking),
-                            entry_id: None,
-                        }],
-                        vec![],
-                    );
-                }
+            // Provider-private redacted/opaque bytes are intentionally suppressed.
+            if let BlockDeltaPayload::RedactedThinking { .. }
+            | BlockDeltaPayload::OpenAiReasoningOpaque { .. } = delta
+            {
+                return FoldResult::default();
             }
-            // open_ai_reasoning_opaque → assistantDelta (thinking channel, opaque reasoning)
-            if let BlockDeltaPayload::OpenAiReasoningOpaque { data, .. } = delta {
-                if acc.block_kind == Some(BlockKind::OpenAiReasoningOpaque) {
+            // A readable OpenAI summary is safe to expose through the ordinary
+            // thinking channel. Empty summaries do not suppress the fallback marker.
+            if let BlockDeltaPayload::OpenAiReasoningSummary { text } = delta {
+                if acc.block_kind == Some(BlockKind::OpenAiReasoningOpaque) && !text.is_empty() {
+                    acc.opaque_summary_emitted = true;
                     return fold_result(
                         vec![SessionDriverEvent::AssistantDelta {
                             base,
-                            text: data.clone(),
+                            text: text.clone(),
                             channel: Some(AssistantDeltaChannel::Thinking),
                             entry_id: None,
                         }],
                         vec![],
                     );
                 }
+                return FoldResult::default();
             }
             // tool_use_input → accumulate partial JSON (emit on tool_call)
             if let BlockDeltaPayload::ToolUseInput { partial_json } = delta {
@@ -1796,10 +1896,16 @@ fn map_daemon_event_inner(
             FoldResult::default()
         }
 
-        DaemonEvent::ContentBlockStop { .. } => {
+        DaemonEvent::ContentBlockStop {
+            block_index,
+            prompt_id,
+            ..
+        } => {
+            if !block_matches(acc, prompt_id, *block_index) {
+                return FoldResult::default();
+            }
             // Block complete. The tool_use accumulator emits on tool_call, not here.
-            acc.block_kind = None;
-            FoldResult::default()
+            fold_result(finalize_opaque_block(acc, &base), vec![])
         }
 
         // ===== Tool plumbing =====
@@ -2528,8 +2634,9 @@ mod tests {
         ContextUsageSnapshot, FlagEntry, FlagMode, GoalFileReference, TodoSnapshot,
     };
     use pantoken_protocol::session_driver::{
-        PermissionMonitorMode, SessionRef, TodoStatus, WorkspaceRef,
+        PermissionMonitorMode, SessionDriverEvent, SessionRef, TodoStatus, WorkspaceRef,
     };
+    use pantoken_protocol::state::{TranscriptItem, fold_all};
     use serde_json::{Value, json};
 
     #[test]
@@ -2570,6 +2677,7 @@ mod tests {
                 let name = match disposition {
                     EventDisposition::Mapped => "mapped",
                     EventDisposition::StateRefetch => "state_refetch",
+                    EventDisposition::StateRefetchOrNoop => "state_refetch_or_noop",
                     EventDisposition::Reseed => "reseed",
                     EventDisposition::UserNotice => "user_notice",
                     EventDisposition::IntentionalNoop => "intentional_noop",
@@ -2585,6 +2693,7 @@ mod tests {
                 "mapped",
                 "reseed",
                 "state_refetch",
+                "state_refetch_or_noop",
                 "user_notice",
             ])
         );
@@ -2596,7 +2705,7 @@ mod tests {
             ),
             (
                 json!({"type":"message_complete","prompt_id":"p"}),
-                EventDisposition::StateRefetch,
+                EventDisposition::StateRefetchOrNoop,
             ),
             (
                 json!({"type":"stream_discontinuity","missed":1}),
@@ -3095,6 +3204,7 @@ mod tests {
         assert_eq!(out.events.len(), 1);
         assert_eq!(event_json(&out.events[0]), snapshot_event("running"));
         assert!(acc.turn_error.is_none());
+        assert_eq!(acc.expected_prompt_id.as_deref(), Some("p1"));
     }
 
     #[test]
@@ -3165,23 +3275,36 @@ mod tests {
     #[test]
     fn content_block_start_text_sets_block_kind_no_events() {
         let mut acc = create_accumulator();
+        fold(
+            json!({ "type": "message_start", "prompt_id": "p1" }),
+            &mut acc,
+        );
         let out = fold(
             json!({ "type": "content_block_start", "block_index": 0, "block_type": { "type": "text" }, "prompt_id": "p1" }),
             &mut acc,
         );
         assert!(out.events.is_empty());
         assert_eq!(acc.block_kind, Some(BlockKind::Text));
+        assert_eq!(acc.block_prompt_id.as_deref(), Some("p1"));
+        assert_eq!(acc.block_index, Some(0));
+        assert_eq!(acc.expected_prompt_id.as_deref(), Some("p1"));
     }
 
     #[test]
     fn content_block_start_tool_use_sets_block_kind_and_tool_use_block() {
         let mut acc = create_accumulator();
+        fold(
+            json!({ "type": "message_start", "prompt_id": "p1" }),
+            &mut acc,
+        );
         let out = fold(
             json!({ "type": "content_block_start", "block_index": 1, "block_type": { "type": "tool_use", "id": "tu1", "name": "bash" }, "prompt_id": "p1" }),
             &mut acc,
         );
         assert!(out.events.is_empty());
         assert_eq!(acc.block_kind, Some(BlockKind::ToolUse));
+        assert_eq!(acc.block_prompt_id.as_deref(), Some("p1"));
+        assert_eq!(acc.block_index, Some(1));
         assert_eq!(acc.tool_use_block.as_ref().unwrap().id, "tu1");
         assert_eq!(acc.tool_use_block.as_ref().unwrap().name, "bash");
     }
@@ -3189,7 +3312,14 @@ mod tests {
     #[test]
     fn content_block_delta_text_assistant_delta_text_channel() {
         let mut acc = create_accumulator();
-        acc.block_kind = Some(BlockKind::Text);
+        fold(
+            json!({ "type": "message_start", "prompt_id": "p1" }),
+            &mut acc,
+        );
+        fold(
+            json!({ "type": "content_block_start", "block_index": 0, "block_type": { "type": "text" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
         let out = fold(
             json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "text", "text": "hello" }, "prompt_id": "p1" }),
             &mut acc,
@@ -3210,7 +3340,14 @@ mod tests {
     #[test]
     fn content_block_delta_thinking_assistant_delta_thinking_channel() {
         let mut acc = create_accumulator();
-        acc.block_kind = Some(BlockKind::Thinking);
+        fold(
+            json!({ "type": "message_start", "prompt_id": "p1" }),
+            &mut acc,
+        );
+        fold(
+            json!({ "type": "content_block_start", "block_index": 0, "block_type": { "type": "thinking" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
         let out = fold(
             json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "thinking", "text": "hmm" }, "prompt_id": "p1" }),
             &mut acc,
@@ -3222,37 +3359,383 @@ mod tests {
     }
 
     #[test]
-    fn content_block_delta_redacted_thinking_assistant_delta_thinking() {
+    fn content_block_delta_redacted_thinking_is_suppressed() {
         let mut acc = create_accumulator();
-        acc.block_kind = Some(BlockKind::RedactedThinking);
+        fold(
+            json!({ "type": "message_start", "prompt_id": "p1" }),
+            &mut acc,
+        );
+        fold(
+            json!({ "type": "content_block_start", "block_index": 0, "block_type": { "type": "redacted_thinking" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
         let out = fold(
             json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "redacted_thinking", "data": "[redacted]" }, "prompt_id": "p1" }),
             &mut acc,
         );
-        let ev = event_json(&out.events[0]);
-        assert_eq!(ev["type"], "assistantDelta");
-        assert_eq!(ev["channel"], "thinking");
-        assert_eq!(ev["text"], "[redacted]");
+        assert!(out.events.is_empty());
     }
 
     #[test]
-    fn content_block_delta_open_ai_reasoning_opaque_assistant_delta_thinking() {
+    fn content_block_delta_open_ai_reasoning_opaque_is_suppressed() {
         let mut acc = create_accumulator();
-        acc.block_kind = Some(BlockKind::OpenAiReasoningOpaque);
+        fold(
+            json!({ "type": "message_start", "prompt_id": "p1" }),
+            &mut acc,
+        );
+        fold(
+            json!({ "type": "content_block_start", "block_index": 0, "block_type": { "type": "open_ai_reasoning_opaque" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
         let out = fold(
             json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "open_ai_reasoning_opaque", "data": "opaque", "id": "rs_123" }, "prompt_id": "p1" }),
             &mut acc,
         );
-        let ev = event_json(&out.events[0]);
-        assert_eq!(ev["type"], "assistantDelta");
-        assert_eq!(ev["channel"], "thinking");
-        assert_eq!(ev["text"], "opaque");
+        assert!(out.events.is_empty());
+    }
+
+    #[test]
+    fn opaque_and_redacted_blocks_finalize_to_one_constant_placeholder() {
+        for block_type in ["open_ai_reasoning_opaque", "redacted_thinking"] {
+            let mut acc = create_accumulator();
+            fold(
+                json!({ "type": "message_start", "prompt_id": "p1" }),
+                &mut acc,
+            );
+            fold(
+                json!({ "type": "content_block_start", "block_index": 0, "block_type": { "type": block_type }, "prompt_id": "p1" }),
+                &mut acc,
+            );
+            let data = "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=".repeat(128);
+            let delta = if block_type == "open_ai_reasoning_opaque" {
+                json!({ "type": "open_ai_reasoning_opaque", "data": data, "id": "opaque-id-sentinel" })
+            } else {
+                json!({ "type": "redacted_thinking", "data": data })
+            };
+            assert!(fold(json!({ "type": "content_block_delta", "block_index": 0, "delta": delta, "prompt_id": "p1" }), &mut acc).events.is_empty());
+            let out = fold(
+                json!({ "type": "content_block_stop", "block_index": 0, "prompt_id": "p1" }),
+                &mut acc,
+            );
+            assert_eq!(out.events.len(), 1);
+            let serialized = serde_json::to_string(&out.events).unwrap();
+            assert_eq!(
+                event_json(&out.events[0])["text"],
+                OPAQUE_REASONING_PLACEHOLDER
+            );
+            assert!(!serialized.contains("opaque-id-sentinel"));
+            assert!(!serialized.contains("QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo="));
+            assert!(acc.block_kind.is_none());
+            assert!(acc.block_prompt_id.is_none());
+            assert!(acc.block_index.is_none());
+        }
+    }
+
+    #[test]
+    fn opaque_summary_deltas_are_readable_and_suppress_placeholder() {
+        let mut acc = create_accumulator();
+        fold(
+            json!({ "type": "message_start", "prompt_id": "p1" }),
+            &mut acc,
+        );
+        fold(
+            json!({ "type": "content_block_start", "block_index": 0, "block_type": { "type": "open_ai_reasoning_opaque" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        let sentinel = "SUMMARY_PATH_OPAQUE_SENTINEL".repeat(128);
+        let opaque_data = fold(
+            json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "open_ai_reasoning_opaque", "data": sentinel, "id": "summary-path-opaque-id" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        assert!(opaque_data.events.is_empty());
+        let first = fold(
+            json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "open_ai_reasoning_summary", "text": "Plan " }, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        let second = fold(
+            json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "open_ai_reasoning_summary", "text": "the change" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        assert_eq!(event_json(&first.events[0])["text"], "Plan ");
+        assert_eq!(event_json(&second.events[0])["text"], "the change");
+        let summary_serialized =
+            serde_json::to_string(&[&first.events[0], &second.events[0]]).unwrap();
+        assert!(!summary_serialized.contains("SUMMARY_PATH_OPAQUE_SENTINEL"));
+        assert!(!summary_serialized.contains("summary-path-opaque-id"));
+        let stop = fold(
+            json!({ "type": "content_block_stop", "block_index": 0, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        assert!(stop.events.is_empty());
+        assert!(acc.block_kind.is_none());
+        assert!(acc.block_prompt_id.is_none());
+        assert!(acc.block_index.is_none());
+        assert!(!acc.opaque_summary_emitted);
+        let stale = fold(
+            json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "open_ai_reasoning_summary", "text": "stale" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        assert!(stale.events.is_empty());
+    }
+
+    #[test]
+    fn empty_opaque_summary_falls_back_to_placeholder_and_clears_state() {
+        let mut acc = create_accumulator();
+        fold(
+            json!({ "type": "message_start", "prompt_id": "p1" }),
+            &mut acc,
+        );
+        fold(
+            json!({ "type": "content_block_start", "block_index": 0, "block_type": { "type": "open_ai_reasoning_opaque" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        let empty = fold(
+            json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "open_ai_reasoning_summary", "text": "" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        assert!(empty.events.is_empty());
+        let stop = fold(
+            json!({ "type": "content_block_stop", "block_index": 0, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        assert_eq!(stop.events.len(), 1);
+        assert_eq!(
+            event_json(&stop.events[0])["text"],
+            OPAQUE_REASONING_PLACEHOLDER
+        );
+        assert!(acc.block_kind.is_none());
+        assert!(acc.block_prompt_id.is_none());
+        assert!(acc.block_index.is_none());
+        assert!(!acc.opaque_summary_emitted);
+    }
+
+    #[test]
+    fn live_and_history_opaque_projections_fold_to_the_same_thinking() {
+        fn thinking(events: &[SessionDriverEvent]) -> String {
+            let state = fold_all(events);
+            state
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    TranscriptItem::Assistant(assistant) => Some(assistant.thinking.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default()
+        }
+
+        for (block_type, summary, expected) in [
+            (
+                "open_ai_reasoning_opaque",
+                Some("readable summary"),
+                "readable summary",
+            ),
+            (
+                "open_ai_reasoning_opaque",
+                None,
+                OPAQUE_REASONING_PLACEHOLDER,
+            ),
+            ("redacted_thinking", None, OPAQUE_REASONING_PLACEHOLDER),
+        ] {
+            let mut acc = create_accumulator();
+            let mut live = Vec::new();
+            live.extend(
+                fold(
+                    json!({ "type": "message_start", "prompt_id": "p1" }),
+                    &mut acc,
+                )
+                .events,
+            );
+            live.extend(fold(json!({ "type": "content_block_start", "block_index": 0, "block_type": { "type": block_type }, "prompt_id": "p1" }), &mut acc).events);
+            live.extend(fold(json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": block_type, "data": "LIVE_HISTORY_PRIVATE_SENTINEL", "id": "live-history-id" }, "prompt_id": "p1" }), &mut acc).events);
+            if let Some(summary) = summary {
+                live.extend(fold(json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "open_ai_reasoning_summary", "text": summary }, "prompt_id": "p1" }), &mut acc).events);
+            }
+            live.extend(
+                fold(
+                    json!({ "type": "content_block_stop", "block_index": 0, "prompt_id": "p1" }),
+                    &mut acc,
+                )
+                .events,
+            );
+
+            let history_block = if let Some(summary) = summary {
+                json!({ "type": block_type, "data": "HISTORY_PRIVATE_SENTINEL", "id": "history-id", "summary": summary })
+            } else {
+                json!({ "type": block_type, "data": "HISTORY_PRIVATE_SENTINEL", "id": "history-id" })
+            };
+            let history = crate::polytoken::history_seed::history_to_seed_events(
+                &[json!({ "type": "assistant", "prompt_id": "p1", "blocks": [history_block] })],
+                &crate::polytoken::history_seed::HistoryMapCtx {
+                    r#ref: SessionRef {
+                        workspace_id: "w".into(),
+                        session_id: "s".into(),
+                    },
+                },
+            );
+            assert_eq!(thinking(&live), expected);
+            assert_eq!(thinking(&history), expected);
+            let serialized = serde_json::to_string(&live).unwrap();
+            assert!(!serialized.contains("LIVE_HISTORY_PRIVATE_SENTINEL"));
+            assert!(!serialized.contains("live-history-id"));
+        }
+    }
+
+    #[test]
+    fn stale_block_identity_cannot_leak_into_reused_index() {
+        let mut acc = create_accumulator();
+        fold(
+            json!({ "type": "message_start", "prompt_id": "p1" }),
+            &mut acc,
+        );
+        fold(
+            json!({ "type": "content_block_start", "block_index": 0, "block_type": { "type": "open_ai_reasoning_opaque" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        fold(
+            json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "open_ai_reasoning_opaque", "data": "old", "id": "old-id" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        let superseded = fold(
+            json!({ "type": "message_start", "prompt_id": "p2" }),
+            &mut acc,
+        );
+        assert_eq!(superseded.events.len(), 2);
+        assert_eq!(
+            event_json(&superseded.events[0])["text"],
+            OPAQUE_REASONING_PLACEHOLDER
+        );
+        assert_eq!(acc.expected_prompt_id.as_deref(), Some("p2"));
+        assert!(
+            fold(
+                json!({ "type": "content_block_stop", "block_index": 0, "prompt_id": "p1" }),
+                &mut acc
+            )
+            .events
+            .is_empty()
+        );
+        assert!(fold(json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "text", "text": "old text" }, "prompt_id": "p1" }), &mut acc).events.is_empty());
+        assert!(fold(json!({ "type": "content_block_start", "block_index": 0, "block_type": { "type": "text" }, "prompt_id": "p1" }), &mut acc).events.is_empty());
+        fold(
+            json!({ "type": "content_block_start", "block_index": 0, "block_type": { "type": "text" }, "prompt_id": "p2" }),
+            &mut acc,
+        );
+        let current = fold(
+            json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "text", "text": "new text" }, "prompt_id": "p2" }),
+            &mut acc,
+        );
+        assert_eq!(event_json(&current.events[0])["text"], "new text");
+    }
+
+    #[test]
+    fn same_turn_block_start_supersession_finalizes_opaque_once() {
+        let mut acc = create_accumulator();
+        fold(
+            json!({ "type": "message_start", "prompt_id": "p1" }),
+            &mut acc,
+        );
+        fold(
+            json!({ "type": "content_block_start", "block_index": 0, "block_type": { "type": "open_ai_reasoning_opaque" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        fold(
+            json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "open_ai_reasoning_opaque", "data": "same-turn-supersession-data", "id": "same-turn-id" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        let superseded = fold(
+            json!({ "type": "content_block_start", "block_index": 1, "block_type": { "type": "text" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        assert_eq!(superseded.events.len(), 1);
+        assert_eq!(
+            event_json(&superseded.events[0])["text"],
+            OPAQUE_REASONING_PLACEHOLDER
+        );
+        assert_eq!(acc.block_prompt_id.as_deref(), Some("p1"));
+        assert_eq!(acc.block_index, Some(1));
+        assert_eq!(acc.block_kind, Some(BlockKind::Text));
+        let stale_stop = fold(
+            json!({ "type": "content_block_stop", "block_index": 0, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        assert!(stale_stop.events.is_empty());
+        let stale_data = fold(
+            json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "open_ai_reasoning_opaque", "data": "same-turn-stale-data", "id": "same-turn-stale-id" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        assert!(stale_data.events.is_empty());
+        let text = fold(
+            json!({ "type": "content_block_delta", "block_index": 1, "delta": { "type": "text", "text": "next block" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        assert_eq!(event_json(&text.events[0])["text"], "next block");
+    }
+
+    #[test]
+    fn stale_completion_is_noop_and_matching_completion_finalizes_and_fetches() {
+        let mut acc = create_accumulator();
+        fold(
+            json!({ "type": "message_start", "prompt_id": "p1" }),
+            &mut acc,
+        );
+        fold(
+            json!({ "type": "content_block_start", "block_index": 0, "block_type": { "type": "open_ai_reasoning_opaque" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
+        fold(
+            json!({ "type": "message_start", "prompt_id": "p2" }),
+            &mut acc,
+        );
+        fold(
+            json!({ "type": "content_block_start", "block_index": 0, "block_type": { "type": "open_ai_reasoning_opaque" }, "prompt_id": "p2" }),
+            &mut acc,
+        );
+        acc.turn_error = Some(TurnError {
+            message: "keep me".to_string(),
+        });
+        let stale = fold(
+            json!({ "type": "message_complete", "prompt_id": "p1" }),
+            &mut acc,
+        );
+        assert!(stale.events.is_empty());
+        assert!(stale.effects.is_empty());
+        assert_eq!(acc.expected_prompt_id.as_deref(), Some("p2"));
+        assert_eq!(acc.block_prompt_id.as_deref(), Some("p2"));
+        assert_eq!(acc.block_index, Some(0));
+        assert_eq!(acc.block_kind, Some(BlockKind::OpenAiReasoningOpaque));
+        assert!(acc.turn_error.is_some());
+        fold(
+            json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "open_ai_reasoning_opaque", "data": "stale-completion-path-data", "id": "stale-completion-path-id" }, "prompt_id": "p2" }),
+            &mut acc,
+        );
+        let matching = fold(
+            json!({ "type": "message_complete", "prompt_id": "p2" }),
+            &mut acc,
+        );
+        assert_eq!(matching.events.len(), 2);
+        assert_eq!(
+            event_json(&matching.events[0])["text"],
+            OPAQUE_REASONING_PLACEHOLDER
+        );
+        assert_eq!(
+            effects_json(&matching),
+            vec![json!({ "type": "fetchState", "emit": "runCompleted", "promptId": "p2" })]
+        );
+        assert!(acc.expected_prompt_id.is_none());
+        assert!(acc.block_kind.is_none());
+        assert!(acc.turn_error.is_none());
     }
 
     #[test]
     fn content_block_delta_tool_use_input_accumulates_no_events() {
         let mut acc = create_accumulator();
-        acc.block_kind = Some(BlockKind::ToolUse);
+        fold(
+            json!({ "type": "message_start", "prompt_id": "p1" }),
+            &mut acc,
+        );
+        fold(
+            json!({ "type": "content_block_start", "block_index": 1, "block_type": { "type": "tool_use", "id": "tu1", "name": "bash" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
         fold(
             json!({ "type": "content_block_delta", "block_index": 1, "delta": { "type": "tool_use_input", "partial_json": "{\"command\":\"ls" }, "prompt_id": "p1" }),
             &mut acc,
@@ -3268,7 +3751,14 @@ mod tests {
     #[test]
     fn content_block_delta_signature_delta_no_events_pass_through() {
         let mut acc = create_accumulator();
-        acc.block_kind = Some(BlockKind::Thinking);
+        fold(
+            json!({ "type": "message_start", "prompt_id": "p1" }),
+            &mut acc,
+        );
+        fold(
+            json!({ "type": "content_block_start", "block_index": 0, "block_type": { "type": "thinking" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
         let out = fold(
             json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "signature_delta", "signature": "sig" }, "prompt_id": "p1" }),
             &mut acc,
@@ -3287,19 +3777,35 @@ mod tests {
     #[test]
     fn content_block_stop_clears_block_kind() {
         let mut acc = create_accumulator();
-        acc.block_kind = Some(BlockKind::Text);
+        fold(
+            json!({ "type": "message_start", "prompt_id": "p1" }),
+            &mut acc,
+        );
+        fold(
+            json!({ "type": "content_block_start", "block_index": 0, "block_type": { "type": "text" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
         let out = fold(
             json!({ "type": "content_block_stop", "block_index": 0, "prompt_id": "p1" }),
             &mut acc,
         );
         assert!(out.events.is_empty());
         assert!(acc.block_kind.is_none());
+        assert!(acc.block_prompt_id.is_none());
+        assert!(acc.block_index.is_none());
     }
 
     #[test]
     fn tool_call_tool_started_with_parsed_input_from_accumulator() {
         let mut acc = create_accumulator();
-        acc.block_kind = Some(BlockKind::ToolUse);
+        fold(
+            json!({ "type": "message_start", "prompt_id": "p1" }),
+            &mut acc,
+        );
+        fold(
+            json!({ "type": "content_block_start", "block_index": 0, "block_type": { "type": "tool_use", "id": "tu1", "name": "bash" }, "prompt_id": "p1" }),
+            &mut acc,
+        );
         acc.tool_use_block = Some(ToolUseBlockMeta {
             id: "tu1".to_string(),
             name: "bash".to_string(),
@@ -4468,6 +4974,10 @@ mod tests {
     fn reset_accumulator_clears_stream_state() {
         let mut acc = create_accumulator();
         acc.block_kind = Some(BlockKind::ToolUse);
+        acc.block_prompt_id = Some("p1".to_string());
+        acc.block_index = Some(0);
+        acc.opaque_summary_emitted = true;
+        acc.expected_prompt_id = Some("p1".to_string());
         acc.tool_input_buffer = "{\"partial\":true}".to_string();
         acc.tool_use_block = Some(ToolUseBlockMeta {
             id: "tu1".to_string(),
@@ -4478,9 +4988,36 @@ mod tests {
         });
         reset_accumulator(&mut acc);
         assert!(acc.block_kind.is_none());
+        assert!(acc.block_prompt_id.is_none());
+        assert!(acc.block_index.is_none());
+        assert!(!acc.opaque_summary_emitted);
+        assert!(acc.expected_prompt_id.is_none());
+        assert!(fold(json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "open_ai_reasoning_opaque", "data": "RESET_STALE_SENTINEL", "id": "reset-stale-id" }, "prompt_id": "p1" }), &mut acc).events.is_empty());
+        assert!(fold(json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "open_ai_reasoning_summary", "text": "stale summary" }, "prompt_id": "p1" }), &mut acc).events.is_empty());
+        assert!(
+            fold(
+                json!({ "type": "content_block_stop", "block_index": 0, "prompt_id": "p1" }),
+                &mut acc
+            )
+            .events
+            .is_empty()
+        );
         assert_eq!(acc.tool_input_buffer, "");
         assert!(acc.tool_use_block.is_none());
         assert!(acc.turn_error.is_none());
+        fold(
+            json!({ "type": "message_start", "prompt_id": "p2" }),
+            &mut acc,
+        );
+        fold(
+            json!({ "type": "content_block_start", "block_index": 0, "block_type": { "type": "open_ai_reasoning_opaque" }, "prompt_id": "p2" }),
+            &mut acc,
+        );
+        let fresh = fold(
+            json!({ "type": "content_block_delta", "block_index": 0, "delta": { "type": "open_ai_reasoning_summary", "text": "fresh" }, "prompt_id": "p2" }),
+            &mut acc,
+        );
+        assert_eq!(event_json(&fresh.events[0])["text"], "fresh");
     }
 
     #[test]
