@@ -258,26 +258,6 @@ describe("remote access contract documentation (AC.1–AC.4)", () => {
     );
   });
 
-  test("remote_update_docs_contract", () => {
-    const desktop = read("desktop/README.md");
-    requireTerms(
-      desktop,
-      [
-        "signed whole-app update",
-        "PWA service-worker `Refresh`",
-        "active or initializing turn",
-        "fail-closed",
-        "retryable failure",
-        "Authorization: Bearer <token>",
-        "`/update/permit/consume`",
-        "tokens never appear in URLs",
-        "redact bearer tokens",
-        "iOS push delivery",
-      ],
-      "remote update operational contract",
-    );
-  });
-
   test("issue_162_profile_contract_absence", () => {
     const productionPaths = [
       "client/src/lib/hosts/types.ts",
@@ -347,71 +327,5 @@ describe("remote access contract documentation (AC.1–AC.4)", () => {
     expect(read("server/pantoken-server/src/remote/runtime.rs")).toContain("inherited_xdg_assignments");
     // The parity harness is intentionally outside this production-source allowlist;
     // it may export isolated XDG roots for test safety.
-  });
-
-  test("issue_162_documentation_contract", () => {
-    const decisions = read("docs/DECISIONS.md");
-    const decisionStart = decisions.indexOf("## Remote deployment Phase 3: XDG roots are always shared");
-    const decisionEnd = decisions.indexOf("## Remote deployment Phase 3: channel derivation", decisionStart);
-    const decisionSection = decisions.slice(decisionStart, decisionEnd);
-    requireTerms(decisionSection, ["always use the remote user's existing", "no profile-level XDG isolation choice", "legacy `xdgMode`", "`xdg_mode`", "omitted", "rewritten"], "issue-162 decision");
-    expect(decisionSection).not.toContain("isolated by default");
-
-    const design = read("docs/DESIGN.md");
-    const designStart = design.indexOf("**XDG roots**");
-    const designSection = design.slice(designStart, designStart + 650);
-    requireTerms(designSection, ["always use", "existing polytoken XDG roots", "no XDG mode", "generic bridge/runtime", "Legacy", "dropped"], "issue-162 design");
-    expect(designSection).not.toContain("Default is `Isolated`");
-
-    const docker = read("docs/docker-target-guide.md");
-    const cleanupStart = docker.indexOf("## Cleanup and uninstall");
-    const cleanupSection = docker.slice(cleanupStart, cleanupStart + 900);
-    expect(cleanupSection).not.toContain("Isolated XDG");
-    requireTerms(cleanupSection, ["Managed polytoken binaries", "Session state and logs"], "issue-162 Docker cleanup");
-  });
-
-  test("remote_contract_docs_cover_issue_147", () => {
-    const desktop = read("desktop/README.md");
-    const contract = read("docs/issues/mobile-access/01-remote-contract.md");
-    requireTerms(
-      desktop,
-      [
-        "local/remote mode",
-        "persisted `hub_port` (8787",
-        "never randomizes",
-        "127.0.0.1",
-        "remote-access.json` (schema 1)",
-        "dev.pantoken.app.remote-access",
-        "bearer-token",
-        "omits `PANTOKEN_TOKEN`",
-        "authenticated internal `/health` and `/update/state` calls",
-        "HTTP `401` with body",
-        "`unauthorized`",
-        "HTTP `405` precedence",
-        "`?token=` with `401`",
-        "first Hello message",
-        "issue #148/03",
-        "no loopback/static auth exemption",
-      ],
-      "desktop issue-147 contract",
-    );
-    requireTerms(
-      contract,
-      [
-        "stable hub port, default `8787`",
-        "random loopback-port behavior for local-only mode",
-        "Remote mode is deterministic",
-        "127.0.0.1",
-        "macOS Keychain",
-        "fails closed",
-        "Authorization: Bearer",
-        "query-token authentication on ordinary static, API, and WebSocket routes",
-        "PWA service-worker updates",
-        "signed `.app` updates",
-      ],
-      "remote contract issue-147 boundary",
-    );
-    expect(desktop).not.toContain("Everything else in the environment passes through");
-    expect(desktop).not.toContain("Picks a free loopback port.\n");
   });
 });

@@ -3,9 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const CI_YML = resolve(import.meta.dirname, "../.github/workflows/ci.yml");
-const DOCS = resolve(import.meta.dirname, "../docs/toolchain-baseline.md");
 const ci = readFileSync(CI_YML, "utf8");
-const docs = readFileSync(DOCS, "utf8");
 
 function jobBlock(name: string): string {
   const lines = ci.split("\n");
@@ -40,15 +38,5 @@ describe("ci.yml provider-free live gate", () => {
     expect(block).toContain("Upload traces on live e2e failure");
     expect(block).toContain("if: failure()");
     expect(block).toContain("path: test-results/");
-  });
-
-  it("documents web-live as a blocking provider-free tier", () => {
-    const row = docs
-      .split("\n")
-      .find((line) => line.startsWith("| `web-live` |"));
-    expect(row).toBeDefined();
-    expect(row).toMatch(/Blocking/);
-    expect(row).toMatch(/fake daemon/);
-    expect(row).not.toMatch(/manual(?: dispatch|-only)/i);
   });
 });

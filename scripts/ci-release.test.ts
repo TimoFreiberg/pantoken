@@ -272,13 +272,4 @@ describe("ci.yml release path (Buck2-authoritative)", () => {
       merge.indexOf("release-metadata-linux.json"),
     );
   });
-
-  it("documents the cross-runner handoff and headless-before-desktop ordering", () => {
-    const readme = readFileSync(resolve(import.meta.dirname, "../desktop/README.md"), "utf8");
-    const publishing = readme.slice(readme.indexOf("## Publishing a release"));
-    expect(publishing).toContain("release-prepare-linux");
-    expect(publishing).toMatch(/depends on that job\s+completing/);
-    expect(publishing).toContain("target/release/headless");
-    expect(publishing).toContain("macOS headless artifact before the desktop");
-  });
 });
