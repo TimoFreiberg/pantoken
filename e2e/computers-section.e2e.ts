@@ -208,6 +208,42 @@ async function lastProfileCapture(page: Page, kind: "added" | "updated"): Promis
   }, kind);
 }
 
+// Host provisioning uses generic remote-host copy, including nameless fallback paths.
+test("Host provisioning copy stays generic for an empty touched name", async ({ page }) => {
+  await resetProfileCaptures(page);
+  await openAddComputer(page);
+
+  // Touch the optional name field, then clear it so the real empty-name fallback
+  // is exercised instead of the untouched-field SSH host suggestion.
+  await page.getByTestId("cs-name-input").fill("Temporary name");
+  await page.getByTestId("cs-name-input").fill("");
+  await page.getByTestId("cs-ssh-input").fill("user@remote.test");
+  await page.getByTestId("cs-test-ssh").click();
+  await expect(page.getByTestId("cs-provisioning")).toBeVisible({ timeout: 10000 });
+
+  const panel = page.getByTestId("computer-setup-panel");
+  for (const label of [
+    "Setting up remote host",
+    "SSH connection",
+    "Remote system",
+    "Polytoken compatibility",
+    "Pantoken runtime",
+    "Connecting to remote host",
+  ]) {
+    await expect(panel).toContainText(label);
+  }
+
+  const provisioning = page.getByTestId("cs-provisioning");
+  await expect(provisioning.locator(".prov-subline")).toHaveText("SSH host: remote.test");
+  await expect(provisioning).not.toContainText(" via ");
+  await expect(panel).not.toContainText(/docker|container/i);
+
+  // Clean up the in-flight mock profile without depending on a user-provided name.
+  const profile = await lastProfileCapture(page, "added");
+  await setState(page, String(profile.id), "ready");
+  await expect(panel).toBeHidden({ timeout: 10000 });
+});
+
 // Host profile creation and listing (AC.4 Host)
 test("host_add_profile_payload_omits_xdg_mode_and_preserves_advanced_fields", async ({ page }) => {
   await resetProfileCaptures(page);

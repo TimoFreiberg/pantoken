@@ -34,6 +34,11 @@
     risksNeedingAcknowledgement,
   } from "../lib/hosts/docker-format.js";
   import { redactSshDestination } from "../lib/hosts/types.js";
+  import {
+    formatProvisioningSummary,
+    formatProvisioningTitle,
+    getProvisioningCopy,
+  } from "../lib/hosts/provisioning-copy.js";
   import Button from "./ui/Button.svelte";
   import SegmentedControl from "./ui/SegmentedControl.svelte";
   import Chevron from "./ui/Chevron.svelte";
@@ -186,8 +191,8 @@
     stage === "exactName",
   );
 
-  // Provisioning phase labels
-  const PHASE_LABELS = ["SSH & Docker", "Container", "Polytoken", "Pantoken runtime"];
+  // Provisioning copy follows the selected execution environment.
+  const provisioningCopy = $derived(getProvisioningCopy(execEnv));
   const safelyCancellable = $derived(provisioningPhase <= 2);
 
   // ── Phone detection ──────────────────────────────────────────────────────
@@ -1068,7 +1073,7 @@
 
   const dialogTitle = $derived(
     stage === "editing" ? "Edit computer" :
-    stage === "provisioning" || stage === "provisioningFailed" ? `Connecting to ${name || "Docker target"}` :
+    stage === "provisioning" || stage === "provisioningFailed" ? formatProvisioningTitle(execEnv, name) :
     stage === "reviewingRisks" ? "Review risks" :
     "Add computer",
   );
@@ -1085,10 +1090,10 @@
       return `${pendingRisks.length} risk${pendingRisks.length === 1 ? "" : "s"} detected · one click to accept all`;
     }
     if (stage === "provisioning") {
-      return `Phase ${provisioningPhase} of 4 · ${PHASE_LABELS[provisioningPhase - 1]}`;
+      return `Phase ${provisioningPhase} of 4 · ${provisioningCopy.phaseLabels[provisioningPhase - 1]}`;
     }
     if (stage === "provisioningFailed") {
-      return `Failed at phase ${provisioningPhase} of 4 · ${PHASE_LABELS[provisioningPhase - 1]}`;
+      return `Failed at phase ${provisioningPhase} of 4 · ${provisioningCopy.phaseLabels[provisioningPhase - 1]}`;
     }
     return "";
   });
@@ -1415,11 +1420,11 @@
       <!-- ── Provisioning ────────────────────────────────────────────────── -->
       {#if stage === "provisioning" || stage === "provisioningFailed"}
         <div class="provisioning" data-testid="cs-provisioning">
-          <div class="prov-subtitle">Setting up Docker target</div>
-          <div class="prov-subline">{selectedContainer?.name ?? containerName} via {sshHost}</div>
+          <div class="prov-subtitle">{provisioningCopy.subtitle}</div>
+          <div class="prov-subline">{formatProvisioningSummary(execEnv, sshHost, selectedContainer?.name ?? containerName)}</div>
 
           <div class="phase-list">
-            {#each PHASE_LABELS as label, i}
+            {#each provisioningCopy.phaseLabels as label, i}
               {@const phaseNum = i + 1}
               {@const isCompleted = stage === "provisioning" && provisioningPhase > phaseNum}
               {@const isActive = stage === "provisioning" && provisioningPhase === phaseNum}
@@ -1430,14 +1435,12 @@
                   {#if isCompleted}✓{:else if isFailed}✕{:else}{phaseNum}{/if}
                 </span>
                 <span class="phase-label">{label}</span>
-                {#if isCompleted && inspection}
+                {#if isCompleted && execEnv === "docker" && inspection}
                   <span class="phase-detail">
                     {inspection.name} · {containerUser} (UID {inspection.resolvedUid}) · {inspection.os}/{inspection.arch} · {backingLine}
                   </span>
                 {:else if isActive}
-                  <span class="phase-detail">
-                    {#if phaseNum === 1}SSH connected · Docker CLI available{:else if phaseNum === 2}Locating container by name · inspecting identity…{:else if phaseNum === 3}Checking compatibility{:else if phaseNum === 4}Starting runtime{/if}
-                  </span>
+                  <span class="phase-detail">{provisioningCopy.phaseDetails[phaseNum - 1]}</span>
                 {/if}
               </div>
             {/each}

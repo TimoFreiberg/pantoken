@@ -18,6 +18,14 @@ async function setState(page: import("@playwright/test").Page, id: string, state
   );
 }
 
+/** Delay the next connection so phase-1 provisioning copy can be asserted. */
+async function setNextConnectHostBehavior(page: import("@playwright/test").Page, delay: number): Promise<void> {
+  await page.evaluate(
+    (behavior) => (window as unknown as { __pantokenHosts?: { setNextConnectHostBehavior: (b: { delay: number }) => void } }).__pantokenHosts?.setNextConnectHostBehavior(behavior),
+    { delay },
+  );
+}
+
 /** Drive a container replacement via window.__pantokenHosts. */
 async function driveReplacement(page: import("@playwright/test").Page, id: string): Promise<void> {
   await page.evaluate(
@@ -201,7 +209,7 @@ test("Setup Docker sheet opens and SSH test reveals the container picker", async
 });
 
 // Select a container and start provisioning
-test("Selecting a container and clicking Use starts provisioning", async ({ page }) => {
+test("Selecting a container preserves Docker provisioning copy", async ({ page }) => {
   await openDockerSetupFromSwitcher(page);
 
   await page.getByTestId("cs-ssh-input").fill("user@dev.example.com");
@@ -212,9 +220,17 @@ test("Selecting a container and clicking Use starts provisioning", async ({ page
   await page.getByTestId("cs-container-work-api-dev").click();
   await expect(page.getByTestId("cs-use-container")).toBeVisible();
 
-  // Click Use this container — starts provisioning.
+  // Hold connectHost briefly so the deterministic phase-1 copy is observable.
+  await setNextConnectHostBehavior(page, 500);
   await page.getByTestId("cs-use-container").click();
   await expect(page.getByTestId("cs-provisioning")).toBeVisible({ timeout: 10000 });
+
+  const provisioning = page.getByTestId("cs-provisioning");
+  for (const label of ["Setting up Docker target", "SSH & Docker", "Container", "Polytoken", "Pantoken runtime"]) {
+    await expect(provisioning).toContainText(label);
+  }
+  await expect(provisioning).toContainText("SSH connected · Docker CLI available");
+  await expect(provisioning.locator(".prov-subline")).toHaveText("work-api-dev via dev.example.com");
 });
 
 // Provisioning reaches ready and the sheet closes
