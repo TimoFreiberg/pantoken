@@ -76,3 +76,7 @@ workspace is created under `.workspaces/` from the default workspace. Never use
   change must follow. **Quality invariants** (product rules the diff must
   respect) are in [`QUALITY.md`](QUALITY.md); the `quality-review` skill checks
   the applicable subset on review.
+- Read [`TESTING.md`](TESTING.md) when planning/writing/reviewing tests.
+- Continuous improvement: Any preexisting issue, smell, design flaw etc. should
+  be improved or fixed. If you notice an issue that is seriously out of scope,
+  call it out in your final message to the operator.

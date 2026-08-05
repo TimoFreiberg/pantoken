@@ -140,3 +140,12 @@ copy; 80–90% is fine.
 This repo is fully agent-built and reviewed only by agents. All quality
 comes from agent tooling and the quality of feature descriptions. When
 reviewing, hold the line on these criteria — there is no human backstop.
+
+### Q22 Tests
+Any new tests and also existing tests that are updated in a session must conform to the TESTING.md quality standards.
+
+### Q23 Improving the quality of the codebase
+Any preexisting issue, smell, design flaw etc. should be improved or fixed. If
+an agent session notices an issue that is seriously out of scope, it should be
+explicitly called out in the final message to the operator.
+
