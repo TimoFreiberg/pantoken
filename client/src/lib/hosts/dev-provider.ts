@@ -51,6 +51,8 @@ export interface DevHostControls {
   getLastAddedProfile(): RemoteProfile | null;
   getLastUpdatedProfile(): RemoteProfile | null;
   getAcknowledgementCaptures(): Array<{ id: string; riskId: string; fingerprint: string }>;
+  /** Seed a profile's acknowledgement map for edit-payload tests. */
+  seedProfileAcknowledgements(id: string, acknowledgements: RemoteProfile["riskAcknowledgements"]): void;
   // ── Deterministic async hooks for testing ─────────────────────────────────
   /** Control the next addProfile call: delay, reject, or resolve normally. */
   setNextAddProfileBehavior(behavior: { delay?: number; reject?: unknown } | null): void;
@@ -479,6 +481,14 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
     getLastAddedProfile: () => structuredClone(profileCaptures.added.at(-1) ?? null),
     getLastUpdatedProfile: () => structuredClone(profileCaptures.updated.at(-1) ?? null),
     getAcknowledgementCaptures: () => structuredClone(profileCaptures.acknowledgements),
+    seedProfileAcknowledgements: (id, acknowledgements) => {
+      const profile = profileMap.get(id);
+      if (!profile) return;
+      profileMap.set(id, {
+        ...profile,
+        riskAcknowledgements: structuredClone(acknowledgements),
+      });
+    },
     setMessageSink: (next) => { sink = next; },
     setPendingRisks,
     setPendingRisksForNextDocker: (risks: PendingRisk[]) => { nextDockerRisks = risks; },

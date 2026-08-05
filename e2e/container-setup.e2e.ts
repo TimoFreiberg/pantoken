@@ -1,5 +1,12 @@
 import { expect, test } from "@playwright/test";
-import { gotoFresh, openDockerSetupFromSwitcher, openSettings, openSidebar } from "./helpers.js";
+import {
+  gotoFresh,
+  openDockerSetupFromSwitcher,
+  openSettings,
+  openSidebar,
+  waitForAcknowledgementCapture,
+  waitForProfileCapture,
+} from "./helpers.js";
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
@@ -463,13 +470,6 @@ async function resetProfileCaptures(page: import("@playwright/test").Page): Prom
   await page.evaluate(() => (window as unknown as { __pantokenHosts?: { resetProfileCaptures: () => void } }).__pantokenHosts?.resetProfileCaptures());
 }
 
-async function lastProfileCapture(page: import("@playwright/test").Page, kind: "added" | "updated"): Promise<Record<string, unknown>> {
-  return page.evaluate((kind) => {
-    const hosts = (window as unknown as { __pantokenHosts?: { getLastAddedProfile: () => unknown; getLastUpdatedProfile: () => unknown } }).__pantokenHosts;
-    return (kind === "added" ? hosts?.getLastAddedProfile() : hosts?.getLastUpdatedProfile()) as Record<string, unknown>;
-  }, kind);
-}
-
 async function acknowledgementCaptures(page: import("@playwright/test").Page): Promise<Array<{ id: string; riskId: string; fingerprint: string }>> {
   return page.evaluate(() => (window as unknown as { __pantokenHosts?: { getAcknowledgementCaptures: () => Array<{ id: string; riskId: string; fingerprint: string }> } }).__pantokenHosts?.getAcknowledgementCaptures() ?? []);
 }
@@ -483,6 +483,9 @@ test("docker_add_profile_payload_omits_xdg_mode_and_preserves_advanced_fields", 
   await page.getByTestId("cs-root-override-input").fill("/srv/docker-remote-root");
   await page.getByLabel("Server binary path").fill("/opt/docker-server");
   await setPendingRisksForNextDocker(page, [ROOT_RISK]);
+  // The advanced values are already in the draft; collapse the section before
+  // opening the picker so the container rows retain a clickable layout.
+  await page.getByRole("button", { name: "▾ Advanced" }).click();
   await page.getByTestId("cs-ssh-input").fill("user@docker-payload.test");
   await page.getByTestId("cs-test-ssh").click();
   await expect(page.getByTestId("cs-ssh-summary")).toBeVisible({ timeout: 10000 });
@@ -494,7 +497,12 @@ test("docker_add_profile_payload_omits_xdg_mode_and_preserves_advanced_fields", 
   await page.getByTestId("cs-use-container").click();
   await expect(page.getByTestId("cs-risks-panel")).toBeVisible({ timeout: 10000 });
   await page.getByTestId("cs-accept-risks").click();
-  const profile = await lastProfileCapture(page, "added");
+  await expect(page.getByTestId("cs-provisioning")).toBeVisible({ timeout: 10_000 });
+  const profile = await waitForProfileCapture(page, "added");
+  await waitForAcknowledgementCapture(page, {
+    riskId: "root-1",
+    fingerprint: "root:dev-id-work-api-dev",
+  });
   expect(profile).toMatchObject({ sshDestination: "user@docker-payload.test", polytokenPolicy: "offerInstall", remoteRootOverride: "/srv/docker-remote-root", serverPath: "/opt/docker-server", executionTarget: { kind: "dockerContainer", containerName: "work-api-dev", user: "root", workdir: "/workspace/payload", pantokenRoot: "/srv/docker-root" } });
   expect(await acknowledgementCaptures(page)).toEqual([{ id: expect.any(String), riskId: "root-1", fingerprint: "root:dev-id-work-api-dev" }]);
   expect(profile).not.toHaveProperty("xdgMode");
@@ -502,7 +510,15 @@ test("docker_add_profile_payload_omits_xdg_mode_and_preserves_advanced_fields", 
 });
 
 test("docker_edit_profile_payload_omits_xdg_mode_and_preserves_advanced_fields", async ({ page }) => {
-  await createDockerProfile(page);
+  const profileId = await createDockerProfile(page);
+  await page.evaluate((id) => {
+    const hosts = (window as unknown as {
+      __pantokenHosts?: {
+        seedProfileAcknowledgements: (profileId: string, acknowledgements: { rootFingerprint: string }) => void;
+      };
+    }).__pantokenHosts;
+    hosts?.seedProfileAcknowledgements(id, { rootFingerprint: "root:existing-fingerprint" });
+  }, profileId);
   await resetProfileCaptures(page);
   await openSettings(page, "computers");
   await page.locator("[data-testid^='computer-row-']").filter({ hasText: "Work API Dev" }).getByRole("button", { name: "Edit" }).click();
@@ -512,8 +528,14 @@ test("docker_edit_profile_payload_omits_xdg_mode_and_preserves_advanced_fields",
   await page.getByTestId("cs-edit-root-override").fill("/srv/docker-edited");
   await page.getByLabel("Server binary path").fill("/opt/docker-server");
   await page.getByTestId("cs-reconnect-later").click();
-  const profile = await lastProfileCapture(page, "updated");
-  expect(profile).toMatchObject({ polytokenPolicy: "offerInstall", remoteRootOverride: "/srv/docker-edited", serverPath: "/opt/docker-server", executionTarget: { kind: "dockerContainer" } });
+  const profile = await waitForProfileCapture(page, "updated");
+  expect(profile).toMatchObject({
+    polytokenPolicy: "offerInstall",
+    remoteRootOverride: "/srv/docker-edited",
+    serverPath: "/opt/docker-server",
+    executionTarget: { kind: "dockerContainer" },
+    riskAcknowledgements: { rootFingerprint: "root:existing-fingerprint" },
+  });
   expect(profile).not.toHaveProperty("xdgMode");
   expect(profile).not.toHaveProperty("xdg_mode");
   expect(await acknowledgementCaptures(page)).toEqual([]);

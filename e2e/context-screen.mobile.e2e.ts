@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import {
   drive,
   gotoFresh,
+  waitForContextFixture,
   closeOverlayAndWaitForOwnedPop,
   openRightSidebar,
   openSidebar,
@@ -31,6 +32,7 @@ test("the header context entry shows a plain-total badge", async ({ page }) => {
   // The context fixture: 3 flagged files + 3 jobs + 3 todos = 9, plain totals
   // (no unseen/unread semantics — D3).
   await drive(page, "context");
+  await waitForContextFixture(page, { badge: 9 });
   await expect(page.getByTestId("context-open")).toBeVisible();
   await expect(page.getByTestId("context-badge")).toHaveText("9");
 });

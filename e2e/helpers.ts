@@ -50,6 +50,124 @@ export async function drive(page: Page, script: string): Promise<void> {
   await page.getByRole("button", { name: script, exact: true }).click();
 }
 
+/** Wait for the dev provider to capture the profile emitted by an add/edit flow. */
+export async function waitForProfileCapture(
+  page: Page,
+  kind: "added" | "updated",
+  options: { timeout?: number } = {},
+): Promise<Record<string, unknown>> {
+  const timeout = options.timeout ?? 15_000;
+  let observed = "null";
+  await expect
+    .poll(
+      async () => {
+        const capture = await page.evaluate((captureKind) => {
+          const hosts = (window as unknown as {
+            __pantokenHosts?: {
+              getLastAddedProfile: () => unknown;
+              getLastUpdatedProfile: () => unknown;
+            };
+          }).__pantokenHosts;
+          return captureKind === "added"
+            ? hosts?.getLastAddedProfile()
+            : hosts?.getLastUpdatedProfile();
+        }, kind);
+        observed = capture === null || capture === undefined ? "null" : "non-null";
+        return capture !== null && typeof capture === "object";
+      },
+      {
+        timeout,
+        message: `Timed out waiting ${timeout}ms for ${kind} profile capture; last observed state: ${observed}`,
+      },
+    )
+    .toBe(true);
+
+  return page.evaluate((captureKind) => {
+    const hosts = (window as unknown as {
+      __pantokenHosts?: {
+        getLastAddedProfile: () => unknown;
+        getLastUpdatedProfile: () => unknown;
+      };
+    }).__pantokenHosts;
+    return (captureKind === "added"
+      ? hosts?.getLastAddedProfile()
+      : hosts?.getLastUpdatedProfile()) as Record<string, unknown>;
+  }, kind);
+}
+
+/** Wait until the dev provider records the acknowledgement for an accepted risk. */
+export async function waitForAcknowledgementCapture(
+  page: Page,
+  expected: { riskId: string; fingerprint: string },
+  options: { timeout?: number } = {},
+): Promise<void> {
+  const timeout = options.timeout ?? 15_000;
+  let observed = "[]";
+  await expect
+    .poll(
+      async () => {
+        const captures = await page.evaluate(
+          () =>
+            (window as unknown as {
+              __pantokenHosts?: {
+                getAcknowledgementCaptures: () => Array<{
+                  id: string;
+                  riskId: string;
+                  fingerprint: string;
+                }>;
+              };
+            }).__pantokenHosts?.getAcknowledgementCaptures() ?? [],
+        );
+        observed = JSON.stringify(captures);
+        return captures.some(
+          (capture) =>
+            capture.riskId === expected.riskId &&
+            capture.fingerprint === expected.fingerprint,
+        );
+      },
+      {
+        timeout,
+        message: `Timed out waiting ${timeout}ms for acknowledgement capture ${expected.riskId}/${expected.fingerprint}; last observed captures: ${observed}`,
+      },
+    )
+    .toBe(true);
+}
+
+/** Wait for the context script's three files, three jobs, and three todos. */
+export async function waitForContextFixture(
+  page: Page,
+  options: { badge?: number; timeout?: number } = {},
+): Promise<void> {
+  const timeout = options.timeout ?? 15_000;
+  let observed = "files=0, jobs=0, todos=0, badge=\"\"";
+  await expect
+    .poll(
+      async () => {
+        const counts = await page.evaluate(() => {
+          const panel = document.querySelector('[data-testid="right-sidebar"]');
+          return {
+            files: panel?.querySelectorAll(".file-item").length ?? 0,
+            jobs: panel?.querySelectorAll(".job-btn").length ?? 0,
+            todos: panel?.querySelectorAll(".todo-btn").length ?? 0,
+            badge: document.querySelector('[data-testid="context-badge"]')?.textContent?.trim() ?? "",
+          };
+        });
+        observed = `files=${counts.files}, jobs=${counts.jobs}, todos=${counts.todos}, badge=${JSON.stringify(counts.badge)}`;
+        return (
+          counts.files === 3 &&
+          counts.jobs === 3 &&
+          counts.todos === 3 &&
+          (options.badge === undefined || counts.badge === String(options.badge))
+        );
+      },
+      {
+        timeout,
+        message: `Timed out waiting ${timeout}ms for context fixture; last observed ${observed}`,
+      },
+    )
+    .toBe(true);
+}
+
 /** Wait until `count` tool-bearing turns have settled and collapsed their work.
  *  This is stronger than waiting for final response text, which appears mid-stream. */
 export async function waitForSettledWorkBlocks(

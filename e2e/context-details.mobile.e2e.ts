@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { drive, gotoFresh, openRightSidebar } from "./helpers.js";
+import {
+  drive,
+  gotoFresh,
+  openRightSidebar,
+  waitForContextFixture,
+} from "./helpers.js";
 
 // Issue #55 regression: on mobile, JobDetail/TodoDetail sheets must render
 // ABOVE the full-screen Context view (z-index fix) and the Back gesture must
@@ -19,6 +24,7 @@ test.beforeEach(async ({ page }) => {
  *  then open the full-screen Context view. */
 async function openContextWithFixtures(page: import("@playwright/test").Page) {
   await drive(page, "context");
+  await waitForContextFixture(page);
   await openRightSidebar(page);
 }
 

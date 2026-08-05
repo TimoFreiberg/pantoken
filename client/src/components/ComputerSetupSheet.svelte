@@ -928,14 +928,14 @@
     const d = profileEditor.draft;
     if (!d) return { ...editProfile };
     return {
-      ...editProfile,
+      id: editProfile.id,
       label: d.name,
       sshDestination: d.sshDestination,
       port: Number(d.port) || 22,
       polytokenPolicy: d.polytokenPolicy,
       remoteRootOverride: d.remoteRootOverride || undefined,
       serverPath: d.serverPath || undefined,
-      riskAcknowledgements: editProfile.riskAcknowledgements,
+      riskAcknowledgements: JSON.parse(JSON.stringify(editProfile.riskAcknowledgements)),
       executionTarget: editProfile.executionTarget.kind === "dockerContainer"
         ? {
             kind: "dockerContainer",

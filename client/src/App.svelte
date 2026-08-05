@@ -175,6 +175,7 @@
           getLastAddedProfile: provider.getLastAddedProfile,
           getLastUpdatedProfile: provider.getLastUpdatedProfile,
           getAcknowledgementCaptures: provider.getAcknowledgementCaptures,
+          seedProfileAcknowledgements: provider.seedProfileAcknowledgements,
           testSshAndListContainers: provider.testSshAndListContainers,
           inspectContainer: provider.inspectContainer,
           listProfiles: provider.listProfiles,

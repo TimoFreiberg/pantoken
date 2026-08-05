@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { drive, gotoFresh, openRightSidebar } from "./helpers.js";
+import {
+  drive,
+  gotoFresh,
+  openRightSidebar,
+  waitForContextFixture,
+} from "./helpers.js";
 
 // The right context panel (RightSidebar) shows the active session's flagged files,
 // background jobs, and todos — live session context, in that order (matches the
@@ -25,6 +30,7 @@ test("the context panel renders flagged files and todos", async ({ page }) => {
 
   // Drive the context fixture → a snapshot with flags + todos lands.
   await drive(page, "context");
+  await waitForContextFixture(page);
 
   // Flagged files render.
   const files = page.getByTestId("flagged-files");
@@ -45,6 +51,7 @@ test("sections render in order: flagged files, background jobs, todos", async ({
 }) => {
   await openPanel(page);
   await drive(page, "context");
+  await waitForContextFixture(page);
 
   // AC-equivalent to the old todos→jobs→files order: the TODO explicitly asks for
   // flagged files -> async jobs -> todos, matching the polytoken TUI.
@@ -103,6 +110,7 @@ test("clicking a todo opens a detail view with full description", async ({
 }) => {
   await openPanel(page);
   await drive(page, "context");
+  await waitForContextFixture(page);
 
   // Click the first todo.
   await page
@@ -125,6 +133,7 @@ test("clicking a todo opens a detail view with full description", async ({
 test("deleting a todo from the detail view removes it", async ({ page }) => {
   await openPanel(page);
   await drive(page, "context");
+  await waitForContextFixture(page);
 
   // Click "Review with subagent" (todo #3 — no other todo depends on it).
   await page.getByTestId("todos").getByText("Review with subagent").click();
@@ -147,6 +156,7 @@ test("deleting a todo from the detail view removes it", async ({ page }) => {
 test("background jobs section renders fixture jobs", async ({ page }) => {
   await openPanel(page);
   await drive(page, "context");
+  await waitForContextFixture(page);
 
   // The context script populates the mock's job fixtures; the hub broadcasts
   // JobsList on the SessionUpdated.
@@ -165,6 +175,7 @@ test("clicking a job opens a detail view with the job's details", async ({
 }) => {
   await openPanel(page);
   await drive(page, "context");
+  await waitForContextFixture(page);
 
   // Wait for jobs to render.
   const jobs = page.getByTestId("background-jobs");
@@ -201,6 +212,7 @@ test("an open detail sheet is dismissible via Esc and does not durably block", a
 }) => {
   await openPanel(page);
   await drive(page, "context");
+  await waitForContextFixture(page);
   const jobs = page.getByTestId("background-jobs");
   await expect(jobs).toContainText("general-purpose");
   await jobs.getByText("general-purpose").first().click();
@@ -222,6 +234,7 @@ test("copy-path button copies flagged file path to clipboard", async ({
 }) => {
   await openPanel(page);
   await drive(page, "context");
+  await waitForContextFixture(page);
 
   // Wait for flagged files to render.
   const files = page.getByTestId("flagged-files");
@@ -241,6 +254,7 @@ test("client-side jobs refresh updates UI after mock script", async ({
 }) => {
   await openPanel(page);
   await drive(page, "context");
+  await waitForContextFixture(page);
 
   // Wait for default jobs (populated by the context script).
   const jobs = page.getByTestId("background-jobs");
@@ -333,6 +347,7 @@ test("the footer stays pinned when the sidebar content overflows", async ({
   // overwrite-guard preserves cwd since "context"'s snapshot omits it.
   await drive(page, "cwd");
   await drive(page, "context");
+  await waitForContextFixture(page);
 
   const footer = page.getByTestId("session-footer");
   await expect(footer).toBeVisible();

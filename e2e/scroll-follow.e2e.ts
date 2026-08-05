@@ -101,6 +101,62 @@ test("a user prompt sent while pinned keeps the viewport at the bottom", async (
   await expect(page.getByTestId("new-messages-pill")).toHaveCount(0);
 });
 
+// ── Explicit send settle: late layout growth + user cancellation ─────────────────────
+
+async function sendWhileScrolledUp(page: import("@playwright/test").Page): Promise<void> {
+  const scroller = page.locator(".scroller");
+  await buildTallTranscript(page, 3);
+  await expect.poll(() => gapFn(scroller)).toBeLessThan(5);
+  await wheelUp(page, 500);
+  await expect.poll(() => gapFn(scroller)).toBeGreaterThan(80);
+  const textarea = page.locator(".composer-wrap textarea");
+  await textarea.fill("Follow this late layout change");
+  await textarea.press("Enter");
+  await expect(scroller).toHaveAttribute("data-send-settling", "1", { timeout: 3000 });
+}
+
+async function appendLateSendGrowth(scroller: import("@playwright/test").Locator): Promise<void> {
+  const before = await scroller.evaluate((el) => (el as HTMLElement).scrollHeight);
+  await scroller.locator(".col").evaluate((el) => {
+    const spacer = document.createElement("div");
+    spacer.dataset.testSendLateGrowth = "1";
+    spacer.style.height = "240px";
+    el.appendChild(spacer);
+  });
+  await expect
+    .poll(() => scroller.evaluate((el) => (el as HTMLElement).scrollHeight))
+    .toBeGreaterThan(before);
+}
+
+test("explicit send follows late layout growth but user wheel cancellation wins — follows growth", async ({
+  page,
+}) => {
+  await sendWhileScrolledUp(page);
+  const scroller = page.locator(".scroller");
+  // Resize the content while the send marker is still active, then wait for the
+  // semantic response/work-block checkpoint before asserting the final bottom.
+  await appendLateSendGrowth(scroller);
+  await waitForSettledWorkBlocks(page, 5);
+  await expect.poll(() => gapFn(scroller), { timeout: 5000 }).toBeLessThan(80);
+  await expect(page.getByTestId("new-messages-pill")).toHaveCount(0);
+});
+
+test("explicit send follows late layout growth but user wheel cancellation wins — cancels on wheel", async ({
+  page,
+}) => {
+  await sendWhileScrolledUp(page);
+  const scroller = page.locator(".scroller");
+  // Compete with the active send settle: late content growth lands first, then a
+  // real upward wheel gesture must cancel follow before the response finishes.
+  await appendLateSendGrowth(scroller);
+  await wheelUp(page, 200);
+  // The semantic gap/pill checkpoint follows the real wheel immediately, while
+  // the send marker is still active; marker expiry is only a timer, not proof of cancellation.
+  await expect.poll(() => gapFn(scroller), { timeout: 3000 }).toBeGreaterThan(80);
+  await expect(page.getByTestId("new-messages-pill")).toBeVisible();
+  await waitForSettledWorkBlocks(page, 5);
+});
+
 // ── AC.3: touch-drag scroll-up un-pins the viewport ─────────────────────────────────
 
 test("a touch-drag scroll-up un-pins the viewport and shows the pill on new content", async ({

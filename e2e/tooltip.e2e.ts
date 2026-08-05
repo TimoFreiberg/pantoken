@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { drive, gotoFresh, openSidebar } from "./helpers.js";
+import {
+  drive,
+  gotoFresh,
+  openSidebar,
+  waitForContextFixture,
+} from "./helpers.js";
 
 // The global Tooltip override (client/src/components/Tooltip.svelte) reuses every
 // element's `title` to render a themed tooltip on hover, suppressing the browser's
@@ -183,6 +188,7 @@ test("self-explanatory controls have no title attribute", async ({ page }) => {
 
   // AC.6: Todos and jobs in the right sidebar.
   await drive(page, "context");
+  await waitForContextFixture(page);
   const todoBtn = page.locator(".todo-btn").first();
   await expect(todoBtn).toBeVisible();
   await expect(todoBtn).not.toHaveAttribute("title", /.+/);

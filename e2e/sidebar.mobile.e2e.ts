@@ -4,6 +4,7 @@ import {
   drive,
   gotoFresh,
   openRightSidebar,
+  waitForContextFixture,
   openSidebar,
 } from "./helpers.js";
 
@@ -101,6 +102,7 @@ test("mobile context panel: closed by default, reachable from header, collapse i
 
   // The context fixture: 3 flagged files + 3 jobs + 3 todos = 9 context items.
   await drive(page, "context");
+  await waitForContextFixture(page, { badge: 9 });
   await expect(open).toBeVisible();
   // AC.4 (mobile): the ctx-glyph shows a panel-right icon (x=15) + a visible badge.
   await expect(open.locator(".ctx-glyph line")).toHaveAttribute("x1", "15");

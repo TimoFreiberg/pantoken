@@ -496,6 +496,7 @@
   let settleUntil = 0;
   let content = $state<HTMLDivElement>();
   let settleObserver: ResizeObserver | undefined;
+  let sendSettleTimer: ReturnType<typeof setTimeout> | undefined;
   function applySettle(): void {
     if (!scroller) return;
     if (settleRatio === undefined) {
@@ -609,20 +610,28 @@
     if (n === lastSendN) return;
     lastSendN = n;
     // Sending supersedes any in-flight nav jump (the user is now following the
-    // fresh reply, not the earlier prompt).
+    // fresh reply, not the earlier prompt). Clear a residual user-scroll flag from
+    // the wheel/touch that may have brought the reader here: the send scroll is
+    // programmatic, so an expired pre-send gesture must not overwrite this explicit
+    // re-pin. Without this, a content-height clamp during the settle window
+    // (content-visibility estimates correcting, composer autosize, work-block
+    // collapse) reads as an input-gated upward scroll and un-pins the fresh pin —
+    // then the pinned-gated re-asserts never fire and the send lands permanently
+    // short of the bottom. Mirrors scrollToTop's clear of the same flag; a new
+    // wheel, touch, or scrollbar gesture during settling re-marks it (via onwheel)
+    // before its scroll events and still wins.
     cancelNavSettle();
-    pinned = true;
-    store.clearActiveUnread();
-    // Clear any residual user-scroll flag from BEFORE the send (e.g. a wheel a
-    // moment earlier) so the programmatic settle below owns its own scroll events.
-    // Without this, a content-height clamp during the settle window (content-
-    // visibility estimates correcting, composer autosize, work-block collapse)
-    // reads as an input-gated upward scroll and un-pins the fresh pin — then the
-    // pinned-gated re-asserts never fire and the send lands permanently short of
-    // the bottom. Mirrors scrollToTop's clear of the same flag; a real wheel
-    // DURING the settle re-marks it via onwheel before its scroll events.
     userScrolling = false;
     clearTimeout(userScrollClearTimer);
+    pinned = true;
+    store.clearActiveUnread();
+    if (scroller) {
+      scroller.dataset.sendSettling = "1";
+      clearTimeout(sendSettleTimer);
+      sendSettleTimer = setTimeout(() => {
+        if (scroller) delete scroller.dataset.sendSettling;
+      }, 500);
+    }
     // Re-assert across frames (not a single scrollTo): sending while scrolled up jumps
     // from the top, where content between may still be settling (images decoding,
     // markstream finalizing). A one-shot scroll can land short; settleScroll chases the
@@ -940,6 +949,7 @@
       window.removeEventListener("pagehide", onPageHide);
       settleObserver?.disconnect();
       viewportObserver?.disconnect();
+      clearTimeout(sendSettleTimer);
       window.removeEventListener("pointerup", onWindowPointerUp);
       window.removeEventListener("keydown", onScrollTopBottomKey);
       clearTimeout(userScrollClearTimer);

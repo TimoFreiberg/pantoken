@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { TestSshResult } from "../client/src/lib/hosts/types.js";
-import { gotoFresh, openSettings, openSidebar } from "./helpers.js";
+import {
+  gotoFresh,
+  openSettings,
+  openSidebar,
+  waitForProfileCapture,
+} from "./helpers.js";
 
 test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
@@ -201,13 +206,6 @@ async function resetProfileCaptures(page: Page): Promise<void> {
   await page.evaluate(() => (window as unknown as { __pantokenHosts?: { resetProfileCaptures: () => void } }).__pantokenHosts?.resetProfileCaptures());
 }
 
-async function lastProfileCapture(page: Page, kind: "added" | "updated"): Promise<Record<string, unknown>> {
-  return page.evaluate((kind) => {
-    const hosts = (window as unknown as { __pantokenHosts?: { getLastAddedProfile: () => unknown; getLastUpdatedProfile: () => unknown } }).__pantokenHosts;
-    return (kind === "added" ? hosts?.getLastAddedProfile() : hosts?.getLastUpdatedProfile()) as Record<string, unknown>;
-  }, kind);
-}
-
 // Host provisioning uses generic remote-host copy, including nameless fallback paths.
 test("Host provisioning copy stays generic for an empty touched name", async ({ page }) => {
   await resetProfileCaptures(page);
@@ -239,7 +237,7 @@ test("Host provisioning copy stays generic for an empty touched name", async ({ 
   await expect(panel).not.toContainText(/docker|container/i);
 
   // Clean up the in-flight mock profile without depending on a user-provided name.
-  const profile = await lastProfileCapture(page, "added");
+  const profile = await waitForProfileCapture(page, "added");
   await setState(page, String(profile.id), "ready");
   await expect(panel).toBeHidden({ timeout: 10000 });
 });
@@ -256,7 +254,7 @@ test("host_add_profile_payload_omits_xdg_mode_and_preserves_advanced_fields", as
   await page.getByLabel("Server binary path").fill("/opt/payload-server");
   await page.getByTestId("cs-test-ssh").click();
   await expect(page.getByTestId("cs-provisioning")).toBeVisible({ timeout: 10000 });
-  const profile = await lastProfileCapture(page, "added");
+  const profile = await waitForProfileCapture(page, "added");
   expect(profile).toMatchObject({ label: "Payload Host", sshDestination: "user@payload.test", polytokenPolicy: "offerInstall", remoteRootOverride: "/srv/payload-root", serverPath: "/opt/payload-server", executionTarget: { kind: "host" } });
   expect(profile).not.toHaveProperty("xdgMode");
   expect(profile).not.toHaveProperty("xdg_mode");
@@ -273,7 +271,7 @@ test("host_edit_profile_payload_omits_xdg_mode_and_preserves_advanced_fields", a
   await page.getByTestId("cs-edit-root-override").fill("/srv/edited-root");
   await page.getByLabel("Server binary path").fill("/opt/edited-server");
   await page.getByTestId("cs-reconnect-later").click();
-  const profile = await lastProfileCapture(page, "updated");
+  const profile = await waitForProfileCapture(page, "updated");
   expect(profile).toMatchObject({ label: "Editable Host", polytokenPolicy: "offerInstall", remoteRootOverride: "/srv/edited-root", serverPath: "/opt/edited-server", executionTarget: { kind: "host" } });
   expect(profile).not.toHaveProperty("xdgMode");
   expect(profile).not.toHaveProperty("xdg_mode");
