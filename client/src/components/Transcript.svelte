@@ -613,6 +613,16 @@
     cancelNavSettle();
     pinned = true;
     store.clearActiveUnread();
+    // Clear any residual user-scroll flag from BEFORE the send (e.g. a wheel a
+    // moment earlier) so the programmatic settle below owns its own scroll events.
+    // Without this, a content-height clamp during the settle window (content-
+    // visibility estimates correcting, composer autosize, work-block collapse)
+    // reads as an input-gated upward scroll and un-pins the fresh pin — then the
+    // pinned-gated re-asserts never fire and the send lands permanently short of
+    // the bottom. Mirrors scrollToTop's clear of the same flag; a real wheel
+    // DURING the settle re-marks it via onwheel before its scroll events.
+    userScrolling = false;
+    clearTimeout(userScrollClearTimer);
     // Re-assert across frames (not a single scrollTo): sending while scrolled up jumps
     // from the top, where content between may still be settling (images decoding,
     // markstream finalizing). A one-shot scroll can land short; settleScroll chases the
