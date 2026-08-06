@@ -1,5 +1,12 @@
 export type PromptResponseState = "final" | "in-progress" | "none";
 
+/** Minimum vertical spacing between prompt-map tick centers (px). */
+export const PROMPT_MAP_TICK_PITCH = 14;
+
+/** Reserved edge inset for the prompt-map rail (px), shared by the geometry helper,
+ *  the component, and the E2E oracle so the cluster bound stays in one place. */
+export const PROMPT_MAP_RAIL_INSET = 10;
+
 export interface PromptMapEntry {
   id: string;
   prompt: string;
@@ -206,4 +213,92 @@ export function projectPromptTicks(
   return offsets.map((_, index) =>
     required === 0 ? 0 : (height * index) / (offsets.length - 1),
   );
+}
+
+/**
+ * Project selected prompt offsets into a compact, vertically centered cluster of
+ * absolute tick-center `top` coordinates in the prompt-map rail's coordinate system
+ * (the same system the `.tick` button's `top` style uses — no caller-applied inset
+ * offset).
+ *
+ * Contract:
+ * - Returns `[]` for no entries.
+ * - `usableStart = inset`, `usableEnd = max(inset, railHeight - inset)`; every result
+ *   lies within that inclusive range.
+ * - A single marker centers at `clamp(railHeight / 2, usableStart, usableEnd)`.
+ * - When `count <= floor(usable / tickPitch) + 1`, relative offsets are projected into
+ *   a desired span of `min(usable, tickPitch * max(1, count - 1))` and the ACTUAL
+ *   resulting span is centered in the rail; if the raw projected gaps would overlap,
+ *   they are replaced by evenly spaced centers at the minimum pitch before centering.
+ * - When the count exceeds that capacity, centers are distributed monotonically across
+ *   the full usable interval; gaps may drop below `tickPitch` because boundedness and
+ *   rendering every selected active marker take precedence over the pitch preference.
+ * - For a degenerate usable interval (`usableStart === usableEnd`), every entry maps to
+ *   that single bounded coordinate, keeping the output nondecreasing.
+ *
+ * Deterministic and DOM-free.
+ */
+export function projectPromptCluster(
+  offsets: readonly number[],
+  railHeight: number,
+  tickPitch: number,
+  inset: number,
+): number[] {
+  if (offsets.length === 0) return [];
+  const usableStart = Math.max(0, inset);
+  const usableEnd = Math.max(usableStart, railHeight - inset);
+  const usable = usableEnd - usableStart;
+  const pitch = Math.max(0, tickPitch);
+  const capacity = usable > 0 && pitch > 0 ? Math.floor(usable / pitch) + 1 : 1;
+
+  if (offsets.length === 1) {
+    return [clamp(railHeight / 2, usableStart, usableEnd)];
+  }
+
+  if (offsets.length <= capacity) {
+    const count = offsets.length;
+    const desiredSpan = Math.min(usable, pitch * (count - 1));
+    const rawSpan = Math.max(0, offsets[count - 1]! - offsets[0]!);
+    const raw =
+      rawSpan === 0
+        ? offsets.map(() => 0)
+        : offsets.map((offset) => (offset - offsets[0]!) * (desiredSpan / rawSpan));
+    // Minimum-pitch enforcement: overlapping/compressed projections collapse into
+    // evenly spaced centers at the minimum pitch before the cluster is centered.
+    const minPitchHolds = raw.every(
+      (value, i) => i === 0 || value - raw[i - 1]! >= pitch - 1e-9,
+    );
+    const projected = minPitchHolds ? raw : raw.map((_, i) => pitch * i);
+    const actualSpan = projected[projected.length - 1]! - projected[0]!;
+    const shift = usableStart + (usable - actualSpan) / 2;
+    return projected.map((value) => shift + value);
+  }
+
+  // Over capacity: boundedness and rendering every selected marker win. Distribute
+  // centers monotonically across the full usable interval (gaps may be < tickPitch).
+  if (usable <= 0) return offsets.map(() => usableStart);
+  return offsets.map((_, index) => usableStart + (usable * index) / (offsets.length - 1));
+}
+
+/** A selected prompt index paired with its projected tick-center position. */
+export interface PromptTickPair {
+  index: number;
+  position: number;
+}
+
+/**
+ * Zip selected original prompt indices with their projected positions. Expects
+ * equal-length arrays, preserves order, and never fills omitted indices — sparse
+ * selections stay sparse in the renderer.
+ */
+export function pairPromptTicks(
+  indices: readonly number[],
+  positions: readonly number[],
+): PromptTickPair[] {
+  if (indices.length !== positions.length) {
+    throw new Error(
+      `pairPromptTicks: expected equal-length arrays (${indices.length} indices, ${positions.length} positions)`,
+    );
+  }
+  return indices.map((index, i) => ({ index, position: positions[i]! }));
 }

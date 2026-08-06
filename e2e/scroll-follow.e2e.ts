@@ -200,11 +200,11 @@ test("find-in-transcript jump to match un-pins the viewport so it stays at the m
   });
 });
 
-// Journey: prompt-nav ↑ un-pins so streaming content doesn't yank back to the bottom
-test("prompt-nav ↑ un-pins so streaming content doesn't yank back to the bottom", async ({
+// Journey: a prompt-map jump unpins so streaming content doesn't yank back to the bottom
+test("a prompt-map jump unpins so streaming content doesn't yank back to the bottom", async ({
   page,
 }) => {
-  // Build enough turns that prompt-nav ↑ can jump well away from the live tail.
+  // Build enough turns that a map tick can jump well away from the live tail.
   await buildTallTranscript(page, 5);
 
   const gap = () =>
@@ -213,26 +213,26 @@ test("prompt-nav ↑ un-pins so streaming content doesn't yank back to the botto
       return sc.scrollHeight - sc.scrollTop - sc.clientHeight;
     });
 
-  // Scroll up first so prompt-nav ↑ has an earlier prompt to jump to (at the
-  // bottom, ↑ targets the most recent prompt which may still be in view).
+  // Scroll up first so the map jump has an earlier prompt to jump to (at the
+  // bottom, the newest tick targets the most recent prompt which may still be in view).
   await wheelUp(page, 500);
   await expect.poll(gap).toBeGreaterThan(80);
 
-  // Click prompt-nav ↑ to jump to an earlier prompt. This is a programmatic
-  // scroll that explicitly sets pinned=false — without that, the input gate
-  // would hold the pin and the streaming-pin effect would yank back on the
+  // Click an earlier prompt's map tick to jump well away from the tail. This is a
+  // programmatic scroll that explicitly sets pinned=false — without that, the input
+  // gate would hold the pin and the streaming-pin effect would yank back on the
   // next content delta.
-  await page.locator(".transcript-wrap").hover();
-  await page.getByTestId("prompt-nav-up").click();
-  await page.waitForTimeout(500);
+  const tick2 = page.locator('[data-testid="prompt-map-tick"][data-prompt-index="2"]');
+  await expect(tick2).toBeVisible();
+  await tick2.click();
 
-  // The viewport should now be scrolled up, away from the live tail.
+  // The viewport should now be scrolled up, away from the live tail (a state
+  // checkpoint instead of a fixed wait — the shared jumpToTarget settles async).
   await expect.poll(gap, { timeout: 5000 }).toBeGreaterThan(80);
 
   // Drive the mock to append new content. The streaming-pin effect must NOT
-  // yank back to the bottom — pinned is false (set by prompt-nav ↑).
+  // yank back to the bottom — pinned is false (set by the map jump).
   await drive(page, "reply");
-  await page.waitForTimeout(500);
 
   // The "New messages ↓" pill should appear — pinned is false and new content
   // landed below the fold. If the explicit pinned=false were missing, the
@@ -242,11 +242,11 @@ test("prompt-nav ↑ un-pins so streaming content doesn't yank back to the botto
   });
 });
 
-// Journey: a wheel during the prompt-nav settle window cancels the re-assert — the
+// Journey: a wheel during the prompt-map settle window cancels the re-assert — the
 // user's scroll wins and the target row is NOT snapped back to the viewport top.
 // Regression guard for the nav-settle window's user-input cancellation wiring
 // (wheel/touch/scroll-key/scrollbar all call cancelNavSettle).
-test("wheel during a prompt-nav jump cancels the settle re-assert", async ({ page }) => {
+test("wheel during a prompt-map jump cancels the shared settle re-assert", async ({ page }) => {
   await buildTallTranscript(page, 5);
 
   const atPrompt = (idx: number) =>
@@ -262,14 +262,24 @@ test("wheel during a prompt-nav jump cancels the settle re-assert", async ({ pag
       return Math.abs(sc.scrollTop - Math.min(within, max)) < 4;
     }, idx);
 
-  // ↑ from the tail lands on the most recent prompt (index 5) and opens the
-  // ~500ms nav-settle window. The transient data-nav-settling marker (set in
-  // jumpToTarget, cleared on cancellation/lapse) proves the window is ACTIVE here,
-  // so the wheel below lands inside it deterministically.
-  await page.locator(".transcript-wrap").hover();
-  await page.getByTestId("prompt-nav-up").click();
+  // Click the newest prompt's map tick from the tail and open the ~500ms nav-settle
+  // window. The transient data-nav-settling marker (set in jumpToTarget, cleared on
+  // cancellation/lapse) proves the window is ACTIVE here, so the wheel below lands
+  // inside it deterministically.
+  const tick5 = page.locator('[data-testid="prompt-map-tick"][data-prompt-index="5"]');
+  await expect(tick5).toBeVisible();
+  await tick5.click();
   const scroller = page.locator(".scroller");
   await expect(scroller).toHaveAttribute("data-nav-settling", "1", { timeout: 3000 });
+
+  // The click left the tick both focused and hovered, mounting the prompt-map preview
+  // popup over the transcript's left column; a wheel over that overlay (a scroller
+  // sibling) would not scroll the transcript. Move focus to the scroller so the
+  // preview is no longer pinned by focus — wheelUp's pointer move off the tick then
+  // clears hover and unmounts the preview before the wheel fires. Focusing the scroller
+  // does not touch the nav window (only wheel/touch/key/scrollbar input cancels it),
+  // so the wheel below still lands inside the settle window.
+  await scroller.focus();
 
   // Wheel up DURING the window. Cancellation must stop the re-assert: the marker
   // clears immediately, and after the window would have lapsed the target row must
@@ -277,9 +287,7 @@ test("wheel during a prompt-nav jump cancels the settle re-assert", async ({ pag
   // left it.
   await wheelUp(page, 200);
   await expect(scroller).not.toHaveAttribute("data-nav-settling", "1", { timeout: 3000 });
-  await page.waitForTimeout(900);
-
-  expect(await atPrompt(5)).toBe(false);
+  await expect.poll(() => atPrompt(5), { timeout: 5000 }).toBe(false);
   const gap = await page.evaluate(() => {
     const sc = document.querySelector(".scroller") as HTMLElement;
     return sc.scrollHeight - sc.scrollTop - sc.clientHeight;

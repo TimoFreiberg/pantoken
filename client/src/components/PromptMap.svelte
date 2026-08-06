@@ -2,8 +2,11 @@
   import { onDestroy, onMount, tick } from "svelte";
   import { overlayHistory, PHONE_MQ } from "../lib/overlay-history.js";
   import {
+    PROMPT_MAP_RAIL_INSET,
+    PROMPT_MAP_TICK_PITCH,
     calculatePromptIntervals,
-    projectPromptTicks,
+    pairPromptTicks,
+    projectPromptCluster,
     responseFallback,
     responsePreview,
     selectPromptWindow,
@@ -20,7 +23,6 @@
 
   let { entries, scroller, sessionKey = "", onjump }: Props = $props();
 
-  const TICK_PITCH = 14;
   const MAP_ID = "prompt-map";
   let phone = $state(false);
   let rail = $state<HTMLElement>();
@@ -30,9 +32,7 @@
   let handledClose = false;
   let activeIndices = $state<number[]>([]);
   let primaryIndex = $state(0);
-  let windowStart = $state(0);
-  let windowEnd = $state(-1);
-  let tickPositions = $state<number[]>([]);
+  let tickPairs = $state<Array<{ index: number; position: number }>>([]);
   let omittedBefore = $state(false);
   let omittedAfter = $state(false);
   let overCapacity = $state(false);
@@ -119,7 +119,7 @@
       total: entries.length,
       activeIndices: active,
       availableHeight: available,
-      tickPitch: TICK_PITCH,
+      tickPitch: PROMPT_MAP_TICK_PITCH,
       contextPadding: 1,
       nearestIndex: nearest,
       stablePrimaryIndex: primaryIndex,
@@ -128,16 +128,19 @@
       const interval = intervals[index];
       return interval ? (interval.start + interval.end) / 2 : offsets[index] ?? 0;
     });
-    const positions = projectPromptTicks(
+    // Compact, vertically centered cluster: project the selected offsets into a
+    // bounded span (minimum pitch per marker, capped at the usable rail height for
+    // over-capacity selections) and pair each projected position with its original
+    // prompt index, so sparse selections never render extra ticks.
+    const positions = projectPromptCluster(
       selectedOffsets,
-      Math.max(0, railHeight - 20),
-      TICK_PITCH,
-    ).map((position) => position + 10);
+      Math.max(0, railHeight),
+      PROMPT_MAP_TICK_PITCH,
+      PROMPT_MAP_RAIL_INSET,
+    );
     activeIndices = active;
     primaryIndex = selected.primaryIndex ?? primaryIndex;
-    windowStart = selected.start;
-    windowEnd = selected.end;
-    tickPositions = positions;
+    tickPairs = pairPromptTicks(selected.indices, positions);
     omittedBefore = selected.omittedBefore;
     omittedAfter = selected.omittedAfter;
     overCapacity = selected.overCapacity;
@@ -259,27 +262,31 @@
   >
     <div class="desktop-rail" bind:this={rail}>
       {#if omittedBefore}<span class="fade top" aria-hidden="true"></span>{/if}
-      {#each entries.slice(windowStart, windowEnd + 1) as entry, localIndex (entry.id)}
-        {@const index = windowStart + localIndex}
-        {@const active = activeIndices.includes(index)}
-        <button
-          type="button"
-          class="tick"
-          class:active
-          class:primary={primaryIndex === index}
-          style={`top: ${tickPositions[localIndex] ?? 10}px`}
-          title={entryLabel(index)}
-          aria-label={entryLabel(index)}
-          data-testid="prompt-map-tick"
-          data-prompt-index={index}
-          onclick={() => jump(index)}
-          onmouseenter={() => (hoveredIndex = index)}
-          onmouseleave={() => (hoveredIndex = null)}
-          onfocus={() => (focusedIndex = index)}
-          onblur={() => (focusedIndex = null)}
-        >
-          <span class="tick-mark"></span>
-        </button>
+      {#each tickPairs as tick (tick.index)}
+        {@const index = tick.index}
+        {@const entry = entries[index]}
+        {#if entry}
+          {@const active = activeIndices.includes(index)}
+          <button
+            type="button"
+            class="tick"
+            class:active
+            class:primary={primaryIndex === index}
+            class:emphasized={hoveredIndex === index || focusedIndex === index}
+            style={`top: ${tick.position}px`}
+            title={entryLabel(index)}
+            aria-label={entryLabel(index)}
+            data-testid="prompt-map-tick"
+            data-prompt-index={index}
+            onclick={() => jump(index)}
+            onmouseenter={() => (hoveredIndex = index)}
+            onmouseleave={() => (hoveredIndex = null)}
+            onfocus={() => (focusedIndex = index)}
+            onblur={() => (focusedIndex = null)}
+          >
+            <span class="tick-mark"></span>
+          </button>
+        {/if}
       {/each}
       {#if omittedAfter}<span class="fade bottom" aria-hidden="true"></span>{/if}
       {#if previewIndex !== null}
@@ -350,6 +357,9 @@
   .tick:hover .tick-mark, .tick:focus-visible .tick-mark { width: 15px; background: var(--accent); opacity: 1; }
   .tick.active .tick-mark { width: 13px; background: var(--text-muted); opacity: .95; }
   .tick.primary .tick-mark { width: 17px; background: var(--accent); }
+  /* Hover/focus emphasis must survive the active/primary rules above (same specificity,
+     later order): the explicit class wins for the hovered/focused marker in every state. */
+  .tick.emphasized .tick-mark { width: 15px; background: var(--accent); opacity: 1; }
   .tick:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
   .fade { position: absolute; left: 4px; width: 18px; height: 28px; pointer-events: none; background: linear-gradient(var(--surface), transparent); opacity: .86; }
   .fade.top { top: 0; } .fade.bottom { bottom: 0; transform: rotate(180deg); }

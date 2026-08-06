@@ -486,8 +486,8 @@ container. The SSH host is merely the transport and Docker discovery layer.
 
 The transcript's "pinned to the bottom" state (follow the live tail while
 streaming) is turned OFF only by **explicit user-input events**: wheel,
-touch drag, keyboard scroll keys, and scrollbar drag. The prompt-nav ↑
-button also explicitly sets `pinned = false` (it's a programmatic scroll
+touch drag, keyboard scroll keys, and scrollbar drag. A prompt-map jump
+also explicitly sets `pinned = false` (it's a programmatic scroll
 that un-pins directly). Find-in-transcript navigation un-pins via a store
 signal. Programmatic scrolls (ResizeObserver re-asserts, settleScroll,
 content-shrink clamps) structurally cannot false-un-pin because they never

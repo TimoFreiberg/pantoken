@@ -2,7 +2,7 @@
 // rule is unit-testable in isolation (no DOM, no store, no Svelte effect timing).
 //
 // INPUT-GATING: the pin is turned OFF only by explicit user-input events — wheel,
-// touch drag, keyboard scroll keys, prompt-nav buttons, and scrollbar drag.
+// touch drag, keyboard scroll keys, prompt-map jumps, and scrollbar drag.
 // Programmatic scrolls (ResizeObserver re-asserts, settleScroll, find-in-transcript,
 // content-shrink clamps) structurally cannot false-un-pin because they never fire
 // user-input events.

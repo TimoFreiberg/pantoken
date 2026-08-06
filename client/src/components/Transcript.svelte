@@ -289,19 +289,8 @@
   // Starts at -1 so the first measurement never reads as growth.
   let prevSize = -1;
 
-  // --- Prompt-stepping nav (↑/↓ buttons). Every press anchors to the current viewport
-  //     rather than a persistent cursor, so content reflow or an intervening scroll cannot
-  //     make the next jump stale. `navStepping` only keeps the floating nav visible while
-  //     actively stepping — it is not used to choose the next prompt.
-  // $state: the template reads it (`class:visible` keeps the floating nav control shown
-  // while actively stepping) — a plain let wouldn't re-render.
-  let navStepping = $state(false);
-  // Whether the transcript area is hovered or focused, so the floating prev/next
-  // prompt-nav control is visible. On touch (pointer: coarse) the control is always
-  // visible via CSS — hover/focus doesn't apply there.
-  let navHovered = $state(false);
   // A programmatic scroll fires `scroll` events of its own; treat scrolls within this
-  // window as ours for pin-state and save-position handling. Prompt-stepping uses an
+  // window as ours for pin-state and save-position handling. A prompt-map jump uses an
   // INSTANT scroll (scrollTo, no animation), so it lands within a frame or two; the
   // window is short (120ms) but still covers the async scroll-event dispatch + any rAF
   // the browser defers to. settleScroll (switch/restore/send) keeps its own longer
@@ -311,7 +300,7 @@
     progScrollUntil = Date.now() + ms;
   }
 
-  // Prompt-nav settle window: after a nav jump the transcript layout is still settling
+  // Prompt-map settle window: after a map jump the transcript layout is still settling
   // (the "Worked for Ns" collapse animation, markstream block finalization, and
   // content-visibility realization all land AFTER a one-shot scrollTo — the same late
   // shifts settleScroll chases, see above), so the jump can land short or get clamped
@@ -484,10 +473,8 @@
     lastScrollTop = top;
     // Reaching the bottom clears the active-session unread flag (you've seen it all).
     if (pinned) store.clearActiveUnread();
-    // A user scroll (not one of ours) abandons prompt-stepping, so the next ↑ button press re-anchors.
-    if (Date.now() >= progScrollUntil) navStepping = false;
     // Persist where the user is reading (debounced). Skipped during our own programmatic
-    // scrolls (prompt-stepping / settleScroll) — those set progScrollUntil, and saving a
+    // scrolls (prompt-map jumps / settleScroll) — those set progScrollUntil, and saving a
     // transient mid-scroll position would restore to a spot the user never chose.
     if (Date.now() >= progScrollUntil) scheduleSavePosition();
   }
@@ -574,7 +561,6 @@
     lastScrollTop = 0;
     userScrolling = false;
     clearTimeout(userScrollClearTimer);
-    navStepping = false;
     const plan = id ? planRestore(scrollPositions, id) : null;
     if (plan && plan !== "bottom") {
       // Scrolled-up reading spot: NOT pinned. settleScroll re-derives ratio * scrollHeight
@@ -626,7 +612,6 @@
     // fresh reply, not the earlier prompt).
     cancelNavSettle();
     pinned = true;
-    navStepping = false;
     store.clearActiveUnread();
     // Re-assert across frames (not a single scrollTo): sending while scrolled up jumps
     // from the top, where content between may still be settling (images decoding,
@@ -717,43 +702,8 @@
   // True when the active session has content below the viewport (drives the pill).
   const showNewPill = $derived(!pinned && store.activeUnread);
 
-  /** Where the first ↑ button press lands when you're not already stepping. At the live tail it's the
-   *  most recent prompt (re-read what you just asked) — a short final turn can leave that
-   *  prompt mid-viewport instead of scrolled off the top, so the tail is detected from the
-   *  scroll gap, not the top edge. Scrolled up, it's the most recent prompt above the
-   *  viewport top: the jump stays relative to where you're reading and never yanks you
-   *  back down to the tail. */
-  function firstUpAnchor(prompts: NodeListOf<HTMLElement>): number {
-    const last = prompts.length - 1;
-    if (!scroller) return last;
-    const gap = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
-    if (gap < 80) return last; // at/near the live bottom
-    const sTop = scroller.getBoundingClientRect().top;
-    for (let i = last; i >= 0; i--) {
-      const top = prompts[i]?.getBoundingClientRect().top ?? Infinity;
-      if (top < sTop - 1) return i;
-    }
-    return 0; // nothing scrolled off the top yet → the oldest prompt
-  }
-
-  /** The first prompt whose top is below the viewport bottom — the next prompt
-   *  to jump to when pressing ↓. Returns null if no prompt is below the fold
-   *  (at/near the live tail), signaling a jump to the bottom.
-   *  A prompt straddling the viewport bottom (top above, body below) is
-   *  considered visible and skipped; ↓ always targets a prompt fully below
-   *  the fold. */
-  function firstDownAnchor(prompts: NodeListOf<HTMLElement>): number | null {
-    if (!scroller) return null;
-    const sBottom = scroller.getBoundingClientRect().bottom;
-    for (let i = 0; i < prompts.length; i++) {
-      const top = prompts[i]?.getBoundingClientRect().top ?? Infinity;
-      if (top > sBottom) return i;
-    }
-    return null; // nothing below the fold → live bottom
-  }
-
-  /** Jump to an already-selected prompt row. Arrow stepping and PromptMap both pass the
-   * DOM node directly. A single-shot scrollTo is NOT enough: the layout keeps settling
+  /** Jump to an already-selected prompt row. PromptMap passes the DOM node directly.
+   * A single-shot scrollTo is NOT enough: the layout keeps settling
    * for a few hundred ms after the jump (work-block collapse animation, markstream
    * finalization, content-visibility realization — see the applyNavSettle comment), so
    * we open a short nav-settle window that re-asserts the target's clamped top against
@@ -769,7 +719,6 @@
     markProgScroll(600); // cover the whole nav window, not just the first scroll
     navHoldUntil = progScrollUntil;
     pinned = false;
-    navStepping = true;
     scroller.scrollTo({ top });
     flashPromptRow(target);
     // Hold the target against late layout shifts for ~500ms. applyNavSettle runs
@@ -785,29 +734,9 @@
     navRafId = requestAnimationFrame(navRafLoop);
   }
 
-  /** Scroll the target prompt to the top of the viewport, anchoring every press to
-   *  the current viewport rather than a persistent cursor. */
-  function stepPrompt(dir: -1 | 1): void {
-    if (!scroller) return;
-    const prompts = scroller.querySelectorAll<HTMLElement>(".row.user[data-prompt-id]");
-    const last = prompts.length - 1;
-    if (last < 0) return;
-    if (dir === -1) {
-      jumpToTarget(prompts[firstUpAnchor(prompts)]!);
-      return;
-    }
-    const idx = firstDownAnchor(prompts);
-    if (idx === null) {
-      navStepping = false;
-      scrollToBottom();
-      return;
-    }
-    jumpToTarget(prompts[idx]!);
-  }
-
-  // Brief highlight flash on a prompt row the user just jumped to, so an instant scroll
-  // isn't disorienting. Removes any prior flash class first so rapid bursts (↑↑↑) reset
-  // the animation cleanly rather than no-op'ing on an already-flashing row.
+  /** Brief highlight flash on a prompt row the user just jumped to, so an instant scroll
+   *  isn't disorienting. Removes any prior flash class first so rapid repeated jumps
+   *  reset the animation cleanly rather than no-op'ing on an already-flashing row. */
   let flashTimer: ReturnType<typeof setTimeout> | undefined;
   function flashPromptRow(row: HTMLElement): void {
     row.classList.remove("nav-flash");
@@ -1013,15 +942,6 @@
   class="transcript-wrap"
   role="region"
   aria-label="Transcript"
-  onmouseenter={() => (navHovered = true)}
-  onmouseleave={() => (navHovered = false)}
-  onfocusin={() => (navHovered = true)}
-  onfocusout={(e) => {
-    // Only hide if focus actually left the wrap (focusout bubbles from children).
-    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
-      navHovered = false;
-    }
-  }}
 >
 <TranscriptSearch {scroller} />
 <PromptMap
@@ -1448,57 +1368,6 @@
     New messages ↓
   </button>
 {/if}
-{#if !isTouch && !store.phoneLayout}
-<div
-  class="prompt-nav"
-  class:visible={navHovered || navStepping}
-  role="group"
-  aria-label="Prompt navigation"
->
-  <button
-    class="prompt-nav-btn"
-    data-testid="prompt-nav-up"
-    type="button"
-    title="Previous prompt"
-    aria-label="Previous prompt"
-    onclick={() => stepPrompt(-1)}
-  >
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      width="18"
-      height="18"
-    >
-      <path d="M12 19V5M5 12l7-7 7 7" />
-    </svg>
-  </button>
-  <button
-    class="prompt-nav-btn"
-    data-testid="prompt-nav-down"
-    type="button"
-    title="Next prompt"
-    aria-label="Next prompt"
-    onclick={() => stepPrompt(1)}
-  >
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      width="18"
-      height="18"
-    >
-      <path d="M12 5v14M5 12l7 7 7-7" />
-    </svg>
-  </button>
-</div>
-{/if}
 </div>
 
 <style>
@@ -1578,66 +1447,6 @@
     }
     .row.user.nav-flash {
       animation: none;
-    }
-    .prompt-nav,
-    .prompt-nav-btn {
-      transition: none;
-    }
-  }
-  /* Floating prev/next-prompt nav — a discoverability affordance for the prompt-stepping
-     buttons. Fades in on transcript hover/focus; always visible on touch
-     (pointer: coarse) where hover doesn't apply. Always mounted (opacity toggle)
-     so the fade-out works symmetrically with the fade-in. */
-  .prompt-nav {
-    position: absolute;
-    right: 8px;
-    top: 50%;
-    transform: translateY(-50%);
-    z-index: 6;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.16s ease;
-  }
-  .prompt-nav.visible {
-    opacity: 1;
-    pointer-events: auto;
-  }
-  .prompt-nav-btn {
-    width: 36px;
-    height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: none;
-    border-radius: 50%;
-    background: var(--surface);
-    color: var(--text-muted);
-    cursor: pointer;
-    box-shadow: var(--shadow-pop);
-    opacity: 0.75;
-    transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
-  }
-  .prompt-nav-btn:hover {
-    opacity: 1;
-    color: var(--accent-text);
-    background: var(--accent);
-  }
-  /* Touch devices use PromptMap's outline sheet instead of two floating arrows. */
-  @media (pointer: coarse), (max-width: 859px) {
-    .prompt-nav { display: none; }
-  }
-  /* Touch devices: always visible (no hover state) + 44px touch targets. */
-  @media (pointer: coarse) {
-    .prompt-nav {
-      opacity: 1;
-      pointer-events: auto;
-    }
-    .prompt-nav-btn {
-      min-width: 44px;
-      min-height: 44px;
     }
   }
   .col {

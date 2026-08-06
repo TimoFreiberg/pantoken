@@ -11,7 +11,7 @@ import {
 } from "./helpers.js";
 
 /** Build `turns` reply turns (plus the greeting) and wait for `turns + 1` settled
- *  work blocks. Shared by the prompt-nav tests that each previously rebuilt a
+ *  work blocks. Shared by the prompt-map navigation tests that each previously rebuilt a
  *  5-turn transcript via inline `for` loops. */
 async function buildMultiTurn(page: Page, turns: number): Promise<void> {
   for (let i = 0; i < turns; i++) {
@@ -636,20 +636,18 @@ test("timeout-bearing dialog shows a countdown and auto-resolves deny-safe", asy
   await expect(page.getByText("Denied — skipping that step.")).toBeVisible();
 });
 
-// Journey: Ctrl/Cmd+Up anchors to the scroll position, not always the last prompt
-test("Ctrl/Cmd+Up anchors to the scroll position, not always the last prompt", async ({
+// Journey: a prompt-map tick targets an explicit prompt and the composer focus gate stays intact
+test("a prompt-map tick targets an explicit prompt and the composer focus gate remains intact", async ({
   page,
 }) => {
   // Build enough turns that early prompts have room to scroll to the top of the viewport.
   await buildMultiTurn(page, 5);
   const count = await page.locator(".row.user").count();
   expect(count).toBeGreaterThanOrEqual(6);
-  const last = count - 1;
 
-  // Park user prompt #2 at the top of the viewport, well away from the live tail.
-  // Use real wheel input so the input-gated pin registers it as a user action.
+  // Park the viewport well away from the live tail using real wheel input so the
+  // input-gated pin registers it as a user action.
   await wheelUp(page, 500);
-  // Confirm we're genuinely scrolled up off the tail before pressing the hotkey.
   const gap = () =>
     page.evaluate(() => {
       const sc = document.querySelector(".scroller") as HTMLElement;
@@ -657,37 +655,17 @@ test("Ctrl/Cmd+Up anchors to the scroll position, not always the last prompt", a
     });
   await expect.poll(gap).toBeGreaterThan(80);
 
-  // Index of the `.row.user` whose top sits nearest the scroller's top.
-  const topRowIndex = () =>
-    page.evaluate(() => {
-      const sc = document.querySelector(".scroller") as HTMLElement;
-      const sTop = sc.getBoundingClientRect().top;
-      let best = -1;
-      let dist = Infinity;
-      document.querySelectorAll(".row.user").forEach((r, i) => {
-        const d = Math.abs(r.getBoundingClientRect().top - sTop);
-        if (d < dist) {
-          dist = d;
-          best = i;
-        }
-      });
-      return best;
-    });
-
-  // ↑ jumps to the prompt at the top of where we're reading (#1, just above the parked
-  // #2) — it does NOT yank down to the most recent prompt the way it used to.
-  await page.locator(".transcript-wrap").hover();
-  await page.getByTestId("prompt-nav-up").press("Enter");
-  await expect.poll(topRowIndex).toBeLessThanOrEqual(2);
-  const idx = await topRowIndex();
-  expect(idx).toBeGreaterThanOrEqual(1); // moved up to an early prompt
-  expect(idx).toBeLessThan(last); // and nowhere near the live tail
+  // A rendered map tick targets an explicit earlier prompt (#1) directly. The shared
+  // jumpToTarget settles it at the viewport top — it does NOT yank down to the live tail.
+  const tick1 = page.locator('[data-testid="prompt-map-tick"][data-prompt-index="1"]');
+  await expect(tick1).toBeVisible();
+  await tick1.click();
+  await expect.poll(() => atPrompt(page, 1), { timeout: 10_000 }).toBe(true);
   expect(await gap()).toBeGreaterThan(80); // didn't scroll back to the bottom
 
-  // Control+ArrowUp is now a live hotkey (scroll-to-top), but the focus gate
-  // suppresses it while the composer textarea is focused. The prompt-nav-up
-  // button click above moved focus to a <button>, so focus the textarea first
-  // to verify the gate suppresses the hotkey (scroll position untouched).
+  // Control+ArrowUp is a live hotkey (scroll-to-top), but the focus gate suppresses
+  // it while the composer textarea is focused. Focus the textarea first to verify the
+  // gate suppresses the hotkey (scroll position untouched).
   await page.locator("textarea").focus();
   const scrollTopBefore = await page.evaluate(() => {
     const sc = document.querySelector(".scroller") as HTMLElement;
@@ -701,90 +679,49 @@ test("Ctrl/Cmd+Up anchors to the scroll position, not always the last prompt", a
   expect(scrollTopAfter).toBe(scrollTopBefore);
 });
 
-// Journey: Ctrl/Cmd+Up/Down step through user prompts
-test("Ctrl/Cmd+Up/Down step through user prompts", async ({ page }) => {
+// Journey: prompt-map ticks target rendered prompts and clamp at the transcript ends
+test("prompt-map ticks target rendered prompts and clamp at the transcript ends", async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 600 });
   await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1100);
   // Build several turns so the oldest prompts have enough content below them to scroll to
-  // the top (a short final turn can't, which is fine — the stepper clamps there).
+  // the top (a short final turn can't, which is fine — the map clamps there).
   await buildMultiTurn(page, 5);
 
   const count = await page.locator(".row.user").count(); // greeting + 5 replies
   expect(count).toBeGreaterThanOrEqual(6);
   const last = count - 1;
 
-  // Asserting by scroll position, not prompt text: the reply fixture reuses one
-  // prompt string across turns. `atPrompt` is the shared helper above.
-  const atBottom = () =>
-    page.evaluate(() => {
-      const sc = document.querySelector(".scroller") as HTMLElement;
-      return sc.scrollHeight - sc.scrollTop - sc.clientHeight < 4;
-    });
-
-  // From the live tail, clicking ↑ walks one prompt older per click, all the way to the oldest.
-  // Stepping one at a time (settling between clicks) keeps each smooth scroll short.
-  await page.locator(".transcript-wrap").hover();
-  const upBtn = page.getByTestId("prompt-nav-up");
-  const downBtn = page.getByTestId("prompt-nav-down");
+  // From the live tail, map ticks walk one prompt older per click, all the way to the
+  // oldest. Each requested index must be rendered before clicking; landing settles via
+  // the shared jumpToTarget path (waitForPrompt polls two layout passes).
   for (let i = last; i >= 0; i--) {
-    await upBtn.click({ force: true });
+    const tick = page.locator(`[data-testid="prompt-map-tick"][data-prompt-index="${i}"]`);
+    await expect(tick).toBeVisible();
+    await tick.click();
     await waitForPrompt(page, i);
-    await expect.poll(() => atPrompt(page, i)).toBe(true);
   }
-  // Past the oldest, ↑ clamps — it stays on the first prompt.
-  await upBtn.click({ force: true });
+  // Clicking the oldest tick again clamps — it stays on the first prompt.
+  const tick0 = page.locator('[data-testid="prompt-map-tick"][data-prompt-index="0"]');
+  await expect(tick0).toBeVisible();
+  await tick0.click();
   await waitForPrompt(page, 0);
 
-  // ↓ walks back toward newer prompts…
-  for (let i = 1; i <= last; i++) {
-    await downBtn.click({ force: true });
+  // Ticks walk back toward newer prompts…
+  for (let i = 1; i < last; i++) {
+    const tick = page.locator(`[data-testid="prompt-map-tick"][data-prompt-index="${i}"]`);
+    await expect(tick).toBeVisible();
+    await tick.click();
     await waitForPrompt(page, i);
-    await expect.poll(() => atPrompt(page, i)).toBe(true);
   }
-  // …and stepping past the newest returns to the live bottom.
-  await downBtn.click({ force: true });
-  await expect.poll(atBottom).toBe(true);
-});
-
-// Journey: prompt-nav re-anchors to viewport after manual scroll
-test("prompt-nav re-anchors to viewport after manual scroll", async ({
-  page,
-}) => {
-  // 380px leaves no hit-testable transcript after the fixed header/composer; 600px
-  // keeps the fixture constrained while leaving the scroll region usable.
-  await page.setViewportSize({ width: 1100, height: 600 });
-  await page.waitForTimeout(50);
-  await buildMultiTurn(page, 5);
-  await page.locator(".scroller").focus();
-
-  // ↑ from the tail lands on the last prompt.
-  await page.getByTestId("prompt-nav-up").press("Enter");
-  await expect.poll(() => atPrompt(page, 5)).toBe(true);
-
-  // Set scrollTop directly so userScrolling remains false. This reproduces the
-  // intervening viewport shift that previously made the next jump use stale cursor
-  // state; the next ↑ must anchor to the current viewport.
-  const targetTop = await page.evaluate(() => {
-    const sc = document.querySelector(".scroller") as HTMLElement;
-    const row = document.querySelectorAll(".row.user")[3] as HTMLElement;
-    return (
-      row.getBoundingClientRect().top -
-      sc.getBoundingClientRect().top +
-      sc.scrollTop
-    );
-  });
-  await page.evaluate((top) => {
-    (document.querySelector(".scroller") as HTMLElement).scrollTop = top;
-  }, targetTop);
-
-  // Prompt #3 is at the viewport top, so ↑ should select #2 rather than use a
-  // stale cursor position from the previous jump.
-  await page.getByTestId("prompt-nav-up").press("Enter");
-  await expect.poll(() => atPrompt(page, 2)).toBe(true);
-
-  // From #2 at the top, ↓ selects the first prompt below the viewport fold (#3).
-  await page.getByTestId("prompt-nav-down").press("Enter");
-  await expect.poll(() => atPrompt(page, 3)).toBe(true);
+  // …and clicking the newest tick clamps at the transcript end: it holds the newest
+  // prompt's landing (there is no step-past control anymore, so the final turn's
+  // content below the newest prompt keeps the live bottom just below the viewport).
+  const newestTick = page.locator(
+    `[data-testid="prompt-map-tick"][data-prompt-index="${last}"]`,
+  );
+  await expect(newestTick).toBeVisible();
+  await newestTick.click();
+  await waitForPrompt(page, last);
 });
 
 // Journey: ⌘↑/⌘↓ scroll to top/bottom of transcript (not while typing)
@@ -863,50 +800,6 @@ test("sending a prompt while scrolled up jumps the transcript to the bottom", as
   // …and the "New messages ↓" catch-up pill never appeared (we followed the stream
   // down instead of falling behind it).
   await expect(page.getByTestId("new-messages-pill")).toHaveCount(0);
-});
-
-// Journey: prev/next prompt-nav buttons are visible on hover and step through prompts
-test("prev/next prompt-nav buttons are visible on hover and step through prompts", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 1100, height: 600 });
-  await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1100);
-  // Build several turns so the oldest prompts have enough content below them to scroll to
-  // the top (a short final turn can't, which is fine — the stepper clamps there).
-  await buildMultiTurn(page, 5);
-
-  const count = await page.locator(".row.user").count(); // greeting + 5 replies
-  expect(count).toBeGreaterThanOrEqual(6);
-  const last = count - 1;
-
-  // The nav control is always mounted but hidden (opacity 0) until the transcript is
-  // hovered. Hover the transcript-wrap to reveal it.
-  const upBtn = page.getByTestId("prompt-nav-up");
-  const downBtn = page.getByTestId("prompt-nav-down");
-  await page.locator(".transcript-wrap").hover();
-  await expect(upBtn).toBeVisible();
-  await expect(downBtn).toBeVisible();
-
-  // Buttons have the right tooltips (repo rule: every action names itself).
-  await expect(upBtn).toHaveAttribute("title", "Previous prompt");
-  await expect(downBtn).toHaveAttribute("title", "Next prompt");
-
-  // From the live tail, clicking ↑ steps one prompt older per click.
-  for (let i = last; i >= 0; i--) {
-    await upBtn.click({ force: true });
-    await waitForPrompt(page, i);
-    await expect.poll(() => atPrompt(page, i)).toBe(true);
-  }
-  // Past the oldest, ↑ clamps.
-  await upBtn.click({ force: true });
-  await waitForPrompt(page, 0);
-
-  // ↓ walks back toward newer prompts…
-  for (let i = 1; i <= last; i++) {
-    await downBtn.click({ force: true });
-    await waitForPrompt(page, i);
-    await expect.poll(() => atPrompt(page, i)).toBe(true);
-  }
 });
 
 // Journey: switching sessions restores the saved reading position
