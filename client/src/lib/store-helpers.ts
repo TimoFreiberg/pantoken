@@ -51,6 +51,35 @@ export function settleStopOperation(
   };
 }
 
+export interface StaleBuildDecision {
+  readonly raise: boolean; // show the refresh toast now
+  readonly notifySha: string | null; // served sha to record when raising
+  readonly clear: boolean; // served == bundle → drop the recorded sha
+}
+
+/** Decide whether the refresh toast should raise for a served bundle sha.
+ *
+ *  The server's hello names the sha of the bundle it is SERVING (`servedSha`);
+ *  the tab is running the bundle with `bundleSha`. A mismatch means the server
+ *  updated underneath this tab. The toast raises at most once per served sha:
+ *  once `notifiedSha` records a sha, later hellos for the same sha stay silent
+ *  (the user already refreshed or dismissed). When the served sha matches the
+ *  bundle, the record is dropped so a future deploy raises again.
+ */
+export function settleStaleBuild(
+  servedSha: string,
+  bundleSha: string,
+  notifiedSha: string | null,
+): StaleBuildDecision {
+  if (servedSha === bundleSha) {
+    return { raise: false, notifySha: null, clear: notifiedSha !== null };
+  }
+  if (notifiedSha !== null && servedSha === notifiedSha) {
+    return { raise: false, notifySha: null, clear: false };
+  }
+  return { raise: true, notifySha: servedSha, clear: false };
+}
+
 /** The new-session draft's configurable fields. Mirrors the inline `$state`
  *  type in `store.svelte.ts` (cwd + the model/thinking/facet/
  *  permissionMonitor overrides). Extracted here so pure helpers operating on

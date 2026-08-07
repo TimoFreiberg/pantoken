@@ -51,6 +51,7 @@ import { deliveryState } from "./delivery.js";
 import { ensurePermission } from "./notify.js";
 import {
   reseedDraftFromDefaults,
+  settleStaleBuild,
   settleStopOperation,
   type StopOperation,
   type StopState,
@@ -1196,21 +1197,34 @@ class PantokenStore {
         const bootActiveId = this.activeSessionId ?? this.session.ref?.sessionId;
         if (bootActiveId) this.loadDraft(`s:${bootActiveId}`);
         void this.hydrateOutbox(msg.serverId);
-        // The server names the bundle it is SERVING; if it differs from the one
-        // we're RUNNING, the server updated underneath this tab/PWA (sw.js is
-        // byte-identical across builds, so `updatefound` never fires for app
-        // code). Raise the existing refresh toast — once per served sha, so a
-        // dismissed toast doesn't nag again on every reconnect. PROD-gated: a
-        // dev serve (Vite) can disagree with a stale dist marker harmlessly.
-        if (
-          import.meta.env.PROD &&
-          msg.buildSha &&
-          buildFullHash &&
-          msg.buildSha !== buildFullHash &&
-          msg.buildSha !== this.staleBuildNotified
-        ) {
-          this.staleBuildNotified = msg.buildSha;
-          this.markUpdateReady();
+        // The server names the bundle it is SERVING (dist/.pantoken-built-sha);
+        // if it differs from the one we're RUNNING, the server updated underneath
+        // this tab/PWA (sw.js is byte-identical across builds, so `updatefound`
+        // never fires for app code). Raise the existing refresh toast — at most
+        // once per served sha, tracked per serverId in namespaced localStorage so
+        // a reload (Refresh on the toast) doesn't re-raise for the same served
+        // build. PROD-gated: a dev serve (Vite) can disagree with a stale dist
+        // marker harmlessly.
+        if (import.meta.env.PROD && msg.buildSha && buildFullHash) {
+          const persisted =
+            loadNamespacedScalar(STALE_BUILD_KEY, msg.serverId) || null;
+          const decision = settleStaleBuild(
+            msg.buildSha,
+            buildFullHash,
+            persisted ?? this.staleBuildNotified,
+          );
+          if (decision.clear) {
+            this.staleBuildNotified = null;
+            persistNamespacedScalar(STALE_BUILD_KEY, msg.serverId, "");
+          } else if (decision.raise && decision.notifySha) {
+            this.staleBuildNotified = decision.notifySha;
+            persistNamespacedScalar(
+              STALE_BUILD_KEY,
+              msg.serverId,
+              decision.notifySha,
+            );
+            this.markUpdateReady();
+          }
         }
         // A hello after the first is a reconnect. If the resume token we sent
         // is accepted, the hub keeps us on our session (no seed arrives); the
@@ -3614,6 +3628,11 @@ const DRAFTS_KEY = "pantoken.composerDrafts";
 const DRAFT_CONFIG_KEY = "pantoken.draftConfig";
 const LAST_SESSION_PREFIX = "pantoken.lastSession.";
 const LAST_SERVER_KEY = "pantoken.lastServerId";
+// Namespaced per-server record (`pantoken.<serverId>.staleBuildNotified`) of
+// the last served bundle sha the refresh toast was raised for. Persisting it
+// makes the "once per served sha" promise survive a page reload — the refresh
+// toast must not re-raise for the same served build.
+const STALE_BUILD_KEY = "staleBuildNotified";
 
 const LAST_PROJECT_CWD_KEY = "pantoken.lastProjectCwd";
 

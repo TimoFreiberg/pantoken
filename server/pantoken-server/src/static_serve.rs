@@ -199,6 +199,44 @@ impl StaticServer {
     }
 }
 
+/// The sha of the served client bundle: the `.pantoken-built-sha` marker
+/// vite stamps next to the dist (authoritative — it names exactly what this
+/// process serves), falling back to the server binary's compiled build sha
+/// for dists without a marker (pre-marker builds, git-unreachable builds).
+/// A release-sha fallback (the deployed dist lost its marker) logs a warning
+/// so the degraded comparison is diagnosable.
+pub fn resolve_build_sha(client_dist: &Path, compiled_sha: &str) -> String {
+    let marker = std::fs::read_to_string(client_dist.join(".pantoken-built-sha"));
+    let marker_sha = marker
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    match marker_sha {
+        Some(sha) => sha.to_string(),
+        None => {
+            // A missing marker on a release build means the deployed dist lost
+            // its stamp (dropped dotfile, hand-installed dist): hello's buildSha
+            // falls back to the compiled sha and the served-vs-bundle comparison
+            // degrades. Warn so the deploy is diagnosable; dev builds stay silent.
+            if is_release_sha(compiled_sha) {
+                warn!(
+                    "served client-dist at {} has no .pantoken-built-sha marker; \
+                     hello buildSha falls back to the compiled sha {}",
+                    client_dist.display(),
+                    compiled_sha
+                );
+            }
+            compiled_sha.to_string()
+        }
+    }
+}
+
+/// True when `sha` looks like a real release commit sha (40 hex digits), as
+/// opposed to dev fallbacks such as "dev-local" or "".
+fn is_release_sha(sha: &str) -> bool {
+    sha.len() == 40 && sha.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 /// Strip leading slashes and defuse path traversal (`..` segments).
 fn normalize_path(pathname: &str) -> String {
     let stripped = pathname
@@ -260,6 +298,34 @@ fn mime_type(ext: &str) -> Result<&'static str, ()> {
 mod tests {
     use super::*;
     use axum::http::HeaderValue;
+    #[test]
+    fn resolve_build_sha_prefers_dist_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".pantoken-built-sha"), "abc123\n").unwrap();
+        assert_eq!(resolve_build_sha(dir.path(), "server-sha"), "abc123");
+    }
+
+    #[test]
+    fn resolve_build_sha_falls_back_when_marker_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(resolve_build_sha(dir.path(), "server-sha"), "server-sha");
+    }
+
+    #[test]
+    fn resolve_build_sha_falls_back_on_empty_or_whitespace_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".pantoken-built-sha"), "   \n").unwrap();
+        assert_eq!(resolve_build_sha(dir.path(), "server-sha"), "server-sha");
+    }
+
+    #[test]
+    fn is_release_sha_accepts_only_40_hex() {
+        assert!(is_release_sha(&"a".repeat(40)));
+        assert!(!is_release_sha("dev-local"));
+        assert!(!is_release_sha(""));
+        assert!(!is_release_sha(&"z".repeat(40)));
+    }
+
     #[test]
     fn normalize_strips_leading_slash() {
         assert_eq!(normalize_path("/index.html"), "index.html");

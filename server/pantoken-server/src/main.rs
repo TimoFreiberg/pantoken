@@ -222,7 +222,10 @@ async fn main() {
         cfg.live_refresh_ms,
         server_id.clone(),
         Some(cfg.data_dir.clone()),
-        option_env!("PANTOKEN_BUILD_SHA").unwrap_or("").to_string(),
+        static_serve::resolve_build_sha(
+            &cfg.client_dist,
+            option_env!("PANTOKEN_BUILD_SHA").unwrap_or(""),
+        ),
         cfg.delta_flush_ms,
         cfg.journal_idle_evict_ms,
     );
@@ -725,7 +728,10 @@ async fn run_remote_runtime_mode() {
         cfg.live_refresh_ms,
         server_id,
         Some(run_dir.clone()),
-        option_env!("PANTOKEN_BUILD_SHA").unwrap_or("").to_string(),
+        static_serve::resolve_build_sha(
+            &cfg.client_dist,
+            option_env!("PANTOKEN_BUILD_SHA").unwrap_or(""),
+        ),
         cfg.delta_flush_ms,
         cfg.journal_idle_evict_ms,
     );

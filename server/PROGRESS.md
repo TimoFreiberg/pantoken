@@ -380,9 +380,11 @@ faithfully.
       validation (same as TS — the crypto/HTTP path can't be unit-tested
       without a mock push service; `is_dead_status`/`classify_send_result`
       are the tested pure helpers).
-- [~] `build_sha` from the dist marker — reads `PANTOKEN_BUILD_SHA` at compile
-      time via `option_env!` (empty in dev). Still needs a build step (CI /
-      `build.rs`) to actually set the var; the read path is wired.
+- [x] `build_sha` from the dist marker — hello's `buildSha` prefers the
+      served dist's `.pantoken-built-sha` marker (stamped by
+      `client/vite.config.ts` `stampBuiltSha`) and falls back to the compiled
+      `PANTOKEN_BUILD_SHA` ("dev-local" in cargo dev builds, the release sha
+      in headless/CI builds). (2026-08-07)
 - [x] Flip the default server impl — **done (2026-07-08):** TS server deleted,
       Rust server is the only server. AGENTS.md, docs/DECISIONS.md,
       docs/TODO.md, package.json scripts, CI, deploy scripts, desktop app, and
