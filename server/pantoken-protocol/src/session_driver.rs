@@ -455,9 +455,14 @@ pub struct TodoItem {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+// Wire contract is snake_case (`in_progress`): the TS protocol type, the TS
+// wire validator, and the Rust server-side validator all use it (the daemon's
+// own auto-generated types do too). `alias` tolerates a stray camelCase
+// payload from an older peer instead of dropping the whole event.
+#[serde(rename_all = "snake_case")]
 pub enum TodoStatus {
     Pending,
+    #[serde(alias = "inProgress")]
     InProgress,
     Done,
     Blocked,
