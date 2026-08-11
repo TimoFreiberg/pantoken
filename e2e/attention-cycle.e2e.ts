@@ -50,6 +50,23 @@ test("⌘\\ cycles through qna + approval: transcript → qna → approval → t
   await expect(qnaForm(page)).toBeVisible();
 });
 
+test("⌘\\ cycles a plan approval away and back through the approval pill", async ({ page }) => {
+  await drive(page, "planhandoff");
+  const dialog = page.getByRole("dialog", { name: "Plan handoff" });
+  await expect(dialog).toBeVisible();
+
+  // transcript is the implicit home: first press focuses approval, second leaves it.
+  await page.keyboard.press("Control+\\");
+  await expect(dialog).toBeVisible();
+  await expect(page.locator(".attention-pill")).toHaveCount(0);
+  await page.keyboard.press("Control+\\");
+  await expect(dialog).toBeHidden();
+  await expect(page.locator(".attention-pill")).toBeVisible();
+  await page.keyboard.press("Control+\\");
+  await expect(dialog).toBeVisible();
+  await expect(page.locator(".attention-pill")).toHaveCount(0);
+});
+
 // Journey: clicking a pill restores its surface
 test("clicking a pill restores its surface", async ({ page }) => {
   await drive(page, "confirm");
@@ -69,6 +86,38 @@ test("clicking a pill restores its surface", async ({ page }) => {
   await pill.click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(pill).toBeHidden();
+});
+
+test("dirty input and editor approvals stay visible during desktop attention cycling", async ({ page }) => {
+  await drive(page, "input");
+  let dialog = page.getByRole("dialog", { name: "Commit message" });
+  const input = dialog.getByRole("textbox");
+  await expect(input).toHaveValue("Add /health route");
+  await input.fill("draft input value");
+  await page.keyboard.press("Control+\\");
+  await expect(dialog).toBeVisible();
+  await expect(page.locator(".attention-pill")).toHaveCount(0);
+  await page.keyboard.press("Control+\\");
+  await expect(dialog).toBeVisible();
+  await expect(page.locator(".attention-pill")).toHaveCount(0);
+  await expect(input).toHaveValue("draft input value");
+
+  await input.fill("Add /health route");
+  await page.locator('.scrim[role="presentation"]').click({ position: { x: 5, y: 5 } });
+  await expect(dialog).toBeHidden();
+
+  await drive(page, "editor");
+  dialog = page.getByRole("dialog", { name: "Edit release notes" });
+  const editor = dialog.locator("textarea.editor");
+  await expect(editor).toHaveValue("Added the approval shelf.\nPreserved draft safety.");
+  await editor.fill("draft editor value\nwith two lines");
+  await page.keyboard.press("Control+\\");
+  await expect(dialog).toBeVisible();
+  await expect(page.locator(".attention-pill")).toHaveCount(0);
+  await page.keyboard.press("Control+\\");
+  await expect(dialog).toBeVisible();
+  await expect(page.locator(".attention-pill")).toHaveCount(0);
+  await expect(editor).toHaveValue("draft editor value\nwith two lines");
 });
 
 // Journey: ⌘\\ is a no-op when no agent-driven surfaces are active

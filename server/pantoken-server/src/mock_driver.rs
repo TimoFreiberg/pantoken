@@ -3940,6 +3940,13 @@ impl PantokenDriver for MockDriver {
                     timeout_ms: None,
                 } } },
             ],
+            "editor" => vec![
+                ScriptStep { wait_ms: 0, event: SessionDriverEvent::HostUiRequest { base: base(), request: HostUiRequest::Editor {
+                    request_id: "req-editor-1".into(),
+                    title: "Edit release notes".into(),
+                    initial_value: Some("Added the approval shelf.\nPreserved draft safety.".into()),
+                } } },
+            ],
             "qna" => vec![
                 ScriptStep { wait_ms: 0, event: SessionDriverEvent::HostUiRequest { base: base(), request: HostUiRequest::Qna {
                     request_id: "req-qna-1".into(),

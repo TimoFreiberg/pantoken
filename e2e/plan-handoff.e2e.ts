@@ -36,6 +36,39 @@ test("plan-handoff preserves daemon action ordering and reveals refusal feedback
   await expect(dialog).toBeHidden();
 });
 
+test("plan-handoff minimize button collapses and restores the approval", async ({ page }) => {
+  await drive(page, "planhandoff");
+  const dialog = page.getByRole("dialog", { name: "Plan handoff" });
+  await expect(dialog).toBeVisible();
+
+  await dialog.getByRole("button", { name: /minimize to pill/i }).click();
+  await expect(dialog).toBeHidden();
+  const pill = page.locator(".attention-pill");
+  await expect(pill).toBeVisible();
+
+  await pill.click();
+  await expect(dialog).toBeVisible();
+  await expect(pill).toBeHidden();
+});
+
+test("plan-handoff refusal editor survives desktop minimize and restore", async ({ page }) => {
+  await drive(page, "planhandoff");
+  const dialog = page.getByRole("dialog", { name: "Plan handoff" });
+  await dialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
+  const field = dialog.getByRole("textbox", { name: /feedback/i });
+  await field.fill("Keep this plan focused.");
+
+  await dialog.getByRole("button", { name: /minimize to pill/i }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator(".attention-pill")).toBeVisible();
+
+  await page.locator(".attention-pill").click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("textbox", { name: /feedback/i })).toHaveValue(
+    "Keep this plan focused.",
+  );
+});
+
 // Journey: normal plan-handoff resolution and cancellation paths. Each request is
 // resolved before the next drive so the dev-bar fixture controls remain usable.
 test("plan-handoff resolves and cancels successive requests", async ({ page }) => {
@@ -123,11 +156,14 @@ test("plan-handoff scrim protects revealed feedback and untouched plan behavior"
   await drive(page, "planhandoff");
   const dialog = page.getByRole("dialog", { name: "Plan handoff" });
   await dialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
-  const field = dialog.getByRole("textbox", { name: /feedback/i });
-  await field.fill("Keep this draft.");
+  const emptyField = dialog.getByRole("textbox", { name: /feedback/i });
   await page.locator(".scrim").click({ position: { x: 3, y: 3 } });
   await expect(dialog).toBeVisible();
-  await expect(field).toHaveValue("Keep this draft.");
+  await expect(emptyField).toHaveValue("");
+  await emptyField.fill("Keep this draft.");
+  await page.locator(".scrim").click({ position: { x: 3, y: 3 } });
+  await expect(dialog).toBeVisible();
+  await expect(emptyField).toHaveValue("Keep this draft.");
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
 });

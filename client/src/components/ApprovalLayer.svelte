@@ -155,11 +155,13 @@
     cancel();
   }
   // Desktop's attention cycle leaves a dirty input/editor open instead of pill-minimizing
-  // it. Phone minimization is safe because the per-request draft map restores its text.
+  // it. Plan refusal drafts are request-keyed too, so revealing that editor must not block
+  // desktop minimization; scrimClick() above still uses isDirty for modal protection.
+  const canDesktopMinimize = $derived(current?.kind === "plan" || !isDirty);
   const minimized = $derived(
     store.phoneLayout
       ? attention.mobileMinimized
-      : attention.minimized.approval && !isDirty,
+      : attention.minimized.approval && canDesktopMinimize,
   );
 
   function minimize(): void {
