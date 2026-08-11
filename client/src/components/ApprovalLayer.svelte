@@ -163,6 +163,20 @@
       : attention.minimized.approval && canDesktopMinimize,
   );
 
+  // Keep the controller clear of a stale pill as soon as the draft becomes dirty.
+  // This matters after a later edit restores the dialog: a cycle-time minimize
+  // must not reappear once the user has deliberately returned to a clean value.
+  $effect(() => {
+    if (!store.phoneLayout && isDirty && attention.minimized.approval)
+      attention.unminimize("approval");
+  });
+
+  function updateInputValue(value: string): void {
+    inputValue = value;
+    if (!store.phoneLayout) attention.unminimize("approval");
+    rememberDraft();
+  }
+
   function minimize(): void {
     if (store.phoneLayout) attention.minimizeMobile();
     else attention.minimize("approval");
@@ -674,14 +688,14 @@
       </div>
     {:else if current.kind === "input"}
       <h2 id="approval-title">{current.title}</h2>
-      <input class="field" value={inputValue} oninput={(e) => { inputValue = e.currentTarget.value; rememberDraft(); }} placeholder={current.placeholder ?? ""} />
+      <input class="field" value={inputValue} oninput={(e) => updateInputValue(e.currentTarget.value)} placeholder={current.placeholder ?? ""} />
       <div class="actions two">
         <Button variant="secondary" size="lg" block title="Cancel this request" onclick={cancel}>Cancel</Button>
         <Button variant="primary" size="lg" block title="Submit your input" onclick={() => submitValue(inputValue)}>Submit</Button>
       </div>
     {:else if current.kind === "editor"}
       <h2 id="approval-title">{current.title}</h2>
-      <textarea class="editor" value={inputValue} oninput={(e) => { inputValue = e.currentTarget.value; rememberDraft(); }} rows="6"></textarea>
+      <textarea class="editor" value={inputValue} oninput={(e) => updateInputValue(e.currentTarget.value)} rows="6"></textarea>
       <div class="actions two">
         <Button variant="secondary" size="lg" block title="Cancel this request" onclick={cancel}>Cancel</Button>
         <Button variant="primary" size="lg" block title="Save your edits" onclick={() => submitValue(inputValue)}>Save</Button>

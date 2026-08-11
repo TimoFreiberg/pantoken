@@ -44,6 +44,12 @@ class AttentionController {
     if (this.focused === surface) this.focused = null;
   }
 
+  // Clear a surface's pill state without changing which surface owns focus. This
+  // lets a surface veto a cycle-time minimization when it has unsaved input.
+  unminimize(surface: AttentionSurface): void {
+    this.minimized[surface] = false;
+  }
+
   clear(surface: AttentionSurface): void {
     if (this.focused === surface) this.focused = null;
     this.minimized[surface] = false;

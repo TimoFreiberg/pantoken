@@ -565,9 +565,12 @@
                 ? "Container commands unavailable"
                 : "Docker probe failed",
         message: execEnv === "host" || e.message.startsWith("ssh-probe")
-          ? "The SSH probe could not be completed."
+          ? `The SSH probe could not be completed: ${detail}`
           : "Docker container discovery could not be completed.",
-        detail,
+        // A native rejection is already the provider's best real error. Keep it
+        // in the primary failure message; only structured result details use the
+        // disclosure because they can contain extra diagnostic context.
+        detail: execEnv === "host" ? undefined : detail,
       };
       operation = { kind: "idle" };
     }
