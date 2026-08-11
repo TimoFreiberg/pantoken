@@ -274,7 +274,10 @@ test("running subagent pulse is disabled with reduced motion and remains geometr
       return false;
     }
     return [current.row, current.marker].every((box, i) => {
-      const baseline = [first.row!, first.marker!][i];
+      const baseline = i === 0 ? first.row : first.marker;
+      if (!baseline) {
+        return false;
+      }
       return (["x", "y", "width", "height"] as const).every((key) => Math.abs(box[key] - baseline[key]) <= 1);
     });
   }).toBe(true);
