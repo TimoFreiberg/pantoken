@@ -81,43 +81,54 @@ composer rather than directly on top of it, so a user typing isn't
 completely interrupted. *(This is a settled default; if a concrete
 drawback emerges, revisit via `docs/TODO.md`.)*
 
+### Q11 never swallow error output
+Every internal error must either be shown immediately (if it's displayed
+somewhere where longer output doesn't degrade UX), be accessible via popup
+behind a details button or similar (if we can't show longer error messages
+where the error notification is displayed) or logged in the app log file (if
+there's no clean place to show the error).
+Throwing away error context without showing it anywhere is strictly forbidden.
+This is a power user app built for its author, I always want to be able to see
+the lowest level error message available to the codebase (with helpful context
+added where possible of course).
+
 ---
 
 ## Server (Rust)
 
-### Q11 — Reliability over performance `[server]`
+### Q12 — Reliability over performance `[server]`
 The server must always work. Never panic if avoidable — prefer complex
 error handling over panics that cause random crashes. Startup crash on
 truly invalid config is acceptable; runtime panics are not.
 
-### Q12 — Daemon disappearance is visible `[server] [UI]`
+### Q13 — Daemon disappearance is visible `[server] [UI]`
 If the polytoken binary disappears while the server is running, the user
 should see it in the GUI (not silent dead buttons).
 
-### Q13 — No `unsafe` `[server]`
+### Q14 — No `unsafe` `[server]`
 No `unsafe` if at all possible. Reliability is more important than the
 performance `unsafe` might buy.
 
-### Q14 — Avoid unnecessary large clones `[server]`
+### Q15 — Avoid unnecessary large clones `[server]`
 Reasonably high performance Rust. No raw-pointer micro-optimization, but
 avoid wildly unnecessary clones of large strings and buffers.
 
-### Q15 — Thorough, classified error handling `[server]`
+### Q16 — Thorough, classified error handling `[server]`
 Errors we've built support for must be displayed nicely in the UI. Most
 errors in normal operations should be shown clearly. Unexpected errors
 handled by a fallback path must always be displayed in a way the user
 notices something is going on.
 
-### Q16 — Bounded memory `[server]`
+### Q17 — Bounded memory `[server]`
 Keep as little data in memory as necessary for smooth and correct
 operation. Evict data that's no longer needed. Keeping session contents
 warm for fast back-and-forth switching is fine, but the number of warm
 sessions must be bounded.
 
-### Q17 — No Tokio Mutexes `[server]`
+### Q18 — No Tokio Mutexes `[server]`
 Do not use Tokio Mutexes. No exceptions. (See `docs/DECISIONS.md`.)
 
-### Q18 — Tracing discipline `[server]`
+### Q19 — Tracing discipline `[server]`
 The operator won't look at the logs for informational stuff, so don't
 log informational output via tracing. Do log what helps diagnose error
 cases. This is a developer tool — logs are expected when diagnosing
@@ -127,24 +138,24 @@ problems.
 
 ## Cross-cutting
 
-### Q19 — Forward compatibility `[cross]`
+### Q20 — Forward compatibility `[cross]`
 Newer versions of polytoken arrive frequently. Be forward-compatible if
 reasonably possible. Maintain a workflow to update the API based on the
 self-describing CLI methods of the polytoken binary.
 
-### Q20 — Visual direction: follow Codex Desktop `[UI]`
+### Q21 — Visual direction: follow Codex Desktop `[UI]`
 Wherever possible, follow the lead of the Codex Desktop app. Not a 100%
 copy; 80–90% is fine.
 
-### Q21 — Agent-built quality `[cross]`
+### Q22 — Agent-built quality `[cross]`
 This repo is fully agent-built and reviewed only by agents. All quality
 comes from agent tooling and the quality of feature descriptions. When
 reviewing, hold the line on these criteria — there is no human backstop.
 
-### Q22 Tests
+### Q23 Tests
 Any new tests and also existing tests that are updated in a session must conform to the TESTING.md quality standards.
 
-### Q23 Improving the quality of the codebase
+### Q24 Improving the quality of the codebase
 Any preexisting issue, smell, design flaw etc. should be improved or fixed. If
 an agent session notices an issue that is seriously out of scope, it should be
 explicitly called out in the final message to the operator.
