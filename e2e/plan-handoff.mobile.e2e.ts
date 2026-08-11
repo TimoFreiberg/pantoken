@@ -5,8 +5,8 @@ test.beforeEach(async ({ page }) => {
   await gotoFresh(page);
 });
 
-// Mobile plan-handoff keeps the body independently scrollable and stacks every
-// refusal/cancel/implementation control into usable touch targets.
+// Mobile plan-handoff keeps the body independently scrollable and stacks the
+// stable refusal plus implementation controls into usable touch targets.
 test("plan-handoff.mobile feedback editor is focused and controls remain usable", async ({ page }) => {
   await drive(page, "planhandoff");
   const dialog = page.getByRole("dialog", { name: "Plan handoff" });
@@ -17,14 +17,14 @@ test("plan-handoff.mobile feedback editor is focused and controls remain usable"
   await body.evaluate((el) => { el.scrollTop = el.scrollHeight; });
   await expect.poll(() => body.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
 
-  await dialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
+  await dialog.getByRole("button", { name: "Refuse", exact: true }).click();
   const feedback = dialog.getByRole("textbox", { name: /feedback/i });
   await expect(feedback).toBeFocused();
   const fieldBox = await feedback.boundingBox();
   expect(fieldBox).not.toBeNull();
   expect(fieldBox!.height).toBeGreaterThanOrEqual(44);
 
-  const buttons = dialog.getByRole("button").filter({ hasText: /Reject with feedback|Cancel|Implement/ });
+  const buttons = dialog.getByRole("button").filter({ hasText: /Refuse|Implement/ });
   for (const button of await buttons.all()) {
     const box = await button.boundingBox();
     expect(box).not.toBeNull();
@@ -40,7 +40,7 @@ test("plan-handoff.mobile feedback editor is focused and controls remain usable"
 test("plan-handoff preserves refusal draft across pending-dialog navigation", async ({ page }) => {
   await drive(page, "planhandoffpending");
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
+  await dialog.getByRole("button", { name: "Refuse", exact: true }).click();
   await dialog.getByRole("textbox", { name: /feedback/i }).fill("mobile pending sentinel");
   await dialog.getByTitle("Next pending request").click();
   await dialog.getByTitle("Previous pending request").click();
@@ -52,7 +52,7 @@ test("plan-handoff preserves refusal draft across pending-dialog navigation", as
 test("plan-handoff refusal draft is cleared after request replacement", async ({ page }) => {
   await drive(page, "planhandoffpending");
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
+  await dialog.getByRole("button", { name: "Refuse", exact: true }).click();
   await dialog.getByRole("textbox", { name: /feedback/i }).fill("stale replacement sentinel");
   await expect(dialog.getByTitle("Next pending request")).toBeVisible();
   await expect(dialog.getByRole("textbox", { name: /feedback/i })).toHaveValue("stale replacement sentinel");
@@ -62,7 +62,7 @@ test("plan-handoff refusal draft is cleared after request replacement", async ({
   await expect(replacement).toBeVisible({ timeout: 9000 });
   await expect(replacement.getByRole("textbox", { name: /feedback/i })).toHaveCount(0);
   await expect(replacement.getByText("stale replacement sentinel")).toHaveCount(0);
-  await expect(replacement.getByRole("button", { name: "Reject with feedback", exact: true })).toBeVisible();
+  await expect(replacement.getByRole("button", { name: "Refuse", exact: true })).toBeVisible();
 });
 
 test("plan-handoff mobile has no horizontal overflow", async ({ page }) => {

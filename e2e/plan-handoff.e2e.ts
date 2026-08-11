@@ -9,23 +9,48 @@ function actionNames(dialog: import("@playwright/test").Locator) {
   return dialog.locator(".actions button").allTextContents();
 }
 
-// Modern refusal is inserted before cancel; the obsolete keyboard hint is only a
-// daemon wire label and must not leak into the accessible name.
-test("plan-handoff preserves daemon action ordering and reveals refusal feedback", async ({ page }) => {
+async function expectRefusalWire(
+  page: import("@playwright/test").Page,
+  value: string,
+  feedback: string,
+): Promise<void> {
+  await expect
+    .poll(async () => {
+      const messages = await page.locator(".row.notice .ntext").allTextContents();
+      const message = [...messages].reverse().find((text) => text.includes("respondUi: "));
+      if (!message) return null;
+      try {
+        const payload = JSON.parse(message.slice(message.indexOf("respondUi: ") + "respondUi: ".length));
+        return { value: payload.value, feedback: payload.decision?.refuse?.feedback };
+      } catch {
+        return null;
+      }
+    })
+    .toEqual({ value, feedback });
+}
+
+// The visible refusal action is stable and never exposes daemon labels or hints.
+test("plan-handoff preserves action ordering and stable refusal affordance", async ({ page }) => {
   await drive(page, "planhandoff");
   let dialog = page.getByRole("dialog", { name: "Plan handoff" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("plan.md")).toBeVisible();
   await expect(dialog.getByRole("heading", { name: "Plan: Add facet indicator + plan-handoff card" })).toBeVisible();
-  const body = dialog.locator(".plan-body");
-  await expect(body).toBeVisible();
+  await expect(dialog.locator(".plan-body")).toBeVisible();
   await expect.poll(() => actionNames(dialog)).toEqual([
-    "Reject with feedback", "Cancel", "Implement (current context)", "Implement (new context)",
+    "Refuse", "Implement (current context)", "Implement (new context)",
   ]);
-  await expect(dialog.getByRole("button", { name: /Tab for feedback/ })).toHaveCount(0);
-  await dialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Refuse", exact: true })).toHaveAttribute("title", /Escape/);
+  await expect(dialog.getByRole("button", { name: /Daemon refuse option|Tab for feedback/ })).toHaveCount(0);
+
+  const refuse = dialog.getByRole("button", { name: "Refuse", exact: true });
+  await refuse.click();
+  await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("textbox", { name: /feedback/i })).toBeFocused();
-  await page.keyboard.press("Escape");
+  await expect(refuse).toHaveText("Refuse");
+  await expect(refuse).toHaveAttribute("aria-label", "Refuse");
+  await expect(refuse).toHaveAttribute("title", /again/);
+  await refuse.click();
   await expect(dialog).toBeHidden();
 
   await drive(page, "planhandoff");
@@ -54,7 +79,7 @@ test("plan-handoff minimize button collapses and restores the approval", async (
 test("plan-handoff refusal editor survives desktop minimize and restore", async ({ page }) => {
   await drive(page, "planhandoff");
   const dialog = page.getByRole("dialog", { name: "Plan handoff" });
-  await dialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
+  await dialog.getByRole("button", { name: "Refuse", exact: true }).click();
   const field = dialog.getByRole("textbox", { name: /feedback/i });
   await field.fill("Keep this plan focused.");
 
@@ -82,21 +107,35 @@ test("plan-handoff resolves and cancels successive requests", async ({ page }) =
   await expect(implementation).toBeHidden();
 
   await drive(page, "planhandoff");
-  const cancelled = page.getByRole("dialog", { name: "Plan handoff" });
-  await expect(cancelled).toBeVisible();
+  const refusal = page.getByRole("dialog", { name: "Plan handoff" });
+  await expect(refusal).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(cancelled).toBeHidden();
-  await expect(
-    page.locator(".row.notice .ntext").filter({ hasText: "Dialog cancelled." }),
-  ).toHaveCount(1);
+  await expect(refusal.getByRole("textbox", { name: /feedback/i })).toBeFocused();
+  await page.evaluate(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+    document.body.focus();
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const dialog = document.querySelector('[role="dialog"][aria-labelledby="approval-title"]');
+        return Boolean(dialog && !dialog.contains(document.activeElement));
+      }),
+    )
+    .toBe(true);
+  await page.locator(".scrim").click({ position: { x: 3, y: 3 } });
+  await expect(refusal).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(refusal).toBeHidden();
+  await expect(page.getByText(/Plan refusal submitted without feedback/)).toBeVisible();
 });
 
 test("plan-handoff submits typed refusal and empty feedback", async ({ page }) => {
   await drive(page, "planhandoff");
   const dialog = page.getByRole("dialog", { name: "Plan handoff" });
-  await dialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
+  await dialog.getByRole("button", { name: "Refuse", exact: true }).click();
   await dialog.getByRole("textbox", { name: /feedback/i }).fill("Please split this into smaller steps.");
-  await dialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
+  await dialog.getByRole("button", { name: "Refuse", exact: true }).click();
   await expect(dialog).toBeHidden();
   // The acknowledgement renders as a transcript notice row (exactly one).
   await expect(
@@ -104,46 +143,31 @@ test("plan-handoff submits typed refusal and empty feedback", async ({ page }) =
       .locator(".row.notice .ntext")
       .filter({ hasText: "Plan refusal submitted with feedback." }),
   ).toHaveCount(1);
+  await expectRefusalWire(page, "Daemon refuse option (Tab for feedback)", "Please split this into smaller steps.");
 
   await drive(page, "planhandoff");
   const emptyDialog = page.getByRole("dialog", { name: "Plan handoff" });
-  await emptyDialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
-  await emptyDialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
+  await emptyDialog.getByRole("button", { name: "Refuse", exact: true }).click();
+  await emptyDialog.getByRole("button", { name: "Refuse", exact: true }).click();
   await expect(emptyDialog).toBeHidden();
   await expect(
     page
       .locator(".row.notice .ntext")
       .filter({ hasText: "Plan refusal submitted without feedback." }),
   ).toHaveCount(1);
+  await expectRefusalWire(page, "Daemon refuse option (Tab for feedback)", "");
 });
 
-test("plan-handoff plain cancel, Escape, and implementation remain safe", async ({ page }) => {
+test("plan-handoff Escape uses the two-step refusal flow and implementation remains immediate", async ({ page }) => {
   await drive(page, "planhandoff");
   const dialog = page.getByRole("dialog", { name: "Plan handoff" });
-  // Await the dialog before pressing Escape: the key press targets whatever is
-  // focused, and the sheet handles Escape only when focus is inside it.
   await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("textbox", { name: /feedback/i })).toBeFocused();
+  await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
-  await expect(
-    page.locator(".row.notice .ntext").filter({ hasText: "Dialog cancelled." }),
-  ).toHaveCount(1);
-
-  await drive(page, "planhandoff");
-  const plainCancel = page.getByRole("dialog", { name: "Plan handoff" });
-  await expect(plainCancel).toBeVisible();
-  // The no-feedback cancel path is deliberately click-twice (deny-safe): the
-  // first click arms the button ("Click again"), the second commits.
-  await plainCancel.getByRole("button", { name: "Cancel", exact: true }).click();
-  await expect(plainCancel.getByRole("button", { name: "Click again" })).toBeVisible();
-  await expect(plainCancel).toBeVisible();
-  await plainCancel.getByRole("button", { name: "Click again" }).click();
-  await expect(plainCancel).toBeHidden();
-  // The armed second click commits the Cancel label as a typed value response
-  // (the wire summary shows {"value":"Cancel"}), acknowledged as a notice.
-  await expect(
-    page.locator(".row.notice .ntext").filter({ hasText: "Received: Cancel" }),
-  ).toHaveCount(1);
+  await expect(page.getByText(/Plan refusal submitted without feedback/)).toBeVisible();
 
   await drive(page, "planhandoff");
   const implementation = page.getByRole("dialog", { name: "Plan handoff" });
@@ -155,15 +179,16 @@ test("plan-handoff plain cancel, Escape, and implementation remain safe", async 
 test("plan-handoff scrim protects revealed feedback and untouched plan behavior", async ({ page }) => {
   await drive(page, "planhandoff");
   const dialog = page.getByRole("dialog", { name: "Plan handoff" });
-  await dialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
-  const emptyField = dialog.getByRole("textbox", { name: /feedback/i });
+  await dialog.getByRole("button", { name: "Refuse", exact: true }).click();
+  const field = dialog.getByRole("textbox", { name: /feedback/i });
+  await expect(field).toHaveValue("");
   await page.locator(".scrim").click({ position: { x: 3, y: 3 } });
   await expect(dialog).toBeVisible();
-  await expect(emptyField).toHaveValue("");
-  await emptyField.fill("Keep this draft.");
+  await expect(field).toHaveValue("");
+  await field.fill("Keep this draft.");
   await page.locator(".scrim").click({ position: { x: 3, y: 3 } });
   await expect(dialog).toBeVisible();
-  await expect(emptyField).toHaveValue("Keep this draft.");
+  await expect(field).toHaveValue("Keep this draft.");
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
 });
@@ -202,7 +227,9 @@ test("plan-handoff Escape closes only the plan-view overlay over a pending appro
   await expect(modal).toHaveCount(0);
   await expect(dialog).toBeVisible();
 
-  // The approval is still dismissible by its own Escape once the overlay is gone.
+  // First Escape after the overlay reveals feedback; the second submits refusal.
+  await page.keyboard.press("Escape");
+  await expect(dialog.getByRole("textbox", { name: /feedback/i })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
 });
@@ -228,7 +255,9 @@ test("plan-handoff Escape cancels after the rendered PlanView disappears on acti
   await expect(page.getByTestId("plan-view")).toHaveCount(0);
   await expect(dialog).toBeVisible();
 
-  // The stale toggle must not swallow Escape after the rendered panel disappears.
+  // The stale toggle must not swallow the first Escape after the rendered panel disappears.
+  await page.keyboard.press("Escape");
+  await expect(dialog.getByRole("textbox", { name: /feedback/i })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
 });
@@ -236,7 +265,7 @@ test("plan-handoff Escape cancels after the rendered PlanView disappears on acti
 test("plan-handoff Meta/Ctrl+Enter submits revealed refusal and never implementation", async ({ page }) => {
   await drive(page, "planhandoff");
   const dialog = page.getByRole("dialog", { name: "Plan handoff" });
-  await dialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
+  await dialog.getByRole("button", { name: "Refuse", exact: true }).click();
   await dialog.getByRole("textbox", { name: /feedback/i }).fill("Keyboard refusal.");
   await page.keyboard.press("Meta+Enter");
   await expect(dialog).toBeHidden();
@@ -252,29 +281,32 @@ test("plan_handoff_refusal_label_equals_cancel_label", async ({ page }) => {
   await drive(page, "planhandofflegacy");
   const legacy = page.getByRole("dialog", { name: "Plan handoff (legacy daemon)" });
   await expect.poll(() => actionNames(legacy)).toEqual([
-    "Cancel", "Implement (current context)", "Implement (new context)",
+    "Refuse", "Implement (current context)", "Implement (new context)",
   ]);
+  await page.keyboard.press("Escape");
+  await expect(legacy.getByRole("textbox", { name: /feedback/i })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(legacy).toBeHidden();
 
-  // Older daemons have no refusal label, so the single legacy Cancel affordance
-  // is also the explicit-feedback refusal path after its first-click reveal.
+  // Older daemons omit the refusal label, so the stable Refuse affordance uses
+  // the legacy third action value on the wire.
   await drive(page, "planhandofflegacy");
   const legacyFeedback = page.getByRole("dialog", { name: "Plan handoff (legacy daemon)" });
-  await legacyFeedback.getByRole("button", { name: "Cancel", exact: true }).click();
+  await legacyFeedback.getByRole("button", { name: "Refuse", exact: true }).click();
   await legacyFeedback.getByRole("textbox", { name: /feedback/i }).fill("Legacy daemon feedback.");
-  await legacyFeedback.getByRole("button", { name: "Cancel", exact: true }).click();
+  await legacyFeedback.getByRole("button", { name: "Refuse", exact: true }).click();
   await expect(legacyFeedback).toBeHidden();
   await expect(
     page
       .locator(".row.notice .ntext")
       .filter({ hasText: "Plan refusal submitted with feedback." }),
   ).toHaveCount(1);
+  await expect(page.getByText(/respondUi:.*Cancel.*Legacy daemon feedback\./)).toBeVisible();
 
   await drive(page, "planhandoffequal");
   const equal = page.getByRole("dialog", { name: "Plan handoff (equal labels)" });
-  await expect(equal.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(1);
-  await equal.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(equal.getByRole("button", { name: "Refuse", exact: true })).toHaveCount(1);
+  await equal.getByRole("button", { name: "Refuse", exact: true }).click();
   const equalFeedback = equal.getByRole("textbox", { name: /feedback/i });
   await expect(equalFeedback).toBeFocused();
   await equalFeedback.fill("Keep the equal-label draft.");
@@ -282,25 +314,22 @@ test("plan_handoff_refusal_label_equals_cancel_label", async ({ page }) => {
   await page.locator(".scrim").click({ position: { x: 3, y: 3 } });
   await expect(equal).toBeVisible();
   await expect(equalFeedback).toHaveValue("Keep the equal-label draft.");
-  // Escape remains the no-feedback generic cancellation path.
+  // Escape submits the revealed refusal, preserving the draft as feedback.
   await page.keyboard.press("Escape");
   await expect(equal).toBeHidden();
-  // Two generic cancellations so far in this test (the legacy Escape + this one).
-  await expect(
-    page.locator(".row.notice .ntext").filter({ hasText: "Dialog cancelled." }),
-  ).toHaveCount(2);
+  await expect(page.getByText(/Plan refusal submitted with feedback/)).toHaveCount(2);
 
-  // A fresh equal-label request also times out through generic cancellation, never
+  // A fresh equal-label request still times out through generic cancellation, never
   // submitting the revealed refusal (or its draft) as a plan answer.
   await drive(page, "planhandoffequal");
   const timedEqual = page.getByRole("dialog", { name: "Plan handoff (equal labels)" });
-  await timedEqual.getByRole("button", { name: "Cancel", exact: true }).click();
+  await timedEqual.getByRole("button", { name: "Refuse", exact: true }).click();
   await timedEqual.getByRole("textbox", { name: /feedback/i }).fill("equal timeout sentinel");
   await expect(timedEqual).toBeHidden({ timeout: 8000 });
-  // Three generic cancellations now (legacy Escape, equal Escape, this timeout).
+  // The timed equal-label request still uses generic cancellation.
   await expect(
     page.locator(".row.notice .ntext").filter({ hasText: "Dialog cancelled." }),
-  ).toHaveCount(3);
+  ).toHaveCount(1);
   // The timed equal request's own response summary is a generic cancellation
   // (all three cancellations render now that replayed request ids are unique).
   await expect(
@@ -310,17 +339,22 @@ test("plan_handoff_refusal_label_equals_cancel_label", async ({ page }) => {
       .last(),
   ).toBeVisible();
   await expect(page.getByText(/equal timeout sentinel/)).toHaveCount(0);
-  // Exactly one refusal happened in this test — the legacy drive's (pinned
-  // above). The timed equal request must not have added another.
+  // The timed equal request must not have added a refusal beyond the legacy and
+  // equal-label refusal journeys above.
   await expect(
     page.locator(".row.notice .ntext").filter({ hasText: "Plan refusal submitted" }),
-  ).toHaveCount(1);
+  ).toHaveCount(3);
 
   await drive(page, "planhandoffcollision");
   const collision = page.getByRole("dialog", { name: "Plan handoff (collision)" });
   await expect.poll(() => actionNames(collision)).toEqual([
-    "Cancel", "Implement (current context)", "Implement (new context)",
+    "Refuse", "Implement (current context)", "Implement (new context)",
   ]);
+  await expect(collision.getByRole("button", { name: "Refuse", exact: true })).toBeDisabled();
+  await page.evaluate(() => document.body.focus());
+  await page.keyboard.press("Escape");
+  await expect(collision).toBeHidden();
+  await expect(page.getByText(/respondUi:.*Implement \(current context\)/)).toHaveCount(0);
 });
 
 test("plan-handoff renders markdown and preserves plan-body scrolling", async ({ page }) => {
@@ -336,7 +370,7 @@ test("plan-handoff renders markdown and preserves plan-body scrolling", async ({
 test("plan-handoff drafted timeout resolves to generic cancellation without refusal", async ({ page }) => {
   await drive(page, "planhandofftimeout");
   const dialog = page.getByRole("dialog", { name: "Plan handoff (timed)" });
-  await dialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
+  await dialog.getByRole("button", { name: "Refuse", exact: true }).click();
   await dialog.getByRole("textbox", { name: /feedback/i }).fill("timeout sentinel");
   await expect(dialog).toBeHidden({ timeout: 8000 });
   await expect(
@@ -370,7 +404,7 @@ test("a timed-out drafted plan card auto-resolves to generic cancellation", asyn
   await drive(page, "planhandofftimeout");
   const dialog = page.getByRole("dialog", { name: "Plan handoff (timed)" });
   await expect(page.getByText(/Auto-dismiss in \d+s/)).toBeVisible();
-  await dialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
+  await dialog.getByRole("button", { name: "Refuse", exact: true }).click();
   await dialog.getByRole("textbox", { name: /feedback/i }).fill("timeout sentinel");
   await expect(dialog).toBeHidden({ timeout: 8000 });
   await expect(

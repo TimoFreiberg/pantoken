@@ -27,9 +27,9 @@ async function expectTall(loc: Locator, min = 44) {
 test("plan-handoff controls meet the 44px touch target and stay in viewport", async ({ page }) => {
   await drive(page, "planhandoff");
   const dialog = page.getByRole("dialog", { name: "Plan handoff" });
-  await dialog.getByRole("button", { name: "Reject with feedback", exact: true }).click();
+  await dialog.getByRole("button", { name: "Refuse", exact: true }).click();
   await expectTall(dialog.getByRole("textbox", { name: /feedback/i }));
-  for (const button of await dialog.getByRole("button").filter({ hasText: /Reject with feedback|Cancel|Implement/ }).all()) {
+  for (const button of await dialog.getByRole("button").filter({ hasText: /Refuse|Implement/ }).all()) {
     await expectTall(button);
     const box = await button.boundingBox();
     expect(box).not.toBeNull();

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
   import { reveal } from "../lib/transitions.js";
   import { isDialogRequest, type HostUiRequest } from "@pantoken/protocol";
   import { store } from "../lib/store.svelte.js";
@@ -194,42 +193,12 @@
     store.respondUi({ requestId: current.requestId, value: v });
   }
 
-  // Plan refusal uses an explicit two-step affordance: the first click reveals an
-  // optional feedback field, while the second click submits the dedicated refusal
-  // response (including an intentional empty string). A distinct cancel action keeps
-  // the existing click-twice safety gate for the no-feedback cancel path.
-  const ARM_TIMEOUT = 3000;
-  let planCancelArmed = $state(false);
-  let planCancelTimer: ReturnType<typeof setTimeout> | null = null;
-  function disarmPlanCancel(): void {
-    planCancelArmed = false;
-    if (planCancelTimer) {
-      clearTimeout(planCancelTimer);
-      planCancelTimer = null;
-    }
-  }
-  function attemptPlanCancel(): void {
-    if (!current || current.kind !== "plan") return;
-    if (planCancelArmed) {
-      disarmPlanCancel();
-      submitValue(current.actionLabels[2]);
-    } else {
-      planCancelArmed = true;
-      planCancelTimer = setTimeout(disarmPlanCancel, ARM_TIMEOUT);
-    }
-  }
-  function normalizePlanLabel(label: string): string {
-    return label.replace(/\s*\(Tab for feedback\)\s*$/i, "").trim();
-  }
+  // Plan refusal has one stable, visible action. The first activation reveals and
+  // focuses optional feedback; the second submits the refusal, including an
+  // intentional empty string. Daemon labels stay wire-only and never become UI copy.
   const planRefusal = $derived.by(() => {
     if (current?.kind !== "plan") {
-      return {
-        cancelLabel: "",
-        refusalWireLabel: "",
-        refusalLabel: "",
-        available: false,
-        distinct: false,
-      };
+      return { refusalWireLabel: "", available: false };
     }
     const explicit =
       "refuseLabel" in current && typeof current.refuseLabel === "string"
@@ -238,13 +207,9 @@
     const collidesWithImplementation =
       explicit === current.actionLabels[0] || explicit === current.actionLabels[1];
     const available = explicit === undefined ? true : !collidesWithImplementation;
-    const refusalWireLabel = available ? (explicit ?? current.actionLabels[2]) : "";
     return {
-      cancelLabel: current.actionLabels[2],
-      refusalWireLabel,
-      refusalLabel: normalizePlanLabel(refusalWireLabel),
+      refusalWireLabel: available ? (explicit ?? current.actionLabels[2]) : "",
       available,
-      distinct: available && refusalWireLabel !== current.actionLabels[2],
     };
   });
   function focusRefusalField(): void {
@@ -266,7 +231,6 @@
     approvalDeadlines.delete(draftKey(requestId));
     refusalFeedback = "";
     refusalRevealed = false;
-    disarmPlanCancel();
     attention.clear("approval");
     store.respondUi({ requestId, value, feedback });
   }
@@ -274,14 +238,6 @@
     if (refusalRevealed) submitRefusal();
     else revealRefusal();
   }
-  onDestroy(() => disarmPlanCancel());
-  const planCancelLabel = $derived(
-    planCancelArmed
-      ? "Click again"
-      : current?.kind === "plan"
-        ? normalizePlanLabel(current.actionLabels[2])
-        : "",
-  );
 
   // --- Binary 2-option select → Yes/No card ---
   // Classify an option label as affirmative / negative / neutral so we can
@@ -446,7 +402,6 @@
     const id = current?.requestId;
     if (id !== lastApprovalId) {
       if (lastApprovalId !== undefined) attention.clear("approval");
-      disarmPlanCancel();
       refusalField = null;
       lastApprovalId = id;
     }
@@ -500,11 +455,16 @@
     if (e.key === "Escape") {
       // This handler is on the approval sheet, so it runs at the event target before
       // PlanView's window-level handler. Let the rendered overlay claim Escape without
-      // preventing default or changing the pending approval's deny-safe state.
+      // changing the pending approval's state.
       if (isRenderedPlanView()) return;
       e.preventDefault();
-      if (current?.kind === "plan" && planCancelArmed) {
-        disarmPlanCancel();
+      if (current?.kind === "plan") {
+        if (planRefusal.available) {
+          if (refusalRevealed) submitRefusal();
+          else revealRefusal();
+        } else {
+          cancel();
+        }
         return;
       }
       cancel();
@@ -579,10 +539,16 @@
     if (isRenderedPlanView()) return;
     if (e.defaultPrevented) return;
     if (OPEN_ESCAPE_OWNER_SELECTORS.some((sel) => document.querySelector(sel))) return;
-    // Replicate the sheet's Escape semantics exactly: an armed plan cancel
-    // disarms instead of cancelling.
-    if (current.kind === "plan" && planCancelArmed) {
-      disarmPlanCancel();
+    // Replicate the sheet's Escape semantics exactly, including the plan refusal
+    // reveal/submit transition when focus has left the sheet.
+    if (current.kind === "plan") {
+      e.preventDefault();
+      if (planRefusal.available) {
+        if (refusalRevealed) submitRefusal();
+        else revealRefusal();
+      } else {
+        cancel();
+      }
       return;
     }
     cancel();
@@ -689,38 +655,20 @@
         </div>
       {/if}
       <div class="actions plan-actions">
-        {#if planRefusal.distinct}
-          <Button
-            variant="secondary"
-            size="lg"
-            block
-            class="refusal-action"
-            title="Explain why this plan should not be implemented"
-            aria-label={planRefusal.refusalLabel}
-            onclick={attemptPlanRefusal}
-          >{planRefusal.refusalLabel}</Button>
-        {/if}
-        {#if planRefusal.distinct || planRefusal.refusalWireLabel !== planRefusal.cancelLabel}
-          <Button
-            variant="secondary"
-            size="lg"
-            block
-            class={planCancelArmed ? "armed" : ""}
-            title={planCancelArmed ? "Click again to cancel" : planCancelLabel}
-            aria-label={planCancelLabel}
-            onclick={attemptPlanCancel}
-          >{planCancelLabel}</Button>
-        {:else if planRefusal.available}
-          <Button
-            variant="secondary"
-            size="lg"
-            block
-            class="refusal-action"
-            title="Click once to add optional feedback; click again to refuse"
-            aria-label={planCancelLabel}
-            onclick={attemptPlanRefusal}
-          >{planCancelLabel}</Button>
-        {/if}
+        <Button
+          variant="secondary"
+          size="lg"
+          block
+          class="refusal-action"
+          title={!planRefusal.available
+            ? "Refusal unavailable for this plan"
+            : refusalRevealed
+              ? "Press Escape again to refuse this plan"
+              : "Press Escape to add optional feedback"}
+          aria-label="Refuse"
+          disabled={!planRefusal.available}
+          onclick={attemptPlanRefusal}
+        >Refuse</Button>
         <Button variant="secondary" size="lg" block title={current.actionLabels[1]} aria-label={current.actionLabels[1]} onclick={() => submitValue(current.actionLabels[1])}>{current.actionLabels[1]}</Button>
         <Button variant="primary" size="lg" block title={current.actionLabels[0]} aria-label={current.actionLabels[0]} onclick={() => submitValue(current.actionLabels[0])}>{current.actionLabels[0]}</Button>
       </div>
@@ -911,16 +859,6 @@
     white-space: normal;
     min-width: 0;
     flex: 1 1 0;
-  }
-  /* Armed (click-twice confirm): destructive red so the operator sees the
-     consequence of a second click. Mirrors ContextMeter's .action.armed. */
-  .actions :global(.btn.armed) {
-    color: var(--danger);
-    border-color: var(--danger);
-    background: color-mix(in srgb, var(--danger) 10%, transparent);
-  }
-  .actions :global(.btn.armed:hover) {
-    background: color-mix(in srgb, var(--danger) 15%, transparent);
   }
   .actions.two {
     flex-direction: row;
