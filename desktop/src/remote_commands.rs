@@ -153,6 +153,12 @@ pub struct TestSshResult {
     /// auth, host-key, or unreachable errors. `None` otherwise.
     #[serde(rename = "sshErrorDetail")]
     pub ssh_error_detail: Option<String>,
+    /// Machine-readable setup failure family, when the probe did not succeed.
+    #[serde(rename = "failureKind")]
+    pub failure_kind: Option<String>,
+    /// Bounded, redacted technical detail for the setup disclosure.
+    #[serde(rename = "failureDetail")]
+    pub failure_detail: Option<String>,
 }
 
 /// A mount on a container, from `inspect_container`. Mirrors `MountSummary`.
@@ -655,9 +661,73 @@ fn ssh_error_detail(stderr: &str) -> Option<String> {
     Some(detail)
 }
 
+fn bounded_probe_detail(detail: &str, ssh_destination: &str) -> Option<String> {
+    let detail = detail.trim().replace(ssh_destination, "<redacted-host>");
+    if detail.is_empty() {
+        return None;
+    }
+    const MAX: usize = 300;
+    let mut bounded: String = detail.chars().take(MAX).collect();
+    if detail.chars().count() > MAX {
+        bounded.push('…');
+    }
+    Some(bounded)
+}
+
+fn probe_failure(
+    ssh_ok: bool,
+    docker_permission: &str,
+    kind: &str,
+    detail: Option<String>,
+) -> TestSshResult {
+    TestSshResult {
+        ssh_ok,
+        docker_permission: docker_permission.into(),
+        containers: Vec::new(),
+        ssh_error_detail: (kind == "ssh").then_some(detail.clone()).flatten(),
+        failure_kind: Some(kind.into()),
+        failure_detail: detail,
+    }
+}
+
+/// Test SSH connectivity without requiring Docker. This is the pre-profile
+/// probe for Host execution targets and intentionally runs only a harmless
+/// remote shell command.
+pub async fn test_ssh_impl(
+    ssh_destination: String,
+    port: Option<u16>,
+    transport: &Arc<dyn SshTransport>,
+) -> Result<TestSshResult, String> {
+    let output = transport
+        .run_command(SshCommand::for_probe(&ssh_destination, port), "true")
+        .await
+        .map_err(|e| {
+            format!(
+                "ssh-probe: {}",
+                bounded_probe_detail(&e.to_string(), &ssh_destination)
+                    .unwrap_or_else(|| "SSH probe could not be started".into())
+            )
+        })?;
+    if !output.is_success() {
+        let detail = bounded_probe_detail(
+            &ssh_error_detail(&output.stderr).unwrap_or_default(),
+            &ssh_destination,
+        );
+        return Ok(probe_failure(false, "unknown", "ssh", detail));
+    }
+    Ok(TestSshResult {
+        ssh_ok: true,
+        docker_permission: "unknown".into(),
+        containers: Vec::new(),
+        ssh_error_detail: None,
+        failure_kind: None,
+        failure_detail: None,
+    })
+}
+
 /// Test SSH connectivity and list Docker containers on the remote host.
 /// Runs before a profile is saved, so it builds a minimal `SshCommand` from
-/// just destination + port.
+/// just destination + port. Docker failures remain distinct from SSH failures.
 pub async fn test_ssh_and_list_containers_impl(
     ssh_destination: String,
     port: Option<u16>,
@@ -665,37 +735,39 @@ pub async fn test_ssh_and_list_containers_impl(
 ) -> Result<TestSshResult, String> {
     let command = SshCommand::for_probe(&ssh_destination, port);
 
-    // 1. Test SSH connectivity + Docker availability/permission.
     let docker_version = transport
         .run_command(
             command.clone(),
             "docker version --format '{{.Client.Version}}'",
         )
         .await
-        .map_err(|e| format!("SSH connection failed: {e}"))?;
+        .map_err(|e| {
+            format!(
+                "ssh-probe: Docker access probe could not be run: {}",
+                bounded_probe_detail(&e.to_string(), &ssh_destination)
+                    .unwrap_or_else(|| "SSH transport could not run the Docker access probe".into())
+            )
+        })?;
 
-    // If the SSH command itself failed (non-zero exit), check whether it's an
-    // SSH-level failure (exit 255) or a Docker-permission failure.
     if !docker_version.is_success() {
-        // Exit code 255 = SSH-level failure (auth, unreachable, host-key).
         if docker_version.exit_code == Some(255) {
-            return Ok(TestSshResult {
-                ssh_ok: false,
-                docker_permission: "unknown".into(),
-                containers: Vec::new(),
-                ssh_error_detail: ssh_error_detail(&docker_version.stderr),
-            });
+            let detail = bounded_probe_detail(
+                &ssh_error_detail(&docker_version.stderr).unwrap_or_default(),
+                &ssh_destination,
+            );
+            return Ok(probe_failure(false, "unknown", "ssh", detail));
         }
-        // Non-255 failure = Docker CLI issue or permission denied.
-        return Ok(TestSshResult {
-            ssh_ok: true,
-            docker_permission: "denied".into(),
-            containers: Vec::new(),
-            ssh_error_detail: None,
-        });
+        return Ok(probe_failure(
+            true,
+            "denied",
+            "dockerUnavailable",
+            bounded_probe_detail(
+                &ssh_error_detail(&docker_version.stderr).unwrap_or_default(),
+                &ssh_destination,
+            ),
+        ));
     }
 
-    // 2. List all containers (including stopped, so the picker can show them).
     let list_command = crate::docker_target::shell_join(&[
         "docker".into(),
         "container".into(),
@@ -705,28 +777,42 @@ pub async fn test_ssh_and_list_containers_impl(
         crate::docker_target::CONTAINER_LIST_FORMAT.into(),
     ]);
     let listed = transport
-        .run_command(command.clone(), &list_command)
+        .run_command(command, &list_command)
         .await
-        .map_err(|e| format!("failed to list containers: {e}"))?;
+        .map_err(|e| {
+            format!(
+                "docker-discovery: {}",
+                bounded_probe_detail(&e.to_string(), &ssh_destination)
+                    .unwrap_or_else(|| "Docker container listing could not be started".into())
+            )
+        })?;
 
     if !listed.is_success() {
-        return Ok(TestSshResult {
-            ssh_ok: true,
-            docker_permission: "denied".into(),
-            containers: Vec::new(),
-            ssh_error_detail: None,
-        });
+        let detail = bounded_probe_detail(
+            &ssh_error_detail(&listed.stderr).unwrap_or_default(),
+            &ssh_destination,
+        );
+        if listed.exit_code == Some(255) {
+            return Ok(probe_failure(false, "unknown", "ssh", detail));
+        }
+        return Ok(probe_failure(true, "denied", "dockerDiscovery", detail));
     }
 
-    let records = crate::docker_target::parse_container_list(&listed.stdout)
-        .map_err(|e| format!("malformed container list: {e}"))?;
+    let records = match crate::docker_target::parse_container_list(&listed.stdout) {
+        Ok(records) => records,
+        Err(error) => {
+            return Ok(probe_failure(
+                true,
+                "granted",
+                "malformedDockerOutput",
+                bounded_probe_detail(&error.to_string(), &ssh_destination),
+            ));
+        }
+    };
 
     let containers = records
         .into_iter()
         .map(|record| {
-            // docker container ls doesn't give configured user or compose
-            // metadata reliably; the list shows basic info. Full details come
-            // from inspect_container after selection.
             let (compose_project, compose_service) =
                 crate::docker_target::compose_metadata(&record.labels);
             ContainerSummary {
@@ -745,6 +831,8 @@ pub async fn test_ssh_and_list_containers_impl(
         docker_permission: "granted".into(),
         containers,
         ssh_error_detail: None,
+        failure_kind: None,
+        failure_detail: None,
     })
 }
 
@@ -948,6 +1036,14 @@ pub fn resume_connection(
     ensure_remote_host(id, state)
 }
 
+/// Test SSH connectivity without requiring Docker.
+/// Runs before saving a Host execution profile.
+#[tauri::command]
+pub async fn test_ssh(ssh_destination: String, port: Option<u16>) -> Result<TestSshResult, String> {
+    let transport: Arc<dyn SshTransport> = Arc::new(SystemSshTransport::new());
+    test_ssh_impl(ssh_destination, port, &transport).await
+}
+
 /// Test SSH connectivity and list Docker containers on the remote host.
 /// Runs before a profile is saved (pre-profile discovery).
 #[tauri::command]
@@ -987,6 +1083,7 @@ pub fn invoke_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tau
         acknowledge_risk,
         cancel_connection,
         resume_connection,
+        test_ssh,
         test_ssh_and_list_containers,
         inspect_container,
     ])
@@ -1915,9 +2012,10 @@ mod tests {
     // ── Container discovery command tests ───────────────────────────────────
 
     fn container_list_stdout() -> String {
-        // Two container records as JSON-per-line (docker container ls --format '{{json .}}').
-        let line1 = r#"{"Id":"abc123","Names":"work-api-dev","Image":"node:20-alpine","State":"running","Status":"Up 2 hours","Labels":{"com.docker.compose.project":"work-api","com.docker.compose.service":"api"}}"#;
-        let line2 = r#"{"Id":"def456","Names":"postgres-dev","Image":"postgres:16","State":"exited","Status":"Exited 0","Labels":{}}"#;
+        // Real docker container ls --format '{{json .}}' output: ID plus a
+        // comma-separated label string.
+        let line1 = r#"{"ID":"abc123","Names":"work-api-dev","Image":"node:20-alpine","State":"running","Status":"Up 2 hours","Labels":"com.docker.compose.project=work-api,com.docker.compose.service=api"}"#;
+        let line2 = r#"{"ID":"def456","Names":"postgres-dev","Image":"postgres:16","State":"exited","Status":"Exited 0","Labels":""}"#;
         format!("{line1}\n{line2}\n")
     }
 
@@ -1965,6 +2063,50 @@ mod tests {
           }
         ]"#
         .into()
+    }
+
+    #[tokio::test]
+    async fn test_ssh_only_probe_succeeds_without_docker() {
+        let fake = FakeSshTransport::new(FakeScenario::default());
+        fake.add_command_response(
+            "true",
+            crate::bridge::CommandOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: Some(0),
+            },
+        );
+        let transport: Arc<dyn SshTransport> = Arc::new(fake.clone());
+        let result = test_ssh_impl("dev@server".into(), Some(22), &transport)
+            .await
+            .unwrap();
+        assert!(result.ssh_ok);
+        assert_eq!(result.docker_permission, "unknown");
+        assert!(result.containers.is_empty());
+        assert!(result.failure_kind.is_none());
+        assert_eq!(fake.command_log(), vec!["true"]);
+    }
+
+    #[tokio::test]
+    async fn test_ssh_only_probe_surfaces_bounded_redacted_detail() {
+        let fake = FakeSshTransport::new(FakeScenario::default());
+        fake.add_command_response(
+            "true",
+            crate::bridge::CommandOutput {
+                stdout: String::new(),
+                stderr: format!("Permission denied for dev@server {}", "x".repeat(500)),
+                exit_code: Some(255),
+            },
+        );
+        let transport: Arc<dyn SshTransport> = Arc::new(fake);
+        let result = test_ssh_impl("dev@server".into(), Some(22), &transport)
+            .await
+            .unwrap();
+        assert!(!result.ssh_ok);
+        assert_eq!(result.failure_kind.as_deref(), Some("ssh"));
+        let detail = result.failure_detail.unwrap();
+        assert!(detail.len() <= 303);
+        assert!(!detail.contains("dev@server"));
     }
 
     #[tokio::test]
@@ -2030,6 +2172,72 @@ mod tests {
         assert_eq!(result.docker_permission, "denied");
         assert!(result.containers.is_empty());
         assert_eq!(result.ssh_error_detail, None);
+        assert_eq!(result.failure_kind.as_deref(), Some("dockerUnavailable"));
+        assert_eq!(result.failure_detail.as_deref(), Some("permission denied"));
+    }
+
+    #[tokio::test]
+    async fn test_ssh_and_list_containers_list_failure_is_docker_classified() {
+        let fake = FakeSshTransport::new(FakeScenario::default());
+        fake.add_command_response(
+            "docker version",
+            crate::bridge::CommandOutput {
+                stdout: "27.0.0".into(),
+                stderr: String::new(),
+                exit_code: Some(0),
+            },
+        );
+        fake.add_command_response(
+            "container ls",
+            crate::bridge::CommandOutput {
+                stdout: String::new(),
+                stderr: "permission denied".into(),
+                exit_code: Some(1),
+            },
+        );
+        let transport: Arc<dyn SshTransport> = Arc::new(fake);
+        let result = test_ssh_and_list_containers_impl("dev@server".into(), None, &transport)
+            .await
+            .unwrap();
+        assert!(result.ssh_ok);
+        assert_eq!(result.failure_kind.as_deref(), Some("dockerDiscovery"));
+        assert_eq!(result.failure_detail.as_deref(), Some("permission denied"));
+        assert_eq!(result.ssh_error_detail, None);
+    }
+
+    #[tokio::test]
+    async fn test_ssh_and_list_containers_malformed_output_is_classified() {
+        let fake = FakeSshTransport::new(FakeScenario::default());
+        fake.add_command_response(
+            "docker version",
+            crate::bridge::CommandOutput {
+                stdout: "27.0.0".into(),
+                stderr: String::new(),
+                exit_code: Some(0),
+            },
+        );
+        fake.add_command_response(
+            "container ls",
+            crate::bridge::CommandOutput {
+                stdout: "not json".into(),
+                stderr: String::new(),
+                exit_code: Some(0),
+            },
+        );
+        let transport: Arc<dyn SshTransport> = Arc::new(fake);
+        let result = test_ssh_and_list_containers_impl("dev@server".into(), None, &transport)
+            .await
+            .unwrap();
+        assert_eq!(
+            result.failure_kind.as_deref(),
+            Some("malformedDockerOutput")
+        );
+        assert!(result
+            .failure_detail
+            .as_deref()
+            .unwrap()
+            .contains("record 1"));
+        assert!(result.failure_detail.as_deref().unwrap().len() <= 300);
     }
 
     #[tokio::test]
@@ -2057,6 +2265,16 @@ mod tests {
             result.ssh_error_detail.as_deref(),
             Some("Permission denied (publickey)")
         );
+        assert_eq!(result.failure_kind.as_deref(), Some("ssh"));
+        assert_eq!(
+            result.failure_detail.as_deref(),
+            Some("Permission denied (publickey)")
+        );
+        assert!(!result
+            .failure_detail
+            .as_deref()
+            .unwrap()
+            .contains("dev@server"));
     }
 
     #[tokio::test]

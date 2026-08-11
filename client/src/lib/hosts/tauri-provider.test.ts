@@ -172,6 +172,38 @@ describe("TauriHostProvider", () => {
     expect(dockerHost?.isDockerTarget).toBe(true);
   });
 
+  test("testSsh uses the SSH-only command and preserves real failures", async () => {
+    const calls: string[] = [];
+    globalThis.window = {
+      __TAURI_INTERNALS__: {
+        invoke: (cmd: string): Promise<unknown> => {
+          calls.push(cmd);
+          return Promise.resolve({
+            sshOk: false,
+            dockerPermission: "unknown",
+            containers: [],
+            failureKind: "ssh",
+            failureDetail: "Permission denied (publickey)",
+          });
+        },
+      },
+    } as unknown as typeof globalThis.window;
+    const result = await createTauriHostProvider(() => "").testSsh("user@host", 22);
+    expect(calls).toEqual(["test_ssh"]);
+    expect(result.failureKind).toBe("ssh");
+    expect(result.failureDetail).toBe("Permission denied (publickey)");
+  });
+
+  test("testSsh degrades only for a missing native command", async () => {
+    const provider = createTauriHostProvider(() => "");
+    installRejectingInvoke("test_ssh", "command test_ssh not found");
+    await expect(provider.testSsh("user@host")).rejects.toThrow(
+      "SSH testing is not available in this build",
+    );
+    installRejectingInvoke("test_ssh", "ssh-probe: Connection refused");
+    await expect(provider.testSsh("user@host")).rejects.toThrow("ssh-probe: Connection refused");
+  });
+
   test("testSshAndListContainers degrades only for missing-command rejections", async () => {
     const provider = createTauriHostProvider(() => "");
 

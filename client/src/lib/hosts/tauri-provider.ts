@@ -19,15 +19,15 @@ import type {
 } from "./types.js";
 
 /** True when a Tauri invoke rejection means the requested command is not
- *  registered — the desktop build predates it. Tauri v2 rejects unknown
- *  commands with a message shaped like `command test_ssh_and_list_containers
- *  not found`; the exact wording varies by version, so we match the common
- *  "missing command" phrasings. Any other rejection (e.g. the command ran and
- *  returned `Err("SSH connection failed: …")`) is a REAL failure and must not
- *  be degraded to "not available". */
+ *  registered — the desktop build predates it. Any other rejection is a real
+ *  probe failure and must remain visible to the setup sheet. */
 function isMissingCommandError(rejection: unknown): boolean {
   const message = rejection instanceof Error ? rejection.message : String(rejection);
-  return /not found|unknown command|not registered/i.test(message);
+  const normalized = message.trim();
+  return (
+    /^command\s+[a-z0-9_]+\s+(?:not found|not registered)$/i.test(normalized) ||
+    /^unknown command:\s*[a-z0-9_]+$/i.test(normalized)
+  );
 }
 
 /** Extract a stable error message from an invoke rejection. */
@@ -279,6 +279,23 @@ export function createTauriHostProvider(
 
     supportsContainerTargets() {
       return true;
+    },
+
+    async testSsh(
+      sshDestination: string,
+      port?: number,
+    ): Promise<TestSshResult> {
+      try {
+        return await invoke<TestSshResult>("test_ssh", {
+          sshDestination,
+          port: port ?? 22,
+        });
+      } catch (rejection) {
+        if (isMissingCommandError(rejection)) {
+          throw new Error("SSH testing is not available in this build");
+        }
+        throw new Error(rejectionMessage(rejection));
+      }
     },
 
     async testSshAndListContainers(

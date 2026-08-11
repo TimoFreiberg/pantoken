@@ -67,9 +67,12 @@ export interface HostProvider {
    *  the browser single-host provider. The UI uses this to disable the
    *  Docker container option in the setup dialog's segmented control. */
   supportsContainerTargets(): boolean;
+  /** Test the SSH destination without requiring Docker. Called before saving
+   *  a Host execution profile. */
+  testSsh(sshDestination: string, port?: number): Promise<TestSshResult>;
   /** Test the SSH destination and list running containers. Called before
-   *  saving a profile (gap a). Throws if the command is unavailable on the
-   *  current platform. */
+   *  saving a Docker profile (gap a). Throws if the command is unavailable on
+   *  the current platform. */
   testSshAndListContainers(
     sshDestination: string,
     port?: number,
@@ -139,6 +142,9 @@ export function createSingleHostProvider(wsUrl: string): HostProvider {
     supportsContainerTargets() {
       return false;
     },
+    async testSsh() {
+      throw new Error("SSH testing is not available in this build");
+    },
     async testSshAndListContainers() {
       throw new Error("Docker targets require the Pantoken desktop app");
     },
@@ -168,7 +174,7 @@ export interface FakeHostController {
   setNextAddProfileBehavior: (behavior: { delay?: number; reject?: unknown } | null) => void;
   setNextUpdateProfileBehavior: (behavior: { delay?: number; reject?: unknown } | null) => void;
   setNextConnectHostBehavior: (behavior: { delay?: number; reject?: unknown } | null) => void;
-  setNextTestSshBehavior: (behavior: { delay?: number; reject?: unknown } | null) => void;
+  setNextTestSshBehavior: (behavior: { delay?: number; reject?: unknown; result?: TestSshResult } | null) => void;
   setNextInspectContainerBehavior: (behavior: { delay?: number; reject?: unknown } | null) => void;
   setNextAcknowledgeRiskBehavior: (behavior: { delay?: number; reject?: unknown } | null) => void;
   setNextResumeConnectionBehavior: (behavior: { delay?: number; reject?: unknown } | null) => void;
@@ -189,7 +195,8 @@ export function createFakeHostProvider(
   setNextAddProfileBehavior: (b: { delay?: number; reject?: unknown } | null) => void;
   setNextUpdateProfileBehavior: (b: { delay?: number; reject?: unknown } | null) => void;
   setNextConnectHostBehavior: (b: { delay?: number; reject?: unknown } | null) => void;
-  setNextTestSshBehavior: (b: { delay?: number; reject?: unknown } | null) => void;
+  setNextTestSshBehavior: (b: { delay?: number; reject?: unknown; result?: TestSshResult } | null) => void;
+  setNextTestSshOnlyBehavior: (b: { delay?: number; reject?: unknown; result?: TestSshResult } | null) => void;
   setNextInspectContainerBehavior: (b: { delay?: number; reject?: unknown } | null) => void;
   setNextAcknowledgeRiskBehavior: (b: { delay?: number; reject?: unknown } | null) => void;
   setNextResumeConnectionBehavior: (b: { delay?: number; reject?: unknown } | null) => void;
@@ -211,11 +218,12 @@ export function createFakeHostProvider(
   let inspectionMap = new Map<string, ContainerInspection>();
 
   // ── Deterministic async hooks for testing ─────────────────────────────────
-  type NextBehavior = { delay?: number; reject?: unknown } | null;
+  type NextBehavior = { delay?: number; reject?: unknown; result?: TestSshResult } | null;
   let nextAddProfile: NextBehavior = null;
   let nextUpdateProfile: NextBehavior = null;
   let nextConnectHost: NextBehavior = null;
   let nextTestSsh: NextBehavior = null;
+  let nextTestSshOnly: NextBehavior = null;
   let nextInspectContainer: NextBehavior = null;
   let nextAcknowledgeRisk: NextBehavior = null;
   let nextResumeConnection: NextBehavior = null;
@@ -340,6 +348,18 @@ export function createFakeHostProvider(
     supportsContainerTargets() {
       return true;
     },
+    async testSsh(
+      _sshDestination: string,
+      _port?: number,
+    ): Promise<TestSshResult> {
+      const behavior = nextTestSshOnly;
+      nextTestSshOnly = null;
+      return applyBehavior(behavior, () => behavior?.result ?? {
+        sshOk: true,
+        dockerPermission: "unknown",
+        containers: [],
+      });
+    },
     async testSshAndListContainers(
       _sshDestination: string,
       _port?: number,
@@ -413,6 +433,7 @@ export function createFakeHostProvider(
     setNextUpdateProfileBehavior: (b: NextBehavior) => { nextUpdateProfile = b; },
     setNextConnectHostBehavior: (b: NextBehavior) => { nextConnectHost = b; },
     setNextTestSshBehavior: (b: NextBehavior) => { nextTestSsh = b; },
+    setNextTestSshOnlyBehavior: (b: NextBehavior) => { nextTestSshOnly = b; },
     setNextInspectContainerBehavior: (b: NextBehavior) => { nextInspectContainer = b; },
     setNextAcknowledgeRiskBehavior: (b: NextBehavior) => { nextAcknowledgeRisk = b; },
     setNextResumeConnectionBehavior: (b: NextBehavior) => { nextResumeConnection = b; },

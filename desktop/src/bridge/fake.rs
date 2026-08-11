@@ -162,6 +162,8 @@ pub struct FakeSshTransport {
     stdin_commands: Arc<Mutex<Vec<(String, Vec<u8>)>>>,
     /// Resolved proxy commands for Docker/bridge inspection tests.
     proxy_commands: Arc<Mutex<Vec<SshCommand>>>,
+    /// Remote commands issued by probe tests.
+    command_log: Arc<Mutex<Vec<String>>>,
 }
 
 /// A canned response for a `run_command` call.
@@ -215,6 +217,7 @@ impl FakeSshTransport {
             remote_fs: Arc::new(Mutex::new(FakeRemoteFs::new())),
             stdin_commands: Arc::new(Mutex::new(Vec::new())),
             proxy_commands: Arc::new(Mutex::new(Vec::new())),
+            command_log: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -254,6 +257,11 @@ impl FakeSshTransport {
     /// Snapshot the resolved proxy commands recorded by this transport.
     pub fn proxy_commands(&self) -> Vec<SshCommand> {
         self.proxy_commands.lock().unwrap().clone()
+    }
+
+    /// Snapshot remote commands recorded by this transport.
+    pub fn command_log(&self) -> Vec<String> {
+        self.command_log.lock().unwrap().clone()
     }
 }
 
@@ -332,6 +340,7 @@ impl Clone for FakeSshTransport {
             remote_fs: self.remote_fs.clone(),
             stdin_commands: self.stdin_commands.clone(),
             proxy_commands: self.proxy_commands.clone(),
+            command_log: self.command_log.clone(),
         }
     }
 }
@@ -454,6 +463,10 @@ impl SshTransport for FakeSshTransport {
         remote_command: &str,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = io::Result<CommandOutput>> + Send>>
     {
+        self.command_log
+            .lock()
+            .unwrap()
+            .push(remote_command.to_owned());
         let responses = self.command_responses.lock().unwrap();
         // Find the first matching response.
         let matched = responses

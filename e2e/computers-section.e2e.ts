@@ -512,7 +512,7 @@ test("Double-submit prevention: Test SSH disabled while pending (AC.15)", async 
   await openAddComputer(page);
   await page.getByTestId("cs-ssh-input").fill("user@host.test");
   // Set a delay on testSsh so the button stays disabled.
-  await setNextBehavior(page, "setNextTestSshBehavior", { delay: 2000 });
+  await setNextBehavior(page, "setNextTestSshOnlyBehavior", { delay: 2000 });
   await page.getByTestId("cs-env-host").click();
   await page.getByTestId("cs-test-ssh").click();
   // The testing box should be visible.
@@ -575,7 +575,7 @@ test("ConnectionSheet does not appear over setup (AC.20)", async ({ page }) => {
 test("#142: SSH test rejection surfaces the real error, not the degradation message", async ({ page }) => {
   await openAddComputer(page);
   await page.getByTestId("cs-ssh-input").fill("user@unreachable.test");
-  await setNextBehavior(page, "setNextTestSshBehavior", {
+  await setNextBehavior(page, "setNextTestSshOnlyBehavior", {
     reject: new Error("SSH connection failed: Connection refused"),
   });
   await page.getByTestId("cs-test-ssh").click();
@@ -587,16 +587,47 @@ test("#142: SSH test rejection surfaces the real error, not the degradation mess
 test("#142: sshOk false with stderr detail shows the real ssh message", async ({ page }) => {
   await openAddComputer(page);
   await page.getByTestId("cs-ssh-input").fill("user@key.test");
-  await setNextBehavior(page, "setNextTestSshBehavior", {
+  await setNextBehavior(page, "setNextTestSshOnlyBehavior", {
     result: {
       sshOk: false,
       dockerPermission: "unknown",
       containers: [],
+      failureKind: "ssh",
+      failureDetail: "Permission denied (publickey). user@key.test",
       sshErrorDetail: "Permission denied (publickey).",
     },
   });
   await page.getByTestId("cs-test-ssh").click();
   await expect(page.getByTestId("cs-ssh-error")).toBeVisible({ timeout: 10000 });
-  await expect(page.getByTestId("cs-ssh-error")).toContainText("Permission denied (publickey).");
-  await expect(page.getByTestId("cs-ssh-error")).not.toContainText("Check the SSH destination");
+  await expect(page.getByTestId("cs-ssh-error")).toContainText("Can't reach the host");
+  await expect(page.getByTestId("cs-ssh-error")).not.toContainText("user@key.test");
+  await page.getByTestId("cs-technical-details-toggle").click();
+  await expect(page.getByTestId("cs-technical-details")).toBeVisible();
+  await expect(page.getByTestId("cs-technical-details")).toContainText("Permission denied (publickey).");
+  await expect(page.getByTestId("cs-technical-details")).not.toContainText("user@key.test");
+});
+
+test("#142: Docker discovery failures have a Docker classification and bounded details", async ({ page }) => {
+  await openAddComputer(page);
+  await page.getByTestId("cs-ssh-input").fill("user@docker.test");
+  await page.getByTestId("cs-env-docker").click();
+  await setNextBehavior(page, "setNextTestSshBehavior", {
+    result: {
+      sshOk: true,
+      dockerPermission: "granted",
+      containers: [],
+      failureKind: "malformedDockerOutput",
+      failureDetail: "record 0: malformed Docker JSON",
+    },
+  });
+  await page.getByTestId("cs-test-ssh").click();
+  await expect(page.getByTestId("cs-ssh-error")).toContainText("Docker output could not be understood");
+  await expect(page.getByTestId("cs-ssh-error")).not.toContainText("SSH connection failed");
+  await page.getByTestId("cs-technical-details-toggle").click();
+  await expect(page.getByTestId("cs-technical-details")).toContainText("malformed Docker JSON");
+  await expect(page.getByTestId("cs-technical-details")).not.toContainText("user@docker.test");
+  await page.getByTestId("cs-technical-details-toggle").click();
+  await page.getByTestId("cs-ssh-error").getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByTestId("cs-technical-details")).toHaveCount(0);
+  await expect(page.getByTestId("cs-ssh-input")).toHaveValue("user@docker.test");
 });

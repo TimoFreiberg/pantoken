@@ -54,7 +54,7 @@ pub fn normalize_absolute_path(value: &str) -> Result<String, DockerTargetError>
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DockerTargetError {
     UnsafePath,
-    MalformedList,
+    MalformedList { line: usize, reason: String },
     ContainerNotFound,
     AmbiguousContainer,
     ContainerUnavailable(String),
@@ -66,7 +66,12 @@ impl std::fmt::Display for DockerTargetError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnsafePath => write!(f, "path must be a safe absolute POSIX path"),
-            Self::MalformedList => write!(f, "Docker returned malformed container-list output"),
+            Self::MalformedList { line, reason } => {
+                write!(
+                    f,
+                    "Docker returned malformed container-list output at record {line}: {reason}"
+                )
+            }
             Self::ContainerNotFound => write!(f, "container was not found by exact name"),
             Self::AmbiguousContainer => {
                 write!(f, "multiple containers had the exact requested name")
@@ -86,15 +91,42 @@ impl std::error::Error for DockerTargetError {}
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 pub struct ContainerListRecord {
+    /// Docker emits `ID`; older fixtures used the serde-derived `Id` spelling.
+    #[serde(rename = "ID", alias = "Id")]
     pub id: String,
     pub names: String,
     pub image: String,
     pub state: String,
     pub status: String,
-    /// Docker label map (e.g. `com.docker.compose.project`). Absent on some
-    /// Docker versions / non-compose containers.
-    #[serde(default)]
+    /// Docker emits labels as `key=value,key2=value2`; retain support for the
+    /// map-shaped representation used by older fixtures and persisted tests.
+    #[serde(default, deserialize_with = "deserialize_labels")]
     pub labels: std::collections::HashMap<String, String>,
+}
+
+fn deserialize_labels<'de, D>(
+    deserializer: D,
+) -> Result<std::collections::HashMap<String, String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Labels {
+        Map(std::collections::HashMap<String, String>),
+        Text(String),
+    }
+
+    let labels =
+        Option::<Labels>::deserialize(deserializer)?.unwrap_or(Labels::Text(String::new()));
+    Ok(match labels {
+        Labels::Map(map) => map,
+        Labels::Text(text) => text
+            .split(',')
+            .filter_map(|entry| entry.split_once('='))
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect(),
+    })
 }
 
 /// Extract Compose project + service from a container's label map.
@@ -125,8 +157,14 @@ pub fn find_socket_mount(mounts: &[DockerMount]) -> Option<&DockerMount> {
 pub fn parse_container_list(stdout: &str) -> Result<Vec<ContainerListRecord>, DockerTargetError> {
     stdout
         .lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| serde_json::from_str(line).map_err(|_| DockerTargetError::MalformedList))
+        .enumerate()
+        .filter(|(_, line)| !line.trim().is_empty())
+        .map(|(index, line)| {
+            serde_json::from_str(line).map_err(|error| DockerTargetError::MalformedList {
+                line: index + 1,
+                reason: error.to_string().chars().take(120).collect(),
+            })
+        })
         .collect()
 }
 
@@ -372,6 +410,34 @@ mod tests {
             status: state.into(),
             labels: std::collections::HashMap::new(),
         }
+    }
+
+    #[test]
+    fn docker_list_parser_accepts_real_id_and_label_output() {
+        let stdout = r#"{"ID":"abc123","Names":"work-api-dev","Image":"node:20-alpine","State":"running","Status":"Up 2 hours","Labels":"com.docker.compose.project=work-api,com.docker.compose.service=api"}
+{"ID":"def456","Names":"postgres-dev","Image":"postgres:16","State":"exited","Status":"Exited 0","Labels":""}"#;
+        let records = parse_container_list(stdout).unwrap();
+        assert_eq!(records[0].id, "abc123");
+        assert_eq!(
+            records[0].labels.get("com.docker.compose.project"),
+            Some(&"work-api".to_string())
+        );
+        assert_eq!(
+            compose_metadata(&records[0].labels),
+            (Some("work-api".into()), Some("api".into()))
+        );
+        assert!(records[1].labels.is_empty());
+    }
+
+    #[test]
+    fn docker_list_parser_retains_map_fixture_compatibility() {
+        let stdout = r#"{"Id":"abc123","Names":"api","Image":"node","State":"running","Status":"Up","Labels":{"com.docker.compose.project":"legacy","com.docker.compose.service":"api"}}"#;
+        let records = parse_container_list(stdout).unwrap();
+        assert_eq!(records[0].id, "abc123");
+        assert_eq!(
+            compose_metadata(&records[0].labels),
+            (Some("legacy".into()), Some("api".into()))
+        );
     }
 
     #[test]

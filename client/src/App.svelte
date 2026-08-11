@@ -177,6 +177,8 @@
           getAcknowledgementCaptures: provider.getAcknowledgementCaptures,
           seedProfileAcknowledgements: provider.seedProfileAcknowledgements,
           testSshAndListContainers: provider.testSshAndListContainers,
+          testSshOnly: provider.testSsh,
+          setNextTestSshOnlyBehavior: provider.setNextTestSshOnlyBehavior,
           inspectContainer: provider.inspectContainer,
           listProfiles: provider.listProfiles,
           setNextAddProfileBehavior: provider.setNextAddProfileBehavior,

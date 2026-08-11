@@ -91,7 +91,7 @@
   // ── Transient state (NOT part of the draft) ───────────────────────────────
   // Test results
   let testResult = $state<TestSshResult | null>(null);
-  let testError = $state<{ title: string; message: string } | null>(null);
+  let testError = $state<{ title: string; message: string; detail?: string } | null>(null);
   let testSubStep = $state(0);
 
   // Container selection (selectedContainer is transient; exactContainerName is
@@ -451,13 +451,59 @@
   /** Build the "can't reach the host" error for an `sshOk: false` result. When
    *  the provider surfaced ssh stderr detail (Rust exit 255), show that real
    *  message instead of the generic hint. */
-  function sshFailureError(result: TestSshResult): { title: string; message: string } {
+  function sshFailureError(result: TestSshResult): { title: string; message: string; detail?: string } {
     return {
       title: "Can't reach the host",
-      message: result.sshErrorDetail
-        ? result.sshErrorDetail
-        : "Check the SSH destination and try again.",
+      message: "The SSH probe could not reach this host.",
+      detail: result.failureDetail || result.sshErrorDetail
+        ? boundedProbeDetail(result.failureDetail ?? result.sshErrorDetail ?? "")
+        : undefined,
     };
+  }
+
+  function boundedProbeDetail(message: string): string {
+    const redacted = message.replaceAll(sshDestination, "<redacted-host>").trim();
+    const limit = 300;
+    return redacted.length > limit ? `${redacted.slice(0, limit)}…` : redacted;
+  }
+
+  function classifiedFailureError(result: TestSshResult): { title: string; message: string; detail?: string } {
+    switch (result.failureKind) {
+      case "dockerUnavailable":
+        return {
+          title: "Docker is unavailable",
+          message: "Docker is not installed, running, or accessible on this host.",
+          detail: result.failureDetail
+            ? boundedProbeDetail(result.failureDetail)
+            : undefined,
+        };
+      case "dockerDiscovery":
+        return {
+          title: "Docker container listing failed",
+          message: "Docker could not list containers on this host.",
+          detail: result.failureDetail
+            ? boundedProbeDetail(result.failureDetail)
+            : undefined,
+        };
+      case "malformedDockerOutput":
+        return {
+          title: "Docker output could not be understood",
+          message: "Docker returned container data in an unexpected format.",
+          detail: result.failureDetail
+            ? boundedProbeDetail(result.failureDetail)
+            : undefined,
+        };
+      case "ssh":
+        return sshFailureError(result);
+      default:
+        return {
+          title: "SSH probe failed",
+          message: "The remote host probe did not succeed.",
+          detail: result.failureDetail
+            ? boundedProbeDetail(result.failureDetail)
+            : undefined,
+        };
+    }
   }
 
   async function runTest(): Promise<void> {
@@ -465,6 +511,7 @@
     operation = { kind: "testingSsh" };
     stage = "testingSsh";
     testError = null;
+    showTechnicalDetails = false;
     testResult = null;
     testSubStep = 0;
 
@@ -474,7 +521,7 @@
 
     try {
       if (execEnv === "host") {
-        const result = await provider.testSshAndListContainers(sshDestination, Number(port) || 22);
+        const result = await provider.testSsh(sshDestination, Number(port) || 22);
         clearInterval(stepTimer);
         if (!result.sshOk) {
           stage = "sshFailed";
@@ -493,9 +540,9 @@
       const result = await provider.testSshAndListContainers(sshDestination, Number(port) || 22);
       clearInterval(stepTimer);
       testResult = result;
-      if (!result.sshOk) {
+      if (!result.sshOk || result.failureKind) {
         stage = "sshFailed";
-        testError = sshFailureError(result);
+        testError = classifiedFailureError(result);
         operation = { kind: "idle" };
         return;
       }
@@ -506,11 +553,21 @@
       clearInterval(stepTimer);
       stage = "sshFailed";
       const e = err as Error;
+      const detail = boundedProbeDetail(e.message || String(err));
       testError = {
-        title: e.message.includes("not available")
-          ? "Container commands unavailable"
-          : "SSH connection failed",
-        message: e.message,
+        title: execEnv === "host"
+          ? "SSH probe failed"
+          : e.message.startsWith("docker-unavailable")
+            ? "Docker is unavailable"
+            : e.message.startsWith("docker-discovery")
+              ? "Docker container listing failed"
+              : e.message.includes("not available")
+                ? "Container commands unavailable"
+                : "Docker probe failed",
+        message: execEnv === "host" || e.message.startsWith("ssh-probe")
+          ? "The SSH probe could not be completed."
+          : "Docker container discovery could not be completed.",
+        detail,
       };
       operation = { kind: "idle" };
     }
@@ -519,11 +576,13 @@
   function retryTest(): void {
     stage = "connectionFields";
     testError = null;
+    showTechnicalDetails = false;
   }
 
   function editSshFields(): void {
     stage = "connectionFields";
     testError = null;
+    showTechnicalDetails = false;
   }
 
   // ── Container selection ──────────────────────────────────────────────────
@@ -1244,6 +1303,17 @@
           <div class="error-box" data-testid="cs-ssh-error">
             <div class="error-title">⚠ {testError.title}</div>
             <div class="error-msg">{testError.message}</div>
+            {#if testError.detail}
+              <button class="disclosure" data-testid="cs-technical-details-toggle" onclick={() => showTechnicalDetails = !showTechnicalDetails} aria-expanded={showTechnicalDetails}>
+                <Chevron variant="disclosure" open={showTechnicalDetails} size={12} /> Show technical details
+              </button>
+              {#if showTechnicalDetails}
+                <div class="tech-details-wrapper" data-testid="cs-technical-details">
+                  <pre class="tech-details">{testError?.detail ?? ""}</pre>
+                  <button type="button" class="error-copy" onclick={() => navigator.clipboard?.writeText(testError?.detail ?? "")}>Copy details</button>
+                </div>
+              {/if}
+            {/if}
             <div class="error-actions">
               <Button variant="primary" onclick={() => void runTest()}>Retry</Button>
               <Button onclick={editSshFields}>Edit</Button>

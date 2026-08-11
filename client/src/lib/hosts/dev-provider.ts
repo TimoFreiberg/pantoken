@@ -64,6 +64,10 @@ export interface DevHostControls {
   setNextTestSshBehavior(
     behavior: { delay?: number; reject?: unknown; result?: TestSshResult } | null,
   ): void;
+  /** Control the next SSH-only probe call. */
+  setNextTestSshOnlyBehavior(
+    behavior: { delay?: number; reject?: unknown; result?: TestSshResult } | null,
+  ): void;
   /** Control the next inspectContainer call. */
   setNextInspectContainerBehavior(behavior: { delay?: number; reject?: unknown } | null): void;
   /** Control the next acknowledgeRisk call. */
@@ -167,6 +171,7 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
   let nextUpdateProfile: NextBehavior = null;
   let nextConnectHost: NextBehavior = null;
   let nextTestSsh: NextBehavior = null;
+  let nextTestSshOnly: NextBehavior = null;
   let nextInspectContainer: NextBehavior = null;
   let nextAcknowledgeRisk: NextBehavior = null;
   let nextResumeConnection: NextBehavior = null;
@@ -445,6 +450,15 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
     },
     // ── Docker container target methods ────────────────────────────────────
     supportsContainerTargets: () => supportsDockerFlag,
+    testSsh: async (_sshDestination, _port?) => {
+      const behavior = nextTestSshOnly;
+      nextTestSshOnly = null;
+      return applyBehavior(behavior, () => behavior?.result ?? {
+        sshOk: true,
+        dockerPermission: "unknown" as const,
+        containers: [],
+      });
+    },
     testSshAndListContainers: async (_sshDestination, _port?) => {
       const behavior = nextTestSsh;
       nextTestSsh = null;
@@ -504,6 +518,7 @@ export function createDevHostProvider(wsUrl: string): DevHostProvider {
     setNextUpdateProfileBehavior: (b: NextBehavior) => { nextUpdateProfile = b; },
     setNextConnectHostBehavior: (b: NextBehavior) => { nextConnectHost = b; },
     setNextTestSshBehavior: (b: NextBehavior) => { nextTestSsh = b; },
+    setNextTestSshOnlyBehavior: (b: NextBehavior) => { nextTestSshOnly = b; },
     setNextInspectContainerBehavior: (b: NextBehavior) => { nextInspectContainer = b; },
     setNextAcknowledgeRiskBehavior: (b: NextBehavior) => { nextAcknowledgeRisk = b; },
     setNextResumeConnectionBehavior: (b: NextBehavior) => { nextResumeConnection = b; },
