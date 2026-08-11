@@ -169,6 +169,16 @@ test("background jobs section renders fixture jobs", async ({ page }) => {
   await expect(jobs).toContainText("researcher");
 });
 
+async function driveVisualJobs(page: import("@playwright/test").Page): Promise<void> {
+  await page.evaluate(() => {
+    const mock = (window as unknown as { __pantokenMock?: (script: string) => void }).__pantokenMock;
+    if (!mock) throw new Error("mock driver hook is unavailable");
+    mock("jobvisual");
+  });
+  await openPanel(page);
+  await expect(page.getByTestId("background-jobs").locator(".job-btn")).toHaveCount(4);
+}
+
 // Clicking a job opens a detail view with the job's identity and context.
 test("clicking a job opens a detail view with the job's details", async ({
   page,
@@ -201,6 +211,73 @@ test("clicking a job opens a detail view with the job's details", async ({
   await expect(shellDetail).toBeVisible();
   await expect(shellDetail).toContainText("cargo clippy");
   await expect(shellDetail).toContainText("0 warnings, 0 errors");
+});
+
+// The visual cue is scoped to running subagents, not shell jobs or completed work.
+test("running subagent pulse is limited to active subagents", async ({ page }) => {
+  await driveVisualJobs(page);
+
+  const jobs = page.getByTestId("background-jobs");
+  const runningSubagent = jobs.locator('.job-item[data-job-kind="subagent"][data-job-status="running"]');
+  const runningShell = jobs.locator('.job-item[data-job-kind="shell"][data-job-status="running"]');
+  const completedShell = jobs.locator('.job-item[data-job-kind="shell"][data-job-status="completed"]');
+  const completedSubagent = jobs.locator('.job-item[data-job-kind="subagent"][data-job-status="completed"]');
+
+  await expect(runningSubagent).toHaveCount(1);
+  await expect(runningSubagent.locator('[data-job-kind-marker="subagent"]')).toBeVisible();
+  await expect.poll(() => runningSubagent.locator(".job-status-icon").evaluate((el) => {
+    const style = getComputedStyle(el);
+    return { name: style.animationName, iterations: style.animationIterationCount };
+  })).toMatchObject({ iterations: "infinite" });
+  await expect.poll(() => runningSubagent.locator(".job-status-icon").evaluate((el) => getComputedStyle(el).animationName))
+    .toMatch(/^svelte-[a-z0-9]+-subagent-status-pulse$/);
+
+  for (const [row, kind] of [
+    [runningShell, "shell"],
+    [completedShell, "shell"],
+    [completedSubagent, "subagent"],
+  ] as const) {
+    await expect(row).toHaveCount(1);
+    await expect(row.locator(`[data-job-kind-marker="${kind}"]`)).toBeVisible();
+    await expect(row.locator(".job-status-icon")).toHaveCSS("animation-name", "none");
+  }
+});
+
+// Reduced motion keeps the active status cue static and prevents geometry changes
+// in the narrow phone context view.
+test("running subagent pulse is disabled with reduced motion and remains geometrically stable at 412x915", async ({ page }) => {
+  await page.setViewportSize({ width: 412, height: 915 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await driveVisualJobs(page);
+
+  const jobs = page.getByTestId("background-jobs");
+  const row = jobs.locator('.job-item[data-job-kind="subagent"][data-job-status="running"]');
+  const marker = row.locator('[data-job-kind-marker="subagent"]');
+  const completed = jobs.locator('.job-item[data-job-kind="subagent"][data-job-status="completed"]');
+  await expect(marker).toBeVisible();
+  await expect(row).toHaveCount(1);
+  await expect(completed).toHaveCount(1);
+  await expect(row.locator(".job-status-icon")).toHaveCSS("animation-name", "none");
+  await expect.poll(async () => {
+    const runningColor = await row.locator(".job-status-icon").evaluate((el) => getComputedStyle(el).color);
+    const completedColor = await completed.locator(".job-status-icon").evaluate((el) => getComputedStyle(el).color);
+    return runningColor !== completedColor;
+  }).toBe(true);
+
+  const first = { row: await row.boundingBox(), marker: await marker.boundingBox() };
+  expect(first.row).not.toBeNull();
+  expect(first.marker).not.toBeNull();
+  await expect.poll(async () => {
+    const animationName = await row.locator(".job-status-icon").evaluate((el) => getComputedStyle(el).animationName);
+    const current = { row: await row.boundingBox(), marker: await marker.boundingBox() };
+    if (animationName !== "none" || !current.row || !current.marker || !first.row || !first.marker) {
+      return false;
+    }
+    return [current.row, current.marker].every((box, i) => {
+      const baseline = [first.row!, first.marker!][i];
+      return (["x", "y", "width", "height"] as const).every((key) => Math.abs(box[key] - baseline[key]) <= 1);
+    });
+  }).toBe(true);
 });
 
 // Q5 guard: an open detail sheet (now z=100/101, above agent-driven overlays

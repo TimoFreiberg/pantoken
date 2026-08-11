@@ -67,6 +67,13 @@
     failed: "✕",
     cancelled: "⊘",
   };
+  const JOB_STATUS_LABEL: Record<string, string> = {
+    reserved: "Reserved",
+    running: "Running",
+    completed: "Completed",
+    failed: "Failed",
+    cancelled: "Cancelled",
+  };
 
   function copyPath(path: string): void {
     void store.copyToClipboard(path);
@@ -157,16 +164,25 @@
       {:else}
         <ul class="job-list">
           {#each jobs as j (j.handle)}
-            <li class="job-item {j.status}">
+            <li
+              class="job-item {j.status}"
+              data-job-kind={j.kind}
+              data-job-status={j.status}
+            >
               <button
                 class="job-btn"
                 onclick={() => store.selectJob(j.handle)}
               >
-                <span class="job-kind-icon">{JOB_KIND_ICON[j.kind] ?? "?"}</span>
+                <span
+                  class="job-kind-icon"
+                  data-job-kind-marker={j.kind}
+                  aria-hidden="true"
+                >{JOB_KIND_ICON[j.kind] ?? "?"}</span>
                 <div class="job-body">
                   <div class="job-head">
                     <span class="job-name">{j.subagentType ?? j.toolName}</span>
-                    <span class="job-status-icon">{JOB_STATUS_ICON[j.status] ?? "?"}</span>
+                    <span class="job-status-icon" aria-hidden="true">{JOB_STATUS_ICON[j.status] ?? "?"}</span>
+                    <span class="sr-only">{JOB_STATUS_LABEL[j.status] ?? j.status}</span>
                   </div>
                   {#if j.outputTail}
                     <span class="job-tail">{j.outputTail}</span>
@@ -552,8 +568,22 @@
     font-size: 12px;
     color: var(--text-muted);
   }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
   .job-item.running .job-status-icon {
-    color: var(--accent);
+    color: var(--progress);
+  }
+  .job-item[data-job-kind="subagent"][data-job-status="running"] .job-status-icon {
+    animation: subagent-status-pulse 1.4s ease-in-out infinite;
   }
   .job-item.completed .job-status-icon {
     color: var(--ok);
@@ -568,6 +598,17 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  @keyframes subagent-status-pulse {
+    0%,
+    100% {
+      opacity: 0.45;
+      text-shadow: 0 0 0 transparent;
+    }
+    50% {
+      opacity: 1;
+      text-shadow: 0 0 5px color-mix(in srgb, var(--progress) 55%, transparent);
+    }
   }
   .mcp-list {
     list-style: none;
@@ -689,6 +730,12 @@
   @media (prefers-reduced-motion: reduce) {
     .right-sidebar {
       transition: none;
+    }
+    .job-item[data-job-kind="subagent"][data-job-status="running"] .job-status-icon {
+      animation: none;
+      color: var(--progress);
+      opacity: 1;
+      text-shadow: none;
     }
   }
 </style>

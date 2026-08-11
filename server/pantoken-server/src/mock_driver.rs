@@ -606,6 +606,20 @@ fn mock_context_jobs() -> Vec<BackgroundJob> {
     ]
 }
 
+/// Isolated visual fixture for the RightSidebar pulse boundary: a running
+/// subagent, a running shell, a completed shell, and a completed subagent.
+fn mock_visual_jobs() -> Vec<BackgroundJob> {
+    let mut jobs = mock_context_jobs();
+    let mut running_shell = jobs[1].clone();
+    running_shell.handle = "shell:running-check".into();
+    running_shell.status = JobStatusKind::Running;
+    running_shell.ended_at = None;
+    running_shell.updated_at = "2025-07-09T09:31:00Z".into();
+    running_shell.output_tail = Some("cargo test --workspace".into());
+    jobs.insert(1, running_shell);
+    jobs
+}
+
 /// Default fixture todos for the delete path. Matches the `context` script's
 /// snapshot todos so the sidebar is consistent.
 fn mock_default_todos() -> Vec<TodoItem> {
@@ -4083,6 +4097,18 @@ impl PantokenDriver for MockDriver {
                     ]),
                 ) } },
                 ]
+            }
+            "jobvisual" => {
+                // Isolated four-state fixture for the RightSidebar visual-state e2e
+                // checks. The snapshot event triggers the normal JobsList broadcast.
+                *self.jobs.lock() = mock_visual_jobs();
+                vec![ScriptStep {
+                    wait_ms: 0,
+                    event: SessionDriverEvent::SessionUpdated {
+                        base: base(),
+                        snapshot: snap(SessionStatus::Idle, None, None, None, None, None),
+                    },
+                }]
             }
             // ── Session state scripts ─────────────────────────────────────
             "goalactive" => vec![
