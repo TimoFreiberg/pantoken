@@ -74,26 +74,33 @@ test("Ctrl+Tab / Ctrl+Shift+Tab cycle through sessions in sidebar order", async 
   // the cold-restore regression fixture (mock_driver.rs's own distinct-cwd group,
   // added for the cold-restore collapse bug, docs/TODO.md) → the scratch session.
   await expect(title(page)).toContainText("Wire up the WebSocket bridge");
+  const bridgeRow = row(page, "Wire up the WebSocket bridge");
+  const foldRow = row(page, "Explore the fold reducer");
+  const coldRestoreRow = row(page, "Cold-restore regression check");
+  const scratchRow = row(page, "scratch");
+
+  // The header changes optimistically on openSession. Wait for the authoritative
+  // seed/row activation before sending the next cycle key, otherwise a fast pair of
+  // Ctrl+Tab presses can race two daemon attaches and make this test flaky.
+  await page.keyboard.press("Control+Tab");
+  await waitForSessionReady(page, { title: "Explore the fold reducer", row: foldRow });
 
   await page.keyboard.press("Control+Tab");
-  await expect(title(page)).toContainText("Explore the fold reducer");
+  await waitForSessionReady(page, { title: "Cold-restore regression check", row: coldRestoreRow });
 
   await page.keyboard.press("Control+Tab");
-  await expect(title(page)).toContainText("Cold-restore regression check");
-
-  await page.keyboard.press("Control+Tab");
-  await expect(title(page)).toContainText("scratch");
+  await waitForSessionReady(page, { title: "scratch", row: scratchRow });
 
   // Past the last row wraps back to the top.
   await page.keyboard.press("Control+Tab");
-  await expect(title(page)).toContainText("Wire up the WebSocket bridge");
+  await waitForSessionReady(page, { title: "Wire up the WebSocket bridge", row: bridgeRow });
 
   // Shift reverses, and wraps off the top to the last row.
   await page.keyboard.press("Control+Shift+Tab");
-  await expect(title(page)).toContainText("scratch");
+  await waitForSessionReady(page, { title: "scratch", row: scratchRow });
 
   await page.keyboard.press("Control+Shift+Tab");
-  await expect(title(page)).toContainText("Cold-restore regression check");
+  await waitForSessionReady(page, { title: "Cold-restore regression check", row: coldRestoreRow });
 });
 
 // ⌘B toggles the sidebar, ⌘K focuses search, ⌘⇧J toggles the context panel

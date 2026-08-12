@@ -167,7 +167,12 @@
   // This matters after a later edit restores the dialog: a cycle-time minimize
   // must not reappear once the user has deliberately returned to a clean value.
   $effect(() => {
-    if (!store.phoneLayout && isDirty && attention.minimized.approval)
+    if (
+      !store.phoneLayout &&
+      current?.kind !== "plan" &&
+      isDirty &&
+      attention.minimized.approval
+    )
       attention.unminimize("approval");
   });
 
